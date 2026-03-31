@@ -1,0 +1,11 @@
+.DS_Store
+
+api/node_modules/
+api/dist/
+api/.env
+
+web/node_modules/
+web/dist/
+web/.env
+
+yellowstone/target/
