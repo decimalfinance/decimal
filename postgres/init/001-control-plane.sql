@@ -11,7 +11,6 @@ $$ LANGUAGE plpgsql;
 CREATE TABLE IF NOT EXISTS organizations
 (
   organization_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  organization_slug TEXT NOT NULL UNIQUE,
   organization_name TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'active',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -51,51 +50,15 @@ CREATE TABLE IF NOT EXISTS auth_sessions
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-ALTER TABLE auth_sessions
-  ALTER COLUMN organization_id DROP NOT NULL;
-
 CREATE TABLE IF NOT EXISTS workspaces
 (
   workspace_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  workspace_slug TEXT NOT NULL UNIQUE,
+  organization_id UUID NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
   workspace_name TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'active',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-ALTER TABLE workspaces
-  ADD COLUMN IF NOT EXISTS organization_id UUID;
-
-INSERT INTO organizations (organization_slug, organization_name)
-VALUES ('legacy-org', 'Legacy Organization')
-ON CONFLICT (organization_slug) DO NOTHING;
-
-UPDATE workspaces
-SET organization_id = (
-  SELECT organization_id
-  FROM organizations
-  WHERE organization_slug = 'legacy-org'
-)
-WHERE organization_id IS NULL;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_constraint
-    WHERE conname = 'workspaces_organization_id_fkey'
-  ) THEN
-    ALTER TABLE workspaces
-      ADD CONSTRAINT workspaces_organization_id_fkey
-      FOREIGN KEY (organization_id)
-      REFERENCES organizations(organization_id)
-      ON DELETE CASCADE;
-  END IF;
-END $$;
-
-ALTER TABLE workspaces
-  ALTER COLUMN organization_id SET NOT NULL;
 
 CREATE TABLE IF NOT EXISTS workspace_addresses
 (
@@ -103,11 +66,13 @@ CREATE TABLE IF NOT EXISTS workspace_addresses
   workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
   chain TEXT NOT NULL,
   address TEXT NOT NULL,
-  address_kind TEXT NOT NULL,
+  address_kind TEXT NOT NULL DEFAULT 'wallet',
   asset_scope TEXT NOT NULL DEFAULT 'usdc',
+  usdc_ata_address TEXT,
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   source TEXT NOT NULL DEFAULT 'manual',
   source_ref TEXT,
+  display_name TEXT,
   notes TEXT,
   properties_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -115,82 +80,58 @@ CREATE TABLE IF NOT EXISTS workspace_addresses
   UNIQUE (workspace_id, address)
 );
 
-CREATE TABLE IF NOT EXISTS workspace_labels
-(
-  label_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
-  label_name TEXT NOT NULL,
-  label_type TEXT NOT NULL,
-  color TEXT,
-  description TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (workspace_id, label_name)
-);
+ALTER TABLE workspace_addresses
+  ADD COLUMN IF NOT EXISTS usdc_ata_address TEXT;
 
-CREATE TABLE IF NOT EXISTS workspace_address_labels
-(
-  workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
-  workspace_address_id UUID NOT NULL REFERENCES workspace_addresses(workspace_address_id) ON DELETE CASCADE,
-  label_id UUID NOT NULL REFERENCES workspace_labels(label_id) ON DELETE CASCADE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  PRIMARY KEY (workspace_id, workspace_address_id, label_id)
-);
+ALTER TABLE workspace_addresses
+  ADD COLUMN IF NOT EXISTS display_name TEXT;
 
-CREATE TABLE IF NOT EXISTS workspace_objects
-(
-  workspace_object_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
-  object_type TEXT NOT NULL,
-  object_key TEXT NOT NULL,
-  display_name TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'active',
-  properties_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (workspace_id, object_type, object_key)
-);
+ALTER TABLE organizations
+  DROP COLUMN IF EXISTS organization_slug;
 
-CREATE TABLE IF NOT EXISTS workspace_address_object_mappings
+ALTER TABLE workspaces
+  DROP COLUMN IF EXISTS workspace_slug;
+
+CREATE TABLE IF NOT EXISTS transfer_requests
 (
-  mapping_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  transfer_request_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
-  workspace_address_id UUID NOT NULL REFERENCES workspace_addresses(workspace_address_id) ON DELETE CASCADE,
-  workspace_object_id UUID NOT NULL REFERENCES workspace_objects(workspace_object_id) ON DELETE CASCADE,
-  mapping_role TEXT NOT NULL,
-  confidence REAL NOT NULL DEFAULT 1.0,
-  source TEXT NOT NULL DEFAULT 'manual',
-  is_primary BOOLEAN NOT NULL DEFAULT FALSE,
-  valid_from TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  valid_to TIMESTAMPTZ,
+  source_workspace_address_id UUID REFERENCES workspace_addresses(workspace_address_id) ON DELETE SET NULL,
+  destination_workspace_address_id UUID NOT NULL REFERENCES workspace_addresses(workspace_address_id) ON DELETE RESTRICT,
+  request_type TEXT NOT NULL,
+  asset TEXT NOT NULL DEFAULT 'usdc',
+  amount_raw BIGINT NOT NULL,
+  requested_by_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
+  reason TEXT,
+  external_reference TEXT,
+  status TEXT NOT NULL DEFAULT 'submitted',
+  requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  due_at TIMESTAMPTZ,
   properties_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS global_entities
-(
-  global_entity_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  entity_name TEXT NOT NULL,
-  entity_type TEXT NOT NULL,
-  chain TEXT NOT NULL,
-  confidence REAL NOT NULL DEFAULT 1.0,
-  source TEXT NOT NULL DEFAULT 'system',
-  properties_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+ALTER TABLE transfer_requests
+  ADD COLUMN IF NOT EXISTS source_workspace_address_id UUID;
 
-CREATE TABLE IF NOT EXISTS global_entity_addresses
-(
-  global_entity_address_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  global_entity_id UUID NOT NULL REFERENCES global_entities(global_entity_id) ON DELETE CASCADE,
-  address TEXT NOT NULL UNIQUE,
-  address_kind TEXT NOT NULL,
-  confidence REAL NOT NULL DEFAULT 1.0,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+ALTER TABLE transfer_requests
+  ADD COLUMN IF NOT EXISTS destination_workspace_address_id UUID;
+
+ALTER TABLE transfer_requests
+  DROP COLUMN IF EXISTS counterparty_id;
+
+ALTER TABLE transfer_requests
+  DROP COLUMN IF EXISTS destination_id;
+
+DROP TABLE IF EXISTS workspace_address_object_mappings CASCADE;
+DROP TABLE IF EXISTS workspace_address_labels CASCADE;
+DROP TABLE IF EXISTS workspace_objects CASCADE;
+DROP TABLE IF EXISTS workspace_labels CASCADE;
+DROP TABLE IF EXISTS global_entity_addresses CASCADE;
+DROP TABLE IF EXISTS global_entities CASCADE;
+DROP TABLE IF EXISTS destinations CASCADE;
+DROP TABLE IF EXISTS counterparties CASCADE;
 
 CREATE INDEX IF NOT EXISTS idx_memberships_organization_id ON organization_memberships(organization_id);
 CREATE INDEX IF NOT EXISTS idx_memberships_user_id ON organization_memberships(user_id);
@@ -199,11 +140,11 @@ CREATE INDEX IF NOT EXISTS idx_auth_sessions_organization_id ON auth_sessions(or
 CREATE INDEX IF NOT EXISTS idx_workspaces_organization_id ON workspaces(organization_id);
 CREATE INDEX IF NOT EXISTS idx_workspace_addresses_workspace_id ON workspace_addresses(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_workspace_addresses_address ON workspace_addresses(address);
-CREATE INDEX IF NOT EXISTS idx_workspace_labels_workspace_id ON workspace_labels(workspace_id);
-CREATE INDEX IF NOT EXISTS idx_workspace_objects_workspace_id ON workspace_objects(workspace_id);
-CREATE INDEX IF NOT EXISTS idx_workspace_mappings_workspace_id ON workspace_address_object_mappings(workspace_id);
-CREATE INDEX IF NOT EXISTS idx_workspace_mappings_address_id ON workspace_address_object_mappings(workspace_address_id);
-CREATE INDEX IF NOT EXISTS idx_global_entity_addresses_entity_id ON global_entity_addresses(global_entity_id);
+CREATE INDEX IF NOT EXISTS idx_workspace_addresses_usdc_ata ON workspace_addresses(usdc_ata_address);
+CREATE INDEX IF NOT EXISTS idx_transfer_requests_workspace_id ON transfer_requests(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_transfer_requests_source_address_id ON transfer_requests(source_workspace_address_id);
+CREATE INDEX IF NOT EXISTS idx_transfer_requests_destination_address_id ON transfer_requests(destination_workspace_address_id);
+CREATE INDEX IF NOT EXISTS idx_transfer_requests_status ON transfer_requests(status);
 
 DROP TRIGGER IF EXISTS trg_organizations_updated_at ON organizations;
 CREATE TRIGGER trg_organizations_updated_at
@@ -230,27 +171,7 @@ CREATE TRIGGER trg_workspace_addresses_updated_at
 BEFORE UPDATE ON workspace_addresses
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
-DROP TRIGGER IF EXISTS trg_workspace_labels_updated_at ON workspace_labels;
-CREATE TRIGGER trg_workspace_labels_updated_at
-BEFORE UPDATE ON workspace_labels
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-
-DROP TRIGGER IF EXISTS trg_workspace_objects_updated_at ON workspace_objects;
-CREATE TRIGGER trg_workspace_objects_updated_at
-BEFORE UPDATE ON workspace_objects
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-
-DROP TRIGGER IF EXISTS trg_workspace_mappings_updated_at ON workspace_address_object_mappings;
-CREATE TRIGGER trg_workspace_mappings_updated_at
-BEFORE UPDATE ON workspace_address_object_mappings
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-
-DROP TRIGGER IF EXISTS trg_global_entities_updated_at ON global_entities;
-CREATE TRIGGER trg_global_entities_updated_at
-BEFORE UPDATE ON global_entities
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-
-DROP TRIGGER IF EXISTS trg_global_entity_addresses_updated_at ON global_entity_addresses;
-CREATE TRIGGER trg_global_entity_addresses_updated_at
-BEFORE UPDATE ON global_entity_addresses
+DROP TRIGGER IF EXISTS trg_transfer_requests_updated_at ON transfer_requests;
+CREATE TRIGGER trg_transfer_requests_updated_at
+BEFORE UPDATE ON transfer_requests
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();

@@ -5,10 +5,9 @@ import { config } from './config.js';
 import { authRouter } from './routes/auth.js';
 import { eventsRouter } from './routes/events.js';
 import { healthRouter } from './routes/health.js';
-import { labelsRouter } from './routes/labels.js';
-import { objectsRouter } from './routes/objects.js';
+import { internalRouter } from './routes/internal.js';
 import { organizationsRouter } from './routes/organizations.js';
-import { workspacesRouter } from './routes/workspaces.js';
+import { transferRequestsRouter } from './routes/transfer-requests.js';
 
 export function createApp() {
   const app = express();
@@ -36,12 +35,11 @@ export function createApp() {
 
   app.use(healthRouter);
   app.use(authRouter);
+  app.use(internalRouter);
   app.use(requireAuth());
   app.use(organizationsRouter);
-  app.use(workspacesRouter);
   app.use(addressesRouter);
-  app.use(labelsRouter);
-  app.use(objectsRouter);
+  app.use(transferRequestsRouter);
   app.use(eventsRouter);
 
   app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

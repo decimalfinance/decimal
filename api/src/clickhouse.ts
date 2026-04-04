@@ -22,3 +22,32 @@ export async function queryClickHouse<T = Record<string, unknown>>(query: string
     .filter(Boolean)
     .map((line) => JSON.parse(line) as T);
 }
+
+export async function executeClickHouse(query: string, body = '\n') {
+  const response = await fetch(
+    `${config.clickhouseUrl}/?query=${encodeURIComponent(query)}`,
+    {
+      method: 'POST',
+      body,
+    },
+  );
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`ClickHouse query failed: ${response.status} ${text}`);
+  }
+
+  return response.text();
+}
+
+export async function insertClickHouseRows(table: string, rows: Array<Record<string, unknown>>) {
+  if (!rows.length) {
+    return;
+  }
+
+  const payload = rows.map((row) => JSON.stringify(row)).join('\n') + '\n';
+  await executeClickHouse(
+    `INSERT INTO ${config.clickhouseDatabase}.${table} FORMAT JSONEachRow`,
+    payload,
+  );
+}

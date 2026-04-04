@@ -4,4 +4,5 @@ export const config = {
   clickhouseUrl: process.env.CLICKHOUSE_URL ?? 'http://127.0.0.1:8123',
   clickhouseDatabase: process.env.CLICKHOUSE_DATABASE ?? 'usdc_ops',
   corsOrigin: process.env.CORS_ORIGIN ?? '*',
+  controlPlaneServiceToken: process.env.CONTROL_PLANE_SERVICE_TOKEN ?? '',
 };

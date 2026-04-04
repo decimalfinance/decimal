@@ -21,134 +21,211 @@ ENGINE = MergeTree
 PARTITION BY toYYYYMM(ingest_time)
 ORDER BY (slot, signature, pubkey, write_version, observation_id);
 
--- Canonical layer:
--- Normalized append-only facts derived from raw observations.
-
-CREATE TABLE IF NOT EXISTS canonical_account_mutations
+CREATE TABLE IF NOT EXISTS observed_transactions
 (
-    mutation_id UUID,
-    slot UInt64,
     signature String,
-    event_time DateTime64(3, 'UTC'),
-    mint String,
-    token_account String,
-    wallet_owner Nullable(String),
-    amount_before_raw Int128,
-    amount_after_raw Int128,
-    delta_raw Int128,
-    decimals UInt8,
-    mutation_kind LowCardinality(String),
-    canonical_version UInt32,
-    properties_json Nullable(String)
-)
-ENGINE = MergeTree
-PARTITION BY toYYYYMM(event_time)
-ORDER BY (signature, token_account, mutation_id);
-
-CREATE TABLE IF NOT EXISTS canonical_transaction_events
-(
-    canonical_event_id UUID,
     slot UInt64,
-    signature String,
     event_time DateTime64(3, 'UTC'),
     asset LowCardinality(String),
-    chain LowCardinality(String),
-    canonical_version UInt32,
+    finality_state LowCardinality(String),
+    status LowCardinality(String),
     raw_mutation_count UInt32,
     participant_count UInt32,
-    event_summary_json Nullable(String),
-    properties_json Nullable(String)
-)
-ENGINE = MergeTree
-PARTITION BY toYYYYMM(event_time)
-ORDER BY (event_time, signature, canonical_event_id);
-
--- Workspace interpretation layer:
--- These records decide whether a global event matters to a given workspace.
-
-CREATE TABLE IF NOT EXISTS workspace_event_links
-(
-    workspace_id UUID,
-    canonical_event_id UUID,
-    link_reason LowCardinality(String),
-    matched_address_count UInt32,
-    matched_object_count UInt32,
-    created_at DateTime64(3, 'UTC') DEFAULT now64(3)
-)
-ENGINE = MergeTree
-PARTITION BY toYYYYMM(created_at)
-ORDER BY (workspace_id, canonical_event_id, created_at);
-
-CREATE TABLE IF NOT EXISTS workspace_event_participants
-(
-    workspace_id UUID,
-    canonical_event_id UUID,
-    participant_id UUID,
-    role LowCardinality(String),
-    address String,
-    workspace_address_id Nullable(UUID),
-    workspace_object_id Nullable(UUID),
-    global_entity_id Nullable(UUID),
-    direction LowCardinality(String),
-    amount_raw Int128,
-    confidence Float32,
     properties_json Nullable(String),
     created_at DateTime64(3, 'UTC') DEFAULT now64(3)
 )
 ENGINE = MergeTree
-PARTITION BY toYYYYMM(created_at)
-ORDER BY (workspace_id, canonical_event_id, participant_id);
+PARTITION BY toYYYYMM(event_time)
+ORDER BY (event_time, signature);
 
--- Serving layer:
--- Customer-facing operational records. These are rebuildable from canonical + workspace config.
-
-CREATE TABLE IF NOT EXISTS workspace_operational_events
+CREATE TABLE IF NOT EXISTS observed_transfers
 (
-    workspace_id UUID,
-    workspace_event_id UUID,
-    canonical_event_id UUID,
+    transfer_id UUID,
+    signature String,
     slot UInt64,
-    signature String,
     event_time DateTime64(3, 'UTC'),
     asset LowCardinality(String),
-    event_type LowCardinality(String),
-    direction LowCardinality(String),
+    source_token_account Nullable(String),
+    source_wallet Nullable(String),
+    destination_token_account String,
+    destination_wallet Nullable(String),
     amount_raw Int128,
     amount_decimal Decimal(38, 6),
-    primary_object_id Nullable(UUID),
-    counterparty_object_id Nullable(UUID),
-    primary_label Nullable(String),
-    counterparty_label Nullable(String),
-    confidence Float32,
-    is_actionable UInt8 DEFAULT 0,
-    summary_text String,
+    transfer_kind LowCardinality(String),
+    instruction_index Nullable(UInt32),
+    inner_instruction_index Nullable(UInt32),
+    route_group String DEFAULT '',
+    leg_role LowCardinality(String) DEFAULT 'unknown',
     properties_json Nullable(String),
-    model_version UInt32,
     created_at DateTime64(3, 'UTC') DEFAULT now64(3)
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMM(event_time)
-ORDER BY (workspace_id, event_time, workspace_event_id);
+ORDER BY (event_time, signature, destination_token_account, transfer_id);
 
-CREATE TABLE IF NOT EXISTS workspace_reconciliation_rows
+ALTER TABLE observed_transfers
+    DROP COLUMN IF EXISTS workspace_id;
+
+ALTER TABLE observed_transfers
+    ADD COLUMN IF NOT EXISTS instruction_index Nullable(UInt32) AFTER transfer_kind;
+
+ALTER TABLE observed_transfers
+    ADD COLUMN IF NOT EXISTS inner_instruction_index Nullable(UInt32) AFTER instruction_index;
+
+ALTER TABLE observed_transfers
+    ADD COLUMN IF NOT EXISTS route_group String DEFAULT '' AFTER inner_instruction_index;
+
+ALTER TABLE observed_transfers
+    ADD COLUMN IF NOT EXISTS leg_role LowCardinality(String) DEFAULT 'unknown' AFTER route_group;
+
+CREATE TABLE IF NOT EXISTS observed_payments
+(
+    payment_id UUID,
+    signature String,
+    slot UInt64,
+    event_time DateTime64(3, 'UTC'),
+    asset LowCardinality(String),
+    source_wallet Nullable(String),
+    destination_wallet Nullable(String),
+    gross_amount_raw Int128,
+    gross_amount_decimal Decimal(38, 6),
+    net_destination_amount_raw Int128,
+    net_destination_amount_decimal Decimal(38, 6),
+    fee_amount_raw Int128,
+    fee_amount_decimal Decimal(38, 6),
+    route_count UInt32,
+    payment_kind LowCardinality(String),
+    reconstruction_rule LowCardinality(String),
+    confidence_band LowCardinality(String),
+    properties_json Nullable(String),
+    created_at DateTime64(3, 'UTC') DEFAULT now64(3)
+)
+ENGINE = MergeTree
+PARTITION BY toYYYYMM(event_time)
+ORDER BY (event_time, signature, payment_id);
+
+CREATE TABLE IF NOT EXISTS matcher_events
+(
+    event_id UUID,
+    workspace_id UUID,
+    destination_address String,
+    transfer_request_id Nullable(UUID),
+    observed_transfer_id Nullable(UUID),
+    signature Nullable(String),
+    event_type LowCardinality(String),
+    quantity_raw Int128,
+    remaining_request_raw Nullable(Int128),
+    remaining_observation_raw Nullable(Int128),
+    explanation String,
+    event_time DateTime64(3, 'UTC'),
+    properties_json Nullable(String),
+    created_at DateTime64(3, 'UTC') DEFAULT now64(3)
+)
+ENGINE = MergeTree
+PARTITION BY toYYYYMM(event_time)
+ORDER BY (workspace_id, destination_address, event_time, event_id);
+
+ALTER TABLE matcher_events
+    RENAME COLUMN IF EXISTS observed_movement_id TO observed_transfer_id;
+
+ALTER TABLE matcher_events
+    ADD COLUMN IF NOT EXISTS observed_transfer_id Nullable(UUID) AFTER transfer_request_id;
+
+CREATE TABLE IF NOT EXISTS request_book_snapshots
 (
     workspace_id UUID,
-    reconciliation_row_id UUID,
-    workspace_event_id UUID,
-    event_time DateTime64(3, 'UTC'),
-    asset LowCardinality(String),
-    amount_raw Int128,
-    amount_decimal Decimal(38, 6),
-    direction LowCardinality(String),
-    internal_object_key Nullable(String),
-    counterparty_name Nullable(String),
-    event_type LowCardinality(String),
-    signature String,
-    token_account Nullable(String),
-    notes Nullable(String),
-    export_status LowCardinality(String),
-    created_at DateTime64(3, 'UTC') DEFAULT now64(3)
+    destination_address String,
+    transfer_request_id UUID,
+    requested_at DateTime64(3, 'UTC'),
+    request_type LowCardinality(String),
+    requested_amount_raw Int128,
+    allocated_amount_raw Int128,
+    remaining_amount_raw Int128,
+    fill_count UInt32,
+    book_status LowCardinality(String),
+    last_signature Nullable(String),
+    last_observed_transfer_id Nullable(UUID),
+    observed_event_time Nullable(DateTime64(3, 'UTC')),
+    updated_at DateTime64(3, 'UTC') DEFAULT now64(3)
 )
-ENGINE = MergeTree
-PARTITION BY toYYYYMM(event_time)
-ORDER BY (workspace_id, event_time, reconciliation_row_id);
+ENGINE = ReplacingMergeTree(updated_at)
+PARTITION BY toYYYYMM(updated_at)
+ORDER BY (workspace_id, destination_address, transfer_request_id);
+
+ALTER TABLE request_book_snapshots
+    RENAME COLUMN IF EXISTS last_observed_movement_id TO last_observed_transfer_id;
+
+ALTER TABLE request_book_snapshots
+    ADD COLUMN IF NOT EXISTS last_observed_transfer_id Nullable(UUID) AFTER last_signature;
+
+ALTER TABLE request_book_snapshots
+    ADD COLUMN IF NOT EXISTS observed_event_time Nullable(DateTime64(3, 'UTC')) AFTER last_observed_transfer_id;
+
+CREATE TABLE IF NOT EXISTS settlement_matches
+(
+    workspace_id UUID,
+    transfer_request_id UUID,
+    signature Nullable(String),
+    observed_transfer_id Nullable(UUID),
+    match_status LowCardinality(String),
+    confidence_score UInt8,
+    confidence_band LowCardinality(String),
+    matched_amount_raw Int128,
+    amount_variance_raw Int128,
+    destination_match_type LowCardinality(String),
+    time_delta_seconds Int64,
+    match_rule LowCardinality(String),
+    candidate_count UInt32,
+    explanation String,
+    observed_event_time Nullable(DateTime64(3, 'UTC')),
+    matched_at Nullable(DateTime64(3, 'UTC')),
+    updated_at DateTime64(3, 'UTC') DEFAULT now64(3)
+)
+ENGINE = ReplacingMergeTree(updated_at)
+PARTITION BY toYYYYMM(updated_at)
+ORDER BY (workspace_id, transfer_request_id);
+
+ALTER TABLE settlement_matches
+    RENAME COLUMN IF EXISTS observed_movement_id TO observed_transfer_id;
+
+ALTER TABLE settlement_matches
+    ADD COLUMN IF NOT EXISTS observed_transfer_id Nullable(UUID) AFTER signature;
+
+ALTER TABLE settlement_matches
+    ADD COLUMN IF NOT EXISTS observed_event_time Nullable(DateTime64(3, 'UTC')) AFTER explanation;
+
+ALTER TABLE settlement_matches
+    ADD COLUMN IF NOT EXISTS matched_at Nullable(DateTime64(3, 'UTC')) AFTER observed_event_time;
+
+CREATE TABLE IF NOT EXISTS exceptions
+(
+    workspace_id UUID,
+    exception_id UUID,
+    transfer_request_id Nullable(UUID),
+    signature Nullable(String),
+    observed_transfer_id Nullable(UUID),
+    exception_type LowCardinality(String),
+    severity LowCardinality(String),
+    status LowCardinality(String),
+    explanation String,
+    properties_json Nullable(String),
+    observed_event_time Nullable(DateTime64(3, 'UTC')),
+    processed_at Nullable(DateTime64(3, 'UTC')),
+    created_at DateTime64(3, 'UTC') DEFAULT now64(3),
+    updated_at DateTime64(3, 'UTC') DEFAULT now64(3)
+)
+ENGINE = ReplacingMergeTree(updated_at)
+PARTITION BY toYYYYMM(updated_at)
+ORDER BY (workspace_id, exception_id);
+
+ALTER TABLE exceptions
+    RENAME COLUMN IF EXISTS observed_movement_id TO observed_transfer_id;
+
+ALTER TABLE exceptions
+    ADD COLUMN IF NOT EXISTS observed_transfer_id Nullable(UUID) AFTER signature;
+
+ALTER TABLE exceptions
+    ADD COLUMN IF NOT EXISTS observed_event_time Nullable(DateTime64(3, 'UTC')) AFTER properties_json;
+
+ALTER TABLE exceptions
+    ADD COLUMN IF NOT EXISTS processed_at Nullable(DateTime64(3, 'UTC')) AFTER observed_event_time;

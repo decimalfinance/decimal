@@ -8,192 +8,120 @@ datasource db {
 }
 
 model Organization {
-  organizationId String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("organization_id")
-  organizationSlug String                 @unique @map("organization_slug")
-  organizationName String                 @map("organization_name")
-  status         String                   @default("active")
-  createdAt      DateTime                 @default(now()) @db.Timestamptz(6) @map("created_at")
-  updatedAt      DateTime                 @updatedAt @db.Timestamptz(6) @map("updated_at")
-  memberships    OrganizationMembership[]
-  sessions       AuthSession[]
-  workspaces     Workspace[]
+  organizationId   String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("organization_id")
+  organizationName String                   @map("organization_name")
+  status           String                   @default("active")
+  createdAt        DateTime                 @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt        DateTime                 @updatedAt @db.Timestamptz(6) @map("updated_at")
+  memberships      OrganizationMembership[]
+  sessions         AuthSession[]
+  workspaces       Workspace[]
 
   @@map("organizations")
 }
 
 model User {
-  userId         String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("user_id")
-  email          String                   @unique
-  displayName    String                   @map("display_name")
-  status         String                   @default("active")
-  createdAt      DateTime                 @default(now()) @db.Timestamptz(6) @map("created_at")
-  updatedAt      DateTime                 @updatedAt @db.Timestamptz(6) @map("updated_at")
-  memberships    OrganizationMembership[]
-  sessions       AuthSession[]
+  userId                    String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("user_id")
+  email                     String            @unique
+  displayName               String            @map("display_name")
+  status                    String            @default("active")
+  createdAt                 DateTime          @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt                 DateTime          @updatedAt @db.Timestamptz(6) @map("updated_at")
+  memberships               OrganizationMembership[]
+  sessions                  AuthSession[]
+  transferRequestsRequested TransferRequest[] @relation("TransferRequestRequestedByUser")
 
   @@map("users")
 }
 
 model OrganizationMembership {
-  membershipId    String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("membership_id")
-  organizationId  String       @db.Uuid @map("organization_id")
-  userId          String       @db.Uuid @map("user_id")
-  role            String
-  status          String       @default("active")
-  createdAt       DateTime     @default(now()) @db.Timestamptz(6) @map("created_at")
-  updatedAt       DateTime     @updatedAt @db.Timestamptz(6) @map("updated_at")
-  organization    Organization @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
-  user            User         @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  membershipId   String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("membership_id")
+  organizationId String       @db.Uuid @map("organization_id")
+  userId         String       @db.Uuid @map("user_id")
+  role           String
+  status         String       @default("active")
+  createdAt      DateTime     @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt      DateTime     @updatedAt @db.Timestamptz(6) @map("updated_at")
+  organization   Organization @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [userId], onDelete: Cascade)
 
   @@unique([organizationId, userId])
   @@map("organization_memberships")
 }
 
 model AuthSession {
-  authSessionId   String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("auth_session_id")
-  sessionToken    String       @unique @map("session_token")
-  organizationId  String?      @db.Uuid @map("organization_id")
-  userId          String       @db.Uuid @map("user_id")
-  expiresAt       DateTime     @db.Timestamptz(6) @map("expires_at")
-  lastSeenAt      DateTime     @default(now()) @db.Timestamptz(6) @map("last_seen_at")
-  createdAt       DateTime     @default(now()) @db.Timestamptz(6) @map("created_at")
-  organization    Organization? @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
-  user            User         @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  authSessionId  String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("auth_session_id")
+  sessionToken   String        @unique @map("session_token")
+  organizationId String?       @db.Uuid @map("organization_id")
+  userId         String        @db.Uuid @map("user_id")
+  expiresAt      DateTime      @db.Timestamptz(6) @map("expires_at")
+  lastSeenAt     DateTime      @default(now()) @db.Timestamptz(6) @map("last_seen_at")
+  createdAt      DateTime      @default(now()) @db.Timestamptz(6) @map("created_at")
+  organization   Organization? @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
+  user           User          @relation(fields: [userId], references: [userId], onDelete: Cascade)
 
   @@map("auth_sessions")
 }
 
 model Workspace {
-  workspaceId        String                          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("workspace_id")
-  organizationId     String                          @db.Uuid @map("organization_id")
-  workspaceSlug      String                          @unique @map("workspace_slug")
-  workspaceName      String                          @map("workspace_name")
-  status             String                          @default("active")
-  createdAt          DateTime                        @default(now()) @db.Timestamptz(6) @map("created_at")
-  updatedAt          DateTime                        @updatedAt @db.Timestamptz(6) @map("updated_at")
-  organization       Organization                    @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
-  addresses          WorkspaceAddress[]
-  labels             WorkspaceLabel[]
-  objects            WorkspaceObject[]
-  addressLabels      WorkspaceAddressLabel[]
-  addressMappings    WorkspaceAddressObjectMapping[]
+  workspaceId       String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("workspace_id")
+  organizationId    String           @db.Uuid @map("organization_id")
+  workspaceName     String           @map("workspace_name")
+  status            String           @default("active")
+  createdAt         DateTime         @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt         DateTime         @updatedAt @db.Timestamptz(6) @map("updated_at")
+  organization      Organization     @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
+  addresses         WorkspaceAddress[]
+  transferRequests  TransferRequest[]
 
   @@map("workspaces")
 }
 
 model WorkspaceAddress {
-  workspaceAddressId String                          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("workspace_address_id")
-  workspaceId        String                          @db.Uuid @map("workspace_id")
-  chain              String
-  address            String
-  addressKind        String                          @map("address_kind")
-  assetScope         String                          @default("usdc") @map("asset_scope")
-  isActive           Boolean                         @default(true) @map("is_active")
-  source             String                          @default("manual")
-  sourceRef          String?                         @map("source_ref")
-  notes              String?
-  propertiesJson     Json                            @default("{}") @map("properties_json")
-  createdAt          DateTime                        @default(now()) @db.Timestamptz(6) @map("created_at")
-  updatedAt          DateTime                        @updatedAt @db.Timestamptz(6) @map("updated_at")
-  workspace          Workspace                       @relation(fields: [workspaceId], references: [workspaceId], onDelete: Cascade)
-  labels             WorkspaceAddressLabel[]
-  mappings           WorkspaceAddressObjectMapping[]
+  workspaceAddressId     String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("workspace_address_id")
+  workspaceId            String           @db.Uuid @map("workspace_id")
+  chain                  String
+  address                String
+  addressKind            String           @default("wallet") @map("address_kind")
+  assetScope             String           @default("usdc") @map("asset_scope")
+  usdcAtaAddress         String?          @map("usdc_ata_address")
+  isActive               Boolean          @default(true) @map("is_active")
+  source                 String           @default("manual")
+  sourceRef              String?          @map("source_ref")
+  displayName            String?          @map("display_name")
+  notes                  String?
+  propertiesJson         Json             @default("{}") @map("properties_json")
+  createdAt              DateTime         @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt              DateTime         @updatedAt @db.Timestamptz(6) @map("updated_at")
+  workspace              Workspace        @relation(fields: [workspaceId], references: [workspaceId], onDelete: Cascade)
+  outboundTransferRequests TransferRequest[] @relation("TransferRequestSourceAddress")
+  inboundTransferRequests  TransferRequest[] @relation("TransferRequestDestinationAddress")
 
   @@unique([workspaceId, address])
   @@map("workspace_addresses")
 }
 
-model WorkspaceLabel {
-  labelId            String                          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("label_id")
-  workspaceId        String                          @db.Uuid @map("workspace_id")
-  labelName          String                          @map("label_name")
-  labelType          String                          @map("label_type")
-  color              String?
-  description        String?
-  createdAt          DateTime                        @default(now()) @db.Timestamptz(6) @map("created_at")
-  updatedAt          DateTime                        @updatedAt @db.Timestamptz(6) @map("updated_at")
-  workspace          Workspace                       @relation(fields: [workspaceId], references: [workspaceId], onDelete: Cascade)
-  addressLinks       WorkspaceAddressLabel[]
+model TransferRequest {
+  transferRequestId          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("transfer_request_id")
+  workspaceId                String           @db.Uuid @map("workspace_id")
+  sourceWorkspaceAddressId   String?          @db.Uuid @map("source_workspace_address_id")
+  destinationWorkspaceAddressId String        @db.Uuid @map("destination_workspace_address_id")
+  requestType                String           @map("request_type")
+  asset                      String           @default("usdc")
+  amountRaw                  BigInt           @map("amount_raw")
+  requestedByUserId          String?          @db.Uuid @map("requested_by_user_id")
+  reason                     String?
+  externalReference          String?          @map("external_reference")
+  status                     String           @default("submitted")
+  requestedAt                DateTime         @default(now()) @db.Timestamptz(6) @map("requested_at")
+  dueAt                      DateTime?        @db.Timestamptz(6) @map("due_at")
+  propertiesJson             Json             @default("{}") @map("properties_json")
+  createdAt                  DateTime         @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt                  DateTime         @updatedAt @db.Timestamptz(6) @map("updated_at")
+  workspace                  Workspace        @relation(fields: [workspaceId], references: [workspaceId], onDelete: Cascade)
+  sourceWorkspaceAddress     WorkspaceAddress? @relation("TransferRequestSourceAddress", fields: [sourceWorkspaceAddressId], references: [workspaceAddressId], onDelete: SetNull)
+  destinationWorkspaceAddress WorkspaceAddress @relation("TransferRequestDestinationAddress", fields: [destinationWorkspaceAddressId], references: [workspaceAddressId], onDelete: Restrict)
+  requestedByUser            User?            @relation("TransferRequestRequestedByUser", fields: [requestedByUserId], references: [userId], onDelete: SetNull)
 
-  @@unique([workspaceId, labelName])
-  @@map("workspace_labels")
-}
-
-model WorkspaceAddressLabel {
-  workspaceId        String           @db.Uuid @map("workspace_id")
-  workspaceAddressId String           @db.Uuid @map("workspace_address_id")
-  labelId            String           @db.Uuid @map("label_id")
-  createdAt          DateTime         @default(now()) @db.Timestamptz(6) @map("created_at")
-  workspace          Workspace        @relation(fields: [workspaceId], references: [workspaceId], onDelete: Cascade)
-  workspaceAddress   WorkspaceAddress @relation(fields: [workspaceAddressId], references: [workspaceAddressId], onDelete: Cascade)
-  label              WorkspaceLabel   @relation(fields: [labelId], references: [labelId], onDelete: Cascade)
-
-  @@id([workspaceId, workspaceAddressId, labelId])
-  @@map("workspace_address_labels")
-}
-
-model WorkspaceObject {
-  workspaceObjectId  String                          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("workspace_object_id")
-  workspaceId        String                          @db.Uuid @map("workspace_id")
-  objectType         String                          @map("object_type")
-  objectKey          String                          @map("object_key")
-  displayName        String                          @map("display_name")
-  status             String                          @default("active")
-  propertiesJson     Json                            @default("{}") @map("properties_json")
-  createdAt          DateTime                        @default(now()) @db.Timestamptz(6) @map("created_at")
-  updatedAt          DateTime                        @updatedAt @db.Timestamptz(6) @map("updated_at")
-  workspace          Workspace                       @relation(fields: [workspaceId], references: [workspaceId], onDelete: Cascade)
-  mappings           WorkspaceAddressObjectMapping[]
-
-  @@unique([workspaceId, objectType, objectKey])
-  @@map("workspace_objects")
-}
-
-model WorkspaceAddressObjectMapping {
-  mappingId          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("mapping_id")
-  workspaceId        String           @db.Uuid @map("workspace_id")
-  workspaceAddressId String           @db.Uuid @map("workspace_address_id")
-  workspaceObjectId  String           @db.Uuid @map("workspace_object_id")
-  mappingRole        String           @map("mapping_role")
-  confidence         Float            @default(1)
-  source             String           @default("manual")
-  isPrimary          Boolean          @default(false) @map("is_primary")
-  validFrom          DateTime         @default(now()) @db.Timestamptz(6) @map("valid_from")
-  validTo            DateTime?        @db.Timestamptz(6) @map("valid_to")
-  propertiesJson     Json             @default("{}") @map("properties_json")
-  createdAt          DateTime         @default(now()) @db.Timestamptz(6) @map("created_at")
-  updatedAt          DateTime         @updatedAt @db.Timestamptz(6) @map("updated_at")
-  workspace          Workspace        @relation(fields: [workspaceId], references: [workspaceId], onDelete: Cascade)
-  workspaceAddress   WorkspaceAddress @relation(fields: [workspaceAddressId], references: [workspaceAddressId], onDelete: Cascade)
-  workspaceObject    WorkspaceObject  @relation(fields: [workspaceObjectId], references: [workspaceObjectId], onDelete: Cascade)
-
-  @@map("workspace_address_object_mappings")
-}
-
-model GlobalEntity {
-  globalEntityId     String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("global_entity_id")
-  entityName         String                 @map("entity_name")
-  entityType         String                 @map("entity_type")
-  chain              String
-  confidence         Float                  @default(1)
-  source             String                 @default("system")
-  propertiesJson     Json                   @default("{}") @map("properties_json")
-  createdAt          DateTime               @default(now()) @db.Timestamptz(6) @map("created_at")
-  updatedAt          DateTime               @updatedAt @db.Timestamptz(6) @map("updated_at")
-  addresses          GlobalEntityAddress[]
-
-  @@map("global_entities")
-}
-
-model GlobalEntityAddress {
-  globalEntityAddressId String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("global_entity_address_id")
-  globalEntityId        String        @db.Uuid @map("global_entity_id")
-  address               String        @unique
-  addressKind           String        @map("address_kind")
-  confidence            Float         @default(1)
-  createdAt             DateTime      @default(now()) @db.Timestamptz(6) @map("created_at")
-  updatedAt             DateTime      @updatedAt @db.Timestamptz(6) @map("updated_at")
-  globalEntity          GlobalEntity  @relation(fields: [globalEntityId], references: [globalEntityId], onDelete: Cascade)
-
-  @@map("global_entity_addresses")
+  @@map("transfer_requests")
 }

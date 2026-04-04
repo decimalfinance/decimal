@@ -1,12 +1,13 @@
 import type {
   AuthenticatedSession,
-  EventParticipant,
+  ExceptionItem,
   LoginResponse,
-  OnboardingSnapshot,
-  OperationalEvent,
+  ObservedTransfer,
   OrganizationDirectoryItem,
   OrganizationMembership,
   ReconciliationRow,
+  TransferRequest,
+  WorkspaceAddress,
   Workspace,
 } from './types';
 
@@ -78,7 +79,7 @@ export const api = {
   listOrganizations() {
     return request<{ items: OrganizationDirectoryItem[] }>('/organizations');
   },
-  createOrganization(input: { organizationName: string; organizationSlug: string }) {
+  createOrganization(input: { organizationName: string }) {
     return request<OrganizationMembership>('/organizations', {
       method: 'POST',
       body: JSON.stringify(input),
@@ -90,13 +91,9 @@ export const api = {
       body: JSON.stringify({}),
     });
   },
-  listWorkspaces(organizationId: string) {
-    return request<{ items: Workspace[] }>(`/organizations/${organizationId}/workspaces`);
-  },
   createWorkspace(
     organizationId: string,
     input: {
-      workspaceSlug: string;
       workspaceName: string;
       status?: string;
     },
@@ -106,14 +103,20 @@ export const api = {
       body: JSON.stringify(input),
     });
   },
-  getOnboardingSnapshot(workspaceId: string) {
-    return request<OnboardingSnapshot>(`/workspaces/${workspaceId}/onboarding`);
+  createDemoWorkspace(organizationId: string) {
+    return request<Workspace>(`/organizations/${organizationId}/demo-workspace`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  },
+  listAddresses(workspaceId: string) {
+    return request<{ items: WorkspaceAddress[] }>(`/workspaces/${workspaceId}/addresses`);
   },
   createAddress(
     workspaceId: string,
     input: {
       address: string;
-      addressKind: string;
+      displayName?: string;
       assetScope?: string;
       notes?: string;
     },
@@ -128,80 +131,42 @@ export const api = {
       }),
     });
   },
-  createLabel(
-    workspaceId: string,
-    input: {
-      labelName: string;
-      labelType: string;
-      color?: string;
-      description?: string;
-    },
-  ) {
-    return request(`/workspaces/${workspaceId}/labels`, {
-      method: 'POST',
-      body: JSON.stringify(input),
-    });
-  },
-  attachLabel(
-    workspaceId: string,
-    input: {
-      workspaceAddressId: string;
-      labelId: string;
-    },
-  ) {
-    return request(`/workspaces/${workspaceId}/address-labels`, {
-      method: 'POST',
-      body: JSON.stringify(input),
-    });
-  },
-  createObject(
-    workspaceId: string,
-    input: {
-      objectType: string;
-      objectKey: string;
-      displayName: string;
-      status?: string;
-    },
-  ) {
-    return request(`/workspaces/${workspaceId}/objects`, {
-      method: 'POST',
-      body: JSON.stringify(input),
-    });
-  },
-  createObjectMapping(
-    workspaceId: string,
-    input: {
-      workspaceAddressId: string;
-      workspaceObjectId: string;
-      mappingRole: string;
-      confidence?: number;
-      isPrimary?: boolean;
-    },
-  ) {
-    return request(`/workspaces/${workspaceId}/address-object-mappings`, {
-      method: 'POST',
-      body: JSON.stringify({
-        source: 'manual',
-        confidence: input.confidence ?? 1,
-        isPrimary: input.isPrimary ?? true,
-        ...input,
-      }),
-    });
-  },
-  listEvents(workspaceId: string, filters?: { eventType?: string; direction?: string }) {
-    const params = new URLSearchParams();
-    params.set('limit', '100');
-    if (filters?.eventType) params.set('eventType', filters.eventType);
-    if (filters?.direction) params.set('direction', filters.direction);
-    return request<{ items: OperationalEvent[] }>(`/workspaces/${workspaceId}/events?${params.toString()}`);
+  listTransfers(workspaceId: string) {
+    return request<{ servedAt: string; items: ObservedTransfer[] }>(
+      `/workspaces/${workspaceId}/transfers?limit=100`,
+    );
   },
   listReconciliation(workspaceId: string) {
-    return request<{ items: ReconciliationRow[] }>(`/workspaces/${workspaceId}/reconciliation?limit=100`);
-  },
-  listParticipants(workspaceId: string, workspaceEventId: string) {
-    return request<{ items: EventParticipant[] }>(
-      `/workspaces/${workspaceId}/events/${workspaceEventId}/participants`,
+    return request<{ servedAt: string; items: ReconciliationRow[] }>(
+      `/workspaces/${workspaceId}/reconciliation?limit=100`,
     );
+  },
+  listExceptions(workspaceId: string) {
+    return request<{ servedAt: string; items: ExceptionItem[] }>(
+      `/workspaces/${workspaceId}/exceptions?limit=100`,
+    );
+  },
+  listTransferRequests(workspaceId: string) {
+    return request<{ items: TransferRequest[] }>(`/workspaces/${workspaceId}/transfer-requests`);
+  },
+  createTransferRequest(
+    workspaceId: string,
+    input: {
+      sourceWorkspaceAddressId?: string;
+      destinationWorkspaceAddressId: string;
+      requestType: string;
+      asset?: string;
+      amountRaw: string;
+      reason?: string;
+      externalReference?: string;
+      status?: string;
+      dueAt?: string;
+    },
+  ) {
+    return request<TransferRequest>(`/workspaces/${workspaceId}/transfer-requests`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
   },
 };
 

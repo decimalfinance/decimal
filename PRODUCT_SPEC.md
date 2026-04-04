@@ -2,430 +2,725 @@
 
 ## Working Name
 
-`USDC Ops Layer`
+`Stablecoin Ops Control Surface`
 
-This name is internal. The product definition matters more than the brand right now.
+This name is internal. The product shape matters more than the brand.
 
 ## One-Line Definition
 
-`USDC Ops Layer` is a real-time Solana USDC monitoring, classification, and reconciliation system for teams that move money and need to understand exactly what happened onchain.
+`Stablecoin Ops Control Surface` is a stablecoin operations product for teams using USDC on Solana, combining transfer requests, approvals, trusted destination management, on-chain settlement tracking, reconciliation, and exception handling in one workflow.
 
-## Why This Product
+## Product Thesis
 
-The market is large, but most stablecoin opportunities require one or more of:
+The market does not primarily need another wallet, another payment rail, or another analytics dashboard.
 
-- large balance sheet risk,
-- regulatory complexity,
-- banking relationships,
-- deep liquidity bootstrapping,
-- or distribution that we do not have today.
+It needs an operational layer for teams that already move money.
 
-This product does not require any of those to start.
+Those teams have one recurring job:
 
-It is small enough to build as an MVP, useful enough for real users, and close enough to existing Solana data rails that execution risk is acceptable.
+- request a movement of funds
+- decide whether it should be allowed
+- execute it safely
+- verify what actually happened on-chain
+- reconcile it back to business intent
+- resolve exceptions
+- export the final record to finance and ops systems
+
+That is the product.
 
 ## What We Are Building
 
-We are building a product that answers this operational question:
+We are building a workflow system for outbound USDC movements on Solana.
 
-`What happened to my USDC on Solana, who was involved, how much moved, and how should I interpret it?`
+The product owns:
 
-The product will:
+- transfer intent
+- approval and policy workflow
+- destination trust and counterparty registry
+- on-chain settlement observation
+- reconciliation and matching
+- exception handling
+- audit and export
 
-- watch USDC movements on Solana in real time,
-- group updates by transaction,
-- decode balances and amount changes,
-- label known entities when possible,
-- classify movements into operational event types,
-- and expose those events through a UI and API for operations and finance workflows.
+The product does not own:
 
-## System Shape
+- custody
+- key management
+- banking
+- fiat rails
+- issuance
+- checkout
 
-The system is split into two planes:
+It sits above those systems.
 
-- `data plane`
-- `control plane`
+## Core User And Buyer
 
-### Data Plane
+### Shared Buyer Category
 
-The data plane is responsible for:
+The buyer is:
 
-- ingestion from Yellowstone,
-- normalization,
-- classification,
-- replay,
-- and event storage.
+- an operations, finance, or treasury lead at a company already moving USDC on Solana
 
-This plane is implemented in `Rust` and writes event data into `ClickHouse`.
+### Three Supported Buyer Variants
 
-### Control Plane
+1. `Cross-border fintech finance / ops`
+- moving USDC for payouts, partner settlements, or treasury transfers
 
-The control plane is responsible for:
+2. `Marketplace payout ops`
+- sending recurring outbound payouts to sellers, creators, or contractors
 
-- workspace onboarding,
-- watched addresses,
-- labels,
-- internal business objects,
-- mappings,
-- and product-facing APIs.
+3. `Crypto-native treasury ops`
+- managing treasury transfers, counterparty payments, and rebalancing
 
-This plane is implemented in `TypeScript` and stores onboarding/configuration state in `Postgres`.
-The control-plane API framework is `Express`, and database access is handled through `Prisma`.
+We are not choosing one buyer at the architecture level yet.
+We are building the shared workflow core that all three require.
 
-### Storage Decision
+## User Problem
 
-`ClickHouse` holds:
+Today these teams use some combination of:
 
-- raw observations
-- canonical events
-- workspace-scoped serving events
-- reconciliation outputs
+- wallet or custody dashboards
+- Solana explorers
+- spreadsheets
+- Slack / Telegram / email approval threads
+- CSV exports
+- internal scripts
+- finance systems that do not understand on-chain settlement
 
-`Postgres` holds:
+This creates the same failures repeatedly:
 
-- workspaces
-- watched addresses
-- labels
-- business objects
-- mappings
-- onboarding state
+- approval context is outside the payment system
+- “submitted” and “settled” get confused
+- on-chain events do not map cleanly to business intent
+- reconciliation is manual
+- exceptions are not durable or auditable
 
-This separation is intentional. Event data is append-heavy and analytical. Onboarding/configuration data is transactional and relational.
+The product exists to remove that fragmentation.
 
-## What We Are Not Building
+## Primary Workflow
 
-We are not building:
+The product is designed around one workflow:
 
-- a stablecoin issuer,
-- a payments processor,
-- a wallet for consumers,
-- a merchant checkout product,
-- a DeFi yield product,
-- a generic blockchain analytics dashboard,
-- a compliance platform,
-- or a trading signal engine.
+`outbound USDC payout or treasury transfer from request to approval to execution to settlement to reconciliation`
 
-Those may become adjacent opportunities later, but they are out of scope for the MVP.
+### Workflow Steps
 
-## Core User
+1. `Intake`
+- create a transfer request or import a payout batch
 
-The primary user is:
+2. `Control`
+- evaluate the request against policies, destination trust, and risk constraints
 
-`an operations or treasury person at a Solana-native company that receives, sends, or manages USDC`
+3. `Approval`
+- approve, reject, or escalate
 
-Examples:
+4. `Execution`
+- execute through the chosen wallet / custody / provider
 
-- a payments app monitoring treasury wallets,
-- a wallet team tracking settlement flows,
-- a protocol team watching treasury and liquidity movements,
-- a market making or OTC team monitoring known counterparties,
-- a finance team trying to reconcile onchain USDC activity.
+5. `Observation`
+- observe the on-chain transaction and token movement
 
-## End Users
+6. `Matching`
+- match observed settlement back to the request or payout item
 
-Primary end users:
+7. `Exception Handling`
+- surface and resolve unmatched, delayed, incorrect, or suspicious cases
 
-- treasury teams,
-- operations teams,
-- finance and reconciliation teams,
-- protocol ops teams,
-- market structure / liquidity ops teams.
+8. `Audit / Export`
+- produce finance-ready and ops-ready records
 
-Secondary end users:
+## Shared Product Core
 
-- founders at small fintech or payment apps,
-- risk teams,
-- analytics teams that need a structured USDC event feed.
+These capabilities are required across all three buyer variants.
 
-Non-users for MVP:
+### Shared Capabilities
 
-- retail traders,
-- consumers,
-- general-purpose crypto researchers,
-- pure compliance teams,
-- merchants directly.
+- create transfer requests
+- maintain trusted destinations and counterparties
+- define approval policies
+- route approvals
+- track request state
+- observe Solana USDC settlement
+- reconcile requests to observed settlement
+- manage exception queues
+- export records
+- keep an immutable audit trail
 
-## User Pain Point
+### Shared Screens
 
-The pain is not lack of raw blockchain data.
+- operations inbox
+- transfer requests
+- approvals
+- settlement & reconciliation
+- exception queue
+- counterparties & destinations
+- policies
+- audit & exports
 
-The pain is that raw Solana USDC activity is too noisy and too operationally expensive to interpret.
+## Buyer-Specific Extensions
 
-Today, a team often cannot quickly answer:
+The product core must stay shared, but these extensions must remain visible in the design.
 
-- Did we receive or send USDC?
-- Which wallets changed?
-- Which transaction caused it?
-- Was this a transfer, swap, pool interaction, or treasury move?
-- Which known entity was on the other side?
-- What should finance log for reconciliation?
+### Cross-Border Fintech Extensions
 
-The current alternatives are weak:
+- corridor metadata
+- beneficiary / partner metadata
+- payout provider reference
+- local-currency reference
+- settlement-confidence or finance-close state
 
-- explorers are manual,
-- raw RPC data is noisy,
-- internal scripts are fragile,
-- and generic analytics tools are not built around ops workflows.
+### Marketplace Payout Extensions
 
-## Jobs To Be Done
+- beneficiary registry
+- payout batch
+- payout item
+- earnings period / payout period
+- support-facing payout status
 
-### Primary Job
+### Treasury Ops Extensions
 
-When USDC moves on Solana, help me understand and reconcile it quickly without manually inspecting raw transactions.
-
-### Functional Jobs
-
-- monitor watched wallets and entities,
-- detect USDC inflows and outflows,
-- group writes into transaction-level events,
-- identify known counterparties,
-- classify events into a small taxonomy,
-- export records for finance and ops,
-- and provide a clean audit trail.
-
-### Emotional Jobs
-
-- reduce uncertainty,
-- reduce fear of missing a money movement,
-- reduce time spent manually checking explorers,
-- increase confidence in treasury and ops decisions.
-
-## Product Promise
-
-For any watched USDC movement on Solana, the product should turn raw account updates into a human-readable operational event within seconds.
+- treasury wallet cluster
+- rebalance job
+- counterparty trust state
+- internal vs external movement type
+- anomaly / unexpected movement flag
 
 ## MVP Scope
 
 The MVP is intentionally narrow.
 
-### Chain And Asset Scope
+### Asset And Chain
 
-- Solana only
-- USDC only
+- `USDC only`
+- `Solana only`
 
-### Data Scope
+### Flow Type
 
-- real-time only for MVP
-- no historical backfill requirement for initial version
+- outbound transfers only
+- payout items and treasury transfers only
 
-### User Scope
+### Tenancy
 
-- single workspace or single user is acceptable for V1
-- no multi-tenant complexity required on day one
+- organizations
+- users
+- roles
+- one or more workspaces per organization
 
-### Feature Scope
+### Integrations
 
-The MVP must include:
+- observe on-chain settlement from our data plane
+- no fiat rails
+- no on/off-ramp integrations
+- no custody implementation
 
-- watched address list,
-- live USDC event feed,
-- transaction grouping,
-- token account decoding,
-- amount change computation,
-- basic entity labeling,
-- basic event classification,
-- CSV export,
-- and a minimal API or machine-readable output.
+### Must-Have Capabilities
 
-The MVP does not need:
+1. Transfer request creation
+2. Destination / counterparty registry
+3. Approval policy engine
+4. Approval actions and audit log
+5. On-chain settlement observation
+6. Reconciliation and match states
+7. Exception queue
+8. CSV / API export
 
-- authentication complexity,
-- billing,
-- ML,
-- alerting rules engine,
-- mobile app,
-- deep protocol coverage,
-- cross-chain support,
-- or role-based access control.
+## Explicit Non-Goals
 
-## Event Model
+For MVP, we are not building:
 
-The core object in the system is an `event`.
+- a wallet
+- a custody product
+- a banking partner layer
+- merchant checkout
+- a stablecoin issuer
+- cross-chain support
+- multi-asset support
+- ML prediction
+- protocol analytics
+- inbound receivables automation
+- accounting for every chain activity
 
-An event should contain:
+## Product Objects
 
-- timestamp,
-- slot,
-- transaction signature,
-- watched entity or wallet involved,
-- source token account,
-- destination token account,
-- source owner if known,
-- destination owner if known,
-- amount delta,
-- asset,
-- label(s),
-- event type,
-- confidence level,
-- raw references for auditability.
+The product data model follows four layers:
 
-## Event Types For MVP
+- business intent
+- control
+- settlement observation
+- resolution
 
-The initial taxonomy should stay small:
+### 1. Organization
 
-- `wallet_transfer`
-- `exchange_deposit`
-- `exchange_withdrawal`
-- `pool_deposit`
-- `pool_withdrawal`
-- `swap_related_movement`
-- `treasury_rebalance`
+Represents the customer account.
+
+### 2. Workspace
+
+Represents one operating environment or money-moving system inside an organization.
+
+Examples:
+
+- treasury
+- contractor payouts
+- seller payouts
+- vendor settlements
+
+### 3. User
+
+Represents a human operator.
+
+### 4. Role
+
+Represents authorization level in the workspace.
+
+Examples:
+
+- requester
+- approver
+- operator
+- admin
+- auditor
+
+### 5. Counterparty
+
+Represents the business-side recipient or destination actor.
+
+Examples:
+
+- vendor
+- seller
+- creator
+- contractor
+- partner
+- treasury counterparty
+- internal treasury desk
+
+### 6. Destination
+
+Represents an on-chain destination or trusted payout target.
+
+Fields should support:
+
+- address
+- token account
+- owner
+- trust state
+- labels
+- notes
+
+### 7. Business Object
+
+Represents the business context for the transfer.
+
+Examples:
+
+- payout batch
+- payout item
+- invoice
+- vendor payment
+- treasury rebalance
+- treasury sweep
+
+### 8. Transfer Request
+
+Represents intended movement before execution.
+
+Required fields:
+
+- `id`
+- `workspace_id`
+- `type`
+- `asset`
+- `amount`
+- `counterparty_id`
+- `destination_id`
+- `business_object_id`
+- `reason`
+- `requested_by`
+- `requested_at`
+- `due_at`
+- `status`
+- `external_reference`
+
+### 9. Approval Policy
+
+Represents decision logic for whether and how a request must be approved.
+
+Required fields:
+
+- `id`
+- `workspace_id`
+- `name`
+- `conditions_json`
+- `enabled`
+
+### 10. Approval Action
+
+Represents a human decision or workflow transition.
+
+Examples:
+
+- approve
+- reject
+- escalate
+- hold
+- release
+- cancel
+
+### 11. Observed Transaction
+
+Represents normalized on-chain transaction state.
+
+Required fields:
+
+- `signature`
+- `slot`
+- `block_time`
+- `status`
+- `finality_state`
+
+### 12. Observed Token Movement
+
+Represents normalized USDC movement lines.
+
+Required fields:
+
+- `id`
+- `signature`
 - `mint`
-- `burn`
-- `unknown`
+- `amount`
+- `source_address`
+- `destination_address`
+- `source_owner`
+- `destination_owner`
 
-If a transaction cannot be confidently classified, it must be labeled `unknown` rather than guessed.
+### 13. Settlement Match
 
-## Entity System
+Represents the relation between intended movement and observed movement.
 
-The second core object is an `entity`.
+Required fields:
 
-We need a small but reliable label registry for:
+- `id`
+- `transfer_request_id`
+- `signature`
+- `match_status`
+- `matched_amount`
+- `variance_amount`
+- `match_reason`
 
-- watched wallets,
-- token accounts,
-- protocol vaults,
-- pool accounts,
-- treasury wallets,
-- known exchange deposit wallets,
-- and internal addresses defined by the user.
+### 14. Exception
 
-Each label should carry:
+Represents an unresolved operational problem.
 
-- entity name,
-- entity type,
-- confidence,
-- source of truth,
-- and notes.
+Required fields:
 
-The label system must distinguish between:
+- `id`
+- `workspace_id`
+- `transfer_request_id`
+- `signature`
+- `exception_type`
+- `severity`
+- `status`
+- `owner_user_id`
+- `opened_at`
+- `resolved_at`
 
-- user-defined labels,
-- hardcoded / curated labels,
-- and inferred labels.
+### 15. Audit Event
+
+Represents immutable product-side evidence of actions and state changes.
+
+### 16. Export Record
+
+Represents outbound sync/export state for finance or ops systems.
+
+## State Machines
+
+The product must explicitly model state instead of inferring it from raw chain activity.
+
+### Transfer Request States
+
+- `draft`
+- `pending_approval`
+- `approved`
+- `rejected`
+- `held`
+- `submitted`
+- `settled`
+- `partially_settled`
+- `exception`
+- `cancelled`
+- `exported`
+
+### Settlement Match States
+
+- `unmatched`
+- `matched`
+- `partial`
+- `mismatch`
+- `unexpected_observation`
+
+### Exception States
+
+- `open`
+- `in_review`
+- `waiting_on_external`
+- `resolved`
+- `dismissed`
+
+## Exception Types
+
+The MVP exception taxonomy should stay small but operationally useful.
+
+- `amount_mismatch`
+- `wrong_destination`
+- `duplicate_payment`
+- `delayed_settlement`
+- `failed_or_reverted`
+- `unexpected_transaction`
+- `policy_violation`
+- `insufficient_funds`
+- `invalid_destination`
+- `manual_review_required`
 
 ## UX Definition
 
-The product UX should feel like an operations console, not a research terminal.
+The UX should feel like an operator workspace, not a dashboard for passive viewing.
 
-### Core Screen
+### 1. Operations Inbox
 
-The main screen is a live event feed.
+Purpose:
 
-Each row should answer:
+- answer `what needs my attention right now?`
 
-- what happened,
-- how much USDC moved,
-- which transaction did it,
-- which entities were involved,
-- and how confident the system is.
+Shows:
 
-### Expected User Flow
+- pending approvals
+- open exceptions
+- unmatched settlements
+- recently settled items
+- urgent anomalies
 
-1. User adds a small set of watched wallets or entities.
-2. Product starts streaming USDC events related to them.
-3. Product groups the underlying writes by transaction.
-4. Product shows one interpreted event record.
-5. User filters by event type, entity, amount, or confidence.
-6. User exports the records when needed.
+### 2. Transfer Requests
 
-### UX Principles
+Purpose:
 
-- show interpreted events first, raw details second,
-- preserve traceability back to raw transaction data,
-- never invent precision,
-- prefer `unknown` over false confidence,
-- make large money movements obvious,
-- keep the interface useful for someone doing operations at speed.
+- create, review, and track outgoing requests
 
-## Why Someone Uses It Instead Of Existing Tools
+Shows:
 
-They do not want to stitch together:
+- request list
+- request detail
+- linked approvals
+- linked settlement
+- linked business context
 
-- Solscan,
-- transaction signatures,
-- token account state,
-- internal spreadsheets,
-- and handwritten notes.
+### 3. Approvals
 
-They want one place where USDC activity becomes:
+Purpose:
 
-- readable,
-- grouped,
-- labeled,
-- and exportable.
+- give approvers enough context to make safe decisions
 
-## Why Someone Pays For It Later
+Shows:
 
-Because it saves time and reduces operational mistakes.
+- approval queue
+- policy reason
+- amount
+- destination trust state
+- counterparty
+- business reason
 
-The future paid value is:
+### 4. Settlement & Reconciliation
 
-- faster reconciliation,
-- fewer missed movements,
-- less manual triage,
-- cleaner treasury visibility,
-- and a structured record of stablecoin operations.
+Purpose:
 
-## Distribution Hypothesis
+- show what settled and whether it matched intent
 
-The first users will likely come from:
+Shows:
 
-- small Solana fintech teams,
-- payment products,
-- protocol teams,
-- and operators already living in Telegram, Discord, and explorers.
+- matched items
+- unmatched items
+- partial matches
+- unexpected transactions
+- finality / settlement status
 
-The product must be obviously useful from a short demo, not from a long sales pitch.
+### 5. Exception Queue
+
+Purpose:
+
+- handle operational failures cleanly
+
+Shows:
+
+- exception type
+- severity
+- owner
+- linked request
+- linked transaction
+- suggested next action
+
+### 6. Counterparties & Destinations
+
+Purpose:
+
+- maintain trusted payout and counterparty context
+
+Shows:
+
+- counterparty list
+- destination list
+- trust state
+- labels
+- notes
+
+### 7. Policies
+
+Purpose:
+
+- manage approval and control rules
+
+Shows:
+
+- threshold rules
+- role-based approvals
+- destination restrictions
+- manual escalation settings
+
+### 8. Audit & Exports
+
+Purpose:
+
+- provide durable evidence and output
+
+Shows:
+
+- audit events
+- export jobs
+- export status
+- downloadable records
+
+## API Boundaries
+
+The product has three application boundaries.
+
+### Control Plane API
+
+Owns:
+
+- organizations
+- users
+- roles
+- workspaces
+- counterparties
+- destinations
+- policies
+- transfer requests
+- approvals
+
+### Data Plane
+
+Owns:
+
+- on-chain ingestion
+- transaction normalization
+- observed token movements
+- settlement evidence
+
+### Serving Layer
+
+Owns:
+
+- reconciliation views
+- exception views
+- operator feed
+- exportable records
+
+## Technical Shape
+
+### Postgres
+
+Stores:
+
+- organizations
+- users
+- roles
+- workspaces
+- counterparties
+- destinations
+- business objects
+- transfer requests
+- approval policies
+- approval actions
+
+### ClickHouse
+
+Stores:
+
+- raw observations
+- canonical observed transactions
+- canonical token movements
+- settlement matches
+- exceptions
+- audit-style operational events
+- exportable serving views
+
+### Rust
+
+Owns:
+
+- ingestion
+- normalization
+- observation
+- reconciliation computation
+- exception detection
+
+### TypeScript
+
+Owns:
+
+- product API
+- control-plane CRUD
+- operator-facing application logic
 
 ## Success Criteria For MVP
 
-The MVP is successful if a real user can:
+The MVP succeeds if a real operator can:
 
-- add watched wallets,
-- see live USDC events within seconds,
-- understand what happened without opening an explorer,
-- and export a useful record for ops or finance.
+- create a transfer request
+- route it for approval
+- execute it externally
+- see the resulting on-chain settlement
+- know whether it matched the request
+- resolve any exception
+- export the final record
 
-More concretely:
+Operationally, success means:
 
-- a user can identify the relevant transaction from the event feed,
-- a user can tell inflow vs outflow correctly,
-- a user can distinguish basic event classes,
-- and the output is good enough to assist reconciliation.
+- fewer spreadsheet steps
+- fewer explorer checks
+- faster close of outgoing transfers
+- clearer ownership of exceptions
 
-## Non-Negotiable Product Principles
+## Product Principles
 
-- Scope stays narrow.
-- USDC only until the product is obviously useful.
-- Solana only until the product is obviously useful.
-- Interpretation must remain auditable.
-- We do not sell fake certainty.
-- We do not add ML to cover for weak foundations.
+- workflow first, data second
+- intent and settlement must both be first-class
+- approvals require context, not just signatures
+- exceptions are a product surface, not an error state
+- the chain is evidence, not the whole product
+- do not expand scope with generic analytics
+- do not rely on ML to cover weak workflow design
 
 ## Build Sequence
 
-The build sequence should be:
-
-1. Canonical event pipeline
-2. Amount delta computation
-3. Label registry
-4. Event classification
-5. Simple operator UI
-6. Export and API layer
-
-If we skip that order, the product will become confused quickly.
-
-## Product Boundaries
-
-When a new idea comes up during development, we should test it against one question:
-
-`Does this help an operations or treasury user understand and reconcile USDC movement on Solana right now?`
-
-If the answer is no, it is out of scope for the MVP.
+1. Shared core entities and state machines
+2. Transfer request and approval flows
+3. Destination / counterparty registry
+4. On-chain observation and settlement matching
+5. Exception queue
+6. Audit and exports
+7. Buyer-specific extensions
 
 ## Revision Rule
 
-This document is the current source of truth for product scope.
+This document is the source of truth for product scope.
 
-We should only change it when we make an explicit product decision, not casually while building.
+We only change it when we make an explicit product decision.

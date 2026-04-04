@@ -23,6 +23,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     );
     println!("   ClickHouse: {}", config.clickhouse_url);
     println!("   Control plane: {}", config.control_plane_api_url);
+    println!(
+        "   Control plane token: {}",
+        if config.control_plane_service_token.is_some() {
+            "Set"
+        } else {
+            "Not set"
+        }
+    );
 
     let writer = storage::ClickHouseWriter::new(
         config.clickhouse_url,
@@ -30,7 +38,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         config.clickhouse_user,
         config.clickhouse_password,
     );
-    let control_plane_client = control_plane::ControlPlaneClient::new(config.control_plane_api_url);
+    let control_plane_client = control_plane::ControlPlaneClient::new(
+        config.control_plane_api_url,
+        config.control_plane_service_token,
+    );
     let registry_cache = control_plane::WorkspaceRegistryCache::new(
         control_plane_client,
         config.workspace_refresh_interval,
@@ -40,6 +51,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         config.yellowstone_token,
         writer,
         registry_cache,
+        config.debug_account_logs,
     );
     worker.run().await;
 

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../prisma.js';
 import { assertWorkspaceAccess, assertWorkspaceAdmin } from '../workspace-access.js';
+import { deriveUsdcAtaForWallet, SOLANA_CHAIN, USDC_ASSET } from '../solana.js';
 
 export const addressesRouter = Router();
 
@@ -10,10 +11,11 @@ const workspaceParamsSchema = z.object({
 });
 
 const createAddressSchema = z.object({
-  chain: z.string().default('solana'),
+  chain: z.string().default(SOLANA_CHAIN),
   address: z.string().min(1),
-  addressKind: z.string().min(1),
-  assetScope: z.string().default('usdc'),
+  addressKind: z.string().min(1).optional(),
+  displayName: z.string().optional(),
+  assetScope: z.string().default(USDC_ASSET),
   source: z.string().default('manual'),
   sourceRef: z.string().optional(),
   notes: z.string().optional(),
@@ -39,19 +41,29 @@ addressesRouter.post('/workspaces/:workspaceId/addresses', async (req, res, next
     const { workspaceId } = workspaceParamsSchema.parse(req.params);
     await assertWorkspaceAdmin(workspaceId, req.auth!.userId);
     const input = createAddressSchema.parse(req.body);
+    const displayName = input.displayName?.trim() || null;
+    const addressKind = input.addressKind ?? 'wallet';
+    const usdcAtaAddress = deriveUsdcAtaForWallet(input.address);
+
     const address = await prisma.workspaceAddress.create({
       data: {
         workspaceId,
         chain: input.chain,
         address: input.address,
-        addressKind: input.addressKind,
+        addressKind,
         assetScope: input.assetScope,
+        usdcAtaAddress,
         source: input.source,
         sourceRef: input.sourceRef,
+        displayName,
         notes: input.notes,
-        propertiesJson: input.properties ?? {},
+        propertiesJson: {
+          usdcAtaAddress,
+          ...(input.properties ?? {}),
+        },
       },
     });
+
     res.status(201).json(address);
   } catch (error) {
     next(error);

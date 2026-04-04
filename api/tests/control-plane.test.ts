@@ -3,18 +3,14 @@ import { after, before, beforeEach, test } from 'node:test';
 import { AddressInfo } from 'node:net';
 import { createApp } from '../src/app.js';
 import { prisma } from '../src/prisma.js';
+import { deriveUsdcAtaForWallet } from '../src/solana.js';
 
 const TRUNCATE_SQL = `
 TRUNCATE TABLE
   auth_sessions,
   organization_memberships,
-  workspace_address_object_mappings,
-  workspace_address_labels,
-  workspace_objects,
-  workspace_labels,
+  transfer_requests,
   workspace_addresses,
-  global_entity_addresses,
-  global_entities,
   workspaces,
   organizations,
   users
@@ -95,7 +91,6 @@ test('organization creation and workspace creation are scoped to active member o
     '/organizations',
     {
       organizationName: 'Acme Treasury',
-      organizationSlug: 'acme-treasury',
     },
     login.sessionToken,
   );
@@ -104,7 +99,6 @@ test('organization creation and workspace creation are scoped to active member o
     `/organizations/${organization.organizationId}/workspaces`,
     {
       workspaceName: 'Primary Watch',
-      workspaceSlug: 'primary-watch',
     },
     login.sessionToken,
   );
@@ -115,13 +109,12 @@ test('organization creation and workspace creation are scoped to active member o
   const session = await sessionResponse.json();
 
   assert.equal(session.organizations.length, 1);
-  assert.equal(session.organizations[0].organizationSlug, 'acme-treasury');
   assert.equal(session.organizations[0].role, 'owner');
   assert.equal(session.organizations[0].workspaces.length, 1);
   assert.equal(session.organizations[0].workspaces[0].workspaceId, workspace.workspaceId);
 });
 
-test('workspace onboarding snapshot returns addresses, labels, and mappings for an org admin', async () => {
+test('wallets can be added to a workspace and listed back to members', async () => {
   const setup = await createOrganizationWorkspace();
   const workspace = setup.workspace;
 
@@ -129,64 +122,106 @@ test('workspace onboarding snapshot returns addresses, labels, and mappings for 
     `/workspaces/${workspace.workspaceId}/addresses`,
     {
       chain: 'solana',
-      address: 'Address1111111111111111111111111111111111',
-      addressKind: 'treasury_wallet',
-    },
-    setup.sessionToken,
-  );
-
-  const label = await post(
-    `/workspaces/${workspace.workspaceId}/labels`,
-    {
-      labelName: 'treasury',
-      labelType: 'internal',
-    },
-    setup.sessionToken,
-  );
-
-  await post(
-    `/workspaces/${workspace.workspaceId}/address-labels`,
-    {
-      workspaceAddressId: address.workspaceAddressId,
-      labelId: label.labelId,
-    },
-    setup.sessionToken,
-  );
-
-  const object = await post(
-    `/workspaces/${workspace.workspaceId}/objects`,
-    {
-      objectType: 'treasury',
-      objectKey: 'main',
+      address: 'So11111111111111111111111111111111111111112',
       displayName: 'Main Treasury',
     },
     setup.sessionToken,
   );
 
-  await post(
-    `/workspaces/${workspace.workspaceId}/address-object-mappings`,
-    {
-      workspaceAddressId: address.workspaceAddressId,
-      workspaceObjectId: object.workspaceObjectId,
-      mappingRole: 'owner',
-      isPrimary: true,
-    },
-    setup.sessionToken,
-  );
-
-  const response = await fetch(`${baseUrl}/workspaces/${workspace.workspaceId}/onboarding`, {
+  const response = await fetch(`${baseUrl}/workspaces/${workspace.workspaceId}/addresses`, {
     headers: authHeaders(setup.sessionToken),
   });
 
   assert.equal(response.status, 200);
-  const snapshot = await response.json();
+  const payload = await response.json();
 
-  assert.equal(snapshot.workspace.workspaceId, workspace.workspaceId);
-  assert.equal(snapshot.addresses.length, 1);
-  assert.equal(snapshot.labels.length, 1);
-  assert.equal(snapshot.addressLabels.length, 1);
-  assert.equal(snapshot.objects.length, 1);
-  assert.equal(snapshot.addressObjectMappings.length, 1);
+  assert.equal(payload.items.length, 1);
+  assert.equal(payload.items[0].workspaceAddressId, address.workspaceAddressId);
+  assert.equal(payload.items[0].displayName, 'Main Treasury');
+});
+
+test('internal matching context returns wallet-first transfer setup', async () => {
+  const setup = await createOrganizationWorkspace();
+  const workspaceId = setup.workspace.workspaceId;
+  const recipientWallet = 'So11111111111111111111111111111111111111112';
+  const expectedAta = deriveUsdcAtaForWallet(recipientWallet);
+
+  const address = await post(
+    `/workspaces/${workspaceId}/addresses`,
+    {
+      chain: 'solana',
+      address: recipientWallet,
+      displayName: 'Vendor Wallet',
+    },
+    setup.sessionToken,
+  );
+
+  const transferRequest = await post(
+    `/workspaces/${workspaceId}/transfer-requests`,
+    {
+      destinationWorkspaceAddressId: address.workspaceAddressId,
+      requestType: 'wallet_transfer',
+      amountRaw: '10000',
+      status: 'submitted',
+    },
+    setup.sessionToken,
+  );
+
+  const contextResponse = await fetch(
+    `${baseUrl}/internal/workspaces/${workspaceId}/matching-context`,
+  );
+  assert.equal(contextResponse.status, 200);
+  const context = await contextResponse.json();
+
+  assert.equal(context.addresses.length, 1);
+  assert.equal(context.transferRequests.length, 1);
+  assert.equal(context.transferRequests[0].transferRequestId, transferRequest.transferRequestId);
+  assert.equal(context.transferRequests[0].destinationWorkspaceAddress.address, recipientWallet);
+  assert.equal(context.transferRequests[0].destinationWorkspaceAddress.usdcAtaAddress, expectedAta);
+  assert.equal(context.transferRequests[0].amountRaw, '10000');
+});
+
+test('recipient wallet setup derives a USDC receiving address and supports wallet-first transfer requests', async () => {
+  const setup = await createOrganizationWorkspace();
+  const workspaceId = setup.workspace.workspaceId;
+  const recipientWallet = 'So11111111111111111111111111111111111111112';
+  const expectedAta = deriveUsdcAtaForWallet(recipientWallet);
+
+  const address = await post(
+    `/workspaces/${workspaceId}/addresses`,
+    {
+      chain: 'solana',
+      address: recipientWallet,
+      displayName: 'Vendor Wallet',
+    },
+    setup.sessionToken,
+  );
+
+  assert.equal(address.usdcAtaAddress, expectedAta);
+  assert.equal(address.propertiesJson.usdcAtaAddress, expectedAta);
+
+  const transferRequest = await post(
+    `/workspaces/${workspaceId}/transfer-requests`,
+    {
+      destinationWorkspaceAddressId: address.workspaceAddressId,
+      requestType: 'vendor_payout',
+      amountRaw: '10000',
+      status: 'submitted',
+    },
+    setup.sessionToken,
+  );
+
+  assert.equal(transferRequest.destinationWorkspaceAddress.address, recipientWallet);
+  assert.equal(transferRequest.destinationWorkspaceAddress.usdcAtaAddress, expectedAta);
+
+  const contextResponse = await fetch(`${baseUrl}/internal/workspaces/${workspaceId}/matching-context`);
+  assert.equal(contextResponse.status, 200);
+  const context = await contextResponse.json();
+
+  assert.equal(context.transferRequests.length, 1);
+  assert.equal(context.transferRequests[0].transferRequestId, transferRequest.transferRequestId);
+  assert.equal(context.transferRequests[0].destinationWorkspaceAddress.address, recipientWallet);
+  assert.equal(context.transferRequests[0].destinationWorkspaceAddress.usdcAtaAddress, expectedAta);
 });
 
 test('joined members can read org workspaces but cannot mutate workspace onboarding', async () => {
@@ -214,7 +249,6 @@ test('joined members can read org workspaces but cannot mutate workspace onboard
       body: JSON.stringify({
         chain: 'solana',
         address: 'MemberAddress1111111111111111111111111111111',
-        addressKind: 'customer_wallet',
       }),
     },
   );
@@ -244,7 +278,6 @@ async function createOrganizationWorkspace() {
     '/organizations',
     {
       organizationName: 'Beta Treasury',
-      organizationSlug: 'beta-treasury',
     },
     login.sessionToken,
   );
@@ -252,7 +285,6 @@ async function createOrganizationWorkspace() {
     `/organizations/${organization.organizationId}/workspaces`,
     {
       workspaceName: 'Beta Ops',
-      workspaceSlug: 'beta-ops',
     },
     login.sessionToken,
   );

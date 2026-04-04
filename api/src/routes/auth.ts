@@ -91,7 +91,6 @@ async function listUserOrganizations(userId: string) {
   return memberships.map((membership) => ({
     organizationId: membership.organization.organizationId,
     organizationName: membership.organization.organizationName,
-    organizationSlug: membership.organization.organizationSlug,
     role: membership.role,
     status: membership.organization.status,
     workspaces: membership.organization.workspaces,
