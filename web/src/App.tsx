@@ -38,6 +38,51 @@ import type {
 type AuthStatus = 'booting' | 'anonymous' | 'authenticated';
 const WORKSPACE_REFRESH_INTERVAL_MS = 10_000;
 
+function ThemeIcon({ theme }: { theme: Theme }) {
+  if (theme === 'dark') {
+    return (
+      <svg aria-hidden="true" className="theme-icon" viewBox="0 0 24 24">
+        <path
+          d="M12 4.5V2m0 20v-2.5M6.34 6.34 4.57 4.57m14.86 14.86-1.77-1.77M4.5 12H2m20 0h-2.5M6.34 17.66l-1.77 1.77m14.86-14.86-1.77 1.77M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="1.5"
+        />
+      </svg>
+    );
+  }
+
+  return (
+    <svg aria-hidden="true" className="theme-icon" viewBox="0 0 24 24">
+      <path
+        d="M21 12.8A9 9 0 1 1 11.2 3a7.2 7.2 0 0 0 9.8 9.8Z"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.5"
+      />
+    </svg>
+  );
+}
+
+function resetViewport(sectionId?: string) {
+  if (!sectionId) {
+    if (window.location.hash) {
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+    }
+    window.scrollTo({ top: 0, behavior: 'auto' });
+    return;
+  }
+
+  window.setTimeout(() => {
+    window.location.hash = sectionId;
+    document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 0);
+}
+
 export function App() {
   const [theme, setTheme] = useState<Theme>(() => loadTheme());
   const [authStatus, setAuthStatus] = useState<AuthStatus>('booting');
@@ -70,6 +115,7 @@ export function App() {
       : currentWorkspaceOrganization;
   const currentRole = currentWorkspaceOrganization?.role ?? currentOrganization?.role ?? null;
   const canManageCurrentOrg = isAdminRole(currentRole);
+  const sidebarWorkspace = currentWorkspace ?? currentOrganization?.workspaces[0] ?? null;
 
   useEffect(() => {
     const onPopstate = () => {
@@ -417,6 +463,21 @@ export function App() {
     await loadWorkspace(currentWorkspaceId);
   }
 
+  function handleOpenOrganization(organizationId: string) {
+    navigate({ name: 'organizationHome', organizationId }, setRoute);
+    resetViewport();
+  }
+
+  function handleOpenWorkspace(workspaceId: string) {
+    navigate({ name: 'workspaceHome', workspaceId }, setRoute);
+    resetViewport();
+  }
+
+  function handleOpenWorkspaceSetup(workspaceId: string, sectionId?: string) {
+    navigate({ name: 'workspaceSetup', workspaceId }, setRoute);
+    resetViewport(sectionId);
+  }
+
   if (authStatus === 'booting') {
     return (
       <div className="app-root">
@@ -441,86 +502,124 @@ export function App() {
       <div className="shell">
         <header className="topbar">
           <div className="topbar-brand">
-            <div>
-              <p className="eyebrow">USDC//OPS</p>
-              <strong>Stablecoin control surface</strong>
-            </div>
+            <strong>[project name]</strong>
             <span className="status-chip">
               {currentWorkspace ? currentWorkspace.workspaceName : currentOrganization ? currentOrganization.organizationName : 'personal view'}
             </span>
           </div>
 
-          <div className="topbar-meta">
+          <nav className="topbar-nav" aria-label="Global navigation">
             <button
-              className="ghost-button"
-              onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
+              className={route.name === 'dashboard' ? 'topbar-link is-active' : 'topbar-link'}
+              onClick={() => navigate({ name: 'dashboard' }, setRoute)}
               type="button"
             >
-              {theme === 'dark' ? 'light mode' : 'dark mode'}
+              Dashboard
             </button>
-            <span>{session.user.displayName}</span>
-            <button className="ghost-button" onClick={handleLogout} type="button">
-              logout
+            <button
+              className={
+                route.name === 'orgs' || route.name === 'organizationHome' || route.name === 'workspaceHome' || route.name === 'workspaceSetup'
+                  ? 'topbar-link is-active'
+                  : 'topbar-link'
+              }
+              onClick={() => navigate({ name: 'orgs' }, setRoute)}
+              type="button"
+            >
+              Orgs
+            </button>
+            <button
+              className={route.name === 'profile' ? 'topbar-link is-active' : 'topbar-link'}
+              onClick={() => navigate({ name: 'profile' }, setRoute)}
+              type="button"
+            >
+              Profile
+            </button>
+          </nav>
+
+          <div className="topbar-meta">
+            <button
+              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              className="ghost-button icon-button"
+              onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
+              title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              type="button"
+            >
+              <ThemeIcon theme={theme} />
+            </button>
+            <span className="topbar-user">{session.user.displayName}</span>
+            <button
+              className="ghost-button danger-button"
+              onClick={handleLogout}
+              type="button"
+            >
+              Logout
             </button>
           </div>
         </header>
 
-        <div className="shell-grid">
-          <aside className="rail">
-            <div className="rail-section">
-              <button
-                className={route.name === 'dashboard' ? 'rail-link is-active' : 'rail-link'}
-                onClick={() => navigate({ name: 'dashboard' }, setRoute)}
-                type="button"
-              >
-                Dashboard
-              </button>
-              <button
-                className={route.name === 'orgs' ? 'rail-link is-active' : 'rail-link'}
-                onClick={() => navigate({ name: 'orgs' }, setRoute)}
-                type="button"
-              >
-                Orgs
-              </button>
-              <button
-                className={route.name === 'profile' ? 'rail-link is-active' : 'rail-link'}
-                onClick={() => navigate({ name: 'profile' }, setRoute)}
-                type="button"
-              >
-                Profile
-              </button>
-            </div>
-
-            {session.organizations.length ? (
+        <div className={currentOrganization ? 'shell-grid shell-grid-with-rail' : 'shell-grid shell-grid-full'}>
+          {currentOrganization ? (
+            <aside className="rail org-rail">
               <div className="rail-section">
                 <div className="section-header">
-                  <span>Organizations</span>
+                  <span>Current org</span>
+                  <small>{currentOrganization.role}</small>
                 </div>
+                <label className="field rail-field">
+                  <span>Select org</span>
+                  <select
+                    aria-label="Select organization"
+                    value={currentOrganization.organizationId}
+                    onChange={(event) => handleOpenOrganization(event.target.value)}
+                  >
+                    {session.organizations.map((organization) => (
+                      <option key={organization.organizationId} value={organization.organizationId}>
+                        {organization.organizationName}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <div className="stack-list">
-                  {session.organizations.map((organization) => (
-                    <button
-                      key={organization.organizationId}
-                      className={
-                        route.name === 'organizationHome' && route.organizationId === organization.organizationId
-                          ? 'workspace-link is-active'
-                          : 'workspace-link'
-                      }
-                      onClick={() => navigate({ name: 'organizationHome', organizationId: organization.organizationId }, setRoute)}
-                      type="button"
-                    >
-                      <strong>{organization.organizationName}</strong>
-                      <small>{organization.role}</small>
-                    </button>
-                  ))}
+                  <button
+                    className={
+                      route.name === 'workspaceHome'
+                        ? 'rail-link is-active'
+                        : 'rail-link'
+                    }
+                    onClick={() =>
+                      sidebarWorkspace
+                        ? handleOpenWorkspace(sidebarWorkspace.workspaceId)
+                        : handleOpenOrganization(currentOrganization.organizationId)
+                    }
+                    type="button"
+                  >
+                    Dashboard
+                  </button>
                 </div>
               </div>
-            ) : null}
 
-            {currentOrganization ? (
+              {sidebarWorkspace ? (
+                <div className="rail-section">
+                  <div className="section-header">
+                    <span>Current workspace</span>
+                    <small>{sidebarWorkspace.workspaceName}</small>
+                  </div>
+                  <div className="stack-list">
+                    <button
+                      className={route.name === 'workspaceSetup' ? 'rail-link is-active' : 'rail-link'}
+                      onClick={() => handleOpenWorkspaceSetup(sidebarWorkspace.workspaceId)}
+                      type="button"
+                    >
+                      Wallets + expected transfers
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
               <div className="rail-section">
                 <div className="section-header">
-                  <span>Workspaces</span>
-                  <small>{currentOrganization.role}</small>
+                  <span>Watch systems</span>
+                  <small>{currentOrganization.workspaces.length}</small>
                 </div>
                 <div className="stack-list">
                   {currentOrganization.workspaces.length ? (
@@ -533,7 +632,7 @@ export function App() {
                             ? 'workspace-link is-active'
                             : 'workspace-link'
                         }
-                        onClick={() => navigate({ name: 'workspaceHome', workspaceId: workspace.workspaceId }, setRoute)}
+                        onClick={() => handleOpenWorkspace(workspace.workspaceId)}
                         type="button"
                       >
                         <strong>{workspace.workspaceName}</strong>
@@ -545,8 +644,8 @@ export function App() {
                   )}
                 </div>
               </div>
-            ) : null}
-          </aside>
+            </aside>
+          ) : null}
 
           <main className="main-panel">
             {errorMessage ? <div className="error-banner">{errorMessage}</div> : null}
@@ -554,8 +653,8 @@ export function App() {
             {route.name === 'dashboard' ? (
               <DashboardPage
                 onGoOrgs={() => navigate({ name: 'orgs' }, setRoute)}
-                onOpenOrganization={(organizationId) => navigate({ name: 'organizationHome', organizationId }, setRoute)}
-                onOpenWorkspace={(workspaceId) => navigate({ name: 'workspaceHome', workspaceId }, setRoute)}
+                onOpenOrganization={handleOpenOrganization}
+                onOpenWorkspace={handleOpenWorkspace}
                 session={session}
               />
             ) : null}
@@ -566,7 +665,7 @@ export function App() {
                 isLoading={isLoadingOrganizations}
                 onCreateOrganization={handleCreateOrganization}
                 onJoinOrganization={handleJoinOrganization}
-                onOpenOrganization={(organizationId) => navigate({ name: 'organizationHome', organizationId }, setRoute)}
+                onOpenOrganization={handleOpenOrganization}
                 session={session}
               />
             ) : null}
@@ -576,7 +675,7 @@ export function App() {
                 organization={currentOrganization}
                 onCreateDemoWorkspace={handleCreateDemoWorkspace}
                 onCreateWorkspace={handleCreateWorkspace}
-                onOpenWorkspace={(workspaceId) => navigate({ name: 'workspaceHome', workspaceId }, setRoute)}
+                onOpenWorkspace={handleOpenWorkspace}
               />
             ) : null}
 

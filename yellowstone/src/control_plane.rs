@@ -148,6 +148,7 @@ impl WorkspaceRegistryCache {
 
 #[derive(Default)]
 pub struct WorkspaceRegistry {
+    #[cfg(test)]
     wallet_matches_by_address: HashMap<String, Vec<WorkspaceAddressMatch>>,
     wallet_matches_by_usdc_ata: HashMap<String, Vec<WorkspaceAddressMatch>>,
     pending_requests_by_workspace_ata:
@@ -156,6 +157,7 @@ pub struct WorkspaceRegistry {
 
 impl WorkspaceRegistry {
     fn new(raw_snapshots: Vec<WorkspaceMatchingSnapshot>) -> Self {
+        #[cfg(test)]
         let mut wallet_matches_by_address: HashMap<String, Vec<WorkspaceAddressMatch>> =
             HashMap::new();
         let mut wallet_matches_by_usdc_ata: HashMap<String, Vec<WorkspaceAddressMatch>> =
@@ -169,11 +171,15 @@ impl WorkspaceRegistry {
             for address in &raw_snapshot.addresses {
                 let matched = WorkspaceAddressMatch {
                     workspace_id: raw_snapshot.workspace.workspace_id.clone(),
+                    #[cfg(test)]
                     workspace_address_id: address.workspace_address_id.clone(),
+                    #[cfg(test)]
                     wallet_address: address.address.clone(),
+                    #[cfg(test)]
                     usdc_ata_address: address.usdc_ata_address.clone(),
                 };
 
+                #[cfg(test)]
                 wallet_matches_by_address
                     .entry(address.address.clone())
                     .or_default()
@@ -205,22 +211,26 @@ impl WorkspaceRegistry {
                     .or_default()
                     .push(WorkspaceTransferRequestMatch {
                         transfer_request_id: request.transfer_request_id.clone(),
-                        workspace_id: raw_snapshot.workspace.workspace_id.clone(),
-                        destination_match_address,
                         amount_raw: request.amount_raw.parse().unwrap_or_default(),
                         requested_at: request.requested_at,
                         request_type: request.request_type.clone(),
+                        #[cfg(test)]
+                        workspace_id: raw_snapshot.workspace.workspace_id.clone(),
+                        #[cfg(test)]
+                        destination_match_address,
                     });
             }
         }
 
         Self {
+            #[cfg(test)]
             wallet_matches_by_address,
             wallet_matches_by_usdc_ata,
             pending_requests_by_workspace_ata,
         }
     }
 
+    #[cfg(test)]
     pub fn matches_for_wallet(&self, address: &str) -> Option<&[WorkspaceAddressMatch]> {
         self.wallet_matches_by_address.get(address).map(Vec::as_slice)
     }
@@ -244,17 +254,20 @@ impl WorkspaceRegistry {
 #[cfg(test)]
 impl WorkspaceRegistry {
     pub fn from_matches(matches: Vec<WorkspaceAddressMatch>) -> Self {
+        #[cfg(test)]
         let mut wallet_matches_by_address: HashMap<String, Vec<WorkspaceAddressMatch>> =
             HashMap::new();
         let mut wallet_matches_by_usdc_ata: HashMap<String, Vec<WorkspaceAddressMatch>> =
             HashMap::new();
 
         for matched in matches {
+            #[cfg(test)]
             wallet_matches_by_address
                 .entry(matched.wallet_address.clone())
                 .or_default()
                 .push(matched.clone());
 
+            #[cfg(test)]
             if let Some(usdc_ata_address) = &matched.usdc_ata_address {
                 wallet_matches_by_usdc_ata
                     .entry(usdc_ata_address.clone())
@@ -264,6 +277,7 @@ impl WorkspaceRegistry {
         }
 
         Self {
+            #[cfg(test)]
             wallet_matches_by_address,
             wallet_matches_by_usdc_ata,
             pending_requests_by_workspace_ata: HashMap::new(),
@@ -293,19 +307,24 @@ impl WorkspaceRegistry {
 #[derive(Clone)]
 pub struct WorkspaceAddressMatch {
     pub workspace_id: String,
+    #[cfg(test)]
     pub workspace_address_id: String,
+    #[cfg(test)]
     pub wallet_address: String,
+    #[cfg(test)]
     pub usdc_ata_address: Option<String>,
 }
 
 #[derive(Clone)]
 pub struct WorkspaceTransferRequestMatch {
     pub transfer_request_id: String,
-    pub workspace_id: String,
-    pub destination_match_address: String,
     pub amount_raw: i128,
     pub requested_at: DateTime<Utc>,
     pub request_type: String,
+    #[cfg(test)]
+    pub workspace_id: String,
+    #[cfg(test)]
+    pub destination_match_address: String,
 }
 
 #[derive(Deserialize)]
@@ -329,8 +348,10 @@ struct WorkspaceView {
 
 #[derive(Deserialize)]
 struct WorkspaceAddressView {
+    #[cfg(test)]
     #[serde(rename = "workspaceAddressId")]
     workspace_address_id: String,
+    #[cfg(test)]
     address: String,
     #[serde(rename = "usdcAtaAddress")]
     usdc_ata_address: Option<String>,
@@ -368,7 +389,9 @@ mod tests {
                 workspace_id: "workspace-1".to_string(),
             },
             addresses: vec![WorkspaceAddressView {
+                #[cfg(test)]
                 workspace_address_id: "address-1".to_string(),
+                #[cfg(test)]
                 address: "Wallet111".to_string(),
                 usdc_ata_address: Some("Ata111".to_string()),
             }],

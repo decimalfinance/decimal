@@ -70,7 +70,7 @@ export function WorkspaceHomePage({
       </section>
 
       <section className="content-grid">
-        <div className="content-panel">
+        <div className="content-panel" id="wallets-section">
           <div className="panel-header">
             <div>
               <p className="eyebrow">Status</p>
@@ -94,7 +94,7 @@ export function WorkspaceHomePage({
           </div>
         </div>
 
-        <div className="content-panel">
+        <div className="content-panel" id="planned-transfers-section">
           <div className="panel-header">
             <div>
               <p className="eyebrow">Planned transfers</p>

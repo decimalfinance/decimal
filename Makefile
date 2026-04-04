@@ -42,10 +42,17 @@ dev:
 	  (( cleaned_up )) && return 0; \
 	  cleaned_up=1; \
 	  trap - INT TERM; \
-	  local pid; \
-	  for pid in "$${pids[@]:-}"; do kill -INT "$$pid" 2>/dev/null || true; done; \
-	  sleep 1; \
-	  for pid in "$${pids[@]:-}"; do kill -TERM "$$pid" 2>/dev/null || true; done; \
+	  local pid idx; \
+	  sleep 0.2; \
+	  for (( idx=$${#pids[@]}; idx>=1; idx-- )); do \
+	    pid="$${pids[idx]}"; \
+	    if kill -0 "$$pid" 2>/dev/null; then kill -TERM "$$pid" 2>/dev/null || true; fi; \
+	  done; \
+	  sleep 0.5; \
+	  for (( idx=$${#pids[@]}; idx>=1; idx-- )); do \
+	    pid="$${pids[idx]}"; \
+	    if kill -0 "$$pid" 2>/dev/null; then kill -KILL "$$pid" 2>/dev/null || true; fi; \
+	  done; \
 	  for pid in "$${pids[@]:-}"; do wait "$$pid" 2>/dev/null || true; done; \
 	}; \
 	typeset -a pids && \

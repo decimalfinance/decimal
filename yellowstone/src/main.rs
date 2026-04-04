@@ -52,6 +52,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         writer,
         registry_cache,
         config.debug_account_logs,
+        config.debug_stream_logs,
     );
     worker.run().await;
 

@@ -27,6 +27,7 @@ pub mod subscriptions;
 pub mod transaction_context;
 pub mod transfer_reconstruction;
 
+#[cfg(test)]
 const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const MATCH_WINDOW_BEFORE_REQUEST_SECONDS: i64 = 120;
 const MATCH_WINDOW_AFTER_REQUEST_SECONDS: i64 = 24 * 60 * 60;
@@ -42,6 +43,7 @@ pub struct YellowstoneWorker {
     writer: ClickHouseWriter,
     registry_cache: tokio::sync::Mutex<WorkspaceRegistryCache>,
     debug_account_logs: bool,
+    debug_stream_logs: bool,
 }
 
 impl YellowstoneWorker {
@@ -51,6 +53,7 @@ impl YellowstoneWorker {
         writer: ClickHouseWriter,
         registry_cache: WorkspaceRegistryCache,
         debug_account_logs: bool,
+        debug_stream_logs: bool,
     ) -> Self {
         Self {
             endpoint,
@@ -58,6 +61,7 @@ impl YellowstoneWorker {
             writer,
             registry_cache: tokio::sync::Mutex::new(registry_cache),
             debug_account_logs,
+            debug_stream_logs,
         }
     }
 
@@ -242,49 +246,73 @@ impl YellowstoneWorker {
                 }
             }
             Some(UpdateOneof::Transaction(tx)) => {
-                let signature = tx
-                    .transaction
-                    .as_ref()
-                    .map(|tx| bs58::encode(&tx.signature).into_string())
-                    .unwrap_or_else(|| "none".to_string());
-                println!("TRANSACTION filters=[{}] slot={} signature={}", filters, tx.slot, signature);
+                if self.debug_stream_logs {
+                    let signature = tx
+                        .transaction
+                        .as_ref()
+                        .map(|tx| bs58::encode(&tx.signature).into_string())
+                        .unwrap_or_else(|| "none".to_string());
+                    println!("TRANSACTION filters=[{}] slot={} signature={}", filters, tx.slot, signature);
+                }
 
                 if let Some(context) = build_transaction_context(&tx, update_time) {
                     self.persist_transaction_context(context, worker_state).await;
                 }
             }
-            Some(UpdateOneof::Ping(_)) => println!("PING filters=[{}] keepalive", filters),
+            Some(UpdateOneof::Ping(_)) => {
+                if self.debug_stream_logs {
+                    println!("PING filters=[{}] keepalive", filters);
+                }
+            }
             Some(UpdateOneof::TransactionStatus(status)) => {
-                println!(
-                    "TRANSACTION_STATUS filters=[{}] slot={} signature={}",
-                    filters,
-                    status.slot,
-                    bs58::encode(&status.signature).into_string(),
-                );
+                if self.debug_stream_logs {
+                    println!(
+                        "TRANSACTION_STATUS filters=[{}] slot={} signature={}",
+                        filters,
+                        status.slot,
+                        bs58::encode(&status.signature).into_string(),
+                    );
+                }
             }
             Some(UpdateOneof::Slot(slot)) => {
-                println!("SLOT filters=[{}] slot={} status={}", filters, slot.slot, slot.status);
+                if self.debug_stream_logs {
+                    println!("SLOT filters=[{}] slot={} status={}", filters, slot.slot, slot.status);
+                }
             }
             Some(UpdateOneof::Block(block)) => {
-                println!(
-                    "BLOCK filters=[{}] slot={} txs={} accounts={}",
-                    filters, block.slot, block.executed_transaction_count, block.updated_account_count
-                );
+                if self.debug_stream_logs {
+                    println!(
+                        "BLOCK filters=[{}] slot={} txs={} accounts={}",
+                        filters, block.slot, block.executed_transaction_count, block.updated_account_count
+                    );
+                }
             }
             Some(UpdateOneof::BlockMeta(block_meta)) => {
-                println!(
-                    "BLOCK_META filters=[{}] slot={} txs={}",
-                    filters, block_meta.slot, block_meta.executed_transaction_count
-                );
+                if self.debug_stream_logs {
+                    println!(
+                        "BLOCK_META filters=[{}] slot={} txs={}",
+                        filters, block_meta.slot, block_meta.executed_transaction_count
+                    );
+                }
             }
             Some(UpdateOneof::Entry(entry)) => {
-                println!(
-                    "ENTRY filters=[{}] slot={} index={} txs={}",
-                    filters, entry.slot, entry.index, entry.executed_transaction_count
-                );
+                if self.debug_stream_logs {
+                    println!(
+                        "ENTRY filters=[{}] slot={} index={} txs={}",
+                        filters, entry.slot, entry.index, entry.executed_transaction_count
+                    );
+                }
             }
-            Some(UpdateOneof::Pong(pong)) => println!("PONG filters=[{}] id={}", filters, pong.id),
-            None => println!("UPDATE filters=[{}] empty", filters),
+            Some(UpdateOneof::Pong(pong)) => {
+                if self.debug_stream_logs {
+                    println!("PONG filters=[{}] id={}", filters, pong.id);
+                }
+            }
+            None => {
+                if self.debug_stream_logs {
+                    println!("UPDATE filters=[{}] empty", filters);
+                }
+            }
         }
     }
 
@@ -1019,6 +1047,7 @@ mod tests {
                 String::new(),
             ),
             WorkspaceRegistryCache::with_registry(registry),
+            false,
             false,
         )
     }

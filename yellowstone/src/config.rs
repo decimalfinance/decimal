@@ -12,6 +12,7 @@ pub struct AppConfig {
     pub control_plane_service_token: Option<String>,
     pub workspace_refresh_interval: Duration,
     pub debug_account_logs: bool,
+    pub debug_stream_logs: bool,
 }
 
 impl AppConfig {
@@ -37,6 +38,10 @@ impl AppConfig {
             .ok()
             .map(|value| matches!(value.trim(), "1" | "true" | "TRUE" | "yes" | "YES"))
             .unwrap_or(false);
+        let debug_stream_logs = env::var("DEBUG_YELLOWSTONE_STREAM")
+            .ok()
+            .map(|value| matches!(value.trim(), "1" | "true" | "TRUE" | "yes" | "YES"))
+            .unwrap_or(false);
 
         Ok(Self {
             yellowstone_endpoint,
@@ -49,6 +54,7 @@ impl AppConfig {
             control_plane_service_token,
             workspace_refresh_interval,
             debug_account_logs,
+            debug_stream_logs,
         })
     }
 }
