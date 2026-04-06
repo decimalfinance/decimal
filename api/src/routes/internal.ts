@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '../prisma.js';
 import { config } from '../config.js';
+import { ACTIVE_MATCHING_REQUEST_STATUSES } from '../transfer-request-lifecycle.js';
 
 export const internalRouter = Router();
 
@@ -60,7 +61,7 @@ internalRouter.get('/internal/workspaces/:workspaceId/matching-context', async (
           workspaceId,
           asset: 'usdc',
           status: {
-            in: ['pending_approval', 'approved', 'submitted'],
+            in: [...ACTIVE_MATCHING_REQUEST_STATUSES],
           },
         },
         include: {

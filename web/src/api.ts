@@ -1,12 +1,15 @@
 import type {
   AuthenticatedSession,
   ExceptionItem,
+  ExceptionNote,
   LoginResponse,
   ObservedTransfer,
+  ReconciliationDetail,
   OrganizationDirectoryItem,
   OrganizationMembership,
   ReconciliationRow,
   TransferRequest,
+  TransferRequestNote,
   WorkspaceAddress,
   Workspace,
 } from './types';
@@ -141,13 +144,72 @@ export const api = {
       `/workspaces/${workspaceId}/reconciliation?limit=100`,
     );
   },
+  listReconciliationQueue(workspaceId: string, displayState?: ReconciliationRow['requestDisplayState']) {
+    const query = displayState ? `?limit=100&displayState=${encodeURIComponent(displayState)}` : '?limit=100';
+    return request<{ servedAt: string; items: ReconciliationRow[] }>(
+      `/workspaces/${workspaceId}/reconciliation-queue${query}`,
+    );
+  },
+  getReconciliationDetail(workspaceId: string, transferRequestId: string) {
+    return request<ReconciliationDetail>(
+      `/workspaces/${workspaceId}/reconciliation-queue/${transferRequestId}`,
+    );
+  },
   listExceptions(workspaceId: string) {
     return request<{ servedAt: string; items: ExceptionItem[] }>(
       `/workspaces/${workspaceId}/exceptions?limit=100`,
     );
   },
+  applyExceptionAction(
+    workspaceId: string,
+    exceptionId: string,
+    input: {
+      action: 'reviewed' | 'expected' | 'dismissed' | 'reopen';
+      note?: string;
+    },
+  ) {
+    return request<ExceptionItem>(`/workspaces/${workspaceId}/exceptions/${exceptionId}/actions`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+  addExceptionNote(workspaceId: string, exceptionId: string, input: { body: string }) {
+    return request<ExceptionNote>(`/workspaces/${workspaceId}/exceptions/${exceptionId}/notes`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
   listTransferRequests(workspaceId: string) {
     return request<{ items: TransferRequest[] }>(`/workspaces/${workspaceId}/transfer-requests`);
+  },
+  addTransferRequestNote(workspaceId: string, transferRequestId: string, input: { body: string }) {
+    return request<TransferRequestNote>(
+      `/workspaces/${workspaceId}/transfer-requests/${transferRequestId}/notes`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+    );
+  },
+  transitionTransferRequest(
+    workspaceId: string,
+    transferRequestId: string,
+    input: {
+      toStatus: string;
+      note?: string;
+      payloadJson?: Record<string, unknown>;
+      linkedSignature?: string;
+      linkedPaymentId?: string;
+      linkedTransferIds?: string[];
+    },
+  ) {
+    return request<TransferRequest>(
+      `/workspaces/${workspaceId}/transfer-requests/${transferRequestId}/transitions`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+    );
   },
   createTransferRequest(
     workspaceId: string,

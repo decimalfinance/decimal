@@ -1,5 +1,8 @@
 import { config } from './config.js';
 
+const CLICKHOUSE_DATETIME_PATTERN =
+  /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d{1,6})?$/;
+
 export async function queryClickHouse<T = Record<string, unknown>>(query: string): Promise<T[]> {
   const response = await fetch(
     `${config.clickhouseUrl}/?query=${encodeURIComponent(query)}`,
@@ -50,4 +53,18 @@ export async function insertClickHouseRows(table: string, rows: Array<Record<str
     `INSERT INTO ${config.clickhouseDatabase}.${table} FORMAT JSONEachRow`,
     payload,
   );
+}
+
+export function normalizeClickHouseDateTime(
+  value: string | null | undefined,
+): string | null {
+  if (!value) {
+    return null;
+  }
+
+  if (CLICKHOUSE_DATETIME_PATTERN.test(value)) {
+    return `${value.replace(' ', 'T')}Z`;
+  }
+
+  return value;
 }

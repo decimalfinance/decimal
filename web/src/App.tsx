@@ -28,9 +28,8 @@ import {
 } from './screens/workspace-pages';
 import type {
   AuthenticatedSession,
-  ExceptionItem,
   ObservedTransfer,
-  OrganizationDirectoryItem,
+  ReconciliationDetail,
   ReconciliationRow,
   TransferRequest,
   WorkspaceAddress,
@@ -89,18 +88,18 @@ export function App() {
   const [authStatus, setAuthStatus] = useState<AuthStatus>('booting');
   const [session, setSession] = useState<AuthenticatedSession | null>(null);
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.pathname));
-  const [organizationDirectory, setOrganizationDirectory] = useState<OrganizationDirectoryItem[]>([]);
   const [addresses, setAddresses] = useState<WorkspaceAddress[]>([]);
   const [transferRequests, setTransferRequests] = useState<TransferRequest[]>([]);
   const [observedTransfers, setObservedTransfers] = useState<ObservedTransfer[]>([]);
   const [reconciliationRows, setReconciliationRows] = useState<ReconciliationRow[]>([]);
-  const [exceptions, setExceptions] = useState<ExceptionItem[]>([]);
+  const [reconciliationFilter, setReconciliationFilter] = useState<
+    ReconciliationRow['requestDisplayState'] | 'all'
+  >('all');
   const [selectedObservedTransfer, setSelectedObservedTransfer] = useState<ObservedTransfer | null>(null);
-  const [selectedReconciliation, setSelectedReconciliation] = useState<ReconciliationRow | null>(null);
-  const [workspaceServedAt, setWorkspaceServedAt] = useState<string | null>(null);
-  const [workspaceLoadedAt, setWorkspaceLoadedAt] = useState<string | null>(null);
+  const [selectedReconciliationId, setSelectedReconciliationId] = useState<string | null>(null);
+  const [selectedReconciliationDetail, setSelectedReconciliationDetail] = useState<ReconciliationDetail | null>(null);
+  const [isLoadingReconciliationDetail, setIsLoadingReconciliationDetail] = useState(false);
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(false);
-  const [isLoadingOrganizations, setIsLoadingOrganizations] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const currentWorkspaceId =
@@ -114,6 +113,8 @@ export function App() {
     route.name === 'organizationHome'
       ? findOrganization(session, route.organizationId)
       : currentWorkspaceOrganization;
+  const currentDashboardOrganizationId =
+    currentWorkspaceOrganization?.organizationId ?? currentOrganization?.organizationId ?? null;
   const currentRole = currentWorkspaceOrganization?.role ?? currentOrganization?.role ?? null;
   const canManageCurrentOrg = isAdminRole(currentRole);
   const sidebarWorkspace = currentWorkspace ?? currentOrganization?.workspaces[0] ?? null;
@@ -137,21 +138,13 @@ export function App() {
   }, [theme]);
 
   useEffect(() => {
-    if (authStatus !== 'authenticated') {
-      return;
-    }
-
-    void refreshOrganizationDirectory();
-  }, [authStatus]);
-
-  useEffect(() => {
     if (authStatus !== 'authenticated' || !currentWorkspaceId) {
       resetWorkspaceState();
       return;
     }
 
     void loadWorkspace(currentWorkspaceId);
-  }, [authStatus, currentWorkspaceId]);
+  }, [authStatus, currentWorkspaceId, reconciliationFilter]);
 
   useEffect(() => {
     if (authStatus !== 'authenticated' || !currentWorkspaceId || route.name !== 'workspaceHome') {
@@ -172,11 +165,9 @@ export function App() {
     setTransferRequests([]);
     setObservedTransfers([]);
     setReconciliationRows([]);
-    setExceptions([]);
     setSelectedObservedTransfer(null);
-    setSelectedReconciliation(null);
-    setWorkspaceServedAt(null);
-    setWorkspaceLoadedAt(null);
+    setSelectedReconciliationId(null);
+    setSelectedReconciliationDetail(null);
   }
 
   async function boot() {
@@ -222,15 +213,16 @@ export function App() {
     return nextSession;
   }
 
-  async function refreshOrganizationDirectory() {
+  async function loadReconciliationDetail(workspaceId: string, transferRequestId: string) {
     try {
-      setIsLoadingOrganizations(true);
-      const response = await api.listOrganizations();
-      setOrganizationDirectory(response.items);
+      setIsLoadingReconciliationDetail(true);
+      const detail = await api.getReconciliationDetail(workspaceId, transferRequestId);
+      setSelectedReconciliationDetail(detail);
+      setSelectedReconciliationId(transferRequestId);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Failed to load organizations');
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to load request detail');
     } finally {
-      setIsLoadingOrganizations(false);
+      setIsLoadingReconciliationDetail(false);
     }
   }
 
@@ -244,22 +236,20 @@ export function App() {
         nextTransferRequests,
         nextTransfers,
         nextReconciliation,
-        nextExceptions,
       ] = await Promise.all([
         api.listAddresses(workspaceId),
         api.listTransferRequests(workspaceId),
         api.listTransfers(workspaceId),
-        api.listReconciliation(workspaceId),
-        api.listExceptions(workspaceId),
+        api.listReconciliationQueue(
+          workspaceId,
+          reconciliationFilter === 'all' ? undefined : reconciliationFilter,
+        ),
       ]);
 
       setAddresses(nextAddresses.items);
       setTransferRequests(nextTransferRequests.items);
       setObservedTransfers(nextTransfers.items);
       setReconciliationRows(nextReconciliation.items);
-      setExceptions(nextExceptions.items);
-      setWorkspaceServedAt(nextReconciliation.servedAt);
-      setWorkspaceLoadedAt(new Date().toISOString());
 
       if (
         selectedObservedTransfer &&
@@ -268,10 +258,15 @@ export function App() {
         setSelectedObservedTransfer(null);
       }
       if (
-        selectedReconciliation &&
-        !nextReconciliation.items.some((row) => row.transferRequestId === selectedReconciliation.transferRequestId)
+        selectedReconciliationId &&
+        !nextReconciliation.items.some((row) => row.transferRequestId === selectedReconciliationId)
       ) {
-        setSelectedReconciliation(null);
+        setSelectedReconciliationId(null);
+        setSelectedReconciliationDetail(null);
+      }
+
+      if (selectedReconciliationId) {
+        await loadReconciliationDetail(workspaceId, selectedReconciliationId);
       }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Failed to load workspace');
@@ -306,7 +301,6 @@ export function App() {
       });
       setAuthStatus('authenticated');
       form.reset();
-      await refreshOrganizationDirectory();
       navigate({ name: 'dashboard' }, setRoute);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Failed to login');
@@ -322,7 +316,6 @@ export function App() {
 
     api.clearSessionToken();
     setSession(null);
-    setOrganizationDirectory([]);
     resetWorkspaceState();
     setAuthStatus('anonymous');
     navigate({ name: 'landingEditorial' }, setRoute);
@@ -344,22 +337,11 @@ export function App() {
         organizationName,
       });
 
-      await Promise.all([refreshSession(), refreshOrganizationDirectory()]);
+      await refreshSession();
       form.reset();
       navigate({ name: 'organizationHome', organizationId: organization.organizationId }, setRoute);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Failed to create organization');
-    }
-  }
-
-  async function handleJoinOrganization(organizationId: string) {
-    try {
-      setErrorMessage(null);
-      await api.joinOrganization(organizationId);
-      await Promise.all([refreshSession(), refreshOrganizationDirectory()]);
-      navigate({ name: 'organizationHome', organizationId }, setRoute);
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Failed to join organization');
     }
   }
 
@@ -466,8 +448,12 @@ export function App() {
     setSelectedObservedTransfer(transfer);
   }
 
-  function handleSelectReconciliation(row: ReconciliationRow) {
-    setSelectedReconciliation(row);
+  async function handleSelectReconciliation(row: ReconciliationRow) {
+    if (!currentWorkspaceId) {
+      return;
+    }
+
+    await loadReconciliationDetail(currentWorkspaceId, row.transferRequestId);
   }
 
   async function handleRefreshWorkspace() {
@@ -476,6 +462,93 @@ export function App() {
     }
 
     await loadWorkspace(currentWorkspaceId);
+  }
+
+  async function handleTransitionRequest(transferRequestId: string, toStatus: string) {
+    if (!currentWorkspaceId || !selectedReconciliationDetail) {
+      return;
+    }
+
+    try {
+      setErrorMessage(null);
+      await api.transitionTransferRequest(currentWorkspaceId, transferRequestId, {
+        toStatus,
+        linkedSignature: selectedReconciliationDetail.linkedSignature ?? undefined,
+        linkedPaymentId: selectedReconciliationDetail.linkedPaymentId ?? undefined,
+        linkedTransferIds: selectedReconciliationDetail.linkedTransferIds,
+        payloadJson: {
+          source: 'workspace_reconciliation_detail',
+        },
+      });
+      await Promise.all([
+        loadWorkspace(currentWorkspaceId),
+        loadReconciliationDetail(currentWorkspaceId, transferRequestId),
+      ]);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to update request state');
+    }
+  }
+
+  async function handleAddRequestNote(transferRequestId: string, body: string) {
+    if (!currentWorkspaceId || !body.trim()) {
+      return;
+    }
+
+    try {
+      setErrorMessage(null);
+      await api.addTransferRequestNote(currentWorkspaceId, transferRequestId, {
+        body: body.trim(),
+      });
+      await Promise.all([
+        loadWorkspace(currentWorkspaceId),
+        loadReconciliationDetail(currentWorkspaceId, transferRequestId),
+      ]);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to add request note');
+    }
+  }
+
+  async function handleAddExceptionNote(exceptionId: string, body: string) {
+    if (!currentWorkspaceId || !selectedReconciliationId || !body.trim()) {
+      return;
+    }
+
+    try {
+      setErrorMessage(null);
+      await api.addExceptionNote(currentWorkspaceId, exceptionId, {
+        body: body.trim(),
+      });
+      await Promise.all([
+        loadWorkspace(currentWorkspaceId),
+        loadReconciliationDetail(currentWorkspaceId, selectedReconciliationId),
+      ]);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to add exception note');
+    }
+  }
+
+  async function handleApplyExceptionAction(
+    exceptionId: string,
+    action: 'reviewed' | 'expected' | 'dismissed' | 'reopen',
+    note?: string,
+  ) {
+    if (!currentWorkspaceId || !selectedReconciliationId) {
+      return;
+    }
+
+    try {
+      setErrorMessage(null);
+      await api.applyExceptionAction(currentWorkspaceId, exceptionId, {
+        action,
+        note: note?.trim() ? note.trim() : undefined,
+      });
+      await Promise.all([
+        loadWorkspace(currentWorkspaceId),
+        loadReconciliationDetail(currentWorkspaceId, selectedReconciliationId),
+      ]);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to update exception');
+    }
   }
 
   function handleOpenOrganization(organizationId: string) {
@@ -583,7 +656,7 @@ export function App() {
             <aside className="rail org-rail">
               <div className="rail-section">
                 <div className="section-header">
-                  <span>Current org</span>
+                  <span>Org</span>
                   <small>{currentOrganization.role}</small>
                 </div>
                 <label className="field rail-field">
@@ -603,15 +676,11 @@ export function App() {
                 <div className="stack-list">
                   <button
                     className={
-                      route.name === 'workspaceHome'
+                      route.name === 'organizationHome'
                         ? 'rail-link is-active'
                         : 'rail-link'
                     }
-                    onClick={() =>
-                      sidebarWorkspace
-                        ? handleOpenWorkspace(sidebarWorkspace.workspaceId)
-                        : handleOpenOrganization(currentOrganization.organizationId)
-                    }
+                    onClick={() => handleOpenOrganization(currentOrganization.organizationId)}
                     type="button"
                   >
                     Dashboard
@@ -621,20 +690,27 @@ export function App() {
 
               {sidebarWorkspace ? (
                 <div className="rail-section">
-                  <div className="section-header">
-                    <span>Current workspace</span>
-                    <small>{sidebarWorkspace.workspaceName}</small>
-                  </div>
-                  <div className="stack-list">
-                    <button
-                      className={route.name === 'workspaceSetup' ? 'rail-link is-active' : 'rail-link'}
-                      onClick={() => handleOpenWorkspaceSetup(sidebarWorkspace.workspaceId)}
-                      type="button"
-                    >
-                      Wallets + expected transfers
-                    </button>
-                  </div>
+                <div className="section-header">
+                  <span>Current watch system</span>
+                  <small>{sidebarWorkspace.workspaceName}</small>
                 </div>
+                <div className="stack-list">
+                  <button
+                    className={route.name === 'workspaceHome' ? 'rail-link is-active' : 'rail-link'}
+                    onClick={() => handleOpenWorkspace(sidebarWorkspace.workspaceId)}
+                    type="button"
+                  >
+                    Watch system
+                  </button>
+                  <button
+                    className={route.name === 'workspaceSetup' ? 'rail-link is-active' : 'rail-link'}
+                    onClick={() => handleOpenWorkspaceSetup(sidebarWorkspace.workspaceId)}
+                    type="button"
+                  >
+                    Wallets + expected transfers
+                  </button>
+                </div>
+              </div>
               ) : null}
 
               <div className="rail-section">
@@ -675,17 +751,13 @@ export function App() {
               <DashboardPage
                 onGoOrgs={() => navigate({ name: 'orgs' }, setRoute)}
                 onOpenOrganization={handleOpenOrganization}
-                onOpenWorkspace={handleOpenWorkspace}
                 session={session}
               />
             ) : null}
 
             {route.name === 'orgs' ? (
               <OrganizationsPage
-                directory={organizationDirectory}
-                isLoading={isLoadingOrganizations}
                 onCreateOrganization={handleCreateOrganization}
-                onJoinOrganization={handleJoinOrganization}
                 onOpenOrganization={handleOpenOrganization}
                 session={session}
               />
@@ -707,19 +779,26 @@ export function App() {
                 addresses={addresses}
                 currentWorkspace={currentWorkspace}
                 currentRole={currentRole}
-                exceptions={exceptions}
                 isLoading={isLoadingWorkspace}
                 observedTransfers={observedTransfers}
+                onBackToDashboard={() => {
+                  if (currentDashboardOrganizationId) handleOpenOrganization(currentDashboardOrganizationId);
+                }}
                 onOpenSetup={() => navigate({ name: 'workspaceSetup', workspaceId: currentWorkspace.workspaceId }, setRoute)}
+                onAddExceptionNote={handleAddExceptionNote}
+                onAddRequestNote={handleAddRequestNote}
+                onApplyExceptionAction={handleApplyExceptionAction}
+                onChangeReconciliationFilter={setReconciliationFilter}
                 onRefresh={handleRefreshWorkspace}
                 onSelectObservedTransfer={handleSelectObservedTransfer}
-                onSelectReconciliation={handleSelectReconciliation}
+                onSelectReconciliation={(row) => void handleSelectReconciliation(row)}
+                onTransitionRequest={handleTransitionRequest}
+                reconciliationFilter={reconciliationFilter}
                 reconciliationRows={reconciliationRows}
-                selectedReconciliation={selectedReconciliation}
+                selectedReconciliationDetail={selectedReconciliationDetail}
                 selectedObservedTransfer={selectedObservedTransfer}
-                workspaceLoadedAt={workspaceLoadedAt}
-                workspaceServedAt={workspaceServedAt}
                 transferRequests={transferRequests}
+                isLoadingReconciliationDetail={isLoadingReconciliationDetail}
               />
             ) : null}
 
@@ -728,6 +807,10 @@ export function App() {
                 addresses={addresses}
                 canManage={canManageCurrentOrg}
                 currentWorkspace={currentWorkspace}
+                onBackToDashboard={() => {
+                  if (currentDashboardOrganizationId) handleOpenOrganization(currentDashboardOrganizationId);
+                }}
+                onBackToWatchSystem={() => handleOpenWorkspace(currentWorkspace.workspaceId)}
                 onCreateAddress={handleCreateAddress}
                 onCreateTransferRequest={handleCreateTransferRequest}
                 transferRequests={transferRequests}

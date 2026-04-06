@@ -30,6 +30,9 @@ model User {
   memberships               OrganizationMembership[]
   sessions                  AuthSession[]
   transferRequestsRequested TransferRequest[] @relation("TransferRequestRequestedByUser")
+  transferRequestNotes      TransferRequestNote[]
+  exceptionNotes            ExceptionNote[]
+  exceptionStatesUpdated    ExceptionState[]
 
   @@map("users")
 }
@@ -73,6 +76,10 @@ model Workspace {
   organization      Organization     @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
   addresses         WorkspaceAddress[]
   transferRequests  TransferRequest[]
+  transferRequestEvents TransferRequestEvent[]
+  transferRequestNotes  TransferRequestNote[]
+  exceptionNotes       ExceptionNote[]
+  exceptionStates      ExceptionState[]
 
   @@map("workspaces")
 }
@@ -122,6 +129,80 @@ model TransferRequest {
   sourceWorkspaceAddress     WorkspaceAddress? @relation("TransferRequestSourceAddress", fields: [sourceWorkspaceAddressId], references: [workspaceAddressId], onDelete: SetNull)
   destinationWorkspaceAddress WorkspaceAddress @relation("TransferRequestDestinationAddress", fields: [destinationWorkspaceAddressId], references: [workspaceAddressId], onDelete: Restrict)
   requestedByUser            User?            @relation("TransferRequestRequestedByUser", fields: [requestedByUserId], references: [userId], onDelete: SetNull)
+  events                     TransferRequestEvent[]
+  notes                      TransferRequestNote[]
 
+  @@index([workspaceId, status, requestedAt(sort: Desc)])
+  @@index([destinationWorkspaceAddressId, status, requestedAt(sort: Desc)])
   @@map("transfer_requests")
+}
+
+model TransferRequestEvent {
+  transferRequestEventId String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("transfer_request_event_id")
+  transferRequestId      String          @db.Uuid @map("transfer_request_id")
+  workspaceId            String          @db.Uuid @map("workspace_id")
+  eventType              String          @map("event_type")
+  actorType              String          @map("actor_type")
+  actorId                String?         @map("actor_id")
+  eventSource            String          @map("event_source")
+  beforeState            String?         @map("before_state")
+  afterState             String?         @map("after_state")
+  linkedSignature        String?         @map("linked_signature")
+  linkedPaymentId        String?         @db.Uuid @map("linked_payment_id")
+  linkedTransferIds      Json            @default("[]") @map("linked_transfer_ids")
+  payloadJson            Json            @default("{}") @map("payload_json")
+  createdAt              DateTime        @default(now()) @db.Timestamptz(6) @map("created_at")
+  transferRequest        TransferRequest @relation(fields: [transferRequestId], references: [transferRequestId], onDelete: Cascade)
+  workspace              Workspace       @relation(fields: [workspaceId], references: [workspaceId], onDelete: Cascade)
+
+  @@index([transferRequestId, createdAt(sort: Asc)])
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@map("transfer_request_events")
+}
+
+model TransferRequestNote {
+  transferRequestNoteId String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("transfer_request_note_id")
+  transferRequestId     String          @db.Uuid @map("transfer_request_id")
+  workspaceId           String          @db.Uuid @map("workspace_id")
+  authorUserId          String?         @db.Uuid @map("author_user_id")
+  body                  String
+  createdAt             DateTime        @default(now()) @db.Timestamptz(6) @map("created_at")
+  transferRequest       TransferRequest @relation(fields: [transferRequestId], references: [transferRequestId], onDelete: Cascade)
+  workspace             Workspace       @relation(fields: [workspaceId], references: [workspaceId], onDelete: Cascade)
+  authorUser            User?           @relation(fields: [authorUserId], references: [userId], onDelete: SetNull)
+
+  @@index([transferRequestId, createdAt(sort: Asc)])
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@map("transfer_request_notes")
+}
+
+model ExceptionNote {
+  exceptionNoteId String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("exception_note_id")
+  workspaceId     String    @db.Uuid @map("workspace_id")
+  exceptionId     String    @db.Uuid @map("exception_id")
+  authorUserId    String?   @db.Uuid @map("author_user_id")
+  body            String
+  createdAt       DateTime  @default(now()) @db.Timestamptz(6) @map("created_at")
+  workspace       Workspace @relation(fields: [workspaceId], references: [workspaceId], onDelete: Cascade)
+  authorUser      User?     @relation(fields: [authorUserId], references: [userId], onDelete: SetNull)
+
+  @@index([exceptionId, createdAt(sort: Asc)])
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@map("exception_notes")
+}
+
+model ExceptionState {
+  exceptionStateId String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("exception_state_id")
+  workspaceId      String    @db.Uuid @map("workspace_id")
+  exceptionId      String    @db.Uuid @map("exception_id")
+  status           String
+  updatedByUserId  String?   @db.Uuid @map("updated_by_user_id")
+  createdAt        DateTime  @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt        DateTime  @updatedAt @db.Timestamptz(6) @map("updated_at")
+  workspace        Workspace @relation(fields: [workspaceId], references: [workspaceId], onDelete: Cascade)
+  updatedByUser    User?     @relation(fields: [updatedByUserId], references: [userId], onDelete: SetNull)
+
+  @@unique([workspaceId, exceptionId])
+  @@index([workspaceId, status, updatedAt(sort: Desc)])
+  @@map("exception_states")
 }

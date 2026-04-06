@@ -6,6 +6,14 @@ use std::error::Error;
 use std::fmt;
 
 type QueryResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
+const OBSERVED_TRANSFERS_INSERT_ROWS: usize = 128;
+const OBSERVED_PAYMENTS_INSERT_ROWS: usize = 64;
+const RAW_OBSERVATIONS_INSERT_ROWS: usize = 512;
+const MATCHER_EVENTS_INSERT_ROWS: usize = 128;
+const SNAPSHOTS_INSERT_ROWS: usize = 128;
+const MATCHES_INSERT_ROWS: usize = 128;
+const EXCEPTIONS_INSERT_ROWS: usize = 128;
+const ASYNC_INSERT_BUSY_TIMEOUT_MS: u32 = 1_000;
 
 #[derive(Debug)]
 struct ClickHouseHttpError {
@@ -40,11 +48,16 @@ impl ClickHouseWriter {
         }
     }
 
-    pub async fn insert_raw_observation(
+    pub async fn insert_raw_observations(
         &self,
-        row: &RawObservationRow,
+        rows: &[RawObservationRow],
     ) -> QueryResult<()> {
-        self.insert_json_each_row("raw_observations", row).await
+        self.insert_json_each_row_many_chunked(
+            "raw_observations",
+            rows,
+            RAW_OBSERVATIONS_INSERT_ROWS,
+        )
+        .await
     }
 
     pub async fn insert_observed_transaction(
@@ -58,39 +71,69 @@ impl ClickHouseWriter {
         &self,
         rows: &[ObservedTransferRow],
     ) -> QueryResult<()> {
-        self.insert_json_each_row_many("observed_transfers", rows).await
+        self.insert_json_each_row_many_chunked(
+            "observed_transfers",
+            rows,
+            OBSERVED_TRANSFERS_INSERT_ROWS,
+        )
+        .await
     }
 
     pub async fn insert_observed_payments(
         &self,
         rows: &[ObservedPaymentRow],
     ) -> QueryResult<()> {
-        self.insert_json_each_row_many("observed_payments", rows).await
+        self.insert_json_each_row_many_chunked(
+            "observed_payments",
+            rows,
+            OBSERVED_PAYMENTS_INSERT_ROWS,
+        )
+        .await
     }
 
-    pub async fn upsert_settlement_match(
+    pub async fn upsert_settlement_matches(
         &self,
-        row: &SettlementMatchRow,
+        rows: &[SettlementMatchRow],
     ) -> QueryResult<()> {
-        self.insert_json_each_row("settlement_matches", row).await
+        self.insert_json_each_row_many_chunked(
+            "settlement_matches",
+            rows,
+            MATCHES_INSERT_ROWS,
+        )
+        .await
     }
 
-    pub async fn insert_matcher_event(
+    pub async fn insert_matcher_events(
         &self,
-        row: &MatcherEventRow,
+        rows: &[MatcherEventRow],
     ) -> QueryResult<()> {
-        self.insert_json_each_row("matcher_events", row).await
+        self.insert_json_each_row_many_chunked(
+            "matcher_events",
+            rows,
+            MATCHER_EVENTS_INSERT_ROWS,
+        )
+        .await
     }
 
-    pub async fn upsert_request_book_snapshot(
+    pub async fn upsert_request_book_snapshots(
         &self,
-        row: &RequestBookSnapshotRow,
+        rows: &[RequestBookSnapshotRow],
     ) -> QueryResult<()> {
-        self.insert_json_each_row("request_book_snapshots", row).await
+        self.insert_json_each_row_many_chunked(
+            "request_book_snapshots",
+            rows,
+            SNAPSHOTS_INSERT_ROWS,
+        )
+        .await
     }
 
-    pub async fn upsert_exception(&self, row: &ExceptionRow) -> QueryResult<()> {
-        self.insert_json_each_row("exceptions", row).await
+    pub async fn upsert_exceptions(&self, rows: &[ExceptionRow]) -> QueryResult<()> {
+        self.insert_json_each_row_many_chunked(
+            "exceptions",
+            rows,
+            EXCEPTIONS_INSERT_ROWS,
+        )
+        .await
     }
 
     pub async fn load_request_book_snapshots(&self) -> QueryResult<Vec<RequestBookSnapshotStateRow>> {
@@ -107,7 +150,7 @@ impl ClickHouseWriter {
         row: &T,
     ) -> QueryResult<()> {
         let query = format!("INSERT INTO {}.{} FORMAT JSONEachRow", self.database, table);
-        let url = format!("{}/?query={}", self.base_url, urlencoding::encode(&query));
+        let url = self.insert_url(&query);
         let payload = format!(
             "{}\n",
             serde_json::to_string(row).expect("row should serialize to JSON")
@@ -135,7 +178,7 @@ impl ClickHouseWriter {
         }
 
         let query = format!("INSERT INTO {}.{} FORMAT JSONEachRow", self.database, table);
-        let url = format!("{}/?query={}", self.base_url, urlencoding::encode(&query));
+        let url = self.insert_url(&query);
         let mut payload = String::new();
 
         for row in rows {
@@ -151,6 +194,47 @@ impl ClickHouseWriter {
             .send()
             .await?;
         self.ensure_success(response).await?;
+
+        Ok(())
+    }
+
+    fn insert_url(&self, query: &str) -> String {
+        format!(
+            "{}/?query={}&async_insert=1&wait_for_async_insert=1&async_insert_busy_timeout_ms={}",
+            self.base_url,
+            urlencoding::encode(query),
+            ASYNC_INSERT_BUSY_TIMEOUT_MS
+        )
+    }
+
+    async fn insert_json_each_row_many_chunked<T: Serialize>(
+        &self,
+        table: &str,
+        rows: &[T],
+        max_rows_per_insert: usize,
+    ) -> QueryResult<()> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+
+        let mut pending = chunk_ranges(rows.len(), max_rows_per_insert.max(1));
+
+        while let Some((start, end)) = pending.pop() {
+            let slice = &rows[start..end];
+            match self.insert_json_each_row_many(table, slice).await {
+                Ok(()) => {}
+                Err(error) => {
+                    if slice.len() > 1 && should_split_batch_after_error(error.as_ref()) {
+                        let mid = start + (slice.len() / 2);
+                        pending.push((mid, end));
+                        pending.push((start, mid));
+                        continue;
+                    }
+
+                    return Err(error);
+                }
+            }
+        }
 
         Ok(())
     }
@@ -375,5 +459,78 @@ where
     match value {
         Some(value) => serializer.serialize_some(&value.format("%Y-%m-%d %H:%M:%S%.3f").to_string()),
         None => serializer.serialize_none(),
+    }
+}
+
+fn chunk_ranges(total_rows: usize, max_rows_per_chunk: usize) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    let mut start = 0;
+
+    while start < total_rows {
+        let end = (start + max_rows_per_chunk).min(total_rows);
+        ranges.push((start, end));
+        start = end;
+    }
+
+    ranges.reverse();
+    ranges
+}
+
+fn should_split_batch_after_error(error: &(dyn Error + Send + Sync)) -> bool {
+    let message = error.to_string();
+    message.contains("MEMORY_LIMIT_EXCEEDED")
+        || message.contains("memory limit exceeded")
+        || message.contains("Code: 241")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{chunk_ranges, should_split_batch_after_error, ClickHouseWriter, ASYNC_INSERT_BUSY_TIMEOUT_MS};
+    use std::error::Error;
+    use std::fmt;
+
+    #[derive(Debug)]
+    struct TestError(&'static str);
+
+    impl fmt::Display for TestError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "{}", self.0)
+        }
+    }
+
+    impl Error for TestError {}
+
+    #[test]
+    fn chunk_ranges_splits_and_reverses_for_stack_processing() {
+        assert_eq!(chunk_ranges(0, 128), Vec::<(usize, usize)>::new());
+        assert_eq!(chunk_ranges(3, 128), vec![(0, 3)]);
+        assert_eq!(chunk_ranges(260, 128), vec![(256, 260), (128, 256), (0, 128)]);
+    }
+
+    #[test]
+    fn split_retry_only_triggers_for_memory_pressure_errors() {
+        let memory = TestError("ClickHouse HTTP 500 Internal Server Error: Code: 241. DB::Exception: MEMORY_LIMIT_EXCEEDED");
+        let generic = TestError("network timeout");
+
+        assert!(should_split_batch_after_error(&memory));
+        assert!(!should_split_batch_after_error(&generic));
+    }
+
+    #[test]
+    fn insert_url_uses_async_insert_settings() {
+        let writer = ClickHouseWriter::new(
+            "http://127.0.0.1:8123".to_string(),
+            "usdc_ops".to_string(),
+            "default".to_string(),
+            "".to_string(),
+        );
+        let url = writer.insert_url("INSERT INTO usdc_ops.observed_transfers FORMAT JSONEachRow");
+
+        assert!(url.contains("async_insert=1"));
+        assert!(url.contains("wait_for_async_insert=1"));
+        assert!(url.contains(&format!(
+            "async_insert_busy_timeout_ms={}",
+            ASYNC_INSERT_BUSY_TIMEOUT_MS
+        )));
     }
 }

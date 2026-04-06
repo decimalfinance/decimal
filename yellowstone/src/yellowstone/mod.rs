@@ -16,6 +16,7 @@ use spl_token::solana_program::program_option::COption;
 use spl_token::solana_program::program_pack::Pack;
 use spl_token::state::{Account as SplTokenAccount, AccountState as SplTokenAccountState, Mint as SplTokenMint};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 use yellowstone_grpc_proto::geyser::subscribe_update::UpdateOneof;
 use yellowstone_grpc_proto::prelude::SubscribeUpdate;
@@ -32,6 +33,8 @@ const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const MATCH_WINDOW_BEFORE_REQUEST_SECONDS: i64 = 120;
 const MATCH_WINDOW_AFTER_REQUEST_SECONDS: i64 = 24 * 60 * 60;
 const MAX_RECENT_SIGNATURES: usize = 50_000;
+const RAW_OBSERVATION_BUFFER_MAX_ROWS: usize = 512;
+const RAW_OBSERVATION_FLUSH_INTERVAL: Duration = Duration::from_millis(1_000);
 
 #[derive(Default)]
 struct WorkerState {
@@ -42,6 +45,20 @@ struct WorkerState {
 struct RecentSignatureCache {
     order: VecDeque<String>,
     seen: HashSet<String>,
+}
+
+struct PendingRawObservations {
+    rows: Vec<RawObservationRow>,
+    last_flush: Instant,
+}
+
+impl Default for PendingRawObservations {
+    fn default() -> Self {
+        Self {
+            rows: Vec::new(),
+            last_flush: Instant::now(),
+        }
+    }
 }
 
 impl RecentSignatureCache {
@@ -72,6 +89,7 @@ pub struct YellowstoneWorker {
     writer: ClickHouseWriter,
     registry_cache: tokio::sync::Mutex<WorkspaceRegistryCache>,
     recent_signatures: tokio::sync::Mutex<RecentSignatureCache>,
+    pending_raw_observations: tokio::sync::Mutex<PendingRawObservations>,
     debug_account_logs: bool,
     debug_stream_logs: bool,
 }
@@ -91,6 +109,7 @@ impl YellowstoneWorker {
             writer,
             registry_cache: tokio::sync::Mutex::new(registry_cache),
             recent_signatures: tokio::sync::Mutex::new(RecentSignatureCache::default()),
+            pending_raw_observations: tokio::sync::Mutex::new(PendingRawObservations::default()),
             debug_account_logs,
             debug_stream_logs,
         }
@@ -137,6 +156,9 @@ impl YellowstoneWorker {
         }
 
         loop {
+            if let Err(error) = self.flush_pending_raw_observations(false).await {
+                eprintln!("Failed to flush buffered raw observations: {}", error);
+            }
             match stream.next().await {
                 Some(Ok(update)) => {
                     if let Err(error) = self.refresh_registry_if_stale().await {
@@ -155,12 +177,41 @@ impl YellowstoneWorker {
             }
         }
 
+        if let Err(error) = self.flush_pending_raw_observations(true).await {
+            eprintln!("Failed to flush buffered raw observations during shutdown: {}", error);
+        }
         println!("Yellowstone Worker shutting down...");
     }
 
     async fn refresh_registry_if_stale(&self) -> Result<(), reqwest::Error> {
         let mut cache = self.registry_cache.lock().await;
         cache.refresh_if_stale().await
+    }
+
+    async fn enqueue_raw_observation(&self, row: RawObservationRow) {
+        let mut pending = self.pending_raw_observations.lock().await;
+        pending.rows.push(row);
+    }
+
+    async fn flush_pending_raw_observations(
+        &self,
+        force: bool,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let rows = {
+            let mut pending = self.pending_raw_observations.lock().await;
+            let should_flush = force
+                || pending.rows.len() >= RAW_OBSERVATION_BUFFER_MAX_ROWS
+                || pending.last_flush.elapsed() >= RAW_OBSERVATION_FLUSH_INTERVAL;
+
+            if !should_flush || pending.rows.is_empty() {
+                return Ok(());
+            }
+
+            pending.last_flush = Instant::now();
+            std::mem::take(&mut pending.rows)
+        };
+
+        self.writer.insert_raw_observations(&rows).await
     }
 
     async fn handle_update(&self, update: SubscribeUpdate, worker_state: &mut WorkerState) {
@@ -209,9 +260,7 @@ impl YellowstoneWorker {
                         parser_version: 1,
                     };
 
-                    if let Err(error) = self.writer.insert_raw_observation(&raw_row).await {
-                        eprintln!("Failed to insert raw observation: {}", error);
-                    }
+                    self.enqueue_raw_observation(raw_row).await;
 
                     if self.debug_account_logs {
                         match filters.as_str() {
@@ -352,6 +401,13 @@ impl YellowstoneWorker {
         context: TransactionContext,
         worker_state: &mut WorkerState,
     ) {
+        if let Err(error) = self.flush_pending_raw_observations(true).await {
+            eprintln!(
+                "Failed to flush buffered raw observations before processing {}: {}",
+                context.signature, error
+            );
+        }
+
         {
             let recent_signatures = self.recent_signatures.lock().await;
             if recent_signatures.contains(&context.signature) {
@@ -453,6 +509,7 @@ impl YellowstoneWorker {
 
         if let Err(error) = self.writer.insert_observed_transfers(&observed_transfer_rows).await {
             eprintln!("Failed to insert observed transfers batch: {}", error);
+            return false;
         }
 
         let observed_payment_rows: Vec<ObservedPaymentRow> = observed_payments
@@ -481,7 +538,13 @@ impl YellowstoneWorker {
 
         if let Err(error) = self.writer.insert_observed_payments(&observed_payment_rows).await {
             eprintln!("Failed to insert observed payments batch: {}", error);
+            return false;
         }
+
+        let mut matcher_event_rows = Vec::new();
+        let mut request_book_snapshot_rows = Vec::new();
+        let mut settlement_match_rows = Vec::new();
+        let mut exception_rows = Vec::new();
 
         for payment in observed_payments {
 
@@ -581,9 +644,7 @@ impl YellowstoneWorker {
                     ),
                 };
 
-                if let Err(error) = self.writer.insert_matcher_event(&observation_event).await {
-                    eprintln!("Failed to insert matcher event: {}", error);
-                }
+                matcher_event_rows.push(observation_event);
 
                 for allocation in allocation_result.allocations {
                     let Some(request) = windowed_requests
@@ -610,9 +671,7 @@ impl YellowstoneWorker {
                         updated_at: processing_time,
                     };
 
-                    if let Err(error) = self.writer.upsert_request_book_snapshot(&snapshot_row).await {
-                        eprintln!("Failed to upsert request book snapshot: {}", error);
-                    }
+                    request_book_snapshot_rows.push(snapshot_row);
 
                     worker_state.matcher_state.set_request_state(
                         request.transfer_request_id.clone(),
@@ -655,9 +714,7 @@ impl YellowstoneWorker {
                         ),
                     };
 
-                    if let Err(error) = self.writer.insert_matcher_event(&allocation_event).await {
-                        eprintln!("Failed to insert matcher allocation event: {}", error);
-                    }
+                    matcher_event_rows.push(allocation_event);
 
                     let settlement_match = SettlementMatchRow {
                         workspace_id: workspace_id.clone(),
@@ -694,9 +751,7 @@ impl YellowstoneWorker {
                         updated_at: processing_time,
                     };
 
-                    if let Err(error) = self.writer.upsert_settlement_match(&settlement_match).await {
-                        eprintln!("Failed to upsert settlement match: {}", error);
-                    }
+                    settlement_match_rows.push(settlement_match);
                 }
 
                 if remaining_observation_raw > 0 {
@@ -744,11 +799,33 @@ impl YellowstoneWorker {
                         updated_at: processing_time,
                     };
 
-                    if let Err(error) = self.writer.upsert_exception(&exception_row).await {
-                        eprintln!("Failed to insert residual exception: {}", error);
-                    }
+                    exception_rows.push(exception_row);
                 }
             }
+        }
+
+        if let Err(error) = self.writer.insert_matcher_events(&matcher_event_rows).await {
+            eprintln!("Failed to insert matcher events batch: {}", error);
+            return false;
+        }
+
+        if let Err(error) = self
+            .writer
+            .upsert_request_book_snapshots(&request_book_snapshot_rows)
+            .await
+        {
+            eprintln!("Failed to upsert request book snapshots batch: {}", error);
+            return false;
+        }
+
+        if let Err(error) = self.writer.upsert_settlement_matches(&settlement_match_rows).await {
+            eprintln!("Failed to upsert settlement matches batch: {}", error);
+            return false;
+        }
+
+        if let Err(error) = self.writer.upsert_exceptions(&exception_rows).await {
+            eprintln!("Failed to insert exceptions batch: {}", error);
+            return false;
         }
 
         true

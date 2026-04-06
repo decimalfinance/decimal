@@ -1,0 +1,1196 @@
+import type {
+  Prisma,
+  TransferRequest,
+  TransferRequestEvent,
+  TransferRequestNote,
+  User,
+  WorkspaceAddress,
+} from '@prisma/client';
+import { normalizeClickHouseDateTime, queryClickHouse } from './clickhouse.js';
+import { config } from './config.js';
+import { prisma } from './prisma.js';
+import { createTransferRequestEvent } from './transfer-request-events.js';
+import {
+  buildSystemProjectionPath,
+  deriveProjectedSettlementStatus,
+  deriveRequestDisplayState,
+  getTargetExceptionStatusForAction,
+  isExceptionActionAllowed,
+  type ExceptionAction,
+  type RequestStatus,
+} from './transfer-request-lifecycle.js';
+
+type TransferRequestWithRelations = TransferRequest & {
+  sourceWorkspaceAddress: WorkspaceAddress | null;
+  destinationWorkspaceAddress: WorkspaceAddress | null;
+  requestedByUser: User | null;
+  events?: TransferRequestEvent[];
+  notes?: (TransferRequestNote & {
+    authorUser: Pick<User, 'userId' | 'email' | 'displayName'> | null;
+  })[];
+};
+
+export type SettlementMatchRow = {
+  transfer_request_id: string;
+  signature: string | null;
+  observed_transfer_id: string | null;
+  match_status: string;
+  confidence_score: number | string;
+  confidence_band: string;
+  matched_amount_raw: string;
+  amount_variance_raw: string;
+  destination_match_type: string;
+  time_delta_seconds: string | number;
+  match_rule: string;
+  candidate_count: number | string;
+  explanation: string;
+  observed_event_time: string | null;
+  matched_at: string | null;
+  updated_at: string;
+  chain_to_match_ms?: string | number | null;
+};
+
+export type ExceptionRow = {
+  exception_id: string;
+  transfer_request_id: string | null;
+  signature: string | null;
+  observed_transfer_id: string | null;
+  exception_type: string;
+  severity: string;
+  status: string;
+  explanation: string;
+  properties_json: string | null;
+  observed_event_time: string | null;
+  processed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  chain_to_process_ms?: string | number | null;
+};
+
+type ObservedTransferRow = {
+  transfer_id: string;
+  signature: string;
+  slot: string | number;
+  event_time: string;
+  asset: string;
+  source_token_account: string | null;
+  source_wallet: string | null;
+  destination_token_account: string;
+  destination_wallet: string | null;
+  amount_raw: string;
+  amount_decimal: string;
+  transfer_kind: string;
+  instruction_index: number | string | null;
+  inner_instruction_index: number | string | null;
+  route_group: string;
+  leg_role: string;
+  properties_json: string | null;
+  created_at: string;
+};
+
+type ObservedPaymentRow = {
+  payment_id: string;
+  signature: string;
+  slot: string | number;
+  event_time: string;
+  asset: string;
+  source_wallet: string | null;
+  destination_wallet: string | null;
+  gross_amount_raw: string;
+  gross_amount_decimal: string;
+  net_destination_amount_raw: string;
+  net_destination_amount_decimal: string;
+  fee_amount_raw: string;
+  fee_amount_decimal: string;
+  route_count: number | string;
+  payment_kind: string;
+  reconstruction_rule: string;
+  confidence_band: string;
+  properties_json: string | null;
+  created_at: string;
+};
+
+type QueueBuildOptions = {
+  limit?: number;
+  displayState?: string;
+};
+
+export async function listReconciliationQueue(workspaceId: string, options: QueueBuildOptions = {}) {
+  const transferRequests = await prisma.transferRequest.findMany({
+    where: {
+      workspaceId,
+      asset: 'usdc',
+    },
+    include: {
+      destinationWorkspaceAddress: true,
+      sourceWorkspaceAddress: true,
+      requestedByUser: true,
+      events: {
+        orderBy: { createdAt: 'asc' },
+      },
+    },
+    orderBy: { requestedAt: 'desc' },
+    take: options.limit,
+  });
+
+  const requestIds = transferRequests.map((request) => request.transferRequestId);
+  const [matches, exceptions] = await Promise.all([
+    querySettlementMatches(workspaceId, requestIds),
+    queryExceptions(workspaceId, requestIds),
+  ]);
+
+  const projectedRequests = await projectTransferRequestStatuses({
+    workspaceId,
+    transferRequests,
+    matches,
+    exceptions,
+  });
+
+  const items = buildQueueItems({
+    transferRequests: projectedRequests,
+    matches,
+    exceptions,
+  });
+
+  return options.displayState
+    ? items.filter((item) => item.requestDisplayState === options.displayState)
+    : items;
+}
+
+export async function getReconciliationDetail(workspaceId: string, transferRequestId: string) {
+  const requestWithTimeline = await prisma.transferRequest.findFirstOrThrow({
+    where: { workspaceId, transferRequestId },
+    include: {
+      sourceWorkspaceAddress: true,
+      destinationWorkspaceAddress: true,
+      requestedByUser: true,
+      events: {
+        orderBy: { createdAt: 'asc' },
+      },
+      notes: {
+        include: {
+          authorUser: {
+            select: {
+              userId: true,
+              email: true,
+              displayName: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'asc' },
+      },
+    },
+  });
+
+  const [matches, exceptions] = await Promise.all([
+    querySettlementMatches(workspaceId, [transferRequestId]),
+    queryExceptions(workspaceId, [transferRequestId]),
+  ]);
+
+  await projectTransferRequestStatuses({
+    workspaceId,
+    transferRequests: [requestWithTimeline],
+    matches,
+    exceptions,
+  });
+
+  const projectedRequest = await prisma.transferRequest.findFirstOrThrow({
+    where: { workspaceId, transferRequestId },
+    include: {
+      sourceWorkspaceAddress: true,
+      destinationWorkspaceAddress: true,
+      requestedByUser: true,
+      events: {
+        orderBy: { createdAt: 'asc' },
+      },
+      notes: {
+        include: {
+          authorUser: {
+            select: {
+              userId: true,
+              email: true,
+              displayName: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'asc' },
+      },
+    },
+  });
+
+  const queueItems = buildQueueItems({
+    transferRequests: [projectedRequest],
+    matches,
+    exceptions,
+  });
+  const queueItem = queueItems[0];
+
+  const exceptionIds = queueItem.exceptions.map((item) => item.exceptionId);
+  const exceptionNotes = exceptionIds.length
+    ? await prisma.exceptionNote.findMany({
+        where: {
+          workspaceId,
+          exceptionId: {
+            in: exceptionIds,
+          },
+        },
+        include: {
+          authorUser: {
+            select: {
+              userId: true,
+              email: true,
+              displayName: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'asc' },
+      })
+    : [];
+
+  const exceptionNotesById = new Map<string, ReturnType<typeof serializeExceptionNote>[]>();
+  for (const note of exceptionNotes) {
+    const bucket = exceptionNotesById.get(note.exceptionId) ?? [];
+    bucket.push(serializeExceptionNote(note));
+    exceptionNotesById.set(note.exceptionId, bucket);
+  }
+
+  const enrichedExceptions = queueItem.exceptions.map((exception) => ({
+    ...exception,
+    notes: exceptionNotesById.get(exception.exceptionId) ?? [],
+    availableActions: getAvailableExceptionActions(exception.status),
+  }));
+
+  const [linkedObservedTransfers, linkedObservedPayment] = await Promise.all([
+    queryObservedTransfersByIds(queueItem.linkedTransferIds),
+    queueItem.linkedPaymentId ? queryObservedPaymentById(queueItem.linkedPaymentId) : null,
+  ]);
+
+  return {
+    ...serializeTransferRequest(projectedRequest),
+    requestDisplayState: queueItem.requestDisplayState,
+    linkedSignature: queueItem.linkedSignature,
+    linkedPaymentId: queueItem.linkedPaymentId,
+    linkedTransferIds: queueItem.linkedTransferIds,
+    linkedObservedTransfers,
+    linkedObservedPayment,
+    match: queueItem.match,
+    matchExplanation: queueItem.matchExplanation,
+    exceptions: enrichedExceptions,
+    exceptionExplanation: queueItem.exceptionExplanation,
+    events: (projectedRequest.events ?? []).map((event) =>
+      serializeTransferRequestEvent(parseTransferRequestEvent(event)),
+    ),
+    notes: (projectedRequest.notes ?? []).map(serializeTransferRequestNote),
+    timeline: buildTimeline({
+      events: (projectedRequest.events ?? []).map((event) => parseTransferRequestEvent(event)),
+      notes: (projectedRequest.notes ?? []).map(serializeTransferRequestNote),
+      match: queueItem.match,
+      exceptions: enrichedExceptions,
+    }),
+  };
+}
+
+export async function applyExceptionAction(args: {
+  workspaceId: string;
+  exceptionId: string;
+  action: ExceptionAction;
+  actorUserId: string;
+  note?: string;
+}) {
+  const { workspaceId, exceptionId, action, actorUserId, note } = args;
+  const exception = await queryExceptionById(workspaceId, exceptionId);
+
+  if (!exception) {
+    throw new Error('Exception not found');
+  }
+
+  if (!isExceptionActionAllowed(exception.status, action)) {
+    throw new Error(`Invalid exception action ${action} for status ${exception.status}`);
+  }
+
+  const nextStatus = getTargetExceptionStatusForAction(action);
+  const updatedExceptionState = await prisma.$transaction(async (tx) => {
+    const state = await tx.exceptionState.upsert({
+      where: {
+        workspaceId_exceptionId: {
+          workspaceId,
+          exceptionId,
+        },
+      },
+      update: {
+        status: nextStatus,
+        updatedByUserId: actorUserId,
+      },
+      create: {
+        workspaceId,
+        exceptionId,
+        status: nextStatus,
+        updatedByUserId: actorUserId,
+      },
+    });
+
+    if (note?.trim()) {
+      await tx.exceptionNote.create({
+        data: {
+          workspaceId,
+          exceptionId,
+          authorUserId: actorUserId,
+          body: note.trim(),
+        },
+      });
+    }
+
+    if (exception.transfer_request_id) {
+      const request = await tx.transferRequest.findUnique({
+        where: { transferRequestId: exception.transfer_request_id },
+        select: { transferRequestId: true, status: true },
+      });
+
+      if (request) {
+        await createTransferRequestEvent(tx, {
+          transferRequestId: request.transferRequestId,
+          workspaceId,
+          eventType: 'exception_status_updated',
+          actorType: 'user',
+          actorId: actorUserId,
+          eventSource: 'user',
+          beforeState: request.status,
+          afterState: request.status,
+          linkedSignature: exception.signature,
+          linkedTransferIds: exception.observed_transfer_id ? [exception.observed_transfer_id] : [],
+          payloadJson: {
+            exceptionId,
+            exceptionAction: action,
+            exceptionStatus: nextStatus,
+          },
+        });
+      }
+    }
+
+    return state;
+  });
+
+  return serializeException(applyExceptionStateOverlay(exception, updatedExceptionState));
+}
+
+export async function addExceptionNote(args: {
+  workspaceId: string;
+  exceptionId: string;
+  actorUserId: string;
+  body: string;
+}) {
+  const exception = await queryExceptionById(args.workspaceId, args.exceptionId);
+  if (!exception) {
+    throw new Error('Exception not found');
+  }
+
+  const note = await prisma.exceptionNote.create({
+    data: {
+      workspaceId: args.workspaceId,
+      exceptionId: args.exceptionId,
+      authorUserId: args.actorUserId,
+      body: args.body.trim(),
+    },
+    include: {
+      authorUser: {
+        select: {
+          userId: true,
+          email: true,
+          displayName: true,
+        },
+      },
+    },
+  });
+
+  return serializeExceptionNote(note);
+}
+
+export async function getExceptionDetail(workspaceId: string, exceptionId: string) {
+  const exception = await queryExceptionById(workspaceId, exceptionId);
+  if (!exception) {
+    throw new Error('Exception not found');
+  }
+
+  const notes = await prisma.exceptionNote.findMany({
+    where: { workspaceId, exceptionId },
+    include: {
+      authorUser: {
+        select: {
+          userId: true,
+          email: true,
+          displayName: true,
+        },
+      },
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+
+  return {
+    ...serializeException(exception),
+    notes: notes.map(serializeExceptionNote),
+    availableActions: getAvailableExceptionActions(exception.status),
+  };
+}
+
+export async function listWorkspaceExceptions(args: {
+  workspaceId: string;
+  limit?: number;
+  status?: string;
+  severity?: string;
+}) {
+  const rows = await queryExceptionsByWorkspace({
+    workspaceId: args.workspaceId,
+    severity: args.severity,
+  });
+
+  const filtered = args.status
+    ? rows.filter((row) => row.status === args.status)
+    : rows;
+
+  return filtered.slice(0, args.limit ?? 100).map(serializeException);
+}
+
+async function projectTransferRequestStatuses(args: {
+  workspaceId: string;
+  transferRequests: TransferRequestWithRelations[];
+  matches: SettlementMatchRow[];
+  exceptions: ExceptionRow[];
+}) {
+  const matchesByRequestId = new Map(args.matches.map((row) => [row.transfer_request_id, row] as const));
+  const exceptionsByRequestId = new Map<string, ExceptionRow[]>();
+
+  for (const exception of args.exceptions) {
+    if (!exception.transfer_request_id) continue;
+    const bucket = exceptionsByRequestId.get(exception.transfer_request_id) ?? [];
+    bucket.push(exception);
+    exceptionsByRequestId.set(exception.transfer_request_id, bucket);
+  }
+
+  const updates = args.transferRequests
+    .map((request) => {
+      const match = matchesByRequestId.get(request.transferRequestId) ?? null;
+      const requestExceptions = exceptionsByRequestId.get(request.transferRequestId) ?? [];
+      const targetStatus = deriveProjectedSettlementStatus({
+        currentStatus: request.status as RequestStatus,
+        matchStatus: match?.match_status ?? null,
+        exceptionStatuses: requestExceptions.map((item) => item.status),
+      });
+      const projectionPath = buildSystemProjectionPath({
+        currentStatus: request.status as RequestStatus,
+        targetStatus,
+      });
+
+      return {
+        request,
+        match,
+        requestExceptions,
+        projectionPath,
+      };
+    })
+    .filter((item) => item.projectionPath.length > 0);
+
+  if (!updates.length) {
+    return args.transferRequests;
+  }
+
+  await prisma.$transaction(async (tx) => {
+    for (const item of updates) {
+      let cursor = item.request.status as RequestStatus;
+
+      for (const nextStatus of item.projectionPath) {
+        await tx.transferRequest.update({
+          where: { transferRequestId: item.request.transferRequestId },
+          data: { status: nextStatus },
+        });
+
+        await createTransferRequestEvent(tx, {
+          transferRequestId: item.request.transferRequestId,
+          workspaceId: args.workspaceId,
+          eventType:
+            nextStatus === 'observed'
+              ? 'settlement_observed'
+              : nextStatus === 'matched'
+                ? 'settlement_matched'
+                : nextStatus === 'partially_matched'
+                  ? 'settlement_partially_matched'
+                  : 'settlement_exception_projected',
+          actorType: 'system',
+          actorId: 'settlement_projector',
+          eventSource: 'system',
+          beforeState: cursor,
+          afterState: nextStatus,
+          linkedSignature:
+            item.match?.signature ??
+            item.requestExceptions.find((exception) => exception.signature)?.signature ??
+            null,
+          linkedTransferIds: uniqueValues(
+            [
+              item.match?.observed_transfer_id,
+              ...item.requestExceptions.map((exception) => exception.observed_transfer_id),
+            ].filter((value): value is string => Boolean(value)),
+          ),
+          payloadJson: {
+            projectedBy: 'settlement_read_model',
+            matchStatus: item.match?.match_status ?? null,
+            exceptionStatuses: item.requestExceptions.map((exception) => exception.status),
+          },
+        });
+
+        cursor = nextStatus;
+      }
+    }
+  });
+
+  return prisma.transferRequest.findMany({
+    where: {
+      transferRequestId: {
+        in: args.transferRequests.map((request) => request.transferRequestId),
+      },
+    },
+    include: {
+      sourceWorkspaceAddress: true,
+      destinationWorkspaceAddress: true,
+      requestedByUser: true,
+      events: {
+        orderBy: { createdAt: 'asc' },
+      },
+    },
+    orderBy: { requestedAt: 'desc' },
+  });
+}
+
+function buildQueueItems(args: {
+  transferRequests: TransferRequestWithRelations[];
+  matches: SettlementMatchRow[];
+  exceptions: ExceptionRow[];
+}) {
+  const matchesByRequestId = new Map(args.matches.map((row) => [row.transfer_request_id, row] as const));
+  const exceptionsByRequestId = new Map<string, ExceptionRow[]>();
+
+  for (const exception of args.exceptions) {
+    if (!exception.transfer_request_id) continue;
+    const bucket = exceptionsByRequestId.get(exception.transfer_request_id) ?? [];
+    bucket.push(exception);
+    exceptionsByRequestId.set(exception.transfer_request_id, bucket);
+  }
+
+  return args.transferRequests.map((request) => {
+    const matchRow = matchesByRequestId.get(request.transferRequestId) ?? null;
+    const exceptions = (exceptionsByRequestId.get(request.transferRequestId) ?? []).map(serializeException);
+    const linkedTransferIds = uniqueValues(
+      [
+        matchRow?.observed_transfer_id,
+        ...exceptions.map((item) => item.observedTransferId),
+      ].filter((value): value is string => Boolean(value)),
+    );
+    const linkedSignature =
+      matchRow?.signature ??
+      exceptions.find((item) => item.signature)?.signature ??
+      null;
+
+    const match = matchRow ? serializeMatch(matchRow) : null;
+    return {
+      ...serializeTransferRequest(request),
+      requestDisplayState: deriveRequestDisplayState({
+        requestStatus: request.status,
+        matchStatus: matchRow?.match_status ?? null,
+        exceptionStatuses: exceptions.map((item) => item.status),
+      }),
+      linkedSignature,
+      linkedPaymentId: extractLinkedPaymentId(request.events ?? []),
+      linkedTransferIds,
+      match,
+      matchExplanation: match?.explanation ?? null,
+      exceptionExplanation: exceptions[0]?.explanation ?? null,
+      exceptions,
+    };
+  });
+}
+
+function extractLinkedPaymentId(events: TransferRequestEvent[]) {
+  const event = [...events]
+    .reverse()
+    .find((candidate) => candidate.linkedPaymentId);
+  return event?.linkedPaymentId ?? null;
+}
+
+export function serializeTransferRequest(request: TransferRequestWithRelations) {
+  return {
+    transferRequestId: request.transferRequestId,
+    workspaceId: request.workspaceId,
+    sourceWorkspaceAddressId: request.sourceWorkspaceAddressId,
+    destinationWorkspaceAddressId: request.destinationWorkspaceAddressId,
+    requestType: request.requestType,
+    asset: request.asset,
+    amountRaw: request.amountRaw.toString(),
+    requestedByUserId: request.requestedByUserId,
+    reason: request.reason,
+    externalReference: request.externalReference,
+    status: request.status,
+    requestedAt: request.requestedAt,
+    dueAt: request.dueAt,
+    propertiesJson: request.propertiesJson,
+    sourceWorkspaceAddress: request.sourceWorkspaceAddress
+      ? serializeWorkspaceAddress(request.sourceWorkspaceAddress)
+      : null,
+    destinationWorkspaceAddress: request.destinationWorkspaceAddress
+      ? serializeWorkspaceAddress(request.destinationWorkspaceAddress)
+      : null,
+    requestedByUser: request.requestedByUser
+      ? {
+          userId: request.requestedByUser.userId,
+          email: request.requestedByUser.email,
+          displayName: request.requestedByUser.displayName,
+        }
+      : null,
+  };
+}
+
+function serializeWorkspaceAddress(address: WorkspaceAddress) {
+  return {
+    workspaceAddressId: address.workspaceAddressId,
+    address: address.address,
+    usdcAtaAddress: address.usdcAtaAddress,
+    addressKind: address.addressKind,
+    displayName: address.displayName,
+    notes: address.notes,
+  };
+}
+
+export function parseTransferRequestEvent(event: TransferRequestEvent) {
+  const linkedTransferIds = Array.isArray(event.linkedTransferIds)
+    ? event.linkedTransferIds.filter((value): value is string => typeof value === 'string')
+    : [];
+
+  return {
+    ...event,
+    linkedTransferIds,
+  };
+}
+
+export function serializeTransferRequestEvent(event: ReturnType<typeof parseTransferRequestEvent>) {
+  return {
+    transferRequestEventId: event.transferRequestEventId,
+    transferRequestId: event.transferRequestId,
+    workspaceId: event.workspaceId,
+    eventType: event.eventType,
+    actorType: event.actorType,
+    actorId: event.actorId,
+    eventSource: event.eventSource,
+    beforeState: event.beforeState,
+    afterState: event.afterState,
+    linkedSignature: event.linkedSignature,
+    linkedPaymentId: event.linkedPaymentId,
+    linkedTransferIds: event.linkedTransferIds,
+    payloadJson: event.payloadJson,
+    createdAt: event.createdAt,
+  };
+}
+
+export function serializeTransferRequestNote(
+  note: TransferRequestNote & {
+    authorUser: Pick<User, 'userId' | 'email' | 'displayName'> | null;
+  },
+) {
+  return {
+    transferRequestNoteId: note.transferRequestNoteId,
+    transferRequestId: note.transferRequestId,
+    workspaceId: note.workspaceId,
+    body: note.body,
+    createdAt: note.createdAt,
+    authorUser: note.authorUser
+      ? {
+          userId: note.authorUser.userId,
+          email: note.authorUser.email,
+          displayName: note.authorUser.displayName,
+        }
+      : null,
+  };
+}
+
+function serializeExceptionNote(
+  note: Prisma.ExceptionNoteGetPayload<{
+    include: {
+      authorUser: {
+        select: {
+          userId: true;
+          email: true;
+          displayName: true;
+        };
+      };
+    };
+  }>,
+) {
+  return {
+    exceptionNoteId: note.exceptionNoteId,
+    exceptionId: note.exceptionId,
+    workspaceId: note.workspaceId,
+    body: note.body,
+    createdAt: note.createdAt,
+    authorUser: note.authorUser
+      ? {
+          userId: note.authorUser.userId,
+          email: note.authorUser.email,
+          displayName: note.authorUser.displayName,
+        }
+      : null,
+  };
+}
+
+export function buildTimeline(args: {
+  events: ReturnType<typeof parseTransferRequestEvent>[];
+  notes: ReturnType<typeof serializeTransferRequestNote>[];
+  match: ReturnType<typeof serializeMatch> | null;
+  exceptions: Array<ReturnType<typeof serializeException> & { notes?: ReturnType<typeof serializeExceptionNote>[] }>;
+}) {
+  const items = [
+    ...args.events.map((event) => ({
+      timelineType: 'request_event' as const,
+      createdAt: event.createdAt,
+      eventType: event.eventType,
+      actorType: event.actorType,
+      actorId: event.actorId,
+      eventSource: event.eventSource,
+      beforeState: event.beforeState,
+      afterState: event.afterState,
+      linkedSignature: event.linkedSignature,
+      linkedPaymentId: event.linkedPaymentId,
+      linkedTransferIds: event.linkedTransferIds,
+      payloadJson: event.payloadJson,
+    })),
+    ...args.notes.map((note) => ({
+      timelineType: 'request_note' as const,
+      createdAt: note.createdAt,
+      body: note.body,
+      authorUser: note.authorUser,
+    })),
+    ...(args.match
+      ? [
+          {
+            timelineType: 'match_result' as const,
+            createdAt: args.match.matchedAt ?? args.match.updatedAt,
+            matchStatus: args.match.matchStatus,
+            explanation: args.match.explanation,
+            linkedSignature: args.match.signature,
+            linkedTransferIds: args.match.observedTransferId ? [args.match.observedTransferId] : [],
+          },
+        ]
+      : []),
+    ...args.exceptions.map((exception) => ({
+      timelineType: 'exception' as const,
+      createdAt: exception.updatedAt,
+      exceptionId: exception.exceptionId,
+      reasonCode: exception.reasonCode,
+      severity: exception.severity,
+      status: exception.status,
+      explanation: exception.explanation,
+      linkedSignature: exception.signature,
+      linkedTransferIds: exception.observedTransferId ? [exception.observedTransferId] : [],
+      notes: exception.notes ?? [],
+    })),
+  ];
+
+  return items.sort((left, right) => {
+    const leftTime = new Date(left.createdAt).getTime();
+    const rightTime = new Date(right.createdAt).getTime();
+    return leftTime - rightTime;
+  });
+}
+
+function serializeMatch(row: SettlementMatchRow) {
+  return {
+    signature: row.signature,
+    observedTransferId: row.observed_transfer_id,
+    matchStatus: row.match_status,
+    confidenceScore: Number(row.confidence_score),
+    confidenceBand: row.confidence_band,
+    matchedAmountRaw: row.matched_amount_raw,
+    amountVarianceRaw: row.amount_variance_raw,
+    destinationMatchType: row.destination_match_type,
+    timeDeltaSeconds: Number(row.time_delta_seconds),
+    matchRule: row.match_rule,
+    candidateCount: Number(row.candidate_count),
+    explanation: row.explanation,
+    observedEventTime: normalizeClickHouseDateTime(row.observed_event_time),
+    matchedAt: normalizeClickHouseDateTime(row.matched_at ?? row.updated_at),
+    updatedAt: normalizeClickHouseDateTime(row.updated_at)!,
+    chainToMatchMs: row.chain_to_match_ms === undefined || row.chain_to_match_ms === null
+      ? null
+      : Number(row.chain_to_match_ms),
+  };
+}
+
+export function serializeException(row: ExceptionRow) {
+  return {
+    exceptionId: row.exception_id,
+    transferRequestId: row.transfer_request_id,
+    signature: row.signature,
+    observedTransferId: row.observed_transfer_id,
+    exceptionType: row.exception_type,
+    reasonCode: row.exception_type,
+    severity: row.severity,
+    status: row.status,
+    explanation: row.explanation,
+    propertiesJson: safeJsonParse(row.properties_json),
+    observedEventTime: normalizeClickHouseDateTime(row.observed_event_time),
+    processedAt: normalizeClickHouseDateTime(row.processed_at ?? row.updated_at),
+    createdAt: normalizeClickHouseDateTime(row.created_at)!,
+    updatedAt: normalizeClickHouseDateTime(row.updated_at)!,
+    chainToProcessMs:
+      row.chain_to_process_ms === undefined || row.chain_to_process_ms === null
+        ? null
+        : Number(row.chain_to_process_ms),
+  };
+}
+
+export function getAvailableExceptionActions(status: string) {
+  const actions: ExceptionAction[] = [];
+  for (const action of ['reviewed', 'expected', 'dismissed', 'reopen'] as const) {
+    if (isExceptionActionAllowed(status, action)) {
+      actions.push(action);
+    }
+  }
+  return actions;
+}
+
+function applyExceptionStateOverlay(
+  row: ExceptionRow,
+  state: {
+    status: string;
+    updatedAt: Date;
+  } | null,
+): ExceptionRow {
+  if (!state) {
+    return row;
+  }
+
+  const updatedAt = state.updatedAt.toISOString();
+  return {
+    ...row,
+    status: state.status,
+    processed_at: updatedAt,
+    updated_at: updatedAt,
+    chain_to_process_ms: null,
+  };
+}
+
+async function getExceptionStateMap(workspaceId: string, exceptionIds: string[]) {
+  if (!exceptionIds.length) {
+    return new Map<
+      string,
+      {
+        status: string;
+        updatedAt: Date;
+      }
+    >();
+  }
+
+  const states = await prisma.exceptionState.findMany({
+    where: {
+      workspaceId,
+      exceptionId: {
+        in: exceptionIds,
+      },
+    },
+    select: {
+      exceptionId: true,
+      status: true,
+      updatedAt: true,
+    },
+  });
+
+  return new Map(
+    states.map((state) => [
+      state.exceptionId,
+      {
+        status: state.status,
+        updatedAt: state.updatedAt,
+      },
+    ]),
+  );
+}
+
+async function querySettlementMatches(workspaceId: string, transferRequestIds: string[]) {
+  if (!transferRequestIds.length) {
+    return [] as SettlementMatchRow[];
+  }
+
+  const ids = transferRequestIds.map((id) => `toUUID('${escapeClickHouseString(id)}')`).join(', ');
+  return queryClickHouse<SettlementMatchRow>(`
+    SELECT
+      transfer_request_id,
+      signature,
+      observed_transfer_id,
+      match_status,
+      confidence_score,
+      confidence_band,
+      matched_amount_raw,
+      amount_variance_raw,
+      destination_match_type,
+      time_delta_seconds,
+      match_rule,
+      candidate_count,
+      explanation,
+      observed_event_time,
+      matched_at,
+      if(isNull(observed_event_time) OR isNull(matched_at), NULL, dateDiff('millisecond', observed_event_time, matched_at)) AS chain_to_match_ms,
+      updated_at
+    FROM ${config.clickhouseDatabase}.settlement_matches FINAL
+    WHERE workspace_id = toUUID('${workspaceId}')
+      AND transfer_request_id IN (${ids})
+    ORDER BY updated_at DESC
+    LIMIT 1 BY transfer_request_id
+    FORMAT JSONEachRow
+  `);
+}
+
+async function queryExceptions(workspaceId: string, transferRequestIds: string[]) {
+  if (!transferRequestIds.length) {
+    return [] as ExceptionRow[];
+  }
+
+  const ids = transferRequestIds.map((id) => `toUUID('${escapeClickHouseString(id)}')`).join(', ');
+  const rows = await queryClickHouse<ExceptionRow>(`
+    SELECT
+      exception_id,
+      transfer_request_id,
+      signature,
+      observed_transfer_id,
+      exception_type,
+      severity,
+      status,
+      explanation,
+      properties_json,
+      observed_event_time,
+      processed_at,
+      if(isNull(observed_event_time) OR isNull(processed_at), NULL, dateDiff('millisecond', observed_event_time, processed_at)) AS chain_to_process_ms,
+      created_at,
+      updated_at
+    FROM ${config.clickhouseDatabase}.exceptions FINAL
+    WHERE workspace_id = toUUID('${workspaceId}')
+      AND transfer_request_id IN (${ids})
+    ORDER BY updated_at DESC
+    LIMIT 1 BY exception_id
+    FORMAT JSONEachRow
+  `);
+
+  const stateMap = await getExceptionStateMap(
+    workspaceId,
+    rows.map((row) => row.exception_id),
+  );
+
+  return rows.map((row) => applyExceptionStateOverlay(row, stateMap.get(row.exception_id) ?? null));
+}
+
+async function queryExceptionById(workspaceId: string, exceptionId: string) {
+  const rows = await queryClickHouse<ExceptionRow>(`
+    SELECT
+      exception_id,
+      transfer_request_id,
+      signature,
+      observed_transfer_id,
+      exception_type,
+      severity,
+      status,
+      explanation,
+      properties_json,
+      observed_event_time,
+      processed_at,
+      created_at,
+      updated_at
+    FROM ${config.clickhouseDatabase}.exceptions FINAL
+    WHERE workspace_id = toUUID('${workspaceId}')
+      AND exception_id = toUUID('${exceptionId}')
+    ORDER BY updated_at DESC
+    LIMIT 1
+    FORMAT JSONEachRow
+  `);
+
+  const row = rows[0] ?? null;
+  if (!row) {
+    return null;
+  }
+
+  const state = await prisma.exceptionState.findUnique({
+    where: {
+      workspaceId_exceptionId: {
+        workspaceId,
+        exceptionId,
+      },
+    },
+    select: {
+      status: true,
+      updatedAt: true,
+    },
+  });
+
+  return applyExceptionStateOverlay(row, state);
+}
+
+async function queryExceptionsByWorkspace(args: {
+  workspaceId: string;
+  severity?: string;
+}) {
+  const clauses = [`workspace_id = toUUID('${args.workspaceId}')`];
+  if (args.severity) {
+    clauses.push(`severity = '${escapeClickHouseString(args.severity)}'`);
+  }
+
+  const rows = await queryClickHouse<ExceptionRow>(`
+    SELECT
+      exception_id,
+      transfer_request_id,
+      signature,
+      observed_transfer_id,
+      exception_type,
+      severity,
+      status,
+      explanation,
+      properties_json,
+      observed_event_time,
+      processed_at,
+      if(isNull(observed_event_time) OR isNull(processed_at), NULL, dateDiff('millisecond', observed_event_time, processed_at)) AS chain_to_process_ms,
+      created_at,
+      updated_at
+    FROM ${config.clickhouseDatabase}.exceptions FINAL
+    WHERE ${clauses.join(' AND ')}
+    ORDER BY updated_at DESC
+    LIMIT 1 BY exception_id
+    FORMAT JSONEachRow
+  `);
+
+  const stateMap = await getExceptionStateMap(
+    args.workspaceId,
+    rows.map((row) => row.exception_id),
+  );
+
+  return rows.map((row) => applyExceptionStateOverlay(row, stateMap.get(row.exception_id) ?? null));
+}
+
+async function queryObservedTransfersByIds(transferIds: string[]) {
+  if (!transferIds.length) {
+    return [];
+  }
+
+  const ids = transferIds.map((value) => `toUUID('${escapeClickHouseString(value)}')`).join(', ');
+  const rows = await queryClickHouse<ObservedTransferRow>(`
+    SELECT
+      transfer_id,
+      signature,
+      slot,
+      event_time,
+      asset,
+      source_token_account,
+      source_wallet,
+      destination_token_account,
+      destination_wallet,
+      amount_raw,
+      amount_decimal,
+      transfer_kind,
+      instruction_index,
+      inner_instruction_index,
+      route_group,
+      leg_role,
+      properties_json,
+      created_at
+    FROM ${config.clickhouseDatabase}.observed_transfers
+    WHERE transfer_id IN (${ids})
+    ORDER BY event_time ASC
+    FORMAT JSONEachRow
+  `);
+
+  return rows.map((row) => ({
+    transferId: row.transfer_id,
+    signature: row.signature,
+    slot: Number(row.slot),
+    eventTime: normalizeClickHouseDateTime(row.event_time)!,
+    asset: row.asset,
+    sourceTokenAccount: row.source_token_account,
+    sourceWallet: row.source_wallet,
+    destinationTokenAccount: row.destination_token_account,
+    destinationWallet: row.destination_wallet,
+    amountRaw: row.amount_raw,
+    amountDecimal: row.amount_decimal,
+    transferKind: row.transfer_kind,
+    instructionIndex: row.instruction_index === null ? null : Number(row.instruction_index),
+    innerInstructionIndex:
+      row.inner_instruction_index === null ? null : Number(row.inner_instruction_index),
+    routeGroup: row.route_group,
+    legRole: row.leg_role,
+    propertiesJson: safeJsonParse(row.properties_json),
+    createdAt: normalizeClickHouseDateTime(row.created_at)!,
+  }));
+}
+
+async function queryObservedPaymentById(paymentId: string) {
+  const rows = await queryClickHouse<ObservedPaymentRow>(`
+    SELECT
+      payment_id,
+      signature,
+      slot,
+      event_time,
+      asset,
+      source_wallet,
+      destination_wallet,
+      gross_amount_raw,
+      gross_amount_decimal,
+      net_destination_amount_raw,
+      net_destination_amount_decimal,
+      fee_amount_raw,
+      fee_amount_decimal,
+      route_count,
+      payment_kind,
+      reconstruction_rule,
+      confidence_band,
+      properties_json,
+      created_at
+    FROM ${config.clickhouseDatabase}.observed_payments
+    WHERE payment_id = toUUID('${escapeClickHouseString(paymentId)}')
+    LIMIT 1
+    FORMAT JSONEachRow
+  `);
+
+  const row = rows[0];
+  if (!row) {
+    return null;
+  }
+
+  return {
+    paymentId: row.payment_id,
+    signature: row.signature,
+    slot: Number(row.slot),
+    eventTime: normalizeClickHouseDateTime(row.event_time)!,
+    asset: row.asset,
+    sourceWallet: row.source_wallet,
+    destinationWallet: row.destination_wallet,
+    grossAmountRaw: row.gross_amount_raw,
+    grossAmountDecimal: row.gross_amount_decimal,
+    netDestinationAmountRaw: row.net_destination_amount_raw,
+    netDestinationAmountDecimal: row.net_destination_amount_decimal,
+    feeAmountRaw: row.fee_amount_raw,
+    feeAmountDecimal: row.fee_amount_decimal,
+    routeCount: Number(row.route_count),
+    paymentKind: row.payment_kind,
+    reconstructionRule: row.reconstruction_rule,
+    confidenceBand: row.confidence_band,
+    propertiesJson: safeJsonParse(row.properties_json),
+    createdAt: normalizeClickHouseDateTime(row.created_at)!,
+  };
+}
+
+function safeJsonParse(value: string | null) {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+function escapeClickHouseString(value: string) {
+  return value.replaceAll('\\', '\\\\').replaceAll("'", "\\'");
+}
+
+function uniqueValues(values: string[]) {
+  return [...new Set(values)];
+}

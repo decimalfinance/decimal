@@ -88,6 +88,32 @@ export type TransferRequest = {
   destinationWorkspaceAddress: WorkspaceAddressLite | null;
 };
 
+export type TransferRequestEvent = {
+  transferRequestEventId: string;
+  transferRequestId: string;
+  workspaceId: string;
+  eventType: string;
+  actorType: string;
+  actorId: string | null;
+  eventSource: string;
+  beforeState: string | null;
+  afterState: string | null;
+  linkedSignature: string | null;
+  linkedPaymentId: string | null;
+  linkedTransferIds: string[];
+  payloadJson: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type TransferRequestNote = {
+  transferRequestNoteId: string;
+  transferRequestId: string;
+  workspaceId: string;
+  body: string;
+  createdAt: string;
+  authorUser: User | null;
+};
+
 export type ObservedTransfer = {
   transferId: string;
   signature: string;
@@ -123,9 +149,14 @@ export type ReconciliationRow = {
   dueAt: string | null;
   reason: string | null;
   externalReference: string | null;
+  propertiesJson: Record<string, unknown>;
   requestedByUser: User | null;
   sourceWorkspaceAddress: WorkspaceAddressLite | null;
   destinationWorkspaceAddress: WorkspaceAddressLite | null;
+  requestDisplayState: 'pending' | 'matched' | 'partial' | 'exception';
+  linkedSignature: string | null;
+  linkedPaymentId: string | null;
+  linkedTransferIds: string[];
   match: {
     signature: string | null;
     observedTransferId: string | null;
@@ -144,7 +175,8 @@ export type ReconciliationRow = {
     updatedAt: string;
     chainToMatchMs: number | null;
   } | null;
-  reconciliationStatus: string;
+  matchExplanation: string | null;
+  exceptionExplanation: string | null;
   exceptions: ExceptionItem[];
 };
 
@@ -154,6 +186,7 @@ export type ExceptionItem = {
   signature: string | null;
   observedTransferId: string | null;
   exceptionType: string;
+  reasonCode: string;
   severity: string;
   status: string;
   explanation: string;
@@ -163,4 +196,88 @@ export type ExceptionItem = {
   createdAt: string;
   updatedAt: string;
   chainToProcessMs: number | null;
+  notes?: ExceptionNote[];
+  availableActions?: ('reviewed' | 'expected' | 'dismissed' | 'reopen')[];
+};
+
+export type ExceptionNote = {
+  exceptionNoteId: string;
+  exceptionId: string;
+  workspaceId: string;
+  body: string;
+  createdAt: string;
+  authorUser: User | null;
+};
+
+export type ObservedPayment = {
+  paymentId: string;
+  signature: string;
+  slot: number;
+  eventTime: string;
+  asset: string;
+  sourceWallet: string | null;
+  destinationWallet: string | null;
+  grossAmountRaw: string;
+  grossAmountDecimal: string;
+  netDestinationAmountRaw: string;
+  netDestinationAmountDecimal: string;
+  feeAmountRaw: string;
+  feeAmountDecimal: string;
+  routeCount: number;
+  paymentKind: string;
+  reconstructionRule: string;
+  confidenceBand: string;
+  propertiesJson: Record<string, unknown> | string | null;
+  createdAt: string;
+};
+
+export type ReconciliationTimelineItem =
+  | {
+      timelineType: 'request_event';
+      createdAt: string;
+      eventType: string;
+      actorType: string;
+      actorId: string | null;
+      eventSource: string;
+      beforeState: string | null;
+      afterState: string | null;
+      linkedSignature: string | null;
+      linkedPaymentId: string | null;
+      linkedTransferIds: string[];
+      payloadJson: Record<string, unknown>;
+    }
+  | {
+      timelineType: 'request_note';
+      createdAt: string;
+      body: string;
+      authorUser: User | null;
+    }
+  | {
+      timelineType: 'match_result';
+      createdAt: string;
+      matchStatus: string;
+      explanation: string;
+      linkedSignature: string | null;
+      linkedTransferIds: string[];
+    }
+  | {
+      timelineType: 'exception';
+      createdAt: string;
+      exceptionId: string;
+      reasonCode: string;
+      severity: string;
+      status: string;
+      explanation: string;
+      linkedSignature: string | null;
+      linkedTransferIds: string[];
+      notes: ExceptionNote[];
+    };
+
+export type ReconciliationDetail = ReconciliationRow & {
+  linkedObservedTransfers: ObservedTransfer[];
+  linkedObservedPayment: ObservedPayment | null;
+  events: TransferRequestEvent[];
+  notes: TransferRequestNote[];
+  timeline: ReconciliationTimelineItem[];
+  availableTransitions: string[];
 };

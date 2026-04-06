@@ -1,8 +1,17 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../prisma.js';
-import { queryClickHouse } from '../clickhouse.js';
 import { config } from '../config.js';
+import { normalizeClickHouseDateTime, queryClickHouse } from '../clickhouse.js';
+import {
+  addExceptionNote,
+  applyExceptionAction,
+  getExceptionDetail,
+  getReconciliationDetail,
+  listReconciliationQueue,
+  listWorkspaceExceptions,
+} from '../reconciliation.js';
+import { getAvailableUserTransitions, type RequestStatus } from '../transfer-request-lifecycle.js';
 import { assertWorkspaceAccess } from '../workspace-access.js';
 
 export const eventsRouter = Router();
@@ -11,14 +20,35 @@ const workspaceParamsSchema = z.object({
   workspaceId: z.string().uuid(),
 });
 
+const transferRequestParamsSchema = workspaceParamsSchema.extend({
+  transferRequestId: z.string().uuid(),
+});
+
+const exceptionParamsSchema = workspaceParamsSchema.extend({
+  exceptionId: z.string().uuid(),
+});
+
 const listQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(100),
 });
 
+const reconciliationQueueQuerySchema = listQuerySchema.extend({
+  displayState: z.enum(['pending', 'matched', 'partial', 'exception']).optional(),
+});
+
 const exceptionsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(100),
-  status: z.string().optional(),
+  status: z.enum(['open', 'reviewed', 'expected', 'dismissed', 'reopened']).optional(),
   severity: z.string().optional(),
+});
+
+const exceptionActionSchema = z.object({
+  action: z.enum(['reviewed', 'expected', 'dismissed', 'reopen']),
+  note: z.string().trim().min(1).max(5000).optional(),
+});
+
+const exceptionNoteSchema = z.object({
+  body: z.string().trim().min(1).max(5000),
 });
 
 type ObservedTransferRow = {
@@ -41,43 +71,6 @@ type ObservedTransferRow = {
   properties_json: string | null;
   created_at: string;
   chain_to_write_ms: string | number;
-};
-
-type SettlementMatchRow = {
-  transfer_request_id: string;
-  signature: string | null;
-  observed_transfer_id: string | null;
-  match_status: string;
-  confidence_score: number | string;
-  confidence_band: string;
-  matched_amount_raw: string;
-  amount_variance_raw: string;
-  destination_match_type: string;
-  time_delta_seconds: string | number;
-  match_rule: string;
-  candidate_count: number | string;
-  explanation: string;
-  observed_event_time: string | null;
-  matched_at: string | null;
-  updated_at: string;
-  chain_to_match_ms: string | number | null;
-};
-
-type ExceptionRow = {
-  exception_id: string;
-  transfer_request_id: string | null;
-  signature: string | null;
-  observed_transfer_id: string | null;
-  exception_type: string;
-  severity: string;
-  status: string;
-  explanation: string;
-  properties_json: string | null;
-  observed_event_time: string | null;
-  processed_at: string | null;
-  created_at: string;
-  updated_at: string;
-  chain_to_process_ms: string | number | null;
 };
 
 eventsRouter.get('/workspaces/:workspaceId/transfers', async (req, res, next) => {
@@ -152,7 +145,7 @@ eventsRouter.get('/workspaces/:workspaceId/transfers', async (req, res, next) =>
         transferId: row.transfer_id,
         signature: row.signature,
         slot: Number(row.slot),
-        eventTime: row.event_time,
+        eventTime: normalizeClickHouseDateTime(row.event_time),
         asset: row.asset,
         sourceTokenAccount: row.source_token_account,
         sourceWallet: row.source_wallet,
@@ -168,7 +161,7 @@ eventsRouter.get('/workspaces/:workspaceId/transfers', async (req, res, next) =>
         routeGroup: row.route_group,
         legRole: row.leg_role,
         propertiesJson: safeJsonParse(row.properties_json),
-        createdAt: row.created_at,
+        createdAt: normalizeClickHouseDateTime(row.created_at),
         chainToWriteMs: Number(row.chain_to_write_ms),
       })),
     });
@@ -180,148 +173,59 @@ eventsRouter.get('/workspaces/:workspaceId/transfers', async (req, res, next) =>
 eventsRouter.get('/workspaces/:workspaceId/reconciliation', async (req, res, next) => {
   try {
     const { workspaceId } = workspaceParamsSchema.parse(req.params);
-    const query = listQuerySchema.parse(req.query);
+    const query = reconciliationQueueQuerySchema.parse(req.query);
     await assertWorkspaceAccess(workspaceId, req.auth!.userId);
 
-    const [transferRequests, matches, exceptions] = await Promise.all([
-      prisma.transferRequest.findMany({
-        where: {
-          workspaceId,
-          asset: 'usdc',
-        },
-        include: {
-          destinationWorkspaceAddress: true,
-          sourceWorkspaceAddress: true,
-          requestedByUser: true,
-        },
-        orderBy: { requestedAt: 'desc' },
-        take: query.limit,
-      }),
-      queryClickHouse<SettlementMatchRow>(`
-        SELECT
-          transfer_request_id,
-          signature,
-          observed_transfer_id,
-          match_status,
-          confidence_score,
-          confidence_band,
-          matched_amount_raw,
-          amount_variance_raw,
-          destination_match_type,
-          time_delta_seconds,
-          match_rule,
-          candidate_count,
-          explanation,
-          observed_event_time,
-          matched_at,
-          if(isNull(observed_event_time) OR isNull(matched_at), NULL, dateDiff('millisecond', observed_event_time, matched_at)) AS chain_to_match_ms,
-          updated_at
-        FROM ${config.clickhouseDatabase}.settlement_matches FINAL
-        WHERE workspace_id = toUUID('${workspaceId}')
-        FORMAT JSONEachRow
-      `),
-      queryClickHouse<ExceptionRow>(`
-        SELECT
-          exception_id,
-          transfer_request_id,
-          signature,
-          observed_transfer_id,
-          exception_type,
-          severity,
-          status,
-          explanation,
-          properties_json,
-          observed_event_time,
-          processed_at,
-          if(isNull(observed_event_time) OR isNull(processed_at), NULL, dateDiff('millisecond', observed_event_time, processed_at)) AS chain_to_process_ms,
-          created_at,
-          updated_at
-        FROM ${config.clickhouseDatabase}.exceptions FINAL
-        WHERE workspace_id = toUUID('${workspaceId}')
-        FORMAT JSONEachRow
-      `),
-    ]);
-
-    const matchesByRequestId = new Map(matches.map((row) => [row.transfer_request_id, row] as const));
-    const exceptionsByRequestId = new Map<string, ExceptionRow[]>();
-
-    for (const exception of exceptions) {
-      if (!exception.transfer_request_id) continue;
-      const bucket = exceptionsByRequestId.get(exception.transfer_request_id) ?? [];
-      bucket.push(exception);
-      exceptionsByRequestId.set(exception.transfer_request_id, bucket);
-    }
-
-    const nowMs = Date.now();
-    const windowMs = 24 * 60 * 60 * 1000;
+    const items = await listReconciliationQueue(workspaceId, {
+      limit: query.limit,
+      displayState: query.displayState,
+    });
 
     res.json({
       servedAt: new Date().toISOString(),
-      items: transferRequests.map((request) => {
-        const bestMatch = matchesByRequestId.get(request.transferRequestId) ?? null;
-        const requestExceptions = exceptionsByRequestId.get(request.transferRequestId) ?? [];
-        const derivedStatus = bestMatch
-          ? bestMatch.match_status
-          : nowMs - request.requestedAt.getTime() > windowMs
-            ? 'unmatched_expired'
-            : 'unmatched_pending';
-
-        return {
-          transferRequestId: request.transferRequestId,
-          workspaceId: request.workspaceId,
-          sourceWorkspaceAddressId: request.sourceWorkspaceAddressId,
-          destinationWorkspaceAddressId: request.destinationWorkspaceAddressId,
-          requestType: request.requestType,
-          asset: request.asset,
-          amountRaw: request.amountRaw.toString(),
-          status: request.status,
-          requestedAt: request.requestedAt,
-          dueAt: request.dueAt,
-          reason: request.reason,
-          externalReference: request.externalReference,
-          requestedByUser: request.requestedByUser
-            ? {
-                userId: request.requestedByUser.userId,
-                email: request.requestedByUser.email,
-                displayName: request.requestedByUser.displayName,
-              }
-            : null,
-          sourceWorkspaceAddress: request.sourceWorkspaceAddress
-            ? serializeWorkspaceAddress(request.sourceWorkspaceAddress)
-            : null,
-          destinationWorkspaceAddress: request.destinationWorkspaceAddress
-            ? serializeWorkspaceAddress(request.destinationWorkspaceAddress)
-            : null,
-          match: bestMatch
-            ? {
-                signature: bestMatch.signature,
-                observedTransferId: bestMatch.observed_transfer_id,
-                matchStatus: bestMatch.match_status,
-                confidenceScore: Number(bestMatch.confidence_score),
-                confidenceBand: bestMatch.confidence_band,
-                matchedAmountRaw: bestMatch.matched_amount_raw,
-                amountVarianceRaw: bestMatch.amount_variance_raw,
-                destinationMatchType: bestMatch.destination_match_type,
-                timeDeltaSeconds: Number(bestMatch.time_delta_seconds),
-                matchRule: bestMatch.match_rule,
-                candidateCount: Number(bestMatch.candidate_count),
-                explanation: bestMatch.explanation,
-                observedEventTime: bestMatch.observed_event_time,
-                matchedAt: bestMatch.matched_at ?? bestMatch.updated_at,
-                updatedAt: bestMatch.updated_at,
-                chainToMatchMs:
-                  bestMatch.chain_to_match_ms === null ? null : Number(bestMatch.chain_to_match_ms),
-              }
-            : null,
-          reconciliationStatus: derivedStatus,
-          exceptions: requestExceptions.map(serializeException),
-        };
-      }),
+      items,
     });
   } catch (error) {
     next(error);
   }
 });
+
+eventsRouter.get('/workspaces/:workspaceId/reconciliation-queue', async (req, res, next) => {
+  try {
+    const { workspaceId } = workspaceParamsSchema.parse(req.params);
+    const query = reconciliationQueueQuerySchema.parse(req.query);
+    await assertWorkspaceAccess(workspaceId, req.auth!.userId);
+
+    const items = await listReconciliationQueue(workspaceId, {
+      limit: query.limit,
+      displayState: query.displayState,
+    });
+
+    res.json({
+      servedAt: new Date().toISOString(),
+      items,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+eventsRouter.get(
+  '/workspaces/:workspaceId/reconciliation-queue/:transferRequestId',
+  async (req, res, next) => {
+    try {
+      const { workspaceId, transferRequestId } = transferRequestParamsSchema.parse(req.params);
+      await assertWorkspaceAccess(workspaceId, req.auth!.userId);
+      const detail = await getReconciliationDetail(workspaceId, transferRequestId);
+      res.json({
+        ...detail,
+        availableTransitions: getAvailableUserTransitions(detail.status as RequestStatus),
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
 
 eventsRouter.get('/workspaces/:workspaceId/exceptions', async (req, res, next) => {
   try {
@@ -329,76 +233,71 @@ eventsRouter.get('/workspaces/:workspaceId/exceptions', async (req, res, next) =
     const query = exceptionsQuerySchema.parse(req.query);
     await assertWorkspaceAccess(workspaceId, req.auth!.userId);
 
-    const clauses = [`workspace_id = toUUID('${workspaceId}')`];
-    if (query.status) clauses.push(`status = '${escapeClickHouseString(query.status)}'`);
-    if (query.severity) clauses.push(`severity = '${escapeClickHouseString(query.severity)}'`);
-
-    const rows = await queryClickHouse<ExceptionRow>(`
-      SELECT
-        exception_id,
-        transfer_request_id,
-        signature,
-        observed_transfer_id,
-        exception_type,
-        severity,
-        status,
-        explanation,
-        properties_json,
-        created_at,
-        updated_at
-      FROM ${config.clickhouseDatabase}.exceptions FINAL
-      WHERE ${clauses.join(' AND ')}
-      ORDER BY updated_at DESC
-      LIMIT ${query.limit}
-      FORMAT JSONEachRow
-    `);
+    const items = await listWorkspaceExceptions({
+      workspaceId,
+      limit: query.limit,
+      status: query.status,
+      severity: query.severity,
+    });
 
     res.json({
       servedAt: new Date().toISOString(),
-      items: rows.map(serializeException),
+      items,
     });
   } catch (error) {
     next(error);
   }
 });
 
-function serializeWorkspaceAddress(address: {
-  workspaceAddressId: string;
-  address: string;
-  usdcAtaAddress: string | null;
-  addressKind: string;
-  displayName: string | null;
-  notes: string | null;
-}) {
-  return {
-    workspaceAddressId: address.workspaceAddressId,
-    address: address.address,
-    usdcAtaAddress: address.usdcAtaAddress,
-    addressKind: address.addressKind,
-    displayName: address.displayName,
-    notes: address.notes,
-  };
-}
+eventsRouter.get('/workspaces/:workspaceId/exceptions/:exceptionId', async (req, res, next) => {
+  try {
+    const { workspaceId, exceptionId } = exceptionParamsSchema.parse(req.params);
+    await assertWorkspaceAccess(workspaceId, req.auth!.userId);
+    const detail = await getExceptionDetail(workspaceId, exceptionId);
+    res.json(detail);
+  } catch (error) {
+    next(error);
+  }
+});
 
-function serializeException(exception: ExceptionRow) {
-  return {
-    exceptionId: exception.exception_id,
-    transferRequestId: exception.transfer_request_id,
-    signature: exception.signature,
-    observedTransferId: exception.observed_transfer_id,
-    exceptionType: exception.exception_type,
-    severity: exception.severity,
-    status: exception.status,
-    explanation: exception.explanation,
-    propertiesJson: safeJsonParse(exception.properties_json),
-    observedEventTime: exception.observed_event_time,
-    processedAt: exception.processed_at ?? exception.updated_at,
-    createdAt: exception.created_at,
-    updatedAt: exception.updated_at,
-    chainToProcessMs:
-      exception.chain_to_process_ms === null ? null : Number(exception.chain_to_process_ms),
-  };
-}
+eventsRouter.post('/workspaces/:workspaceId/exceptions/:exceptionId/actions', async (req, res, next) => {
+  try {
+    const { workspaceId, exceptionId } = exceptionParamsSchema.parse(req.params);
+    await assertWorkspaceAccess(workspaceId, req.auth!.userId);
+    const input = exceptionActionSchema.parse(req.body);
+
+    const updated = await applyExceptionAction({
+      workspaceId,
+      exceptionId,
+      action: input.action,
+      actorUserId: req.auth!.userId,
+      note: input.note,
+    });
+
+    res.json(updated);
+  } catch (error) {
+    next(error);
+  }
+});
+
+eventsRouter.post('/workspaces/:workspaceId/exceptions/:exceptionId/notes', async (req, res, next) => {
+  try {
+    const { workspaceId, exceptionId } = exceptionParamsSchema.parse(req.params);
+    await assertWorkspaceAccess(workspaceId, req.auth!.userId);
+    const input = exceptionNoteSchema.parse(req.body);
+
+    const note = await addExceptionNote({
+      workspaceId,
+      exceptionId,
+      actorUserId: req.auth!.userId,
+      body: input.body,
+    });
+
+    res.status(201).json(note);
+  } catch (error) {
+    next(error);
+  }
+});
 
 function safeJsonParse(value: string | null) {
   if (!value) return null;

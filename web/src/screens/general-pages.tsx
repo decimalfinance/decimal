@@ -1,7 +1,6 @@
 import type { FormEvent } from 'react';
 import type {
   AuthenticatedSession,
-  OrganizationDirectoryItem,
   OrganizationMembership,
   Workspace,
 } from '../types';
@@ -244,32 +243,18 @@ export function LoginScreen({
 export function DashboardPage({
   onGoOrgs,
   onOpenOrganization,
-  onOpenWorkspace,
   session,
 }: {
   onGoOrgs: () => void;
   onOpenOrganization: (organizationId: string) => void;
-  onOpenWorkspace: (workspaceId: string) => void;
   session: AuthenticatedSession;
 }) {
-  const recentWorkspaces = session.organizations.flatMap((organization) =>
-    organization.workspaces.map((workspace) => ({
-      organizationId: organization.organizationId,
-      organizationName: organization.organizationName,
-      role: organization.role,
-      workspace,
-    })),
-  );
-
   return (
     <div className="page-stack">
       <section className="hero-panel">
         <div>
           <p className="eyebrow">Dashboard</p>
           <h1>Welcome back, {session.user.displayName}.</h1>
-          <p className="section-copy">
-            This is your personal operator view. Start from an organization, then open one workspace when you are ready to manage wallets and planned transfers.
-          </p>
         </div>
         <div className="hero-metrics">
           <Metric label="Orgs" value={String(session.organizations.length).padStart(2, '0')} />
@@ -312,53 +297,17 @@ export function DashboardPage({
             )}
           </div>
         </div>
-
-        <div className="content-panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Recent workspaces</p>
-              <h2>Jump back in</h2>
-            </div>
-          </div>
-
-          <div className="stack-list">
-            {recentWorkspaces.length ? (
-              recentWorkspaces.slice(0, 6).map(({ organizationName, role, workspace }) => (
-                <button
-                  key={workspace.workspaceId}
-                  className="workspace-row"
-                  onClick={() => onOpenWorkspace(workspace.workspaceId)}
-                  type="button"
-                >
-                  <div>
-                    <strong>{workspace.workspaceName}</strong>
-                    <small>{organizationName} // {role}</small>
-                  </div>
-                  <span>{workspace.status}</span>
-                </button>
-              ))
-            ) : (
-              <div className="empty-box compact">No workspaces yet. Open an organization to create the first one.</div>
-            )}
-          </div>
-        </div>
       </section>
     </div>
   );
 }
 
 export function OrganizationsPage({
-  directory,
-  isLoading,
   onCreateOrganization,
-  onJoinOrganization,
   onOpenOrganization,
   session,
 }: {
-  directory: OrganizationDirectoryItem[];
-  isLoading: boolean;
   onCreateOrganization: (event: FormEvent<HTMLFormElement>) => Promise<void>;
-  onJoinOrganization: (organizationId: string) => Promise<void>;
   onOpenOrganization: (organizationId: string) => void;
   session: AuthenticatedSession;
 }) {
@@ -422,38 +371,6 @@ export function OrganizationsPage({
               Create organization
             </button>
           </form>
-        </div>
-      </section>
-
-      <section className="content-panel">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Directory</p>
-            <h2>Available organizations</h2>
-          </div>
-          <span className="status-chip">{isLoading ? 'syncing' : 'ready'}</span>
-        </div>
-
-        <div className="stack-list">
-          {directory.map((organization) => (
-            <div key={organization.organizationId} className="workspace-row static-row">
-              <div>
-                <strong>{organization.organizationName}</strong>
-                <small>
-                  {organization.workspaceCount} workspaces
-                </small>
-              </div>
-              {organization.isMember ? (
-                <button className="ghost-button" onClick={() => onOpenOrganization(organization.organizationId)} type="button">
-                  open
-                </button>
-              ) : (
-                <button className="ghost-button" onClick={() => onJoinOrganization(organization.organizationId)} type="button">
-                  join
-                </button>
-              )}
-            </div>
-          ))}
         </div>
       </section>
     </div>
