@@ -364,6 +364,32 @@ export function WorkspaceHomePage({
                   </div>
                 ) : null}
 
+                {selectedReconciliationDetail.relatedObservedPayments.length > 1 ? (
+                  <div className="detail-section">
+                    <div className="detail-section-head">
+                      <strong>Settlement breakdown</strong>
+                      <span>{selectedReconciliationDetail.relatedObservedPayments.length}</span>
+                    </div>
+                    <div className="stack-list">
+                      {selectedReconciliationDetail.relatedObservedPayments.map((payment) => (
+                        <div className="note-card" key={payment.paymentId}>
+                          <strong>
+                            {payment.destinationLabel ??
+                              payment.destinationWallet ??
+                              'Unknown destination'}
+                          </strong>
+                          <small>
+                            {payment.recipientRole
+                              ? payment.recipientRole.replaceAll('_', ' ')
+                              : 'destination'}
+                          </small>
+                          <p>{formatRawUsdc(payment.netDestinationAmountRaw)} USDC</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
                 {selectedReconciliationDetail.exceptions.length ? (
                   <div className="detail-section">
                     <div className="detail-section-head">

@@ -537,6 +537,140 @@ test('reconciliation and request detail expose derived display state, explanatio
   );
 });
 
+test('reconciliation detail explains fee-adjusted partial matches with known recipient labels', async () => {
+  const setup = await createTransferRequestSetup({ status: 'draft' });
+  const transferId = crypto.randomUUID();
+  const paymentId = crypto.randomUUID();
+  const feePaymentId = crypto.randomUUID();
+  const signature = '4wJeeY9Rw5qP3HmWGFGXaQ7YmtYQcJ8eftYgXriQKLXTTpQZVz3GuzoRzqkNmL26LXMEXfYZGA9ap9qbpTzcTtEC';
+  const eventTime = '2026-04-06 21:57:04.352';
+  const createdAt = '2026-04-06 22:01:16.671';
+  const jupiterAuthorityWallet = '69yhtoJR4JYPPABZcSNkzuqbaFbwHsCkja1sP1Q2aVT5';
+
+  await post(
+    `/workspaces/${setup.workspace.workspaceId}/transfer-requests/${setup.transferRequest.transferRequestId}/transitions`,
+    {
+      toStatus: 'submitted',
+      linkedPaymentId: paymentId,
+      linkedTransferIds: [transferId],
+      linkedSignature: signature,
+      payloadJson: {
+        source: 'test-seed',
+      },
+    },
+    setup.sessionToken,
+  );
+
+  await insertClickHouseRows('observed_transfers', [
+    {
+      transfer_id: transferId,
+      signature,
+      slot: 411497760,
+      event_time: eventTime,
+      asset: 'usdc',
+      source_token_account: '64HWdAaTsTVvsQWQnw4PKVWeQ5BQXJ5dT6fTwerqo9US',
+      source_wallet: 'VhfmPjvQxSiQW2FjnvoghewGGVYaWcz4cmDxpFPQEti',
+      destination_token_account: setup.destinationAddress.usdcAtaAddress,
+      destination_wallet: setup.destinationAddress.address,
+      amount_raw: '9182',
+      amount_decimal: '0.009182',
+      transfer_kind: 'spl_token_transfer_checked',
+      instruction_index: 2,
+      inner_instruction_index: null,
+      route_group: 'ix 2',
+      leg_role: 'direct_settlement',
+      properties_json: JSON.stringify({ seeded: true }),
+      created_at: createdAt,
+    },
+  ]);
+
+  await insertClickHouseRows('observed_payments', [
+    {
+      payment_id: paymentId,
+      signature,
+      slot: 411497760,
+      event_time: eventTime,
+      asset: 'usdc',
+      source_wallet: 'VhfmPjvQxSiQW2FjnvoghewGGVYaWcz4cmDxpFPQEti',
+      destination_wallet: setup.destinationAddress.address,
+      gross_amount_raw: '9182',
+      gross_amount_decimal: '0.009182',
+      net_destination_amount_raw: '9182',
+      net_destination_amount_decimal: '0.009182',
+      fee_amount_raw: '0',
+      fee_amount_decimal: '0.000000',
+      route_count: 1,
+      payment_kind: 'direct',
+      reconstruction_rule: 'route_group_balance_bundle',
+      confidence_band: 'partial',
+      properties_json: JSON.stringify({ seeded: true }),
+      created_at: createdAt,
+    },
+    {
+      payment_id: feePaymentId,
+      signature,
+      slot: 411497760,
+      event_time: eventTime,
+      asset: 'usdc',
+      source_wallet: 'VhfmPjvQxSiQW2FjnvoghewGGVYaWcz4cmDxpFPQEti',
+      destination_wallet: jupiterAuthorityWallet,
+      gross_amount_raw: '818',
+      gross_amount_decimal: '0.000818',
+      net_destination_amount_raw: '818',
+      net_destination_amount_decimal: '0.000818',
+      fee_amount_raw: '0',
+      fee_amount_decimal: '0.000000',
+      route_count: 1,
+      payment_kind: 'direct',
+      reconstruction_rule: 'route_group_balance_bundle',
+      confidence_band: 'partial',
+      properties_json: JSON.stringify({ seeded: true }),
+      created_at: createdAt,
+    },
+  ]);
+
+  await insertClickHouseRows('settlement_matches', [
+    {
+      workspace_id: setup.workspace.workspaceId,
+      transfer_request_id: setup.transferRequest.transferRequestId,
+      signature,
+      observed_transfer_id: transferId,
+      match_status: 'matched_partial',
+      confidence_score: 72,
+      confidence_band: 'partial',
+      matched_amount_raw: '9182',
+      amount_variance_raw: '818',
+      destination_match_type: 'wallet_destination',
+      time_delta_seconds: 12,
+      match_rule: 'payment_book_fifo_allocator',
+      candidate_count: 1,
+      explanation: 'Observed payment only partially covered the requested amount.',
+      observed_event_time: eventTime,
+      matched_at: createdAt,
+      updated_at: createdAt,
+    },
+  ]);
+
+  const detailResponse = await fetch(
+    `${baseUrl}/workspaces/${setup.workspace.workspaceId}/reconciliation-queue/${setup.transferRequest.transferRequestId}`,
+    { headers: authHeaders(setup.sessionToken) },
+  );
+  assert.equal(detailResponse.status, 200);
+  const detail = await detailResponse.json();
+
+  assert.match(detail.matchExplanation, /Only 0\.009182 of the requested 2\.500000 USDC reached the expected destination/);
+  assert.match(detail.matchExplanation, /Jupiter Aggregator Authority 11/);
+  assert.equal(detail.relatedObservedPayments.length, 2);
+  assert.equal(
+    detail.relatedObservedPayments.some(
+      (payment: { destinationLabel: string | null; recipientRole: string }) =>
+        payment.destinationLabel === 'Jupiter Aggregator Authority 11' &&
+        payment.recipientRole === 'known_fee_recipient',
+    ),
+    true,
+  );
+});
+
 test('dedicated reconciliation queue endpoint supports display-state filtering and detail lookup', async () => {
   const setup = await createSeededPartialExceptionRequest();
 

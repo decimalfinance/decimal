@@ -110,6 +110,21 @@ type ObservedPaymentRow = {
   created_at: string;
 };
 
+type RelatedPaymentRole = 'expected_destination' | 'known_fee_recipient' | 'other_destination';
+
+const KNOWN_RECIPIENTS: Record<
+  string,
+  {
+    label: string;
+    role: Exclude<RelatedPaymentRole, 'expected_destination' | 'other_destination'>;
+  }
+> = {
+  '69yhtoJR4JYPPABZcSNkzuqbaFbwHsCkja1sP1Q2aVT5': {
+    label: 'Jupiter Aggregator Authority 11',
+    role: 'known_fee_recipient',
+  },
+};
+
 type QueueBuildOptions = {
   limit?: number;
   displayState?: string;
@@ -260,10 +275,23 @@ export async function getReconciliationDetail(workspaceId: string, transferReque
     availableActions: getAvailableExceptionActions(exception.status),
   }));
 
-  const [linkedObservedTransfers, linkedObservedPayment] = await Promise.all([
+  const [linkedObservedTransfers, linkedObservedPayment, relatedObservedPayments] = await Promise.all([
     queryObservedTransfersByIds(queueItem.linkedTransferIds),
     queueItem.linkedPaymentId ? queryObservedPaymentById(queueItem.linkedPaymentId) : null,
+    queueItem.linkedSignature ? queryObservedPaymentsBySignature(queueItem.linkedSignature) : [],
   ]);
+
+  const expectedDestinationWallet = projectedRequest.destinationWorkspaceAddress?.address ?? null;
+  const annotatedObservedPayments = relatedObservedPayments.map((payment) =>
+    annotateObservedPayment(payment, expectedDestinationWallet),
+  );
+  const detailedMatchExplanation = buildDetailedMatchExplanation({
+    requestAmountRaw: projectedRequest.amountRaw.toString(),
+    expectedDestinationWallet,
+    defaultExplanation: queueItem.matchExplanation,
+    match: queueItem.match,
+    relatedObservedPayments: annotatedObservedPayments,
+  });
 
   return {
     ...serializeTransferRequest(projectedRequest),
@@ -273,8 +301,9 @@ export async function getReconciliationDetail(workspaceId: string, transferReque
     linkedTransferIds: queueItem.linkedTransferIds,
     linkedObservedTransfers,
     linkedObservedPayment,
+    relatedObservedPayments: annotatedObservedPayments,
     match: queueItem.match,
-    matchExplanation: queueItem.matchExplanation,
+    matchExplanation: detailedMatchExplanation,
     exceptions: enrichedExceptions,
     exceptionExplanation: queueItem.exceptionExplanation,
     events: (projectedRequest.events ?? []).map((event) =>
@@ -605,6 +634,73 @@ function buildQueueItems(args: {
       exceptions,
     };
   });
+}
+
+function annotateObservedPayment(
+  payment: Awaited<ReturnType<typeof queryObservedPaymentById>> extends infer T
+    ? NonNullable<T>
+    : never,
+  expectedDestinationWallet: string | null,
+) {
+  const knownRecipient = payment.destinationWallet
+    ? KNOWN_RECIPIENTS[payment.destinationWallet]
+    : null;
+
+  const recipientRole: RelatedPaymentRole =
+    payment.destinationWallet && expectedDestinationWallet && payment.destinationWallet === expectedDestinationWallet
+      ? 'expected_destination'
+      : knownRecipient?.role ?? 'other_destination';
+
+  return {
+    ...payment,
+    recipientRole,
+    destinationLabel:
+      recipientRole === 'expected_destination'
+        ? 'Expected destination'
+        : knownRecipient?.label ?? null,
+  };
+}
+
+function buildDetailedMatchExplanation(args: {
+  requestAmountRaw: string;
+  expectedDestinationWallet: string | null;
+  defaultExplanation: string | null;
+  match: ReturnType<typeof serializeMatch> | null;
+  relatedObservedPayments: Array<
+    ReturnType<typeof annotateObservedPayment>
+  >;
+}) {
+  if (!args.match || args.match.matchStatus !== 'matched_partial') {
+    return args.defaultExplanation;
+  }
+
+  const expectedLeg = args.relatedObservedPayments.find(
+    (payment) => payment.recipientRole === 'expected_destination',
+  );
+  const siblingLegs = args.relatedObservedPayments.filter(
+    (payment) => payment.recipientRole !== 'expected_destination',
+  );
+
+  if (!expectedLeg || !siblingLegs.length) {
+    return args.defaultExplanation;
+  }
+
+  const siblingBreakdown = siblingLegs
+    .map((payment) => {
+      const amount = formatRawUsdc(payment.netDestinationAmountRaw);
+      const destination =
+        payment.destinationLabel ??
+        payment.destinationWallet ??
+        'another destination';
+      return `${amount} USDC to ${destination}`;
+    })
+    .join(', ');
+
+  return `Only ${formatRawUsdc(expectedLeg.netDestinationAmountRaw)} of the requested ${formatRawUsdc(
+    args.requestAmountRaw,
+  )} USDC reached the expected destination${
+    args.expectedDestinationWallet ? ` wallet ${args.expectedDestinationWallet}` : ''
+  }. The remaining settlement in the same transaction was routed as ${siblingBreakdown}.`;
 }
 
 function extractLinkedPaymentId(events: TransferRequestEvent[]) {
@@ -1178,6 +1274,57 @@ async function queryObservedPaymentById(paymentId: string) {
   };
 }
 
+async function queryObservedPaymentsBySignature(signature: string) {
+  const rows = await queryClickHouse<ObservedPaymentRow>(`
+    SELECT
+      payment_id,
+      signature,
+      slot,
+      event_time,
+      asset,
+      source_wallet,
+      destination_wallet,
+      gross_amount_raw,
+      gross_amount_decimal,
+      net_destination_amount_raw,
+      net_destination_amount_decimal,
+      fee_amount_raw,
+      fee_amount_decimal,
+      route_count,
+      payment_kind,
+      reconstruction_rule,
+      confidence_band,
+      properties_json,
+      created_at
+    FROM ${config.clickhouseDatabase}.observed_payments
+    WHERE signature = '${escapeClickHouseString(signature)}'
+    ORDER BY event_time ASC, payment_id ASC
+    FORMAT JSONEachRow
+  `);
+
+  return rows.map((row) => ({
+    paymentId: row.payment_id,
+    signature: row.signature,
+    slot: Number(row.slot),
+    eventTime: normalizeClickHouseDateTime(row.event_time)!,
+    asset: row.asset,
+    sourceWallet: row.source_wallet,
+    destinationWallet: row.destination_wallet,
+    grossAmountRaw: row.gross_amount_raw,
+    grossAmountDecimal: row.gross_amount_decimal,
+    netDestinationAmountRaw: row.net_destination_amount_raw,
+    netDestinationAmountDecimal: row.net_destination_amount_decimal,
+    feeAmountRaw: row.fee_amount_raw,
+    feeAmountDecimal: row.fee_amount_decimal,
+    routeCount: Number(row.route_count),
+    paymentKind: row.payment_kind,
+    reconstructionRule: row.reconstruction_rule,
+    confidenceBand: row.confidence_band,
+    propertiesJson: safeJsonParse(row.properties_json),
+    createdAt: normalizeClickHouseDateTime(row.created_at)!,
+  }));
+}
+
 function safeJsonParse(value: string | null) {
   if (!value) return null;
   try {
@@ -1193,4 +1340,14 @@ function escapeClickHouseString(value: string) {
 
 function uniqueValues(values: string[]) {
   return [...new Set(values)];
+}
+
+function formatRawUsdc(amountRaw: string) {
+  const negative = amountRaw.startsWith('-');
+  const digits = negative ? amountRaw.slice(1) : amountRaw;
+  const padded = digits.padStart(7, '0');
+  const whole = padded.slice(0, -6) || '0';
+  const fraction = padded.slice(-6);
+
+  return `${negative ? '-' : ''}${whole}.${fraction}`;
 }

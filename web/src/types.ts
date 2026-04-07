@@ -229,6 +229,8 @@ export type ObservedPayment = {
   confidenceBand: string;
   propertiesJson: Record<string, unknown> | string | null;
   createdAt: string;
+  recipientRole?: 'expected_destination' | 'known_fee_recipient' | 'other_destination';
+  destinationLabel?: string | null;
 };
 
 export type ReconciliationTimelineItem =
@@ -276,6 +278,7 @@ export type ReconciliationTimelineItem =
 export type ReconciliationDetail = ReconciliationRow & {
   linkedObservedTransfers: ObservedTransfer[];
   linkedObservedPayment: ObservedPayment | null;
+  relatedObservedPayments: ObservedPayment[];
   events: TransferRequestEvent[];
   notes: TransferRequestNote[];
   timeline: ReconciliationTimelineItem[];
