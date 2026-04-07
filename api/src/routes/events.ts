@@ -11,7 +11,9 @@ import {
   listReconciliationQueue,
   listWorkspaceExceptions,
 } from '../reconciliation.js';
-import { getAvailableUserTransitions, type RequestStatus } from '../transfer-request-lifecycle.js';
+import {
+  REQUEST_STATUSES,
+} from '../transfer-request-lifecycle.js';
 import { assertWorkspaceAccess } from '../workspace-access.js';
 
 export const eventsRouter = Router();
@@ -34,6 +36,7 @@ const listQuerySchema = z.object({
 
 const reconciliationQueueQuerySchema = listQuerySchema.extend({
   displayState: z.enum(['pending', 'matched', 'partial', 'exception']).optional(),
+  requestStatus: z.enum(REQUEST_STATUSES).optional(),
 });
 
 const exceptionsQuerySchema = z.object({
@@ -179,6 +182,7 @@ eventsRouter.get('/workspaces/:workspaceId/reconciliation', async (req, res, nex
     const items = await listReconciliationQueue(workspaceId, {
       limit: query.limit,
       displayState: query.displayState,
+      requestStatus: query.requestStatus,
     });
 
     res.json({
@@ -199,6 +203,7 @@ eventsRouter.get('/workspaces/:workspaceId/reconciliation-queue', async (req, re
     const items = await listReconciliationQueue(workspaceId, {
       limit: query.limit,
       displayState: query.displayState,
+      requestStatus: query.requestStatus,
     });
 
     res.json({
@@ -217,10 +222,7 @@ eventsRouter.get(
       const { workspaceId, transferRequestId } = transferRequestParamsSchema.parse(req.params);
       await assertWorkspaceAccess(workspaceId, req.auth!.userId);
       const detail = await getReconciliationDetail(workspaceId, transferRequestId);
-      res.json({
-        ...detail,
-        availableTransitions: getAvailableUserTransitions(detail.status as RequestStatus),
-      });
+      res.json(detail);
     } catch (error) {
       next(error);
     }

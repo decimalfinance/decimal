@@ -145,9 +145,26 @@ export const api = {
     );
   },
   listReconciliationQueue(workspaceId: string, displayState?: ReconciliationRow['requestDisplayState']) {
-    const query = displayState ? `?limit=100&displayState=${encodeURIComponent(displayState)}` : '?limit=100';
+    return api.listReconciliationQueueWithStatus(workspaceId, {
+      displayState,
+    });
+  },
+  listReconciliationQueueWithStatus(
+    workspaceId: string,
+    filters?: {
+      displayState?: ReconciliationRow['requestDisplayState'];
+      requestStatus?: string;
+    },
+  ) {
+    const params = new URLSearchParams({ limit: '100' });
+    if (filters?.displayState) {
+      params.set('displayState', filters.displayState);
+    }
+    if (filters?.requestStatus) {
+      params.set('requestStatus', filters.requestStatus);
+    }
     return request<{ servedAt: string; items: ReconciliationRow[] }>(
-      `/workspaces/${workspaceId}/reconciliation-queue${query}`,
+      `/workspaces/${workspaceId}/reconciliation-queue?${params.toString()}`,
     );
   },
   getReconciliationDetail(workspaceId: string, transferRequestId: string) {

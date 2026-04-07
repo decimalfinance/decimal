@@ -40,6 +40,17 @@ export const ACTIVE_MATCHING_REQUEST_STATUSES = [
 
 export const REQUEST_DISPLAY_STATES = ['pending', 'matched', 'partial', 'exception'] as const;
 export type RequestDisplayState = (typeof REQUEST_DISPLAY_STATES)[number];
+export const APPROVAL_STATES = ['draft', 'submitted', 'pending_approval', 'approved', 'closed', 'rejected'] as const;
+export type ApprovalState = (typeof APPROVAL_STATES)[number];
+export const EXECUTION_STATES = [
+  'not_started',
+  'awaiting_execution',
+  'submitted_onchain',
+  'observed_onchain',
+  'closed',
+  'rejected',
+] as const;
+export type ExecutionState = (typeof EXECUTION_STATES)[number];
 export const EXCEPTION_ACTIONS = ['reviewed', 'expected', 'dismissed', 'reopen'] as const;
 export type ExceptionAction = (typeof EXCEPTION_ACTIONS)[number];
 
@@ -74,21 +85,6 @@ const USER_ALLOWED_REQUEST_TRANSITIONS: Readonly<Record<RequestStatus, readonly 
 };
 
 const ACTIVE_EXCEPTION_STATUSES = new Set(['open', 'reviewed', 'expected', 'reopened']);
-const PRE_SETTLEMENT_REQUEST_STATUSES = new Set<RequestStatus>([
-  'draft',
-  'submitted',
-  'pending_approval',
-  'approved',
-  'ready_for_execution',
-  'submitted_onchain',
-]);
-const POST_SETTLEMENT_REQUEST_STATUSES = new Set<RequestStatus>([
-  'observed',
-  'matched',
-  'partially_matched',
-  'exception',
-  'closed',
-]);
 const EXCEPTION_ACTION_STATUS_TRANSITIONS: Readonly<Record<string, readonly string[]>> = {
   open: ['reviewed', 'expected', 'dismissed'],
   reviewed: ['expected', 'dismissed'],
@@ -113,63 +109,62 @@ export function getAvailableUserTransitions(status: RequestStatus) {
   return [...USER_ALLOWED_REQUEST_TRANSITIONS[status]];
 }
 
-export function buildSystemProjectionPath(args: {
-  currentStatus: RequestStatus;
-  targetStatus: RequestStatus | null;
-}) {
-  const { currentStatus, targetStatus } = args;
-  if (!targetStatus || currentStatus === targetStatus) {
-    return [] as RequestStatus[];
+export function deriveApprovalState(requestStatus: string): ApprovalState {
+  switch (requestStatus) {
+    case 'draft':
+      return 'draft';
+    case 'submitted':
+      return 'submitted';
+    case 'pending_approval':
+      return 'pending_approval';
+    case 'rejected':
+      return 'rejected';
+    case 'closed':
+      return 'closed';
+    default:
+      return 'approved';
   }
-
-  if (currentStatus === 'closed' || currentStatus === 'rejected') {
-    return [] as RequestStatus[];
-  }
-
-  const path: RequestStatus[] = [];
-  let cursor = currentStatus;
-
-  if (
-    targetStatus !== 'observed' &&
-    PRE_SETTLEMENT_REQUEST_STATUSES.has(cursor) &&
-    POST_SETTLEMENT_REQUEST_STATUSES.has(targetStatus)
-  ) {
-    path.push('observed');
-    cursor = 'observed';
-  }
-
-  if (cursor !== targetStatus) {
-    path.push(targetStatus);
-  }
-
-  return path;
 }
 
-export function deriveProjectedSettlementStatus(args: {
-  currentStatus: RequestStatus;
+export function deriveExecutionState(args: {
+  requestStatus: string;
+  linkedSignature?: string | null;
   matchStatus?: string | null;
   exceptionStatuses?: string[];
-}) {
-  const { currentStatus, matchStatus, exceptionStatuses = [] } = args;
+}): ExecutionState {
+  const { requestStatus, linkedSignature, matchStatus, exceptionStatuses = [] } = args;
+  const hasObservedSettlement =
+    Boolean(linkedSignature)
+    || Boolean(matchStatus)
+    || exceptionStatuses.some((status) => ACTIVE_EXCEPTION_STATUSES.has(status));
 
-  if (currentStatus === 'closed' || currentStatus === 'rejected') {
-    return null;
+  if (requestStatus === 'closed') {
+    return 'closed';
   }
 
-  const hasActiveException = exceptionStatuses.some((status) => ACTIVE_EXCEPTION_STATUSES.has(status));
-  if (hasActiveException) {
-    return 'exception' satisfies RequestStatus;
+  if (requestStatus === 'rejected') {
+    return 'rejected';
   }
 
-  if (matchStatus === 'matched_partial') {
-    return 'partially_matched' satisfies RequestStatus;
+  if (
+    requestStatus === 'observed'
+    || requestStatus === 'matched'
+    || requestStatus === 'partially_matched'
+    || requestStatus === 'exception'
+    || hasObservedSettlement
+  ) {
+    return 'observed_onchain';
   }
 
-  if (matchStatus === 'matched_exact' || matchStatus === 'matched_split') {
-    return 'matched' satisfies RequestStatus;
+  if (requestStatus === 'submitted_onchain') {
+    return 'submitted_onchain';
   }
 
-  return null;
+  if (requestStatus === 'approved' || requestStatus === 'ready_for_execution') {
+    return 'awaiting_execution';
+  }
+
+  return 'not_started';
 }
 
 export function getTargetExceptionStatusForAction(action: ExceptionAction) {
@@ -216,4 +211,21 @@ export function deriveRequestDisplayState(args: {
   }
 
   return 'pending' satisfies RequestDisplayState;
+}
+
+export function getAvailableOperatorTransitions(args: {
+  requestStatus: RequestStatus;
+  requestDisplayState: RequestDisplayState;
+}) {
+  const { requestStatus, requestDisplayState } = args;
+
+  if (requestStatus === 'closed' || requestStatus === 'rejected') {
+    return [] as RequestStatus[];
+  }
+
+  if (requestDisplayState !== 'pending') {
+    return ['closed'] as RequestStatus[];
+  }
+
+  return getAvailableUserTransitions(requestStatus);
 }

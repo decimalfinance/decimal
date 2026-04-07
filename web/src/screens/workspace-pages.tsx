@@ -1,4 +1,4 @@
-import type { FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import type {
   ExceptionItem,
   ObservedTransfer,
@@ -7,6 +7,7 @@ import type {
   TransferRequest,
   Workspace,
   WorkspaceAddress,
+  WorkspaceAddressLite,
 } from '../types';
 import { formatRawUsdc, formatTimestamp, orbTransactionUrl, shortenAddress } from '../lib/app';
 import { InfoLine, Metric } from '../components/ui';
@@ -62,6 +63,19 @@ export function WorkspaceHomePage({
 }) {
   const matchedCount = reconciliationRows.filter((row) => row.requestDisplayState === 'matched').length;
   const pendingCount = reconciliationRows.filter((row) => row.requestDisplayState === 'pending').length;
+  const [inspectorTab, setInspectorTab] = useState<'overview' | 'exceptions'>('overview');
+
+  useEffect(() => {
+    if (
+      selectedReconciliationDetail?.requestDisplayState === 'exception' &&
+      selectedReconciliationDetail.exceptions.length
+    ) {
+      setInspectorTab('exceptions');
+      return;
+    }
+
+    setInspectorTab('overview');
+  }, [selectedReconciliationDetail?.transferRequestId]);
 
   return (
     <div className="page-stack">
@@ -232,7 +246,7 @@ export function WorkspaceHomePage({
           <div className="stack-list">
             {reconciliationRows.length ? (
               reconciliationRows.map((row) => (
-                <button
+                <div
                   key={row.transferRequestId}
                   className={
                     selectedReconciliationDetail?.transferRequestId === row.transferRequestId
@@ -240,17 +254,32 @@ export function WorkspaceHomePage({
                       : 'feed-row'
                   }
                   data-tone={row.requestDisplayState}
-                  onClick={() => onSelectReconciliation(row)}
-                  type="button"
                 >
-                  <div>
-                    <strong>{getTransferLabel(row)}</strong>
-                    <small>
-                      {row.requestType.replaceAll('_', ' ')} // {getDisplayStateLabel(row.requestDisplayState)}
-                    </small>
-                  </div>
-                  <span>{formatRawUsdc(row.amountRaw)}</span>
-                </button>
+                  <button className="feed-row-main request-card-main" onClick={() => onSelectReconciliation(row)} type="button">
+                    <div className="request-card-copy">
+                      <div className="request-card-title">
+                        <strong>{getTransferLabel(row)}</strong>
+                        <span className={`tone-pill tone-pill-${row.requestDisplayState}`}>
+                          {getDisplayStateLabel(row.requestDisplayState)}
+                        </span>
+                      </div>
+                      <div className="request-card-meta">
+                        <span className="meta-pill">to {getWalletNameLite(row.destinationWorkspaceAddress)}</span>
+                        <span className="meta-pill">{formatTimestamp(row.requestedAt)}</span>
+                        <span className="meta-pill">{formatLabel(row.requestType)}</span>
+                        {row.exceptions[0] ? (
+                          <span className="meta-pill meta-pill-danger">
+                            {getExceptionReasonLabel(row.exceptions[0].reasonCode)}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="request-card-amount">
+                      <strong>{formatRawUsdc(row.amountRaw)}</strong>
+                      <small>USDC</small>
+                    </div>
+                  </button>
+                </div>
               ))
             ) : (
               <div className="empty-box compact">No planned transfers yet. Open setup and create the first one.</div>
@@ -275,8 +304,9 @@ export function WorkspaceHomePage({
                   label="Receiving USDC ATA"
                   value={selectedReconciliationDetail.destinationWorkspaceAddress?.usdcAtaAddress ?? 'Unknown'}
                 />
-                <InfoLine label="Lifecycle state" value={selectedReconciliationDetail.status.replaceAll('_', ' ')} />
-                <InfoLine label="Queue state" value={getDisplayStateLabel(selectedReconciliationDetail.requestDisplayState)} />
+                <InfoLine label="Request state" value={formatLabel(selectedReconciliationDetail.approvalState)} />
+                <InfoLine label="Execution state" value={formatLabel(selectedReconciliationDetail.executionState)} />
+                <InfoLine label="Reconciliation state" value={getDisplayStateLabel(selectedReconciliationDetail.requestDisplayState)} />
                 <InfoLine label="Requested at" value={formatTimestamp(selectedReconciliationDetail.requestedAt)} />
 
                 {selectedReconciliationDetail.availableTransitions.length ? (
@@ -300,166 +330,199 @@ export function WorkspaceHomePage({
                   </div>
                 ) : null}
 
-                {selectedReconciliationDetail.linkedSignature ? (
-                  <div className="inspector-callout">
-                    <div>
-                      <p className="eyebrow">Linked signature</p>
-                      <strong>{shortenAddress(selectedReconciliationDetail.linkedSignature, 10, 10)}</strong>
-                    </div>
-                    <a
-                      className="ghost-button inline-link-button"
-                      href={orbTransactionUrl(selectedReconciliationDetail.linkedSignature)}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      open on orb
-                    </a>
+                {selectedReconciliationDetail.exceptions.length ? (
+                  <div className="filter-row filter-row-compact">
+                    {(['overview', 'exceptions'] as const).map((tab) => (
+                      <button
+                        className={inspectorTab === tab ? 'filter-chip is-active' : 'filter-chip'}
+                        key={tab}
+                        onClick={() => setInspectorTab(tab)}
+                        type="button"
+                      >
+                        {tab === 'overview'
+                          ? 'overview'
+                          : `exceptions (${selectedReconciliationDetail.exceptions.length})`}
+                      </button>
+                    ))}
                   </div>
                 ) : null}
-                {selectedReconciliationDetail.match ? (
+
+                {inspectorTab === 'overview' ? (
                   <>
-                    <InfoLine label="Match rule" value={selectedReconciliationDetail.match.matchRule} />
-                    <InfoLine label="Match status" value={selectedReconciliationDetail.match.matchStatus.replaceAll('_', ' ')} />
-                    <InfoLine label="Matched amount" value={formatRawUsdc(selectedReconciliationDetail.match.matchedAmountRaw)} />
-                    <InfoLine
-                      label="Observed event"
-                      value={
-                        selectedReconciliationDetail.match.observedEventTime
-                          ? formatTimestamp(selectedReconciliationDetail.match.observedEventTime)
-                          : 'n/a'
-                      }
-                    />
-                    <InfoLine
-                      label="Matched at"
-                      value={
-                        selectedReconciliationDetail.match.matchedAt
-                          ? formatTimestamp(selectedReconciliationDetail.match.matchedAt)
-                          : 'n/a'
-                      }
-                    />
-                    <InfoLine
-                      label="Chain to match"
-                      value={
-                        selectedReconciliationDetail.match.chainToMatchMs === null
-                          ? 'n/a'
-                          : `${selectedReconciliationDetail.match.chainToMatchMs} ms`
-                      }
-                    />
-                    <div className="empty-box compact">{selectedReconciliationDetail.matchExplanation ?? 'No explanation yet.'}</div>
+                    {selectedReconciliationDetail.linkedSignature ? (
+                      <div className="inspector-callout">
+                        <div>
+                          <p className="eyebrow">Linked signature</p>
+                          <strong>{shortenAddress(selectedReconciliationDetail.linkedSignature, 10, 10)}</strong>
+                        </div>
+                        <a
+                          className="ghost-button inline-link-button"
+                          href={orbTransactionUrl(selectedReconciliationDetail.linkedSignature)}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          open on orb
+                        </a>
+                      </div>
+                    ) : null}
+                    {selectedReconciliationDetail.match ? (
+                      <>
+                        <InfoLine label="Match rule" value={selectedReconciliationDetail.match.matchRule} />
+                        <InfoLine label="Match status" value={selectedReconciliationDetail.match.matchStatus.replaceAll('_', ' ')} />
+                        <InfoLine label="Matched amount" value={formatRawUsdc(selectedReconciliationDetail.match.matchedAmountRaw)} />
+                        <InfoLine
+                          label="Observed event"
+                          value={
+                            selectedReconciliationDetail.match.observedEventTime
+                              ? formatTimestamp(selectedReconciliationDetail.match.observedEventTime)
+                              : 'n/a'
+                          }
+                        />
+                        <InfoLine
+                          label="Matched at"
+                          value={
+                            selectedReconciliationDetail.match.matchedAt
+                              ? formatTimestamp(selectedReconciliationDetail.match.matchedAt)
+                              : 'n/a'
+                          }
+                        />
+                        <InfoLine
+                          label="Chain to match"
+                          value={
+                            selectedReconciliationDetail.match.chainToMatchMs === null
+                              ? 'n/a'
+                              : `${selectedReconciliationDetail.match.chainToMatchMs} ms`
+                          }
+                        />
+                        <div className="empty-box compact">{selectedReconciliationDetail.matchExplanation ?? 'No explanation yet.'}</div>
+                      </>
+                    ) : (
+                      <div className="empty-box compact">
+                        No exact match yet. The request is still waiting for a compatible observed payment.
+                      </div>
+                    )}
+
+                    {selectedReconciliationDetail.linkedObservedPayment ? (
+                      <div className="empty-box compact">
+                        <strong>Observed payment</strong>
+                        <div className="detail-grid">
+                          <span>{selectedReconciliationDetail.linkedObservedPayment.paymentKind.replaceAll('_', ' ')}</span>
+                          <span>{formatRawUsdc(selectedReconciliationDetail.linkedObservedPayment.netDestinationAmountRaw)}</span>
+                          <span>{selectedReconciliationDetail.linkedObservedPayment.routeCount} route(s)</span>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {selectedReconciliationDetail.relatedObservedPayments.length > 1 ? (
+                      <div className="detail-section">
+                        <div className="detail-section-head">
+                          <strong>Settlement breakdown</strong>
+                          <span>{selectedReconciliationDetail.relatedObservedPayments.length}</span>
+                        </div>
+                        <div className="stack-list">
+                          {selectedReconciliationDetail.relatedObservedPayments.map((payment) => (
+                            <div className="note-card" key={payment.paymentId}>
+                              <strong>
+                                {payment.destinationLabel ??
+                                  payment.destinationWallet ??
+                                  'Unknown destination'}
+                              </strong>
+                              <small>
+                                {payment.recipientRole
+                                  ? payment.recipientRole.replaceAll('_', ' ')
+                                  : 'destination'}
+                              </small>
+                              <p>{formatRawUsdc(payment.netDestinationAmountRaw)} USDC</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div className="detail-section">
+                      <div className="detail-section-head">
+                        <strong>Request notes</strong>
+                        <span>{selectedReconciliationDetail.notes.length}</span>
+                      </div>
+                      <div className="stack-list">
+                        {selectedReconciliationDetail.notes.length ? (
+                          selectedReconciliationDetail.notes.map((note) => (
+                            <div key={note.transferRequestNoteId} className="note-card">
+                              <strong>{note.authorUser?.displayName ?? note.authorUser?.email ?? 'Operator'}</strong>
+                              <small>{formatTimestamp(note.createdAt)}</small>
+                              <p>{note.body}</p>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="empty-box compact">No request notes yet.</div>
+                        )}
+                        <form
+                          className="inline-note-form"
+                          onSubmit={(event) =>
+                            void handleNoteSubmit(event, (body) =>
+                              onAddRequestNote(selectedReconciliationDetail.transferRequestId, body),
+                            )
+                          }
+                        >
+                          <label className="field">
+                            <span>Add request note</span>
+                            <textarea name="body" placeholder="Capture context for the next operator." rows={3} />
+                          </label>
+                          <button className="ghost-button compact-button" type="submit">
+                            save note
+                          </button>
+                        </form>
+                      </div>
+                    </div>
                   </>
                 ) : (
-                  <div className="empty-box compact">
-                    No exact match yet. The request is still waiting for a compatible observed payment.
-                  </div>
+                  <>
+                    <div className="empty-box compact">
+                      {selectedReconciliationDetail.exceptionExplanation ??
+                        'Exceptions are preventing this request from being treated as fully settled.'}
+                    </div>
+                    <div className="detail-section">
+                      <div className="detail-section-head">
+                        <strong>Exceptions</strong>
+                        <span>{selectedReconciliationDetail.exceptions.length}</span>
+                      </div>
+                      <div className="stack-list">
+                        {selectedReconciliationDetail.exceptions.map((exception) => (
+                          <ExceptionCard
+                            exception={exception}
+                            onAddNote={onAddExceptionNote}
+                            onApplyAction={onApplyExceptionAction}
+                            key={exception.exceptionId}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  </>
                 )}
 
-                {selectedReconciliationDetail.linkedObservedPayment ? (
-                  <div className="empty-box compact">
-                    <strong>Observed payment</strong>
-                    <div className="detail-grid">
-                      <span>{selectedReconciliationDetail.linkedObservedPayment.paymentKind.replaceAll('_', ' ')}</span>
-                      <span>{formatRawUsdc(selectedReconciliationDetail.linkedObservedPayment.netDestinationAmountRaw)}</span>
-                      <span>{selectedReconciliationDetail.linkedObservedPayment.routeCount} route(s)</span>
-                    </div>
-                  </div>
-                ) : null}
-
-                {selectedReconciliationDetail.relatedObservedPayments.length > 1 ? (
-                  <div className="detail-section">
-                    <div className="detail-section-head">
-                      <strong>Settlement breakdown</strong>
-                      <span>{selectedReconciliationDetail.relatedObservedPayments.length}</span>
-                    </div>
-                    <div className="stack-list">
-                      {selectedReconciliationDetail.relatedObservedPayments.map((payment) => (
-                        <div className="note-card" key={payment.paymentId}>
-                          <strong>
-                            {payment.destinationLabel ??
-                              payment.destinationWallet ??
-                              'Unknown destination'}
-                          </strong>
-                          <small>
-                            {payment.recipientRole
-                              ? payment.recipientRole.replaceAll('_', ' ')
-                              : 'destination'}
-                          </small>
-                          <p>{formatRawUsdc(payment.netDestinationAmountRaw)} USDC</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {selectedReconciliationDetail.exceptions.length ? (
-                  <div className="detail-section">
-                    <div className="detail-section-head">
-                      <strong>Exceptions</strong>
-                      <span>{selectedReconciliationDetail.exceptions.length}</span>
-                    </div>
-                    <div className="stack-list">
-                      {selectedReconciliationDetail.exceptions.map((exception) => (
-                        <ExceptionCard
-                          exception={exception}
-                          onAddNote={onAddExceptionNote}
-                          onApplyAction={onApplyExceptionAction}
-                          key={exception.exceptionId}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
                 <div className="detail-section">
                   <div className="detail-section-head">
-                    <strong>Request notes</strong>
-                    <span>{selectedReconciliationDetail.notes.length}</span>
-                  </div>
-                  <div className="stack-list">
-                    {selectedReconciliationDetail.notes.length ? (
-                      selectedReconciliationDetail.notes.map((note) => (
-                        <div key={note.transferRequestNoteId} className="note-card">
-                          <strong>{note.authorUser?.displayName ?? note.authorUser?.email ?? 'Operator'}</strong>
-                          <small>{formatTimestamp(note.createdAt)}</small>
-                          <p>{note.body}</p>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="empty-box compact">No request notes yet.</div>
-                    )}
-                    <form
-                      className="inline-note-form"
-                      onSubmit={(event) =>
-                        void handleNoteSubmit(event, (body) =>
-                          onAddRequestNote(selectedReconciliationDetail.transferRequestId, body),
-                        )
+                    <strong>{inspectorTab === 'exceptions' ? 'Exception timeline' : 'Timeline'}</strong>
+                    <span>
+                      {
+                        selectedReconciliationDetail.timeline.filter((item) =>
+                          inspectorTab === 'exceptions' ? item.timelineType === 'exception' : true,
+                        ).length
                       }
-                    >
-                      <label className="field">
-                        <span>Add request note</span>
-                        <textarea name="body" placeholder="Capture context for the next operator." rows={3} />
-                      </label>
-                      <button className="ghost-button compact-button" type="submit">
-                        save note
-                      </button>
-                    </form>
-                  </div>
-                </div>
-
-                <div className="detail-section">
-                  <div className="detail-section-head">
-                    <strong>Timeline</strong>
-                    <span>{selectedReconciliationDetail.timeline.length}</span>
+                    </span>
                   </div>
                   <div className="timeline-list">
-                    {selectedReconciliationDetail.timeline.map((item, index) => (
-                      <div className="timeline-item" key={`${item.timelineType}-${index}-${item.createdAt}`}>
-                        <div>
-                          <strong>{getTimelineTitle(item)}</strong>
-                          <small>{formatTimestamp(item.createdAt)}</small>
+                    {selectedReconciliationDetail.timeline
+                      .filter((item) => (inspectorTab === 'exceptions' ? item.timelineType === 'exception' : true))
+                      .map((item, index) => (
+                        <div className="timeline-item" key={`${item.timelineType}-${index}-${item.createdAt}`}>
+                          <div>
+                            <strong>{getTimelineTitle(item)}</strong>
+                            <small>{formatTimestamp(item.createdAt)}</small>
+                          </div>
+                          <p>{getTimelineBody(item)}</p>
                         </div>
-                        <p>{getTimelineBody(item)}</p>
-                      </div>
-                    ))}
+                      ))}
                   </div>
                 </div>
               </div>
@@ -662,6 +725,18 @@ function getWalletName(address: WorkspaceAddress) {
   return address.displayName?.trim() || address.address;
 }
 
+function getWalletNameLite(address: WorkspaceAddressLite | null) {
+  return address?.displayName?.trim() || address?.address || 'Unknown';
+}
+
+function getExceptionReasonLabel(reasonCode: string) {
+  return reasonCode.replaceAll('_', ' ');
+}
+
+function formatLabel(value: string) {
+  return value.replaceAll('_', ' ');
+}
+
 function ExceptionCard({
   exception,
   onAddNote,
@@ -679,7 +754,7 @@ function ExceptionCard({
     <div className="exception-card">
       <div className="exception-card-head">
         <div>
-          <strong>{exception.reasonCode.replaceAll('_', ' ')}</strong>
+          <strong>{getExceptionReasonLabel(exception.reasonCode)}</strong>
           <small>{exception.severity} // {exception.status}</small>
         </div>
       </div>
@@ -767,13 +842,13 @@ function getDisplayStateLabel(state: ReconciliationRow['requestDisplayState']) {
 function getTimelineTitle(item: ReconciliationDetail['timeline'][number]) {
   switch (item.timelineType) {
     case 'request_event':
-      return item.eventType.replaceAll('_', ' ');
+      return formatLabel(item.eventType);
     case 'request_note':
       return 'request note';
     case 'match_result':
-      return item.matchStatus.replaceAll('_', ' ');
+      return formatLabel(item.matchStatus);
     case 'exception':
-      return item.reasonCode.replaceAll('_', ' ');
+      return getExceptionReasonLabel(item.reasonCode);
   }
 }
 
@@ -781,7 +856,7 @@ function getTimelineBody(item: ReconciliationDetail['timeline'][number]) {
   switch (item.timelineType) {
     case 'request_event':
       return item.beforeState && item.afterState
-        ? `${item.beforeState.replaceAll('_', ' ')} -> ${item.afterState.replaceAll('_', ' ')}`
+        ? `${formatLabel(item.beforeState)} -> ${formatLabel(item.afterState)}`
         : item.eventSource;
     case 'request_note':
       return item.body;

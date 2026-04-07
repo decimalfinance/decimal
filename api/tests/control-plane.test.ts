@@ -572,7 +572,9 @@ test('reconciliation and request detail expose derived display state, explanatio
   assert.equal(detailResponse.status, 200);
   const detail = await detailResponse.json();
 
-  assert.equal(detail.status, 'exception');
+  assert.equal(detail.status, 'submitted');
+  assert.equal(detail.approvalState, 'submitted');
+  assert.equal(detail.executionState, 'observed_onchain');
   assert.equal(detail.requestDisplayState, 'exception');
   assert.equal(detail.linkedSignature, signature);
   assert.deepEqual(detail.linkedTransferIds, [transferId]);
@@ -589,7 +591,7 @@ test('reconciliation and request detail expose derived display state, explanatio
       (event: { eventType: string; afterState: string }) =>
         event.eventType === 'settlement_exception_projected' && event.afterState === 'exception',
     ),
-    true,
+    false,
   );
 });
 
@@ -1278,7 +1280,9 @@ test('dedicated reconciliation queue endpoint supports display-state filtering a
   assert.equal(queue.items.length, 1);
   assert.equal(queue.items[0].transferRequestId, setup.transferRequest.transferRequestId);
   assert.equal(queue.items[0].requestDisplayState, 'exception');
-  assert.equal(queue.items[0].status, 'exception');
+  assert.equal(queue.items[0].status, 'submitted');
+  assert.equal(queue.items[0].approvalState, 'submitted');
+  assert.equal(queue.items[0].executionState, 'observed_onchain');
 
   const detailResponse = await fetch(
     `${baseUrl}/workspaces/${setup.workspace.workspaceId}/reconciliation-queue/${setup.transferRequest.transferRequestId}`,
@@ -1350,7 +1354,9 @@ test('exception actions and notes update detail state and preserve operator audi
   const requestDetail = await requestDetailResponse.json();
 
   assert.equal(requestDetail.requestDisplayState, 'partial');
-  assert.equal(requestDetail.status, 'partially_matched');
+  assert.equal(requestDetail.status, 'submitted');
+  assert.equal(requestDetail.approvalState, 'submitted');
+  assert.equal(requestDetail.executionState, 'observed_onchain');
   assert.equal(requestDetail.exceptions[0].status, 'dismissed');
   assert.equal(requestDetail.exceptions[0].notes.length, 2);
   assert.equal(

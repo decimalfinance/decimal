@@ -96,6 +96,7 @@ export function App() {
   const [reconciliationFilter, setReconciliationFilter] = useState<
     ReconciliationRow['requestDisplayState'] | 'all'
   >('all');
+  const [reconciliationStatusFilter, setReconciliationStatusFilter] = useState<string | 'all'>('all');
   const [selectedObservedTransfer, setSelectedObservedTransfer] = useState<ObservedTransfer | null>(null);
   const [selectedReconciliationId, setSelectedReconciliationId] = useState<string | null>(null);
   const [selectedReconciliationDetail, setSelectedReconciliationDetail] = useState<ReconciliationDetail | null>(null);
@@ -156,7 +157,7 @@ export function App() {
       loadObservedTransfersData(currentWorkspaceId),
       loadReconciliationData(currentWorkspaceId),
     ]);
-  }, [authStatus, currentWorkspaceId, reconciliationFilter]);
+  }, [authStatus, currentWorkspaceId, reconciliationFilter, reconciliationStatusFilter]);
 
   useEffect(() => {
     if (authStatus !== 'authenticated' || !currentWorkspaceId || route.name !== 'workspaceHome') {
@@ -187,7 +188,14 @@ export function App() {
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [authStatus, currentWorkspaceId, route.name, reconciliationFilter, selectedReconciliationId]);
+  }, [
+    authStatus,
+    currentWorkspaceId,
+    route.name,
+    reconciliationFilter,
+    reconciliationStatusFilter,
+    selectedReconciliationId,
+  ]);
 
   function resetWorkspaceState() {
     setAddresses([]);
@@ -306,15 +314,15 @@ export function App() {
   async function loadReconciliationData(workspaceId: string, options?: { silent?: boolean }) {
     try {
       setErrorMessage(null);
-      const nextReconciliation = await api.listReconciliationQueue(
-        workspaceId,
-        reconciliationFilter === 'all' ? undefined : reconciliationFilter,
-      );
-      setReconciliationRows(nextReconciliation.items);
+      const filteredReconciliation = await api.listReconciliationQueueWithStatus(workspaceId, {
+        displayState: reconciliationFilter === 'all' ? undefined : reconciliationFilter,
+        requestStatus: reconciliationStatusFilter === 'all' ? undefined : reconciliationStatusFilter,
+      });
+      setReconciliationRows(filteredReconciliation.items);
 
       if (
         selectedReconciliationId &&
-        !nextReconciliation.items.some((row) => row.transferRequestId === selectedReconciliationId)
+        !filteredReconciliation.items.some((row) => row.transferRequestId === selectedReconciliationId)
       ) {
         setSelectedReconciliationId(null);
         setSelectedReconciliationDetail(null);

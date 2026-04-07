@@ -153,7 +153,16 @@ export type ReconciliationRow = {
   requestedByUser: User | null;
   sourceWorkspaceAddress: WorkspaceAddressLite | null;
   destinationWorkspaceAddress: WorkspaceAddressLite | null;
+  approvalState: 'draft' | 'submitted' | 'pending_approval' | 'approved' | 'closed' | 'rejected';
+  executionState:
+    | 'not_started'
+    | 'awaiting_execution'
+    | 'submitted_onchain'
+    | 'observed_onchain'
+    | 'closed'
+    | 'rejected';
   requestDisplayState: 'pending' | 'matched' | 'partial' | 'exception';
+  availableTransitions: string[];
   linkedSignature: string | null;
   linkedPaymentId: string | null;
   linkedTransferIds: string[];

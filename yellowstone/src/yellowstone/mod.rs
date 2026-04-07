@@ -165,9 +165,14 @@ impl YellowstoneWorker {
         }
 
         let mut reconnect_backoff = STREAM_RECONNECT_INITIAL_BACKOFF;
+        let mut replay_from_slot_supported = true;
 
         loop {
-            let replay_from_slot = self.replay_from_slot();
+            let replay_from_slot = if replay_from_slot_supported {
+                self.replay_from_slot()
+            } else {
+                None
+            };
             let mut client = match client::connect(&endpoint, x_token.clone()).await {
                 Ok(c) => c,
                 Err(error) => {
@@ -232,10 +237,18 @@ impl YellowstoneWorker {
                         self.handle_update(update, &mut worker_state).await;
                     }
                     Some(Err(error)) => {
-                        eprintln!(
-                            "Yellowstone stream error: {}. Reconnecting in {:?}...",
-                            error, reconnect_backoff
-                        );
+                        if replay_from_slot_supported && error.to_string().contains("from_slot is not supported") {
+                            replay_from_slot_supported = false;
+                            eprintln!(
+                                "Yellowstone server does not support replay from slot. Retrying without from_slot in {:?}...",
+                                reconnect_backoff
+                            );
+                        } else {
+                            eprintln!(
+                                "Yellowstone stream error: {}. Reconnecting in {:?}...",
+                                error, reconnect_backoff
+                            );
+                        }
                         break true;
                     }
                     None => {

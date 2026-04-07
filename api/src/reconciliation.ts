@@ -13,9 +13,10 @@ import { getOrResolveAddressLabels } from './address-label-registry.js';
 import { prisma } from './prisma.js';
 import { createTransferRequestEvent } from './transfer-request-events.js';
 import {
-  buildSystemProjectionPath,
-  deriveProjectedSettlementStatus,
+  deriveApprovalState,
+  deriveExecutionState,
   deriveRequestDisplayState,
+  getAvailableOperatorTransitions,
   getTargetExceptionStatusForAction,
   isExceptionActionAllowed,
   type ExceptionAction,
@@ -117,6 +118,7 @@ type RelatedPaymentRole = 'expected_destination' | 'known_fee_recipient' | 'othe
 type QueueBuildOptions = {
   limit?: number;
   displayState?: string;
+  requestStatus?: string;
 };
 
 export async function listReconciliationQueue(workspaceId: string, options: QueueBuildOptions = {}) {
@@ -143,15 +145,8 @@ export async function listReconciliationQueue(workspaceId: string, options: Queu
     queryExceptions(workspaceId, requestIds),
   ]);
 
-  const projectedRequests = await projectTransferRequestStatuses({
-    workspaceId,
-    transferRequests,
-    matches,
-    exceptions,
-  });
-
   const items = buildQueueItems({
-    transferRequests: projectedRequests,
+    transferRequests,
     matches,
     exceptions,
   });
@@ -159,8 +154,10 @@ export async function listReconciliationQueue(workspaceId: string, options: Queu
   await hydrateAddressLabelsForQueueItems(items);
 
   return options.displayState
-    ? items.filter((item) => item.requestDisplayState === options.displayState)
-    : items;
+    ? items
+        .filter((item) => item.requestDisplayState === options.displayState)
+        .filter((item) => (options.requestStatus ? item.status === options.requestStatus : true))
+    : items.filter((item) => (options.requestStatus ? item.status === options.requestStatus : true));
 }
 
 export async function getReconciliationDetail(workspaceId: string, transferRequestId: string) {
@@ -193,39 +190,8 @@ export async function getReconciliationDetail(workspaceId: string, transferReque
     queryExceptions(workspaceId, [transferRequestId]),
   ]);
 
-  await projectTransferRequestStatuses({
-    workspaceId,
-    transferRequests: [requestWithTimeline],
-    matches,
-    exceptions,
-  });
-
-  const projectedRequest = await prisma.transferRequest.findFirstOrThrow({
-    where: { workspaceId, transferRequestId },
-    include: {
-      sourceWorkspaceAddress: true,
-      destinationWorkspaceAddress: true,
-      requestedByUser: true,
-      events: {
-        orderBy: { createdAt: 'asc' },
-      },
-      notes: {
-        include: {
-          authorUser: {
-            select: {
-              userId: true,
-              email: true,
-              displayName: true,
-            },
-          },
-        },
-        orderBy: { createdAt: 'asc' },
-      },
-    },
-  });
-
   const queueItems = buildQueueItems({
-    transferRequests: [projectedRequest],
+    transferRequests: [requestWithTimeline],
     matches,
     exceptions,
   });
@@ -274,7 +240,7 @@ export async function getReconciliationDetail(workspaceId: string, transferReque
     queueItem.linkedSignature ? queryObservedPaymentsBySignature(queueItem.linkedSignature) : [],
   ]);
 
-  const expectedDestinationWallet = projectedRequest.destinationWorkspaceAddress?.address ?? null;
+  const expectedDestinationWallet = requestWithTimeline.destinationWorkspaceAddress?.address ?? null;
   const addressLabels = await getOrResolveAddressLabels(
     'solana',
     relatedObservedPayments
@@ -285,7 +251,7 @@ export async function getReconciliationDetail(workspaceId: string, transferReque
     annotateObservedPayment(payment, expectedDestinationWallet, addressLabels),
   );
   const detailedMatchExplanation = buildDetailedMatchExplanation({
-    requestAmountRaw: projectedRequest.amountRaw.toString(),
+    requestAmountRaw: requestWithTimeline.amountRaw.toString(),
     expectedDestinationWallet,
     defaultExplanation: queueItem.matchExplanation,
     match: queueItem.match,
@@ -293,8 +259,11 @@ export async function getReconciliationDetail(workspaceId: string, transferReque
   });
 
   return {
-    ...serializeTransferRequest(projectedRequest),
+    ...serializeTransferRequest(requestWithTimeline),
+    approvalState: queueItem.approvalState,
+    executionState: queueItem.executionState,
     requestDisplayState: queueItem.requestDisplayState,
+    availableTransitions: queueItem.availableTransitions,
     linkedSignature: queueItem.linkedSignature,
     linkedPaymentId: queueItem.linkedPaymentId,
     linkedTransferIds: queueItem.linkedTransferIds,
@@ -305,13 +274,13 @@ export async function getReconciliationDetail(workspaceId: string, transferReque
     matchExplanation: detailedMatchExplanation,
     exceptions: enrichedExceptions,
     exceptionExplanation: queueItem.exceptionExplanation,
-    events: (projectedRequest.events ?? []).map((event) =>
+    events: (requestWithTimeline.events ?? []).map((event) =>
       serializeTransferRequestEvent(parseTransferRequestEvent(event)),
     ),
-    notes: (projectedRequest.notes ?? []).map(serializeTransferRequestNote),
+    notes: (requestWithTimeline.notes ?? []).map(serializeTransferRequestNote),
     timeline: buildTimeline({
-      events: (projectedRequest.events ?? []).map((event) => parseTransferRequestEvent(event)),
-      notes: (projectedRequest.notes ?? []).map(serializeTransferRequestNote),
+      events: (requestWithTimeline.events ?? []).map((event) => parseTransferRequestEvent(event)),
+      notes: (requestWithTimeline.notes ?? []).map(serializeTransferRequestNote),
       match: queueItem.match,
       exceptions: enrichedExceptions,
     }),
@@ -478,115 +447,6 @@ export async function listWorkspaceExceptions(args: {
   return filtered.slice(0, args.limit ?? 100).map(serializeException);
 }
 
-async function projectTransferRequestStatuses(args: {
-  workspaceId: string;
-  transferRequests: TransferRequestWithRelations[];
-  matches: SettlementMatchRow[];
-  exceptions: ExceptionRow[];
-}) {
-  const matchesByRequestId = new Map(args.matches.map((row) => [row.transfer_request_id, row] as const));
-  const exceptionsByRequestId = new Map<string, ExceptionRow[]>();
-
-  for (const exception of args.exceptions) {
-    if (!exception.transfer_request_id) continue;
-    const bucket = exceptionsByRequestId.get(exception.transfer_request_id) ?? [];
-    bucket.push(exception);
-    exceptionsByRequestId.set(exception.transfer_request_id, bucket);
-  }
-
-  const updates = args.transferRequests
-    .map((request) => {
-      const match = matchesByRequestId.get(request.transferRequestId) ?? null;
-      const requestExceptions = exceptionsByRequestId.get(request.transferRequestId) ?? [];
-      const targetStatus = deriveProjectedSettlementStatus({
-        currentStatus: request.status as RequestStatus,
-        matchStatus: match?.match_status ?? null,
-        exceptionStatuses: requestExceptions.map((item) => item.status),
-      });
-      const projectionPath = buildSystemProjectionPath({
-        currentStatus: request.status as RequestStatus,
-        targetStatus,
-      });
-
-      return {
-        request,
-        match,
-        requestExceptions,
-        projectionPath,
-      };
-    })
-    .filter((item) => item.projectionPath.length > 0);
-
-  if (!updates.length) {
-    return args.transferRequests;
-  }
-
-  await prisma.$transaction(async (tx) => {
-    for (const item of updates) {
-      let cursor = item.request.status as RequestStatus;
-
-      for (const nextStatus of item.projectionPath) {
-        await tx.transferRequest.update({
-          where: { transferRequestId: item.request.transferRequestId },
-          data: { status: nextStatus },
-        });
-
-        await createTransferRequestEvent(tx, {
-          transferRequestId: item.request.transferRequestId,
-          workspaceId: args.workspaceId,
-          eventType:
-            nextStatus === 'observed'
-              ? 'settlement_observed'
-              : nextStatus === 'matched'
-                ? 'settlement_matched'
-                : nextStatus === 'partially_matched'
-                  ? 'settlement_partially_matched'
-                  : 'settlement_exception_projected',
-          actorType: 'system',
-          actorId: 'settlement_projector',
-          eventSource: 'system',
-          beforeState: cursor,
-          afterState: nextStatus,
-          linkedSignature:
-            item.match?.signature ??
-            item.requestExceptions.find((exception) => exception.signature)?.signature ??
-            null,
-          linkedTransferIds: uniqueValues(
-            [
-              item.match?.observed_transfer_id,
-              ...item.requestExceptions.map((exception) => exception.observed_transfer_id),
-            ].filter((value): value is string => Boolean(value)),
-          ),
-          payloadJson: {
-            projectedBy: 'settlement_read_model',
-            matchStatus: item.match?.match_status ?? null,
-            exceptionStatuses: item.requestExceptions.map((exception) => exception.status),
-          },
-        });
-
-        cursor = nextStatus;
-      }
-    }
-  });
-
-  return prisma.transferRequest.findMany({
-    where: {
-      transferRequestId: {
-        in: args.transferRequests.map((request) => request.transferRequestId),
-      },
-    },
-    include: {
-      sourceWorkspaceAddress: true,
-      destinationWorkspaceAddress: true,
-      requestedByUser: true,
-      events: {
-        orderBy: { createdAt: 'asc' },
-      },
-    },
-    orderBy: { requestedAt: 'desc' },
-  });
-}
-
 function buildQueueItems(args: {
   transferRequests: TransferRequestWithRelations[];
   matches: SettlementMatchRow[];
@@ -605,6 +465,11 @@ function buildQueueItems(args: {
   return args.transferRequests.map((request) => {
     const matchRow = matchesByRequestId.get(request.transferRequestId) ?? null;
     const exceptions = (exceptionsByRequestId.get(request.transferRequestId) ?? []).map(serializeException);
+    const requestDisplayState = deriveRequestDisplayState({
+      requestStatus: request.status,
+      matchStatus: matchRow?.match_status ?? null,
+      exceptionStatuses: exceptions.map((item) => item.status),
+    });
     const linkedTransferIds = uniqueValues(
       [
         matchRow?.observed_transfer_id,
@@ -619,10 +484,17 @@ function buildQueueItems(args: {
     const match = matchRow ? serializeMatch(matchRow) : null;
     return {
       ...serializeTransferRequest(request),
-      requestDisplayState: deriveRequestDisplayState({
+      approvalState: deriveApprovalState(request.status),
+      executionState: deriveExecutionState({
         requestStatus: request.status,
+        linkedSignature,
         matchStatus: matchRow?.match_status ?? null,
         exceptionStatuses: exceptions.map((item) => item.status),
+      }),
+      requestDisplayState,
+      availableTransitions: getAvailableOperatorTransitions({
+        requestStatus: request.status as RequestStatus,
+        requestDisplayState,
       }),
       linkedSignature,
       linkedPaymentId: extractLinkedPaymentId(request.events ?? []),
@@ -942,7 +814,7 @@ export function serializeException(row: ExceptionRow) {
     signature: row.signature,
     observedTransferId: row.observed_transfer_id,
     exceptionType: row.exception_type,
-    reasonCode: row.exception_type,
+    reasonCode: normalizeExceptionReasonCode(row.exception_type),
     severity: row.severity,
     status: row.status,
     explanation: row.explanation,
@@ -956,6 +828,17 @@ export function serializeException(row: ExceptionRow) {
         ? null
         : Number(row.chain_to_process_ms),
   };
+}
+
+function normalizeExceptionReasonCode(exceptionType: string) {
+  switch (exceptionType) {
+    case 'unexpected_observation':
+      return 'unexpected_destination';
+    case 'unallocated_residual':
+      return 'residual_amount';
+    default:
+      return exceptionType;
+  }
 }
 
 export function getAvailableExceptionActions(status: string) {

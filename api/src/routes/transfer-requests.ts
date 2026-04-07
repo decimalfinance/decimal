@@ -8,6 +8,8 @@ import {
   ACTIVE_MATCHING_REQUEST_STATUSES,
   CREATE_REQUEST_STATUSES,
   REQUEST_STATUSES,
+  deriveRequestDisplayState,
+  getAvailableOperatorTransitions,
   getAvailableUserTransitions,
   isUserRequestStatusTransitionAllowed,
   type RequestStatus,
@@ -88,10 +90,7 @@ transferRequestsRouter.get(
       const { workspaceId, transferRequestId } = transferRequestParamsSchema.parse(req.params);
       await assertWorkspaceAccess(workspaceId, req.auth!.userId);
       const detail = await getReconciliationDetail(workspaceId, transferRequestId);
-      res.json({
-        ...detail,
-        availableTransitions: getAvailableUserTransitions(detail.status as RequestStatus),
-      });
+      res.json(detail);
     } catch (error) {
       next(error);
     }
@@ -239,7 +238,17 @@ transferRequestsRouter.post(
         },
       });
 
-      if (!isUserRequestStatusTransitionAllowed(current.status as RequestStatus, input.toStatus)) {
+      const reconciliationDetail = await getReconciliationDetail(workspaceId, transferRequestId);
+      const allowsOperatorClose =
+        input.toStatus === 'closed'
+        && reconciliationDetail.requestDisplayState !== 'pending'
+        && current.status !== 'closed'
+        && current.status !== 'rejected';
+
+      if (
+        !allowsOperatorClose
+        && !isUserRequestStatusTransitionAllowed(current.status as RequestStatus, input.toStatus)
+      ) {
         throw new Error(
           `Invalid request status transition from ${current.status} to ${input.toStatus}`,
         );
@@ -287,9 +296,18 @@ transferRequestsRouter.post(
         return nextRequest;
       });
 
+      const nextDisplayState = deriveRequestDisplayState({
+        requestStatus: updated.status,
+        matchStatus: reconciliationDetail.match?.matchStatus ?? null,
+        exceptionStatuses: reconciliationDetail.exceptions.map((item) => item.status),
+      });
+
       res.json({
         ...serializeTransferRequest(updated),
-        availableTransitions: getAvailableUserTransitions(updated.status as RequestStatus),
+        availableTransitions: getAvailableOperatorTransitions({
+          requestStatus: updated.status as RequestStatus,
+          requestDisplayState: nextDisplayState,
+        }),
       });
     } catch (error) {
       next(error);
