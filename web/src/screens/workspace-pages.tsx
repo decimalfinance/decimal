@@ -146,355 +146,637 @@ export function WorkspaceHomePage({
         </div>
       </section>
 
-      <section className="content-grid content-grid-single">
-        <div className="content-panel content-panel-soft">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Approval inbox</p>
-              <h2>Requests needing review</h2>
-              <p className="compact-copy">Policy-routed requests wait here until an operator approves, rejects, or escalates them.</p>
+      <section className="workspace-home-grid">
+        <div className="workspace-home-primary">
+          <div className="content-panel content-panel-strong">
+            <div className="panel-header panel-header-stack">
+              <div>
+                <p className="eyebrow">Planned transfers</p>
+                <h2>Requests and matches</h2>
+                <p className="compact-copy">
+                  The operator queue lives here. Watch the outcome first, then inspect settlement and execution context in the rail.
+                </p>
+              </div>
+              <span className="status-chip">{reconciliationRows.length} live</span>
             </div>
-            <span className="status-chip">{approvalInbox.length}</span>
-          </div>
-          <div className="stack-list">
-            {approvalInbox.length ? (
-              approvalInbox.map((item) => (
+
+            <div className="filter-row filter-row-compact">
+              {(['all', 'pending', 'matched', 'partial', 'exception'] as const).map((filter) => (
                 <button
-                  key={item.transferRequestId}
-                  className={
-                    selectedReconciliationDetail?.transferRequestId === item.transferRequestId
-                      ? 'feed-row is-active'
-                      : 'feed-row'
-                  }
-                  data-tone="pending"
-                  onClick={() => onSelectReconciliation(item)}
+                  key={filter}
+                  className={reconciliationFilter === filter ? 'filter-chip is-active' : 'filter-chip'}
+                  onClick={() => onChangeReconciliationFilter(filter)}
                   type="button"
                 >
-                  <div className="request-card-copy">
-                    <div className="request-card-title">
-                      <strong>{getTransferLabel(item)}</strong>
-                      <span className="meta-pill meta-pill-danger">{getApprovalStateLabel(item.approvalState)}</span>
-                    </div>
-                    <div className="request-card-meta">
-                      <span className="meta-pill">{formatRawUsdc(item.amountRaw)} USDC</span>
-                      <span className="meta-pill">{getDestinationLabel(item.destination, item.destinationWorkspaceAddress)}</span>
-                      <span className="meta-pill">{getDestinationTrustLabel(item.destination?.trustState ?? 'unreviewed')}</span>
-                      {item.approvalEvaluation.reasons.map((reason) => (
-                        <span className="meta-pill meta-pill-danger" key={reason.code}>
-                          {getApprovalReasonLabel(reason.code)}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
+                  {filter}
                 </button>
-              ))
-            ) : (
-              <div className="empty-box compact">No requests currently require approval.</div>
-            )}
-          </div>
-        </div>
-      </section>
+              ))}
+            </div>
 
-      <section className="content-grid content-grid-single">
-        <div className="content-panel content-panel-soft">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Observed transfers</p>
-              <h2>Real USDC movement</h2>
-              <p className="compact-copy">Every observed USDC leg across the wallets saved in this workspace.</p>
-            </div>
-          </div>
-          <div className="transfer-table">
-            <div className="transfer-table-head">
-              <span>Amount</span>
-              <span>From</span>
-              <span>To</span>
-              <span>Route</span>
-              <span>Type</span>
-              <span>Actions</span>
-            </div>
-            {observedTransfers.length ? (
-              observedTransfers.map((transfer) => (
-                <div
-                  key={transfer.transferId}
-                  className={
-                    selectedObservedTransfer?.transferId === transfer.transferId
-                      ? 'transfer-table-row is-active'
-                      : 'transfer-table-row'
-                  }
-                >
-                  <a
-                    className="transfer-table-link"
-                    href={orbTransactionUrl(transfer.signature)}
-                    rel="noreferrer"
-                    target="_blank"
-                    title={transfer.signature}
+            <div className="stack-list">
+              {reconciliationRows.length ? (
+                reconciliationRows.map((row) => (
+                  <div
+                    key={row.transferRequestId}
+                    className={
+                      selectedReconciliationDetail?.transferRequestId === row.transferRequestId
+                        ? 'feed-row is-active'
+                        : 'feed-row'
+                    }
+                    data-tone={row.requestDisplayState}
                   >
-                    <span className="transfer-table-amount">{transfer.amountDecimal}</span>
-                    <span className="transfer-table-mono" title={transfer.sourceWallet ?? transfer.sourceTokenAccount ?? 'Unknown'}>
-                      {shortenAddress(transfer.sourceWallet ?? transfer.sourceTokenAccount, 8, 8)}
-                    </span>
-                    <span className="transfer-table-mono" title={transfer.destinationWallet ?? transfer.destinationTokenAccount}>
-                      {shortenAddress(transfer.destinationWallet ?? transfer.destinationTokenAccount, 8, 8)}
-                    </span>
-                    <span className="transfer-table-meta" title={transfer.routeGroup}>
-                      {getRouteLabel(transfer)}
-                    </span>
-                    <span className="transfer-table-meta">{transfer.legRole.replaceAll('_', ' ')}</span>
-                  </a>
-                  <div className="transfer-table-actions">
-                    <button
-                      className="ghost-button compact-button"
-                      onClick={() => onSelectObservedTransfer(transfer)}
-                      type="button"
-                    >
-                      inspect
+                    <button className="feed-row-main request-card-main" onClick={() => onSelectReconciliation(row)} type="button">
+                      <div className="request-card-copy">
+                        <div className="request-card-title">
+                          <strong>{getTransferLabel(row)}</strong>
+                          <span className={`tone-pill tone-pill-${row.requestDisplayState}`}>
+                            {getDisplayStateLabel(row.requestDisplayState)}
+                          </span>
+                        </div>
+                        <div className="request-card-meta">
+                          <span className="meta-pill">to {getDestinationLabel(row.destination, row.destinationWorkspaceAddress)}</span>
+                          {row.destination?.counterparty ? (
+                            <span className="meta-pill">{row.destination.counterparty.displayName}</span>
+                          ) : null}
+                          {row.destination ? (
+                            <span className="meta-pill">
+                              {row.destination.trustState} // {row.destination.isInternal ? 'internal' : 'external'}
+                            </span>
+                          ) : null}
+                          <span className="meta-pill">{formatTimestamp(row.requestedAt)}</span>
+                          <span className="meta-pill">{formatLabel(row.requestType)}</span>
+                          {row.exceptions[0] ? (
+                            <span className="meta-pill meta-pill-danger">
+                              {getExceptionReasonLabel(row.exceptions[0].reasonCode)}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="request-card-amount">
+                        <strong>{formatRawUsdc(row.amountRaw)}</strong>
+                        <small>USDC</small>
+                      </div>
                     </button>
                   </div>
+                ))
+              ) : (
+                <div className="empty-box compact">No planned transfers yet. Open setup and create the first one.</div>
+              )}
+            </div>
+          </div>
+
+          <div className="content-panel content-panel-soft">
+            <div className="panel-header panel-header-stack">
+              <div>
+                <p className="eyebrow">Observed transfers</p>
+                <h2>Real USDC movement</h2>
+                <p className="compact-copy">Every observed USDC leg across the wallets saved in this workspace.</p>
+              </div>
+            </div>
+            <div className="transfer-table">
+              <div className="transfer-table-head">
+                <span>Amount</span>
+                <span>From</span>
+                <span>To</span>
+                <span>Route</span>
+                <span>Type</span>
+                <span>Actions</span>
+              </div>
+              {observedTransfers.length ? (
+                observedTransfers.map((transfer) => (
+                  <div
+                    key={transfer.transferId}
+                    className={
+                      selectedObservedTransfer?.transferId === transfer.transferId
+                        ? 'transfer-table-row is-active'
+                        : 'transfer-table-row'
+                    }
+                  >
+                    <a
+                      className="transfer-table-link"
+                      href={orbTransactionUrl(transfer.signature)}
+                      rel="noreferrer"
+                      target="_blank"
+                      title={transfer.signature}
+                    >
+                      <span className="transfer-table-amount">{transfer.amountDecimal}</span>
+                      <span className="transfer-table-mono" title={transfer.sourceWallet ?? transfer.sourceTokenAccount ?? 'Unknown'}>
+                        {shortenAddress(transfer.sourceWallet ?? transfer.sourceTokenAccount, 8, 8)}
+                      </span>
+                      <span className="transfer-table-mono" title={transfer.destinationWallet ?? transfer.destinationTokenAccount}>
+                        {shortenAddress(transfer.destinationWallet ?? transfer.destinationTokenAccount, 8, 8)}
+                      </span>
+                      <span className="transfer-table-meta" title={transfer.routeGroup}>
+                        {getRouteLabel(transfer)}
+                      </span>
+                      <span className="transfer-table-meta">{transfer.legRole.replaceAll('_', ' ')}</span>
+                    </a>
+                    <div className="transfer-table-actions">
+                      <button
+                        className="ghost-button compact-button"
+                        onClick={() => onSelectObservedTransfer(transfer)}
+                        type="button"
+                      >
+                        inspect
+                      </button>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="empty-box compact">No observed transfers yet for the saved wallets.</div>
+              )}
+            </div>
+
+            {selectedObservedTransfer ? (
+              <div className="transfer-inspector-drawer transfer-inspector-inline">
+                <div className="panel-header">
+                  <div>
+                    <p className="eyebrow">Observed transfer</p>
+                    <h2>Transfer inspector</h2>
+                  </div>
                 </div>
-              ))
+                <div className="stack-list">
+                  <div className="inspector-callout">
+                    <div>
+                      <p className="eyebrow">Explorer</p>
+                      <strong>{shortenAddress(selectedObservedTransfer.signature, 10, 10)}</strong>
+                    </div>
+                    <a
+                      className="ghost-button inline-link-button"
+                      href={orbTransactionUrl(selectedObservedTransfer.signature)}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      open on orb
+                    </a>
+                  </div>
+                  <InfoLine label="Signature" value={selectedObservedTransfer.signature} />
+                  <InfoLine label="Observed at" value={formatTimestamp(selectedObservedTransfer.eventTime)} />
+                  <InfoLine label="Written at" value={formatTimestamp(selectedObservedTransfer.createdAt)} />
+                  <InfoLine label="Chain to write" value={`${selectedObservedTransfer.chainToWriteMs} ms`} />
+                  <InfoLine label="Route" value={getRouteLabel(selectedObservedTransfer)} />
+                  <InfoLine label="Leg role" value={selectedObservedTransfer.legRole.replaceAll('_', ' ')} />
+                  <InfoLine label="Source wallet" value={selectedObservedTransfer.sourceWallet ?? 'Unknown'} />
+                  <InfoLine label="Source token account" value={selectedObservedTransfer.sourceTokenAccount ?? 'Unknown'} />
+                  <InfoLine label="Destination wallet" value={selectedObservedTransfer.destinationWallet ?? 'Unknown'} />
+                  <InfoLine label="Destination token account" value={selectedObservedTransfer.destinationTokenAccount} />
+                  <InfoLine label="Amount" value={selectedObservedTransfer.amountDecimal} />
+                </div>
+              </div>
             ) : (
-              <div className="empty-box compact">No observed transfers yet for the saved wallets.</div>
+              <div className="empty-box compact transfer-empty-state">
+                Select a transfer row to inspect its exact chain-facing fields.
+              </div>
             )}
           </div>
-          {selectedObservedTransfer ? (
-            <div className="transfer-inspector-drawer">
-              <div className="panel-header">
-                <div>
-                  <p className="eyebrow">Observed transfer</p>
-                  <h2>Transfer inspector</h2>
-                </div>
-              </div>
-              <div className="stack-list">
-                <div className="inspector-callout">
-                  <div>
-                    <p className="eyebrow">Explorer</p>
-                    <strong>{shortenAddress(selectedObservedTransfer.signature, 10, 10)}</strong>
-                  </div>
-                  <a
-                    className="ghost-button inline-link-button"
-                    href={orbTransactionUrl(selectedObservedTransfer.signature)}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    open on orb
-                  </a>
-                </div>
-                <InfoLine label="Signature" value={selectedObservedTransfer.signature} />
-                <InfoLine label="Observed at" value={formatTimestamp(selectedObservedTransfer.eventTime)} />
-                <InfoLine label="Written at" value={formatTimestamp(selectedObservedTransfer.createdAt)} />
-                <InfoLine label="Chain to write" value={`${selectedObservedTransfer.chainToWriteMs} ms`} />
-                <InfoLine label="Route" value={getRouteLabel(selectedObservedTransfer)} />
-                <InfoLine label="Leg role" value={selectedObservedTransfer.legRole.replaceAll('_', ' ')} />
-                <InfoLine label="Source wallet" value={selectedObservedTransfer.sourceWallet ?? 'Unknown'} />
-                <InfoLine label="Source token account" value={selectedObservedTransfer.sourceTokenAccount ?? 'Unknown'} />
-                <InfoLine label="Destination wallet" value={selectedObservedTransfer.destinationWallet ?? 'Unknown'} />
-                <InfoLine label="Destination token account" value={selectedObservedTransfer.destinationTokenAccount} />
-                <InfoLine label="Amount" value={selectedObservedTransfer.amountDecimal} />
-              </div>
-            </div>
-          ) : (
-            <div className="empty-box compact transfer-empty-state">
-              Select a transfer row to inspect its exact chain-facing fields.
-            </div>
-          )}
         </div>
-      </section>
 
-      <section className="workspace-home-main">
-        <div className="content-panel content-panel-strong">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Planned transfers</p>
-              <h2>Requests and matches</h2>
-              <p className="compact-copy">This is the main operator queue. Start here, then inspect chain activity below.</p>
+        <aside className="workspace-home-secondary">
+          <div className="content-panel content-panel-soft">
+            <div className="panel-header panel-header-stack">
+              <div>
+                <p className="eyebrow">Approval inbox</p>
+                <h2>Requests needing review</h2>
+                <p className="compact-copy">
+                  Policy-routed requests wait here until an operator approves, rejects, or escalates them.
+                </p>
+              </div>
+              <span className="status-chip">{approvalInbox.length}</span>
             </div>
-            <span className="status-chip">{reconciliationRows.length}</span>
-          </div>
-
-          <div className="filter-row filter-row-compact">
-            {(['all', 'pending', 'matched', 'partial', 'exception'] as const).map((filter) => (
-              <button
-                key={filter}
-                className={reconciliationFilter === filter ? 'filter-chip is-active' : 'filter-chip'}
-                onClick={() => onChangeReconciliationFilter(filter)}
-                type="button"
-              >
-                {filter}
-              </button>
-            ))}
-          </div>
-
-          <div className="stack-list">
-            {reconciliationRows.length ? (
-              reconciliationRows.map((row) => (
-                <div
-                  key={row.transferRequestId}
-                  className={
-                    selectedReconciliationDetail?.transferRequestId === row.transferRequestId
-                      ? 'feed-row is-active'
-                      : 'feed-row'
-                  }
-                  data-tone={row.requestDisplayState}
-                >
-                  <button className="feed-row-main request-card-main" onClick={() => onSelectReconciliation(row)} type="button">
+            <div className="stack-list">
+              {approvalInbox.length ? (
+                approvalInbox.map((item) => (
+                  <button
+                    key={item.transferRequestId}
+                    className={
+                      selectedReconciliationDetail?.transferRequestId === item.transferRequestId
+                        ? 'feed-row is-active'
+                        : 'feed-row'
+                    }
+                    data-tone="pending"
+                    onClick={() => onSelectReconciliation(item)}
+                    type="button"
+                  >
                     <div className="request-card-copy">
                       <div className="request-card-title">
-                        <strong>{getTransferLabel(row)}</strong>
-                        <span className={`tone-pill tone-pill-${row.requestDisplayState}`}>
-                          {getDisplayStateLabel(row.requestDisplayState)}
-                        </span>
+                        <strong>{getTransferLabel(item)}</strong>
+                        <span className="meta-pill meta-pill-danger">{getApprovalStateLabel(item.approvalState)}</span>
                       </div>
                       <div className="request-card-meta">
-                        <span className="meta-pill">to {getDestinationLabel(row.destination, row.destinationWorkspaceAddress)}</span>
-                        {row.destination?.counterparty ? (
-                          <span className="meta-pill">{row.destination.counterparty.displayName}</span>
-                        ) : null}
-                        {row.destination ? (
-                          <span className="meta-pill">
-                            {row.destination.trustState} // {row.destination.isInternal ? 'internal' : 'external'}
+                        <span className="meta-pill">{formatRawUsdc(item.amountRaw)} USDC</span>
+                        <span className="meta-pill">{getDestinationLabel(item.destination, item.destinationWorkspaceAddress)}</span>
+                        {item.approvalEvaluation.reasons.map((reason) => (
+                          <span className="meta-pill meta-pill-danger" key={reason.code}>
+                            {getApprovalReasonLabel(reason.code)}
                           </span>
+                        ))}
+                      </div>
+                    </div>
+                  </button>
+                ))
+              ) : (
+                <div className="empty-box compact">No requests currently require approval.</div>
+              )}
+            </div>
+          </div>
+
+          {selectedReconciliationDetail ? (
+            <div className="content-panel content-panel-strong workspace-inspector-panel">
+              <div className="transfer-inspector-drawer transfer-inspector-sticky">
+                <div className="panel-header panel-header-stack">
+                  <div>
+                    <p className="eyebrow">Request inspector</p>
+                    <h2>Request and match</h2>
+                  </div>
+                </div>
+
+                <div className="stack-list">
+                  <InfoLine label="Transfer" value={getTransferLabel(selectedReconciliationDetail)} />
+                  <InfoLine label="Requested amount" value={formatRawUsdc(selectedReconciliationDetail.amountRaw)} />
+                  <InfoLine
+                    label="Destination"
+                    value={getDestinationLabel(
+                      selectedReconciliationDetail.destination,
+                      selectedReconciliationDetail.destinationWorkspaceAddress,
+                    )}
+                  />
+                  <InfoLine
+                    label="Counterparty"
+                    value={selectedReconciliationDetail.destination?.counterparty?.displayName ?? 'Unassigned'}
+                  />
+                  <InfoLine
+                    label="Destination trust"
+                    value={selectedReconciliationDetail.destination?.trustState ?? 'unreviewed'}
+                  />
+                  <InfoLine
+                    label="Destination scope"
+                    value={selectedReconciliationDetail.destination?.isInternal ? 'internal' : 'external'}
+                  />
+                  <InfoLine
+                    label="Receiving wallet"
+                    value={
+                      selectedReconciliationDetail.destination?.walletAddress
+                      ?? selectedReconciliationDetail.destinationWorkspaceAddress?.address
+                      ?? 'Unknown'
+                    }
+                  />
+                  <InfoLine
+                    label="Receiving USDC ATA"
+                    value={
+                      selectedReconciliationDetail.destination?.tokenAccountAddress
+                      ?? selectedReconciliationDetail.destinationWorkspaceAddress?.usdcAtaAddress
+                      ?? 'Unknown'
+                    }
+                  />
+                  <InfoLine label="Requested at" value={formatTimestamp(selectedReconciliationDetail.requestedAt)} />
+
+                  <div className="state-summary-grid">
+                    <div className="state-summary-card">
+                      <span className="eyebrow">Approval</span>
+                      <strong>{getApprovalStateLabel(selectedReconciliationDetail.approvalState)}</strong>
+                      <small>Can this request become active yet?</small>
+                    </div>
+                    <div className="state-summary-card">
+                      <span className="eyebrow">Execution</span>
+                      <strong>{getExecutionStateLabel(selectedReconciliationDetail.executionState)}</strong>
+                      <small>Has anything actually been sent or observed onchain?</small>
+                    </div>
+                    <div className="state-summary-card">
+                      <span className="eyebrow">Reconciliation</span>
+                      <strong>{getDisplayStateLabel(selectedReconciliationDetail.requestDisplayState)}</strong>
+                      <small>How does observed settlement compare to the request?</small>
+                    </div>
+                  </div>
+
+                  <div className="detail-section">
+                    <div className="detail-section-head">
+                      <strong>Execution tracking</strong>
+                      <span>{selectedReconciliationDetail.latestExecution ? 'active attempt' : 'no attempt yet'}</span>
+                    </div>
+
+                    {selectedReconciliationDetail.latestExecution ? (
+                      <div className="stack-list">
+                        <InfoLine
+                          label="Execution state"
+                          value={getExecutionStateLabel(selectedReconciliationDetail.executionState)}
+                        />
+                        <InfoLine
+                          label="Execution source"
+                          value={selectedReconciliationDetail.latestExecution.executionSource.replaceAll('_', ' ')}
+                        />
+                        <InfoLine
+                          label="Attempt created"
+                          value={formatTimestamp(selectedReconciliationDetail.latestExecution.createdAt)}
+                        />
+                        <InfoLine
+                          label="Submitted at"
+                          value={
+                            selectedReconciliationDetail.latestExecution.submittedAt
+                              ? formatTimestamp(selectedReconciliationDetail.latestExecution.submittedAt)
+                              : 'Not submitted yet'
+                          }
+                        />
+                        <InfoLine
+                          label="Submitted signature"
+                          value={
+                            selectedReconciliationDetail.latestExecution.submittedSignature
+                              ? shortenAddress(selectedReconciliationDetail.latestExecution.submittedSignature, 10, 10)
+                              : 'Not attached yet'
+                          }
+                        />
+                        <InfoLine
+                          label="Observed onchain"
+                          value={
+                            selectedReconciliationDetail.observedExecutionTransaction
+                              ? formatTimestamp(selectedReconciliationDetail.observedExecutionTransaction.eventTime)
+                              : 'No observed transaction yet'
+                          }
+                        />
+
+                        {selectedReconciliationDetail.latestExecution.submittedSignature ? (
+                          <div className="inspector-callout">
+                            <div>
+                              <p className="eyebrow">Submitted signature</p>
+                              <strong>
+                                {shortenAddress(selectedReconciliationDetail.latestExecution.submittedSignature, 10, 10)}
+                              </strong>
+                            </div>
+                            <a
+                              className="ghost-button inline-link-button"
+                              href={orbTransactionUrl(selectedReconciliationDetail.latestExecution.submittedSignature)}
+                              rel="noreferrer"
+                              target="_blank"
+                            >
+                              open on orb
+                            </a>
+                          </div>
                         ) : null}
-                        <span className="meta-pill">{formatTimestamp(row.requestedAt)}</span>
-                        <span className="meta-pill">{formatLabel(row.requestType)}</span>
-                        {row.exceptions[0] ? (
-                          <span className="meta-pill meta-pill-danger">
-                            {getExceptionReasonLabel(row.exceptions[0].reasonCode)}
-                          </span>
+
+                        {!selectedReconciliationDetail.latestExecution.submittedSignature ? (
+                          <div className="detail-section">
+                            <label className="field">
+                              <span>Attach submitted signature</span>
+                              <input
+                                name="executionSignature"
+                                onChange={(event) => setExecutionSignature(event.target.value)}
+                                placeholder="Paste the submitted transaction signature"
+                                type="text"
+                                value={executionSignature}
+                              />
+                            </label>
+                            <div className="exception-actions">
+                              <button
+                                className="primary-button compact-button"
+                                onClick={() =>
+                                  void onUpdateExecutionRecord(
+                                    selectedReconciliationDetail.latestExecution!.executionRecordId,
+                                    { submittedSignature: executionSignature.trim() || undefined },
+                                    selectedReconciliationDetail.transferRequestId,
+                                  )
+                                }
+                                type="button"
+                              >
+                                attach signature
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {selectedReconciliationDetail.latestExecution.submittedSignature
+                        && !selectedReconciliationDetail.observedExecutionTransaction
+                        && selectedReconciliationDetail.executionState === 'submitted_onchain' ? (
+                          <div className="exception-actions">
+                            <button
+                              className="ghost-button compact-button"
+                              onClick={() =>
+                                void onUpdateExecutionRecord(
+                                  selectedReconciliationDetail.latestExecution!.executionRecordId,
+                                  { state: 'broadcast_failed' },
+                                  selectedReconciliationDetail.transferRequestId,
+                                )
+                              }
+                              type="button"
+                            >
+                              mark broadcast failed
+                            </button>
+                          </div>
+                        ) : null}
+
+                        {selectedReconciliationDetail.executionRecords.length > 1 ? (
+                          <div className="detail-section">
+                            <div className="detail-section-head">
+                              <strong>Execution history</strong>
+                              <span>{selectedReconciliationDetail.executionRecords.length}</span>
+                            </div>
+                            <div className="stack-list">
+                              {selectedReconciliationDetail.executionRecords.map((execution) => (
+                                <div className="note-card" key={execution.executionRecordId}>
+                                  <strong>{getExecutionStateLabel(execution.state)}</strong>
+                                  <small>
+                                    {formatTimestamp(execution.createdAt)} // {execution.executionSource.replaceAll('_', ' ')}
+                                  </small>
+                                  <p>
+                                    {execution.submittedSignature
+                                      ? `Submitted ${shortenAddress(execution.submittedSignature, 8, 8)}`
+                                      : 'No signature attached yet.'}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="stack-list">
+                        <div className="empty-box compact">
+                          No execution attempt is recorded yet. This request is approved, but that does not mean anything has been sent.
+                        </div>
+                        {selectedReconciliationDetail.approvalState === 'approved' ? (
+                          <div className="exception-actions">
+                            <button
+                              className="primary-button compact-button"
+                              onClick={() => void onCreateExecutionRecord(selectedReconciliationDetail.transferRequestId)}
+                              type="button"
+                            >
+                              create execution record
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="detail-section">
+                    <div className="detail-section-head">
+                      <strong>Approval check</strong>
+                      <span>
+                        {selectedReconciliationDetail.approvalEvaluation.requiresApproval
+                          ? 'manual review needed'
+                          : 'auto-cleared'}
+                      </span>
+                    </div>
+                    {selectedReconciliationDetail.approvalEvaluation.requiresApproval ? (
+                      <div className="detail-section stack-list">
+                        <div className="empty-box compact">
+                          This request was routed into the approval inbox by{' '}
+                          {selectedReconciliationDetail.approvalEvaluation.policyName}.
+                        </div>
+                        <div className="reason-list">
+                          {selectedReconciliationDetail.approvalEvaluation.reasons.map((reason) => (
+                            <div className="reason-card" key={reason.code}>
+                              <strong>{getApprovalReasonLabel(reason.code)}</strong>
+                              <p>{reason.message}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="empty-box compact">
+                        Auto-cleared by {selectedReconciliationDetail.approvalEvaluation.policyName}. No approval reasons were triggered.
+                      </div>
+                    )}
+                  </div>
+
+                  {(selectedReconciliationDetail.approvalState === 'pending_approval'
+                    || selectedReconciliationDetail.approvalState === 'escalated') ? (
+                    <div className="detail-section">
+                      <div className="detail-section-head">
+                        <strong>Approval actions</strong>
+                        <span>
+                          {selectedReconciliationDetail.approvalState === 'escalated'
+                            ? 'escalated review'
+                            : 'waiting for review'}
+                        </span>
+                      </div>
+                      <label className="field">
+                        <span>Comment</span>
+                        <textarea
+                          name="approvalComment"
+                          onChange={(event) => setApprovalComment(event.target.value)}
+                          placeholder="Optional approval context"
+                          rows={3}
+                          value={approvalComment}
+                        />
+                      </label>
+                      <div className="exception-actions">
+                        <button
+                          className="primary-button compact-button"
+                          onClick={() =>
+                            void onApplyApprovalDecision(
+                              selectedReconciliationDetail.transferRequestId,
+                              'approve',
+                              approvalComment,
+                            )
+                          }
+                          type="button"
+                        >
+                          approve
+                        </button>
+                        <button
+                          className="ghost-button compact-button"
+                          onClick={() =>
+                            void onApplyApprovalDecision(
+                              selectedReconciliationDetail.transferRequestId,
+                              'reject',
+                              approvalComment,
+                            )
+                          }
+                          type="button"
+                        >
+                          reject
+                        </button>
+                        {selectedReconciliationDetail.approvalState === 'pending_approval' ? (
+                          <button
+                            className="ghost-button compact-button"
+                            onClick={() =>
+                              void onApplyApprovalDecision(
+                                selectedReconciliationDetail.transferRequestId,
+                                'escalate',
+                                approvalComment,
+                              )
+                            }
+                            type="button"
+                          >
+                            escalate
+                          </button>
                         ) : null}
                       </div>
                     </div>
-                    <div className="request-card-amount">
-                      <strong>{formatRawUsdc(row.amountRaw)}</strong>
-                      <small>USDC</small>
+                  ) : null}
+
+                  {selectedReconciliationDetail.approvalDecisions.length ? (
+                    <div className="detail-section">
+                      <div className="detail-section-head">
+                        <strong>Approval history</strong>
+                        <span>{selectedReconciliationDetail.approvalDecisions.length}</span>
+                      </div>
+                      <div className="stack-list">
+                        {selectedReconciliationDetail.approvalDecisions.map((decision) => (
+                          <div className="note-card" key={decision.approvalDecisionId}>
+                            <strong>{getApprovalActionLabel(decision.action)}</strong>
+                            <small>
+                              {decision.actorUser?.displayName ?? decision.actorUser?.email ?? decision.actorType} //{' '}
+                              {formatTimestamp(decision.createdAt)}
+                            </small>
+                            {decision.payloadJson && 'reasons' in decision.payloadJson ? (
+                              <p>{getApprovalDecisionSummary(decision.action)}</p>
+                            ) : null}
+                            {decision.comment ? <p>{decision.comment}</p> : null}
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </button>
-                </div>
-              ))
-            ) : (
-              <div className="empty-box compact">No planned transfers yet. Open setup and create the first one.</div>
-            )}
-          </div>
-          {selectedReconciliationDetail ? (
-            <div className="transfer-inspector-drawer">
-              <div className="panel-header">
-                <div>
-                  <p className="eyebrow">Request inspector</p>
-                  <h2>Request and match</h2>
-                </div>
-              </div>
-              <div className="stack-list">
-                <InfoLine label="Transfer" value={getTransferLabel(selectedReconciliationDetail)} />
-                <InfoLine label="Requested amount" value={formatRawUsdc(selectedReconciliationDetail.amountRaw)} />
-                <InfoLine
-                  label="Destination"
-                  value={getDestinationLabel(
-                    selectedReconciliationDetail.destination,
-                    selectedReconciliationDetail.destinationWorkspaceAddress,
-                  )}
-                />
-                <InfoLine
-                  label="Counterparty"
-                  value={selectedReconciliationDetail.destination?.counterparty?.displayName ?? 'Unassigned'}
-                />
-                <InfoLine
-                  label="Destination trust"
-                  value={selectedReconciliationDetail.destination?.trustState ?? 'unreviewed'}
-                />
-                <InfoLine
-                  label="Destination scope"
-                  value={selectedReconciliationDetail.destination?.isInternal ? 'internal' : 'external'}
-                />
-                <InfoLine
-                  label="Receiving wallet"
-                  value={
-                    selectedReconciliationDetail.destination?.walletAddress
-                    ?? selectedReconciliationDetail.destinationWorkspaceAddress?.address
-                    ?? 'Unknown'
-                  }
-                />
-                <InfoLine
-                  label="Receiving USDC ATA"
-                  value={
-                    selectedReconciliationDetail.destination?.tokenAccountAddress
-                    ?? selectedReconciliationDetail.destinationWorkspaceAddress?.usdcAtaAddress
-                    ?? 'Unknown'
-                  }
-                />
-                <InfoLine label="Requested at" value={formatTimestamp(selectedReconciliationDetail.requestedAt)} />
+                  ) : null}
 
-                <div className="state-summary-grid">
-                  <div className="state-summary-card">
-                    <span className="eyebrow">Approval</span>
-                    <strong>{getApprovalStateLabel(selectedReconciliationDetail.approvalState)}</strong>
-                    <small>Can this request become active yet?</small>
-                  </div>
-                  <div className="state-summary-card">
-                    <span className="eyebrow">Execution</span>
-                    <strong>{getExecutionStateLabel(selectedReconciliationDetail.executionState)}</strong>
-                    <small>Has anything actually been sent or observed onchain?</small>
-                  </div>
-                  <div className="state-summary-card">
-                    <span className="eyebrow">Reconciliation</span>
-                    <strong>{getDisplayStateLabel(selectedReconciliationDetail.requestDisplayState)}</strong>
-                    <small>How does observed settlement compare to the request?</small>
-                  </div>
-                </div>
+                  {selectedReconciliationDetail.availableTransitions.length ? (
+                    <div className="detail-section">
+                      <div className="detail-section-head">
+                        <strong>Request actions</strong>
+                        <span>{selectedReconciliationDetail.availableTransitions.length}</span>
+                      </div>
+                      <div className="exception-actions">
+                        {selectedReconciliationDetail.availableTransitions.map((status) => (
+                          <button
+                            className="ghost-button compact-button"
+                            key={status}
+                            onClick={() => void onTransitionRequest(selectedReconciliationDetail.transferRequestId, status)}
+                            type="button"
+                          >
+                            move to {status.replaceAll('_', ' ')}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
 
-                <div className="detail-section">
-                  <div className="detail-section-head">
-                    <strong>Execution tracking</strong>
-                    <span>{selectedReconciliationDetail.latestExecution ? 'active attempt' : 'no attempt yet'}</span>
-                  </div>
+                  {selectedReconciliationDetail.exceptions.length ? (
+                    <div className="filter-row filter-row-compact">
+                      {(['overview', 'exceptions'] as const).map((tab) => (
+                        <button
+                          className={inspectorTab === tab ? 'filter-chip is-active' : 'filter-chip'}
+                          key={tab}
+                          onClick={() => setInspectorTab(tab)}
+                          type="button"
+                        >
+                          {tab === 'overview'
+                            ? 'overview'
+                            : `exceptions (${selectedReconciliationDetail.exceptions.length})`}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
 
-                  {selectedReconciliationDetail.latestExecution ? (
-                    <div className="stack-list">
-                      <InfoLine
-                        label="Execution state"
-                        value={getExecutionStateLabel(selectedReconciliationDetail.executionState)}
-                      />
-                      <InfoLine
-                        label="Execution source"
-                        value={selectedReconciliationDetail.latestExecution.executionSource.replaceAll('_', ' ')}
-                      />
-                      <InfoLine
-                        label="Attempt created"
-                        value={formatTimestamp(selectedReconciliationDetail.latestExecution.createdAt)}
-                      />
-                      <InfoLine
-                        label="Submitted at"
-                        value={
-                          selectedReconciliationDetail.latestExecution.submittedAt
-                            ? formatTimestamp(selectedReconciliationDetail.latestExecution.submittedAt)
-                            : 'Not submitted yet'
-                        }
-                      />
-                      <InfoLine
-                        label="Submitted signature"
-                        value={
-                          selectedReconciliationDetail.latestExecution.submittedSignature
-                            ? shortenAddress(selectedReconciliationDetail.latestExecution.submittedSignature, 10, 10)
-                            : 'Not attached yet'
-                        }
-                      />
-                      <InfoLine
-                        label="Observed onchain"
-                        value={
-                          selectedReconciliationDetail.observedExecutionTransaction
-                            ? formatTimestamp(selectedReconciliationDetail.observedExecutionTransaction.eventTime)
-                            : 'No observed transaction yet'
-                        }
-                      />
-
-                      {selectedReconciliationDetail.latestExecution.submittedSignature ? (
+                  {inspectorTab === 'overview' ? (
+                    <>
+                      {selectedReconciliationDetail.linkedSignature ? (
                         <div className="inspector-callout">
                           <div>
-                            <p className="eyebrow">Submitted signature</p>
-                            <strong>{shortenAddress(selectedReconciliationDetail.latestExecution.submittedSignature, 10, 10)}</strong>
+                            <p className="eyebrow">Settlement signature</p>
+                            <strong>{shortenAddress(selectedReconciliationDetail.linkedSignature, 10, 10)}</strong>
                           </div>
                           <a
                             className="ghost-button inline-link-button"
-                            href={orbTransactionUrl(selectedReconciliationDetail.latestExecution.submittedSignature)}
+                            href={orbTransactionUrl(selectedReconciliationDetail.linkedSignature)}
                             rel="noreferrer"
                             target="_blank"
                           >
@@ -503,406 +785,169 @@ export function WorkspaceHomePage({
                         </div>
                       ) : null}
 
-                      {!selectedReconciliationDetail.latestExecution.submittedSignature ? (
-                        <div className="detail-section">
-                          <label className="field">
-                            <span>Attach submitted signature</span>
-                            <input
-                              name="executionSignature"
-                              onChange={(event) => setExecutionSignature(event.target.value)}
-                              placeholder="Paste the submitted transaction signature"
-                              type="text"
-                              value={executionSignature}
-                            />
-                          </label>
-                          <div className="exception-actions">
-                            <button
-                              className="primary-button compact-button"
-                              onClick={() =>
-                                void onUpdateExecutionRecord(
-                                  selectedReconciliationDetail.latestExecution!.executionRecordId,
-                                  { submittedSignature: executionSignature.trim() || undefined },
-                                  selectedReconciliationDetail.transferRequestId,
-                                )
-                              }
-                              type="button"
-                            >
-                              attach signature
-                            </button>
+                      {selectedReconciliationDetail.match ? (
+                        <>
+                          <InfoLine label="Match rule" value={selectedReconciliationDetail.match.matchRule} />
+                          <InfoLine
+                            label="Match status"
+                            value={selectedReconciliationDetail.match.matchStatus.replaceAll('_', ' ')}
+                          />
+                          <InfoLine
+                            label="Matched amount"
+                            value={formatRawUsdc(selectedReconciliationDetail.match.matchedAmountRaw)}
+                          />
+                          <InfoLine
+                            label="Observed event"
+                            value={
+                              selectedReconciliationDetail.match.observedEventTime
+                                ? formatTimestamp(selectedReconciliationDetail.match.observedEventTime)
+                                : 'n/a'
+                            }
+                          />
+                          <InfoLine
+                            label="Matched at"
+                            value={
+                              selectedReconciliationDetail.match.matchedAt
+                                ? formatTimestamp(selectedReconciliationDetail.match.matchedAt)
+                                : 'n/a'
+                            }
+                          />
+                          <InfoLine
+                            label="Chain to match"
+                            value={
+                              selectedReconciliationDetail.match.chainToMatchMs === null
+                                ? 'n/a'
+                                : `${selectedReconciliationDetail.match.chainToMatchMs} ms`
+                            }
+                          />
+                          <div className="empty-box compact">
+                            {selectedReconciliationDetail.matchExplanation ?? 'No explanation yet.'}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="empty-box compact">
+                          No exact match yet. The request is still waiting for a compatible observed payment.
+                        </div>
+                      )}
+
+                      {selectedReconciliationDetail.linkedObservedPayment ? (
+                        <div className="empty-box compact">
+                          <strong>Observed payment</strong>
+                          <div className="detail-grid">
+                            <span>{selectedReconciliationDetail.linkedObservedPayment.paymentKind.replaceAll('_', ' ')}</span>
+                            <span>{formatRawUsdc(selectedReconciliationDetail.linkedObservedPayment.netDestinationAmountRaw)}</span>
+                            <span>{selectedReconciliationDetail.linkedObservedPayment.routeCount} route(s)</span>
                           </div>
                         </div>
                       ) : null}
 
-                      {selectedReconciliationDetail.latestExecution.submittedSignature
-                        && !selectedReconciliationDetail.observedExecutionTransaction
-                        && selectedReconciliationDetail.executionState === 'submitted_onchain' ? (
-                        <div className="exception-actions">
-                          <button
-                            className="ghost-button compact-button"
-                            onClick={() =>
-                              void onUpdateExecutionRecord(
-                                selectedReconciliationDetail.latestExecution!.executionRecordId,
-                                { state: 'broadcast_failed' },
-                                selectedReconciliationDetail.transferRequestId,
-                              )
-                            }
-                            type="button"
-                          >
-                            mark broadcast failed
-                          </button>
-                        </div>
-                      ) : null}
-
-                      {selectedReconciliationDetail.executionRecords.length > 1 ? (
+                      {selectedReconciliationDetail.relatedObservedPayments.length > 1 ? (
                         <div className="detail-section">
                           <div className="detail-section-head">
-                            <strong>Execution history</strong>
-                            <span>{selectedReconciliationDetail.executionRecords.length}</span>
+                            <strong>Settlement breakdown</strong>
+                            <span>{selectedReconciliationDetail.relatedObservedPayments.length}</span>
                           </div>
                           <div className="stack-list">
-                            {selectedReconciliationDetail.executionRecords.map((execution) => (
-                              <div className="note-card" key={execution.executionRecordId}>
-                                <strong>{getExecutionStateLabel(execution.state)}</strong>
-                                <small>{formatTimestamp(execution.createdAt)} // {execution.executionSource.replaceAll('_', ' ')}</small>
-                                <p>
-                                  {execution.submittedSignature
-                                    ? `Submitted ${shortenAddress(execution.submittedSignature, 8, 8)}`
-                                    : 'No signature attached yet.'}
-                                </p>
+                            {selectedReconciliationDetail.relatedObservedPayments.map((payment) => (
+                              <div className="note-card" key={payment.paymentId}>
+                                <strong>{payment.destinationLabel ?? payment.destinationWallet ?? 'Unknown destination'}</strong>
+                                <small>
+                                  {payment.recipientRole
+                                    ? payment.recipientRole.replaceAll('_', ' ')
+                                    : 'destination'}
+                                </small>
+                                <p>{formatRawUsdc(payment.netDestinationAmountRaw)} USDC</p>
                               </div>
                             ))}
                           </div>
                         </div>
                       ) : null}
-                    </div>
-                  ) : (
-                    <div className="stack-list">
-                      <div className="empty-box compact">
-                        No execution attempt is recorded yet. This request is approved, but that does not mean anything has been sent.
-                      </div>
-                      {selectedReconciliationDetail.approvalState === 'approved' ? (
-                        <div className="exception-actions">
-                          <button
-                            className="primary-button compact-button"
-                            onClick={() => void onCreateExecutionRecord(selectedReconciliationDetail.transferRequestId)}
-                            type="button"
-                          >
-                            create execution record
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
-                  )}
-                </div>
 
-                <div className="detail-section">
-                  <div className="detail-section-head">
-                    <strong>Approval check</strong>
-                    <span>{selectedReconciliationDetail.approvalEvaluation.requiresApproval ? 'manual review needed' : 'auto-cleared'}</span>
-                  </div>
-                  {selectedReconciliationDetail.approvalEvaluation.requiresApproval ? (
-                    <div className="detail-section stack-list">
-                      <div className="empty-box compact">
-                        This request was routed into the approval inbox by {selectedReconciliationDetail.approvalEvaluation.policyName}.
-                      </div>
-                      <div className="reason-list">
-                        {selectedReconciliationDetail.approvalEvaluation.reasons.map((reason) => (
-                          <div className="reason-card" key={reason.code}>
-                            <strong>{getApprovalReasonLabel(reason.code)}</strong>
-                            <p>{reason.message}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="empty-box compact">
-                      Auto-cleared by {selectedReconciliationDetail.approvalEvaluation.policyName}. No approval reasons were triggered.
-                    </div>
-                  )}
-                </div>
-
-                {(selectedReconciliationDetail.approvalState === 'pending_approval'
-                  || selectedReconciliationDetail.approvalState === 'escalated') ? (
-                  <div className="detail-section">
-                    <div className="detail-section-head">
-                      <strong>Approval actions</strong>
-                      <span>{selectedReconciliationDetail.approvalState === 'escalated' ? 'escalated review' : 'waiting for review'}</span>
-                    </div>
-                    <label className="field">
-                      <span>Comment</span>
-                      <textarea
-                        name="approvalComment"
-                        onChange={(event) => setApprovalComment(event.target.value)}
-                        placeholder="Optional approval context"
-                        rows={3}
-                        value={approvalComment}
-                      />
-                    </label>
-                    <div className="exception-actions">
-                      <button
-                        className="primary-button compact-button"
-                        onClick={() => void onApplyApprovalDecision(selectedReconciliationDetail.transferRequestId, 'approve', approvalComment)}
-                        type="button"
-                      >
-                        approve
-                      </button>
-                      <button
-                        className="ghost-button compact-button"
-                        onClick={() => void onApplyApprovalDecision(selectedReconciliationDetail.transferRequestId, 'reject', approvalComment)}
-                        type="button"
-                      >
-                        reject
-                      </button>
-                      {selectedReconciliationDetail.approvalState === 'pending_approval' ? (
-                        <button
-                          className="ghost-button compact-button"
-                          onClick={() => void onApplyApprovalDecision(selectedReconciliationDetail.transferRequestId, 'escalate', approvalComment)}
-                          type="button"
-                        >
-                          escalate
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
-                ) : null}
-
-                {selectedReconciliationDetail.approvalDecisions.length ? (
-                  <div className="detail-section">
-                    <div className="detail-section-head">
-                      <strong>Approval history</strong>
-                      <span>{selectedReconciliationDetail.approvalDecisions.length}</span>
-                    </div>
-                    <div className="stack-list">
-                      {selectedReconciliationDetail.approvalDecisions.map((decision) => (
-                        <div className="note-card" key={decision.approvalDecisionId}>
-                          <strong>{getApprovalActionLabel(decision.action)}</strong>
-                          <small>
-                            {decision.actorUser?.displayName ?? decision.actorUser?.email ?? decision.actorType} // {formatTimestamp(decision.createdAt)}
-                          </small>
-                          {decision.payloadJson && 'reasons' in decision.payloadJson ? (
-                            <p>{getApprovalDecisionSummary(decision.action)}</p>
-                          ) : null}
-                          {decision.comment ? <p>{decision.comment}</p> : null}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {selectedReconciliationDetail.availableTransitions.length ? (
-                  <div className="detail-section">
-                    <div className="detail-section-head">
-                      <strong>Request actions</strong>
-                      <span>{selectedReconciliationDetail.availableTransitions.length}</span>
-                    </div>
-                    <div className="exception-actions">
-                      {selectedReconciliationDetail.availableTransitions.map((status) => (
-                        <button
-                          className="ghost-button compact-button"
-                          key={status}
-                          onClick={() => void onTransitionRequest(selectedReconciliationDetail.transferRequestId, status)}
-                          type="button"
-                        >
-                          move to {status.replaceAll('_', ' ')}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {selectedReconciliationDetail.exceptions.length ? (
-                  <div className="filter-row filter-row-compact">
-                    {(['overview', 'exceptions'] as const).map((tab) => (
-                      <button
-                        className={inspectorTab === tab ? 'filter-chip is-active' : 'filter-chip'}
-                        key={tab}
-                        onClick={() => setInspectorTab(tab)}
-                        type="button"
-                      >
-                        {tab === 'overview'
-                          ? 'overview'
-                          : `exceptions (${selectedReconciliationDetail.exceptions.length})`}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-
-                {inspectorTab === 'overview' ? (
-                  <>
-                    {selectedReconciliationDetail.linkedSignature ? (
-                      <div className="inspector-callout">
-                        <div>
-                          <p className="eyebrow">Settlement signature</p>
-                          <strong>{shortenAddress(selectedReconciliationDetail.linkedSignature, 10, 10)}</strong>
-                        </div>
-                        <a
-                          className="ghost-button inline-link-button"
-                          href={orbTransactionUrl(selectedReconciliationDetail.linkedSignature)}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          open on orb
-                        </a>
-                      </div>
-                    ) : null}
-                    {selectedReconciliationDetail.match ? (
-                      <>
-                        <InfoLine label="Match rule" value={selectedReconciliationDetail.match.matchRule} />
-                        <InfoLine label="Match status" value={selectedReconciliationDetail.match.matchStatus.replaceAll('_', ' ')} />
-                        <InfoLine label="Matched amount" value={formatRawUsdc(selectedReconciliationDetail.match.matchedAmountRaw)} />
-                        <InfoLine
-                          label="Observed event"
-                          value={
-                            selectedReconciliationDetail.match.observedEventTime
-                              ? formatTimestamp(selectedReconciliationDetail.match.observedEventTime)
-                              : 'n/a'
-                          }
-                        />
-                        <InfoLine
-                          label="Matched at"
-                          value={
-                            selectedReconciliationDetail.match.matchedAt
-                              ? formatTimestamp(selectedReconciliationDetail.match.matchedAt)
-                              : 'n/a'
-                          }
-                        />
-                        <InfoLine
-                          label="Chain to match"
-                          value={
-                            selectedReconciliationDetail.match.chainToMatchMs === null
-                              ? 'n/a'
-                              : `${selectedReconciliationDetail.match.chainToMatchMs} ms`
-                          }
-                        />
-                        <div className="empty-box compact">{selectedReconciliationDetail.matchExplanation ?? 'No explanation yet.'}</div>
-                      </>
-                    ) : (
-                      <div className="empty-box compact">
-                        No exact match yet. The request is still waiting for a compatible observed payment.
-                      </div>
-                    )}
-
-                    {selectedReconciliationDetail.linkedObservedPayment ? (
-                      <div className="empty-box compact">
-                        <strong>Observed payment</strong>
-                        <div className="detail-grid">
-                          <span>{selectedReconciliationDetail.linkedObservedPayment.paymentKind.replaceAll('_', ' ')}</span>
-                          <span>{formatRawUsdc(selectedReconciliationDetail.linkedObservedPayment.netDestinationAmountRaw)}</span>
-                          <span>{selectedReconciliationDetail.linkedObservedPayment.routeCount} route(s)</span>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {selectedReconciliationDetail.relatedObservedPayments.length > 1 ? (
                       <div className="detail-section">
                         <div className="detail-section-head">
-                          <strong>Settlement breakdown</strong>
-                          <span>{selectedReconciliationDetail.relatedObservedPayments.length}</span>
+                          <strong>Request notes</strong>
+                          <span>{selectedReconciliationDetail.notes.length}</span>
                         </div>
                         <div className="stack-list">
-                          {selectedReconciliationDetail.relatedObservedPayments.map((payment) => (
-                            <div className="note-card" key={payment.paymentId}>
-                              <strong>
-                                {payment.destinationLabel ??
-                                  payment.destinationWallet ??
-                                  'Unknown destination'}
-                              </strong>
-                              <small>
-                                {payment.recipientRole
-                                  ? payment.recipientRole.replaceAll('_', ' ')
-                                  : 'destination'}
-                              </small>
-                              <p>{formatRawUsdc(payment.netDestinationAmountRaw)} USDC</p>
-                            </div>
+                          {selectedReconciliationDetail.notes.length ? (
+                            selectedReconciliationDetail.notes.map((note) => (
+                              <div key={note.transferRequestNoteId} className="note-card">
+                                <strong>{note.authorUser?.displayName ?? note.authorUser?.email ?? 'Operator'}</strong>
+                                <small>{formatTimestamp(note.createdAt)}</small>
+                                <p>{note.body}</p>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="empty-box compact">No request notes yet.</div>
+                          )}
+                          <form
+                            className="inline-note-form"
+                            onSubmit={(event) =>
+                              void handleNoteSubmit(event, (body) =>
+                                onAddRequestNote(selectedReconciliationDetail.transferRequestId, body),
+                              )
+                            }
+                          >
+                            <label className="field">
+                              <span>Add request note</span>
+                              <textarea name="body" placeholder="Capture context for the next operator." rows={3} />
+                            </label>
+                            <button className="ghost-button compact-button" type="submit">
+                              save note
+                            </button>
+                          </form>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="empty-box compact">
+                        {selectedReconciliationDetail.exceptionExplanation ??
+                          'Exceptions are preventing this request from being treated as fully settled.'}
+                      </div>
+                      <div className="detail-section">
+                        <div className="detail-section-head">
+                          <strong>Exceptions</strong>
+                          <span>{selectedReconciliationDetail.exceptions.length}</span>
+                        </div>
+                        <div className="stack-list">
+                          {selectedReconciliationDetail.exceptions.map((exception) => (
+                            <ExceptionCard
+                              exception={exception}
+                              key={exception.exceptionId}
+                              onAddNote={onAddExceptionNote}
+                              onApplyAction={onApplyExceptionAction}
+                            />
                           ))}
                         </div>
                       </div>
-                    ) : null}
+                    </>
+                  )}
 
-                    <div className="detail-section">
-                      <div className="detail-section-head">
-                        <strong>Request notes</strong>
-                        <span>{selectedReconciliationDetail.notes.length}</span>
-                      </div>
-                      <div className="stack-list">
-                        {selectedReconciliationDetail.notes.length ? (
-                          selectedReconciliationDetail.notes.map((note) => (
-                            <div key={note.transferRequestNoteId} className="note-card">
-                              <strong>{note.authorUser?.displayName ?? note.authorUser?.email ?? 'Operator'}</strong>
-                              <small>{formatTimestamp(note.createdAt)}</small>
-                              <p>{note.body}</p>
+                  <div className="detail-section">
+                    <div className="detail-section-head">
+                      <strong>{inspectorTab === 'exceptions' ? 'Exception timeline' : 'Timeline'}</strong>
+                      <span>
+                        {
+                          selectedReconciliationDetail.timeline.filter((item) =>
+                            inspectorTab === 'exceptions' ? item.timelineType === 'exception' : true,
+                          ).length
+                        }
+                      </span>
+                    </div>
+                    <div className="timeline-list">
+                      {selectedReconciliationDetail.timeline
+                        .filter((item) => (inspectorTab === 'exceptions' ? item.timelineType === 'exception' : true))
+                        .map((item, index) => (
+                          <div className="timeline-item" key={`${item.timelineType}-${index}-${item.createdAt}`}>
+                            <div>
+                              <strong>{getTimelineTitle(item)}</strong>
+                              <small>{formatTimestamp(item.createdAt)}</small>
                             </div>
-                          ))
-                        ) : (
-                          <div className="empty-box compact">No request notes yet.</div>
-                        )}
-                        <form
-                          className="inline-note-form"
-                          onSubmit={(event) =>
-                            void handleNoteSubmit(event, (body) =>
-                              onAddRequestNote(selectedReconciliationDetail.transferRequestId, body),
-                            )
-                          }
-                        >
-                          <label className="field">
-                            <span>Add request note</span>
-                            <textarea name="body" placeholder="Capture context for the next operator." rows={3} />
-                          </label>
-                          <button className="ghost-button compact-button" type="submit">
-                            save note
-                          </button>
-                        </form>
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="empty-box compact">
-                      {selectedReconciliationDetail.exceptionExplanation ??
-                        'Exceptions are preventing this request from being treated as fully settled.'}
-                    </div>
-                    <div className="detail-section">
-                      <div className="detail-section-head">
-                        <strong>Exceptions</strong>
-                        <span>{selectedReconciliationDetail.exceptions.length}</span>
-                      </div>
-                      <div className="stack-list">
-                        {selectedReconciliationDetail.exceptions.map((exception) => (
-                          <ExceptionCard
-                            exception={exception}
-                            onAddNote={onAddExceptionNote}
-                            onApplyAction={onApplyExceptionAction}
-                            key={exception.exceptionId}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                <div className="detail-section">
-                  <div className="detail-section-head">
-                    <strong>{inspectorTab === 'exceptions' ? 'Exception timeline' : 'Timeline'}</strong>
-                    <span>
-                      {
-                        selectedReconciliationDetail.timeline.filter((item) =>
-                          inspectorTab === 'exceptions' ? item.timelineType === 'exception' : true,
-                        ).length
-                      }
-                    </span>
-                  </div>
-                  <div className="timeline-list">
-                    {selectedReconciliationDetail.timeline
-                      .filter((item) => (inspectorTab === 'exceptions' ? item.timelineType === 'exception' : true))
-                      .map((item, index) => (
-                        <div className="timeline-item" key={`${item.timelineType}-${index}-${item.createdAt}`}>
-                          <div>
-                            <strong>{getTimelineTitle(item)}</strong>
-                            <small>{formatTimestamp(item.createdAt)}</small>
+                            <p>{getTimelineBody(item)}</p>
                           </div>
-                          <p>{getTimelineBody(item)}</p>
-                        </div>
-                      ))}
+                        ))}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -914,7 +959,7 @@ export function WorkspaceHomePage({
               Select a request to inspect the settlement timeline, exceptions, and notes.
             </div>
           )}
-        </div>
+        </aside>
       </section>
     </div>
   );

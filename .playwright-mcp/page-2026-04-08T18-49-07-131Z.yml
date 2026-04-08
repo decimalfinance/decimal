@@ -1,0 +1,201 @@
+- generic [ref=e4]:
+  - banner [ref=e5]:
+    - generic [ref=e6]:
+      - strong [ref=e7]: "[project name]"
+      - generic [ref=e8]: Demo Settlement Desk
+    - navigation "Global navigation" [ref=e9]:
+      - button "Dashboard" [ref=e10] [cursor=pointer]
+      - button "Orgs" [ref=e11] [cursor=pointer]
+      - button "Profile" [ref=e12] [cursor=pointer]
+    - generic [ref=e13]:
+      - button "Switch to light mode" [ref=e14] [cursor=pointer]:
+        - img [ref=e15]
+      - generic [ref=e17]: Ops
+      - button "Logout" [ref=e18] [cursor=pointer]
+  - generic [ref=e19]:
+    - complementary [ref=e20]:
+      - generic [ref=e21]:
+        - generic [ref=e22]:
+          - generic [ref=e23]: Org
+          - generic [ref=e24]: owner
+        - generic [ref=e25]:
+          - generic [ref=e26]: Select org
+          - combobox "Select organization" [ref=e27]:
+            - option "Acme Treasury" [selected]
+        - button "Dashboard" [ref=e29] [cursor=pointer]
+      - generic [ref=e30]:
+        - generic [ref=e31]:
+          - generic [ref=e32]: Current watch system
+          - generic [ref=e33]: Demo Settlement Desk
+        - generic [ref=e34]:
+          - button "Watch system" [ref=e35] [cursor=pointer]
+          - button "Wallets + expected transfers" [ref=e36] [cursor=pointer]
+      - generic [ref=e37]:
+        - generic [ref=e38]:
+          - generic [ref=e39]: Watch systems
+          - generic [ref=e40]: "1"
+        - button "Demo Settlement Desk active" [ref=e42] [cursor=pointer]:
+          - strong [ref=e43]: Demo Settlement Desk
+          - generic [ref=e44]: active
+    - main [ref=e45]:
+      - generic [ref=e46]:
+        - generic [ref=e47]:
+          - generic [ref=e48]:
+            - paragraph [ref=e49]: Setup
+            - heading "Demo Settlement Desk" [level=1] [ref=e50]
+            - paragraph [ref=e51]: Save wallets, define business destinations, then create planned transfers against those destinations.
+          - generic [ref=e52]:
+            - button "org dashboard" [ref=e53] [cursor=pointer]
+            - button "watch system" [ref=e54] [cursor=pointer]
+        - generic [ref=e55]:
+          - generic [ref=e56]:
+            - generic [ref=e58]:
+              - paragraph [ref=e59]: Step 1
+              - heading "Wallets" [level=2] [ref=e60]
+              - paragraph [ref=e61]: Save the wallets you care about first. Everything else in the workspace builds from this list.
+            - generic [ref=e62]:
+              - generic [ref=e63]:
+                - generic [ref=e64]: Wallet address
+                - textbox "Wallet address" [ref=e65]:
+                  - /placeholder: Solana wallet address
+              - generic [ref=e66]:
+                - generic [ref=e67]: Wallet registry name
+                - textbox "Wallet registry name Short technical name for this saved address row." [ref=e68]:
+                  - /placeholder: Treasury wallet, hot wallet, vendor wallet...
+                - generic [ref=e69]: Short technical name for this saved address row.
+              - generic [ref=e70]:
+                - generic [ref=e71]: Notes
+                - textbox "Notes" [ref=e72]:
+                  - /placeholder: Optional
+              - generic [ref=e73]:
+                - generic [ref=e74]: Status
+                - combobox "Status" [ref=e75]:
+                  - option "active" [selected]
+                  - option "inactive"
+              - button "Save wallet" [ref=e77] [cursor=pointer]
+            - generic [ref=e79]: No wallets saved yet.
+          - generic [ref=e80]:
+            - generic [ref=e82]:
+              - paragraph [ref=e83]: Step 2
+              - heading "Counterparties" [level=2] [ref=e84]
+              - paragraph [ref=e85]: Capture who this wallet belongs to so reconciliation has business identity, not just an address.
+            - generic [ref=e86]:
+              - generic [ref=e87]:
+                - generic [ref=e88]: Business entity name
+                - textbox "Business entity name The company, team, or business entity behind one or more destinations." [ref=e89]:
+                  - /placeholder: Acme Vendor, Coinbase Prime, Treasury Ops...
+                - generic [ref=e90]: The company, team, or business entity behind one or more destinations.
+              - generic [ref=e91]:
+                - generic [ref=e92]: Category
+                - textbox "Category" [ref=e93]:
+                  - /placeholder: vendor
+              - generic [ref=e94]:
+                - generic [ref=e95]: Reference
+                - textbox "Reference" [ref=e96]:
+                  - /placeholder: Optional external id
+              - generic [ref=e97]:
+                - generic [ref=e98]: Status
+                - combobox "Status" [ref=e99]:
+                  - option "active" [selected]
+                  - option "inactive"
+              - button "Create counterparty" [ref=e101] [cursor=pointer]
+            - generic [ref=e103]: No counterparties yet.
+          - generic [ref=e104]:
+            - generic [ref=e106]:
+              - paragraph [ref=e107]: Step 3
+              - heading "Destinations" [level=2] [ref=e108]
+              - paragraph [ref=e109]: Link each wallet to a named destination with trust and internal or external context.
+            - generic [ref=e110]:
+              - generic [ref=e111]:
+                - generic [ref=e112]: Linked wallet
+                - combobox "Linked wallet" [ref=e113]:
+                  - option "Select wallet" [disabled] [selected]
+              - generic [ref=e114]:
+                - generic [ref=e115]: Counterparty
+                - combobox "Counterparty" [ref=e116]:
+                  - option "Optional" [selected]
+              - generic [ref=e117]:
+                - generic [ref=e118]: Payment endpoint label
+                - textbox "Payment endpoint label Operator-facing name for this specific payment endpoint. This can differ from both the wallet name and the counterparty name." [ref=e119]:
+                  - /placeholder: Acme payout wallet
+                - generic [ref=e120]: Operator-facing name for this specific payment endpoint. This can differ from both the wallet name and the counterparty name.
+              - generic [ref=e121]:
+                - generic [ref=e122]: Destination type
+                - textbox "Destination type Use this to distinguish payout, refund, treasury, or exchange destinations." [ref=e123]:
+                  - /placeholder: vendor_wallet
+                - generic [ref=e124]: Use this to distinguish payout, refund, treasury, or exchange destinations.
+              - generic [ref=e125]:
+                - generic [ref=e126]: Trust state
+                - combobox "Trust state Trust controls whether new requests can go live immediately, must stay in draft, or are blocked entirely." [ref=e127]:
+                  - option "unreviewed" [selected]
+                  - option "trusted"
+                  - option "restricted"
+                  - option "blocked"
+                - generic [ref=e128]: Trust controls whether new requests can go live immediately, must stay in draft, or are blocked entirely.
+              - generic [ref=e129]:
+                - generic [ref=e130]: Scope
+                - combobox "Scope" [ref=e131]:
+                  - option "external" [selected]
+                  - option "internal"
+              - generic [ref=e132]:
+                - generic [ref=e133]: Notes
+                - textbox "Notes" [ref=e134]:
+                  - /placeholder: Optional
+              - generic [ref=e135]:
+                - generic [ref=e136]: Status
+                - combobox "Status" [ref=e137]:
+                  - option "active" [selected]
+                  - option "inactive"
+              - button "Create destination" [disabled] [ref=e139] [cursor=pointer]
+            - generic [ref=e141]: No destinations yet.
+          - generic [ref=e142]:
+            - generic [ref=e144]:
+              - paragraph [ref=e145]: Step 4
+              - heading "Approval policy" [level=2] [ref=e146]
+              - paragraph [ref=e147]: Control which requests auto-clear and which must enter the approval inbox.
+            - generic [ref=e148]: Approval policy unavailable.
+          - generic [ref=e149]:
+            - generic [ref=e151]:
+              - paragraph [ref=e152]: Step 5
+              - heading "Planned transfers" [level=2] [ref=e153]
+              - paragraph [ref=e154]: Create requests against destination objects so matching and review carry business context.
+            - generic [ref=e155]:
+              - generic [ref=e156]:
+                - generic [ref=e157]: From wallet
+                - combobox "From wallet" [ref=e158]:
+                  - option "Optional" [selected]
+              - generic [ref=e159]:
+                - generic [ref=e160]: Destination
+                - combobox "Destination Requests now target a destination object, not a bare wallet, so trust and business identity carry through to reconciliation." [ref=e161]:
+                  - option "Select destination" [disabled] [selected]
+                - generic [ref=e162]: Requests now target a destination object, not a bare wallet, so trust and business identity carry through to reconciliation.
+              - generic [ref=e163]:
+                - generic [ref=e164]: Transfer type
+                - textbox "Transfer type" [ref=e165]:
+                  - /placeholder: wallet_transfer
+              - generic [ref=e166]:
+                - generic [ref=e167]: Initial request state
+                - combobox "Initial request state Draft means “record it, but do not treat it as active yet.” Live request means the policy engine will immediately decide whether it auto-clears or enters the approval inbox." [ref=e168]:
+                  - option "save as draft" [selected]
+                - generic [ref=e169]: Draft means “record it, but do not treat it as active yet.” Live request means the policy engine will immediately decide whether it auto-clears or enters the approval inbox.
+              - generic [ref=e170]:
+                - generic [ref=e171]: Amount (raw units)
+                - 'textbox "Amount (raw units) USDC uses 6 decimals. Example: 10000 = 0.01 USDC." [ref=e172]':
+                  - /placeholder: 10000 for 0.01 USDC
+                - generic [ref=e173]: "USDC uses 6 decimals. Example: 10000 = 0.01 USDC."
+              - generic [ref=e174]:
+                - generic [ref=e175]: Reference
+                - textbox "Reference" [ref=e176]:
+                  - /placeholder: Optional
+              - generic [ref=e177]:
+                - generic [ref=e178]: Reason
+                - textbox "Reason" [ref=e179]:
+                  - /placeholder: Optional
+              - button "Create planned transfer" [disabled] [ref=e180] [cursor=pointer]
+            - generic [ref=e182]: No planned transfers yet.
+        - generic [ref=e184]:
+          - generic [ref=e186]:
+            - paragraph [ref=e187]: Matching note
+            - heading "How it works" [level=2] [ref=e188]
+            - paragraph [ref=e189]: Keep the explanation light and operational. The page itself should carry the workflow.
+          - generic [ref=e190]: Phase B keeps the worker wallet-compatible, but new requests now point at named destinations. That means queue rows and request detail can show trust, counterparty, and internal or external context while matching still uses the linked receiving wallet underneath.

@@ -14,7 +14,7 @@ These capabilities are critical, but they become much more useful after:
 - destinations exist
 - approvals exist
 - execution tracking exists
-
+ 
 That richer context makes exceptions, audits, and exports much more meaningful.
 
 ## What Must Exist At The End

@@ -1,0 +1,109 @@
+- generic [ref=e4]:
+  - banner [ref=e5]:
+    - generic [ref=e6]:
+      - strong [ref=e7]: "[project name]"
+      - generic [ref=e8]: Demo Settlement Desk
+    - navigation "Global navigation" [ref=e9]:
+      - button "Dashboard" [ref=e10] [cursor=pointer]
+      - button "Orgs" [ref=e11] [cursor=pointer]
+      - button "Profile" [ref=e12] [cursor=pointer]
+    - generic [ref=e13]:
+      - button "Switch to dark mode" [ref=e14] [cursor=pointer]:
+        - img [ref=e15]
+      - generic [ref=e17]: Ops
+      - button "Logout" [ref=e18] [cursor=pointer]
+  - generic [ref=e19]:
+    - complementary [ref=e20]:
+      - generic [ref=e21]:
+        - generic [ref=e22]:
+          - generic [ref=e23]: Org
+          - generic [ref=e24]: owner
+        - generic [ref=e25]:
+          - generic [ref=e26]: Select org
+          - combobox "Select organization" [ref=e27]:
+            - option "Acme Treasury" [selected]
+        - button "Dashboard" [ref=e29] [cursor=pointer]
+      - generic [ref=e30]:
+        - generic [ref=e31]:
+          - generic [ref=e32]: Current watch system
+          - generic [ref=e33]: Demo Settlement Desk
+        - generic [ref=e34]:
+          - button "Watch system" [ref=e35] [cursor=pointer]
+          - button "Wallets + expected transfers" [ref=e36] [cursor=pointer]
+      - generic [ref=e37]:
+        - generic [ref=e38]:
+          - generic [ref=e39]: Watch systems
+          - generic [ref=e40]: "1"
+        - button "Demo Settlement Desk active" [ref=e42] [cursor=pointer]:
+          - strong [ref=e43]: Demo Settlement Desk
+          - generic [ref=e44]: active
+    - main [ref=e45]:
+      - generic [ref=e46]:
+        - generic [ref=e47]:
+          - generic [ref=e48]:
+            - paragraph [ref=e49]: Workspace
+            - heading "Demo Settlement Desk" [level=1] [ref=e50]
+            - paragraph [ref=e51]: Save wallets, create planned transfers, observe real USDC transfers, and reconcile them against what you expected.
+          - generic [ref=e52]:
+            - button "org dashboard" [ref=e53] [cursor=pointer]
+            - button "refresh" [ref=e54] [cursor=pointer]
+            - button "wallets + planned transfers" [ref=e55] [cursor=pointer]
+        - generic [ref=e57]:
+          - generic [ref=e58]:
+            - generic [ref=e59]:
+              - strong [ref=e60]: "00"
+              - text: Wallets
+            - generic [ref=e61]:
+              - strong [ref=e62]: "00"
+              - text: Planned
+            - generic [ref=e63]:
+              - strong [ref=e64]: "00"
+              - text: Observed
+            - generic [ref=e65]:
+              - strong [ref=e66]: "00"
+              - text: Matched
+            - generic [ref=e67]:
+              - strong [ref=e68]: "00"
+              - text: Pending
+          - generic [ref=e69]: syncing
+        - generic [ref=e70]:
+          - generic [ref=e71]:
+            - generic [ref=e72]:
+              - generic [ref=e73]:
+                - generic [ref=e74]:
+                  - paragraph [ref=e75]: Planned transfers
+                  - heading "Requests and matches" [level=2] [ref=e76]
+                  - paragraph [ref=e77]: The operator queue lives here. Watch the outcome first, then inspect settlement and execution context in the rail.
+                - generic [ref=e78]: 0 live
+              - generic [ref=e79]:
+                - button "all" [ref=e80] [cursor=pointer]
+                - button "pending" [ref=e81] [cursor=pointer]
+                - button "matched" [ref=e82] [cursor=pointer]
+                - button "partial" [ref=e83] [cursor=pointer]
+                - button "exception" [ref=e84] [cursor=pointer]
+              - generic [ref=e86]: No planned transfers yet. Open setup and create the first one.
+            - generic [ref=e87]:
+              - generic [ref=e89]:
+                - paragraph [ref=e90]: Observed transfers
+                - heading "Real USDC movement" [level=2] [ref=e91]
+                - paragraph [ref=e92]: Every observed USDC leg across the wallets saved in this workspace.
+              - generic [ref=e93]:
+                - generic [ref=e94]:
+                  - generic [ref=e95]: Amount
+                  - generic [ref=e96]: From
+                  - generic [ref=e97]: To
+                  - generic [ref=e98]: Route
+                  - generic [ref=e99]: Type
+                  - generic [ref=e100]: Actions
+                - generic [ref=e101]: No observed transfers yet for the saved wallets.
+              - generic [ref=e102]: Select a transfer row to inspect its exact chain-facing fields.
+          - complementary [ref=e103]:
+            - generic [ref=e104]:
+              - generic [ref=e105]:
+                - generic [ref=e106]:
+                  - paragraph [ref=e107]: Approval inbox
+                  - heading "Requests needing review" [level=2] [ref=e108]
+                  - paragraph [ref=e109]: Policy-routed requests wait here until an operator approves, rejects, or escalates them.
+                - generic [ref=e110]: "0"
+              - generic [ref=e112]: No requests currently require approval.
+            - generic [ref=e113]: Select a request to inspect the settlement timeline, exceptions, and notes.

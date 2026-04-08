@@ -249,6 +249,16 @@ export function DashboardPage({
   onOpenOrganization: (organizationId: string) => void;
   session: AuthenticatedSession;
 }) {
+  const workspaces = session.organizations.flatMap((organization) =>
+    organization.workspaces.map((workspace) => ({
+      organizationId: organization.organizationId,
+      organizationName: organization.organizationName,
+      workspaceId: workspace.workspaceId,
+      workspaceName: workspace.workspaceName,
+      status: workspace.status,
+    })),
+  );
+
   return (
     <div className="page-stack">
       <section className="hero-panel">
@@ -262,7 +272,7 @@ export function DashboardPage({
         </div>
       </section>
 
-      <section className="content-grid">
+      <section className="ops-home-grid">
         <div className="content-panel">
           <div className="panel-header">
             <div>
@@ -293,6 +303,44 @@ export function DashboardPage({
                 <button className="primary-button" onClick={onGoOrgs} type="button">
                   Open orgs
                 </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="content-panel content-panel-soft">
+          <div className="panel-header panel-header-stack">
+            <div>
+              <p className="eyebrow">Operator path</p>
+              <h2>Start from a live system</h2>
+              <p className="compact-copy">
+                Open a workspace when you want to watch requests, approvals, execution, and actual settlement in one place.
+              </p>
+            </div>
+            <button className="ghost-button compact-button" onClick={onGoOrgs} type="button">
+              manage orgs
+            </button>
+          </div>
+
+          <div className="stack-list">
+            {workspaces.length ? (
+              workspaces.slice(0, 4).map((workspace) => (
+                <button
+                  className="workspace-row"
+                  key={workspace.workspaceId}
+                  onClick={() => onOpenOrganization(workspace.organizationId)}
+                  type="button"
+                >
+                  <div>
+                    <strong>{workspace.workspaceName}</strong>
+                    <small>{workspace.organizationName} // {workspace.status}</small>
+                  </div>
+                  <span>open org</span>
+                </button>
+              ))
+            ) : (
+              <div className="empty-box compact">
+                No workspaces yet. Create an organization and spin up a desk when you are ready to monitor a real flow.
               </div>
             )}
           </div>
