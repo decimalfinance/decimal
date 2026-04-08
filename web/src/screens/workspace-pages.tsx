@@ -154,15 +154,15 @@ export function WorkspaceHomePage({
                   <div className="request-card-copy">
                     <div className="request-card-title">
                       <strong>{getTransferLabel(item)}</strong>
-                      <span className="meta-pill meta-pill-danger">{formatLabel(item.approvalState)}</span>
+                      <span className="meta-pill meta-pill-danger">{getApprovalStateLabel(item.approvalState)}</span>
                     </div>
                     <div className="request-card-meta">
                       <span className="meta-pill">{formatRawUsdc(item.amountRaw)} USDC</span>
                       <span className="meta-pill">{getDestinationLabel(item.destination, item.destinationWorkspaceAddress)}</span>
-                      <span className="meta-pill">{item.destination?.trustState ?? 'unreviewed'}</span>
+                      <span className="meta-pill">{getDestinationTrustLabel(item.destination?.trustState ?? 'unreviewed')}</span>
                       {item.approvalEvaluation.reasons.map((reason) => (
                         <span className="meta-pill meta-pill-danger" key={reason.code}>
-                          {reason.message}
+                          {getApprovalReasonLabel(reason.code)}
                         </span>
                       ))}
                     </div>
@@ -402,21 +402,50 @@ export function WorkspaceHomePage({
                     ?? 'Unknown'
                   }
                 />
-                <InfoLine label="Request state" value={formatLabel(selectedReconciliationDetail.approvalState)} />
-                <InfoLine label="Execution state" value={formatLabel(selectedReconciliationDetail.executionState)} />
-                <InfoLine label="Reconciliation state" value={getDisplayStateLabel(selectedReconciliationDetail.requestDisplayState)} />
                 <InfoLine label="Requested at" value={formatTimestamp(selectedReconciliationDetail.requestedAt)} />
+
+                <div className="state-summary-grid">
+                  <div className="state-summary-card">
+                    <span className="eyebrow">Approval</span>
+                    <strong>{getApprovalStateLabel(selectedReconciliationDetail.approvalState)}</strong>
+                    <small>Can this request become active yet?</small>
+                  </div>
+                  <div className="state-summary-card">
+                    <span className="eyebrow">Execution</span>
+                    <strong>{getExecutionStateLabel(selectedReconciliationDetail.executionState)}</strong>
+                    <small>Has anything actually been sent or observed onchain?</small>
+                  </div>
+                  <div className="state-summary-card">
+                    <span className="eyebrow">Reconciliation</span>
+                    <strong>{getDisplayStateLabel(selectedReconciliationDetail.requestDisplayState)}</strong>
+                    <small>How does observed settlement compare to the request?</small>
+                  </div>
+                </div>
 
                 <div className="detail-section">
                   <div className="detail-section-head">
-                    <strong>Approval policy</strong>
-                    <span>{selectedReconciliationDetail.approvalEvaluation.requiresApproval ? 'requires review' : 'clear'}</span>
+                    <strong>Approval check</strong>
+                    <span>{selectedReconciliationDetail.approvalEvaluation.requiresApproval ? 'manual review needed' : 'auto-cleared'}</span>
                   </div>
-                  <div className="empty-box compact">
-                    {selectedReconciliationDetail.approvalEvaluation.requiresApproval
-                      ? selectedReconciliationDetail.approvalEvaluation.reasons.map((reason) => reason.message).join(' ')
-                      : `Auto-cleared by ${selectedReconciliationDetail.approvalEvaluation.policyName}.`}
-                  </div>
+                  {selectedReconciliationDetail.approvalEvaluation.requiresApproval ? (
+                    <div className="detail-section stack-list">
+                      <div className="empty-box compact">
+                        This request was routed into the approval inbox by {selectedReconciliationDetail.approvalEvaluation.policyName}.
+                      </div>
+                      <div className="reason-list">
+                        {selectedReconciliationDetail.approvalEvaluation.reasons.map((reason) => (
+                          <div className="reason-card" key={reason.code}>
+                            <strong>{getApprovalReasonLabel(reason.code)}</strong>
+                            <p>{reason.message}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="empty-box compact">
+                      Auto-cleared by {selectedReconciliationDetail.approvalEvaluation.policyName}. No approval reasons were triggered.
+                    </div>
+                  )}
                 </div>
 
                 {(selectedReconciliationDetail.approvalState === 'pending_approval'
@@ -424,7 +453,7 @@ export function WorkspaceHomePage({
                   <div className="detail-section">
                     <div className="detail-section-head">
                       <strong>Approval actions</strong>
-                      <span>{selectedReconciliationDetail.approvalState === 'escalated' ? 'escalated' : 'pending'}</span>
+                      <span>{selectedReconciliationDetail.approvalState === 'escalated' ? 'escalated review' : 'waiting for review'}</span>
                     </div>
                     <label className="field">
                       <span>Comment</span>
@@ -477,6 +506,9 @@ export function WorkspaceHomePage({
                           <small>
                             {decision.actorUser?.displayName ?? decision.actorUser?.email ?? decision.actorType} // {formatTimestamp(decision.createdAt)}
                           </small>
+                          {decision.payloadJson && 'reasons' in decision.payloadJson ? (
+                            <p>{getApprovalDecisionSummary(decision.action)}</p>
+                          ) : null}
                           {decision.comment ? <p>{decision.comment}</p> : null}
                         </div>
                       ))}
@@ -1076,7 +1108,7 @@ export function WorkspaceSetupPage({
                 <option value="restricted">restricted</option>
                 <option value="blocked">blocked</option>
               </select>
-              <small className="field-note">Only trusted destinations can be submitted directly. Unreviewed and restricted destinations are draft-only.</small>
+              <small className="field-note">Trust controls whether new requests can go live immediately, must stay in draft, or are blocked entirely.</small>
             </label>
             <label className="field">
               <span>Scope</span>
@@ -1192,24 +1224,24 @@ export function WorkspaceSetupPage({
                 </select>
               </label>
               <label className="field">
-                <span>External approval threshold raw</span>
+                <span>External approval threshold</span>
                 <input
                   defaultValue={approvalPolicy.ruleJson.externalApprovalThresholdRaw}
                   name="externalApprovalThresholdRaw"
                   placeholder="50000000"
                   required
                 />
-                <small className="field-note">Trusted external destinations at or above this amount require approval.</small>
+                <small className="field-note">Trusted external destinations at or above {formatRawUsdc(approvalPolicy.ruleJson.externalApprovalThresholdRaw)} USDC require approval.</small>
               </label>
               <label className="field">
-                <span>Internal approval threshold raw</span>
+                <span>Internal approval threshold</span>
                 <input
                   defaultValue={approvalPolicy.ruleJson.internalApprovalThresholdRaw}
                   name="internalApprovalThresholdRaw"
                   placeholder="250000000"
                   required
                 />
-                <small className="field-note">Trusted internal destinations at or above this amount require approval.</small>
+                <small className="field-note">Trusted internal destinations at or above {formatRawUsdc(approvalPolicy.ruleJson.internalApprovalThresholdRaw)} USDC require approval.</small>
               </label>
               <button className="primary-button" disabled={!canManage} type="submit">
                 Update approval policy
@@ -1284,19 +1316,20 @@ export function WorkspaceSetupPage({
                 onChange={(event) => setRequestCreateStatus(event.target.value as 'draft' | 'submitted')}
                 value={requestCreateStatus}
               >
-                <option value="draft">draft</option>
+                <option value="draft">save as draft</option>
                 {selectedRequestDestination?.isActive !== false
                 && selectedRequestDestination?.trustState === 'trusted' ? (
-                  <option value="submitted">submitted</option>
+                  <option value="submitted">make live request</option>
                 ) : null}
               </select>
               <small className="field-note">
-                Trusted destinations can be submitted immediately. Workspace approval policy then decides whether they auto-clear or enter the approval inbox. Unreviewed or restricted destinations must start as draft.
+                Draft means “record it, but do not treat it as active yet.” Live request means the policy engine will immediately decide whether it auto-clears or enters the approval inbox.
               </small>
             </label>
             <label className="field">
-              <span>Amount raw</span>
+              <span>Amount (raw units)</span>
               <input name="amountRaw" placeholder="10000 for 0.01 USDC" required />
+              <small className="field-note">USDC uses 6 decimals. Example: 10000 = 0.01 USDC.</small>
             </label>
             <label className="field">
               <span>Reference</span>
@@ -1383,6 +1416,93 @@ function getApprovalActionLabel(action: string) {
       return 'auto approved';
     default:
       return formatLabel(action);
+  }
+}
+
+function getApprovalDecisionSummary(action: string) {
+  switch (action) {
+    case 'routed_for_approval':
+      return 'System decision recorded before the request became active.';
+    case 'auto_approved':
+      return 'Policy allowed the request to become active without manual review.';
+    case 'approve':
+      return 'Operator approved the request and cleared it for execution.';
+    case 'reject':
+      return 'Operator rejected the request.';
+    case 'escalate':
+      return 'Operator escalated the request for higher-touch review.';
+    default:
+      return formatLabel(action);
+  }
+}
+
+function getApprovalStateLabel(state: string) {
+  switch (state) {
+    case 'pending_approval':
+      return 'waiting for approval';
+    case 'escalated':
+      return 'escalated';
+    case 'approved':
+      return 'approved';
+    case 'rejected':
+      return 'rejected';
+    case 'closed':
+      return 'closed';
+    case 'draft':
+      return 'draft';
+    case 'submitted':
+    default:
+      return 'submitted';
+  }
+}
+
+function getExecutionStateLabel(state: string) {
+  switch (state) {
+    case 'not_started':
+      return 'not started';
+    case 'awaiting_execution':
+      return 'ready to send';
+    case 'submitted_onchain':
+      return 'submitted onchain';
+    case 'observed_onchain':
+      return 'observed onchain';
+    case 'closed':
+      return 'closed';
+    case 'rejected':
+      return 'rejected';
+    default:
+      return formatLabel(state);
+  }
+}
+
+function getApprovalReasonLabel(code: string) {
+  switch (code) {
+    case 'destination_not_trusted':
+      return 'destination not trusted';
+    case 'external_transfer_requires_approval':
+      return 'external transfer policy';
+    case 'internal_transfer_requires_approval':
+      return 'internal transfer policy';
+    case 'external_amount_threshold_exceeded':
+      return 'external threshold exceeded';
+    case 'internal_amount_threshold_exceeded':
+      return 'internal threshold exceeded';
+    default:
+      return formatLabel(code);
+  }
+}
+
+function getDestinationTrustLabel(trustState: string) {
+  switch (trustState) {
+    case 'trusted':
+      return 'trusted';
+    case 'restricted':
+      return 'restricted';
+    case 'blocked':
+      return 'blocked';
+    case 'unreviewed':
+    default:
+      return 'unreviewed';
   }
 }
 
@@ -1474,12 +1594,12 @@ function getDestinationTrustCopy(destination: Destination) {
     case 'trusted':
       return 'Trusted destinations can be submitted directly. Workspace approval policy then decides whether the request auto-clears or enters the approval inbox.';
     case 'restricted':
-      return 'Restricted destinations can still be modeled, but new requests must stay in draft until the destination is reviewed.';
+      return 'Restricted destinations can still be modeled, but every new request must stay as a draft until someone changes the destination trust.';
     case 'blocked':
       return 'Blocked destinations cannot be used for new requests.';
     case 'unreviewed':
     default:
-      return 'Unreviewed destinations can be recorded, but requests must start as draft until the destination is trusted.';
+      return 'Unreviewed destinations can be recorded, but requests must stay as drafts until the destination is trusted.';
   }
 }
 
@@ -1500,12 +1620,12 @@ function getDisplayStateLabel(state: ReconciliationRow['requestDisplayState']) {
     case 'matched':
       return 'matched';
     case 'partial':
-      return 'partial';
+      return 'partial match';
     case 'exception':
-      return 'exception';
+      return 'needs review';
     case 'pending':
     default:
-      return 'pending';
+      return 'waiting for settlement';
   }
 }
 

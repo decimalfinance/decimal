@@ -1372,6 +1372,32 @@ textarea:focus {
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+.state-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.state-summary-card {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  padding: 12px;
+}
+
+.state-summary-card strong {
+  font-family: var(--display-font);
+  font-size: var(--font-md);
+  letter-spacing: -0.01em;
+}
+
+.state-summary-card small {
+  color: var(--muted);
+  font-size: var(--font-xs);
+  line-height: 1.45;
+}
+
 .detail-section-head {
   display: flex;
   align-items: center;
@@ -1390,10 +1416,21 @@ textarea:focus {
 
 .exception-card,
 .note-card,
-.timeline-item {
+.timeline-item,
+.reason-card {
   border: 1px solid var(--line);
   background: var(--panel-2);
   padding: 12px;
+}
+
+.reason-list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.reason-card {
+  display: grid;
+  gap: 6px;
 }
 
 .exception-card {
@@ -1415,7 +1452,8 @@ textarea:focus {
 
 .exception-copy,
 .note-card p,
-.timeline-item p {
+.timeline-item p,
+.reason-card p {
   margin: 0;
   color: var(--muted);
   font-size: var(--font-sm);
@@ -1613,6 +1651,8 @@ textarea:focus {
 :root[data-theme="light"] .exception-card,
 :root[data-theme="light"] .note-card,
 :root[data-theme="light"] .timeline-item,
+:root[data-theme="light"] .state-summary-card,
+:root[data-theme="light"] .reason-card,
 :root[data-theme="light"] .inspector-callout,
 :root[data-theme="light"] .queue-guide,
 :root[data-theme="light"] .queue-guide-card {
@@ -1690,7 +1730,8 @@ textarea:focus {
 
   .queue-guide-grid,
   .queue-toolbar,
-  .request-card-main {
+  .request-card-main,
+  .state-summary-grid {
     grid-template-columns: 1fr;
   }
 
