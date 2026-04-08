@@ -9,7 +9,9 @@ export type Route =
   | { name: 'orgs' }
   | { name: 'organizationHome'; organizationId: string }
   | { name: 'workspaceHome'; workspaceId: string }
-  | { name: 'workspaceSetup'; workspaceId: string };
+  | { name: 'workspaceRegistry'; workspaceId: string }
+  | { name: 'workspacePolicy'; workspaceId: string }
+  | { name: 'workspaceRequests'; workspaceId: string };
 export type Theme = 'dark' | 'light';
 export const THEME_STORAGE_KEY = 'usdc_ops.theme';
 
@@ -66,11 +68,13 @@ export function parseRoute(pathname: string): Route {
     return { name: 'organizationHome', organizationId: organizationMatch[1] };
   }
 
-  const workspaceMatch = pathname.match(/^\/workspaces\/([0-9a-f-]+)\/(home|setup)$/i);
+  const workspaceMatch = pathname.match(/^\/workspaces\/([0-9a-f-]+)\/(home|setup|registry|policy|requests)$/i);
   if (workspaceMatch) {
     const [, workspaceId, page] = workspaceMatch;
     if (page === 'home') return { name: 'workspaceHome', workspaceId };
-    return { name: 'workspaceSetup', workspaceId };
+    if (page === 'policy') return { name: 'workspacePolicy', workspaceId };
+    if (page === 'requests') return { name: 'workspaceRequests', workspaceId };
+    return { name: 'workspaceRegistry', workspaceId };
   }
 
   return { name: 'dashboard' };
@@ -92,8 +96,12 @@ export function routeToPath(route: Route) {
       return `/orgs/${route.organizationId}`;
     case 'workspaceHome':
       return `/workspaces/${route.workspaceId}/home`;
-    case 'workspaceSetup':
-      return `/workspaces/${route.workspaceId}/setup`;
+    case 'workspaceRegistry':
+      return `/workspaces/${route.workspaceId}/registry`;
+    case 'workspacePolicy':
+      return `/workspaces/${route.workspaceId}/policy`;
+    case 'workspaceRequests':
+      return `/workspaces/${route.workspaceId}/requests`;
   }
 }
 

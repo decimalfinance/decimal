@@ -24,7 +24,9 @@ import {
 import { LandingEditorialPage } from './screens/landing-editorial';
 import {
   WorkspaceHomePage,
-  WorkspaceSetupPage,
+  WorkspacePolicyPage,
+  WorkspaceRegistryPage,
+  WorkspaceRequestsPage,
 } from './screens/workspace-pages';
 import type {
   ApprovalInboxItem,
@@ -113,7 +115,10 @@ export function App() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const currentWorkspaceId =
-    route.name === 'workspaceHome' || route.name === 'workspaceSetup'
+    route.name === 'workspaceHome'
+    || route.name === 'workspaceRegistry'
+    || route.name === 'workspacePolicy'
+    || route.name === 'workspaceRequests'
       ? route.workspaceId
       : null;
 
@@ -905,9 +910,19 @@ export function App() {
     resetViewport();
   }
 
-  function handleOpenWorkspaceSetup(workspaceId: string, sectionId?: string) {
-    navigate({ name: 'workspaceSetup', workspaceId }, setRoute);
+  function handleOpenWorkspaceRegistry(workspaceId: string, sectionId?: string) {
+    navigate({ name: 'workspaceRegistry', workspaceId }, setRoute);
     resetViewport(sectionId);
+  }
+
+  function handleOpenWorkspacePolicy(workspaceId: string) {
+    navigate({ name: 'workspacePolicy', workspaceId }, setRoute);
+    resetViewport();
+  }
+
+  function handleOpenWorkspaceRequests(workspaceId: string) {
+    navigate({ name: 'workspaceRequests', workspaceId }, setRoute);
+    resetViewport();
   }
 
   if (authStatus === 'booting') {
@@ -954,12 +969,17 @@ export function App() {
             >
               Dashboard
             </button>
-            <button
-              className={
-                route.name === 'orgs' || route.name === 'organizationHome' || route.name === 'workspaceHome' || route.name === 'workspaceSetup'
+              <button
+                className={
+                route.name === 'orgs'
+                || route.name === 'organizationHome'
+                || route.name === 'workspaceHome'
+                || route.name === 'workspaceRegistry'
+                || route.name === 'workspacePolicy'
+                || route.name === 'workspaceRequests'
                   ? 'topbar-link is-active'
                   : 'topbar-link'
-              }
+                }
               onClick={() => navigate({ name: 'orgs' }, setRoute)}
               type="button"
             >
@@ -1047,11 +1067,25 @@ export function App() {
                     Watch system
                   </button>
                   <button
-                    className={route.name === 'workspaceSetup' ? 'rail-link is-active' : 'rail-link'}
-                    onClick={() => handleOpenWorkspaceSetup(sidebarWorkspace.workspaceId)}
+                    className={route.name === 'workspaceRegistry' ? 'rail-link is-active' : 'rail-link'}
+                    onClick={() => handleOpenWorkspaceRegistry(sidebarWorkspace.workspaceId)}
                     type="button"
                   >
-                    Wallets + expected transfers
+                    Address book
+                  </button>
+                  <button
+                    className={route.name === 'workspacePolicy' ? 'rail-link is-active' : 'rail-link'}
+                    onClick={() => handleOpenWorkspacePolicy(sidebarWorkspace.workspaceId)}
+                    type="button"
+                  >
+                    Approval policy
+                  </button>
+                  <button
+                    className={route.name === 'workspaceRequests' ? 'rail-link is-active' : 'rail-link'}
+                    onClick={() => handleOpenWorkspaceRequests(sidebarWorkspace.workspaceId)}
+                    type="button"
+                  >
+                    Expected transfers
                   </button>
                 </div>
               </div>
@@ -1069,7 +1103,12 @@ export function App() {
                         key={workspace.workspaceId}
                         className={
                           currentWorkspaceId === workspace.workspaceId &&
-                          (route.name === 'workspaceHome' || route.name === 'workspaceSetup')
+                          (
+                            route.name === 'workspaceHome'
+                            || route.name === 'workspaceRegistry'
+                            || route.name === 'workspacePolicy'
+                            || route.name === 'workspaceRequests'
+                          )
                             ? 'workspace-link is-active'
                             : 'workspace-link'
                         }
@@ -1129,7 +1168,7 @@ export function App() {
                 onBackToDashboard={() => {
                   if (currentDashboardOrganizationId) handleOpenOrganization(currentDashboardOrganizationId);
                 }}
-                onOpenSetup={() => navigate({ name: 'workspaceSetup', workspaceId: currentWorkspace.workspaceId }, setRoute)}
+                onOpenSetup={() => navigate({ name: 'workspaceRequests', workspaceId: currentWorkspace.workspaceId }, setRoute)}
                 onAddExceptionNote={handleAddExceptionNote}
                 onAddRequestNote={handleAddRequestNote}
                 onApplyExceptionAction={handleApplyExceptionAction}
@@ -1150,9 +1189,8 @@ export function App() {
               />
             ) : null}
 
-            {route.name === 'workspaceSetup' && currentWorkspace ? (
-              <WorkspaceSetupPage
-                approvalPolicy={approvalPolicy}
+            {route.name === 'workspaceRegistry' && currentWorkspace ? (
+              <WorkspaceRegistryPage
                 addresses={addresses}
                 canManage={canManageCurrentOrg}
                 counterparties={counterparties}
@@ -1165,11 +1203,28 @@ export function App() {
                 onCreateAddress={handleCreateAddress}
                 onCreateCounterparty={handleCreateCounterparty}
                 onCreateDestination={handleCreateDestination}
-                onCreateTransferRequest={handleCreateTransferRequest}
-                onUpdateApprovalPolicy={handleUpdateApprovalPolicy}
                 onUpdateAddress={handleUpdateAddress}
                 onUpdateCounterparty={handleUpdateCounterparty}
                 onUpdateDestination={handleUpdateDestination}
+              />
+            ) : null}
+
+            {route.name === 'workspacePolicy' && currentWorkspace ? (
+              <WorkspacePolicyPage
+                approvalPolicy={approvalPolicy}
+                canManage={canManageCurrentOrg}
+                currentWorkspace={currentWorkspace}
+                onUpdateApprovalPolicy={handleUpdateApprovalPolicy}
+              />
+            ) : null}
+
+            {route.name === 'workspaceRequests' && currentWorkspace ? (
+              <WorkspaceRequestsPage
+                addresses={addresses}
+                canManage={canManageCurrentOrg}
+                currentWorkspace={currentWorkspace}
+                destinations={destinations}
+                onCreateTransferRequest={handleCreateTransferRequest}
                 transferRequests={transferRequests}
               />
             ) : null}

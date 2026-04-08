@@ -128,7 +128,7 @@ export function WorkspaceHomePage({
             refresh
           </button>
           <button className="primary-button" onClick={onOpenSetup} type="button">
-            wallets + planned transfers
+            expected transfers
           </button>
         </div>
       </section>
@@ -965,8 +965,7 @@ export function WorkspaceHomePage({
   );
 }
 
-export function WorkspaceSetupPage({
-  approvalPolicy,
+export function WorkspaceRegistryPage({
   addresses,
   canManage,
   counterparties,
@@ -977,14 +976,10 @@ export function WorkspaceSetupPage({
   onCreateAddress,
   onCreateCounterparty,
   onCreateDestination,
-  onCreateTransferRequest,
-  onUpdateApprovalPolicy,
   onUpdateAddress,
   onUpdateCounterparty,
   onUpdateDestination,
-  transferRequests,
 }: {
-  approvalPolicy: ApprovalPolicy | null;
   addresses: WorkspaceAddress[];
   canManage: boolean;
   counterparties: Counterparty[];
@@ -995,78 +990,147 @@ export function WorkspaceSetupPage({
   onCreateAddress: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onCreateCounterparty: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onCreateDestination: (event: FormEvent<HTMLFormElement>) => Promise<void>;
-  onCreateTransferRequest: (event: FormEvent<HTMLFormElement>) => Promise<void>;
-  onUpdateApprovalPolicy: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onUpdateAddress: (workspaceAddressId: string, event: FormEvent<HTMLFormElement>) => Promise<void>;
   onUpdateCounterparty: (counterpartyId: string, event: FormEvent<HTMLFormElement>) => Promise<void>;
   onUpdateDestination: (destinationId: string, event: FormEvent<HTMLFormElement>) => Promise<void>;
-  transferRequests: TransferRequest[];
 }) {
-  const [editingAddressId, setEditingAddressId] = useState<string | null>(null);
-  const [editingCounterpartyId, setEditingCounterpartyId] = useState<string | null>(null);
-  const [editingDestinationId, setEditingDestinationId] = useState<string | null>(null);
-  const [selectedRequestDestinationId, setSelectedRequestDestinationId] = useState('');
-  const [requestCreateStatus, setRequestCreateStatus] = useState<'draft' | 'submitted'>('submitted');
-  const editingAddress = addresses.find((item) => item.workspaceAddressId === editingAddressId) ?? null;
-  const editingCounterparty = counterparties.find((item) => item.counterpartyId === editingCounterpartyId) ?? null;
-  const editingDestination = destinations.find((item) => item.destinationId === editingDestinationId) ?? null;
-  const selectedRequestDestination =
-    destinations.find((item) => item.destinationId === selectedRequestDestinationId) ?? null;
+  const [searchQuery, setSearchQuery] = useState('');
+  const [trustFilter, setTrustFilter] = useState<'all' | Destination['trustState']>('all');
+  const [scopeFilter, setScopeFilter] = useState<'all' | 'internal' | 'external'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [copiedWalletId, setCopiedWalletId] = useState<string | null>(null);
+  const [modalState, setModalState] = useState<
+    | { type: 'create-wallet' }
+    | { type: 'edit-wallet'; workspaceAddressId: string }
+    | { type: 'create-counterparty' }
+    | { type: 'edit-counterparty'; counterpartyId: string }
+    | { type: 'create-destination'; linkedWorkspaceAddressId?: string }
+    | { type: 'edit-destination'; destinationId: string }
+    | { type: 'view-destination'; destinationId: string }
+    | null
+  >(null);
+
+  const selectedDestination =
+    modalState?.type === 'view-destination'
+      ? destinations.find((item) => item.destinationId === modalState.destinationId) ?? null
+      : null;
+  const selectedDestinationWallet = selectedDestination?.linkedWorkspaceAddress ?? null;
+  const selectedDestinationCounterparty = selectedDestination?.counterparty ?? null;
+
+  const editingAddress =
+    modalState?.type === 'edit-wallet'
+      ? addresses.find((item) => item.workspaceAddressId === modalState.workspaceAddressId) ?? null
+      : null;
+  const editingCounterparty =
+    modalState?.type === 'edit-counterparty'
+      ? counterparties.find((item) => item.counterpartyId === modalState.counterpartyId) ?? null
+      : null;
+  const editingDestination =
+    modalState?.type === 'edit-destination'
+      ? destinations.find((item) => item.destinationId === modalState.destinationId) ?? null
+      : null;
 
   useEffect(() => {
-    if (editingAddressId && !editingAddress) {
-      setEditingAddressId(null);
+    if (modalState?.type === 'edit-wallet' && !editingAddress) {
+      setModalState(null);
     }
-  }, [editingAddress, editingAddressId]);
-
-  useEffect(() => {
-    if (editingCounterpartyId && !editingCounterparty) {
-      setEditingCounterpartyId(null);
+    if (modalState?.type === 'edit-counterparty' && !editingCounterparty) {
+      setModalState(null);
     }
-  }, [editingCounterparty, editingCounterpartyId]);
-
-  useEffect(() => {
-    if (editingDestinationId && !editingDestination) {
-      setEditingDestinationId(null);
+    if (modalState?.type === 'edit-destination' && !editingDestination) {
+      setModalState(null);
     }
-  }, [editingDestination, editingDestinationId]);
+  }, [editingAddress, editingCounterparty, editingDestination, modalState]);
+
+  const filteredDestinations = destinations.filter((item) => {
+    const matchesSearch = !searchQuery.trim()
+      || [
+        item.label,
+        item.walletAddress,
+        item.destinationType,
+        item.counterparty?.displayName ?? '',
+        item.linkedWorkspaceAddress?.displayName ?? '',
+        item.linkedWorkspaceAddress?.address ?? '',
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(searchQuery.trim().toLowerCase());
+    const matchesTrust = trustFilter === 'all' || item.trustState === trustFilter;
+    const matchesScope =
+      scopeFilter === 'all'
+      || (scopeFilter === 'internal' ? item.isInternal : !item.isInternal);
+    const matchesStatus =
+      statusFilter === 'all'
+      || (statusFilter === 'active' ? item.isActive : !item.isActive);
+
+    return matchesSearch && matchesTrust && matchesScope && matchesStatus;
+  });
+
+  const linkedWalletIds = new Set(destinations.map((item) => item.linkedWorkspaceAddressId).filter(Boolean));
+  const counterpartyWalletCount = new Map<string, number>();
+  for (const counterparty of counterparties) {
+    const walletIds = new Set(
+      destinations
+        .filter((item) => item.counterpartyId === counterparty.counterpartyId && item.linkedWorkspaceAddressId)
+        .map((item) => item.linkedWorkspaceAddressId as string),
+    );
+    counterpartyWalletCount.set(counterparty.counterpartyId, walletIds.size);
+  }
 
   useEffect(() => {
-    if (!selectedRequestDestination) {
-      setRequestCreateStatus('submitted');
+    if (!copiedWalletId) {
       return;
     }
 
-    if (
-      !selectedRequestDestination.isActive
-      || selectedRequestDestination.trustState === 'blocked'
-      || selectedRequestDestination.trustState === 'restricted'
-      || selectedRequestDestination.trustState === 'unreviewed'
-    ) {
-      setRequestCreateStatus('draft');
-      return;
-    }
+    const timeout = window.setTimeout(() => setCopiedWalletId(null), 1200);
+    return () => window.clearTimeout(timeout);
+  }, [copiedWalletId]);
 
-    setRequestCreateStatus('submitted');
-  }, [selectedRequestDestinationId]);
+  async function handleAddressSubmit(event: FormEvent<HTMLFormElement>) {
+    if (editingAddress) {
+      await onUpdateAddress(editingAddress.workspaceAddressId, event);
+    } else {
+      await onCreateAddress(event);
+    }
+    setModalState(null);
+  }
+
+  async function handleCounterpartySubmit(event: FormEvent<HTMLFormElement>) {
+    if (editingCounterparty) {
+      await onUpdateCounterparty(editingCounterparty.counterpartyId, event);
+    } else {
+      await onCreateCounterparty(event);
+    }
+    setModalState(null);
+  }
+
+  async function handleDestinationSubmit(event: FormEvent<HTMLFormElement>) {
+    if (editingDestination) {
+      await onUpdateDestination(editingDestination.destinationId, event);
+    } else {
+      await onCreateDestination(event);
+    }
+    setModalState(null);
+  }
+
+  async function handleCopyWalletAddress(workspaceAddressId: string, address: string) {
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopiedWalletId(workspaceAddressId);
+    } catch {
+      setCopiedWalletId(null);
+    }
+  }
 
   return (
     <div className="page-stack">
-      <section className="section-headline">
-        <div>
-          <p className="eyebrow">Setup</p>
+      <section className="section-headline section-headline-compact">
+        <div className="section-headline-copy">
+          <p className="eyebrow">Address Book</p>
           <h1>{currentWorkspace.workspaceName}</h1>
           <p className="section-copy">
-            Save wallets, define business destinations, then create planned transfers against those destinations.
+            Save raw wallets, optionally define business owners, and name the payment destinations operators should use elsewhere in the product.
           </p>
-        </div>
-        <div className="headline-actions">
-          <button className="ghost-button" onClick={onBackToDashboard} type="button">
-            org dashboard
-          </button>
-          <button className="ghost-button" onClick={onBackToWatchSystem} type="button">
-            watch system
-          </button>
         </div>
       </section>
 
@@ -1079,323 +1143,472 @@ export function WorkspaceSetupPage({
         </div>
       ) : null}
 
-      <section className="setup-stage-grid">
-        <div className="content-panel content-panel-strong" id="wallets-section">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Step 1</p>
-              <h2>Wallets</h2>
-              <p className="compact-copy">Save the wallets you care about first. Everything else in the workspace builds from this list.</p>
+      <section className="registry-shell">
+        <div className="content-panel content-panel-strong registry-main-panel">
+          <div className="panel-header registry-panel-header">
+            <div className="registry-panel-copy">
+              <p className="eyebrow">Destinations</p>
+              <h2>Payment endpoint registry</h2>
+              <p className="compact-copy registry-description">
+                This is the working surface. Operators will mostly care about destinations, not the normalized tables behind them.
+              </p>
+            </div>
+            <span className="status-chip">{destinations.length} total</span>
+          </div>
+
+          <div className="registry-toolbar">
+            <label className="queue-select registry-search">
+              <span>Search</span>
+              <input
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search destination, wallet, or counterparty"
+              />
+            </label>
+            <div className="registry-toolbar-actions">
+                <button className="primary-button" disabled={!canManage || addresses.length === 0} onClick={() => setModalState({ type: 'create-destination' })} type="button">
+                New destination
+              </button>
+              <button className="ghost-button" disabled={!canManage} onClick={() => setModalState({ type: 'create-wallet' })} type="button">
+                Add wallet
+              </button>
+              <button className="ghost-button" disabled={!canManage} onClick={() => setModalState({ type: 'create-counterparty' })} type="button">
+                Add counterparty
+              </button>
             </div>
           </div>
-          <form
-            key={`wallet-form-${editingAddress?.workspaceAddressId ?? 'new'}`}
-            className="form-stack"
-            onSubmit={(event) =>
-              editingAddress
-                ? void onUpdateAddress(editingAddress.workspaceAddressId, event).then(() => setEditingAddressId(null))
-                : void onCreateAddress(event)
-            }
-          >
-            <label className="field">
-              <span>Wallet address</span>
-              <input
-                defaultValue={editingAddress?.address ?? ''}
-                name="address"
-                placeholder="Solana wallet address"
-                required
-              />
-            </label>
-            <label className="field">
-              <span>Wallet registry name</span>
-              <input
-                defaultValue={editingAddress?.displayName ?? ''}
-                name="displayName"
-                placeholder="Treasury wallet, hot wallet, vendor wallet..."
-                required
-              />
-              <small className="field-note">Short technical name for this saved address row.</small>
-            </label>
-            <label className="field">
-              <span>Notes</span>
-              <input defaultValue={editingAddress?.notes ?? ''} name="notes" placeholder="Optional" />
-            </label>
-            <label className="field">
-              <span>Status</span>
-              <select defaultValue={editingAddress?.isActive === false ? 'false' : 'true'} name="isActive">
-                <option value="true">active</option>
-                <option value="false">inactive</option>
-              </select>
-            </label>
-            <div className="exception-actions">
-              <button className="primary-button" disabled={!canManage} type="submit">
-                {editingAddress ? 'Update wallet' : 'Save wallet'}
-              </button>
-              {editingAddress ? (
-                <button
-                  className="ghost-button"
-                  onClick={() => setEditingAddressId(null)}
-                  type="button"
+
+          <div className="registry-table">
+            <div className="registry-table-head">
+              <span className="registry-head-cell">Destination</span>
+              <span className="registry-head-cell">Wallet</span>
+              <span className="registry-head-cell">Owner</span>
+              <label className="registry-head-filter">
+                <span>Trust</span>
+                <select value={trustFilter} onChange={(event) => setTrustFilter(event.target.value as typeof trustFilter)}>
+                  <option value="all">all</option>
+                  <option value="trusted">trusted</option>
+                  <option value="unreviewed">unreviewed</option>
+                  <option value="restricted">restricted</option>
+                  <option value="blocked">blocked</option>
+                </select>
+              </label>
+              <label className="registry-head-filter">
+                <span>Scope</span>
+                <select value={scopeFilter} onChange={(event) => setScopeFilter(event.target.value as typeof scopeFilter)}>
+                  <option value="all">all</option>
+                  <option value="external">external</option>
+                  <option value="internal">internal</option>
+                </select>
+              </label>
+              <label className="registry-head-filter">
+                <span>Status</span>
+                <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}>
+                  <option value="all">all</option>
+                  <option value="active">active</option>
+                  <option value="inactive">inactive</option>
+                </select>
+              </label>
+            </div>
+            {filteredDestinations.length ? (
+              filteredDestinations.map((item) => (
+                <div
+                  key={item.destinationId}
+                  className="registry-table-row"
                 >
-                  cancel
-                </button>
-              ) : null}
-            </div>
-          </form>
-
-          <div className="stack-list">
-            {addresses.length ? (
-              addresses.map((address) => (
-              <div key={address.workspaceAddressId} className="workspace-row static-row">
-                  <div>
-                    <strong>{getWalletName(address)}</strong>
-                    <small>{address.address}</small>
-                  </div>
-                  <div className="workspace-row-actions">
-                    <span className="status-chip">{address.isActive ? 'active' : 'inactive'}</span>
-                    <button
-                      className="ghost-button compact-button"
-                      onClick={() => setEditingAddressId(address.workspaceAddressId)}
-                      type="button"
-                    >
-                      edit
-                    </button>
-                  </div>
+                  <button
+                    className="registry-row-button"
+                    onClick={() => setModalState({ type: 'view-destination', destinationId: item.destinationId })}
+                    type="button"
+                  >
+                    <span className="registry-cell-primary">
+                      <strong>{item.label}</strong>
+                    </span>
+                    <span className="registry-cell-mono" title={item.linkedWorkspaceAddress?.address ?? item.walletAddress}>
+                      {getWalletNameLite(item.linkedWorkspaceAddress)}
+                    </span>
+                    <span>{item.counterparty?.displayName ?? 'Unassigned'}</span>
+                    <span><span className={`tone-pill tone-pill-${mapDestinationTone(item.trustState)}`}>{item.trustState}</span></span>
+                    <span>{item.isInternal ? 'internal' : 'external'}</span>
+                    <span>{item.isActive ? 'active' : 'inactive'}</span>
+                  </button>
                 </div>
               ))
+            ) : destinations.length ? (
+              <div className="empty-box compact">No destinations match the current search or filters.</div>
             ) : (
-              <div className="empty-box compact">No wallets saved yet.</div>
+              <div className="empty-box compact">
+                <strong>No destinations yet.</strong>
+                <p>Start by turning one of the saved wallets into a named destination. That is the object operators will actually use in requests.</p>
+                {canManage && addresses.length ? (
+                  <button className="primary-button" onClick={() => setModalState({ type: 'create-destination' })} type="button">
+                    Create first destination
+                  </button>
+                ) : null}
+              </div>
             )}
           </div>
         </div>
 
-        <div className="content-panel content-panel-strong" id="planned-transfers-section">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Step 2</p>
-              <h2>Counterparties</h2>
-              <p className="compact-copy">Capture who this wallet belongs to so reconciliation has business identity, not just an address.</p>
+        <div className="registry-sidecar">
+          <div className="content-panel content-panel-soft">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Wallets</p>
+                <h2>Saved wallet registry</h2>
+              </div>
+              <span className="status-chip">{addresses.length}</span>
+            </div>
+            <div className="wallet-table">
+              <div className="wallet-table-head">
+                <span>Name</span>
+                <span>Address</span>
+                <span>Link</span>
+                <span>Status</span>
+              </div>
+              {addresses.length ? (
+                addresses.map((item) => (
+                  <div key={item.workspaceAddressId} className="wallet-table-row">
+                    <span className="wallet-table-name">{getWalletName(item)}</span>
+                    <span>
+                      <button
+                        className="wallet-address-button"
+                        onClick={() => void handleCopyWalletAddress(item.workspaceAddressId, item.address)}
+                        title={copiedWalletId === item.workspaceAddressId ? 'Copied' : item.address}
+                        type="button"
+                      >
+                        {shortenAddress(item.address)}
+                      </button>
+                    </span>
+                    <span>{linkedWalletIds.has(item.workspaceAddressId) ? 'linked' : 'unlinked'}</span>
+                    <span>{item.isActive ? 'active' : 'inactive'}</span>
+                  </div>
+                ))
+              ) : (
+                <div className="empty-box compact">No wallets saved yet.</div>
+              )}
             </div>
           </div>
-          <form
-            key={`counterparty-form-${editingCounterparty?.counterpartyId ?? 'new'}`}
-            className="form-stack"
-            onSubmit={(event) =>
-              editingCounterparty
-                ? void onUpdateCounterparty(editingCounterparty.counterpartyId, event).then(() => setEditingCounterpartyId(null))
-                : void onCreateCounterparty(event)
-            }
-          >
-            <label className="field">
-              <span>Business entity name</span>
-              <input
-                defaultValue={editingCounterparty?.displayName ?? ''}
-                name="displayName"
-                placeholder="Acme Vendor, Coinbase Prime, Treasury Ops..."
-                required
-              />
-              <small className="field-note">The company, team, or business entity behind one or more destinations.</small>
-            </label>
-            <label className="field">
-              <span>Category</span>
-              <input defaultValue={editingCounterparty?.category ?? ''} name="category" placeholder="vendor" />
-            </label>
-            <label className="field">
-              <span>Reference</span>
-              <input
-                defaultValue={editingCounterparty?.externalReference ?? ''}
-                name="externalReference"
-                placeholder="Optional external id"
-              />
-            </label>
-            <label className="field">
-              <span>Status</span>
-              <select defaultValue={editingCounterparty?.status ?? 'active'} name="status">
-                <option value="active">active</option>
-                <option value="inactive">inactive</option>
-              </select>
-            </label>
-            <div className="exception-actions">
-              <button className="primary-button" disabled={!canManage} type="submit">
-                {editingCounterparty ? 'Update counterparty' : 'Create counterparty'}
-              </button>
-              {editingCounterparty ? (
-                <button className="ghost-button" onClick={() => setEditingCounterpartyId(null)} type="button">
-                  cancel
-                </button>
-              ) : null}
-            </div>
-          </form>
 
-          <div className="stack-list">
-            {counterparties.length ? (
-              counterparties.map((item) => (
-                <div key={item.counterpartyId} className="workspace-row static-row">
-                  <div>
-                    <strong>{item.displayName}</strong>
-                    <small>{item.category} // {item.status}</small>
+          <div className="content-panel content-panel-soft">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Counterparties</p>
+                <h2>Business owner registry</h2>
+              </div>
+              <span className="status-chip">{counterparties.length}</span>
+            </div>
+            <div className="counterparty-table">
+              <div className="counterparty-table-head">
+                <span>Name</span>
+                <span>Wallets</span>
+              </div>
+              {counterparties.length ? (
+                counterparties.map((item) => (
+                  <div key={item.counterpartyId} className="counterparty-table-row">
+                    <span className="counterparty-table-name">{item.displayName}</span>
+                    <span>{counterpartyWalletCount.get(item.counterpartyId) ?? 0}</span>
                   </div>
-                  <div className="workspace-row-actions">
-                    <button
-                      className="ghost-button compact-button"
-                      onClick={() => setEditingCounterpartyId(item.counterpartyId)}
-                      type="button"
-                    >
-                      edit
-                    </button>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="empty-box compact">No counterparties yet.</div>
-            )}
+                ))
+              ) : (
+                <div className="empty-box compact">No counterparties saved yet.</div>
+              )}
+            </div>
           </div>
         </div>
+      </section>
 
-        <div className="content-panel content-panel-strong" id="destinations-section">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Step 3</p>
-              <h2>Destinations</h2>
-              <p className="compact-copy">Link each wallet to a named destination with trust and internal or external context.</p>
-            </div>
-          </div>
-          <form
-            key={`destination-form-${editingDestination?.destinationId ?? 'new'}`}
-            className="form-stack"
-            onSubmit={(event) =>
-              editingDestination
-                ? void onUpdateDestination(editingDestination.destinationId, event).then(() => setEditingDestinationId(null))
-                : void onCreateDestination(event)
-            }
-          >
-            <label className="field">
-              <span>Linked wallet</span>
-              <select
-                defaultValue={editingDestination?.linkedWorkspaceAddressId ?? ''}
-                name="linkedWorkspaceAddressId"
-                required
-              >
-                <option value="" disabled>
-                  Select wallet
-                </option>
-                {addresses.map((address) => (
-                  <option key={address.workspaceAddressId} value={address.workspaceAddressId}>
-                    {getWalletName(address)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>Counterparty</span>
-              <select name="counterpartyId" defaultValue={editingDestination?.counterpartyId ?? ''}>
-                <option value="">Optional</option>
-                {counterparties.map((item) => (
-                  <option key={item.counterpartyId} value={item.counterpartyId}>
-                    {item.displayName}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>Payment endpoint label</span>
-              <input
-                defaultValue={editingDestination?.label ?? ''}
-                name="label"
-                placeholder="Acme payout wallet"
-                required
-              />
-              <small className="field-note">
-                Operator-facing name for this specific payment endpoint. This can differ from both the wallet name and the counterparty name.
-              </small>
-            </label>
-            <label className="field">
-              <span>Destination type</span>
-              <input
-                defaultValue={editingDestination?.destinationType ?? ''}
-                name="destinationType"
-                placeholder="vendor_wallet"
-              />
-              <small className="field-note">Use this to distinguish payout, refund, treasury, or exchange destinations.</small>
-            </label>
-            <label className="field">
-              <span>Trust state</span>
-              <select name="trustState" defaultValue={editingDestination?.trustState ?? 'unreviewed'}>
-                <option value="unreviewed">unreviewed</option>
-                <option value="trusted">trusted</option>
-                <option value="restricted">restricted</option>
-                <option value="blocked">blocked</option>
-              </select>
-              <small className="field-note">Trust controls whether new requests can go live immediately, must stay in draft, or are blocked entirely.</small>
-            </label>
-            <label className="field">
-              <span>Scope</span>
-              <select name="isInternal" defaultValue={editingDestination?.isInternal ? 'true' : 'false'}>
-                <option value="false">external</option>
-                <option value="true">internal</option>
-              </select>
-            </label>
-            <label className="field">
-              <span>Notes</span>
-              <input defaultValue={editingDestination?.notes ?? ''} name="notes" placeholder="Optional" />
-            </label>
-            <label className="field">
-              <span>Status</span>
-              <select defaultValue={editingDestination?.isActive === false ? 'false' : 'true'} name="isActive">
-                <option value="true">active</option>
-                <option value="false">inactive</option>
-              </select>
-            </label>
-            <div className="exception-actions">
-              <button className="primary-button" disabled={!canManage || addresses.length === 0} type="submit">
-                {editingDestination ? 'Update destination' : 'Create destination'}
-              </button>
-              {editingDestination ? (
-                <button
-                  className="ghost-button"
-                  onClick={() => setEditingDestinationId(null)}
-                  type="button"
-                >
-                  cancel
-                </button>
-              ) : null}
-            </div>
-          </form>
-
-          <div className="stack-list">
-            {destinations.length ? (
-              destinations.map((item) => (
-                <div key={item.destinationId} className="workspace-row static-row">
+      {modalState ? (
+        <div className="registry-modal-backdrop" onClick={() => setModalState(null)} role="presentation">
+          <div className="registry-modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
+            {modalState.type === 'create-wallet' || modalState.type === 'edit-wallet' ? (
+              <>
+                <div className="panel-header panel-header-stack">
                   <div>
-                    <strong>{item.label}</strong>
-                    <small>
-                      {item.counterparty?.displayName ?? 'No counterparty'} // {item.trustState} // {item.isInternal ? 'internal' : 'external'}
-                    </small>
+                    <p className="eyebrow">Wallet</p>
+                    <h2>{editingAddress ? 'Edit wallet' : 'Add wallet'}</h2>
+                    <p className="compact-copy">Save the raw onchain address first. Destinations can be created from it later.</p>
                   </div>
-                  <div className="workspace-row-actions">
-                    <span className="status-chip">{item.isActive ? 'active' : 'inactive'}</span>
-                    <button
-                      className="ghost-button compact-button"
-                      onClick={() => setEditingDestinationId(item.destinationId)}
-                      type="button"
-                    >
-                      edit
+                  <button className="ghost-button compact-button danger-button" onClick={() => setModalState(null)} type="button">
+                    close
+                  </button>
+                </div>
+                <form key={`wallet-form-${editingAddress?.workspaceAddressId ?? 'new'}`} className="form-stack" onSubmit={(event) => void handleAddressSubmit(event)}>
+                  <label className="field">
+                    <span>Wallet address</span>
+                    <input defaultValue={editingAddress?.address ?? ''} name="address" placeholder="Solana wallet address" required />
+                  </label>
+                  <label className="field">
+                    <span>Wallet name</span>
+                    <input defaultValue={editingAddress?.displayName ?? ''} name="displayName" placeholder="Treasury wallet, hot wallet, vendor wallet..." required />
+                  </label>
+                  <label className="field">
+                    <span>Notes</span>
+                    <input defaultValue={editingAddress?.notes ?? ''} name="notes" placeholder="Optional context" />
+                  </label>
+                  <label className="field">
+                    <span>Status</span>
+                    <select defaultValue={editingAddress?.isActive === false ? 'false' : 'true'} name="isActive">
+                      <option value="true">active</option>
+                      <option value="false">inactive</option>
+                    </select>
+                  </label>
+                  <div className="exception-actions">
+                    <button className="primary-button" disabled={!canManage} type="submit">
+                      {editingAddress ? 'Update wallet' : 'Save wallet'}
                     </button>
                   </div>
+                </form>
+              </>
+            ) : null}
+
+            {modalState.type === 'create-counterparty' || modalState.type === 'edit-counterparty' ? (
+              <>
+                <div className="panel-header panel-header-stack">
+                  <div>
+                    <p className="eyebrow">Counterparty</p>
+                    <h2>{editingCounterparty ? 'Edit counterparty' : 'Add counterparty'}</h2>
+                    <p className="compact-copy">Counterparties are optional business owners for one or more destinations.</p>
+                  </div>
+                  <button className="ghost-button compact-button danger-button" onClick={() => setModalState(null)} type="button">
+                    close
+                  </button>
                 </div>
-              ))
-            ) : (
-              <div className="empty-box compact">No destinations yet.</div>
-            )}
+                <form key={`counterparty-form-${editingCounterparty?.counterpartyId ?? 'new'}`} className="form-stack" onSubmit={(event) => void handleCounterpartySubmit(event)}>
+                  <label className="field">
+                    <span>Business entity name</span>
+                    <input defaultValue={editingCounterparty?.displayName ?? ''} name="displayName" placeholder="Acme Vendor, Coinbase Prime, Treasury Ops..." required />
+                  </label>
+                  <label className="field">
+                    <span>Category</span>
+                    <input defaultValue={editingCounterparty?.category ?? ''} name="category" placeholder="vendor" />
+                  </label>
+                  <label className="field">
+                    <span>Reference</span>
+                    <input defaultValue={editingCounterparty?.externalReference ?? ''} name="externalReference" placeholder="Optional external id" />
+                  </label>
+                  <label className="field">
+                    <span>Status</span>
+                    <select defaultValue={editingCounterparty?.status ?? 'active'} name="status">
+                      <option value="active">active</option>
+                      <option value="inactive">inactive</option>
+                    </select>
+                  </label>
+                  <div className="exception-actions">
+                    <button className="primary-button" disabled={!canManage} type="submit">
+                      {editingCounterparty ? 'Update counterparty' : 'Create counterparty'}
+                    </button>
+                  </div>
+                </form>
+              </>
+            ) : null}
+
+            {modalState.type === 'create-destination' || modalState.type === 'edit-destination' ? (
+              <>
+                <div className="panel-header panel-header-stack">
+                  <div>
+                    <p className="eyebrow">Destination</p>
+                    <h2>{editingDestination ? 'Edit destination' : 'New destination'}</h2>
+                    <p className="compact-copy">This is the operator-facing payment endpoint that will appear in expected transfers, approvals, and reconciliation.</p>
+                  </div>
+                  <button className="ghost-button compact-button danger-button" onClick={() => setModalState(null)} type="button">
+                    close
+                  </button>
+                </div>
+                <form key={`destination-form-${editingDestination?.destinationId ?? 'new'}`} className="form-stack" onSubmit={(event) => void handleDestinationSubmit(event)}>
+                  <label className="field">
+                    <span>Linked wallet</span>
+                    <select defaultValue={editingDestination?.linkedWorkspaceAddressId ?? (modalState.type === 'create-destination' ? modalState.linkedWorkspaceAddressId ?? '' : '')} name="linkedWorkspaceAddressId" required>
+                      <option value="" disabled>
+                        Select wallet
+                      </option>
+                      {addresses.map((address) => (
+                        <option key={address.workspaceAddressId} value={address.workspaceAddressId}>
+                          {getWalletName(address)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Counterparty</span>
+                    <select name="counterpartyId" defaultValue={editingDestination?.counterpartyId ?? ''}>
+                      <option value="">Optional</option>
+                      {counterparties.map((item) => (
+                        <option key={item.counterpartyId} value={item.counterpartyId}>
+                          {item.displayName}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Destination label</span>
+                    <input defaultValue={editingDestination?.label ?? ''} name="label" placeholder="Acme payout wallet" required />
+                  </label>
+                  <label className="field">
+                    <span>Destination type</span>
+                    <input defaultValue={editingDestination?.destinationType ?? ''} name="destinationType" placeholder="vendor_wallet" />
+                  </label>
+                  <label className="field">
+                    <span>Trust state</span>
+                    <select name="trustState" defaultValue={editingDestination?.trustState ?? 'unreviewed'}>
+                      <option value="unreviewed">unreviewed</option>
+                      <option value="trusted">trusted</option>
+                      <option value="restricted">restricted</option>
+                      <option value="blocked">blocked</option>
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Scope</span>
+                    <select name="isInternal" defaultValue={editingDestination?.isInternal ? 'true' : 'false'}>
+                      <option value="false">external</option>
+                      <option value="true">internal</option>
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Notes</span>
+                    <input defaultValue={editingDestination?.notes ?? ''} name="notes" placeholder="Optional context" />
+                  </label>
+                  <label className="field">
+                    <span>Status</span>
+                    <select defaultValue={editingDestination?.isActive === false ? 'false' : 'true'} name="isActive">
+                      <option value="true">active</option>
+                      <option value="false">inactive</option>
+                    </select>
+                  </label>
+                  <div className="exception-actions">
+                    <button className="primary-button" disabled={!canManage || addresses.length === 0} type="submit">
+                      {editingDestination ? 'Update destination' : 'Create destination'}
+                    </button>
+                  </div>
+                </form>
+              </>
+            ) : null}
+
+            {modalState.type === 'view-destination' && selectedDestination ? (
+              <>
+                <div className="registry-modal-hero">
+                  <div className="registry-modal-hero-copy">
+                    <h2>{selectedDestination.label}</h2>
+                    <span className={`tone-pill tone-pill-${mapDestinationTone(selectedDestination.trustState)}`}>
+                      {selectedDestination.trustState}
+                    </span>
+                  </div>
+                  <button className="ghost-button compact-button danger-button" onClick={() => setModalState(null)} type="button">
+                    close
+                  </button>
+                </div>
+
+                <div className="info-grid-tight">
+                  <InfoLine label="Scope" value={selectedDestination.isInternal ? 'internal' : 'external'} />
+                  <InfoLine label="Status" value={selectedDestination.isActive ? 'active' : 'inactive'} />
+                  <InfoLine label="Destination type" value={selectedDestination.destinationType || 'destination'} />
+                </div>
+
+                <div className="registry-detail-group">
+                  <div className="registry-detail-head">
+                    <strong>Linked wallet</strong>
+                    {selectedDestinationWallet && canManage ? (
+                      <button className="ghost-button compact-button" onClick={() => setModalState({ type: 'edit-wallet', workspaceAddressId: selectedDestinationWallet.workspaceAddressId })} type="button">
+                        Edit wallet
+                      </button>
+                    ) : null}
+                  </div>
+                  {selectedDestinationWallet ? (
+                    <div className="registry-detail-box">
+                      <strong>{getWalletNameLite(selectedDestinationWallet)}</strong>
+                      <small>{selectedDestinationWallet.address}</small>
+                      {selectedDestinationWallet.notes ? <p>{selectedDestinationWallet.notes}</p> : null}
+                    </div>
+                  ) : (
+                    <div className="empty-box compact">No linked wallet found.</div>
+                  )}
+                </div>
+
+                <div className="registry-detail-group">
+                  <div className="registry-detail-head">
+                    <strong>Counterparty</strong>
+                    {selectedDestinationCounterparty && canManage ? (
+                      <button className="ghost-button compact-button" onClick={() => setModalState({ type: 'edit-counterparty', counterpartyId: selectedDestinationCounterparty.counterpartyId })} type="button">
+                        Edit counterparty
+                      </button>
+                    ) : null}
+                  </div>
+                  {selectedDestinationCounterparty ? (
+                    <div className="registry-detail-box">
+                      <strong>{selectedDestinationCounterparty.displayName}</strong>
+                      <small>{selectedDestinationCounterparty.category || 'uncategorized'} // {selectedDestinationCounterparty.status}</small>
+                    </div>
+                  ) : (
+                    <div className="empty-box compact">No counterparty linked. This is fine for purely operational or still-unclassified destinations.</div>
+                  )}
+                </div>
+
+                {selectedDestination.notes ? (
+                  <div className="registry-detail-group">
+                    <div className="registry-detail-head">
+                      <strong>Notes</strong>
+                    </div>
+                    <div className="registry-detail-box">
+                      <p>{selectedDestination.notes}</p>
+                    </div>
+                  </div>
+                ) : null}
+
+                {canManage ? (
+                  <div className="exception-actions">
+                    <button className="primary-button" onClick={() => setModalState({ type: 'edit-destination', destinationId: selectedDestination.destinationId })} type="button">
+                      Edit destination
+                    </button>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
           </div>
         </div>
+      ) : null}
+    </div>
+  );
+}
 
+export function WorkspacePolicyPage({
+  approvalPolicy,
+  canManage,
+  currentWorkspace,
+  onUpdateApprovalPolicy,
+}: {
+  approvalPolicy: ApprovalPolicy | null;
+  canManage: boolean;
+  currentWorkspace: Workspace;
+  onUpdateApprovalPolicy: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+}) {
+  return (
+    <div className="page-stack">
+      <section className="section-headline section-headline-compact">
+        <div>
+          <p className="eyebrow">Approval Policy</p>
+          <h1>{currentWorkspace.workspaceName}</h1>
+          <p className="section-copy">
+            Define when a request can go live immediately and when it must pause in the approval inbox.
+          </p>
+        </div>
+      </section>
+
+      {!canManage ? (
+        <div className="notice-banner">
+          <div>
+            <strong>Read only.</strong>
+            <p>Only organization admins can change approval policy for this workspace.</p>
+          </div>
+        </div>
+      ) : null}
+
+      <section className="content-grid content-grid-single">
         <div className="content-panel content-panel-strong">
           <div className="panel-header">
             <div>
-              <p className="eyebrow">Step 4</p>
-              <h2>Approval policy</h2>
-              <p className="compact-copy">Control which requests auto-clear and which must enter the approval inbox.</p>
+              <p className="eyebrow">Policy</p>
+              <h2>When a request becomes live</h2>
+              <p className="compact-copy">These rules run when a trusted destination request is made live.</p>
             </div>
           </div>
           {approvalPolicy ? (
@@ -1449,7 +1662,9 @@ export function WorkspaceSetupPage({
                   placeholder="50000000"
                   required
                 />
-                <small className="field-note">Trusted external destinations at or above {formatRawUsdc(approvalPolicy.ruleJson.externalApprovalThresholdRaw)} USDC require approval.</small>
+                <small className="field-note">
+                  Trusted external destinations at or above {formatRawUsdc(approvalPolicy.ruleJson.externalApprovalThresholdRaw)} USDC require approval.
+                </small>
               </label>
               <label className="field">
                 <span>Internal approval threshold</span>
@@ -1459,7 +1674,9 @@ export function WorkspaceSetupPage({
                   placeholder="250000000"
                   required
                 />
-                <small className="field-note">Trusted internal destinations at or above {formatRawUsdc(approvalPolicy.ruleJson.internalApprovalThresholdRaw)} USDC require approval.</small>
+                <small className="field-note">
+                  Trusted internal destinations at or above {formatRawUsdc(approvalPolicy.ruleJson.internalApprovalThresholdRaw)} USDC require approval.
+                </small>
               </label>
               <button className="primary-button" disabled={!canManage} type="submit">
                 Update approval policy
@@ -1469,13 +1686,78 @@ export function WorkspaceSetupPage({
             <div className="empty-box compact">Approval policy unavailable.</div>
           )}
         </div>
+      </section>
+    </div>
+  );
+}
 
-        <div className="content-panel content-panel-strong" id="planned-transfers-section">
+export function WorkspaceRequestsPage({
+  addresses,
+  canManage,
+  currentWorkspace,
+  destinations,
+  onCreateTransferRequest,
+  transferRequests,
+}: {
+  addresses: WorkspaceAddress[];
+  canManage: boolean;
+  currentWorkspace: Workspace;
+  destinations: Destination[];
+  onCreateTransferRequest: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  transferRequests: TransferRequest[];
+}) {
+  const [selectedRequestDestinationId, setSelectedRequestDestinationId] = useState('');
+  const [requestCreateStatus, setRequestCreateStatus] = useState<'draft' | 'submitted'>('submitted');
+  const selectedRequestDestination =
+    destinations.find((item) => item.destinationId === selectedRequestDestinationId) ?? null;
+
+  useEffect(() => {
+    if (!selectedRequestDestination) {
+      setRequestCreateStatus('submitted');
+      return;
+    }
+
+    if (
+      !selectedRequestDestination.isActive
+      || selectedRequestDestination.trustState === 'blocked'
+      || selectedRequestDestination.trustState === 'restricted'
+      || selectedRequestDestination.trustState === 'unreviewed'
+    ) {
+      setRequestCreateStatus('draft');
+      return;
+    }
+
+    setRequestCreateStatus('submitted');
+  }, [selectedRequestDestination]);
+
+  return (
+    <div className="page-stack">
+      <section className="section-headline section-headline-compact">
+        <div>
+          <p className="eyebrow">Expected Transfers</p>
+          <h1>{currentWorkspace.workspaceName}</h1>
+          <p className="section-copy">
+            Create live requests against trusted destinations so approvals, execution, and reconciliation all start from the same object.
+          </p>
+        </div>
+      </section>
+
+      {!canManage ? (
+        <div className="notice-banner">
+          <div>
+            <strong>Read only.</strong>
+            <p>Only organization admins can create or change planned transfers in this workspace.</p>
+          </div>
+        </div>
+      ) : null}
+
+      <section className="content-grid">
+        <div className="content-panel content-panel-strong">
           <div className="panel-header">
             <div>
-              <p className="eyebrow">Step 5</p>
-              <h2>Planned transfers</h2>
-              <p className="compact-copy">Create requests against destination objects so matching and review carry business context.</p>
+              <p className="eyebrow">New request</p>
+              <h2>Create a planned transfer</h2>
+              <p className="compact-copy">Pick a destination first. Its trust and scope determine whether this request can go live immediately.</p>
             </div>
           </div>
           <form className="form-stack" onSubmit={onCreateTransferRequest}>
@@ -1507,22 +1789,20 @@ export function WorkspaceSetupPage({
                   </option>
                 ))}
               </select>
-              <small className="field-note">
-                Requests now target a destination object, not a bare wallet, so trust and business identity carry through to reconciliation.
-              </small>
             </label>
             {selectedRequestDestination ? (
-              <div className="notice-banner compact-notice">
-                <div>
-                  <strong>
-                    {selectedRequestDestination.label} // {selectedRequestDestination.trustState} // {selectedRequestDestination.isInternal ? 'internal' : 'external'}
-                  </strong>
-                  <p>
-                    {getDestinationTrustCopy(selectedRequestDestination)}
-                  </p>
-                </div>
+              <div className="setup-hint-card">
+                <strong>
+                  {selectedRequestDestination.label} // {selectedRequestDestination.trustState} // {selectedRequestDestination.isInternal ? 'internal' : 'external'}
+                </strong>
+                <p>{getDestinationTrustCopy(selectedRequestDestination)}</p>
               </div>
-            ) : null}
+            ) : (
+              <div className="setup-hint-card">
+                <strong>Before you create requests</strong>
+                <p>Use the Address book page to save the wallet and create the destination first.</p>
+              </div>
+            )}
             <label className="field">
               <span>Transfer type</span>
               <input name="requestType" placeholder="wallet_transfer" required />
@@ -1535,14 +1815,10 @@ export function WorkspaceSetupPage({
                 value={requestCreateStatus}
               >
                 <option value="draft">save as draft</option>
-                {selectedRequestDestination?.isActive !== false
-                && selectedRequestDestination?.trustState === 'trusted' ? (
+                {selectedRequestDestination?.isActive !== false && selectedRequestDestination?.trustState === 'trusted' ? (
                   <option value="submitted">make live request</option>
                 ) : null}
               </select>
-              <small className="field-note">
-                Draft means “record it, but do not treat it as active yet.” Live request means the policy engine will immediately decide whether it auto-clears or enters the approval inbox.
-              </small>
             </label>
             <label className="field">
               <span>Amount (raw units)</span>
@@ -1571,8 +1847,18 @@ export function WorkspaceSetupPage({
               Create planned transfer
             </button>
           </form>
+        </div>
 
-          <div className="stack-list">
+        <div className="content-panel content-panel-strong">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Queue seed</p>
+              <h2>Existing expected transfers</h2>
+              <p className="compact-copy">These will appear in the main watch system queue once they are live.</p>
+            </div>
+            <span className="status-chip">{transferRequests.length}</span>
+          </div>
+          <div className="setup-list">
             {transferRequests.length ? (
               transferRequests.map((item) => (
                 <div key={item.transferRequestId} className="workspace-row static-row">
@@ -1582,27 +1868,12 @@ export function WorkspaceSetupPage({
                       {item.destination?.label ?? getWalletNameLite(item.destinationWorkspaceAddress)} // {item.requestType.replaceAll('_', ' ')} // {formatRawUsdc(item.amountRaw)}
                     </small>
                   </div>
-                  <span>{item.status}</span>
+                  <span className="status-chip">{formatLabel(item.status)}</span>
                 </div>
               ))
             ) : (
               <div className="empty-box compact">No planned transfers yet.</div>
             )}
-          </div>
-        </div>
-      </section>
-
-      <section className="content-grid content-grid-single">
-        <div className="content-panel content-panel-soft">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Matching note</p>
-              <h2>How it works</h2>
-              <p className="compact-copy">Keep the explanation light and operational. The page itself should carry the workflow.</p>
-            </div>
-          </div>
-          <div className="empty-box compact">
-            Phase B keeps the worker wallet-compatible, but new requests now point at named destinations. That means queue rows and request detail can show trust, counterparty, and internal or external context while matching still uses the linked receiving wallet underneath.
           </div>
         </div>
       </section>
@@ -1616,6 +1887,20 @@ function getWalletName(address: WorkspaceAddress) {
 
 function getWalletNameLite(address: WorkspaceAddressLite | null) {
   return address?.displayName?.trim() || address?.address || 'Unknown';
+}
+
+function mapDestinationTone(trustState: Destination['trustState']) {
+  switch (trustState) {
+    case 'trusted':
+      return 'matched';
+    case 'restricted':
+      return 'partial';
+    case 'blocked':
+      return 'exception';
+    case 'unreviewed':
+    default:
+      return 'pending';
+  }
 }
 
 function getExceptionReasonLabel(reasonCode: string) {
