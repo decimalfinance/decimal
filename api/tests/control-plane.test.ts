@@ -12,11 +12,15 @@ const TRUNCATE_SQL = `
 TRUNCATE TABLE
   auth_sessions,
   organization_memberships,
+  approval_decisions,
+  approval_policies,
   transfer_request_notes,
   transfer_request_events,
   exception_notes,
   exception_states,
   transfer_requests,
+  destinations,
+  counterparties,
   workspace_addresses,
   workspaces,
   organizations,
@@ -148,7 +152,7 @@ test('wallets can be added to a workspace and listed back to members', async () 
   assert.equal(payload.items[0].displayName, 'Main Treasury');
 });
 
-test('internal matching context returns wallet-first transfer setup', async () => {
+test('wallet-first submitted requests route into approval and stay out of matching context', async () => {
   const setup = await createOrganizationWorkspace();
   const workspaceId = setup.workspace.workspaceId;
   const recipientWallet = 'So11111111111111111111111111111111111111112';
@@ -175,6 +179,8 @@ test('internal matching context returns wallet-first transfer setup', async () =
     setup.sessionToken,
   );
 
+  assert.equal(transferRequest.status, 'pending_approval');
+
   const contextResponse = await fetch(
     `${baseUrl}/internal/workspaces/${workspaceId}/matching-context`,
   );
@@ -182,14 +188,10 @@ test('internal matching context returns wallet-first transfer setup', async () =
   const context = await contextResponse.json();
 
   assert.equal(context.addresses.length, 1);
-  assert.equal(context.transferRequests.length, 1);
-  assert.equal(context.transferRequests[0].transferRequestId, transferRequest.transferRequestId);
-  assert.equal(context.transferRequests[0].destinationWorkspaceAddress.address, recipientWallet);
-  assert.equal(context.transferRequests[0].destinationWorkspaceAddress.usdcAtaAddress, expectedAta);
-  assert.equal(context.transferRequests[0].amountRaw, '10000');
+  assert.equal(context.transferRequests.length, 0);
 });
 
-test('recipient wallet setup derives a USDC receiving address and supports wallet-first transfer requests', async () => {
+test('recipient wallet setup derives a USDC receiving address and still routes raw wallet requests through approval policy', async () => {
   const setup = await createOrganizationWorkspace();
   const workspaceId = setup.workspace.workspaceId;
   const recipientWallet = 'So11111111111111111111111111111111111111112';
@@ -219,6 +221,73 @@ test('recipient wallet setup derives a USDC receiving address and supports walle
     setup.sessionToken,
   );
 
+  assert.equal(transferRequest.status, 'pending_approval');
+  assert.equal(transferRequest.destinationWorkspaceAddress.address, recipientWallet);
+  assert.equal(transferRequest.destinationWorkspaceAddress.usdcAtaAddress, expectedAta);
+
+  const contextResponse = await fetch(`${baseUrl}/internal/workspaces/${workspaceId}/matching-context`);
+  assert.equal(contextResponse.status, 200);
+  const context = await contextResponse.json();
+
+  assert.equal(context.transferRequests.length, 0);
+});
+
+test('phase b flow supports counterparties, destinations, and destination-aware transfer requests', async () => {
+  const setup = await createOrganizationWorkspace();
+  const workspaceId = setup.workspace.workspaceId;
+  const recipientWallet = 'So11111111111111111111111111111111111111112';
+  const expectedAta = deriveUsdcAtaForWallet(recipientWallet);
+
+  const address = await post(
+    `/workspaces/${workspaceId}/addresses`,
+    {
+      chain: 'solana',
+      address: recipientWallet,
+      displayName: 'Acme Vendor Wallet',
+    },
+    setup.sessionToken,
+  );
+
+  const counterparty = await post(
+    `/workspaces/${workspaceId}/counterparties`,
+    {
+      displayName: 'Acme Vendor',
+      category: 'vendor',
+      externalReference: 'VENDOR-ACME',
+    },
+    setup.sessionToken,
+  );
+
+  const destination = await post(
+    `/workspaces/${workspaceId}/destinations`,
+    {
+      counterpartyId: counterparty.counterpartyId,
+      linkedWorkspaceAddressId: address.workspaceAddressId,
+      label: 'Acme payout wallet',
+      destinationType: 'vendor_wallet',
+      trustState: 'trusted',
+      isInternal: false,
+    },
+    setup.sessionToken,
+  );
+
+  const transferRequest = await post(
+    `/workspaces/${workspaceId}/transfer-requests`,
+    {
+      destinationId: destination.destinationId,
+      requestType: 'vendor_payout',
+      amountRaw: '10000',
+      status: 'submitted',
+    },
+    setup.sessionToken,
+  );
+
+  assert.equal(transferRequest.status, 'approved');
+  assert.equal(transferRequest.destinationId, destination.destinationId);
+  assert.equal(transferRequest.destination.destinationId, destination.destinationId);
+  assert.equal(transferRequest.destination.label, 'Acme payout wallet');
+  assert.equal(transferRequest.destination.trustState, 'trusted');
+  assert.equal(transferRequest.destination.counterparty.displayName, 'Acme Vendor');
   assert.equal(transferRequest.destinationWorkspaceAddress.address, recipientWallet);
   assert.equal(transferRequest.destinationWorkspaceAddress.usdcAtaAddress, expectedAta);
 
@@ -227,9 +296,179 @@ test('recipient wallet setup derives a USDC receiving address and supports walle
   const context = await contextResponse.json();
 
   assert.equal(context.transferRequests.length, 1);
-  assert.equal(context.transferRequests[0].transferRequestId, transferRequest.transferRequestId);
+  assert.equal(context.transferRequests[0].destination.destinationId, destination.destinationId);
+  assert.equal(context.transferRequests[0].destination.label, 'Acme payout wallet');
+  assert.equal(context.transferRequests[0].destination.counterparty.displayName, 'Acme Vendor');
   assert.equal(context.transferRequests[0].destinationWorkspaceAddress.address, recipientWallet);
   assert.equal(context.transferRequests[0].destinationWorkspaceAddress.usdcAtaAddress, expectedAta);
+});
+
+test('destinations and wallets can be updated after creation', async () => {
+  const setup = await createOrganizationWorkspace();
+  const workspaceId = setup.workspace.workspaceId;
+
+  const originalWallet = 'So11111111111111111111111111111111111111112';
+  const correctedWallet = 'So11111111111111111111111111111111111111113';
+  const correctedAta = deriveUsdcAtaForWallet(correctedWallet);
+
+  const address = await post(
+    `/workspaces/${workspaceId}/addresses`,
+    {
+      chain: 'solana',
+      address: originalWallet,
+      displayName: 'Vendor Wallet',
+    },
+    setup.sessionToken,
+  );
+
+  const destination = await post(
+    `/workspaces/${workspaceId}/destinations`,
+    {
+      linkedWorkspaceAddressId: address.workspaceAddressId,
+      label: 'Vendor payout wallet',
+      trustState: 'unreviewed',
+      destinationType: 'vendor_wallet',
+      isInternal: false,
+    },
+    setup.sessionToken,
+  );
+
+  const updatedAddressResponse = await fetch(
+    `${baseUrl}/workspaces/${workspaceId}/addresses/${address.workspaceAddressId}`,
+    {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        ...authHeaders(setup.sessionToken),
+      },
+      body: JSON.stringify({
+        address: correctedWallet,
+        displayName: 'Corrected Vendor Wallet',
+      }),
+    },
+  );
+  assert.equal(updatedAddressResponse.status, 200);
+  const updatedAddress = await updatedAddressResponse.json();
+  assert.equal(updatedAddress.address, correctedWallet);
+  assert.equal(updatedAddress.usdcAtaAddress, correctedAta);
+
+  const updatedDestinationResponse = await fetch(
+    `${baseUrl}/workspaces/${workspaceId}/destinations/${destination.destinationId}`,
+    {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        ...authHeaders(setup.sessionToken),
+      },
+      body: JSON.stringify({
+        trustState: 'trusted',
+        notes: 'Approved after review',
+      }),
+    },
+  );
+  assert.equal(updatedDestinationResponse.status, 200);
+  const updatedDestination = await updatedDestinationResponse.json();
+  assert.equal(updatedDestination.trustState, 'trusted');
+  assert.equal(updatedDestination.notes, 'Approved after review');
+  assert.equal(updatedDestination.walletAddress, correctedWallet);
+  assert.equal(updatedDestination.tokenAccountAddress, correctedAta);
+});
+
+test('destination trust state enforces request creation rules', async () => {
+  const setup = await createOrganizationWorkspace();
+  const workspaceId = setup.workspace.workspaceId;
+
+  const address = await post(
+    `/workspaces/${workspaceId}/addresses`,
+    {
+      chain: 'solana',
+      address: 'So11111111111111111111111111111111111111112',
+      displayName: 'Vendor Wallet',
+    },
+    setup.sessionToken,
+  );
+
+  const unreviewedDestination = await post(
+    `/workspaces/${workspaceId}/destinations`,
+    {
+      linkedWorkspaceAddressId: address.workspaceAddressId,
+      label: 'Unreviewed vendor wallet',
+      trustState: 'unreviewed',
+    },
+    setup.sessionToken,
+  );
+
+  const rejectedSubmitted = await fetch(
+    `${baseUrl}/workspaces/${workspaceId}/transfer-requests`,
+    {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...authHeaders(setup.sessionToken),
+      },
+      body: JSON.stringify({
+        destinationId: unreviewedDestination.destinationId,
+        requestType: 'vendor_payout',
+        amountRaw: '10000',
+        status: 'submitted',
+      }),
+    },
+  );
+  assert.equal(rejectedSubmitted.status, 400);
+  const rejectedPayload = await rejectedSubmitted.json();
+  assert.match(rejectedPayload.message, /create the request as draft/i);
+
+  const acceptedDraft = await post(
+    `/workspaces/${workspaceId}/transfer-requests`,
+    {
+      destinationId: unreviewedDestination.destinationId,
+      requestType: 'vendor_payout',
+      amountRaw: '10000',
+      status: 'draft',
+    },
+    setup.sessionToken,
+  );
+  assert.equal(acceptedDraft.status, 'draft');
+
+  const blockedAddress = await post(
+    `/workspaces/${workspaceId}/addresses`,
+    {
+      chain: 'solana',
+      address: 'So11111111111111111111111111111111111111113',
+      displayName: 'Blocked Vendor Wallet',
+    },
+    setup.sessionToken,
+  );
+
+  const blockedDestination = await post(
+    `/workspaces/${workspaceId}/destinations`,
+    {
+      linkedWorkspaceAddressId: blockedAddress.workspaceAddressId,
+      label: 'Blocked vendor wallet',
+      trustState: 'blocked',
+    },
+    setup.sessionToken,
+  );
+
+  const blockedResponse = await fetch(
+    `${baseUrl}/workspaces/${workspaceId}/transfer-requests`,
+    {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...authHeaders(setup.sessionToken),
+      },
+      body: JSON.stringify({
+        destinationId: blockedDestination.destinationId,
+        requestType: 'vendor_payout',
+        amountRaw: '10000',
+        status: 'draft',
+      }),
+    },
+  );
+  assert.equal(blockedResponse.status, 400);
+  const blockedPayload = await blockedResponse.json();
+  assert.match(blockedPayload.message, /blocked and cannot be used/i);
 });
 
 test('joined members can read org workspaces but cannot mutate workspace onboarding', async () => {
@@ -298,13 +537,15 @@ test('creating a transfer request writes a durable creation event and detail tim
   const detail = await response.json();
 
   assert.equal(detail.transferRequestId, transferRequest.transferRequestId);
-  assert.equal(detail.events.length, 1);
+  assert.equal(detail.events.length, 2);
   assert.equal(detail.events[0].eventType, 'request_created');
   assert.equal(detail.events[0].afterState, 'submitted');
   assert.equal(detail.events[0].actorType, 'user');
+  assert.equal(detail.events[1].eventType, 'approval_required');
+  assert.equal(detail.events[1].afterState, 'pending_approval');
   assert.equal(detail.requestDisplayState, 'pending');
   assert.equal(detail.timeline[0].timelineType, 'request_event');
-  assert.deepEqual(detail.availableTransitions, ['pending_approval']);
+  assert.deepEqual(detail.availableTransitions, []);
 });
 
 test('transfer request transitions enforce the lifecycle graph and add timeline notes', async () => {
@@ -340,8 +581,8 @@ test('transfer request transitions enforce the lifecycle graph and add timeline 
     setup.sessionToken,
   );
 
-  assert.equal(transitioned.status, 'submitted');
-  assert.deepEqual(transitioned.availableTransitions, ['pending_approval']);
+  assert.equal(transitioned.status, 'approved');
+  assert.deepEqual(transitioned.availableTransitions, ['ready_for_execution']);
 
   const detailResponse = await fetch(
     `${baseUrl}/workspaces/${setup.workspace.workspaceId}/transfer-requests/${setup.transferRequest.transferRequestId}`,
@@ -350,13 +591,116 @@ test('transfer request transitions enforce the lifecycle graph and add timeline 
   assert.equal(detailResponse.status, 200);
   const detail = await detailResponse.json();
 
-  assert.equal(detail.events.length, 2);
+  assert.equal(detail.events.length, 3);
   assert.equal(detail.events[1].eventType, 'status_transition');
   assert.equal(detail.events[1].beforeState, 'draft');
   assert.equal(detail.events[1].afterState, 'submitted');
+  assert.equal(detail.events[2].eventType, 'approval_auto_approved');
+  assert.equal(detail.events[2].afterState, 'approved');
   assert.equal(detail.notes.length, 1);
   assert.equal(detail.notes[0].body, 'Ready for reviewer handoff');
   assert.equal(detail.timeline.filter((item: { timelineType: string }) => item.timelineType === 'request_note').length, 1);
+});
+
+test('phase c routes thresholded requests into approval inbox and records approval decisions', async () => {
+  const setup = await createOrganizationWorkspace();
+  const workspaceId = setup.workspace.workspaceId;
+
+  const address = await post(
+    `/workspaces/${workspaceId}/addresses`,
+    {
+      chain: 'solana',
+      address: 'So11111111111111111111111111111111111111112',
+      displayName: 'Vendor Wallet',
+    },
+    setup.sessionToken,
+  );
+
+  const destination = await post(
+    `/workspaces/${workspaceId}/destinations`,
+    {
+      linkedWorkspaceAddressId: address.workspaceAddressId,
+      label: 'Vendor payout wallet',
+      trustState: 'trusted',
+      destinationType: 'vendor_wallet',
+      isInternal: false,
+    },
+    setup.sessionToken,
+  );
+
+  const transferRequest = await post(
+    `/workspaces/${workspaceId}/transfer-requests`,
+    {
+      destinationId: destination.destinationId,
+      requestType: 'vendor_payout',
+      amountRaw: '100000000',
+      status: 'submitted',
+    },
+    setup.sessionToken,
+  );
+
+  assert.equal(transferRequest.status, 'pending_approval');
+
+  const inboxResponse = await fetch(
+    `${baseUrl}/workspaces/${workspaceId}/approval-inbox`,
+    { headers: authHeaders(setup.sessionToken) },
+  );
+  assert.equal(inboxResponse.status, 200);
+  const inbox = await inboxResponse.json();
+
+  assert.equal(inbox.items.length, 1);
+  assert.equal(inbox.items[0].transferRequestId, transferRequest.transferRequestId);
+  assert.equal(inbox.items[0].approvalEvaluation.requiresApproval, true);
+  assert.equal(
+    inbox.items[0].approvalEvaluation.reasons.some((reason: { code: string }) => reason.code === 'external_amount_threshold_exceeded'),
+    true,
+  );
+
+  const detailBeforeResponse = await fetch(
+    `${baseUrl}/workspaces/${workspaceId}/reconciliation-queue/${transferRequest.transferRequestId}`,
+    { headers: authHeaders(setup.sessionToken) },
+  );
+  assert.equal(detailBeforeResponse.status, 200);
+  const detailBefore = await detailBeforeResponse.json();
+
+  assert.equal(detailBefore.approvalState, 'pending_approval');
+  assert.equal(detailBefore.approvalDecisions.length, 1);
+  assert.equal(detailBefore.approvalDecisions[0].action, 'routed_for_approval');
+
+  const approveResponse = await fetch(
+    `${baseUrl}/workspaces/${workspaceId}/transfer-requests/${transferRequest.transferRequestId}/approval-decisions`,
+    {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...authHeaders(setup.sessionToken),
+      },
+      body: JSON.stringify({
+        action: 'approve',
+        comment: 'Policy exception reviewed by treasury ops.',
+      }),
+    },
+  );
+  assert.equal(approveResponse.status, 200);
+  const approved = await approveResponse.json();
+  assert.equal(approved.status, 'approved');
+
+  const detailAfterResponse = await fetch(
+    `${baseUrl}/workspaces/${workspaceId}/reconciliation-queue/${transferRequest.transferRequestId}`,
+    { headers: authHeaders(setup.sessionToken) },
+  );
+  assert.equal(detailAfterResponse.status, 200);
+  const detailAfter = await detailAfterResponse.json();
+
+  assert.equal(detailAfter.approvalState, 'approved');
+  assert.equal(detailAfter.approvalDecisions.length, 2);
+  assert.equal(detailAfter.approvalDecisions[1].action, 'approve');
+  assert.equal(detailAfter.approvalDecisions[1].comment, 'Policy exception reviewed by treasury ops.');
+  assert.equal(
+    detailAfter.events.some((event: { eventType: string; payloadJson: { action?: string } }) =>
+      event.eventType === 'approval_decision' && event.payloadJson?.action === 'approve'),
+    true,
+  );
 });
 
 test('workspace members can add request notes without admin mutation access', async () => {
@@ -572,8 +916,8 @@ test('reconciliation and request detail expose derived display state, explanatio
   assert.equal(detailResponse.status, 200);
   const detail = await detailResponse.json();
 
-  assert.equal(detail.status, 'submitted');
-  assert.equal(detail.approvalState, 'submitted');
+  assert.equal(detail.status, 'approved');
+  assert.equal(detail.approvalState, 'approved');
   assert.equal(detail.executionState, 'observed_onchain');
   assert.equal(detail.requestDisplayState, 'exception');
   assert.equal(detail.linkedSignature, signature);
@@ -1280,8 +1624,8 @@ test('dedicated reconciliation queue endpoint supports display-state filtering a
   assert.equal(queue.items.length, 1);
   assert.equal(queue.items[0].transferRequestId, setup.transferRequest.transferRequestId);
   assert.equal(queue.items[0].requestDisplayState, 'exception');
-  assert.equal(queue.items[0].status, 'submitted');
-  assert.equal(queue.items[0].approvalState, 'submitted');
+  assert.equal(queue.items[0].status, 'approved');
+  assert.equal(queue.items[0].approvalState, 'approved');
   assert.equal(queue.items[0].executionState, 'observed_onchain');
 
   const detailResponse = await fetch(
@@ -1354,8 +1698,8 @@ test('exception actions and notes update detail state and preserve operator audi
   const requestDetail = await requestDetailResponse.json();
 
   assert.equal(requestDetail.requestDisplayState, 'partial');
-  assert.equal(requestDetail.status, 'submitted');
-  assert.equal(requestDetail.approvalState, 'submitted');
+  assert.equal(requestDetail.status, 'approved');
+  assert.equal(requestDetail.approvalState, 'approved');
   assert.equal(requestDetail.executionState, 'observed_onchain');
   assert.equal(requestDetail.exceptions[0].status, 'dismissed');
   assert.equal(requestDetail.exceptions[0].notes.length, 2);
@@ -1439,10 +1783,22 @@ async function createTransferRequestSetup(options?: { status?: 'draft' | 'submit
     setup.sessionToken,
   );
 
+  const destination = await post(
+    `/workspaces/${setup.workspace.workspaceId}/destinations`,
+    {
+      linkedWorkspaceAddressId: destinationAddress.workspaceAddressId,
+      label: 'Vendor payout wallet',
+      trustState: 'trusted',
+      destinationType: 'vendor_wallet',
+      isInternal: false,
+    },
+    setup.sessionToken,
+  );
+
   const transferRequest = await post(
     `/workspaces/${setup.workspace.workspaceId}/transfer-requests`,
     {
-      destinationWorkspaceAddressId: destinationAddress.workspaceAddressId,
+      destinationId: destination.destinationId,
       requestType: 'vendor_payout',
       amountRaw: '2500000',
       status: options?.status ?? 'submitted',
@@ -1453,6 +1809,7 @@ async function createTransferRequestSetup(options?: { status?: 'draft' | 'submit
   return {
     ...setup,
     destinationAddress,
+    destination,
     transferRequest,
   };
 }

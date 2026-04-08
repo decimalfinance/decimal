@@ -10,6 +10,10 @@ const workspaceParamsSchema = z.object({
   workspaceId: z.string().uuid(),
 });
 
+const workspaceAddressParamsSchema = workspaceParamsSchema.extend({
+  workspaceAddressId: z.string().uuid(),
+});
+
 const createAddressSchema = z.object({
   chain: z.string().default(SOLANA_CHAIN),
   address: z.string().min(1),
@@ -21,6 +25,20 @@ const createAddressSchema = z.object({
   notes: z.string().optional(),
   properties: z.record(z.any()).optional(),
 });
+
+const updateAddressSchema = z.object({
+  address: z.string().min(1).optional(),
+  displayName: z.string().optional(),
+  notes: z.string().optional(),
+  isActive: z.boolean().optional(),
+}).refine(
+  (value) =>
+    value.address !== undefined
+    || value.displayName !== undefined
+    || value.notes !== undefined
+    || value.isActive !== undefined,
+  'At least one field must be updated',
+);
 
 addressesRouter.get('/workspaces/:workspaceId/addresses', async (req, res, next) => {
   try {
@@ -69,3 +87,60 @@ addressesRouter.post('/workspaces/:workspaceId/addresses', async (req, res, next
     next(error);
   }
 });
+
+addressesRouter.patch(
+  '/workspaces/:workspaceId/addresses/:workspaceAddressId',
+  async (req, res, next) => {
+    try {
+      const { workspaceId, workspaceAddressId } = workspaceAddressParamsSchema.parse(req.params);
+      await assertWorkspaceAdmin(workspaceId, req.auth!.userId);
+      const input = updateAddressSchema.parse(req.body);
+
+      const current = await prisma.workspaceAddress.findFirstOrThrow({
+        where: {
+          workspaceId,
+          workspaceAddressId,
+        },
+      });
+
+      const nextAddress = input.address?.trim() || current.address;
+      const nextUsdcAtaAddress = deriveUsdcAtaForWallet(nextAddress);
+
+      const updated = await prisma.$transaction(async (tx) => {
+        const address = await tx.workspaceAddress.update({
+          where: { workspaceAddressId },
+          data: {
+            address: nextAddress,
+            usdcAtaAddress: nextUsdcAtaAddress,
+            displayName: input.displayName !== undefined ? input.displayName.trim() || null : undefined,
+            notes: input.notes !== undefined ? input.notes.trim() || null : undefined,
+            isActive: input.isActive,
+            propertiesJson: {
+              ...(typeof current.propertiesJson === 'object' && current.propertiesJson ? current.propertiesJson : {}),
+              usdcAtaAddress: nextUsdcAtaAddress,
+            },
+          },
+        });
+
+        await tx.destination.updateMany({
+          where: {
+            workspaceId,
+            linkedWorkspaceAddressId: workspaceAddressId,
+          },
+          data: {
+            chain: address.chain,
+            asset: address.assetScope,
+            walletAddress: address.address,
+            tokenAccountAddress: address.usdcAtaAddress,
+          },
+        });
+
+        return address;
+      });
+
+      res.json(updated);
+    } catch (error) {
+      next(error);
+    }
+  },
+);

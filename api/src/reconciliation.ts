@@ -1,5 +1,9 @@
 import type {
   AddressLabel,
+  ApprovalDecision,
+  ApprovalPolicy,
+  Counterparty,
+  Destination,
   Prisma,
   TransferRequest,
   TransferRequestEvent,
@@ -7,6 +11,11 @@ import type {
   User,
   WorkspaceAddress,
 } from '@prisma/client';
+import {
+  buildApprovalEvaluationSummary,
+  getOrCreateWorkspaceApprovalPolicy,
+  serializeApprovalPolicy,
+} from './approval-policy.js';
 import { normalizeClickHouseDateTime, queryClickHouse } from './clickhouse.js';
 import { config } from './config.js';
 import { getOrResolveAddressLabels } from './address-label-registry.js';
@@ -26,10 +35,17 @@ import {
 type TransferRequestWithRelations = TransferRequest & {
   sourceWorkspaceAddress: WorkspaceAddress | null;
   destinationWorkspaceAddress: WorkspaceAddress | null;
+  destination: (Destination & {
+    counterparty: Counterparty | null;
+  }) | null;
   requestedByUser: User | null;
   events?: TransferRequestEvent[];
   notes?: (TransferRequestNote & {
     authorUser: Pick<User, 'userId' | 'email' | 'displayName'> | null;
+  })[];
+  approvalDecisions?: (ApprovalDecision & {
+    actorUser: Pick<User, 'userId' | 'email' | 'displayName'> | null;
+    approvalPolicy: ApprovalPolicy | null;
   })[];
 };
 
@@ -130,6 +146,11 @@ export async function listReconciliationQueue(workspaceId: string, options: Queu
     include: {
       destinationWorkspaceAddress: true,
       sourceWorkspaceAddress: true,
+      destination: {
+        include: {
+          counterparty: true,
+        },
+      },
       requestedByUser: true,
       events: {
         orderBy: { createdAt: 'asc' },
@@ -160,12 +181,87 @@ export async function listReconciliationQueue(workspaceId: string, options: Queu
     : items.filter((item) => (options.requestStatus ? item.status === options.requestStatus : true));
 }
 
+export async function listApprovalInbox(args: {
+  workspaceId: string;
+  limit?: number;
+  statuses?: Array<'pending_approval' | 'escalated'>;
+}) {
+  const statuses = args.statuses?.length ? args.statuses : ['pending_approval', 'escalated'];
+  const [transferRequests, approvalPolicy] = await Promise.all([
+    prisma.transferRequest.findMany({
+      where: {
+        workspaceId: args.workspaceId,
+        asset: 'usdc',
+        status: {
+          in: statuses,
+        },
+      },
+      include: {
+        destinationWorkspaceAddress: true,
+        sourceWorkspaceAddress: true,
+        destination: {
+          include: {
+            counterparty: true,
+          },
+        },
+        requestedByUser: true,
+        events: {
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+      orderBy: { requestedAt: 'desc' },
+      take: args.limit ?? 100,
+    }),
+    getOrCreateWorkspaceApprovalPolicy(args.workspaceId),
+  ]);
+
+  const requestIds = transferRequests.map((request) => request.transferRequestId);
+  const [matches, exceptions] = await Promise.all([
+    querySettlementMatches(args.workspaceId, requestIds),
+    queryExceptions(args.workspaceId, requestIds),
+  ]);
+  const items = buildQueueItems({
+    transferRequests,
+    matches,
+    exceptions,
+  });
+
+  await hydrateAddressLabelsForQueueItems(items);
+
+  return {
+    approvalPolicy: serializeApprovalPolicy(approvalPolicy),
+    items: items.map((item) => ({
+      ...item,
+      approvalEvaluation: buildApprovalEvaluationSummary({
+        policy: approvalPolicy,
+        amountRaw: item.amountRaw,
+        destination: item.destination
+          ? {
+              label: item.destination.label,
+              trustState: item.destination.trustState,
+              isInternal: item.destination.isInternal,
+            }
+          : {
+              label: item.destinationWorkspaceAddress?.displayName ?? item.destinationWorkspaceAddress?.address ?? 'unnamed destination',
+              trustState: 'unreviewed',
+              isInternal: false,
+            },
+      }),
+    })),
+  };
+}
+
 export async function getReconciliationDetail(workspaceId: string, transferRequestId: string) {
   const requestWithTimeline = await prisma.transferRequest.findFirstOrThrow({
     where: { workspaceId, transferRequestId },
     include: {
       sourceWorkspaceAddress: true,
       destinationWorkspaceAddress: true,
+      destination: {
+        include: {
+          counterparty: true,
+        },
+      },
       requestedByUser: true,
       events: {
         orderBy: { createdAt: 'asc' },
@@ -179,6 +275,19 @@ export async function getReconciliationDetail(workspaceId: string, transferReque
               displayName: true,
             },
           },
+        },
+        orderBy: { createdAt: 'asc' },
+      },
+      approvalDecisions: {
+        include: {
+          actorUser: {
+            select: {
+              userId: true,
+              email: true,
+              displayName: true,
+            },
+          },
+          approvalPolicy: true,
         },
         orderBy: { createdAt: 'asc' },
       },
@@ -240,7 +349,10 @@ export async function getReconciliationDetail(workspaceId: string, transferReque
     queueItem.linkedSignature ? queryObservedPaymentsBySignature(queueItem.linkedSignature) : [],
   ]);
 
-  const expectedDestinationWallet = requestWithTimeline.destinationWorkspaceAddress?.address ?? null;
+  const expectedDestinationWallet =
+    requestWithTimeline.destination?.walletAddress
+    ?? requestWithTimeline.destinationWorkspaceAddress?.address
+    ?? null;
   const addressLabels = await getOrResolveAddressLabels(
     'solana',
     relatedObservedPayments
@@ -256,6 +368,26 @@ export async function getReconciliationDetail(workspaceId: string, transferReque
     defaultExplanation: queueItem.matchExplanation,
     match: queueItem.match,
     relatedObservedPayments: annotatedObservedPayments,
+  });
+
+  const approvalPolicy = await getOrCreateWorkspaceApprovalPolicy(workspaceId);
+  const approvalEvaluation = buildApprovalEvaluationSummary({
+    policy: approvalPolicy,
+    amountRaw: requestWithTimeline.amountRaw,
+    destination: requestWithTimeline.destination
+      ? {
+          label: requestWithTimeline.destination.label,
+          trustState: requestWithTimeline.destination.trustState,
+          isInternal: requestWithTimeline.destination.isInternal,
+        }
+      : {
+          label:
+            requestWithTimeline.destinationWorkspaceAddress?.displayName
+            ?? requestWithTimeline.destinationWorkspaceAddress?.address
+            ?? 'unnamed destination',
+          trustState: 'unreviewed',
+          isInternal: false,
+        },
   });
 
   return {
@@ -274,6 +406,9 @@ export async function getReconciliationDetail(workspaceId: string, transferReque
     matchExplanation: detailedMatchExplanation,
     exceptions: enrichedExceptions,
     exceptionExplanation: queueItem.exceptionExplanation,
+    approvalPolicy: serializeApprovalPolicy(approvalPolicy),
+    approvalEvaluation,
+    approvalDecisions: (requestWithTimeline.approvalDecisions ?? []).map(serializeApprovalDecision),
     events: (requestWithTimeline.events ?? []).map((event) =>
       serializeTransferRequestEvent(parseTransferRequestEvent(event)),
     ),
@@ -607,6 +742,7 @@ export function serializeTransferRequest(request: TransferRequestWithRelations) 
     workspaceId: request.workspaceId,
     sourceWorkspaceAddressId: request.sourceWorkspaceAddressId,
     destinationWorkspaceAddressId: request.destinationWorkspaceAddressId,
+    destinationId: request.destinationId,
     requestType: request.requestType,
     asset: request.asset,
     amountRaw: request.amountRaw.toString(),
@@ -623,12 +759,45 @@ export function serializeTransferRequest(request: TransferRequestWithRelations) 
     destinationWorkspaceAddress: request.destinationWorkspaceAddress
       ? serializeWorkspaceAddress(request.destinationWorkspaceAddress)
       : null,
+    destination: request.destination
+      ? serializeDestination(request.destination)
+      : null,
     requestedByUser: request.requestedByUser
       ? {
           userId: request.requestedByUser.userId,
           email: request.requestedByUser.email,
           displayName: request.requestedByUser.displayName,
         }
+      : null,
+  };
+}
+
+function serializeApprovalDecision(
+  decision: ApprovalDecision & {
+    actorUser: Pick<User, 'userId' | 'email' | 'displayName'> | null;
+    approvalPolicy: ApprovalPolicy | null;
+  },
+) {
+  return {
+    approvalDecisionId: decision.approvalDecisionId,
+    approvalPolicyId: decision.approvalPolicyId,
+    transferRequestId: decision.transferRequestId,
+    workspaceId: decision.workspaceId,
+    actorUserId: decision.actorUserId,
+    actorType: decision.actorType,
+    action: decision.action,
+    comment: decision.comment,
+    payloadJson: decision.payloadJson,
+    createdAt: decision.createdAt,
+    actorUser: decision.actorUser
+      ? {
+          userId: decision.actorUser.userId,
+          email: decision.actorUser.email,
+          displayName: decision.actorUser.displayName,
+        }
+      : null,
+    approvalPolicy: decision.approvalPolicy
+      ? serializeApprovalPolicy(decision.approvalPolicy)
       : null,
   };
 }
@@ -641,6 +810,49 @@ function serializeWorkspaceAddress(address: WorkspaceAddress) {
     addressKind: address.addressKind,
     displayName: address.displayName,
     notes: address.notes,
+  };
+}
+
+function serializeCounterparty(counterparty: Counterparty) {
+  return {
+    counterpartyId: counterparty.counterpartyId,
+    organizationId: counterparty.organizationId,
+    displayName: counterparty.displayName,
+    category: counterparty.category,
+    externalReference: counterparty.externalReference,
+    status: counterparty.status,
+    metadataJson: counterparty.metadataJson,
+    createdAt: counterparty.createdAt,
+    updatedAt: counterparty.updatedAt,
+  };
+}
+
+function serializeDestination(
+  destination: Destination & {
+    counterparty: Counterparty | null;
+  },
+) {
+  return {
+    destinationId: destination.destinationId,
+    workspaceId: destination.workspaceId,
+    counterpartyId: destination.counterpartyId,
+    linkedWorkspaceAddressId: destination.linkedWorkspaceAddressId,
+    chain: destination.chain,
+    asset: destination.asset,
+    walletAddress: destination.walletAddress,
+    tokenAccountAddress: destination.tokenAccountAddress,
+    destinationType: destination.destinationType,
+    trustState: destination.trustState,
+    label: destination.label,
+    notes: destination.notes,
+    isInternal: destination.isInternal,
+    isActive: destination.isActive,
+    metadataJson: destination.metadataJson,
+    createdAt: destination.createdAt,
+    updatedAt: destination.updatedAt,
+    counterparty: destination.counterparty
+      ? serializeCounterparty(destination.counterparty)
+      : null,
   };
 }
 

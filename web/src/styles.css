@@ -858,6 +858,21 @@ textarea:focus {
   gap: 4px;
 }
 
+.workspace-row.static-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.workspace-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
 .main-panel {
   min-height: calc(100vh - 118px);
 }
@@ -1113,6 +1128,17 @@ textarea:focus {
 .field {
   display: grid;
   gap: 6px;
+}
+
+.field-note {
+  display: block;
+  color: var(--muted);
+  font-size: var(--font-xs);
+  line-height: 1.45;
+}
+
+.compact-notice {
+  padding: 12px;
 }
 
 .primary-button,

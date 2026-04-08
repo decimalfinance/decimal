@@ -27,7 +27,11 @@ import {
   WorkspaceSetupPage,
 } from './screens/workspace-pages';
 import type {
+  ApprovalInboxItem,
+  ApprovalPolicy,
   AuthenticatedSession,
+  Counterparty,
+  Destination,
   ObservedTransfer,
   ReconciliationDetail,
   ReconciliationRow,
@@ -90,9 +94,13 @@ export function App() {
   const [session, setSession] = useState<AuthenticatedSession | null>(null);
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.pathname));
   const [addresses, setAddresses] = useState<WorkspaceAddress[]>([]);
+  const [counterparties, setCounterparties] = useState<Counterparty[]>([]);
+  const [destinations, setDestinations] = useState<Destination[]>([]);
   const [transferRequests, setTransferRequests] = useState<TransferRequest[]>([]);
   const [observedTransfers, setObservedTransfers] = useState<ObservedTransfer[]>([]);
   const [reconciliationRows, setReconciliationRows] = useState<ReconciliationRow[]>([]);
+  const [approvalPolicy, setApprovalPolicy] = useState<ApprovalPolicy | null>(null);
+  const [approvalInbox, setApprovalInbox] = useState<ApprovalInboxItem[]>([]);
   const [reconciliationFilter, setReconciliationFilter] = useState<
     ReconciliationRow['requestDisplayState'] | 'all'
   >('all');
@@ -199,9 +207,13 @@ export function App() {
 
   function resetWorkspaceState() {
     setAddresses([]);
+    setCounterparties([]);
+    setDestinations([]);
     setTransferRequests([]);
     setObservedTransfers([]);
     setReconciliationRows([]);
+    setApprovalPolicy(null);
+    setApprovalInbox([]);
     setSelectedObservedTransfer(null);
     setSelectedReconciliationId(null);
     setSelectedReconciliationDetail(null);
@@ -278,13 +290,19 @@ export function App() {
         setIsLoadingWorkspace(true);
       }
 
-      const [nextAddresses, nextTransferRequests] = await Promise.all([
+      const [nextAddresses, nextCounterparties, nextDestinations, nextTransferRequests, nextApprovalPolicy] = await Promise.all([
         api.listAddresses(workspaceId),
+        api.listCounterparties(workspaceId),
+        api.listDestinations(workspaceId),
         api.listTransferRequests(workspaceId),
+        api.getApprovalPolicy(workspaceId),
       ]);
 
       setAddresses(nextAddresses.items);
+      setCounterparties(nextCounterparties.items);
+      setDestinations(nextDestinations.items);
       setTransferRequests(nextTransferRequests.items);
+      setApprovalPolicy(nextApprovalPolicy);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Failed to load workspace');
     } finally {
@@ -314,11 +332,16 @@ export function App() {
   async function loadReconciliationData(workspaceId: string, options?: { silent?: boolean }) {
     try {
       setErrorMessage(null);
-      const filteredReconciliation = await api.listReconciliationQueueWithStatus(workspaceId, {
-        displayState: reconciliationFilter === 'all' ? undefined : reconciliationFilter,
-        requestStatus: reconciliationStatusFilter === 'all' ? undefined : reconciliationStatusFilter,
-      });
+      const [filteredReconciliation, nextApprovalInbox] = await Promise.all([
+        api.listReconciliationQueueWithStatus(workspaceId, {
+          displayState: reconciliationFilter === 'all' ? undefined : reconciliationFilter,
+          requestStatus: reconciliationStatusFilter === 'all' ? undefined : reconciliationStatusFilter,
+        }),
+        api.listApprovalInbox(workspaceId),
+      ]);
       setReconciliationRows(filteredReconciliation.items);
+      setApprovalInbox(nextApprovalInbox.items);
+      setApprovalPolicy(nextApprovalInbox.approvalPolicy);
 
       if (
         selectedReconciliationId &&
@@ -484,25 +507,53 @@ export function App() {
     }
   }
 
+  async function handleUpdateAddress(
+    workspaceAddressId: string,
+    event: FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+    if (!currentWorkspaceId) return;
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const address = String(formData.get('address') ?? '').trim();
+    const displayName = String(formData.get('displayName') ?? '').trim();
+    const notes = String(formData.get('notes') ?? '').trim();
+    const isActive = String(formData.get('isActive') ?? '').trim() !== 'false';
+    if (!address) return;
+
+    try {
+      setErrorMessage(null);
+      await api.updateAddress(currentWorkspaceId, workspaceAddressId, {
+        address,
+        displayName: displayName || undefined,
+        notes: notes || undefined,
+        isActive,
+      });
+      await loadWorkspace(currentWorkspaceId);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to update address');
+    }
+  }
+
   async function handleCreateTransferRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!currentWorkspaceId) return;
     const form = event.currentTarget;
     const formData = new FormData(form);
     const sourceWorkspaceAddressId = String(formData.get('sourceWorkspaceAddressId') ?? '').trim();
-    const destinationWorkspaceAddressId = String(formData.get('destinationWorkspaceAddressId') ?? '').trim();
+    const destinationId = String(formData.get('destinationId') ?? '').trim();
     const requestType = String(formData.get('requestType') ?? '').trim();
     const amountRaw = String(formData.get('amountRaw') ?? '').trim();
     const reason = String(formData.get('reason') ?? '').trim();
     const externalReference = String(formData.get('externalReference') ?? '').trim();
     const status = String(formData.get('status') ?? '').trim();
-    if (!destinationWorkspaceAddressId || !requestType || !amountRaw) return;
+    if (!destinationId || !requestType || !amountRaw) return;
 
     try {
       setErrorMessage(null);
       await api.createTransferRequest(currentWorkspaceId, {
         sourceWorkspaceAddressId: sourceWorkspaceAddressId || undefined,
-        destinationWorkspaceAddressId,
+        destinationId,
         requestType,
         amountRaw,
         reason: reason || undefined,
@@ -513,6 +564,126 @@ export function App() {
       await loadWorkspace(currentWorkspaceId);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Failed to create transfer request');
+    }
+  }
+
+  async function handleCreateCounterparty(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!currentWorkspaceId) return;
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const displayName = String(formData.get('displayName') ?? '').trim();
+    const category = String(formData.get('category') ?? '').trim();
+    const externalReference = String(formData.get('externalReference') ?? '').trim();
+    if (!displayName) return;
+
+    try {
+      setErrorMessage(null);
+      await api.createCounterparty(currentWorkspaceId, {
+        displayName,
+        category: category || undefined,
+        externalReference: externalReference || undefined,
+      });
+      form.reset();
+      await loadWorkspaceStaticData(currentWorkspaceId);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to create counterparty');
+    }
+  }
+
+  async function handleUpdateCounterparty(
+    counterpartyId: string,
+    event: FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+    if (!currentWorkspaceId) return;
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const displayName = String(formData.get('displayName') ?? '').trim();
+    const category = String(formData.get('category') ?? '').trim();
+    const externalReference = String(formData.get('externalReference') ?? '').trim();
+    const status = String(formData.get('status') ?? '').trim();
+    if (!displayName) return;
+
+    try {
+      setErrorMessage(null);
+      await api.updateCounterparty(currentWorkspaceId, counterpartyId, {
+        displayName,
+        category: category || undefined,
+        externalReference: externalReference || undefined,
+        status: status || undefined,
+      });
+      await loadWorkspaceStaticData(currentWorkspaceId);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to update counterparty');
+    }
+  }
+
+  async function handleCreateDestination(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!currentWorkspaceId) return;
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const linkedWorkspaceAddressId = String(formData.get('linkedWorkspaceAddressId') ?? '').trim();
+    const counterpartyId = String(formData.get('counterpartyId') ?? '').trim();
+    const label = String(formData.get('label') ?? '').trim();
+    const destinationType = String(formData.get('destinationType') ?? '').trim();
+    const trustState = String(formData.get('trustState') ?? '').trim() as Destination['trustState'];
+    const notes = String(formData.get('notes') ?? '').trim();
+    const isInternal = String(formData.get('isInternal') ?? '').trim() === 'true';
+    if (!linkedWorkspaceAddressId || !label) return;
+
+    try {
+      setErrorMessage(null);
+      await api.createDestination(currentWorkspaceId, {
+        linkedWorkspaceAddressId,
+        counterpartyId: counterpartyId || undefined,
+        label,
+        destinationType: destinationType || undefined,
+        trustState: trustState || undefined,
+        notes: notes || undefined,
+        isInternal,
+      });
+      form.reset();
+      await loadWorkspaceStaticData(currentWorkspaceId);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to create destination');
+    }
+  }
+
+  async function handleUpdateDestination(
+    destinationId: string,
+    event: FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+    if (!currentWorkspaceId) return;
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const linkedWorkspaceAddressId = String(formData.get('linkedWorkspaceAddressId') ?? '').trim();
+    const counterpartyId = String(formData.get('counterpartyId') ?? '').trim();
+    const label = String(formData.get('label') ?? '').trim();
+    const destinationType = String(formData.get('destinationType') ?? '').trim();
+    const trustState = String(formData.get('trustState') ?? '').trim() as Destination['trustState'];
+    const notes = String(formData.get('notes') ?? '').trim();
+    const isInternal = String(formData.get('isInternal') ?? '').trim() === 'true';
+    const isActive = String(formData.get('isActive') ?? '').trim() !== 'false';
+    if (!linkedWorkspaceAddressId || !label) return;
+
+    try {
+      setErrorMessage(null);
+      await api.updateDestination(currentWorkspaceId, destinationId, {
+        linkedWorkspaceAddressId,
+        counterpartyId: counterpartyId || null,
+        label,
+        destinationType: destinationType || undefined,
+        trustState: trustState || undefined,
+        notes: notes || undefined,
+        isInternal,
+        isActive,
+      });
+      await loadWorkspace(currentWorkspaceId);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to update destination');
     }
   }
 
@@ -558,6 +729,60 @@ export function App() {
       ]);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Failed to update request state');
+    }
+  }
+
+  async function handleApprovalDecision(
+    transferRequestId: string,
+    action: 'approve' | 'reject' | 'escalate',
+    comment?: string,
+  ) {
+    if (!currentWorkspaceId) {
+      return;
+    }
+
+    try {
+      setErrorMessage(null);
+      await api.createApprovalDecision(currentWorkspaceId, transferRequestId, {
+        action,
+        comment: comment?.trim() ? comment.trim() : undefined,
+      });
+      await Promise.all([
+        loadWorkspace(currentWorkspaceId),
+        selectedReconciliationId === transferRequestId
+          ? loadReconciliationDetail(currentWorkspaceId, transferRequestId)
+          : Promise.resolve(),
+      ]);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to record approval decision');
+    }
+  }
+
+  async function handleUpdateApprovalPolicy(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!currentWorkspaceId || !approvalPolicy) {
+      return;
+    }
+
+    const formData = new FormData(event.currentTarget);
+
+    try {
+      setErrorMessage(null);
+      await api.updateApprovalPolicy(currentWorkspaceId, {
+        policyName: String(formData.get('policyName') ?? '').trim() || undefined,
+        isActive: String(formData.get('isActive') ?? 'true') !== 'false',
+        ruleJson: {
+          requireTrustedDestination: String(formData.get('requireTrustedDestination') ?? 'true') === 'true',
+          requireApprovalForExternal: String(formData.get('requireApprovalForExternal') ?? 'false') === 'true',
+          requireApprovalForInternal: String(formData.get('requireApprovalForInternal') ?? 'false') === 'true',
+          externalApprovalThresholdRaw: String(formData.get('externalApprovalThresholdRaw') ?? '').trim() || undefined,
+          internalApprovalThresholdRaw: String(formData.get('internalApprovalThresholdRaw') ?? '').trim() || undefined,
+        },
+      });
+      await loadWorkspaceStaticData(currentWorkspaceId);
+      await loadReconciliationData(currentWorkspaceId, { silent: true });
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to update approval policy');
     }
   }
 
@@ -848,6 +1073,7 @@ export function App() {
 
             {route.name === 'workspaceHome' && currentWorkspace ? (
               <WorkspaceHomePage
+                approvalInbox={approvalInbox}
                 addresses={addresses}
                 currentWorkspace={currentWorkspace}
                 currentRole={currentRole}
@@ -860,6 +1086,7 @@ export function App() {
                 onAddExceptionNote={handleAddExceptionNote}
                 onAddRequestNote={handleAddRequestNote}
                 onApplyExceptionAction={handleApplyExceptionAction}
+                onApplyApprovalDecision={handleApprovalDecision}
                 onChangeReconciliationFilter={setReconciliationFilter}
                 onRefresh={handleRefreshWorkspace}
                 onSelectObservedTransfer={handleSelectObservedTransfer}
@@ -876,15 +1103,24 @@ export function App() {
 
             {route.name === 'workspaceSetup' && currentWorkspace ? (
               <WorkspaceSetupPage
+                approvalPolicy={approvalPolicy}
                 addresses={addresses}
                 canManage={canManageCurrentOrg}
+                counterparties={counterparties}
                 currentWorkspace={currentWorkspace}
+                destinations={destinations}
                 onBackToDashboard={() => {
                   if (currentDashboardOrganizationId) handleOpenOrganization(currentDashboardOrganizationId);
                 }}
                 onBackToWatchSystem={() => handleOpenWorkspace(currentWorkspace.workspaceId)}
                 onCreateAddress={handleCreateAddress}
+                onCreateCounterparty={handleCreateCounterparty}
+                onCreateDestination={handleCreateDestination}
                 onCreateTransferRequest={handleCreateTransferRequest}
+                onUpdateApprovalPolicy={handleUpdateApprovalPolicy}
+                onUpdateAddress={handleUpdateAddress}
+                onUpdateCounterparty={handleUpdateCounterparty}
+                onUpdateDestination={handleUpdateDestination}
                 transferRequests={transferRequests}
               />
             ) : null}

@@ -16,6 +16,7 @@ model Organization {
   memberships      OrganizationMembership[]
   sessions         AuthSession[]
   workspaces       Workspace[]
+  counterparties   Counterparty[]
 
   @@map("organizations")
 }
@@ -33,6 +34,7 @@ model User {
   transferRequestNotes      TransferRequestNote[]
   exceptionNotes            ExceptionNote[]
   exceptionStatesUpdated    ExceptionState[]
+  approvalDecisions         ApprovalDecision[]
 
   @@map("users")
 }
@@ -67,15 +69,18 @@ model AuthSession {
 }
 
 model Workspace {
-  workspaceId       String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("workspace_id")
-  organizationId    String           @db.Uuid @map("organization_id")
-  workspaceName     String           @map("workspace_name")
-  status            String           @default("active")
-  createdAt         DateTime         @default(now()) @db.Timestamptz(6) @map("created_at")
-  updatedAt         DateTime         @updatedAt @db.Timestamptz(6) @map("updated_at")
-  organization      Organization     @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
-  addresses         WorkspaceAddress[]
-  transferRequests  TransferRequest[]
+  workspaceId            String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("workspace_id")
+  organizationId         String                 @db.Uuid @map("organization_id")
+  workspaceName          String                 @map("workspace_name")
+  status                 String                 @default("active")
+  createdAt              DateTime               @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt              DateTime               @updatedAt @db.Timestamptz(6) @map("updated_at")
+  organization           Organization           @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
+  addresses              WorkspaceAddress[]
+  destinations           Destination[]
+  transferRequests       TransferRequest[]
+  approvalPolicy         ApprovalPolicy?
+  approvalDecisions      ApprovalDecision[]
   transferRequestEvents TransferRequestEvent[]
   transferRequestNotes  TransferRequestNote[]
   exceptionNotes       ExceptionNote[]
@@ -101,6 +106,7 @@ model WorkspaceAddress {
   createdAt              DateTime         @default(now()) @db.Timestamptz(6) @map("created_at")
   updatedAt              DateTime         @updatedAt @db.Timestamptz(6) @map("updated_at")
   workspace              Workspace        @relation(fields: [workspaceId], references: [workspaceId], onDelete: Cascade)
+  destinations           Destination[]
   outboundTransferRequests TransferRequest[] @relation("TransferRequestSourceAddress")
   inboundTransferRequests  TransferRequest[] @relation("TransferRequestDestinationAddress")
 
@@ -108,11 +114,58 @@ model WorkspaceAddress {
   @@map("workspace_addresses")
 }
 
+model Counterparty {
+  counterpartyId      String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("counterparty_id")
+  organizationId      String        @db.Uuid @map("organization_id")
+  displayName         String        @map("display_name")
+  category            String
+  externalReference   String?       @map("external_reference")
+  status              String        @default("active")
+  metadataJson        Json          @default("{}") @map("metadata_json")
+  createdAt           DateTime      @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt           DateTime      @updatedAt @db.Timestamptz(6) @map("updated_at")
+  organization        Organization  @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
+  destinations        Destination[]
+
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@map("counterparties")
+}
+
+model Destination {
+  destinationId             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("destination_id")
+  counterpartyId            String?          @db.Uuid @map("counterparty_id")
+  workspaceId               String           @db.Uuid @map("workspace_id")
+  linkedWorkspaceAddressId  String?          @db.Uuid @map("linked_workspace_address_id")
+  chain                     String
+  asset                     String           @default("usdc")
+  walletAddress             String           @map("wallet_address")
+  tokenAccountAddress       String?          @map("token_account_address")
+  destinationType           String           @default("wallet") @map("destination_type")
+  trustState                String           @default("unreviewed") @map("trust_state")
+  label                     String
+  notes                     String?
+  isInternal                Boolean          @default(false) @map("is_internal")
+  isActive                  Boolean          @default(true) @map("is_active")
+  metadataJson              Json             @default("{}") @map("metadata_json")
+  createdAt                 DateTime         @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt                 DateTime         @updatedAt @db.Timestamptz(6) @map("updated_at")
+  counterparty              Counterparty?    @relation(fields: [counterpartyId], references: [counterpartyId], onDelete: SetNull)
+  workspace                 Workspace        @relation(fields: [workspaceId], references: [workspaceId], onDelete: Cascade)
+  linkedWorkspaceAddress    WorkspaceAddress? @relation(fields: [linkedWorkspaceAddressId], references: [workspaceAddressId], onDelete: SetNull)
+  transferRequests          TransferRequest[]
+
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@index([counterpartyId, createdAt(sort: Desc)])
+  @@unique([workspaceId, linkedWorkspaceAddressId])
+  @@map("destinations")
+}
+
 model TransferRequest {
   transferRequestId          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("transfer_request_id")
   workspaceId                String           @db.Uuid @map("workspace_id")
   sourceWorkspaceAddressId   String?          @db.Uuid @map("source_workspace_address_id")
   destinationWorkspaceAddressId String        @db.Uuid @map("destination_workspace_address_id")
+  destinationId              String?          @db.Uuid @map("destination_id")
   requestType                String           @map("request_type")
   asset                      String           @default("usdc")
   amountRaw                  BigInt           @map("amount_raw")
@@ -128,13 +181,51 @@ model TransferRequest {
   workspace                  Workspace        @relation(fields: [workspaceId], references: [workspaceId], onDelete: Cascade)
   sourceWorkspaceAddress     WorkspaceAddress? @relation("TransferRequestSourceAddress", fields: [sourceWorkspaceAddressId], references: [workspaceAddressId], onDelete: SetNull)
   destinationWorkspaceAddress WorkspaceAddress @relation("TransferRequestDestinationAddress", fields: [destinationWorkspaceAddressId], references: [workspaceAddressId], onDelete: Restrict)
+  destination                Destination?     @relation(fields: [destinationId], references: [destinationId], onDelete: SetNull)
   requestedByUser            User?            @relation("TransferRequestRequestedByUser", fields: [requestedByUserId], references: [userId], onDelete: SetNull)
+  approvalDecisions          ApprovalDecision[]
   events                     TransferRequestEvent[]
   notes                      TransferRequestNote[]
 
   @@index([workspaceId, status, requestedAt(sort: Desc)])
   @@index([destinationWorkspaceAddressId, status, requestedAt(sort: Desc)])
+  @@index([destinationId, status, requestedAt(sort: Desc)])
   @@map("transfer_requests")
+}
+
+model ApprovalPolicy {
+  approvalPolicyId    String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("approval_policy_id")
+  workspaceId         String     @unique @db.Uuid @map("workspace_id")
+  policyName          String     @map("policy_name")
+  isActive            Boolean    @default(true) @map("is_active")
+  ruleJson            Json       @default("{}") @map("rule_json")
+  createdAt           DateTime   @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt           DateTime   @updatedAt @db.Timestamptz(6) @map("updated_at")
+  workspace           Workspace  @relation(fields: [workspaceId], references: [workspaceId], onDelete: Cascade)
+  approvalDecisions   ApprovalDecision[]
+
+  @@map("approval_policies")
+}
+
+model ApprovalDecision {
+  approvalDecisionId  String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("approval_decision_id")
+  approvalPolicyId    String?         @db.Uuid @map("approval_policy_id")
+  transferRequestId   String          @db.Uuid @map("transfer_request_id")
+  workspaceId         String          @db.Uuid @map("workspace_id")
+  actorUserId         String?         @db.Uuid @map("actor_user_id")
+  actorType           String          @default("user") @map("actor_type")
+  action              String
+  comment             String?
+  payloadJson         Json            @default("{}") @map("payload_json")
+  createdAt           DateTime        @default(now()) @db.Timestamptz(6) @map("created_at")
+  approvalPolicy      ApprovalPolicy? @relation(fields: [approvalPolicyId], references: [approvalPolicyId], onDelete: SetNull)
+  transferRequest     TransferRequest @relation(fields: [transferRequestId], references: [transferRequestId], onDelete: Cascade)
+  workspace           Workspace       @relation(fields: [workspaceId], references: [workspaceId], onDelete: Cascade)
+  actorUser           User?           @relation(fields: [actorUserId], references: [userId], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@index([transferRequestId, createdAt(sort: Asc)])
+  @@map("approval_decisions")
 }
 
 model TransferRequestEvent {

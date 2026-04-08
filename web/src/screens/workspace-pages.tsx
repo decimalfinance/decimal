@@ -1,5 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import type {
+  ApprovalInboxItem,
+  ApprovalPolicy,
+  Counterparty,
+  Destination,
   ExceptionItem,
   ObservedTransfer,
   ReconciliationDetail,
@@ -13,6 +17,7 @@ import { formatRawUsdc, formatTimestamp, orbTransactionUrl, shortenAddress } fro
 import { InfoLine, Metric } from '../components/ui';
 
 export function WorkspaceHomePage({
+  approvalInbox,
   addresses,
   currentRole,
   currentWorkspace,
@@ -22,6 +27,7 @@ export function WorkspaceHomePage({
   onAddExceptionNote,
   onAddRequestNote,
   onApplyExceptionAction,
+  onApplyApprovalDecision,
   onChangeReconciliationFilter,
   onRefresh,
   onSelectObservedTransfer,
@@ -35,6 +41,7 @@ export function WorkspaceHomePage({
   transferRequests,
   isLoadingReconciliationDetail,
 }: {
+  approvalInbox: ApprovalInboxItem[];
   addresses: WorkspaceAddress[];
   currentRole: string | null;
   currentWorkspace: Workspace;
@@ -47,6 +54,11 @@ export function WorkspaceHomePage({
     exceptionId: string,
     action: 'reviewed' | 'expected' | 'dismissed' | 'reopen',
     note?: string,
+  ) => Promise<void>;
+  onApplyApprovalDecision: (
+    transferRequestId: string,
+    action: 'approve' | 'reject' | 'escalate',
+    comment?: string,
   ) => Promise<void>;
   onChangeReconciliationFilter: (filter: ReconciliationRow['requestDisplayState'] | 'all') => void;
   onRefresh: () => Promise<void>;
@@ -64,6 +76,7 @@ export function WorkspaceHomePage({
   const matchedCount = reconciliationRows.filter((row) => row.requestDisplayState === 'matched').length;
   const pendingCount = reconciliationRows.filter((row) => row.requestDisplayState === 'pending').length;
   const [inspectorTab, setInspectorTab] = useState<'overview' | 'exceptions'>('overview');
+  const [approvalComment, setApprovalComment] = useState('');
 
   useEffect(() => {
     if (
@@ -75,6 +88,7 @@ export function WorkspaceHomePage({
     }
 
     setInspectorTab('overview');
+    setApprovalComment('');
   }, [selectedReconciliationDetail?.transferRequestId]);
 
   return (
@@ -110,6 +124,55 @@ export function WorkspaceHomePage({
             <Metric label="Pending" value={String(pendingCount).padStart(2, '0')} />
           </div>
           <span className="status-chip">{isLoading ? 'syncing' : currentRole ?? 'member'}</span>
+        </div>
+      </section>
+
+      <section className="content-grid content-grid-single">
+        <div className="content-panel content-panel-soft">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Approval inbox</p>
+              <h2>Requests needing review</h2>
+              <p className="compact-copy">Policy-routed requests wait here until an operator approves, rejects, or escalates them.</p>
+            </div>
+            <span className="status-chip">{approvalInbox.length}</span>
+          </div>
+          <div className="stack-list">
+            {approvalInbox.length ? (
+              approvalInbox.map((item) => (
+                <button
+                  key={item.transferRequestId}
+                  className={
+                    selectedReconciliationDetail?.transferRequestId === item.transferRequestId
+                      ? 'feed-row is-active'
+                      : 'feed-row'
+                  }
+                  data-tone="pending"
+                  onClick={() => onSelectReconciliation(item)}
+                  type="button"
+                >
+                  <div className="request-card-copy">
+                    <div className="request-card-title">
+                      <strong>{getTransferLabel(item)}</strong>
+                      <span className="meta-pill meta-pill-danger">{formatLabel(item.approvalState)}</span>
+                    </div>
+                    <div className="request-card-meta">
+                      <span className="meta-pill">{formatRawUsdc(item.amountRaw)} USDC</span>
+                      <span className="meta-pill">{getDestinationLabel(item.destination, item.destinationWorkspaceAddress)}</span>
+                      <span className="meta-pill">{item.destination?.trustState ?? 'unreviewed'}</span>
+                      {item.approvalEvaluation.reasons.map((reason) => (
+                        <span className="meta-pill meta-pill-danger" key={reason.code}>
+                          {reason.message}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </button>
+              ))
+            ) : (
+              <div className="empty-box compact">No requests currently require approval.</div>
+            )}
+          </div>
         </div>
       </section>
 
@@ -264,7 +327,15 @@ export function WorkspaceHomePage({
                         </span>
                       </div>
                       <div className="request-card-meta">
-                        <span className="meta-pill">to {getWalletNameLite(row.destinationWorkspaceAddress)}</span>
+                        <span className="meta-pill">to {getDestinationLabel(row.destination, row.destinationWorkspaceAddress)}</span>
+                        {row.destination?.counterparty ? (
+                          <span className="meta-pill">{row.destination.counterparty.displayName}</span>
+                        ) : null}
+                        {row.destination ? (
+                          <span className="meta-pill">
+                            {row.destination.trustState} // {row.destination.isInternal ? 'internal' : 'external'}
+                          </span>
+                        ) : null}
                         <span className="meta-pill">{formatTimestamp(row.requestedAt)}</span>
                         <span className="meta-pill">{formatLabel(row.requestType)}</span>
                         {row.exceptions[0] ? (
@@ -297,17 +368,121 @@ export function WorkspaceHomePage({
                 <InfoLine label="Transfer" value={getTransferLabel(selectedReconciliationDetail)} />
                 <InfoLine label="Requested amount" value={formatRawUsdc(selectedReconciliationDetail.amountRaw)} />
                 <InfoLine
+                  label="Destination"
+                  value={getDestinationLabel(
+                    selectedReconciliationDetail.destination,
+                    selectedReconciliationDetail.destinationWorkspaceAddress,
+                  )}
+                />
+                <InfoLine
+                  label="Counterparty"
+                  value={selectedReconciliationDetail.destination?.counterparty?.displayName ?? 'Unassigned'}
+                />
+                <InfoLine
+                  label="Destination trust"
+                  value={selectedReconciliationDetail.destination?.trustState ?? 'unreviewed'}
+                />
+                <InfoLine
+                  label="Destination scope"
+                  value={selectedReconciliationDetail.destination?.isInternal ? 'internal' : 'external'}
+                />
+                <InfoLine
                   label="Receiving wallet"
-                  value={selectedReconciliationDetail.destinationWorkspaceAddress?.address ?? 'Unknown'}
+                  value={
+                    selectedReconciliationDetail.destination?.walletAddress
+                    ?? selectedReconciliationDetail.destinationWorkspaceAddress?.address
+                    ?? 'Unknown'
+                  }
                 />
                 <InfoLine
                   label="Receiving USDC ATA"
-                  value={selectedReconciliationDetail.destinationWorkspaceAddress?.usdcAtaAddress ?? 'Unknown'}
+                  value={
+                    selectedReconciliationDetail.destination?.tokenAccountAddress
+                    ?? selectedReconciliationDetail.destinationWorkspaceAddress?.usdcAtaAddress
+                    ?? 'Unknown'
+                  }
                 />
                 <InfoLine label="Request state" value={formatLabel(selectedReconciliationDetail.approvalState)} />
                 <InfoLine label="Execution state" value={formatLabel(selectedReconciliationDetail.executionState)} />
                 <InfoLine label="Reconciliation state" value={getDisplayStateLabel(selectedReconciliationDetail.requestDisplayState)} />
                 <InfoLine label="Requested at" value={formatTimestamp(selectedReconciliationDetail.requestedAt)} />
+
+                <div className="detail-section">
+                  <div className="detail-section-head">
+                    <strong>Approval policy</strong>
+                    <span>{selectedReconciliationDetail.approvalEvaluation.requiresApproval ? 'requires review' : 'clear'}</span>
+                  </div>
+                  <div className="empty-box compact">
+                    {selectedReconciliationDetail.approvalEvaluation.requiresApproval
+                      ? selectedReconciliationDetail.approvalEvaluation.reasons.map((reason) => reason.message).join(' ')
+                      : `Auto-cleared by ${selectedReconciliationDetail.approvalEvaluation.policyName}.`}
+                  </div>
+                </div>
+
+                {(selectedReconciliationDetail.approvalState === 'pending_approval'
+                  || selectedReconciliationDetail.approvalState === 'escalated') ? (
+                  <div className="detail-section">
+                    <div className="detail-section-head">
+                      <strong>Approval actions</strong>
+                      <span>{selectedReconciliationDetail.approvalState === 'escalated' ? 'escalated' : 'pending'}</span>
+                    </div>
+                    <label className="field">
+                      <span>Comment</span>
+                      <textarea
+                        name="approvalComment"
+                        onChange={(event) => setApprovalComment(event.target.value)}
+                        placeholder="Optional approval context"
+                        rows={3}
+                        value={approvalComment}
+                      />
+                    </label>
+                    <div className="exception-actions">
+                      <button
+                        className="primary-button compact-button"
+                        onClick={() => void onApplyApprovalDecision(selectedReconciliationDetail.transferRequestId, 'approve', approvalComment)}
+                        type="button"
+                      >
+                        approve
+                      </button>
+                      <button
+                        className="ghost-button compact-button"
+                        onClick={() => void onApplyApprovalDecision(selectedReconciliationDetail.transferRequestId, 'reject', approvalComment)}
+                        type="button"
+                      >
+                        reject
+                      </button>
+                      {selectedReconciliationDetail.approvalState === 'pending_approval' ? (
+                        <button
+                          className="ghost-button compact-button"
+                          onClick={() => void onApplyApprovalDecision(selectedReconciliationDetail.transferRequestId, 'escalate', approvalComment)}
+                          type="button"
+                        >
+                          escalate
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+
+                {selectedReconciliationDetail.approvalDecisions.length ? (
+                  <div className="detail-section">
+                    <div className="detail-section-head">
+                      <strong>Approval history</strong>
+                      <span>{selectedReconciliationDetail.approvalDecisions.length}</span>
+                    </div>
+                    <div className="stack-list">
+                      {selectedReconciliationDetail.approvalDecisions.map((decision) => (
+                        <div className="note-card" key={decision.approvalDecisionId}>
+                          <strong>{getApprovalActionLabel(decision.action)}</strong>
+                          <small>
+                            {decision.actorUser?.displayName ?? decision.actorUser?.email ?? decision.actorType} // {formatTimestamp(decision.createdAt)}
+                          </small>
+                          {decision.comment ? <p>{decision.comment}</p> : null}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
 
                 {selectedReconciliationDetail.availableTransitions.length ? (
                   <div className="detail-section">
@@ -541,24 +716,90 @@ export function WorkspaceHomePage({
 }
 
 export function WorkspaceSetupPage({
+  approvalPolicy,
   addresses,
   canManage,
+  counterparties,
   currentWorkspace,
+  destinations,
   onBackToDashboard,
   onBackToWatchSystem,
   onCreateAddress,
+  onCreateCounterparty,
+  onCreateDestination,
   onCreateTransferRequest,
+  onUpdateApprovalPolicy,
+  onUpdateAddress,
+  onUpdateCounterparty,
+  onUpdateDestination,
   transferRequests,
 }: {
+  approvalPolicy: ApprovalPolicy | null;
   addresses: WorkspaceAddress[];
   canManage: boolean;
+  counterparties: Counterparty[];
   currentWorkspace: Workspace;
+  destinations: Destination[];
   onBackToDashboard: () => void;
   onBackToWatchSystem: () => void;
   onCreateAddress: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onCreateCounterparty: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onCreateDestination: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onCreateTransferRequest: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onUpdateApprovalPolicy: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onUpdateAddress: (workspaceAddressId: string, event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onUpdateCounterparty: (counterpartyId: string, event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onUpdateDestination: (destinationId: string, event: FormEvent<HTMLFormElement>) => Promise<void>;
   transferRequests: TransferRequest[];
 }) {
+  const [editingAddressId, setEditingAddressId] = useState<string | null>(null);
+  const [editingCounterpartyId, setEditingCounterpartyId] = useState<string | null>(null);
+  const [editingDestinationId, setEditingDestinationId] = useState<string | null>(null);
+  const [selectedRequestDestinationId, setSelectedRequestDestinationId] = useState('');
+  const [requestCreateStatus, setRequestCreateStatus] = useState<'draft' | 'submitted'>('submitted');
+  const editingAddress = addresses.find((item) => item.workspaceAddressId === editingAddressId) ?? null;
+  const editingCounterparty = counterparties.find((item) => item.counterpartyId === editingCounterpartyId) ?? null;
+  const editingDestination = destinations.find((item) => item.destinationId === editingDestinationId) ?? null;
+  const selectedRequestDestination =
+    destinations.find((item) => item.destinationId === selectedRequestDestinationId) ?? null;
+
+  useEffect(() => {
+    if (editingAddressId && !editingAddress) {
+      setEditingAddressId(null);
+    }
+  }, [editingAddress, editingAddressId]);
+
+  useEffect(() => {
+    if (editingCounterpartyId && !editingCounterparty) {
+      setEditingCounterpartyId(null);
+    }
+  }, [editingCounterparty, editingCounterpartyId]);
+
+  useEffect(() => {
+    if (editingDestinationId && !editingDestination) {
+      setEditingDestinationId(null);
+    }
+  }, [editingDestination, editingDestinationId]);
+
+  useEffect(() => {
+    if (!selectedRequestDestination) {
+      setRequestCreateStatus('submitted');
+      return;
+    }
+
+    if (
+      !selectedRequestDestination.isActive
+      || selectedRequestDestination.trustState === 'blocked'
+      || selectedRequestDestination.trustState === 'restricted'
+      || selectedRequestDestination.trustState === 'unreviewed'
+    ) {
+      setRequestCreateStatus('draft');
+      return;
+    }
+
+    setRequestCreateStatus('submitted');
+  }, [selectedRequestDestinationId]);
+
   return (
     <div className="page-stack">
       <section className="section-headline">
@@ -566,7 +807,7 @@ export function WorkspaceSetupPage({
           <p className="eyebrow">Setup</p>
           <h1>{currentWorkspace.workspaceName}</h1>
           <p className="section-copy">
-            Keep this simple: save wallets first, then create planned transfers between those wallets.
+            Save wallets, define business destinations, then create planned transfers against those destinations.
           </p>
         </div>
         <div className="headline-actions">
@@ -583,7 +824,7 @@ export function WorkspaceSetupPage({
         <div className="notice-banner">
           <div>
             <strong>Read only.</strong>
-            <p>Only organization admins can change wallets and planned transfers in this workspace.</p>
+            <p>Only organization admins can change wallets, destinations, and planned transfers in this workspace.</p>
           </div>
         </div>
       ) : null}
@@ -597,31 +838,78 @@ export function WorkspaceSetupPage({
               <p className="compact-copy">Save the wallets you care about first. Everything else in the workspace builds from this list.</p>
             </div>
           </div>
-          <form className="form-stack" onSubmit={onCreateAddress}>
+          <form
+            key={`wallet-form-${editingAddress?.workspaceAddressId ?? 'new'}`}
+            className="form-stack"
+            onSubmit={(event) =>
+              editingAddress
+                ? void onUpdateAddress(editingAddress.workspaceAddressId, event).then(() => setEditingAddressId(null))
+                : void onCreateAddress(event)
+            }
+          >
             <label className="field">
               <span>Wallet address</span>
-              <input name="address" placeholder="Solana wallet address" required />
+              <input
+                defaultValue={editingAddress?.address ?? ''}
+                name="address"
+                placeholder="Solana wallet address"
+                required
+              />
             </label>
             <label className="field">
-              <span>Name</span>
-              <input name="displayName" placeholder="Treasury wallet, hot wallet, vendor wallet..." required />
+              <span>Wallet registry name</span>
+              <input
+                defaultValue={editingAddress?.displayName ?? ''}
+                name="displayName"
+                placeholder="Treasury wallet, hot wallet, vendor wallet..."
+                required
+              />
+              <small className="field-note">Short technical name for this saved address row.</small>
             </label>
             <label className="field">
               <span>Notes</span>
-              <input name="notes" placeholder="Optional" />
+              <input defaultValue={editingAddress?.notes ?? ''} name="notes" placeholder="Optional" />
             </label>
-            <button className="primary-button" disabled={!canManage} type="submit">
-              Save wallet
-            </button>
+            <label className="field">
+              <span>Status</span>
+              <select defaultValue={editingAddress?.isActive === false ? 'false' : 'true'} name="isActive">
+                <option value="true">active</option>
+                <option value="false">inactive</option>
+              </select>
+            </label>
+            <div className="exception-actions">
+              <button className="primary-button" disabled={!canManage} type="submit">
+                {editingAddress ? 'Update wallet' : 'Save wallet'}
+              </button>
+              {editingAddress ? (
+                <button
+                  className="ghost-button"
+                  onClick={() => setEditingAddressId(null)}
+                  type="button"
+                >
+                  cancel
+                </button>
+              ) : null}
+            </div>
           </form>
 
           <div className="stack-list">
             {addresses.length ? (
               addresses.map((address) => (
-                <div key={address.workspaceAddressId} className="workspace-row static-row">
+              <div key={address.workspaceAddressId} className="workspace-row static-row">
                   <div>
                     <strong>{getWalletName(address)}</strong>
                     <small>{address.address}</small>
+                  </div>
+                  <div className="workspace-row-actions">
+                    <span className="status-chip">{address.isActive ? 'active' : 'inactive'}</span>
+                    <button
+                      className="ghost-button compact-button"
+                      onClick={() => setEditingAddressId(address.workspaceAddressId)}
+                      type="button"
+                    >
+                      edit
+                    </button>
                   </div>
                 </div>
               ))
@@ -635,8 +923,309 @@ export function WorkspaceSetupPage({
           <div className="panel-header">
             <div>
               <p className="eyebrow">Step 2</p>
+              <h2>Counterparties</h2>
+              <p className="compact-copy">Capture who this wallet belongs to so reconciliation has business identity, not just an address.</p>
+            </div>
+          </div>
+          <form
+            key={`counterparty-form-${editingCounterparty?.counterpartyId ?? 'new'}`}
+            className="form-stack"
+            onSubmit={(event) =>
+              editingCounterparty
+                ? void onUpdateCounterparty(editingCounterparty.counterpartyId, event).then(() => setEditingCounterpartyId(null))
+                : void onCreateCounterparty(event)
+            }
+          >
+            <label className="field">
+              <span>Business entity name</span>
+              <input
+                defaultValue={editingCounterparty?.displayName ?? ''}
+                name="displayName"
+                placeholder="Acme Vendor, Coinbase Prime, Treasury Ops..."
+                required
+              />
+              <small className="field-note">The company, team, or business entity behind one or more destinations.</small>
+            </label>
+            <label className="field">
+              <span>Category</span>
+              <input defaultValue={editingCounterparty?.category ?? ''} name="category" placeholder="vendor" />
+            </label>
+            <label className="field">
+              <span>Reference</span>
+              <input
+                defaultValue={editingCounterparty?.externalReference ?? ''}
+                name="externalReference"
+                placeholder="Optional external id"
+              />
+            </label>
+            <label className="field">
+              <span>Status</span>
+              <select defaultValue={editingCounterparty?.status ?? 'active'} name="status">
+                <option value="active">active</option>
+                <option value="inactive">inactive</option>
+              </select>
+            </label>
+            <div className="exception-actions">
+              <button className="primary-button" disabled={!canManage} type="submit">
+                {editingCounterparty ? 'Update counterparty' : 'Create counterparty'}
+              </button>
+              {editingCounterparty ? (
+                <button className="ghost-button" onClick={() => setEditingCounterpartyId(null)} type="button">
+                  cancel
+                </button>
+              ) : null}
+            </div>
+          </form>
+
+          <div className="stack-list">
+            {counterparties.length ? (
+              counterparties.map((item) => (
+                <div key={item.counterpartyId} className="workspace-row static-row">
+                  <div>
+                    <strong>{item.displayName}</strong>
+                    <small>{item.category} // {item.status}</small>
+                  </div>
+                  <div className="workspace-row-actions">
+                    <button
+                      className="ghost-button compact-button"
+                      onClick={() => setEditingCounterpartyId(item.counterpartyId)}
+                      type="button"
+                    >
+                      edit
+                    </button>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="empty-box compact">No counterparties yet.</div>
+            )}
+          </div>
+        </div>
+
+        <div className="content-panel content-panel-strong" id="destinations-section">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Step 3</p>
+              <h2>Destinations</h2>
+              <p className="compact-copy">Link each wallet to a named destination with trust and internal or external context.</p>
+            </div>
+          </div>
+          <form
+            key={`destination-form-${editingDestination?.destinationId ?? 'new'}`}
+            className="form-stack"
+            onSubmit={(event) =>
+              editingDestination
+                ? void onUpdateDestination(editingDestination.destinationId, event).then(() => setEditingDestinationId(null))
+                : void onCreateDestination(event)
+            }
+          >
+            <label className="field">
+              <span>Linked wallet</span>
+              <select
+                defaultValue={editingDestination?.linkedWorkspaceAddressId ?? ''}
+                name="linkedWorkspaceAddressId"
+                required
+              >
+                <option value="" disabled>
+                  Select wallet
+                </option>
+                {addresses.map((address) => (
+                  <option key={address.workspaceAddressId} value={address.workspaceAddressId}>
+                    {getWalletName(address)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Counterparty</span>
+              <select name="counterpartyId" defaultValue={editingDestination?.counterpartyId ?? ''}>
+                <option value="">Optional</option>
+                {counterparties.map((item) => (
+                  <option key={item.counterpartyId} value={item.counterpartyId}>
+                    {item.displayName}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Payment endpoint label</span>
+              <input
+                defaultValue={editingDestination?.label ?? ''}
+                name="label"
+                placeholder="Acme payout wallet"
+                required
+              />
+              <small className="field-note">
+                Operator-facing name for this specific payment endpoint. This can differ from both the wallet name and the counterparty name.
+              </small>
+            </label>
+            <label className="field">
+              <span>Destination type</span>
+              <input
+                defaultValue={editingDestination?.destinationType ?? ''}
+                name="destinationType"
+                placeholder="vendor_wallet"
+              />
+              <small className="field-note">Use this to distinguish payout, refund, treasury, or exchange destinations.</small>
+            </label>
+            <label className="field">
+              <span>Trust state</span>
+              <select name="trustState" defaultValue={editingDestination?.trustState ?? 'unreviewed'}>
+                <option value="unreviewed">unreviewed</option>
+                <option value="trusted">trusted</option>
+                <option value="restricted">restricted</option>
+                <option value="blocked">blocked</option>
+              </select>
+              <small className="field-note">Only trusted destinations can be submitted directly. Unreviewed and restricted destinations are draft-only.</small>
+            </label>
+            <label className="field">
+              <span>Scope</span>
+              <select name="isInternal" defaultValue={editingDestination?.isInternal ? 'true' : 'false'}>
+                <option value="false">external</option>
+                <option value="true">internal</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Notes</span>
+              <input defaultValue={editingDestination?.notes ?? ''} name="notes" placeholder="Optional" />
+            </label>
+            <label className="field">
+              <span>Status</span>
+              <select defaultValue={editingDestination?.isActive === false ? 'false' : 'true'} name="isActive">
+                <option value="true">active</option>
+                <option value="false">inactive</option>
+              </select>
+            </label>
+            <div className="exception-actions">
+              <button className="primary-button" disabled={!canManage || addresses.length === 0} type="submit">
+                {editingDestination ? 'Update destination' : 'Create destination'}
+              </button>
+              {editingDestination ? (
+                <button
+                  className="ghost-button"
+                  onClick={() => setEditingDestinationId(null)}
+                  type="button"
+                >
+                  cancel
+                </button>
+              ) : null}
+            </div>
+          </form>
+
+          <div className="stack-list">
+            {destinations.length ? (
+              destinations.map((item) => (
+                <div key={item.destinationId} className="workspace-row static-row">
+                  <div>
+                    <strong>{item.label}</strong>
+                    <small>
+                      {item.counterparty?.displayName ?? 'No counterparty'} // {item.trustState} // {item.isInternal ? 'internal' : 'external'}
+                    </small>
+                  </div>
+                  <div className="workspace-row-actions">
+                    <span className="status-chip">{item.isActive ? 'active' : 'inactive'}</span>
+                    <button
+                      className="ghost-button compact-button"
+                      onClick={() => setEditingDestinationId(item.destinationId)}
+                      type="button"
+                    >
+                      edit
+                    </button>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="empty-box compact">No destinations yet.</div>
+            )}
+          </div>
+        </div>
+
+        <div className="content-panel content-panel-strong">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Step 4</p>
+              <h2>Approval policy</h2>
+              <p className="compact-copy">Control which requests auto-clear and which must enter the approval inbox.</p>
+            </div>
+          </div>
+          {approvalPolicy ? (
+            <form className="form-stack" onSubmit={onUpdateApprovalPolicy}>
+              <label className="field">
+                <span>Policy name</span>
+                <input defaultValue={approvalPolicy.policyName} name="policyName" required />
+              </label>
+              <label className="field">
+                <span>Policy status</span>
+                <select defaultValue={approvalPolicy.isActive ? 'true' : 'false'} name="isActive">
+                  <option value="true">active</option>
+                  <option value="false">inactive</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Trusted destination required</span>
+                <select
+                  defaultValue={approvalPolicy.ruleJson.requireTrustedDestination ? 'true' : 'false'}
+                  name="requireTrustedDestination"
+                >
+                  <option value="true">yes</option>
+                  <option value="false">no</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Always require approval for external</span>
+                <select
+                  defaultValue={approvalPolicy.ruleJson.requireApprovalForExternal ? 'true' : 'false'}
+                  name="requireApprovalForExternal"
+                >
+                  <option value="false">no</option>
+                  <option value="true">yes</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Always require approval for internal</span>
+                <select
+                  defaultValue={approvalPolicy.ruleJson.requireApprovalForInternal ? 'true' : 'false'}
+                  name="requireApprovalForInternal"
+                >
+                  <option value="false">no</option>
+                  <option value="true">yes</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>External approval threshold raw</span>
+                <input
+                  defaultValue={approvalPolicy.ruleJson.externalApprovalThresholdRaw}
+                  name="externalApprovalThresholdRaw"
+                  placeholder="50000000"
+                  required
+                />
+                <small className="field-note">Trusted external destinations at or above this amount require approval.</small>
+              </label>
+              <label className="field">
+                <span>Internal approval threshold raw</span>
+                <input
+                  defaultValue={approvalPolicy.ruleJson.internalApprovalThresholdRaw}
+                  name="internalApprovalThresholdRaw"
+                  placeholder="250000000"
+                  required
+                />
+                <small className="field-note">Trusted internal destinations at or above this amount require approval.</small>
+              </label>
+              <button className="primary-button" disabled={!canManage} type="submit">
+                Update approval policy
+              </button>
+            </form>
+          ) : (
+            <div className="empty-box compact">Approval policy unavailable.</div>
+          )}
+        </div>
+
+        <div className="content-panel content-panel-strong" id="planned-transfers-section">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Step 5</p>
               <h2>Planned transfers</h2>
-              <p className="compact-copy">Once wallets exist, define the transfer shape you expect to observe on-chain.</p>
+              <p className="compact-copy">Create requests against destination objects so matching and review carry business context.</p>
             </div>
           </div>
           <form className="form-stack" onSubmit={onCreateTransferRequest}>
@@ -652,21 +1241,58 @@ export function WorkspaceSetupPage({
               </select>
             </label>
             <label className="field">
-              <span>To wallet</span>
-              <select name="destinationWorkspaceAddressId" defaultValue="" required>
+              <span>Destination</span>
+              <select
+                name="destinationId"
+                onChange={(event) => setSelectedRequestDestinationId(event.target.value)}
+                value={selectedRequestDestinationId}
+                required
+              >
                 <option value="" disabled>
-                  Select wallet
+                  Select destination
                 </option>
-                {addresses.map((address) => (
-                  <option key={address.workspaceAddressId} value={address.workspaceAddressId}>
-                    {getWalletName(address)}
+                {destinations.filter((item) => item.isActive).map((destination) => (
+                  <option key={destination.destinationId} value={destination.destinationId}>
+                    {destination.label} // {destination.trustState}
                   </option>
                 ))}
               </select>
+              <small className="field-note">
+                Requests now target a destination object, not a bare wallet, so trust and business identity carry through to reconciliation.
+              </small>
             </label>
+            {selectedRequestDestination ? (
+              <div className="notice-banner compact-notice">
+                <div>
+                  <strong>
+                    {selectedRequestDestination.label} // {selectedRequestDestination.trustState} // {selectedRequestDestination.isInternal ? 'internal' : 'external'}
+                  </strong>
+                  <p>
+                    {getDestinationTrustCopy(selectedRequestDestination)}
+                  </p>
+                </div>
+              </div>
+            ) : null}
             <label className="field">
               <span>Transfer type</span>
               <input name="requestType" placeholder="wallet_transfer" required />
+            </label>
+            <label className="field">
+              <span>Initial request state</span>
+              <select
+                name="status"
+                onChange={(event) => setRequestCreateStatus(event.target.value as 'draft' | 'submitted')}
+                value={requestCreateStatus}
+              >
+                <option value="draft">draft</option>
+                {selectedRequestDestination?.isActive !== false
+                && selectedRequestDestination?.trustState === 'trusted' ? (
+                  <option value="submitted">submitted</option>
+                ) : null}
+              </select>
+              <small className="field-note">
+                Trusted destinations can be submitted immediately. Workspace approval policy then decides whether they auto-clear or enter the approval inbox. Unreviewed or restricted destinations must start as draft.
+              </small>
             </label>
             <label className="field">
               <span>Amount raw</span>
@@ -680,7 +1306,17 @@ export function WorkspaceSetupPage({
               <span>Reason</span>
               <input name="reason" placeholder="Optional" />
             </label>
-            <button className="primary-button" disabled={!canManage || addresses.length === 0} type="submit">
+            <button
+              className="primary-button"
+              disabled={
+                !canManage
+                || destinations.length === 0
+                || !selectedRequestDestination
+                || !selectedRequestDestination.isActive
+                || selectedRequestDestination.trustState === 'blocked'
+              }
+              type="submit"
+            >
               Create planned transfer
             </button>
           </form>
@@ -691,7 +1327,9 @@ export function WorkspaceSetupPage({
                 <div key={item.transferRequestId} className="workspace-row static-row">
                   <div>
                     <strong>{getTransferLabel(item)}</strong>
-                    <small>{item.requestType.replaceAll('_', ' ')} // {formatRawUsdc(item.amountRaw)}</small>
+                    <small>
+                      {item.destination?.label ?? getWalletNameLite(item.destinationWorkspaceAddress)} // {item.requestType.replaceAll('_', ' ')} // {formatRawUsdc(item.amountRaw)}
+                    </small>
                   </div>
                   <span>{item.status}</span>
                 </div>
@@ -713,7 +1351,7 @@ export function WorkspaceSetupPage({
             </div>
           </div>
           <div className="empty-box compact">
-            Every saved wallet gets a hidden USDC receiving address derived in the backend. Planned transfers match against that receiving address and the exact amount observed on-chain.
+            Phase B keeps the worker wallet-compatible, but new requests now point at named destinations. That means queue rows and request detail can show trust, counterparty, and internal or external context while matching still uses the linked receiving wallet underneath.
           </div>
         </div>
       </section>
@@ -735,6 +1373,17 @@ function getExceptionReasonLabel(reasonCode: string) {
 
 function formatLabel(value: string) {
   return value.replaceAll('_', ' ');
+}
+
+function getApprovalActionLabel(action: string) {
+  switch (action) {
+    case 'routed_for_approval':
+      return 'routed for approval';
+    case 'auto_approved':
+      return 'auto approved';
+    default:
+      return formatLabel(action);
+  }
 }
 
 function ExceptionCard({
@@ -804,13 +1453,34 @@ function ExceptionCard({
 
 function getTransferLabel(
   row:
-    | Pick<ReconciliationRow, 'sourceWorkspaceAddress' | 'destinationWorkspaceAddress'>
-    | Pick<TransferRequest, 'sourceWorkspaceAddress' | 'destinationWorkspaceAddress'>,
+    | Pick<ReconciliationRow, 'sourceWorkspaceAddress' | 'destinationWorkspaceAddress' | 'destination'>
+    | Pick<TransferRequest, 'sourceWorkspaceAddress' | 'destinationWorkspaceAddress' | 'destination'>,
 ) {
   const source = row.sourceWorkspaceAddress?.displayName ?? row.sourceWorkspaceAddress?.address ?? 'Unknown';
-  const destination =
-    row.destinationWorkspaceAddress?.displayName ?? row.destinationWorkspaceAddress?.address ?? 'Unknown';
+  const destination = getDestinationLabel(row.destination, row.destinationWorkspaceAddress);
   return `${source} -> ${destination}`;
+}
+
+function getDestinationLabel(destination: Destination | null, fallback: WorkspaceAddressLite | null) {
+  return destination?.label ?? fallback?.displayName?.trim() ?? fallback?.address ?? 'Unknown';
+}
+
+function getDestinationTrustCopy(destination: Destination) {
+  if (!destination.isActive) {
+    return 'This destination is inactive. New requests are blocked until it is reactivated.';
+  }
+
+  switch (destination.trustState) {
+    case 'trusted':
+      return 'Trusted destinations can be submitted directly. Workspace approval policy then decides whether the request auto-clears or enters the approval inbox.';
+    case 'restricted':
+      return 'Restricted destinations can still be modeled, but new requests must stay in draft until the destination is reviewed.';
+    case 'blocked':
+      return 'Blocked destinations cannot be used for new requests.';
+    case 'unreviewed':
+    default:
+      return 'Unreviewed destinations can be recorded, but requests must start as draft until the destination is trusted.';
+  }
 }
 
 function getRouteLabel(transfer: ObservedTransfer) {

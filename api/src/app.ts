@@ -3,6 +3,8 @@ import { requireAuth } from './auth.js';
 import { addressLabelsRouter } from './routes/address-labels.js';
 import { addressesRouter } from './routes/addresses.js';
 import { config } from './config.js';
+import { approvalsRouter } from './routes/approvals.js';
+import { destinationsRouter } from './routes/destinations.js';
 import { authRouter } from './routes/auth.js';
 import { eventsRouter } from './routes/events.js';
 import { healthRouter } from './routes/health.js';
@@ -22,7 +24,7 @@ export function createApp() {
 
     res.setHeader('Access-Control-Allow-Origin', allowOrigin);
     res.setHeader('Access-Control-Allow-Headers', 'content-type,authorization');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,OPTIONS');
 
     if (req.method === 'OPTIONS') {
       res.status(204).end();
@@ -41,6 +43,8 @@ export function createApp() {
   app.use(addressLabelsRouter);
   app.use(organizationsRouter);
   app.use(addressesRouter);
+  app.use(approvalsRouter);
+  app.use(destinationsRouter);
   app.use(transferRequestsRouter);
   app.use(eventsRouter);
 

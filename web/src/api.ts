@@ -1,5 +1,9 @@
 import type {
+  ApprovalInboxItem,
+  ApprovalPolicy,
   AuthenticatedSession,
+  Counterparty,
+  Destination,
   ExceptionItem,
   ExceptionNote,
   LoginResponse,
@@ -115,6 +119,78 @@ export const api = {
   listAddresses(workspaceId: string) {
     return request<{ items: WorkspaceAddress[] }>(`/workspaces/${workspaceId}/addresses`);
   },
+  listCounterparties(workspaceId: string) {
+    return request<{ items: Counterparty[] }>(`/workspaces/${workspaceId}/counterparties`);
+  },
+  createCounterparty(
+    workspaceId: string,
+    input: {
+      displayName: string;
+      category?: string;
+      externalReference?: string;
+      status?: string;
+    },
+  ) {
+    return request<Counterparty>(`/workspaces/${workspaceId}/counterparties`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+  updateCounterparty(
+    workspaceId: string,
+    counterpartyId: string,
+    input: {
+      displayName?: string;
+      category?: string;
+      externalReference?: string;
+      status?: string;
+    },
+  ) {
+    return request<Counterparty>(`/workspaces/${workspaceId}/counterparties/${counterpartyId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    });
+  },
+  listDestinations(workspaceId: string) {
+    return request<{ items: Destination[] }>(`/workspaces/${workspaceId}/destinations`);
+  },
+  createDestination(
+    workspaceId: string,
+    input: {
+      counterpartyId?: string;
+      linkedWorkspaceAddressId: string;
+      destinationType?: string;
+      trustState?: Destination['trustState'];
+      label: string;
+      notes?: string;
+      isInternal?: boolean;
+      isActive?: boolean;
+    },
+  ) {
+    return request<Destination>(`/workspaces/${workspaceId}/destinations`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+  updateDestination(
+    workspaceId: string,
+    destinationId: string,
+    input: {
+      counterpartyId?: string | null;
+      linkedWorkspaceAddressId?: string;
+      destinationType?: string;
+      trustState?: Destination['trustState'];
+      label?: string;
+      notes?: string;
+      isInternal?: boolean;
+      isActive?: boolean;
+    },
+  ) {
+    return request<Destination>(`/workspaces/${workspaceId}/destinations/${destinationId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    });
+  },
   createAddress(
     workspaceId: string,
     input: {
@@ -132,6 +208,21 @@ export const api = {
         assetScope: input.assetScope ?? 'usdc',
         ...input,
       }),
+    });
+  },
+  updateAddress(
+    workspaceId: string,
+    workspaceAddressId: string,
+    input: {
+      address?: string;
+      displayName?: string;
+      notes?: string;
+      isActive?: boolean;
+    },
+  ) {
+    return request<WorkspaceAddress>(`/workspaces/${workspaceId}/addresses/${workspaceAddressId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
     });
   },
   listTransfers(workspaceId: string) {
@@ -170,6 +261,52 @@ export const api = {
   getReconciliationDetail(workspaceId: string, transferRequestId: string) {
     return request<ReconciliationDetail>(
       `/workspaces/${workspaceId}/reconciliation-queue/${transferRequestId}`,
+    );
+  },
+  getApprovalPolicy(workspaceId: string) {
+    return request<ApprovalPolicy>(`/workspaces/${workspaceId}/approval-policy`);
+  },
+  updateApprovalPolicy(
+    workspaceId: string,
+    input: {
+      policyName?: string;
+      isActive?: boolean;
+      ruleJson?: Partial<ApprovalPolicy['ruleJson']>;
+    },
+  ) {
+    return request<ApprovalPolicy>(`/workspaces/${workspaceId}/approval-policy`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    });
+  },
+  listApprovalInbox(
+    workspaceId: string,
+    input?: {
+      status?: 'pending_approval' | 'escalated' | 'all';
+    },
+  ) {
+    const params = new URLSearchParams({ limit: '100' });
+    if (input?.status) {
+      params.set('status', input.status);
+    }
+    return request<{ servedAt: string; approvalPolicy: ApprovalPolicy; items: ApprovalInboxItem[] }>(
+      `/workspaces/${workspaceId}/approval-inbox?${params.toString()}`,
+    );
+  },
+  createApprovalDecision(
+    workspaceId: string,
+    transferRequestId: string,
+    input: {
+      action: 'approve' | 'reject' | 'escalate';
+      comment?: string;
+    },
+  ) {
+    return request<{ transferRequestId: string; status: string }>(
+      `/workspaces/${workspaceId}/transfer-requests/${transferRequestId}/approval-decisions`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
     );
   },
   listExceptions(workspaceId: string) {
@@ -232,7 +369,8 @@ export const api = {
     workspaceId: string,
     input: {
       sourceWorkspaceAddressId?: string;
-      destinationWorkspaceAddressId: string;
+      destinationWorkspaceAddressId?: string;
+      destinationId?: string;
       requestType: string;
       asset?: string;
       amountRaw: string;

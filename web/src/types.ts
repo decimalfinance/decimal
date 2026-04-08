@@ -51,6 +51,7 @@ export type WorkspaceAddress = {
   addressKind: string;
   assetScope: string;
   usdcAtaAddress: string | null;
+  isActive: boolean;
   source: string;
   sourceRef: string | null;
   displayName: string | null;
@@ -69,11 +70,93 @@ export type WorkspaceAddressLite = {
   notes: string | null;
 };
 
+export type Counterparty = {
+  counterpartyId: string;
+  organizationId: string;
+  displayName: string;
+  category: string;
+  externalReference: string | null;
+  status: string;
+  metadataJson: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type Destination = {
+  destinationId: string;
+  workspaceId: string;
+  counterpartyId: string | null;
+  linkedWorkspaceAddressId: string | null;
+  chain: string;
+  asset: string;
+  walletAddress: string;
+  tokenAccountAddress: string | null;
+  destinationType: string;
+  trustState: 'unreviewed' | 'trusted' | 'restricted' | 'blocked';
+  label: string;
+  notes: string | null;
+  isInternal: boolean;
+  isActive: boolean;
+  metadataJson: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  counterparty: Counterparty | null;
+  linkedWorkspaceAddress: WorkspaceAddressLite | null;
+};
+
+export type ApprovalPolicyRule = {
+  requireTrustedDestination: boolean;
+  requireApprovalForExternal: boolean;
+  requireApprovalForInternal: boolean;
+  externalApprovalThresholdRaw: string;
+  internalApprovalThresholdRaw: string;
+};
+
+export type ApprovalPolicy = {
+  approvalPolicyId: string;
+  workspaceId: string;
+  policyName: string;
+  isActive: boolean;
+  ruleJson: ApprovalPolicyRule;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ApprovalReason = {
+  code: string;
+  message: string;
+};
+
+export type ApprovalEvaluation = {
+  approvalPolicyId: string | null;
+  policyName: string;
+  isActive: boolean;
+  requiresApproval: boolean;
+  rules: ApprovalPolicyRule;
+  reasons: ApprovalReason[];
+};
+
+export type ApprovalDecision = {
+  approvalDecisionId: string;
+  approvalPolicyId: string | null;
+  transferRequestId: string;
+  workspaceId: string;
+  actorUserId: string | null;
+  actorType: string;
+  action: 'routed_for_approval' | 'auto_approved' | 'approve' | 'reject' | 'escalate';
+  comment: string | null;
+  payloadJson: Record<string, unknown>;
+  createdAt: string;
+  actorUser: User | null;
+  approvalPolicy: ApprovalPolicy | null;
+};
+
 export type TransferRequest = {
   transferRequestId: string;
   workspaceId: string;
   sourceWorkspaceAddressId: string | null;
   destinationWorkspaceAddressId: string;
+  destinationId: string | null;
   requestType: string;
   asset: string;
   amountRaw: string;
@@ -86,6 +169,7 @@ export type TransferRequest = {
   propertiesJson: Record<string, unknown>;
   sourceWorkspaceAddress: WorkspaceAddressLite | null;
   destinationWorkspaceAddress: WorkspaceAddressLite | null;
+  destination: Destination | null;
 };
 
 export type TransferRequestEvent = {
@@ -141,6 +225,7 @@ export type ReconciliationRow = {
   workspaceId: string;
   sourceWorkspaceAddressId: string | null;
   destinationWorkspaceAddressId: string;
+  destinationId: string | null;
   requestType: string;
   asset: string;
   amountRaw: string;
@@ -153,7 +238,8 @@ export type ReconciliationRow = {
   requestedByUser: User | null;
   sourceWorkspaceAddress: WorkspaceAddressLite | null;
   destinationWorkspaceAddress: WorkspaceAddressLite | null;
-  approvalState: 'draft' | 'submitted' | 'pending_approval' | 'approved' | 'closed' | 'rejected';
+  destination: Destination | null;
+  approvalState: 'draft' | 'submitted' | 'pending_approval' | 'escalated' | 'approved' | 'closed' | 'rejected';
   executionState:
     | 'not_started'
     | 'awaiting_execution'
@@ -187,6 +273,10 @@ export type ReconciliationRow = {
   matchExplanation: string | null;
   exceptionExplanation: string | null;
   exceptions: ExceptionItem[];
+};
+
+export type ApprovalInboxItem = ReconciliationRow & {
+  approvalEvaluation: ApprovalEvaluation;
 };
 
 export type ExceptionItem = {
@@ -288,6 +378,9 @@ export type ReconciliationDetail = ReconciliationRow & {
   linkedObservedTransfers: ObservedTransfer[];
   linkedObservedPayment: ObservedPayment | null;
   relatedObservedPayments: ObservedPayment[];
+  approvalPolicy: ApprovalPolicy;
+  approvalEvaluation: ApprovalEvaluation;
+  approvalDecisions: ApprovalDecision[];
   events: TransferRequestEvent[];
   notes: TransferRequestNote[];
   timeline: ReconciliationTimelineItem[];

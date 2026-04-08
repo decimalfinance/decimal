@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS transfer_requests
   workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
   source_workspace_address_id UUID REFERENCES workspace_addresses(workspace_address_id) ON DELETE SET NULL,
   destination_workspace_address_id UUID NOT NULL REFERENCES workspace_addresses(workspace_address_id) ON DELETE RESTRICT,
+  destination_id UUID,
   request_type TEXT NOT NULL,
   asset TEXT NOT NULL DEFAULT 'usdc',
   amount_raw BIGINT NOT NULL,
@@ -187,11 +188,78 @@ ALTER TABLE transfer_requests
 ALTER TABLE transfer_requests
   ADD COLUMN IF NOT EXISTS destination_workspace_address_id UUID;
 
-ALTER TABLE transfer_requests
-  DROP COLUMN IF EXISTS counterparty_id;
+CREATE TABLE IF NOT EXISTS counterparties
+(
+  counterparty_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
+  display_name TEXT NOT NULL,
+  category TEXT NOT NULL,
+  external_reference TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS destinations
+(
+  destination_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  counterparty_id UUID REFERENCES counterparties(counterparty_id) ON DELETE SET NULL,
+  workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+  linked_workspace_address_id UUID REFERENCES workspace_addresses(workspace_address_id) ON DELETE SET NULL,
+  chain TEXT NOT NULL,
+  asset TEXT NOT NULL DEFAULT 'usdc',
+  wallet_address TEXT NOT NULL,
+  token_account_address TEXT,
+  destination_type TEXT NOT NULL DEFAULT 'wallet',
+  trust_state TEXT NOT NULL DEFAULT 'unreviewed',
+  label TEXT NOT NULL,
+  notes TEXT,
+  is_internal BOOLEAN NOT NULL DEFAULT FALSE,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (workspace_id, linked_workspace_address_id)
+);
+
+CREATE TABLE IF NOT EXISTS approval_policies
+(
+  approval_policy_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL UNIQUE REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+  policy_name TEXT NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  rule_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS approval_decisions
+(
+  approval_decision_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  approval_policy_id UUID REFERENCES approval_policies(approval_policy_id) ON DELETE SET NULL,
+  transfer_request_id UUID NOT NULL REFERENCES transfer_requests(transfer_request_id) ON DELETE CASCADE,
+  workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+  actor_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
+  actor_type TEXT NOT NULL DEFAULT 'user',
+  action TEXT NOT NULL,
+  comment TEXT,
+  payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 ALTER TABLE transfer_requests
-  DROP COLUMN IF EXISTS destination_id;
+  ADD COLUMN IF NOT EXISTS destination_id UUID;
+
+ALTER TABLE transfer_requests
+  DROP CONSTRAINT IF EXISTS transfer_requests_destination_id_fkey;
+
+ALTER TABLE transfer_requests
+  ADD CONSTRAINT transfer_requests_destination_id_fkey
+  FOREIGN KEY (destination_id) REFERENCES destinations(destination_id) ON DELETE SET NULL;
+
+ALTER TABLE transfer_requests
+  DROP COLUMN IF EXISTS counterparty_id;
 
 ALTER TABLE transfer_requests
   DROP CONSTRAINT IF EXISTS chk_transfer_requests_status;
@@ -202,6 +270,7 @@ ALTER TABLE transfer_requests
       'draft',
       'submitted',
       'pending_approval',
+      'escalated',
       'approved',
       'ready_for_execution',
       'submitted_onchain',
@@ -230,6 +299,22 @@ ALTER TABLE transfer_request_events
     event_source IN ('user', 'system', 'worker')
   );
 
+ALTER TABLE approval_decisions
+  DROP CONSTRAINT IF EXISTS chk_approval_decisions_actor_type;
+
+ALTER TABLE approval_decisions
+  ADD CONSTRAINT chk_approval_decisions_actor_type CHECK (
+    actor_type IN ('user', 'system')
+  );
+
+ALTER TABLE approval_decisions
+  DROP CONSTRAINT IF EXISTS chk_approval_decisions_action;
+
+ALTER TABLE approval_decisions
+  ADD CONSTRAINT chk_approval_decisions_action CHECK (
+    action IN ('routed_for_approval', 'auto_approved', 'approve', 'reject', 'escalate')
+  );
+
 ALTER TABLE exception_states
   DROP CONSTRAINT IF EXISTS chk_exception_states_status;
 
@@ -252,9 +337,6 @@ DROP TABLE IF EXISTS workspace_objects CASCADE;
 DROP TABLE IF EXISTS workspace_labels CASCADE;
 DROP TABLE IF EXISTS global_entity_addresses CASCADE;
 DROP TABLE IF EXISTS global_entities CASCADE;
-DROP TABLE IF EXISTS destinations CASCADE;
-DROP TABLE IF EXISTS counterparties CASCADE;
-
 CREATE INDEX IF NOT EXISTS idx_memberships_organization_id ON organization_memberships(organization_id);
 CREATE INDEX IF NOT EXISTS idx_memberships_user_id ON organization_memberships(user_id);
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_id ON auth_sessions(user_id);
@@ -271,6 +353,22 @@ CREATE INDEX IF NOT EXISTS idx_transfer_requests_workspace_status_requested_at
   ON transfer_requests(workspace_id, status, requested_at DESC);
 CREATE INDEX IF NOT EXISTS idx_transfer_requests_destination_status_requested_at
   ON transfer_requests(destination_workspace_address_id, status, requested_at DESC);
+CREATE INDEX IF NOT EXISTS idx_transfer_requests_destination_id
+  ON transfer_requests(destination_id);
+CREATE INDEX IF NOT EXISTS idx_counterparties_organization_created_at
+  ON counterparties(organization_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_destinations_workspace_created_at
+  ON destinations(workspace_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_destinations_counterparty_created_at
+  ON destinations(counterparty_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_destinations_wallet_address
+  ON destinations(wallet_address);
+CREATE INDEX IF NOT EXISTS idx_approval_policies_workspace_id
+  ON approval_policies(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_approval_decisions_workspace_created_at
+  ON approval_decisions(workspace_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_approval_decisions_request_created_at
+  ON approval_decisions(transfer_request_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_transfer_request_events_request_created_at
   ON transfer_request_events(transfer_request_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_transfer_request_events_workspace_created_at
@@ -320,6 +418,21 @@ FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS trg_transfer_requests_updated_at ON transfer_requests;
 CREATE TRIGGER trg_transfer_requests_updated_at
 BEFORE UPDATE ON transfer_requests
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_counterparties_updated_at ON counterparties;
+CREATE TRIGGER trg_counterparties_updated_at
+BEFORE UPDATE ON counterparties
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_destinations_updated_at ON destinations;
+CREATE TRIGGER trg_destinations_updated_at
+BEFORE UPDATE ON destinations
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_approval_policies_updated_at ON approval_policies;
+CREATE TRIGGER trg_approval_policies_updated_at
+BEFORE UPDATE ON approval_policies
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_exception_states_updated_at ON exception_states;

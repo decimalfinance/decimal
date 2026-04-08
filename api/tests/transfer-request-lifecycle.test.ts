@@ -9,7 +9,8 @@ import {
 
 test('request lifecycle exposes the allowed transition graph', () => {
   assert.equal(isRequestStatusTransitionAllowed('draft', 'submitted'), true);
-  assert.equal(isRequestStatusTransitionAllowed('submitted', 'approved'), false);
+  assert.equal(isRequestStatusTransitionAllowed('submitted', 'approved'), true);
+  assert.equal(isRequestStatusTransitionAllowed('pending_approval', 'escalated'), true);
   assert.equal(isRequestStatusTransitionAllowed('observed', 'matched'), true);
   assert.equal(isRequestStatusTransitionAllowed('matched', 'closed'), true);
   assert.equal(isRequestStatusTransitionAllowed('closed', 'submitted'), false);
