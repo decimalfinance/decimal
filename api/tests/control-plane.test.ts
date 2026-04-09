@@ -19,6 +19,7 @@ TRUNCATE TABLE
   transfer_request_events,
   exception_notes,
   exception_states,
+  export_jobs,
   transfer_requests,
   destinations,
   counterparties,
@@ -2109,6 +2110,142 @@ test('exception actions and notes update detail state and preserve operator audi
     ),
     true,
   );
+});
+
+test('phase e exception queue supports assignment, severity override, and resolution code', async () => {
+  const setup = await createSeededPartialExceptionRequest();
+  const member = await loginUser('reviewer@example.com', 'Reviewer');
+  await post(`/organizations/${setup.organization.organizationId}/join`, {}, member.sessionToken);
+
+  const updateResponse = await fetch(
+    `${baseUrl}/workspaces/${setup.workspace.workspaceId}/exceptions/${setup.exceptionId}`,
+    {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        ...authHeaders(setup.sessionToken),
+      },
+      body: JSON.stringify({
+        assignedToUserId: member.user.userId,
+        severity: 'critical',
+        resolutionCode: 'vendor_confirmed',
+        note: 'Assigned for escalation review.',
+      }),
+    },
+  );
+
+  assert.equal(updateResponse.status, 200);
+  const updated = await updateResponse.json();
+  assert.equal(updated.severity, 'critical');
+  assert.equal(updated.resolutionCode, 'vendor_confirmed');
+  assert.equal(updated.assignedToUserId, member.user.userId);
+
+  const queueResponse = await fetch(
+    `${baseUrl}/workspaces/${setup.workspace.workspaceId}/exceptions?assigneeUserId=${member.user.userId}&severity=critical`,
+    { headers: authHeaders(setup.sessionToken) },
+  );
+  assert.equal(queueResponse.status, 200);
+  const queue = await queueResponse.json();
+  assert.equal(queue.items.length, 1);
+  assert.equal(queue.items[0].assignedToUser.email, 'reviewer@example.com');
+  assert.equal(queue.items[0].resolutionCode, 'vendor_confirmed');
+});
+
+test('phase e exports produce csv and record export history', async () => {
+  const setup = await createSeededPartialExceptionRequest();
+
+  const reconciliationExport = await fetch(
+    `${baseUrl}/workspaces/${setup.workspace.workspaceId}/exports/reconciliation?format=csv`,
+    { headers: authHeaders(setup.sessionToken) },
+  );
+  assert.equal(reconciliationExport.status, 200);
+  const reconciliationCsv = await reconciliationExport.text();
+  assert.match(reconciliationCsv, /transfer_request_id/);
+  assert.match(reconciliationCsv, /exception_reason_codes/);
+
+  const exceptionsExport = await fetch(
+    `${baseUrl}/workspaces/${setup.workspace.workspaceId}/exports/exceptions?format=csv`,
+    { headers: authHeaders(setup.sessionToken) },
+  );
+  assert.equal(exceptionsExport.status, 200);
+  const exceptionsCsv = await exceptionsExport.text();
+  assert.match(exceptionsCsv, /exception_id/);
+  assert.match(exceptionsCsv, /partial_settlement/);
+
+  const historyResponse = await fetch(
+    `${baseUrl}/workspaces/${setup.workspace.workspaceId}/export-jobs`,
+    { headers: authHeaders(setup.sessionToken) },
+  );
+  assert.equal(historyResponse.status, 200);
+  const history = await historyResponse.json();
+  assert.equal(history.items.length, 2);
+  assert.equal(history.items[0].exportKind, 'exceptions');
+  assert.equal(history.items[1].exportKind, 'reconciliation');
+});
+
+test('phase e audit export and unified timeline include approval and execution stages', async () => {
+  const setup = await createTransferRequestSetup();
+  const transferRequestId = setup.transferRequest.transferRequestId;
+
+  await post(
+    `/workspaces/${setup.workspace.workspaceId}/transfer-requests/${transferRequestId}/executions`,
+    {
+      executionSource: 'manual_operator',
+    },
+    setup.sessionToken,
+  );
+
+  const detailResponse = await fetch(
+    `${baseUrl}/workspaces/${setup.workspace.workspaceId}/reconciliation-queue/${transferRequestId}`,
+    { headers: authHeaders(setup.sessionToken) },
+  );
+  assert.equal(detailResponse.status, 200);
+  const detail = await detailResponse.json();
+
+  assert.equal(detail.timeline.some((item: { timelineType: string }) => item.timelineType === 'approval_decision'), true);
+  assert.equal(detail.timeline.some((item: { timelineType: string }) => item.timelineType === 'execution_record'), true);
+
+  const auditExport = await fetch(
+    `${baseUrl}/workspaces/${setup.workspace.workspaceId}/exports/audit/${transferRequestId}?format=csv`,
+    { headers: authHeaders(setup.sessionToken) },
+  );
+  assert.equal(auditExport.status, 200);
+  const auditCsv = await auditExport.text();
+  assert.match(auditCsv, /approval_decision/);
+  assert.match(auditCsv, /execution_record/);
+});
+
+test('phase e ops health exposes lag and latency status', async () => {
+  const setup = await createSeededPartialExceptionRequest();
+  const signature = setup.signature;
+  const workerReceivedAt = '2026-04-06 13:30:20.083';
+  const txWriteAt = '2026-04-06 13:30:21.083';
+
+  await insertClickHouseRows('observed_transactions', [
+    {
+      signature,
+      slot: 411111111,
+      event_time: '2026-04-06 13:30:15.083',
+      yellowstone_created_at: '2026-04-06 13:30:15.200',
+      worker_received_at: workerReceivedAt,
+      status: 'confirmed',
+      properties_json: '{}',
+      created_at: txWriteAt,
+    },
+  ]);
+
+  const response = await fetch(
+    `${baseUrl}/workspaces/${setup.workspace.workspaceId}/ops-health`,
+    { headers: authHeaders(setup.sessionToken) },
+  );
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+
+  assert.equal(payload.postgres, 'ok');
+  assert.equal(payload.latestSlot, 411111111);
+  assert.ok(payload.latencies.yellowstoneToWorkerMs.p50 !== null);
+  assert.ok(payload.latencies.chainToWriteMs.p50 !== null);
+  assert.equal(payload.openExceptionCount, 1);
 });
 
 test('protected workspace routes reject anonymous callers', async () => {

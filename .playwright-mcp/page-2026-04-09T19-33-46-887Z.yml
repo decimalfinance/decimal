@@ -1,0 +1,36 @@
+- generic [ref=e4]:
+  - banner [ref=e5]:
+    - generic [ref=e6]:
+      - strong [ref=e7]: "[project name]"
+      - generic [ref=e8]: personal view
+    - navigation "Global navigation" [ref=e9]:
+      - button "Dashboard" [ref=e10] [cursor=pointer]
+      - button "Orgs" [active] [ref=e11] [cursor=pointer]
+      - button "Profile" [ref=e12] [cursor=pointer]
+    - generic [ref=e13]:
+      - button "Switch to light mode" [ref=e14] [cursor=pointer]:
+        - img [ref=e15]
+      - generic [ref=e17]: Ops
+      - button "Logout" [ref=e18] [cursor=pointer]
+  - main [ref=e20]:
+    - generic [ref=e49]:
+      - generic [ref=e51]:
+        - paragraph [ref=e52]: Organizations
+        - heading "Manage where this account can operate." [level=1] [ref=e53]
+        - paragraph [ref=e54]: Membership controls which workspaces you can see. Admin role controls which ones you can configure.
+      - generic [ref=e55]:
+        - generic [ref=e56]:
+          - generic [ref=e58]:
+            - paragraph [ref=e59]: Your orgs
+            - heading "Memberships" [level=2] [ref=e60]
+          - generic [ref=e62]: You are not in any organizations yet.
+        - generic [ref=e63]:
+          - generic [ref=e65]:
+            - paragraph [ref=e66]: Create org
+            - heading "New organization" [level=2] [ref=e67]
+          - generic [ref=e68]:
+            - generic [ref=e69]:
+              - generic [ref=e70]: Organization name
+              - textbox "Organization name" [ref=e71]:
+                - /placeholder: Acme Treasury
+            - button "Create organization" [ref=e72] [cursor=pointer]

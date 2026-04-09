@@ -1,0 +1,23 @@
+- generic [ref=e71]:
+  - generic [ref=e72]:
+    - paragraph [ref=e73]: USDC//OPS
+    - heading "Operate stablecoin flows without guessing what happened." [level=1] [ref=e74]
+    - paragraph [ref=e75]: Save wallets, create planned transfers, and verify whether real USDC transfers settled the way you expected.
+    - generic [ref=e76]:
+      - generic [ref=e77]: solana
+      - generic [ref=e78]: dark mono
+      - generic [ref=e79]: org scoped
+  - generic [ref=e80]:
+    - generic [ref=e82]:
+      - paragraph [ref=e83]: Sign in
+      - heading "Operator login" [level=2] [ref=e84]
+    - generic [ref=e85]:
+      - generic [ref=e86]:
+        - generic [ref=e87]: Email
+        - textbox "Email" [ref=e88]:
+          - /placeholder: ops@company.com
+      - generic [ref=e89]:
+        - generic [ref=e90]: Display name
+        - textbox "Display name" [ref=e91]:
+          - /placeholder: Optional
+      - button "Enter surface" [ref=e92] [cursor=pointer]

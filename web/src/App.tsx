@@ -24,6 +24,8 @@ import {
 import { LandingEditorialPage } from './screens/landing-editorial';
 import {
   WorkspaceHomePage,
+  WorkspaceExceptionsPage,
+  WorkspaceOpsPage,
   WorkspacePolicyPage,
   WorkspaceRegistryPage,
   WorkspaceRequestsPage,
@@ -34,11 +36,15 @@ import type {
   AuthenticatedSession,
   Counterparty,
   Destination,
+  ExportJob,
+  ExceptionItem,
+  OpsHealth,
   ObservedTransfer,
   ReconciliationDetail,
   ReconciliationRow,
   TransferRequest,
   WorkspaceAddress,
+  WorkspaceMember,
 } from './types';
 
 type AuthStatus = 'booting' | 'anonymous' | 'authenticated';
@@ -103,6 +109,10 @@ export function App() {
   const [reconciliationRows, setReconciliationRows] = useState<ReconciliationRow[]>([]);
   const [approvalPolicy, setApprovalPolicy] = useState<ApprovalPolicy | null>(null);
   const [approvalInbox, setApprovalInbox] = useState<ApprovalInboxItem[]>([]);
+  const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMember[]>([]);
+  const [exceptions, setExceptions] = useState<ExceptionItem[]>([]);
+  const [exportJobs, setExportJobs] = useState<ExportJob[]>([]);
+  const [opsHealth, setOpsHealth] = useState<OpsHealth | null>(null);
   const [reconciliationFilter, setReconciliationFilter] = useState<
     ReconciliationRow['requestDisplayState'] | 'all'
   >('all');
@@ -119,6 +129,8 @@ export function App() {
     || route.name === 'workspaceRegistry'
     || route.name === 'workspacePolicy'
     || route.name === 'workspaceRequests'
+    || route.name === 'workspaceExceptions'
+    || route.name === 'workspaceOps'
       ? route.workspaceId
       : null;
 
@@ -210,6 +222,26 @@ export function App() {
     selectedReconciliationId,
   ]);
 
+  useEffect(() => {
+    if (
+      authStatus !== 'authenticated'
+      || !currentWorkspaceId
+      || (route.name !== 'workspaceExceptions' && route.name !== 'workspaceOps')
+    ) {
+      return;
+    }
+
+    void loadExceptionData(currentWorkspaceId);
+  }, [authStatus, currentWorkspaceId, route.name]);
+
+  useEffect(() => {
+    if (authStatus !== 'authenticated' || !currentWorkspaceId || route.name !== 'workspaceOps') {
+      return;
+    }
+
+    void loadOpsData(currentWorkspaceId);
+  }, [authStatus, currentWorkspaceId, route.name]);
+
   function resetWorkspaceState() {
     setAddresses([]);
     setCounterparties([]);
@@ -219,6 +251,10 @@ export function App() {
     setReconciliationRows([]);
     setApprovalPolicy(null);
     setApprovalInbox([]);
+    setWorkspaceMembers([]);
+    setExceptions([]);
+    setExportJobs([]);
+    setOpsHealth(null);
     setSelectedObservedTransfer(null);
     setSelectedReconciliationId(null);
     setSelectedReconciliationDetail(null);
@@ -295,12 +331,20 @@ export function App() {
         setIsLoadingWorkspace(true);
       }
 
-      const [nextAddresses, nextCounterparties, nextDestinations, nextTransferRequests, nextApprovalPolicy] = await Promise.all([
+      const [
+        nextAddresses,
+        nextCounterparties,
+        nextDestinations,
+        nextTransferRequests,
+        nextApprovalPolicy,
+        nextWorkspaceMembers,
+      ] = await Promise.all([
         api.listAddresses(workspaceId),
         api.listCounterparties(workspaceId),
         api.listDestinations(workspaceId),
         api.listTransferRequests(workspaceId),
         api.getApprovalPolicy(workspaceId),
+        api.listWorkspaceMembers(workspaceId),
       ]);
 
       setAddresses(nextAddresses.items);
@@ -308,6 +352,7 @@ export function App() {
       setDestinations(nextDestinations.items);
       setTransferRequests(nextTransferRequests.items);
       setApprovalPolicy(nextApprovalPolicy);
+      setWorkspaceMembers(nextWorkspaceMembers.items);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Failed to load workspace');
     } finally {
@@ -367,11 +412,37 @@ export function App() {
     }
   }
 
+  async function loadExceptionData(workspaceId: string) {
+    try {
+      setErrorMessage(null);
+      const nextExceptions = await api.listExceptionsFiltered(workspaceId);
+      setExceptions(nextExceptions.items);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to load exceptions');
+    }
+  }
+
+  async function loadOpsData(workspaceId: string) {
+    try {
+      setErrorMessage(null);
+      const [nextOpsHealth, nextExportJobs] = await Promise.all([
+        api.getOpsHealth(workspaceId),
+        api.listExportJobs(workspaceId),
+      ]);
+      setOpsHealth(nextOpsHealth);
+      setExportJobs(nextExportJobs.items);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to load operations status');
+    }
+  }
+
   async function loadWorkspace(workspaceId: string) {
     await Promise.all([
       loadWorkspaceStaticData(workspaceId),
       loadObservedTransfersData(workspaceId),
       loadReconciliationData(workspaceId),
+      loadExceptionData(workspaceId),
+      ...(route.name === 'workspaceOps' ? [loadOpsData(workspaceId)] : []),
     ]);
   }
 
@@ -857,8 +928,8 @@ export function App() {
     }
   }
 
-  async function handleAddExceptionNote(exceptionId: string, body: string) {
-    if (!currentWorkspaceId || !selectedReconciliationId || !body.trim()) {
+  async function handleAddExceptionNote(exceptionId: string, body: string, transferRequestId?: string | null) {
+    if (!currentWorkspaceId || !body.trim()) {
       return;
     }
 
@@ -868,8 +939,13 @@ export function App() {
         body: body.trim(),
       });
       await Promise.all([
-        loadWorkspace(currentWorkspaceId),
-        loadReconciliationDetail(currentWorkspaceId, selectedReconciliationId),
+        loadExceptionData(currentWorkspaceId),
+        transferRequestId
+          ? loadReconciliationDetail(currentWorkspaceId, transferRequestId, { silent: true })
+          : Promise.resolve(),
+        route.name === 'workspaceOps'
+          ? loadOpsData(currentWorkspaceId)
+          : Promise.resolve(),
       ]);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Failed to add exception note');
@@ -879,9 +955,10 @@ export function App() {
   async function handleApplyExceptionAction(
     exceptionId: string,
     action: 'reviewed' | 'expected' | 'dismissed' | 'reopen',
+    transferRequestId?: string | null,
     note?: string,
   ) {
-    if (!currentWorkspaceId || !selectedReconciliationId) {
+    if (!currentWorkspaceId) {
       return;
     }
 
@@ -892,11 +969,91 @@ export function App() {
         note: note?.trim() ? note.trim() : undefined,
       });
       await Promise.all([
-        loadWorkspace(currentWorkspaceId),
-        loadReconciliationDetail(currentWorkspaceId, selectedReconciliationId),
+        loadExceptionData(currentWorkspaceId),
+        loadReconciliationData(currentWorkspaceId, { silent: true }),
+        transferRequestId
+          ? loadReconciliationDetail(currentWorkspaceId, transferRequestId, { silent: true })
+          : Promise.resolve(),
+        route.name === 'workspaceOps'
+          ? loadOpsData(currentWorkspaceId)
+          : Promise.resolve(),
       ]);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Failed to update exception');
+    }
+  }
+
+  async function handleUpdateExceptionMetadata(
+    exceptionId: string,
+    input: {
+      assignedToUserId?: string | null;
+      resolutionCode?: string | null;
+      severity?: 'info' | 'warning' | 'critical' | null;
+      note?: string;
+    },
+    transferRequestId?: string | null,
+  ) {
+    if (!currentWorkspaceId) {
+      return;
+    }
+
+    try {
+      setErrorMessage(null);
+      await api.updateExceptionMetadata(currentWorkspaceId, exceptionId, input);
+      await Promise.all([
+        loadExceptionData(currentWorkspaceId),
+        loadReconciliationData(currentWorkspaceId, { silent: true }),
+        transferRequestId
+          ? loadReconciliationDetail(currentWorkspaceId, transferRequestId, { silent: true })
+          : Promise.resolve(),
+        route.name === 'workspaceOps'
+          ? loadOpsData(currentWorkspaceId)
+          : Promise.resolve(),
+      ]);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to update exception metadata');
+    }
+  }
+
+  async function handleDownloadReconciliationExport() {
+    if (!currentWorkspaceId) {
+      return;
+    }
+
+    try {
+      setErrorMessage(null);
+      await api.downloadReconciliationExport(currentWorkspaceId);
+      await loadOpsData(currentWorkspaceId);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to export reconciliation data');
+    }
+  }
+
+  async function handleDownloadExceptionsExport() {
+    if (!currentWorkspaceId) {
+      return;
+    }
+
+    try {
+      setErrorMessage(null);
+      await api.downloadExceptionsExport(currentWorkspaceId);
+      await loadOpsData(currentWorkspaceId);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to export exceptions');
+    }
+  }
+
+  async function handleDownloadAuditExport(transferRequestId: string) {
+    if (!currentWorkspaceId) {
+      return;
+    }
+
+    try {
+      setErrorMessage(null);
+      await api.downloadAuditExport(currentWorkspaceId, transferRequestId);
+      await loadOpsData(currentWorkspaceId);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to export audit timeline');
     }
   }
 
@@ -922,6 +1079,16 @@ export function App() {
 
   function handleOpenWorkspaceRequests(workspaceId: string) {
     navigate({ name: 'workspaceRequests', workspaceId }, setRoute);
+    resetViewport();
+  }
+
+  function handleOpenWorkspaceExceptions(workspaceId: string) {
+    navigate({ name: 'workspaceExceptions', workspaceId }, setRoute);
+    resetViewport();
+  }
+
+  function handleOpenWorkspaceOps(workspaceId: string) {
+    navigate({ name: 'workspaceOps', workspaceId }, setRoute);
     resetViewport();
   }
 
@@ -977,6 +1144,8 @@ export function App() {
                 || route.name === 'workspaceRegistry'
                 || route.name === 'workspacePolicy'
                 || route.name === 'workspaceRequests'
+                || route.name === 'workspaceExceptions'
+                || route.name === 'workspaceOps'
                   ? 'topbar-link is-active'
                   : 'topbar-link'
                 }
@@ -1087,6 +1256,20 @@ export function App() {
                   >
                     Expected transfers
                   </button>
+                  <button
+                    className={route.name === 'workspaceExceptions' ? 'rail-link is-active' : 'rail-link'}
+                    onClick={() => handleOpenWorkspaceExceptions(sidebarWorkspace.workspaceId)}
+                    type="button"
+                  >
+                    Exceptions
+                  </button>
+                  <button
+                    className={route.name === 'workspaceOps' ? 'rail-link is-active' : 'rail-link'}
+                    onClick={() => handleOpenWorkspaceOps(sidebarWorkspace.workspaceId)}
+                    type="button"
+                  >
+                    Ops
+                  </button>
                 </div>
               </div>
               ) : null}
@@ -1108,6 +1291,8 @@ export function App() {
                             || route.name === 'workspaceRegistry'
                             || route.name === 'workspacePolicy'
                             || route.name === 'workspaceRequests'
+                            || route.name === 'workspaceExceptions'
+                            || route.name === 'workspaceOps'
                           )
                             ? 'workspace-link is-active'
                             : 'workspace-link'
@@ -1170,6 +1355,7 @@ export function App() {
                 onApplyApprovalDecision={handleApprovalDecision}
                 onCreateExecutionRecord={handleCreateExecutionRecord}
                 onChangeReconciliationFilter={setReconciliationFilter}
+                onDownloadAuditExport={handleDownloadAuditExport}
                 onSelectObservedTransfer={handleSelectObservedTransfer}
                 onSelectReconciliation={(row) => void handleSelectReconciliation(row)}
                 onTransitionRequest={handleTransitionRequest}
@@ -1217,6 +1403,29 @@ export function App() {
                 onCreateTransferRequest={handleCreateTransferRequest}
                 reconciliationRows={reconciliationRows}
                 transferRequests={transferRequests}
+              />
+            ) : null}
+
+            {route.name === 'workspaceExceptions' && currentWorkspace ? (
+              <WorkspaceExceptionsPage
+                currentWorkspace={currentWorkspace}
+                exceptions={exceptions}
+                members={workspaceMembers}
+                onAddExceptionNote={handleAddExceptionNote}
+                onApplyExceptionAction={handleApplyExceptionAction}
+                onDownloadExceptionsExport={handleDownloadExceptionsExport}
+                onUpdateExceptionMetadata={handleUpdateExceptionMetadata}
+                reconciliationRows={reconciliationRows}
+              />
+            ) : null}
+
+            {route.name === 'workspaceOps' && currentWorkspace ? (
+              <WorkspaceOpsPage
+                currentWorkspace={currentWorkspace}
+                exportJobs={exportJobs}
+                onDownloadExceptionsExport={handleDownloadExceptionsExport}
+                onDownloadReconciliationExport={handleDownloadReconciliationExport}
+                opsHealth={opsHealth}
               />
             ) : null}
           </main>

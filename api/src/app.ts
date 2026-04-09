@@ -10,6 +10,7 @@ import { eventsRouter } from './routes/events.js';
 import { healthRouter } from './routes/health.js';
 import { internalRouter } from './routes/internal.js';
 import { organizationsRouter } from './routes/organizations.js';
+import { opsRouter } from './routes/ops.js';
 import { transferRequestsRouter } from './routes/transfer-requests.js';
 
 export function createApp() {
@@ -42,6 +43,7 @@ export function createApp() {
   app.use(requireAuth());
   app.use(addressLabelsRouter);
   app.use(organizationsRouter);
+  app.use(opsRouter);
   app.use(addressesRouter);
   app.use(approvalsRouter);
   app.use(destinationsRouter);

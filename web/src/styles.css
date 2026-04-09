@@ -1126,6 +1126,10 @@ textarea:focus {
   grid-template-columns: 1fr;
 }
 
+.content-grid-two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .content-grid-triple {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
@@ -2127,6 +2131,18 @@ textarea:focus {
   text-overflow: ellipsis;
 }
 
+.exception-queue-table .request-table-head,
+.exception-queue-table .request-table-row,
+.exception-queue-table .request-row-button {
+  grid-template-columns:
+    minmax(0, 1.45fr)
+    110px
+    130px
+    minmax(0, 1.2fr)
+    120px
+    120px;
+}
+
 .request-table-row.is-active {
   background: color-mix(in srgb, var(--accent-soft) 40%, transparent);
 }
@@ -3054,6 +3070,32 @@ textarea {
 
 .request-inspector-modal {
   width: min(1100px, 100%);
+}
+
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.export-history-table {
+  margin-top: var(--space-3);
+}
+
+.status-chip-healthy {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.status-chip-degraded {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--danger) 45%);
+  color: color-mix(in srgb, var(--accent) 55%, var(--danger) 45%);
+}
+
+.status-chip-stale,
+.status-chip-offline {
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 .transfer-inspector-sticky,

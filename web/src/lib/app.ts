@@ -11,7 +11,9 @@ export type Route =
   | { name: 'workspaceHome'; workspaceId: string }
   | { name: 'workspaceRegistry'; workspaceId: string }
   | { name: 'workspacePolicy'; workspaceId: string }
-  | { name: 'workspaceRequests'; workspaceId: string };
+  | { name: 'workspaceRequests'; workspaceId: string }
+  | { name: 'workspaceExceptions'; workspaceId: string }
+  | { name: 'workspaceOps'; workspaceId: string };
 export type Theme = 'dark' | 'light';
 export const THEME_STORAGE_KEY = 'usdc_ops.theme';
 
@@ -82,12 +84,14 @@ export function parseRoute(pathname: string): Route {
     return { name: 'organizationHome', organizationId: organizationMatch[1] };
   }
 
-  const workspaceMatch = pathname.match(/^\/workspaces\/([0-9a-f-]+)\/(home|setup|registry|policy|requests)$/i);
+  const workspaceMatch = pathname.match(/^\/workspaces\/([0-9a-f-]+)\/(home|setup|registry|policy|requests|exceptions|ops)$/i);
   if (workspaceMatch) {
     const [, workspaceId, page] = workspaceMatch;
     if (page === 'home') return { name: 'workspaceHome', workspaceId };
     if (page === 'policy') return { name: 'workspacePolicy', workspaceId };
     if (page === 'requests') return { name: 'workspaceRequests', workspaceId };
+    if (page === 'exceptions') return { name: 'workspaceExceptions', workspaceId };
+    if (page === 'ops') return { name: 'workspaceOps', workspaceId };
     return { name: 'workspaceRegistry', workspaceId };
   }
 
@@ -116,6 +120,10 @@ export function routeToPath(route: Route) {
       return `/workspaces/${route.workspaceId}/policy`;
     case 'workspaceRequests':
       return `/workspaces/${route.workspaceId}/requests`;
+    case 'workspaceExceptions':
+      return `/workspaces/${route.workspaceId}/exceptions`;
+    case 'workspaceOps':
+      return `/workspaces/${route.workspaceId}/ops`;
   }
 }
 

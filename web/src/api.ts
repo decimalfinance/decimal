@@ -4,9 +4,11 @@ import type {
   AuthenticatedSession,
   Counterparty,
   Destination,
+  ExportJob,
   ExceptionItem,
   ExceptionNote,
   LoginResponse,
+  OpsHealth,
   ObservedTransfer,
   ReconciliationDetail,
   OrganizationDirectoryItem,
@@ -15,6 +17,7 @@ import type {
   TransferRequest,
   TransferRequestNote,
   WorkspaceAddress,
+  WorkspaceMember,
   Workspace,
 } from './types';
 
@@ -56,6 +59,31 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>;
+}
+
+async function download(path: string) {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: {
+      ...(sessionToken ? { authorization: `Bearer ${sessionToken}` } : {}),
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`${response.status} ${response.statusText}`);
+  }
+
+  const blob = await response.blob();
+  const disposition = response.headers.get('content-disposition');
+  const fileNameMatch = disposition?.match(/filename=\"([^\"]+)\"/);
+  const fileName = fileNameMatch?.[1] ?? 'export.csv';
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(url);
 }
 
 export const api = {
@@ -121,6 +149,9 @@ export const api = {
   },
   listCounterparties(workspaceId: string) {
     return request<{ items: Counterparty[] }>(`/workspaces/${workspaceId}/counterparties`);
+  },
+  listWorkspaceMembers(workspaceId: string) {
+    return request<{ items: WorkspaceMember[] }>(`/workspaces/${workspaceId}/members`);
   },
   createCounterparty(
     workspaceId: string,
@@ -348,6 +379,24 @@ export const api = {
       `/workspaces/${workspaceId}/exceptions?limit=100`,
     );
   },
+  listExceptionsFiltered(
+    workspaceId: string,
+    input?: {
+      status?: string;
+      severity?: string;
+      assigneeUserId?: string;
+      reasonCode?: string;
+    },
+  ) {
+    const params = new URLSearchParams({ limit: '100' });
+    if (input?.status) params.set('status', input.status);
+    if (input?.severity) params.set('severity', input.severity);
+    if (input?.assigneeUserId) params.set('assigneeUserId', input.assigneeUserId);
+    if (input?.reasonCode) params.set('reasonCode', input.reasonCode);
+    return request<{ servedAt: string; items: ExceptionItem[] }>(
+      `/workspaces/${workspaceId}/exceptions?${params.toString()}`,
+    );
+  },
   applyExceptionAction(
     workspaceId: string,
     exceptionId: string,
@@ -366,6 +415,58 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(input),
     });
+  },
+  updateExceptionMetadata(
+    workspaceId: string,
+    exceptionId: string,
+    input: {
+      assignedToUserId?: string | null;
+      resolutionCode?: string | null;
+      severity?: 'info' | 'warning' | 'critical' | null;
+      note?: string;
+    },
+  ) {
+    return request<ExceptionItem>(`/workspaces/${workspaceId}/exceptions/${exceptionId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    });
+  },
+  listExportJobs(workspaceId: string) {
+    return request<{ items: ExportJob[] }>(`/workspaces/${workspaceId}/export-jobs`);
+  },
+  getOpsHealth(workspaceId: string) {
+    return request<OpsHealth>(`/workspaces/${workspaceId}/ops-health`);
+  },
+  downloadReconciliationExport(
+    workspaceId: string,
+    input?: {
+      displayState?: string;
+      requestStatus?: string;
+    },
+  ) {
+    const params = new URLSearchParams({ format: 'csv' });
+    if (input?.displayState) params.set('displayState', input.displayState);
+    if (input?.requestStatus) params.set('requestStatus', input.requestStatus);
+    return download(`/workspaces/${workspaceId}/exports/reconciliation?${params.toString()}`);
+  },
+  downloadExceptionsExport(
+    workspaceId: string,
+    input?: {
+      status?: string;
+      severity?: string;
+      assigneeUserId?: string;
+      reasonCode?: string;
+    },
+  ) {
+    const params = new URLSearchParams({ format: 'csv' });
+    if (input?.status) params.set('status', input.status);
+    if (input?.severity) params.set('severity', input.severity);
+    if (input?.assigneeUserId) params.set('assigneeUserId', input.assigneeUserId);
+    if (input?.reasonCode) params.set('reasonCode', input.reasonCode);
+    return download(`/workspaces/${workspaceId}/exports/exceptions?${params.toString()}`);
+  },
+  downloadAuditExport(workspaceId: string, transferRequestId: string) {
+    return download(`/workspaces/${workspaceId}/exports/audit/${transferRequestId}?format=csv`);
   },
   listTransferRequests(workspaceId: string) {
     return request<{ items: TransferRequest[] }>(`/workspaces/${workspaceId}/transfer-requests`);

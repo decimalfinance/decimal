@@ -10,6 +10,7 @@ import {
   getReconciliationDetail,
   listReconciliationQueue,
   listWorkspaceExceptions,
+  updateExceptionMetadata,
 } from '../reconciliation.js';
 import {
   REQUEST_STATUSES,
@@ -43,6 +44,8 @@ const exceptionsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(100),
   status: z.enum(['open', 'reviewed', 'expected', 'dismissed', 'reopened']).optional(),
   severity: z.string().optional(),
+  assigneeUserId: z.string().uuid().optional(),
+  reasonCode: z.string().trim().min(1).optional(),
 });
 
 const exceptionActionSchema = z.object({
@@ -52,6 +55,13 @@ const exceptionActionSchema = z.object({
 
 const exceptionNoteSchema = z.object({
   body: z.string().trim().min(1).max(5000),
+});
+
+const exceptionMetadataSchema = z.object({
+  assignedToUserId: z.string().uuid().nullable().optional(),
+  resolutionCode: z.string().trim().min(1).max(200).nullable().optional(),
+  severity: z.enum(['info', 'warning', 'critical']).nullable().optional(),
+  note: z.string().trim().min(1).max(5000).optional(),
 });
 
 type ObservedTransferRow = {
@@ -240,12 +250,55 @@ eventsRouter.get('/workspaces/:workspaceId/exceptions', async (req, res, next) =
       limit: query.limit,
       status: query.status,
       severity: query.severity,
+      assigneeUserId: query.assigneeUserId,
+      reasonCode: query.reasonCode,
     });
 
     res.json({
       servedAt: new Date().toISOString(),
       items,
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+eventsRouter.patch('/workspaces/:workspaceId/exceptions/:exceptionId', async (req, res, next) => {
+  try {
+    const { workspaceId, exceptionId } = exceptionParamsSchema.parse(req.params);
+    const input = exceptionMetadataSchema.parse(req.body);
+    const access = await assertWorkspaceAccess(workspaceId, req.auth!.userId);
+
+    if (input.assignedToUserId) {
+      const membership = await prisma.organizationMembership.findUnique({
+        where: {
+          organizationId_userId: {
+            organizationId: access.workspace.organizationId,
+            userId: input.assignedToUserId,
+          },
+        },
+        select: {
+          membershipId: true,
+          status: true,
+        },
+      });
+
+      if (!membership || membership.status !== 'active') {
+        throw new Error('Assignee must be an active member of this organization');
+      }
+    }
+
+    const updated = await updateExceptionMetadata({
+      workspaceId,
+      exceptionId,
+      actorUserId: req.auth!.userId,
+      assignedToUserId: input.assignedToUserId,
+      resolutionCode: input.resolutionCode,
+      severity: input.severity,
+      note: input.note,
+    });
+
+    res.json(updated);
   } catch (error) {
     next(error);
   }

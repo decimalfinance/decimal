@@ -34,8 +34,10 @@ model User {
   transferRequestNotes      TransferRequestNote[]
   exceptionNotes            ExceptionNote[]
   exceptionStatesUpdated    ExceptionState[]
+  exceptionStatesAssigned   ExceptionState[] @relation("ExceptionStateAssignee")
   approvalDecisions         ApprovalDecision[]
   executionRecords          ExecutionRecord[] @relation("ExecutionRecordExecutorUser")
+  exportJobs                ExportJob[]
 
   @@map("users")
 }
@@ -87,6 +89,7 @@ model Workspace {
   transferRequestNotes  TransferRequestNote[]
   exceptionNotes       ExceptionNote[]
   exceptionStates      ExceptionState[]
+  exportJobs           ExportJob[]
 
   @@map("workspaces")
 }
@@ -312,14 +315,36 @@ model ExceptionState {
   exceptionId      String    @db.Uuid @map("exception_id")
   status           String
   updatedByUserId  String?   @db.Uuid @map("updated_by_user_id")
+  assignedToUserId String?   @db.Uuid @map("assigned_to_user_id")
+  resolutionCode   String?   @map("resolution_code")
+  severity         String?   @map("severity")
   createdAt        DateTime  @default(now()) @db.Timestamptz(6) @map("created_at")
   updatedAt        DateTime  @updatedAt @db.Timestamptz(6) @map("updated_at")
   workspace        Workspace @relation(fields: [workspaceId], references: [workspaceId], onDelete: Cascade)
   updatedByUser    User?     @relation(fields: [updatedByUserId], references: [userId], onDelete: SetNull)
+  assignedToUser   User?     @relation("ExceptionStateAssignee", fields: [assignedToUserId], references: [userId], onDelete: SetNull)
 
   @@unique([workspaceId, exceptionId])
   @@index([workspaceId, status, updatedAt(sort: Desc)])
   @@map("exception_states")
+}
+
+model ExportJob {
+  exportJobId       String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("export_job_id")
+  workspaceId       String    @db.Uuid @map("workspace_id")
+  requestedByUserId String?   @db.Uuid @map("requested_by_user_id")
+  exportKind        String    @map("export_kind")
+  format            String
+  status            String    @default("completed")
+  rowCount          Int       @default(0) @map("row_count")
+  filterJson        Json      @default("{}") @map("filter_json")
+  createdAt         DateTime  @default(now()) @db.Timestamptz(6) @map("created_at")
+  completedAt       DateTime? @db.Timestamptz(6) @map("completed_at")
+  workspace         Workspace @relation(fields: [workspaceId], references: [workspaceId], onDelete: Cascade)
+  requestedByUser   User?     @relation(fields: [requestedByUserId], references: [userId], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@map("export_jobs")
 }
 
 model AddressLabel {

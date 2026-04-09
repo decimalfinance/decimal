@@ -1,0 +1,43 @@
+- generic [ref=e93]:
+  - banner [ref=e94]:
+    - generic [ref=e95]:
+      - strong [ref=e96]: "[project name]"
+      - generic [ref=e97]: personal view
+    - navigation "Global navigation" [ref=e98]:
+      - button "Dashboard" [ref=e99] [cursor=pointer]
+      - button "Orgs" [ref=e100] [cursor=pointer]
+      - button "Profile" [ref=e101] [cursor=pointer]
+    - generic [ref=e102]:
+      - button "Switch to light mode" [ref=e103] [cursor=pointer]:
+        - img [ref=e104]
+      - generic [ref=e106]: Ops
+      - button "Logout" [ref=e107] [cursor=pointer]
+  - main [ref=e109]:
+    - generic [ref=e110]:
+      - generic [ref=e111]:
+        - generic [ref=e112]:
+          - paragraph [ref=e113]: Dashboard
+          - heading "Welcome back, Ops." [level=1] [ref=e114]
+        - generic [ref=e115]:
+          - generic [ref=e116]:
+            - strong [ref=e117]: "00"
+            - text: Orgs
+          - generic [ref=e118]:
+            - strong [ref=e119]: "00"
+            - text: Workspaces
+      - generic [ref=e120]:
+        - generic [ref=e121]:
+          - generic [ref=e123]:
+            - paragraph [ref=e124]: Organizations
+            - heading "Your access" [level=2] [ref=e125]
+          - generic [ref=e127]:
+            - text: You are not part of any organization yet.
+            - button "Open orgs" [ref=e128] [cursor=pointer]
+        - generic [ref=e129]:
+          - generic [ref=e130]:
+            - generic [ref=e131]:
+              - paragraph [ref=e132]: Operator path
+              - heading "Start from a live system" [level=2] [ref=e133]
+              - paragraph [ref=e134]: Open a workspace when you want to watch requests, approvals, execution, and actual settlement in one place.
+            - button "manage orgs" [ref=e135] [cursor=pointer]
+          - generic [ref=e137]: No workspaces yet. Create an organization and spin up a desk when you are ready to monitor a real flow.

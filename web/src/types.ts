@@ -21,6 +21,13 @@ export type OrganizationMembership = {
   workspaces: Workspace[];
 };
 
+export type WorkspaceMember = {
+  membershipId: string;
+  role: string;
+  status: string;
+  user: User;
+};
+
 export type OrganizationDirectoryItem = {
   organizationId: string;
   organizationName: string;
@@ -322,6 +329,9 @@ export type ExceptionItem = {
   reasonCode: string;
   severity: string;
   status: string;
+  resolutionCode: string | null;
+  assignedToUserId: string | null;
+  assignedToUser: User | null;
   explanation: string;
   propertiesJson: Record<string, unknown> | string | null;
   observedEventTime: string | null;
@@ -388,6 +398,29 @@ export type ReconciliationTimelineItem =
       authorUser: User | null;
     }
   | {
+      timelineType: 'approval_decision';
+      createdAt: string;
+      action: string;
+      comment: string | null;
+      actorUser: User | null;
+      payloadJson: Record<string, unknown>;
+    }
+  | {
+      timelineType: 'execution_record';
+      createdAt: string;
+      state: string;
+      executionSource: string;
+      submittedSignature: string | null;
+      executorUser: User | null;
+    }
+  | {
+      timelineType: 'observed_execution';
+      createdAt: string;
+      signature: string;
+      slot: number;
+      status: string;
+    }
+  | {
       timelineType: 'match_result';
       createdAt: string;
       matchStatus: string;
@@ -420,4 +453,37 @@ export type ReconciliationDetail = ReconciliationRow & {
   notes: TransferRequestNote[];
   timeline: ReconciliationTimelineItem[];
   availableTransitions: string[];
+};
+
+export type ExportJob = {
+  exportJobId: string;
+  workspaceId: string;
+  requestedByUserId: string | null;
+  exportKind: string;
+  format: 'csv' | 'json';
+  status: string;
+  rowCount: number;
+  filterJson: Record<string, unknown>;
+  createdAt: string;
+  completedAt: string | null;
+  requestedByUser: User | null;
+};
+
+export type OpsHealth = {
+  postgres: string;
+  workerStatus: 'healthy' | 'degraded' | 'stale' | 'offline';
+  latestSlot: number | null;
+  latestEventTime: string | null;
+  latestWorkerReceivedAt: string | null;
+  latestTxWriteAt: string | null;
+  latestMatchAt: string | null;
+  workerFreshnessMs: number | null;
+  observedTransactionCount: number;
+  matchCount: number;
+  openExceptionCount: number;
+  latencies: {
+    yellowstoneToWorkerMs: { p50: number | null; p95: number | null };
+    chainToWriteMs: { p50: number | null; p95: number | null };
+    chainToMatchMs: { p50: number | null; p95: number | null };
+  };
 };

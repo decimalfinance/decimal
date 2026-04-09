@@ -58,6 +58,18 @@ type ExecutionRecordWithRelations = ExecutionRecord & {
   executorUser: Pick<User, 'userId' | 'email' | 'displayName'> | null;
 };
 
+type ExceptionStateOverlay = {
+  exceptionId: string;
+  status: string;
+  updatedAt: Date;
+  resolutionCode: string | null;
+  severity: string | null;
+  assignedToUserId: string | null;
+  assignedToUser: Pick<User, 'userId' | 'email' | 'displayName'> | null;
+};
+
+type PrismaQueryClient = typeof prisma | Prisma.TransactionClient;
+
 export type SettlementMatchRow = {
   transfer_request_id: string;
   signature: string | null;
@@ -78,6 +90,172 @@ export type SettlementMatchRow = {
   chain_to_match_ms?: string | number | null;
 };
 
+function asUuidSql(value: string | null | undefined) {
+  return value ? Prisma.sql`CAST(${value} AS uuid)` : Prisma.sql`NULL`;
+}
+
+async function queryExceptionStateRecord(
+  client: PrismaQueryClient,
+  workspaceId: string,
+  exceptionId: string,
+): Promise<ExceptionStateOverlay | null> {
+  const rows = await client.$queryRaw<
+    Array<{
+      exceptionId: string;
+      status: string;
+      updatedAt: Date;
+      resolutionCode: string | null;
+      severity: string | null;
+      assignedToUserId: string | null;
+      assignedUserId: string | null;
+      assignedUserEmail: string | null;
+      assignedUserDisplayName: string | null;
+    }>
+  >(Prisma.sql`
+    SELECT
+      es.exception_id AS "exceptionId",
+      es.status,
+      es.updated_at AS "updatedAt",
+      es.resolution_code AS "resolutionCode",
+      es.severity,
+      es.assigned_to_user_id AS "assignedToUserId",
+      u.user_id AS "assignedUserId",
+      u.email AS "assignedUserEmail",
+      u.display_name AS "assignedUserDisplayName"
+    FROM exception_states es
+    LEFT JOIN users u
+      ON u.user_id = es.assigned_to_user_id
+    WHERE es.workspace_id = CAST(${workspaceId} AS uuid)
+      AND es.exception_id = CAST(${exceptionId} AS uuid)
+    LIMIT 1
+  `);
+
+  const row = rows[0] ?? null;
+  if (!row) {
+    return null;
+  }
+
+  return {
+    exceptionId: row.exceptionId,
+    status: row.status,
+    updatedAt: row.updatedAt,
+    resolutionCode: row.resolutionCode,
+    severity: row.severity,
+    assignedToUserId: row.assignedToUserId,
+    assignedToUser: row.assignedUserId
+      ? {
+          userId: row.assignedUserId,
+          email: row.assignedUserEmail ?? '',
+          displayName: row.assignedUserDisplayName ?? '',
+        }
+      : null,
+  };
+}
+
+async function queryExceptionStateRecords(
+  client: PrismaQueryClient,
+  workspaceId: string,
+  exceptionIds: string[],
+): Promise<ExceptionStateOverlay[]> {
+  if (!exceptionIds.length) {
+    return [];
+  }
+
+  const idList = Prisma.join(exceptionIds.map((id) => Prisma.sql`CAST(${id} AS uuid)`));
+  const rows = await client.$queryRaw<
+    Array<{
+      exceptionId: string;
+      status: string;
+      updatedAt: Date;
+      resolutionCode: string | null;
+      severity: string | null;
+      assignedToUserId: string | null;
+      assignedUserId: string | null;
+      assignedUserEmail: string | null;
+      assignedUserDisplayName: string | null;
+    }>
+  >(Prisma.sql`
+    SELECT
+      es.exception_id AS "exceptionId",
+      es.status,
+      es.updated_at AS "updatedAt",
+      es.resolution_code AS "resolutionCode",
+      es.severity,
+      es.assigned_to_user_id AS "assignedToUserId",
+      u.user_id AS "assignedUserId",
+      u.email AS "assignedUserEmail",
+      u.display_name AS "assignedUserDisplayName"
+    FROM exception_states es
+    LEFT JOIN users u
+      ON u.user_id = es.assigned_to_user_id
+    WHERE es.workspace_id = CAST(${workspaceId} AS uuid)
+      AND es.exception_id IN (${idList})
+  `);
+
+  return rows.map((row) => ({
+    exceptionId: row.exceptionId,
+    status: row.status,
+    updatedAt: row.updatedAt,
+    resolutionCode: row.resolutionCode,
+    severity: row.severity,
+    assignedToUserId: row.assignedToUserId,
+    assignedToUser: row.assignedUserId
+      ? {
+          userId: row.assignedUserId,
+          email: row.assignedUserEmail ?? '',
+          displayName: row.assignedUserDisplayName ?? '',
+        }
+      : null,
+  }));
+}
+
+async function upsertExceptionStateRecord(
+  client: PrismaQueryClient,
+  args: {
+    workspaceId: string;
+    exceptionId: string;
+    status: string;
+    updatedByUserId: string;
+    assignedToUserId: string | null;
+    resolutionCode: string | null;
+    severity: string | null;
+  },
+): Promise<ExceptionStateOverlay> {
+  await client.$executeRaw(Prisma.sql`
+    INSERT INTO exception_states (
+      workspace_id,
+      exception_id,
+      status,
+      updated_by_user_id,
+      assigned_to_user_id,
+      resolution_code,
+      severity
+    )
+    VALUES (
+      CAST(${args.workspaceId} AS uuid),
+      CAST(${args.exceptionId} AS uuid),
+      ${args.status},
+      CAST(${args.updatedByUserId} AS uuid),
+      ${asUuidSql(args.assignedToUserId)},
+      ${args.resolutionCode},
+      ${args.severity}
+    )
+    ON CONFLICT (workspace_id, exception_id) DO UPDATE SET
+      status = EXCLUDED.status,
+      updated_by_user_id = EXCLUDED.updated_by_user_id,
+      assigned_to_user_id = EXCLUDED.assigned_to_user_id,
+      resolution_code = EXCLUDED.resolution_code,
+      severity = EXCLUDED.severity,
+      updated_at = now()
+  `);
+
+  const state = await queryExceptionStateRecord(client, args.workspaceId, args.exceptionId);
+  if (!state) {
+    throw new Error('Exception state write failed');
+  }
+  return state;
+}
+
 export type ExceptionRow = {
   exception_id: string;
   transfer_request_id: string | null;
@@ -93,6 +271,11 @@ export type ExceptionRow = {
   created_at: string;
   updated_at: string;
   chain_to_process_ms?: string | number | null;
+  assigned_to_user_id?: string | null;
+  assigned_to_user_email?: string | null;
+  assigned_to_user_display_name?: string | null;
+  resolution_code?: string | null;
+  severity_override?: string | null;
 };
 
 type ObservedTransferRow = {
@@ -487,6 +670,9 @@ export async function getReconciliationDetail(workspaceId: string, transferReque
     timeline: buildTimeline({
       events: (requestWithTimeline.events ?? []).map((event) => parseTransferRequestEvent(event)),
       notes: (requestWithTimeline.notes ?? []).map(serializeTransferRequestNote),
+      approvalDecisions: (requestWithTimeline.approvalDecisions ?? []).map(serializeApprovalDecision),
+      executionRecords: queueItem.executionRecords,
+      observedExecutionTransaction,
       match: queueItem.match,
       exceptions: enrichedExceptions,
     }),
@@ -513,23 +699,16 @@ export async function applyExceptionAction(args: {
 
   const nextStatus = getTargetExceptionStatusForAction(action);
   const updatedExceptionState = await prisma.$transaction(async (tx) => {
-    const state = await tx.exceptionState.upsert({
-      where: {
-        workspaceId_exceptionId: {
-          workspaceId,
-          exceptionId,
-        },
-      },
-      update: {
-        status: nextStatus,
-        updatedByUserId: actorUserId,
-      },
-      create: {
-        workspaceId,
-        exceptionId,
-        status: nextStatus,
-        updatedByUserId: actorUserId,
-      },
+    const existingState = await queryExceptionStateRecord(tx, workspaceId, exceptionId);
+
+    const state = await upsertExceptionStateRecord(tx, {
+      workspaceId,
+      exceptionId,
+      status: nextStatus,
+      updatedByUserId: actorUserId,
+      assignedToUserId: existingState?.assignedToUserId ?? null,
+      resolutionCode: action === 'reopen' ? null : existingState?.resolutionCode ?? null,
+      severity: existingState?.severity ?? null,
     });
 
     if (note?.trim()) {
@@ -565,6 +744,79 @@ export async function applyExceptionAction(args: {
             exceptionId,
             exceptionAction: action,
             exceptionStatus: nextStatus,
+          },
+        });
+      }
+    }
+
+    return state;
+  });
+
+  return serializeException(applyExceptionStateOverlay(exception, updatedExceptionState));
+}
+
+export async function updateExceptionMetadata(args: {
+  workspaceId: string;
+  exceptionId: string;
+  actorUserId: string;
+  assignedToUserId?: string | null;
+  resolutionCode?: string | null;
+  severity?: string | null;
+  note?: string;
+}) {
+  const exception = await queryExceptionById(args.workspaceId, args.exceptionId);
+  if (!exception) {
+    throw new Error('Exception not found');
+  }
+
+  const updatedExceptionState = await prisma.$transaction(async (tx) => {
+    const existingState = await queryExceptionStateRecord(tx, args.workspaceId, args.exceptionId);
+    const state = await upsertExceptionStateRecord(tx, {
+      workspaceId: args.workspaceId,
+      exceptionId: args.exceptionId,
+      status: existingState?.status ?? exception.status,
+      updatedByUserId: args.actorUserId,
+      assignedToUserId:
+        args.assignedToUserId !== undefined ? args.assignedToUserId : existingState?.assignedToUserId ?? null,
+      resolutionCode:
+        args.resolutionCode !== undefined ? args.resolutionCode : existingState?.resolutionCode ?? null,
+      severity: args.severity !== undefined ? args.severity : existingState?.severity ?? null,
+    });
+
+    if (args.note?.trim()) {
+      await tx.exceptionNote.create({
+        data: {
+          workspaceId: args.workspaceId,
+          exceptionId: args.exceptionId,
+          authorUserId: args.actorUserId,
+          body: args.note.trim(),
+        },
+      });
+    }
+
+    if (exception.transfer_request_id) {
+      const request = await tx.transferRequest.findUnique({
+        where: { transferRequestId: exception.transfer_request_id },
+        select: { transferRequestId: true, status: true },
+      });
+
+      if (request) {
+        await createTransferRequestEvent(tx, {
+          transferRequestId: request.transferRequestId,
+          workspaceId: args.workspaceId,
+          eventType: 'exception_metadata_updated',
+          actorType: 'user',
+          actorId: args.actorUserId,
+          eventSource: 'user',
+          beforeState: request.status,
+          afterState: request.status,
+          linkedSignature: exception.signature,
+          linkedTransferIds: exception.observed_transfer_id ? [exception.observed_transfer_id] : [],
+          payloadJson: {
+            exceptionId: args.exceptionId,
+            assignedToUserId: args.assignedToUserId,
+            resolutionCode: args.resolutionCode,
+            severity: args.severity,
           },
         });
       }
@@ -640,15 +892,28 @@ export async function listWorkspaceExceptions(args: {
   limit?: number;
   status?: string;
   severity?: string;
+  assigneeUserId?: string;
+  reasonCode?: string;
 }) {
   const rows = await queryExceptionsByWorkspace({
     workspaceId: args.workspaceId,
-    severity: args.severity,
   });
 
-  const filtered = args.status
-    ? rows.filter((row) => row.status === args.status)
-    : rows;
+  const filtered = rows.filter((row) => {
+    if (args.status && row.status !== args.status) {
+      return false;
+    }
+    if (args.severity && (row.severity_override ?? row.severity) !== args.severity) {
+      return false;
+    }
+    if (args.assigneeUserId && (row.assigned_to_user_id ?? null) !== args.assigneeUserId) {
+      return false;
+    }
+    if (args.reasonCode && normalizeExceptionReasonCode(row.exception_type) !== args.reasonCode) {
+      return false;
+    }
+    return true;
+  });
 
   return filtered.slice(0, args.limit ?? 100).map(serializeException);
 }
@@ -871,17 +1136,21 @@ function serializeApprovalDecision(
     comment: decision.comment,
     payloadJson: decision.payloadJson,
     createdAt: decision.createdAt,
-    actorUser: decision.actorUser
-      ? {
-          userId: decision.actorUser.userId,
-          email: decision.actorUser.email,
-          displayName: decision.actorUser.displayName,
-        }
-      : null,
+    actorUser: serializeUserRef(decision.actorUser),
     approvalPolicy: decision.approvalPolicy
       ? serializeApprovalPolicy(decision.approvalPolicy)
       : null,
   };
+}
+
+function serializeUserRef(user: Pick<User, 'userId' | 'email' | 'displayName'> | null | undefined) {
+  return user
+    ? {
+        userId: user.userId,
+        email: user.email,
+        displayName: user.displayName,
+      }
+    : null;
 }
 
 function serializeWorkspaceAddress(address: WorkspaceAddress) {
@@ -979,13 +1248,7 @@ export function serializeTransferRequestNote(
     workspaceId: note.workspaceId,
     body: note.body,
     createdAt: note.createdAt,
-    authorUser: note.authorUser
-      ? {
-          userId: note.authorUser.userId,
-          email: note.authorUser.email,
-          displayName: note.authorUser.displayName,
-        }
-      : null,
+    authorUser: serializeUserRef(note.authorUser),
   };
 }
 
@@ -1008,19 +1271,16 @@ function serializeExceptionNote(
     workspaceId: note.workspaceId,
     body: note.body,
     createdAt: note.createdAt,
-    authorUser: note.authorUser
-      ? {
-          userId: note.authorUser.userId,
-          email: note.authorUser.email,
-          displayName: note.authorUser.displayName,
-        }
-      : null,
+    authorUser: serializeUserRef(note.authorUser),
   };
 }
 
 export function buildTimeline(args: {
   events: ReturnType<typeof parseTransferRequestEvent>[];
   notes: ReturnType<typeof serializeTransferRequestNote>[];
+  approvalDecisions: ReturnType<typeof serializeApprovalDecision>[];
+  executionRecords: ReturnType<typeof serializeExecutionRecord>[];
+  observedExecutionTransaction: ReturnType<typeof serializeObservedTransaction> | null;
   match: ReturnType<typeof serializeMatch> | null;
   exceptions: Array<ReturnType<typeof serializeException> & { notes?: ReturnType<typeof serializeExceptionNote>[] }>;
 }) {
@@ -1045,6 +1305,33 @@ export function buildTimeline(args: {
       body: note.body,
       authorUser: note.authorUser,
     })),
+    ...args.approvalDecisions.map((decision) => ({
+      timelineType: 'approval_decision' as const,
+      createdAt: decision.createdAt,
+      action: decision.action,
+      comment: decision.comment,
+      actorUser: decision.actorUser,
+      payloadJson: decision.payloadJson,
+    })),
+    ...args.executionRecords.map((record) => ({
+      timelineType: 'execution_record' as const,
+      createdAt: record.updatedAt,
+      state: record.state,
+      executionSource: record.executionSource,
+      submittedSignature: record.submittedSignature,
+      executorUser: record.executorUser,
+    })),
+    ...(args.observedExecutionTransaction
+      ? [
+          {
+            timelineType: 'observed_execution' as const,
+            createdAt: args.observedExecutionTransaction.createdAt,
+            signature: args.observedExecutionTransaction.signature,
+            slot: args.observedExecutionTransaction.slot,
+            status: args.observedExecutionTransaction.status,
+          },
+        ]
+      : []),
     ...(args.match
       ? [
           {
@@ -1109,8 +1396,18 @@ export function serializeException(row: ExceptionRow) {
     observedTransferId: row.observed_transfer_id,
     exceptionType: row.exception_type,
     reasonCode: normalizeExceptionReasonCode(row.exception_type),
-    severity: row.severity,
+    severity: row.severity_override ?? row.severity,
     status: row.status,
+    resolutionCode: row.resolution_code ?? null,
+    assignedToUserId: row.assigned_to_user_id ?? null,
+    assignedToUser:
+      row.assigned_to_user_id || row.assigned_to_user_email || row.assigned_to_user_display_name
+        ? {
+            userId: row.assigned_to_user_id ?? '',
+            email: row.assigned_to_user_email ?? '',
+            displayName: row.assigned_to_user_display_name ?? '',
+          }
+        : null,
     explanation: row.explanation,
     propertiesJson: safeJsonParse(row.properties_json),
     observedEventTime: normalizeClickHouseDateTime(row.observed_event_time),
@@ -1150,6 +1447,10 @@ function applyExceptionStateOverlay(
   state: {
     status: string;
     updatedAt: Date;
+    resolutionCode: string | null;
+    severity: string | null;
+    assignedToUserId: string | null;
+    assignedToUser: Pick<User, 'userId' | 'email' | 'displayName'> | null;
   } | null,
 ): ExceptionRow {
   if (!state) {
@@ -1163,33 +1464,20 @@ function applyExceptionStateOverlay(
     processed_at: updatedAt,
     updated_at: updatedAt,
     chain_to_process_ms: null,
+    resolution_code: state.resolutionCode,
+    severity_override: state.severity,
+    assigned_to_user_id: state.assignedToUserId,
+    assigned_to_user_email: state.assignedToUser?.email ?? null,
+    assigned_to_user_display_name: state.assignedToUser?.displayName ?? null,
   };
 }
 
 async function getExceptionStateMap(workspaceId: string, exceptionIds: string[]) {
   if (!exceptionIds.length) {
-    return new Map<
-      string,
-      {
-        status: string;
-        updatedAt: Date;
-      }
-    >();
+    return new Map<string, ExceptionStateOverlay>();
   }
 
-  const states = await prisma.exceptionState.findMany({
-    where: {
-      workspaceId,
-      exceptionId: {
-        in: exceptionIds,
-      },
-    },
-    select: {
-      exceptionId: true,
-      status: true,
-      updatedAt: true,
-    },
-  });
+  const states = await queryExceptionStateRecords(prisma, workspaceId, exceptionIds);
 
   return new Map(
     states.map((state) => [
@@ -1197,6 +1485,10 @@ async function getExceptionStateMap(workspaceId: string, exceptionIds: string[])
       {
         status: state.status,
         updatedAt: state.updatedAt,
+        resolutionCode: state.resolutionCode,
+        severity: state.severity,
+        assignedToUserId: state.assignedToUserId,
+        assignedToUser: state.assignedToUser,
       },
     ]),
   );
@@ -1303,30 +1595,15 @@ async function queryExceptionById(workspaceId: string, exceptionId: string) {
     return null;
   }
 
-  const state = await prisma.exceptionState.findUnique({
-    where: {
-      workspaceId_exceptionId: {
-        workspaceId,
-        exceptionId,
-      },
-    },
-    select: {
-      status: true,
-      updatedAt: true,
-    },
-  });
+  const state = await queryExceptionStateRecord(prisma, workspaceId, exceptionId);
 
   return applyExceptionStateOverlay(row, state);
 }
 
 async function queryExceptionsByWorkspace(args: {
   workspaceId: string;
-  severity?: string;
 }) {
   const clauses = [`workspace_id = toUUID('${args.workspaceId}')`];
-  if (args.severity) {
-    clauses.push(`severity = '${escapeClickHouseString(args.severity)}'`);
-  }
 
   const rows = await queryClickHouse<ExceptionRow>(`
     SELECT

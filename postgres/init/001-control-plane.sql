@@ -158,9 +158,26 @@ CREATE TABLE IF NOT EXISTS exception_states
   exception_id UUID NOT NULL,
   status TEXT NOT NULL,
   updated_by_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
+  assigned_to_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
+  resolution_code TEXT,
+  severity TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (workspace_id, exception_id)
+);
+
+CREATE TABLE IF NOT EXISTS export_jobs
+(
+  export_job_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+  requested_by_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
+  export_kind TEXT NOT NULL,
+  format TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'completed',
+  row_count INTEGER NOT NULL DEFAULT 0,
+  filter_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  completed_at TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS address_labels
@@ -187,6 +204,15 @@ ALTER TABLE transfer_requests
 
 ALTER TABLE transfer_requests
   ADD COLUMN IF NOT EXISTS destination_workspace_address_id UUID;
+
+ALTER TABLE exception_states
+  ADD COLUMN IF NOT EXISTS assigned_to_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL;
+
+ALTER TABLE exception_states
+  ADD COLUMN IF NOT EXISTS resolution_code TEXT;
+
+ALTER TABLE exception_states
+  ADD COLUMN IF NOT EXISTS severity TEXT;
 
 CREATE TABLE IF NOT EXISTS counterparties
 (
