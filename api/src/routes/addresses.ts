@@ -40,6 +40,28 @@ const updateAddressSchema = z.object({
   'At least one field must be updated',
 );
 
+async function assertWalletNameAvailable(
+  workspaceId: string,
+  displayName: string,
+  excludeWorkspaceAddressId?: string,
+) {
+  const existing = await prisma.workspaceAddress.findFirst({
+    where: {
+      workspaceId,
+      displayName: {
+        equals: displayName,
+        mode: 'insensitive',
+      },
+      ...(excludeWorkspaceAddressId ? { workspaceAddressId: { not: excludeWorkspaceAddressId } } : {}),
+    },
+    select: { workspaceAddressId: true },
+  });
+
+  if (existing) {
+    throw new Error(`Wallet name "${displayName}" already exists in this workspace`);
+  }
+}
+
 addressesRouter.get('/workspaces/:workspaceId/addresses', async (req, res, next) => {
   try {
     const { workspaceId } = workspaceParamsSchema.parse(req.params);
@@ -60,6 +82,9 @@ addressesRouter.post('/workspaces/:workspaceId/addresses', async (req, res, next
     await assertWorkspaceAdmin(workspaceId, req.auth!.userId);
     const input = createAddressSchema.parse(req.body);
     const displayName = input.displayName?.trim() || null;
+    if (displayName) {
+      await assertWalletNameAvailable(workspaceId, displayName);
+    }
     const addressKind = input.addressKind ?? 'wallet';
     const usdcAtaAddress = deriveUsdcAtaForWallet(input.address);
 
@@ -105,6 +130,12 @@ addressesRouter.patch(
 
       const nextAddress = input.address?.trim() || current.address;
       const nextUsdcAtaAddress = deriveUsdcAtaForWallet(nextAddress);
+      const nextDisplayName =
+        input.displayName !== undefined ? input.displayName.trim() || null : current.displayName;
+
+      if (nextDisplayName) {
+        await assertWalletNameAvailable(workspaceId, nextDisplayName, workspaceAddressId);
+      }
 
       const updated = await prisma.$transaction(async (tx) => {
         const address = await tx.workspaceAddress.update({
@@ -112,7 +143,7 @@ addressesRouter.patch(
           data: {
             address: nextAddress,
             usdcAtaAddress: nextUsdcAtaAddress,
-            displayName: input.displayName !== undefined ? input.displayName.trim() || null : undefined,
+            displayName: nextDisplayName,
             notes: input.notes !== undefined ? input.notes.trim() || null : undefined,
             isActive: input.isActive,
             propertiesJson: {

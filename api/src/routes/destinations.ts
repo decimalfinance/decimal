@@ -69,6 +69,50 @@ const updateDestinationSchema = z.object({
   'At least one field must be updated',
 );
 
+async function assertCounterpartyNameAvailable(
+  organizationId: string,
+  displayName: string,
+  excludeCounterpartyId?: string,
+) {
+  const existing = await prisma.counterparty.findFirst({
+    where: {
+      organizationId,
+      displayName: {
+        equals: displayName,
+        mode: 'insensitive',
+      },
+      ...(excludeCounterpartyId ? { counterpartyId: { not: excludeCounterpartyId } } : {}),
+    },
+    select: { counterpartyId: true },
+  });
+
+  if (existing) {
+    throw new Error(`Counterparty name "${displayName}" already exists in this organization`);
+  }
+}
+
+async function assertDestinationLabelAvailable(
+  workspaceId: string,
+  label: string,
+  excludeDestinationId?: string,
+) {
+  const existing = await prisma.destination.findFirst({
+    where: {
+      workspaceId,
+      label: {
+        equals: label,
+        mode: 'insensitive',
+      },
+      ...(excludeDestinationId ? { destinationId: { not: excludeDestinationId } } : {}),
+    },
+    select: { destinationId: true },
+  });
+
+  if (existing) {
+    throw new Error(`Destination name "${label}" already exists in this workspace`);
+  }
+}
+
 destinationsRouter.get('/workspaces/:workspaceId/counterparties', async (req, res, next) => {
   try {
     const { workspaceId } = workspaceParamsSchema.parse(req.params);
@@ -98,6 +142,7 @@ destinationsRouter.post('/workspaces/:workspaceId/counterparties', async (req, r
       where: { workspaceId },
       select: { organizationId: true },
     });
+    await assertCounterpartyNameAvailable(workspace.organizationId, input.displayName);
 
     const counterparty = await prisma.counterparty.create({
       data: {
@@ -139,6 +184,9 @@ destinationsRouter.patch('/workspaces/:workspaceId/counterparties/:counterpartyI
     if (!current) {
       throw new Error('Counterparty not found');
     }
+
+    const nextDisplayName = input.displayName?.trim() || current.displayName;
+    await assertCounterpartyNameAvailable(workspace.organizationId, nextDisplayName, counterpartyId);
 
     const updated = await prisma.counterparty.update({
       where: { counterpartyId },
@@ -213,6 +261,8 @@ destinationsRouter.post('/workspaces/:workspaceId/destinations', async (req, res
       }
     }
 
+    await assertDestinationLabelAvailable(workspaceId, input.label);
+
     const destination = await prisma.destination.create({
       data: {
         workspaceId,
@@ -270,6 +320,9 @@ destinationsRouter.patch('/workspaces/:workspaceId/destinations/:destinationId',
         throw new Error('Counterparty not found');
       }
     }
+
+    const nextLabel = input.label?.trim() || current.label;
+    await assertDestinationLabelAvailable(workspaceId, nextLabel, destinationId);
 
     const linkedWorkspaceAddress = input.linkedWorkspaceAddressId
       ? await prisma.workspaceAddress.findFirst({

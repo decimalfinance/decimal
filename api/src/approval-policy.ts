@@ -40,30 +40,26 @@ export function serializeApprovalPolicy(policy: ApprovalPolicy) {
 }
 
 export async function getOrCreateWorkspaceApprovalPolicy(workspaceId: string, client: PolicyClient = prisma) {
-  const existing = await client.approvalPolicy.findUnique({
+  const policy = await client.approvalPolicy.upsert({
     where: { workspaceId },
-  });
-
-  if (existing) {
-    const normalizedRule = normalizeApprovalPolicyRule(existing.ruleJson);
-    if (JSON.stringify(existing.ruleJson) === JSON.stringify(normalizedRule)) {
-      return existing;
-    }
-
-    return client.approvalPolicy.update({
-      where: { approvalPolicyId: existing.approvalPolicyId },
-      data: {
-        ruleJson: normalizedRule as Prisma.InputJsonValue,
-      },
-    });
-  }
-
-  return client.approvalPolicy.create({
-    data: {
+    update: {},
+    create: {
       workspaceId,
       policyName: DEFAULT_APPROVAL_POLICY_NAME,
       isActive: true,
       ruleJson: DEFAULT_APPROVAL_POLICY_RULE as Prisma.InputJsonValue,
+    },
+  });
+
+  const normalizedRule = normalizeApprovalPolicyRule(policy.ruleJson);
+  if (JSON.stringify(policy.ruleJson) === JSON.stringify(normalizedRule)) {
+    return policy;
+  }
+
+  return client.approvalPolicy.update({
+    where: { approvalPolicyId: policy.approvalPolicyId },
+    data: {
+      ruleJson: normalizedRule as Prisma.InputJsonValue,
     },
   });
 }

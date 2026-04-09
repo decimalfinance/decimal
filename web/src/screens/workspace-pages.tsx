@@ -23,19 +23,16 @@ export function WorkspaceHomePage({
   currentWorkspace,
   isLoading,
   observedTransfers,
-  onOpenSetup,
   onAddExceptionNote,
   onAddRequestNote,
   onApplyExceptionAction,
   onApplyApprovalDecision,
   onCreateExecutionRecord,
   onChangeReconciliationFilter,
-  onRefresh,
   onSelectObservedTransfer,
   onSelectReconciliation,
   onTransitionRequest,
   onUpdateExecutionRecord,
-  onBackToDashboard,
   reconciliationFilter,
   reconciliationRows,
   selectedObservedTransfer,
@@ -49,7 +46,6 @@ export function WorkspaceHomePage({
   currentWorkspace: Workspace;
   isLoading: boolean;
   observedTransfers: ObservedTransfer[];
-  onOpenSetup: () => void;
   onAddExceptionNote: (exceptionId: string, body: string) => Promise<void>;
   onAddRequestNote: (transferRequestId: string, body: string) => Promise<void>;
   onApplyExceptionAction: (
@@ -64,7 +60,6 @@ export function WorkspaceHomePage({
   ) => Promise<void>;
   onCreateExecutionRecord: (transferRequestId: string) => Promise<void>;
   onChangeReconciliationFilter: (filter: ReconciliationRow['requestDisplayState'] | 'all') => void;
-  onRefresh: () => Promise<void>;
   onSelectObservedTransfer: (transfer: ObservedTransfer) => void;
   onSelectReconciliation: (row: ReconciliationRow) => void;
   onTransitionRequest: (transferRequestId: string, toStatus: string) => Promise<void>;
@@ -76,7 +71,6 @@ export function WorkspaceHomePage({
     },
     transferRequestId: string,
   ) => Promise<void>;
-  onBackToDashboard: () => void;
   reconciliationFilter: ReconciliationRow['requestDisplayState'] | 'all';
   reconciliationRows: ReconciliationRow[];
   selectedObservedTransfer: ObservedTransfer | null;
@@ -112,24 +106,13 @@ export function WorkspaceHomePage({
 
   return (
     <div className="page-stack">
-      <section className="section-headline">
-        <div>
+      <section className="section-headline section-headline-compact">
+        <div className="section-headline-copy">
           <p className="eyebrow">Workspace</p>
           <h1>{currentWorkspace.workspaceName}</h1>
           <p className="section-copy">
             Save wallets, create planned transfers, observe real USDC transfers, and reconcile them against what you expected.
           </p>
-        </div>
-        <div className="headline-actions">
-          <button className="ghost-button" onClick={onBackToDashboard} type="button">
-            org dashboard
-          </button>
-          <button className="ghost-button" onClick={() => void onRefresh()} type="button">
-            refresh
-          </button>
-          <button className="primary-button" onClick={onOpenSetup} type="button">
-            expected transfers
-          </button>
         </div>
       </section>
 
@@ -971,8 +954,6 @@ export function WorkspaceRegistryPage({
   counterparties,
   currentWorkspace,
   destinations,
-  onBackToDashboard,
-  onBackToWatchSystem,
   onCreateAddress,
   onCreateCounterparty,
   onCreateDestination,
@@ -985,8 +966,6 @@ export function WorkspaceRegistryPage({
   counterparties: Counterparty[];
   currentWorkspace: Workspace;
   destinations: Destination[];
-  onBackToDashboard: () => void;
-  onBackToWatchSystem: () => void;
   onCreateAddress: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onCreateCounterparty: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onCreateDestination: (event: FormEvent<HTMLFormElement>) => Promise<void>;
@@ -1067,6 +1046,15 @@ export function WorkspaceRegistryPage({
   });
 
   const linkedWalletIds = new Set(destinations.map((item) => item.linkedWorkspaceAddressId).filter(Boolean));
+  const destinationsByWalletId = new Map<string, Destination[]>();
+  for (const destination of destinations) {
+    if (!destination.linkedWorkspaceAddressId) {
+      continue;
+    }
+    const existing = destinationsByWalletId.get(destination.linkedWorkspaceAddressId) ?? [];
+    existing.push(destination);
+    destinationsByWalletId.set(destination.linkedWorkspaceAddressId, existing);
+  }
   const counterpartyWalletCount = new Map<string, number>();
   for (const counterparty of counterparties) {
     const walletIds = new Set(
@@ -1123,7 +1111,7 @@ export function WorkspaceRegistryPage({
   }
 
   return (
-    <div className="page-stack">
+    <div className="page-stack page-stack-tight">
       <section className="section-headline section-headline-compact">
         <div className="section-headline-copy">
           <p className="eyebrow">Address Book</p>
@@ -1147,33 +1135,24 @@ export function WorkspaceRegistryPage({
         <div className="content-panel content-panel-strong registry-main-panel">
           <div className="panel-header registry-panel-header">
             <div className="registry-panel-copy">
-              <p className="eyebrow">Destinations</p>
-              <h2>Payment endpoint registry</h2>
-              <p className="compact-copy registry-description">
-                This is the working surface. Operators will mostly care about destinations, not the normalized tables behind them.
-              </p>
+              <h2 className="registry-section-title">
+                Destinations <span className="registry-count-inline">[{destinations.length}]</span>
+              </h2>
             </div>
-            <span className="status-chip">{destinations.length} total</span>
           </div>
 
-          <div className="registry-toolbar">
-            <label className="queue-select registry-search">
-              <span>Search</span>
-              <input
-                value={searchQuery}
+            <div className="registry-toolbar">
+              <label className="queue-select registry-search">
+                <span>Search</span>
+                <input
+                  value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
                 placeholder="Search destination, wallet, or counterparty"
               />
-            </label>
-            <div className="registry-toolbar-actions">
+              </label>
+              <div className="registry-toolbar-actions">
                 <button className="primary-button" disabled={!canManage || addresses.length === 0} onClick={() => setModalState({ type: 'create-destination' })} type="button">
                 New destination
-              </button>
-              <button className="ghost-button" disabled={!canManage} onClick={() => setModalState({ type: 'create-wallet' })} type="button">
-                Add wallet
-              </button>
-              <button className="ghost-button" disabled={!canManage} onClick={() => setModalState({ type: 'create-counterparty' })} type="button">
-                Add counterparty
               </button>
             </div>
           </div>
@@ -1254,36 +1233,60 @@ export function WorkspaceRegistryPage({
           <div className="content-panel content-panel-soft">
             <div className="panel-header">
               <div>
-                <p className="eyebrow">Wallets</p>
-                <h2>Saved wallet registry</h2>
+                <h2 className="registry-section-title">
+                  Wallets <span className="registry-count-inline">[{addresses.length}]</span>
+                </h2>
               </div>
-              <span className="status-chip">{addresses.length}</span>
+              <div className="panel-header-actions">
+                {canManage ? (
+                  <button className="primary-button compact-button" onClick={() => setModalState({ type: 'create-wallet' })} type="button">
+                    Add wallet
+                  </button>
+                ) : null}
+              </div>
             </div>
             <div className="wallet-table">
               <div className="wallet-table-head">
                 <span>Name</span>
                 <span>Address</span>
-                <span>Link</span>
+                <span>Destination</span>
                 <span>Status</span>
               </div>
               {addresses.length ? (
-                addresses.map((item) => (
-                  <div key={item.workspaceAddressId} className="wallet-table-row">
-                    <span className="wallet-table-name">{getWalletName(item)}</span>
-                    <span>
-                      <button
-                        className="wallet-address-button"
-                        onClick={() => void handleCopyWalletAddress(item.workspaceAddressId, item.address)}
-                        title={copiedWalletId === item.workspaceAddressId ? 'Copied' : item.address}
-                        type="button"
-                      >
-                        {shortenAddress(item.address)}
-                      </button>
-                    </span>
-                    <span>{linkedWalletIds.has(item.workspaceAddressId) ? 'linked' : 'unlinked'}</span>
-                    <span>{item.isActive ? 'active' : 'inactive'}</span>
-                  </div>
-                ))
+                addresses.map((item) => {
+                  const linkedDestinations = destinationsByWalletId.get(item.workspaceAddressId) ?? [];
+                  const primaryDestination = linkedDestinations[0] ?? null;
+                  return (
+                    <div key={item.workspaceAddressId} className="wallet-table-row">
+                      <span className="wallet-table-name">{getWalletName(item)}</span>
+                      <span>
+                        <button
+                          className="wallet-address-button"
+                          onClick={() => void handleCopyWalletAddress(item.workspaceAddressId, item.address)}
+                          title={copiedWalletId === item.workspaceAddressId ? 'Copied' : item.address}
+                          type="button"
+                        >
+                          {shortenAddress(item.address)}
+                        </button>
+                      </span>
+                      <span>
+                        {primaryDestination ? (
+                          <button
+                            className="wallet-link-button"
+                            onClick={() => setModalState({ type: 'view-destination', destinationId: primaryDestination.destinationId })}
+                            type="button"
+                          >
+                            {primaryDestination.label}
+                            {linkedDestinations.length > 1 ? ` +${linkedDestinations.length - 1}` : ''}
+                          </button>
+                        ) : (
+                          'unlinked'
+                        )}
+                      </span>
+                      <span>{item.isActive ? 'active' : 'inactive'}</span>
+                    </div>
+                  );
+                })
               ) : (
                 <div className="empty-box compact">No wallets saved yet.</div>
               )}
@@ -1293,10 +1296,17 @@ export function WorkspaceRegistryPage({
           <div className="content-panel content-panel-soft">
             <div className="panel-header">
               <div>
-                <p className="eyebrow">Counterparties</p>
-                <h2>Business owner registry</h2>
+                <h2 className="registry-section-title">
+                  Counterparties <span className="registry-count-inline">[{counterparties.length}]</span>
+                </h2>
               </div>
-              <span className="status-chip">{counterparties.length}</span>
+              <div className="panel-header-actions">
+                {canManage ? (
+                  <button className="primary-button compact-button" onClick={() => setModalState({ type: 'create-counterparty' })} type="button">
+                    Add counterparty
+                  </button>
+                ) : null}
+              </div>
             </div>
             <div className="counterparty-table">
               <div className="counterparty-table-head">

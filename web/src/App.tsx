@@ -1165,17 +1165,12 @@ export function App() {
                 currentRole={currentRole}
                 isLoading={isLoadingWorkspace}
                 observedTransfers={observedTransfers}
-                onBackToDashboard={() => {
-                  if (currentDashboardOrganizationId) handleOpenOrganization(currentDashboardOrganizationId);
-                }}
-                onOpenSetup={() => navigate({ name: 'workspaceRequests', workspaceId: currentWorkspace.workspaceId }, setRoute)}
                 onAddExceptionNote={handleAddExceptionNote}
                 onAddRequestNote={handleAddRequestNote}
                 onApplyExceptionAction={handleApplyExceptionAction}
                 onApplyApprovalDecision={handleApprovalDecision}
                 onCreateExecutionRecord={handleCreateExecutionRecord}
                 onChangeReconciliationFilter={setReconciliationFilter}
-                onRefresh={handleRefreshWorkspace}
                 onSelectObservedTransfer={handleSelectObservedTransfer}
                 onSelectReconciliation={(row) => void handleSelectReconciliation(row)}
                 onTransitionRequest={handleTransitionRequest}
@@ -1196,10 +1191,6 @@ export function App() {
                 counterparties={counterparties}
                 currentWorkspace={currentWorkspace}
                 destinations={destinations}
-                onBackToDashboard={() => {
-                  if (currentDashboardOrganizationId) handleOpenOrganization(currentDashboardOrganizationId);
-                }}
-                onBackToWatchSystem={() => handleOpenWorkspace(currentWorkspace.workspaceId)}
                 onCreateAddress={handleCreateAddress}
                 onCreateCounterparty={handleCreateCounterparty}
                 onCreateDestination={handleCreateDestination}

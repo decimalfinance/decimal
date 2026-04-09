@@ -127,6 +127,140 @@ test('organization creation and workspace creation are scoped to active member o
   assert.equal(session.organizations[0].workspaces[0].workspaceId, workspace.workspaceId);
 });
 
+test('duplicate names are rejected for organizations, workspaces, wallets, counterparties, and destinations', async () => {
+  const login = await loginUser('owner@example.com', 'Owner');
+
+  const organization = await post(
+    '/organizations',
+    {
+      organizationName: 'Acme Treasury',
+    },
+    login.sessionToken,
+  );
+
+  let response = await fetch(`${baseUrl}/organizations`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...authHeaders(login.sessionToken),
+    },
+    body: JSON.stringify({
+      organizationName: 'acme treasury',
+    }),
+  });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).message, /Organization name "acme treasury" already exists/i);
+
+  const workspace = await post(
+    `/organizations/${organization.organizationId}/workspaces`,
+    {
+      workspaceName: 'Primary Watch',
+    },
+    login.sessionToken,
+  );
+
+  response = await fetch(`${baseUrl}/organizations/${organization.organizationId}/workspaces`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...authHeaders(login.sessionToken),
+    },
+    body: JSON.stringify({
+      workspaceName: 'primary watch',
+    }),
+  });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).message, /Workspace name "primary watch" already exists/i);
+
+  const address = await post(
+    `/workspaces/${workspace.workspaceId}/addresses`,
+    {
+      chain: 'solana',
+      address: 'So11111111111111111111111111111111111111112',
+      displayName: 'Vendor Wallet',
+    },
+    login.sessionToken,
+  );
+
+  response = await fetch(`${baseUrl}/workspaces/${workspace.workspaceId}/addresses`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...authHeaders(login.sessionToken),
+    },
+    body: JSON.stringify({
+      chain: 'solana',
+      address: 'So11111111111111111111111111111111111111113',
+      displayName: 'vendor wallet',
+    }),
+  });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).message, /Wallet name "vendor wallet" already exists/i);
+
+  const counterparty = await post(
+    `/workspaces/${workspace.workspaceId}/counterparties`,
+    {
+      displayName: 'Acme Vendor',
+      category: 'vendor',
+    },
+    login.sessionToken,
+  );
+
+  response = await fetch(`${baseUrl}/workspaces/${workspace.workspaceId}/counterparties`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...authHeaders(login.sessionToken),
+    },
+    body: JSON.stringify({
+      displayName: 'acme vendor',
+      category: 'vendor',
+    }),
+  });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).message, /Counterparty name "acme vendor" already exists/i);
+
+  await post(
+    `/workspaces/${workspace.workspaceId}/destinations`,
+    {
+      linkedWorkspaceAddressId: address.workspaceAddressId,
+      counterpartyId: counterparty.counterpartyId,
+      label: 'Acme payout wallet',
+      trustState: 'trusted',
+      destinationType: 'vendor_wallet',
+      isInternal: false,
+    },
+    login.sessionToken,
+  );
+
+  const secondAddress = await post(
+    `/workspaces/${workspace.workspaceId}/addresses`,
+    {
+      chain: 'solana',
+      address: 'So11111111111111111111111111111111111111114',
+      displayName: 'Treasury Wallet',
+    },
+    login.sessionToken,
+  );
+
+  response = await fetch(`${baseUrl}/workspaces/${workspace.workspaceId}/destinations`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...authHeaders(login.sessionToken),
+    },
+    body: JSON.stringify({
+      linkedWorkspaceAddressId: secondAddress.workspaceAddressId,
+      label: 'acme payout wallet',
+      trustState: 'trusted',
+      destinationType: 'vendor_wallet',
+      isInternal: false,
+    }),
+  });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).message, /Destination name "acme payout wallet" already exists/i);
+});
+
 test('wallets can be added to a workspace and listed back to members', async () => {
   const setup = await createOrganizationWorkspace();
   const workspace = setup.workspace;

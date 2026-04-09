@@ -20,6 +20,44 @@ const createWorkspaceSchema = z.object({
   status: z.string().default('active'),
 });
 
+async function assertOrganizationNameAvailable(organizationName: string) {
+  const existing = await prisma.organization.findFirst({
+    where: {
+      organizationName: {
+        equals: organizationName,
+        mode: 'insensitive',
+      },
+    },
+    select: { organizationId: true },
+  });
+
+  if (existing) {
+    throw new Error(`Organization name "${organizationName}" already exists`);
+  }
+}
+
+async function assertWorkspaceNameAvailable(
+  organizationId: string,
+  workspaceName: string,
+  excludeWorkspaceId?: string,
+) {
+  const existing = await prisma.workspace.findFirst({
+    where: {
+      organizationId,
+      workspaceName: {
+        equals: workspaceName,
+        mode: 'insensitive',
+      },
+      ...(excludeWorkspaceId ? { workspaceId: { not: excludeWorkspaceId } } : {}),
+    },
+    select: { workspaceId: true },
+  });
+
+  if (existing) {
+    throw new Error(`Workspace name "${workspaceName}" already exists in this organization`);
+  }
+}
+
 organizationsRouter.get('/organizations', async (req, res, next) => {
   try {
     const items = await prisma.organization.findMany({
@@ -56,11 +94,13 @@ organizationsRouter.get('/organizations', async (req, res, next) => {
 organizationsRouter.post('/organizations', async (req, res, next) => {
   try {
     const input = createOrganizationSchema.parse(req.body);
+    const organizationName = input.organizationName.trim();
+    await assertOrganizationNameAvailable(organizationName);
 
     const organization = await prisma.$transaction(async (tx) => {
       const createdOrganization = await tx.organization.create({
         data: {
-          organizationName: input.organizationName,
+          organizationName,
         },
       });
 
@@ -159,11 +199,13 @@ organizationsRouter.post('/organizations/:organizationId/workspaces', async (req
     const { organizationId } = orgParamsSchema.parse(req.params);
     await assertOrganizationAdmin(organizationId, req.auth!.userId);
     const input = createWorkspaceSchema.parse(req.body);
+    const workspaceName = input.workspaceName.trim();
+    await assertWorkspaceNameAvailable(organizationId, workspaceName);
 
     const workspace = await prisma.workspace.create({
       data: {
         organizationId,
-        workspaceName: input.workspaceName,
+        workspaceName,
         status: input.status,
       },
     });
