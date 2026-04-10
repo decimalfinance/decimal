@@ -2301,6 +2301,351 @@ test('phase e ops health exposes lag and latency status', async () => {
   assert.equal(payload.openExceptionCount, 1);
 });
 
+test('auth logout invalidates the session and protected routes reject the old token', async () => {
+  const login = await loginUser('logout@example.com', 'Logout User');
+  const organization = await post(
+    '/organizations',
+    {
+      organizationName: 'Logout Treasury',
+    },
+    login.sessionToken,
+  );
+
+  const organizationsResponse = await fetch(`${baseUrl}/organizations`, {
+    headers: authHeaders(login.sessionToken),
+  });
+  assert.equal(organizationsResponse.status, 200);
+  const organizations = await organizationsResponse.json();
+  assert.equal(organizations.items.length, 1);
+  assert.equal(organizations.items[0].organizationId, organization.organizationId);
+  assert.equal(organizations.items[0].isMember, true);
+
+  const logoutResponse = await fetch(`${baseUrl}/auth/logout`, {
+    method: 'POST',
+    headers: authHeaders(login.sessionToken),
+  });
+  assert.equal(logoutResponse.status, 204);
+
+  const sessionResponse = await fetch(`${baseUrl}/auth/session`, {
+    headers: authHeaders(login.sessionToken),
+  });
+  assert.equal(sessionResponse.status, 401);
+
+  const postLogoutOrganizations = await fetch(`${baseUrl}/organizations`, {
+    headers: authHeaders(login.sessionToken),
+  });
+  assert.equal(postLogoutOrganizations.status, 401);
+});
+
+test('internal service routes enforce the control-plane token when configured', async () => {
+  const setup = await createTransferRequestSetup();
+  assert.equal(setup.transferRequest.status, 'approved');
+
+  const originalToken = config.controlPlaneServiceToken;
+  config.controlPlaneServiceToken = 'internal-secret';
+
+  try {
+    let response = await fetch(`${baseUrl}/internal/workspaces`);
+    assert.equal(response.status, 401);
+
+    response = await fetch(`${baseUrl}/internal/workspaces`, {
+      headers: {
+        'x-service-token': 'wrong-token',
+      },
+    });
+    assert.equal(response.status, 401);
+
+    response = await fetch(`${baseUrl}/internal/workspaces`, {
+      headers: {
+        'x-service-token': 'internal-secret',
+      },
+    });
+    assert.equal(response.status, 200);
+    const workspacesPayload = await response.json();
+    assert.equal(workspacesPayload.items.length, 1);
+    assert.equal(workspacesPayload.items[0].workspaceId, setup.workspace.workspaceId);
+
+    response = await fetch(`${baseUrl}/internal/workspaces/${setup.workspace.workspaceId}/matching-context`, {
+      headers: {
+        'x-service-token': 'internal-secret',
+      },
+    });
+    assert.equal(response.status, 200);
+    const context = await response.json();
+    assert.equal(context.transferRequests.length, 1);
+    assert.equal(context.transferRequests[0].transferRequestId, setup.transferRequest.transferRequestId);
+    assert.equal(context.transferRequests[0].status, 'approved');
+  } finally {
+    config.controlPlaneServiceToken = originalToken;
+  }
+});
+
+test('address label endpoints support create, search, and patch flows directly', async () => {
+  const login = await loginUser('labels@example.com', 'Label User');
+  const created = await post(
+    '/address-labels',
+    {
+      chain: 'solana',
+      address: 'HFqp6ErWHY6Uzhj8rFyjYuDya2mXUpYEk8VW75K9PSiY',
+      entityName: 'Jupiter Aggregator Authority 16',
+      entityType: 'account',
+      labelKind: 'aggregator_authority',
+      roleTags: ['aggregator', 'swap_route'],
+      source: 'manual',
+      confidence: 'operator',
+      isActive: true,
+      notes: 'Seeded from operator review',
+    },
+    login.sessionToken,
+  );
+
+  const listResponse = await fetch(
+    `${baseUrl}/address-labels?chain=solana&search=${encodeURIComponent('Aggregator Authority 16')}`,
+    { headers: authHeaders(login.sessionToken) },
+  );
+  assert.equal(listResponse.status, 200);
+  const listPayload = await listResponse.json();
+  assert.equal(listPayload.items.length, 1);
+  assert.equal(listPayload.items[0].addressLabelId, created.addressLabelId);
+  assert.deepEqual(listPayload.items[0].roleTags, ['aggregator', 'swap_route']);
+
+  const patchResponse = await fetch(`${baseUrl}/address-labels/${created.addressLabelId}`, {
+    method: 'PATCH',
+    headers: {
+      'content-type': 'application/json',
+      ...authHeaders(login.sessionToken),
+    },
+    body: JSON.stringify({
+      isActive: false,
+      notes: 'Disabled after review',
+      roleTags: ['aggregator'],
+    }),
+  });
+  assert.equal(patchResponse.status, 200);
+  const updated = await patchResponse.json();
+  assert.equal(updated.isActive, false);
+  assert.equal(updated.notes, 'Disabled after review');
+  assert.deepEqual(updated.roleTags, ['aggregator']);
+});
+
+test('approval policy, inbox, members, and export history endpoints are usable directly', async () => {
+  const setup = await createOrganizationWorkspace();
+  const member = await loginUser('reviewer@example.com', 'Reviewer');
+  await post(`/organizations/${setup.organization.organizationId}/join`, {}, member.sessionToken);
+
+  let response = await fetch(`${baseUrl}/workspaces/${setup.workspace.workspaceId}/approval-policy`, {
+    headers: authHeaders(setup.sessionToken),
+  });
+  assert.equal(response.status, 200);
+  const policy = await response.json();
+  assert.equal(policy.isActive, true);
+  assert.equal(policy.ruleJson.requireTrustedDestination, true);
+
+  response = await fetch(`${baseUrl}/workspaces/${setup.workspace.workspaceId}/approval-policy`, {
+    method: 'PATCH',
+    headers: {
+      'content-type': 'application/json',
+      ...authHeaders(setup.sessionToken),
+    },
+    body: JSON.stringify({
+      ruleJson: {
+        externalApprovalThresholdRaw: '1000',
+      },
+    }),
+  });
+  assert.equal(response.status, 200);
+  const updatedPolicy = await response.json();
+  assert.equal(updatedPolicy.ruleJson.externalApprovalThresholdRaw, '1000');
+
+  const address = await post(
+    `/workspaces/${setup.workspace.workspaceId}/addresses`,
+    {
+      chain: 'solana',
+      address: 'So11111111111111111111111111111111111111112',
+      displayName: 'Approval Wallet',
+    },
+    setup.sessionToken,
+  );
+
+  const destination = await post(
+    `/workspaces/${setup.workspace.workspaceId}/destinations`,
+    {
+      linkedWorkspaceAddressId: address.workspaceAddressId,
+      label: 'Approval destination',
+      trustState: 'trusted',
+      destinationType: 'vendor_wallet',
+      isInternal: false,
+    },
+    setup.sessionToken,
+  );
+
+  const request = await post(
+    `/workspaces/${setup.workspace.workspaceId}/transfer-requests`,
+    {
+      destinationId: destination.destinationId,
+      requestType: 'vendor_payout',
+      amountRaw: '5000',
+      status: 'submitted',
+    },
+    setup.sessionToken,
+  );
+  assert.equal(request.status, 'pending_approval');
+
+  response = await fetch(`${baseUrl}/workspaces/${setup.workspace.workspaceId}/approval-inbox?status=pending_approval`, {
+    headers: authHeaders(setup.sessionToken),
+  });
+  assert.equal(response.status, 200);
+  const inbox = await response.json();
+  assert.equal(inbox.items.length, 1);
+  assert.equal(inbox.items[0].transferRequestId, request.transferRequestId);
+
+  response = await fetch(`${baseUrl}/workspaces/${setup.workspace.workspaceId}/members`, {
+    headers: authHeaders(setup.sessionToken),
+  });
+  assert.equal(response.status, 200);
+  const members = await response.json();
+  assert.equal(members.items.length, 2);
+
+  response = await fetch(`${baseUrl}/workspaces/${setup.workspace.workspaceId}/export-jobs`, {
+    headers: authHeaders(setup.sessionToken),
+  });
+  assert.equal(response.status, 200);
+  const emptyHistory = await response.json();
+  assert.equal(emptyHistory.items.length, 0);
+
+  response = await fetch(`${baseUrl}/workspaces/${setup.workspace.workspaceId}/exports/reconciliation?format=json`, {
+    headers: authHeaders(setup.sessionToken),
+  });
+  assert.equal(response.status, 200);
+  const exportPayload = await response.json();
+  assert.ok(Array.isArray(exportPayload.items));
+
+  response = await fetch(`${baseUrl}/workspaces/${setup.workspace.workspaceId}/export-jobs`, {
+    headers: authHeaders(setup.sessionToken),
+  });
+  assert.equal(response.status, 200);
+  const exportHistory = await response.json();
+  assert.equal(exportHistory.items.length, 1);
+  assert.equal(exportHistory.items[0].exportKind, 'reconciliation');
+});
+
+test('observed transfers endpoint filters to tracked wallets and keeps neutral route labels', async () => {
+  const setup = await createOrganizationWorkspace();
+  const trackedAddress = await post(
+    `/workspaces/${setup.workspace.workspaceId}/addresses`,
+    {
+      chain: 'solana',
+      address: 'So11111111111111111111111111111111111111112',
+      displayName: 'Tracked Wallet',
+    },
+    setup.sessionToken,
+  );
+
+  await insertClickHouseRows('observed_transfers', [
+    {
+      transfer_id: crypto.randomUUID(),
+      signature: '5w4JwH5nWZ9N6cY81mYAwU3S6fP3LhZq1BtYV4Bn8Jq2pHfNE3gEM6VKezxJXvLjVdv6vQ2MSmTYqZ6DxPzLy3EZ',
+      slot: 411600001,
+      event_time: '2026-04-07 11:32:44.313',
+      asset: 'usdc',
+      source_token_account: '64HWdAaTsTVvsQWQnw4PKVWeQ5BQXJ5dT6fTwerqo9US',
+      source_wallet: 'VhfmPjvQxSiQW2FjnvoghewGGVYaWcz4cmDxpFPQEti',
+      destination_token_account: trackedAddress.usdcAtaAddress,
+      destination_wallet: trackedAddress.address,
+      amount_raw: '9204',
+      amount_decimal: '0.009204',
+      transfer_kind: 'transfer_checked',
+      instruction_index: 2,
+      inner_instruction_index: null,
+      route_group: 'route-a',
+      leg_role: 'other_destination',
+      properties_json: '{}',
+      created_at: '2026-04-07 11:38:15.253',
+    },
+    {
+      transfer_id: crypto.randomUUID(),
+      signature: '4x4JwH5nWZ9N6cY81mYAwU3S6fP3LhZq1BtYV4Bn8Jq2pHfNE3gEM6VKezxJXvLjVdv6vQ2MSmTYqZ6DxPzLy3EA',
+      slot: 411600002,
+      event_time: '2026-04-07 11:40:44.313',
+      asset: 'usdc',
+      source_token_account: '11111111111111111111111111111111',
+      source_wallet: '11111111111111111111111111111111',
+      destination_token_account: '22222222222222222222222222222222',
+      destination_wallet: '22222222222222222222222222222222',
+      amount_raw: '1000',
+      amount_decimal: '0.001000',
+      transfer_kind: 'transfer_checked',
+      instruction_index: 3,
+      inner_instruction_index: null,
+      route_group: 'route-b',
+      leg_role: 'direct_settlement',
+      properties_json: '{}',
+      created_at: '2026-04-07 11:41:15.253',
+    },
+  ]);
+
+  const response = await fetch(`${baseUrl}/workspaces/${setup.workspace.workspaceId}/transfers?limit=20`, {
+    headers: authHeaders(setup.sessionToken),
+  });
+  assert.equal(response.status, 200);
+  const transfers = await response.json();
+  assert.equal(transfers.items.length, 1);
+  assert.equal(transfers.items[0].destinationWallet, trackedAddress.address);
+  assert.equal(transfers.items[0].legRole, 'other_destination');
+});
+
+test('transfer request and exception endpoints reject invalid mutation cases directly', async () => {
+  const seeded = await createSeededPartialExceptionRequest();
+  const outsider = await loginUser('outsider@example.com', 'Outsider');
+  const draftRequest = await post(
+    `/workspaces/${seeded.workspace.workspaceId}/transfer-requests`,
+    {
+      destinationId: seeded.destination.destinationId,
+      requestType: 'vendor_payout',
+      amountRaw: '10000',
+      status: 'draft',
+    },
+    seeded.sessionToken,
+  );
+
+  let response = await fetch(
+    `${baseUrl}/workspaces/${seeded.workspace.workspaceId}/transfer-requests/${draftRequest.transferRequestId}/executions`,
+    {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...authHeaders(seeded.sessionToken),
+      },
+      body: JSON.stringify({
+        executionSource: 'manual',
+        metadataJson: {},
+      }),
+    },
+  );
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).message, /Execution records can only be created/i);
+
+  response = await fetch(`${baseUrl}/workspaces/${seeded.workspace.workspaceId}/exceptions/${seeded.exceptionId}`, {
+    headers: authHeaders(seeded.sessionToken),
+  });
+  assert.equal(response.status, 200);
+  const detail = await response.json();
+  assert.equal(detail.exceptionId, seeded.exceptionId);
+
+  response = await fetch(`${baseUrl}/workspaces/${seeded.workspace.workspaceId}/exceptions/${seeded.exceptionId}`, {
+    method: 'PATCH',
+    headers: {
+      'content-type': 'application/json',
+      ...authHeaders(seeded.sessionToken),
+    },
+    body: JSON.stringify({
+      assignedToUserId: outsider.user.userId,
+    }),
+  });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).message, /Assignee must be an active member of this organization/i);
+});
+
 test('protected workspace routes reject anonymous callers', async () => {
   const setup = await createOrganizationWorkspace();
 
