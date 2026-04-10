@@ -3273,11 +3273,11 @@ textarea {
 
 .inspector-accordion {
   border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
-  background: color-mix(in srgb, var(--panel-3) 88%, transparent);
+  background: color-mix(in srgb, var(--panel-3) 82%, transparent);
 }
 
 .inspector-accordion[open] {
-  background: color-mix(in srgb, var(--panel-2) 90%, transparent);
+  background: color-mix(in srgb, var(--panel-2) 78%, transparent);
 }
 
 .inspector-accordion-summary {
@@ -3288,7 +3288,7 @@ textarea {
   padding: 14px 16px;
   cursor: pointer;
   list-style: none;
-  background: color-mix(in srgb, var(--panel-3) 94%, transparent);
+  background: color-mix(in srgb, var(--panel-3) 96%, transparent);
 }
 
 .inspector-accordion-summary::-webkit-details-marker {
@@ -3321,10 +3321,14 @@ textarea {
 
 .inspector-accordion-body {
   display: grid;
-  gap: 14px;
-  padding: 14px 16px 16px;
+  gap: 16px;
+  padding: 18px 16px 16px;
   border-top: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
-  background: color-mix(in srgb, var(--panel-2) 78%, transparent);
+  background: color-mix(in srgb, var(--panel-2) 70%, transparent);
+}
+
+.inspector-accordion-body > :first-child {
+  margin-top: 2px;
 }
 
 .request-inspector-facts {
@@ -3339,7 +3343,7 @@ textarea {
 
 .request-section-card {
   border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
-  background: color-mix(in srgb, var(--panel-3) 90%, transparent);
+  background: color-mix(in srgb, var(--panel-3) 94%, transparent);
   padding: 14px;
 }
 
@@ -3350,7 +3354,7 @@ textarea {
 
 .request-subsection-card.detail-section {
   border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
-  background: color-mix(in srgb, var(--panel-2) 92%, transparent);
+  background: color-mix(in srgb, var(--panel-2) 88%, transparent);
   padding: 14px;
 }
 

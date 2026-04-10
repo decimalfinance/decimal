@@ -71,7 +71,7 @@ pub fn reconstruct_observed_payments(
         } else if distinct_destinations == 1 {
             "multi_leg_settlement".to_string()
         } else {
-            "routed_with_fee".to_string()
+            "multi_destination_route".to_string()
         };
 
         let confidence_band = if grouped_transfers.iter().all(|transfer| transfer.source_wallet.is_some()) {
@@ -130,4 +130,63 @@ pub fn reconstruct_observed_payments(
             .then_with(|| left.destination_wallet.cmp(&right.destination_wallet))
     });
     payments
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reconstruct_observed_payments;
+    use crate::yellowstone::transaction_context::TransactionContext;
+    use crate::yellowstone::transfer_reconstruction::ObservedTransfer;
+    use chrono::Utc;
+    use std::collections::HashSet;
+
+    #[test]
+    fn reconstruct_observed_payments_uses_neutral_multi_destination_kind() {
+        let context = TransactionContext {
+            signature: "sig".to_string(),
+            slot: 1,
+            event_time: Utc::now(),
+            raw_mutation_count: 2,
+            participants: HashSet::new(),
+            signers: Vec::new(),
+            account_keys: Vec::new(),
+            instruction_contexts: Vec::new(),
+            top_level_instruction_count: 0,
+            inner_instruction_set_count: 0,
+            log_message_count: 0,
+            usdc_balance_changes: Vec::new(),
+        };
+
+        let transfers = vec![
+            ObservedTransfer {
+                source_token_account: Some("src-ata".to_string()),
+                source_wallet: Some("src-wallet".to_string()),
+                destination_token_account: "expected-ata".to_string(),
+                destination_wallet: Some("expected-wallet".to_string()),
+                amount_raw: 9_500,
+                instruction_index: Some(1),
+                inner_instruction_index: None,
+                route_group: "sig:ix:1".to_string(),
+                leg_role: "direct_settlement".to_string(),
+                properties_json: None,
+            },
+            ObservedTransfer {
+                source_token_account: Some("src-ata".to_string()),
+                source_wallet: Some("src-wallet".to_string()),
+                destination_token_account: "other-ata".to_string(),
+                destination_wallet: Some("other-wallet".to_string()),
+                amount_raw: 500,
+                instruction_index: Some(1),
+                inner_instruction_index: Some(0),
+                route_group: "sig:ix:1".to_string(),
+                leg_role: "other_destination".to_string(),
+                properties_json: None,
+            },
+        ];
+
+        let payments = reconstruct_observed_payments(&context, &transfers);
+        assert_eq!(payments.len(), 1);
+        assert_eq!(payments[0].payment_kind, "multi_destination_route");
+        assert_eq!(payments[0].fee_amount_raw, 500);
+    }
 }

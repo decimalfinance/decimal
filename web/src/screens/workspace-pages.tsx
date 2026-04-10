@@ -334,7 +334,7 @@ export function WorkspaceHomePage({
                       <span className="transfer-table-meta" title={transfer.routeGroup}>
                         {getRouteLabel(transfer)}
                       </span>
-                      <span className="transfer-table-meta">{transfer.legRole.replaceAll('_', ' ')}</span>
+                      <span className="transfer-table-meta">{getObservedTransferTypeLabel(transfer.legRole)}</span>
                     </a>
                     <div className="transfer-table-actions">
                       <button
@@ -380,7 +380,7 @@ export function WorkspaceHomePage({
                   <InfoLine label="Written at" value={formatTimestamp(selectedObservedTransfer.createdAt)} />
                   <InfoLine label="Chain to write" value={`${selectedObservedTransfer.chainToWriteMs} ms`} />
                   <InfoLine label="Route" value={getRouteLabel(selectedObservedTransfer)} />
-                  <InfoLine label="Leg role" value={selectedObservedTransfer.legRole.replaceAll('_', ' ')} />
+                  <InfoLine label="Leg role" value={getObservedTransferTypeLabel(selectedObservedTransfer.legRole)} />
                   <InfoLine label="Source wallet" value={selectedObservedTransfer.sourceWallet ?? 'Unknown'} />
                   <InfoLine label="Source token account" value={selectedObservedTransfer.sourceTokenAccount ?? 'Unknown'} />
                   <InfoLine label="Destination wallet" value={selectedObservedTransfer.destinationWallet ?? 'Unknown'} />
@@ -929,7 +929,7 @@ export function WorkspaceHomePage({
                         <div className="empty-box compact request-section-card">
                           <strong>Observed payment</strong>
                           <div className="detail-grid">
-                            <span>{selectedReconciliationDetail.linkedObservedPayment.paymentKind.replaceAll('_', ' ')}</span>
+                            <span>{getObservedPaymentKindLabel(selectedReconciliationDetail.linkedObservedPayment.paymentKind)}</span>
                             <span>{formatRawUsdc(selectedReconciliationDetail.linkedObservedPayment.netDestinationAmountRaw)}</span>
                             <span>{selectedReconciliationDetail.linkedObservedPayment.routeCount} route(s)</span>
                           </div>
@@ -3260,6 +3260,36 @@ function getRouteLabel(transfer: ObservedTransfer) {
   }
 
   return 'derived';
+}
+
+function getObservedTransferTypeLabel(legRole: string) {
+  switch (legRole) {
+    case 'direct_settlement':
+      return 'direct settlement';
+    case 'other_destination':
+      return 'other route';
+    case 'self_change':
+      return 'self change';
+    case 'unknown':
+      return 'unclassified';
+    default:
+      return legRole.replaceAll('_', ' ');
+  }
+}
+
+function getObservedPaymentKindLabel(paymentKind: string) {
+  switch (paymentKind) {
+    case 'direct':
+      return 'direct';
+    case 'multi_leg_settlement':
+      return 'multi-leg settlement';
+    case 'multi_destination_route':
+      return 'multi-destination route';
+    case 'routed_with_fee':
+      return 'multi-destination route';
+    default:
+      return paymentKind.replaceAll('_', ' ');
+  }
 }
 
 function getDisplayStateLabel(

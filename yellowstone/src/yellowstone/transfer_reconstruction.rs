@@ -263,8 +263,46 @@ fn classify_leg_roles(transfers: &mut [ObservedTransfer]) {
 
         transfer.leg_role = match dominant_destination {
             Some(dominant) if dominant == &destination_key => "direct_settlement".to_string(),
-            Some(_) => "fee".to_string(),
+            Some(_) => "other_destination".to_string(),
             None => "unknown".to_string(),
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{classify_leg_roles, ObservedTransfer};
+
+    fn make_transfer(
+        route_group: &str,
+        destination_wallet: Option<&str>,
+        destination_token_account: &str,
+        amount_raw: i128,
+    ) -> ObservedTransfer {
+        ObservedTransfer {
+            source_token_account: Some("source-token".to_string()),
+            source_wallet: Some("source-wallet".to_string()),
+            destination_token_account: destination_token_account.to_string(),
+            destination_wallet: destination_wallet.map(str::to_string),
+            amount_raw,
+            instruction_index: Some(1),
+            inner_instruction_index: None,
+            route_group: route_group.to_string(),
+            leg_role: "unknown".to_string(),
+            properties_json: None,
+        }
+    }
+
+    #[test]
+    fn classify_leg_roles_keeps_non_dominant_routes_neutral() {
+        let mut transfers = vec![
+            make_transfer("sig:ix:1", Some("expected-wallet"), "expected-ata", 9_500),
+            make_transfer("sig:ix:1", Some("aggregator-wallet"), "aggregator-ata", 500),
+        ];
+
+        classify_leg_roles(&mut transfers);
+
+        assert_eq!(transfers[0].leg_role, "direct_settlement");
+        assert_eq!(transfers[1].leg_role, "other_destination");
     }
 }
