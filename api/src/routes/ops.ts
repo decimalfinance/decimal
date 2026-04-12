@@ -1,4 +1,5 @@
 import { Router, type Response } from 'express';
+import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { queryClickHouse } from '../clickhouse.js';
 import { config } from '../config.js';
@@ -415,7 +416,7 @@ async function recordExportJob(args: {
       exportKind: args.exportKind,
       format: args.format,
       rowCount: args.rowCount,
-      filterJson: args.filterJson,
+      filterJson: args.filterJson as Prisma.InputJsonValue,
       completedAt: new Date(),
     },
   });

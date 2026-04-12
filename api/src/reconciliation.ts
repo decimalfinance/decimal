@@ -1088,6 +1088,7 @@ export function serializeTransferRequest(request: TransferRequestWithRelations) 
   return {
     transferRequestId: request.transferRequestId,
     workspaceId: request.workspaceId,
+    paymentOrderId: request.paymentOrderId,
     sourceWorkspaceAddressId: request.sourceWorkspaceAddressId,
     destinationWorkspaceAddressId: request.destinationWorkspaceAddressId,
     destinationId: request.destinationId,

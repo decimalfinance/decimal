@@ -11,6 +11,9 @@ import { healthRouter } from './routes/health.js';
 import { internalRouter } from './routes/internal.js';
 import { organizationsRouter } from './routes/organizations.js';
 import { opsRouter } from './routes/ops.js';
+import { payeesRouter } from './routes/payees.js';
+import { paymentOrdersRouter } from './routes/payment-orders.js';
+import { paymentRequestsRouter } from './routes/payment-requests.js';
 import { transferRequestsRouter } from './routes/transfer-requests.js';
 
 export function createApp() {
@@ -47,6 +50,9 @@ export function createApp() {
   app.use(addressesRouter);
   app.use(approvalsRouter);
   app.use(destinationsRouter);
+  app.use(payeesRouter);
+  app.use(paymentRequestsRouter);
+  app.use(paymentOrdersRouter);
   app.use(transferRequestsRouter);
   app.use(eventsRouter);
 

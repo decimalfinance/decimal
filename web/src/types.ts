@@ -161,6 +161,7 @@ export type ApprovalDecision = {
 export type TransferRequest = {
   transferRequestId: string;
   workspaceId: string;
+  paymentOrderId: string | null;
   sourceWorkspaceAddressId: string | null;
   destinationWorkspaceAddressId: string;
   destinationId: string | null;
@@ -259,6 +260,7 @@ export type ObservedTransfer = {
 export type ReconciliationRow = {
   transferRequestId: string;
   workspaceId: string;
+  paymentOrderId: string | null;
   sourceWorkspaceAddressId: string | null;
   destinationWorkspaceAddressId: string;
   destinationId: string | null;
@@ -318,6 +320,211 @@ export type ReconciliationRow = {
 
 export type ApprovalInboxItem = ReconciliationRow & {
   approvalEvaluation: ApprovalEvaluation;
+};
+
+export type PaymentOrderState =
+  | 'draft'
+  | 'pending_approval'
+  | 'approved'
+  | 'ready_for_execution'
+  | 'execution_recorded'
+  | 'partially_settled'
+  | 'settled'
+  | 'exception'
+  | 'closed'
+  | 'cancelled';
+
+export type PaymentOrderEvent = {
+  paymentOrderEventId: string;
+  paymentOrderId: string;
+  workspaceId: string;
+  eventType: string;
+  actorType: string;
+  actorId: string | null;
+  beforeState: string | null;
+  afterState: string | null;
+  linkedTransferRequestId: string | null;
+  linkedExecutionRecordId: string | null;
+  linkedSignature: string | null;
+  payloadJson: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type PaymentRequestState = 'submitted' | 'converted_to_order' | 'cancelled';
+
+export type Payee = {
+  payeeId: string;
+  workspaceId: string;
+  defaultDestinationId: string | null;
+  name: string;
+  externalReference: string | null;
+  status: string;
+  notes: string | null;
+  metadataJson: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  defaultDestination: {
+    destinationId: string;
+    label: string;
+    walletAddress: string;
+    tokenAccountAddress: string | null;
+    trustState: Destination['trustState'];
+    isActive: boolean;
+  } | null;
+};
+
+export type PaymentRequest = {
+  paymentRequestId: string;
+  workspaceId: string;
+  payeeId: string | null;
+  destinationId: string;
+  counterpartyId: string | null;
+  requestedByUserId: string | null;
+  amountRaw: string;
+  asset: string;
+  reason: string;
+  externalReference: string | null;
+  dueAt: string | null;
+  state: PaymentRequestState;
+  metadataJson: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  payee: Payee | null;
+  destination: Destination;
+  counterparty: Counterparty | null;
+  requestedByUser: User | null;
+  paymentOrder: {
+    paymentOrderId: string;
+    state: PaymentOrderState;
+    createdAt: string;
+  } | null;
+};
+
+export type PreparedSolanaInstruction = {
+  programId: string;
+  keys: Array<{
+    pubkey: string;
+    isSigner: boolean;
+    isWritable: boolean;
+  }>;
+  dataBase64: string;
+};
+
+export type PaymentExecutionPacket = {
+  kind: 'solana_spl_usdc_transfer';
+  version: number;
+  network: string;
+  paymentOrderId: string;
+  transferRequestId: string;
+  executionRecordId: string;
+  createdAt: string;
+  source: {
+    workspaceAddressId: string;
+    walletAddress: string;
+    tokenAccountAddress: string;
+    label: string | null;
+  };
+  destination: {
+    destinationId: string;
+    label: string;
+    walletAddress: string;
+    tokenAccountAddress: string;
+    counterpartyName: string | null;
+  };
+  token: {
+    symbol: string;
+    mint: string;
+    decimals: number;
+  };
+  amountRaw: string;
+  memo: string | null;
+  reference: string | null;
+  signerWallet: string;
+  feePayer: string;
+  requiredSigners: string[];
+  instructions: PreparedSolanaInstruction[];
+  signing: {
+    mode: string;
+    requiresRecentBlockhash: boolean;
+    note: string;
+  };
+};
+
+export type PaymentExecutionPreparation = {
+  executionRecord: ExecutionRecord;
+  executionPacket: PaymentExecutionPacket;
+  paymentOrder: PaymentOrder;
+};
+
+export type PaymentOrder = {
+  paymentOrderId: string;
+  workspaceId: string;
+  paymentRequestId: string | null;
+  payeeId: string | null;
+  destinationId: string;
+  counterpartyId: string | null;
+  sourceWorkspaceAddressId: string | null;
+  transferRequestId: string | null;
+  amountRaw: string;
+  asset: string;
+  memo: string | null;
+  externalReference: string | null;
+  invoiceNumber: string | null;
+  attachmentUrl: string | null;
+  dueAt: string | null;
+  state: PaymentOrderState;
+  derivedState: PaymentOrderState;
+  sourceBalanceSnapshotJson: Record<string, unknown>;
+  balanceWarning: {
+    status: 'unknown' | 'sufficient' | 'insufficient';
+    message: string;
+    balanceRaw?: string;
+  };
+  metadataJson: Record<string, unknown>;
+  createdByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  destination: Destination;
+  payee: Payee | null;
+  counterparty: Counterparty | null;
+  sourceWorkspaceAddress: WorkspaceAddress | null;
+  createdByUser: User | null;
+  paymentRequest: Omit<PaymentRequest, 'destination' | 'counterparty' | 'paymentOrder'> | null;
+  transferRequests: Array<{
+    transferRequestId: string;
+    status: string;
+    amountRaw: string;
+    requestedAt: string;
+  }>;
+  events: PaymentOrderEvent[];
+  reconciliationDetail: ReconciliationDetail | null;
+};
+
+export type PaymentRequestsCsvImportResult = {
+  imported: number;
+  failed: number;
+  items: Array<{
+    rowNumber: number;
+    status: 'imported' | 'failed';
+    error?: string;
+    payee?: Payee | null;
+    paymentRequest?: PaymentRequest;
+  }>;
+};
+
+export type PaymentProofPacket = {
+  packetType: 'stablecoin_payment_proof';
+  version: number;
+  generatedAt: string;
+  workspaceId: string;
+  status: 'complete' | 'partial' | 'exception' | 'closed' | 'in_progress';
+  intent: Record<string, unknown>;
+  parties: Record<string, unknown>;
+  approval: Record<string, unknown>;
+  execution: Record<string, unknown>;
+  settlement: Record<string, unknown>;
+  exceptions: Array<Record<string, unknown>>;
+  auditTrail: ReconciliationTimelineItem[];
 };
 
 export type ExceptionItem = {

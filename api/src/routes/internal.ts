@@ -98,6 +98,7 @@ internalRouter.get('/internal/workspaces/:workspaceId/matching-context', async (
       transferRequests: transferRequests.map((request) => ({
         transferRequestId: request.transferRequestId,
         workspaceId: request.workspaceId,
+        paymentOrderId: request.paymentOrderId,
         sourceWorkspaceAddressId: request.sourceWorkspaceAddressId,
         destinationWorkspaceAddressId: request.destinationWorkspaceAddressId,
         requestType: request.requestType,

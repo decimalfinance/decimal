@@ -1655,10 +1655,10 @@ textarea:focus {
 
 .surface-toolbar {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) auto;
+  grid-template-columns: minmax(220px, 1fr) auto;
   gap: var(--space-2);
   align-items: center;
-  width: min(54%, 760px);
+  width: min(66%, 760px);
   justify-self: end;
 }
 
@@ -1679,6 +1679,19 @@ textarea:focus {
   gap: var(--space-2);
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.inline-action-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin: var(--space-3) 0 var(--space-4);
+  color: var(--muted);
+}
+
+.inline-action-row small {
+  font-size: var(--font-xs);
 }
 
 .registry-section-title {
@@ -1705,9 +1718,13 @@ textarea:focus {
 .surface-panel-header {
   align-items: center;
   margin-bottom: 6px;
+  width: 100%;
+  min-width: 0;
 }
 
 .surface-panel-copy {
+  flex: 1 1 auto;
+  min-width: 180px;
   width: auto;
 }
 
@@ -2142,6 +2159,136 @@ textarea:focus {
     120px
     120px;
 }
+
+.payment-order-table .request-table-head,
+.payment-order-table .request-table-row,
+.payment-order-table .request-row-button {
+  grid-template-columns:
+    minmax(88px, 0.9fr)
+    minmax(92px, 1fr)
+    minmax(116px, 1.2fr)
+    minmax(98px, 0.9fr)
+    minmax(230px, 1.9fr)
+    minmax(88px, 0.85fr);
+}
+
+.payment-progress-cell {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.payment-progress-cell small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.25;
+  white-space: normal;
+}
+
+.payment-progress-panel {
+  display: grid;
+  gap: var(--space-3);
+  border: 1px solid var(--line);
+  padding: 14px;
+  background: var(--panel-2);
+}
+
+.payment-progress-head {
+  display: grid;
+  gap: 6px;
+}
+
+.payment-progress-head strong {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.payment-progress-head p {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-sm);
+  line-height: 1.5;
+}
+
+.payment-progress-steps {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  border: 1px solid var(--line);
+}
+
+.payment-progress-step {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 12px;
+  border-left: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.payment-progress-step:first-child {
+  border-left: 0;
+}
+
+.payment-progress-step span {
+  font-size: var(--font-2xs);
+}
+
+.payment-progress-step strong {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.payment-progress-step.is-complete {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent-soft) 35%, transparent);
+}
+
+.payment-progress-step.is-current {
+  color: var(--text);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.execution-handoff-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.execution-prepare-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(220px, 0.8fr) auto;
+  gap: var(--space-3);
+  align-items: end;
+  border: 1px solid var(--line);
+  padding: 14px;
+  background: var(--panel-2);
+}
+
+.execution-prepare-copy {
+  display: grid;
+  gap: 6px;
+  align-self: center;
+}
+
+.execution-prepare-copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-sm);
+  line-height: 1.5;
+}
+
+.execution-packet-card {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.execution-packet-card .registry-detail-box {
+  grid-column: 1 / -1;
+}
+
 
 .request-table-row.is-active {
   background: color-mix(in srgb, var(--accent-soft) 40%, transparent);
@@ -2587,6 +2734,13 @@ textarea:focus {
   }
 
   .policy-strategy-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .execution-handoff-grid,
+  .execution-prepare-panel,
+  .payment-progress-steps,
+  .execution-packet-card {
     grid-template-columns: 1fr;
   }
 

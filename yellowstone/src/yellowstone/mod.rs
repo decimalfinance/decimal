@@ -784,8 +784,20 @@ impl YellowstoneWorker {
                     .filter(|request| is_within_match_window(request.requested_at, context.event_time))
                     .collect();
 
+                let (allocatable_requests, match_rule, match_rule_label) =
+                    select_requests_for_observation(&windowed_requests, &context.signature);
+                let signature_matched_request_count = allocatable_requests
+                    .iter()
+                    .filter(|request| request.submitted_signature.as_deref() == Some(context.signature.as_str()))
+                    .count();
+
                 let book_requests: Vec<BookRequest<'_>> = windowed_requests
                     .iter()
+                    .filter(|request| {
+                        allocatable_requests
+                            .iter()
+                            .any(|candidate| candidate.transfer_request_id == request.transfer_request_id)
+                    })
                     .map(|request| {
                         let snapshot_state = worker_state
                             .matcher_state
@@ -837,10 +849,13 @@ impl YellowstoneWorker {
                     event_time: context.event_time,
                     properties_json: Some(
                         json!({
-                            "windowed_request_count": eligible_request_count,
-                            "route_group": payment.route_group,
-                            "payment_kind": payment.payment_kind,
-                            "route_count": payment.route_count,
+                            "windowed_request_count": windowed_requests.len(),
+                            "eligible_request_count": eligible_request_count,
+                            "signature_matched_request_count": signature_matched_request_count,
+                            "match_rule": match_rule,
+                                "route_group": payment.route_group,
+                                "payment_kind": payment.payment_kind,
+                                "route_count": payment.route_count,
                         })
                         .to_string(),
                     ),
@@ -909,6 +924,7 @@ impl YellowstoneWorker {
                                 "allocated_total_raw": allocation.allocated_total_raw,
                                 "fill_count": allocation.fill_count,
                                 "match_status": allocation.match_status,
+                                "match_rule": match_rule,
                                 "route_group": payment.route_group,
                                 "payment_kind": payment.payment_kind,
                             })
@@ -940,13 +956,14 @@ impl YellowstoneWorker {
                         amount_variance_raw: allocation.remaining_request_raw,
                         destination_match_type: "wallet_destination".to_string(),
                         time_delta_seconds: allocation.time_delta_seconds,
-                        match_rule: "payment_book_fifo_allocator".to_string(),
+                        match_rule: match_rule.to_string(),
                         candidate_count: allocation.fill_count,
                         explanation: format!(
-                            "Allocated total {} of requested {} USDC to wallet {} using FIFO payment-book matching.",
+                            "Allocated total {} of requested {} USDC to wallet {} using {} matching.",
                             format_amount(allocation.allocated_total_raw),
                             format_amount(request.amount_raw),
                             destination_wallet,
+                            match_rule_label,
                         ),
                         observed_event_time: Some(context.event_time),
                         matched_at: Some(processing_time),
@@ -1165,6 +1182,31 @@ fn is_within_match_window(requested_at: DateTime<Utc>, observed_at: DateTime<Utc
     (-MATCH_WINDOW_BEFORE_REQUEST_SECONDS..=MATCH_WINDOW_AFTER_REQUEST_SECONDS).contains(&delta)
 }
 
+fn select_requests_for_observation<'a>(
+    windowed_requests: &'a [&'a WorkspaceTransferRequestMatch],
+    observed_signature: &str,
+) -> (Vec<&'a WorkspaceTransferRequestMatch>, &'static str, &'static str) {
+    let signature_requests: Vec<&WorkspaceTransferRequestMatch> = windowed_requests
+        .iter()
+        .copied()
+        .filter(|request| request.submitted_signature.as_deref() == Some(observed_signature))
+        .collect();
+
+    if signature_requests.is_empty() {
+        (
+            windowed_requests.to_vec(),
+            "payment_book_fifo_allocator",
+            "FIFO payment-book",
+        )
+    } else {
+        (
+            signature_requests,
+            "payment_submitted_signature_allocator",
+            "submitted-signature",
+        )
+    }
+}
+
 fn should_retry_matching_with_fresh_registry(
     registry: &WorkspaceRegistry,
     context: &TransactionContext,
@@ -1282,6 +1324,67 @@ mod tests {
     }
 
     #[test]
+    fn request_selection_prefers_submitted_signature_over_fifo_candidates() {
+        let requested_at = Utc::now();
+        let fifo_request = WorkspaceTransferRequestMatch {
+            transfer_request_id: "fifo-request".to_string(),
+            workspace_id: "workspace-1".to_string(),
+            destination_wallet_address: "wallet-1".to_string(),
+            amount_raw: 10_000,
+            requested_at,
+            request_type: "wallet_transfer".to_string(),
+            submitted_signature: None,
+        };
+        let signature_request = WorkspaceTransferRequestMatch {
+            transfer_request_id: "signature-request".to_string(),
+            workspace_id: "workspace-1".to_string(),
+            destination_wallet_address: "wallet-1".to_string(),
+            amount_raw: 10_000,
+            requested_at,
+            request_type: "wallet_transfer".to_string(),
+            submitted_signature: Some("observed-signature".to_string()),
+        };
+        let windowed_requests = vec![&fifo_request, &signature_request];
+
+        let (selected_requests, match_rule, _) =
+            select_requests_for_observation(&windowed_requests, "observed-signature");
+
+        assert_eq!(match_rule, "payment_submitted_signature_allocator");
+        assert_eq!(selected_requests.len(), 1);
+        assert_eq!(selected_requests[0].transfer_request_id, "signature-request");
+    }
+
+    #[test]
+    fn request_selection_falls_back_to_fifo_when_no_submitted_signature_matches() {
+        let requested_at = Utc::now();
+        let fifo_request = WorkspaceTransferRequestMatch {
+            transfer_request_id: "fifo-request".to_string(),
+            workspace_id: "workspace-1".to_string(),
+            destination_wallet_address: "wallet-1".to_string(),
+            amount_raw: 10_000,
+            requested_at,
+            request_type: "wallet_transfer".to_string(),
+            submitted_signature: None,
+        };
+        let other_signature_request = WorkspaceTransferRequestMatch {
+            transfer_request_id: "other-signature-request".to_string(),
+            workspace_id: "workspace-1".to_string(),
+            destination_wallet_address: "wallet-1".to_string(),
+            amount_raw: 10_000,
+            requested_at,
+            request_type: "wallet_transfer".to_string(),
+            submitted_signature: Some("different-signature".to_string()),
+        };
+        let windowed_requests = vec![&fifo_request, &other_signature_request];
+
+        let (selected_requests, match_rule, _) =
+            select_requests_for_observation(&windowed_requests, "observed-signature");
+
+        assert_eq!(match_rule, "payment_book_fifo_allocator");
+        assert_eq!(selected_requests.len(), 2);
+    }
+
+    #[test]
     fn matching_retry_triggers_when_workspace_wallet_exists_but_request_is_missing() {
         let destination_wallet = Pubkey::new_unique();
         let destination_token_account = Pubkey::new_unique();
@@ -1328,6 +1431,7 @@ mod tests {
                 amount_raw: 10_000,
                 requested_at: Utc::now(),
                 request_type: "wallet_transfer".to_string(),
+                submitted_signature: None,
             }],
         );
 
@@ -1377,6 +1481,7 @@ mod tests {
                 amount_raw: 50_000_000,
                 requested_at: Utc::now(),
                 request_type: "wallet_transfer".to_string(),
+                submitted_signature: None,
             }],
         );
 
@@ -1528,6 +1633,7 @@ mod tests {
                 amount_raw: 10_000,
                 requested_at: Utc::now(),
                 request_type: "wallet_transfer".to_string(),
+                submitted_signature: None,
             }],
         );
 

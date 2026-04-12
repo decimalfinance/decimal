@@ -20,6 +20,8 @@ TRUNCATE TABLE
   exception_notes,
   exception_states,
   export_jobs,
+  payment_order_events,
+  payment_orders,
   transfer_requests,
   destinations,
   counterparties,
@@ -2271,13 +2273,14 @@ test('phase e audit export and unified timeline include approval and execution s
 test('phase e ops health exposes lag and latency status', async () => {
   const setup = await createSeededPartialExceptionRequest();
   const signature = setup.signature;
+  const testSlot = 999_999_999_001;
   const workerReceivedAt = '2026-04-06 13:30:20.083';
   const txWriteAt = '2026-04-06 13:30:21.083';
 
   await insertClickHouseRows('observed_transactions', [
     {
       signature,
-      slot: 411111111,
+      slot: testSlot,
       event_time: '2026-04-06 13:30:15.083',
       yellowstone_created_at: '2026-04-06 13:30:15.200',
       worker_received_at: workerReceivedAt,
@@ -2295,7 +2298,7 @@ test('phase e ops health exposes lag and latency status', async () => {
   const payload = await response.json();
 
   assert.equal(payload.postgres, 'ok');
-  assert.equal(payload.latestSlot, 411111111);
+  assert.equal(payload.latestSlot, testSlot);
   assert.ok(payload.latencies.yellowstoneToWorkerMs.p50 !== null);
   assert.ok(payload.latencies.chainToWriteMs.p50 !== null);
   assert.equal(payload.openExceptionCount, 1);

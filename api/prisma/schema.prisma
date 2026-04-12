@@ -38,6 +38,8 @@ model User {
   approvalDecisions         ApprovalDecision[]
   executionRecords          ExecutionRecord[] @relation("ExecutionRecordExecutorUser")
   exportJobs                ExportJob[]
+  paymentOrdersCreated      PaymentOrder[]    @relation("PaymentOrderCreatedByUser")
+  paymentRequestsCreated    PaymentRequest[]  @relation("PaymentRequestRequestedByUser")
 
   @@map("users")
 }
@@ -90,6 +92,10 @@ model Workspace {
   exceptionNotes       ExceptionNote[]
   exceptionStates      ExceptionState[]
   exportJobs           ExportJob[]
+  paymentOrders        PaymentOrder[]
+  paymentOrderEvents   PaymentOrderEvent[]
+  paymentRequests      PaymentRequest[]
+  payees               Payee[]
 
   @@map("workspaces")
 }
@@ -114,6 +120,7 @@ model WorkspaceAddress {
   destinations           Destination[]
   outboundTransferRequests TransferRequest[] @relation("TransferRequestSourceAddress")
   inboundTransferRequests  TransferRequest[] @relation("TransferRequestDestinationAddress")
+  sourcePaymentOrders      PaymentOrder[]    @relation("PaymentOrderSourceAddress")
 
   @@unique([workspaceId, address])
   @@map("workspace_addresses")
@@ -131,6 +138,8 @@ model Counterparty {
   updatedAt           DateTime      @updatedAt @db.Timestamptz(6) @map("updated_at")
   organization        Organization  @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
   destinations        Destination[]
+  paymentOrders       PaymentOrder[]
+  paymentRequests     PaymentRequest[]
 
   @@index([organizationId, createdAt(sort: Desc)])
   @@map("counterparties")
@@ -158,6 +167,9 @@ model Destination {
   workspace                 Workspace        @relation(fields: [workspaceId], references: [workspaceId], onDelete: Cascade)
   linkedWorkspaceAddress    WorkspaceAddress? @relation(fields: [linkedWorkspaceAddressId], references: [workspaceAddressId], onDelete: SetNull)
   transferRequests          TransferRequest[]
+  paymentOrders             PaymentOrder[]
+  paymentRequests           PaymentRequest[]
+  payees                    Payee[]
 
   @@index([workspaceId, createdAt(sort: Desc)])
   @@index([counterpartyId, createdAt(sort: Desc)])
@@ -168,6 +180,7 @@ model Destination {
 model TransferRequest {
   transferRequestId          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("transfer_request_id")
   workspaceId                String           @db.Uuid @map("workspace_id")
+  paymentOrderId             String?          @db.Uuid @map("payment_order_id")
   sourceWorkspaceAddressId   String?          @db.Uuid @map("source_workspace_address_id")
   destinationWorkspaceAddressId String        @db.Uuid @map("destination_workspace_address_id")
   destinationId              String?          @db.Uuid @map("destination_id")
@@ -184,6 +197,7 @@ model TransferRequest {
   createdAt                  DateTime         @default(now()) @db.Timestamptz(6) @map("created_at")
   updatedAt                  DateTime         @updatedAt @db.Timestamptz(6) @map("updated_at")
   workspace                  Workspace        @relation(fields: [workspaceId], references: [workspaceId], onDelete: Cascade)
+  paymentOrder               PaymentOrder?    @relation(fields: [paymentOrderId], references: [paymentOrderId], onDelete: SetNull)
   sourceWorkspaceAddress     WorkspaceAddress? @relation("TransferRequestSourceAddress", fields: [sourceWorkspaceAddressId], references: [workspaceAddressId], onDelete: SetNull)
   destinationWorkspaceAddress WorkspaceAddress @relation("TransferRequestDestinationAddress", fields: [destinationWorkspaceAddressId], references: [workspaceAddressId], onDelete: Restrict)
   destination                Destination?     @relation(fields: [destinationId], references: [destinationId], onDelete: SetNull)
@@ -194,9 +208,124 @@ model TransferRequest {
   notes                      TransferRequestNote[]
 
   @@index([workspaceId, status, requestedAt(sort: Desc)])
+  @@index([paymentOrderId])
   @@index([destinationWorkspaceAddressId, status, requestedAt(sort: Desc)])
   @@index([destinationId, status, requestedAt(sort: Desc)])
   @@map("transfer_requests")
+}
+
+model PaymentOrder {
+  paymentOrderId             String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("payment_order_id")
+  workspaceId                String            @db.Uuid @map("workspace_id")
+  paymentRequestId           String?           @unique @db.Uuid @map("payment_request_id")
+  payeeId                    String?           @db.Uuid @map("payee_id")
+  destinationId              String            @db.Uuid @map("destination_id")
+  counterpartyId             String?           @db.Uuid @map("counterparty_id")
+  sourceWorkspaceAddressId   String?           @db.Uuid @map("source_workspace_address_id")
+  amountRaw                  BigInt            @map("amount_raw")
+  asset                      String            @default("usdc")
+  memo                       String?
+  externalReference          String?           @map("external_reference")
+  invoiceNumber              String?           @map("invoice_number")
+  attachmentUrl              String?           @map("attachment_url")
+  dueAt                      DateTime?         @db.Timestamptz(6) @map("due_at")
+  state                      String            @default("draft")
+  sourceBalanceSnapshotJson  Json              @default("{}") @map("source_balance_snapshot_json")
+  metadataJson               Json              @default("{}") @map("metadata_json")
+  createdByUserId            String?           @db.Uuid @map("created_by_user_id")
+  createdAt                  DateTime          @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt                  DateTime          @updatedAt @db.Timestamptz(6) @map("updated_at")
+  workspace                  Workspace         @relation(fields: [workspaceId], references: [workspaceId], onDelete: Cascade)
+  paymentRequest             PaymentRequest?   @relation(fields: [paymentRequestId], references: [paymentRequestId], onDelete: SetNull)
+  payee                      Payee?            @relation(fields: [payeeId], references: [payeeId], onDelete: SetNull)
+  destination                Destination       @relation(fields: [destinationId], references: [destinationId], onDelete: Restrict)
+  counterparty               Counterparty?     @relation(fields: [counterpartyId], references: [counterpartyId], onDelete: SetNull)
+  sourceWorkspaceAddress     WorkspaceAddress? @relation("PaymentOrderSourceAddress", fields: [sourceWorkspaceAddressId], references: [workspaceAddressId], onDelete: SetNull)
+  createdByUser              User?             @relation("PaymentOrderCreatedByUser", fields: [createdByUserId], references: [userId], onDelete: SetNull)
+  transferRequests           TransferRequest[]
+  events                     PaymentOrderEvent[]
+
+  @@index([workspaceId, state, createdAt(sort: Desc)])
+  @@index([paymentRequestId])
+  @@index([payeeId, createdAt(sort: Desc)])
+  @@index([destinationId, createdAt(sort: Desc)])
+  @@index([sourceWorkspaceAddressId, createdAt(sort: Desc)])
+  @@map("payment_orders")
+}
+
+model PaymentRequest {
+  paymentRequestId  String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("payment_request_id")
+  workspaceId       String        @db.Uuid @map("workspace_id")
+  payeeId           String?       @db.Uuid @map("payee_id")
+  destinationId     String        @db.Uuid @map("destination_id")
+  counterpartyId    String?       @db.Uuid @map("counterparty_id")
+  requestedByUserId String?       @db.Uuid @map("requested_by_user_id")
+  amountRaw         BigInt        @map("amount_raw")
+  asset             String        @default("usdc")
+  reason            String
+  externalReference String?       @map("external_reference")
+  dueAt             DateTime?     @db.Timestamptz(6) @map("due_at")
+  state             String        @default("submitted")
+  metadataJson      Json          @default("{}") @map("metadata_json")
+  createdAt         DateTime      @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt         DateTime      @updatedAt @db.Timestamptz(6) @map("updated_at")
+  workspace         Workspace     @relation(fields: [workspaceId], references: [workspaceId], onDelete: Cascade)
+  payee             Payee?        @relation(fields: [payeeId], references: [payeeId], onDelete: SetNull)
+  destination       Destination   @relation(fields: [destinationId], references: [destinationId], onDelete: Restrict)
+  counterparty      Counterparty? @relation(fields: [counterpartyId], references: [counterpartyId], onDelete: SetNull)
+  requestedByUser   User?         @relation("PaymentRequestRequestedByUser", fields: [requestedByUserId], references: [userId], onDelete: SetNull)
+  paymentOrder      PaymentOrder?
+
+  @@index([workspaceId, state, createdAt(sort: Desc)])
+  @@index([payeeId, createdAt(sort: Desc)])
+  @@index([destinationId, createdAt(sort: Desc)])
+  @@index([counterpartyId, createdAt(sort: Desc)])
+  @@unique([workspaceId, destinationId, amountRaw, externalReference])
+  @@map("payment_requests")
+}
+
+model Payee {
+  payeeId              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("payee_id")
+  workspaceId          String          @db.Uuid @map("workspace_id")
+  defaultDestinationId String?         @db.Uuid @map("default_destination_id")
+  name                 String
+  externalReference    String?         @map("external_reference")
+  status               String          @default("active")
+  notes                String?
+  metadataJson         Json            @default("{}") @map("metadata_json")
+  createdAt            DateTime        @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt            DateTime        @updatedAt @db.Timestamptz(6) @map("updated_at")
+  workspace            Workspace       @relation(fields: [workspaceId], references: [workspaceId], onDelete: Cascade)
+  defaultDestination   Destination?    @relation(fields: [defaultDestinationId], references: [destinationId], onDelete: SetNull)
+  paymentRequests      PaymentRequest[]
+  paymentOrders        PaymentOrder[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId, status, createdAt(sort: Desc)])
+  @@index([defaultDestinationId, createdAt(sort: Desc)])
+  @@map("payees")
+}
+
+model PaymentOrderEvent {
+  paymentOrderEventId String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("payment_order_event_id")
+  paymentOrderId      String       @db.Uuid @map("payment_order_id")
+  workspaceId         String       @db.Uuid @map("workspace_id")
+  eventType           String       @map("event_type")
+  actorType           String       @map("actor_type")
+  actorId             String?      @map("actor_id")
+  beforeState         String?      @map("before_state")
+  afterState          String?      @map("after_state")
+  linkedTransferRequestId String?  @db.Uuid @map("linked_transfer_request_id")
+  linkedExecutionRecordId String?  @db.Uuid @map("linked_execution_record_id")
+  linkedSignature     String?      @map("linked_signature")
+  payloadJson         Json         @default("{}") @map("payload_json")
+  createdAt           DateTime     @default(now()) @db.Timestamptz(6) @map("created_at")
+  paymentOrder        PaymentOrder @relation(fields: [paymentOrderId], references: [paymentOrderId], onDelete: Cascade)
+  workspace           Workspace    @relation(fields: [workspaceId], references: [workspaceId], onDelete: Cascade)
+
+  @@index([paymentOrderId, createdAt(sort: Asc)])
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@map("payment_order_events")
 }
 
 model ExecutionRecord {

@@ -1,6 +1,6 @@
 # Product Build Map
 
-Date: 2026-04-07
+Date: 2026-04-11
 
 ## Purpose
 
@@ -23,14 +23,15 @@ We are building the operational layer for teams that already move stablecoins.
 
 The full job is:
 
-1. create transfer requests
-2. route approvals
-3. track execution
-4. observe settlement
-5. reconcile intent to on-chain reality
-6. handle exceptions
-7. keep an auditable record
-8. export records to finance and ops systems
+1. create a business payment intent
+2. choose the source of funds and destination
+3. route approvals
+4. hand off or track execution
+5. observe settlement
+6. reconcile intent to on-chain reality
+7. handle exceptions
+8. keep an auditable record
+9. export records to finance and ops systems
 
 ## Current State
 
@@ -44,17 +45,21 @@ The product today is strongest in:
 - observed transfer legs
 - observed payments
 - deterministic matching
-- basic reconciliation UI
+- reconciliation UI
+- destination trust
+- approval policy and inbox
+- execution records
+- exception operations
+- audit/export surfaces
 
 The product is weak or incomplete in:
 
-- request lifecycle
-- trusted counterparties and destinations
-- approvals
-- execution tracking
-- exception operations
-- audit timeline
-- export
+- business-facing payment intent
+- source wallet / source-of-funds selection
+- balance context
+- execution handoff into a wallet or multisig workflow
+- invoice / bill / payout reference metadata
+- accounting-grade export packets
 
 ## Honest Position
 
@@ -62,12 +67,15 @@ Today we have built:
 
 - settlement visibility
 - request matching
+- approval/control workflow
+- execution evidence tracking
+- exception/audit/export foundation
 
 We have not yet built:
 
-- the complete stablecoin operations control surface
+- the complete stablecoin payment control surface
 
-This means the current product is a strong bottom layer, not the finished company.
+This means the current product is a strong control and reconciliation core, not the finished company.
 
 ## Build Principle
 
@@ -79,9 +87,16 @@ The correct sequence is:
 4. add execution tracking
 5. deepen exception operations
 6. produce audit and export outputs
-7. harden the system operationally throughout
+7. add payment orders that combine business intent, source-of-funds, execution handoff, and reconciliation
+8. harden the system operationally throughout
 
 ## Phase Order
+
+Status:
+
+- Phase A through Phase E define the current shipped core.
+- Phase F is the next implementation phase.
+- Phase F replaces the earlier fork between "AP first" and "execution first" with a smaller combined loop.
 
 ### Phase A
 
@@ -143,6 +158,18 @@ Doc:
 
 - [phase-e-exception-ops-audit-export-hardening.md](/Users/fuyofulo/code/stablecoin_intelligence/roadmap/phase-e-exception-ops-audit-export-hardening.md)
 
+### Phase F
+
+`Payment Orders + Source-Side Control`
+
+Goal:
+
+- move from abstract expected transfers to business payment orders that choose a source wallet, pass policy, hand off execution, reconcile settlement, and export proof
+
+Doc:
+
+- [phase-f-payment-orders-and-source-side-control.md](/Users/fuyofulo/code/stablecoin_intelligence/roadmap/phase-f-payment-orders-and-source-side-control.md)
+
 ## Why This Order
 
 This order reflects the current reality of the system.
@@ -162,6 +189,7 @@ The next serious product value comes from:
 - making reconciliation operable
 - attaching business context to destinations
 - adding approvals before execution
+- making source wallet and payment intent first-class
 
 ## Product Completion Standard
 
@@ -169,13 +197,14 @@ The product is not complete when matching works.
 
 The product is complete when an operator can do the full loop in one system:
 
-1. create the request
-2. send it through policy and approval
-3. track its execution
-4. observe settlement
-5. reconcile what happened
-6. resolve exceptions
-7. export the final record
+1. create the payment order
+2. choose the source wallet and destination
+3. send it through policy and approval
+4. hand off or track its execution
+5. observe settlement
+6. reconcile what happened
+7. resolve exceptions
+8. export the final record
 
 ## Phase Exit Rule
 
@@ -187,12 +216,17 @@ Each phase should be considered complete only when it satisfies three conditions
 
 ## Current Recommendation
 
-Build next in this exact order:
+Build the product in this exact order:
 
 1. Phase A
 2. Phase B
 3. Phase C
 4. Phase D
 5. Phase E
+6. Phase F
+
+Current next step:
+
+- finish Phase F by making payment orders originate a non-custodial Solana USDC execution packet before moving up into bills or AP workflows
 
 If user feedback forces reordering, update these docs rather than relying on memory.

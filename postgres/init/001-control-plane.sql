@@ -205,6 +205,9 @@ ALTER TABLE transfer_requests
 ALTER TABLE transfer_requests
   ADD COLUMN IF NOT EXISTS destination_workspace_address_id UUID;
 
+ALTER TABLE transfer_requests
+  ADD COLUMN IF NOT EXISTS payment_order_id UUID;
+
 ALTER TABLE exception_states
   ADD COLUMN IF NOT EXISTS assigned_to_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL;
 
@@ -249,6 +252,21 @@ CREATE TABLE IF NOT EXISTS destinations
   UNIQUE (workspace_id, linked_workspace_address_id)
 );
 
+CREATE TABLE IF NOT EXISTS payees
+(
+  payee_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+  default_destination_id UUID REFERENCES destinations(destination_id) ON DELETE SET NULL,
+  name TEXT NOT NULL,
+  external_reference TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  notes TEXT,
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (workspace_id, name)
+);
+
 CREATE TABLE IF NOT EXISTS approval_policies
 (
   approval_policy_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -289,8 +307,92 @@ CREATE TABLE IF NOT EXISTS execution_records
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS payment_orders
+(
+  payment_order_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+  payment_request_id UUID,
+  payee_id UUID REFERENCES payees(payee_id) ON DELETE SET NULL,
+  destination_id UUID NOT NULL REFERENCES destinations(destination_id) ON DELETE RESTRICT,
+  counterparty_id UUID REFERENCES counterparties(counterparty_id) ON DELETE SET NULL,
+  source_workspace_address_id UUID REFERENCES workspace_addresses(workspace_address_id) ON DELETE SET NULL,
+  amount_raw BIGINT NOT NULL,
+  asset TEXT NOT NULL DEFAULT 'usdc',
+  memo TEXT,
+  external_reference TEXT,
+  invoice_number TEXT,
+  attachment_url TEXT,
+  due_at TIMESTAMPTZ,
+  state TEXT NOT NULL DEFAULT 'draft',
+  source_balance_snapshot_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_by_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS payment_requests
+(
+  payment_request_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+  payee_id UUID REFERENCES payees(payee_id) ON DELETE SET NULL,
+  destination_id UUID NOT NULL REFERENCES destinations(destination_id) ON DELETE RESTRICT,
+  counterparty_id UUID REFERENCES counterparties(counterparty_id) ON DELETE SET NULL,
+  requested_by_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
+  amount_raw BIGINT NOT NULL,
+  asset TEXT NOT NULL DEFAULT 'usdc',
+  reason TEXT NOT NULL,
+  external_reference TEXT,
+  due_at TIMESTAMPTZ,
+  state TEXT NOT NULL DEFAULT 'submitted',
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (workspace_id, destination_id, amount_raw, external_reference)
+);
+
+CREATE TABLE IF NOT EXISTS payment_order_events
+(
+  payment_order_event_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  payment_order_id UUID NOT NULL REFERENCES payment_orders(payment_order_id) ON DELETE CASCADE,
+  workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+  event_type TEXT NOT NULL,
+  actor_type TEXT NOT NULL,
+  actor_id TEXT,
+  before_state TEXT,
+  after_state TEXT,
+  linked_transfer_request_id UUID,
+  linked_execution_record_id UUID,
+  linked_signature TEXT,
+  payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 ALTER TABLE transfer_requests
   ADD COLUMN IF NOT EXISTS destination_id UUID;
+
+ALTER TABLE payment_orders
+  ADD COLUMN IF NOT EXISTS payment_request_id UUID;
+
+ALTER TABLE payment_orders
+  ADD COLUMN IF NOT EXISTS payee_id UUID REFERENCES payees(payee_id) ON DELETE SET NULL;
+
+ALTER TABLE payment_requests
+  ADD COLUMN IF NOT EXISTS payee_id UUID REFERENCES payees(payee_id) ON DELETE SET NULL;
+
+ALTER TABLE payment_orders
+  DROP CONSTRAINT IF EXISTS payment_orders_payment_request_id_fkey;
+
+ALTER TABLE payment_orders
+  ADD CONSTRAINT payment_orders_payment_request_id_fkey
+  FOREIGN KEY (payment_request_id) REFERENCES payment_requests(payment_request_id) ON DELETE SET NULL;
+
+ALTER TABLE transfer_requests
+  DROP CONSTRAINT IF EXISTS transfer_requests_payment_order_id_fkey;
+
+ALTER TABLE transfer_requests
+  ADD CONSTRAINT transfer_requests_payment_order_id_fkey
+  FOREIGN KEY (payment_order_id) REFERENCES payment_orders(payment_order_id) ON DELETE SET NULL;
 
 ALTER TABLE transfer_requests
   DROP CONSTRAINT IF EXISTS transfer_requests_destination_id_fkey;
@@ -371,6 +473,41 @@ ALTER TABLE execution_records
     )
   );
 
+ALTER TABLE payment_orders
+  DROP CONSTRAINT IF EXISTS chk_payment_orders_state;
+
+ALTER TABLE payment_orders
+  ADD CONSTRAINT chk_payment_orders_state CHECK (
+    state IN (
+      'draft',
+      'pending_approval',
+      'approved',
+      'ready_for_execution',
+      'execution_recorded',
+      'partially_settled',
+      'settled',
+      'exception',
+      'closed',
+      'cancelled'
+    )
+  );
+
+ALTER TABLE payment_requests
+  DROP CONSTRAINT IF EXISTS chk_payment_requests_state;
+
+ALTER TABLE payment_requests
+  ADD CONSTRAINT chk_payment_requests_state CHECK (
+    state IN ('submitted', 'converted_to_order', 'cancelled')
+  );
+
+ALTER TABLE payment_order_events
+  DROP CONSTRAINT IF EXISTS chk_payment_order_events_actor_type;
+
+ALTER TABLE payment_order_events
+  ADD CONSTRAINT chk_payment_order_events_actor_type CHECK (
+    actor_type IN ('user', 'system', 'worker')
+  );
+
 ALTER TABLE exception_states
   DROP CONSTRAINT IF EXISTS chk_exception_states_status;
 
@@ -402,6 +539,7 @@ CREATE INDEX IF NOT EXISTS idx_workspace_addresses_workspace_id ON workspace_add
 CREATE INDEX IF NOT EXISTS idx_workspace_addresses_address ON workspace_addresses(address);
 CREATE INDEX IF NOT EXISTS idx_workspace_addresses_usdc_ata ON workspace_addresses(usdc_ata_address);
 CREATE INDEX IF NOT EXISTS idx_transfer_requests_workspace_id ON transfer_requests(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_transfer_requests_payment_order_id ON transfer_requests(payment_order_id);
 CREATE INDEX IF NOT EXISTS idx_transfer_requests_source_address_id ON transfer_requests(source_workspace_address_id);
 CREATE INDEX IF NOT EXISTS idx_transfer_requests_destination_address_id ON transfer_requests(destination_workspace_address_id);
 CREATE INDEX IF NOT EXISTS idx_transfer_requests_status ON transfer_requests(status);
@@ -419,6 +557,10 @@ CREATE INDEX IF NOT EXISTS idx_destinations_counterparty_created_at
   ON destinations(counterparty_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_destinations_wallet_address
   ON destinations(wallet_address);
+CREATE INDEX IF NOT EXISTS idx_payees_workspace_status_created_at
+  ON payees(workspace_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_payees_default_destination_created_at
+  ON payees(default_destination_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_approval_policies_workspace_id
   ON approval_policies(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_approval_decisions_workspace_created_at
@@ -429,6 +571,35 @@ CREATE INDEX IF NOT EXISTS idx_execution_records_workspace_created_at
   ON execution_records(workspace_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_execution_records_request_created_at
   ON execution_records(transfer_request_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_payment_orders_workspace_state_created_at
+  ON payment_orders(workspace_id, state, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_payment_request_id_unique
+  ON payment_orders(payment_request_id)
+  WHERE payment_request_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_payment_orders_payment_request_id
+  ON payment_orders(payment_request_id);
+CREATE INDEX IF NOT EXISTS idx_payment_orders_payee_created_at
+  ON payment_orders(payee_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_payment_orders_destination_created_at
+  ON payment_orders(destination_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_payment_orders_source_created_at
+  ON payment_orders(source_workspace_address_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_unique_active_reference
+  ON payment_orders(workspace_id, destination_id, amount_raw, lower(coalesce(external_reference, invoice_number)))
+  WHERE coalesce(external_reference, invoice_number) IS NOT NULL
+    AND state NOT IN ('closed', 'cancelled');
+CREATE INDEX IF NOT EXISTS idx_payment_order_events_order_created_at
+  ON payment_order_events(payment_order_id, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_payment_order_events_workspace_created_at
+  ON payment_order_events(workspace_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_payment_requests_workspace_state_created_at
+  ON payment_requests(workspace_id, state, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_payment_requests_payee_created_at
+  ON payment_requests(payee_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_payment_requests_destination_created_at
+  ON payment_requests(destination_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_payment_requests_counterparty_created_at
+  ON payment_requests(counterparty_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_transfer_request_events_request_created_at
   ON transfer_request_events(transfer_request_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_transfer_request_events_workspace_created_at
@@ -490,6 +661,11 @@ CREATE TRIGGER trg_destinations_updated_at
 BEFORE UPDATE ON destinations
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_payees_updated_at ON payees;
+CREATE TRIGGER trg_payees_updated_at
+BEFORE UPDATE ON payees
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
 DROP TRIGGER IF EXISTS trg_approval_policies_updated_at ON approval_policies;
 CREATE TRIGGER trg_approval_policies_updated_at
 BEFORE UPDATE ON approval_policies
@@ -498,6 +674,16 @@ FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS trg_execution_records_updated_at ON execution_records;
 CREATE TRIGGER trg_execution_records_updated_at
 BEFORE UPDATE ON execution_records
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_payment_orders_updated_at ON payment_orders;
+CREATE TRIGGER trg_payment_orders_updated_at
+BEFORE UPDATE ON payment_orders
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_payment_requests_updated_at ON payment_requests;
+CREATE TRIGGER trg_payment_requests_updated_at
+BEFORE UPDATE ON payment_requests
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_exception_states_updated_at ON exception_states;

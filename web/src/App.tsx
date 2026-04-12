@@ -14,6 +14,7 @@ import {
   type Route,
   type Theme,
 } from './lib/app';
+import { signAndSubmitPreparedPayment } from './lib/solana-wallet';
 import {
   DashboardPage,
   LoginScreen,
@@ -40,6 +41,10 @@ import type {
   ExceptionItem,
   OpsHealth,
   ObservedTransfer,
+  PaymentExecutionPreparation,
+  PaymentExecutionPacket,
+  PaymentOrder,
+  PaymentRequest,
   ReconciliationDetail,
   ReconciliationRow,
   TransferRequest,
@@ -81,6 +86,18 @@ function ThemeIcon({ theme }: { theme: Theme }) {
   );
 }
 
+function downloadJson(fileName: string, payload: unknown) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(url);
+}
+
 function resetViewport(sectionId?: string) {
   if (!sectionId) {
     if (window.location.hash) {
@@ -104,6 +121,8 @@ export function App() {
   const [addresses, setAddresses] = useState<WorkspaceAddress[]>([]);
   const [counterparties, setCounterparties] = useState<Counterparty[]>([]);
   const [destinations, setDestinations] = useState<Destination[]>([]);
+  const [paymentRequests, setPaymentRequests] = useState<PaymentRequest[]>([]);
+  const [paymentOrders, setPaymentOrders] = useState<PaymentOrder[]>([]);
   const [transferRequests, setTransferRequests] = useState<TransferRequest[]>([]);
   const [observedTransfers, setObservedTransfers] = useState<ObservedTransfer[]>([]);
   const [reconciliationRows, setReconciliationRows] = useState<ReconciliationRow[]>([]);
@@ -185,7 +204,11 @@ export function App() {
   }, [authStatus, currentWorkspaceId, reconciliationFilter, reconciliationStatusFilter]);
 
   useEffect(() => {
-    if (authStatus !== 'authenticated' || !currentWorkspaceId || route.name !== 'workspaceHome') {
+    if (
+      authStatus !== 'authenticated'
+      || !currentWorkspaceId
+      || (route.name !== 'workspaceHome' && route.name !== 'workspaceRequests')
+    ) {
       return;
     }
 
@@ -199,7 +222,11 @@ export function App() {
   }, [authStatus, currentWorkspaceId, route.name]);
 
   useEffect(() => {
-    if (authStatus !== 'authenticated' || !currentWorkspaceId || route.name !== 'workspaceHome') {
+    if (
+      authStatus !== 'authenticated'
+      || !currentWorkspaceId
+      || (route.name !== 'workspaceHome' && route.name !== 'workspaceRequests')
+    ) {
       return;
     }
 
@@ -207,6 +234,9 @@ export function App() {
       void Promise.all([
         loadObservedTransfersData(currentWorkspaceId, { silent: true }),
         loadReconciliationData(currentWorkspaceId, { silent: true }),
+        route.name === 'workspaceRequests'
+          ? loadPaymentOrdersData(currentWorkspaceId)
+          : Promise.resolve(),
       ]);
     }, RECONCILIATION_LIVE_REFRESH_INTERVAL_MS);
 
@@ -246,6 +276,8 @@ export function App() {
     setAddresses([]);
     setCounterparties([]);
     setDestinations([]);
+    setPaymentRequests([]);
+    setPaymentOrders([]);
     setTransferRequests([]);
     setObservedTransfers([]);
     setReconciliationRows([]);
@@ -335,6 +367,8 @@ export function App() {
         nextAddresses,
         nextCounterparties,
         nextDestinations,
+        nextPaymentRequests,
+        nextPaymentOrders,
         nextTransferRequests,
         nextApprovalPolicy,
         nextWorkspaceMembers,
@@ -342,6 +376,8 @@ export function App() {
         api.listAddresses(workspaceId),
         api.listCounterparties(workspaceId),
         api.listDestinations(workspaceId),
+        api.listPaymentRequests(workspaceId),
+        api.listPaymentOrders(workspaceId),
         api.listTransferRequests(workspaceId),
         api.getApprovalPolicy(workspaceId),
         api.listWorkspaceMembers(workspaceId),
@@ -350,6 +386,8 @@ export function App() {
       setAddresses(nextAddresses.items);
       setCounterparties(nextCounterparties.items);
       setDestinations(nextDestinations.items);
+      setPaymentRequests(nextPaymentRequests.items);
+      setPaymentOrders(nextPaymentOrders.items);
       setTransferRequests(nextTransferRequests.items);
       setApprovalPolicy(nextApprovalPolicy);
       setWorkspaceMembers(nextWorkspaceMembers.items);
@@ -359,6 +397,20 @@ export function App() {
       if (!options?.silent) {
         setIsLoadingWorkspace(false);
       }
+    }
+  }
+
+  async function loadPaymentOrdersData(workspaceId: string) {
+    try {
+      setErrorMessage(null);
+      const [nextPaymentRequests, nextPaymentOrders] = await Promise.all([
+        api.listPaymentRequests(workspaceId),
+        api.listPaymentOrders(workspaceId),
+      ]);
+      setPaymentRequests(nextPaymentRequests.items);
+      setPaymentOrders(nextPaymentOrders.items);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to load payment orders');
     }
   }
 
@@ -611,35 +663,176 @@ export function App() {
     }
   }
 
-  async function handleCreateTransferRequest(event: FormEvent<HTMLFormElement>) {
+  async function handleCreatePaymentOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!currentWorkspaceId) return;
     const form = event.currentTarget;
     const formData = new FormData(form);
     const sourceWorkspaceAddressId = String(formData.get('sourceWorkspaceAddressId') ?? '').trim();
     const destinationId = String(formData.get('destinationId') ?? '').trim();
-    const requestType = String(formData.get('requestType') ?? '').trim();
     const amountRaw = String(formData.get('amountRaw') ?? '').trim();
     const reason = String(formData.get('reason') ?? '').trim();
+    const memo = String(formData.get('memo') ?? '').trim();
     const externalReference = String(formData.get('externalReference') ?? '').trim();
-    const status = String(formData.get('status') ?? '').trim();
-    if (!destinationId || !requestType || !amountRaw) return;
+    const invoiceNumber = String(formData.get('invoiceNumber') ?? '').trim();
+    const attachmentUrl = String(formData.get('attachmentUrl') ?? '').trim();
+    const dueAt = String(formData.get('dueAt') ?? '').trim();
+    const sourceBalanceRaw = String(formData.get('sourceBalanceRaw') ?? '').trim();
+    const submitNow = String(formData.get('submitNow') ?? '') === 'true';
+    const requestReason = reason || memo || externalReference || 'Payment request';
+    if (!destinationId || !amountRaw || !requestReason) return;
 
     try {
       setErrorMessage(null);
-      await api.createTransferRequest(currentWorkspaceId, {
+      await api.createPaymentRequest(currentWorkspaceId, {
         sourceWorkspaceAddressId: sourceWorkspaceAddressId || undefined,
         destinationId,
-        requestType,
         amountRaw,
-        reason: reason || undefined,
+        reason: requestReason,
         externalReference: externalReference || undefined,
-        status: status || undefined,
+        dueAt: dueAt ? new Date(dueAt).toISOString() : undefined,
+        metadataJson: {
+          ...(invoiceNumber ? { invoiceNumber } : {}),
+          ...(attachmentUrl ? { attachmentUrl } : {}),
+          ...(memo && memo !== requestReason ? { memo } : {}),
+          ...(sourceBalanceRaw
+            ? {
+                sourceBalanceSnapshot: {
+                  balanceRaw: sourceBalanceRaw,
+                  capturedAt: new Date().toISOString(),
+                  source: 'manual_operator_snapshot',
+                },
+              }
+            : {}),
+        },
+        createOrderNow: true,
+        submitOrderNow: submitNow,
       });
       form.reset();
       await loadWorkspace(currentWorkspaceId);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Failed to create transfer request');
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to create payment order');
+    }
+  }
+
+  async function handleSubmitPaymentOrder(paymentOrderId: string) {
+    if (!currentWorkspaceId) return;
+
+    try {
+      setErrorMessage(null);
+      const order = await api.submitPaymentOrder(currentWorkspaceId, paymentOrderId);
+      await Promise.all([
+        loadWorkspace(currentWorkspaceId),
+        order.transferRequestId
+          ? loadReconciliationDetail(currentWorkspaceId, order.transferRequestId, { silent: true })
+          : Promise.resolve(),
+      ]);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to submit payment order');
+    }
+  }
+
+  async function handleCancelPaymentOrder(paymentOrderId: string) {
+    if (!currentWorkspaceId) return;
+
+    try {
+      setErrorMessage(null);
+      await api.cancelPaymentOrder(currentWorkspaceId, paymentOrderId);
+      await loadWorkspace(currentWorkspaceId);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to cancel payment order');
+    }
+  }
+
+  async function handleCreatePaymentOrderExecution(paymentOrderId: string, event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!currentWorkspaceId) return;
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const executionSource = String(formData.get('executionSource') ?? '').trim();
+    const externalReference = String(formData.get('externalReference') ?? '').trim();
+
+    try {
+      setErrorMessage(null);
+      await api.createPaymentOrderExecution(currentWorkspaceId, paymentOrderId, {
+        executionSource: executionSource || 'manual_signature',
+        externalReference: externalReference || undefined,
+      });
+      form.reset();
+      await loadWorkspace(currentWorkspaceId);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to create payment order execution');
+    }
+  }
+
+  async function handlePreparePaymentOrderExecution(
+    paymentOrderId: string,
+    input?: { sourceWorkspaceAddressId?: string },
+  ): Promise<PaymentExecutionPreparation | null> {
+    if (!currentWorkspaceId) return null;
+
+    try {
+      setErrorMessage(null);
+      const prepared = await api.preparePaymentOrderExecution(currentWorkspaceId, paymentOrderId, input);
+      await Promise.all([
+        loadWorkspace(currentWorkspaceId),
+        prepared.paymentOrder.transferRequestId
+          ? loadReconciliationDetail(currentWorkspaceId, prepared.paymentOrder.transferRequestId, { silent: true })
+          : Promise.resolve(),
+      ]);
+      return prepared;
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to prepare payment execution');
+      return null;
+    }
+  }
+
+  async function handleAttachPaymentOrderSignature(paymentOrderId: string, event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!currentWorkspaceId) return;
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const submittedSignature = String(formData.get('submittedSignature') ?? '').trim();
+    const externalReference = String(formData.get('externalReference') ?? '').trim();
+    if (!submittedSignature && !externalReference) return;
+
+    try {
+      setErrorMessage(null);
+      await api.attachPaymentOrderSignature(currentWorkspaceId, paymentOrderId, {
+        submittedSignature: submittedSignature || undefined,
+        externalReference: externalReference || undefined,
+        submittedAt: submittedSignature ? new Date().toISOString() : undefined,
+      });
+      form.reset();
+      await loadWorkspace(currentWorkspaceId);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to attach payment order execution');
+    }
+  }
+
+  async function handleSignPreparedPaymentOrder(
+    paymentOrderId: string,
+    packet: PaymentExecutionPacket,
+    walletOptionId?: string,
+  ): Promise<string | null> {
+    if (!currentWorkspaceId) return null;
+
+    try {
+      setErrorMessage(null);
+      const signature = await signAndSubmitPreparedPayment(packet, walletOptionId);
+      await api.attachPaymentOrderSignature(currentWorkspaceId, paymentOrderId, {
+        submittedSignature: signature,
+        submittedAt: new Date().toISOString(),
+        metadataJson: {
+          signedVia: 'browser_wallet',
+          preparedExecutionRecordId: packet.executionRecordId,
+        },
+      });
+      await loadWorkspace(currentWorkspaceId);
+      return signature;
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to sign and submit payment');
+      throw error;
     }
   }
 
@@ -1057,6 +1250,74 @@ export function App() {
     }
   }
 
+  async function handleDownloadPaymentOrderAuditExport(paymentOrderId: string) {
+    if (!currentWorkspaceId) {
+      return;
+    }
+
+    try {
+      setErrorMessage(null);
+      await api.downloadPaymentOrderAuditExport(currentWorkspaceId, paymentOrderId);
+      await loadOpsData(currentWorkspaceId);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to export payment order audit packet');
+    }
+  }
+
+  async function handleDownloadPaymentOrderProof(paymentOrderId: string) {
+    if (!currentWorkspaceId) {
+      return;
+    }
+
+    try {
+      setErrorMessage(null);
+      const proof = await api.getPaymentOrderProof(currentWorkspaceId, paymentOrderId);
+      downloadJson(`payment-proof-${paymentOrderId}.json`, proof);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to export payment proof');
+    }
+  }
+
+  async function handleImportPaymentRequestsCsv(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!currentWorkspaceId) return { ok: false, message: 'No workspace is selected' };
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const csv = String(formData.get('csv') ?? '').trim();
+    const sourceWorkspaceAddressId = String(formData.get('sourceWorkspaceAddressId') ?? '').trim();
+    const submitOrderNow = String(formData.get('submitOrderNow') ?? '') === 'true';
+    if (!csv) return { ok: false, message: 'CSV is required' };
+
+    try {
+      setErrorMessage(null);
+      const result = await api.importPaymentRequestsCsv(currentWorkspaceId, {
+        csv,
+        createOrderNow: true,
+        sourceWorkspaceAddressId: sourceWorkspaceAddressId || undefined,
+        submitOrderNow,
+      });
+      if (result.failed > 0) {
+        const failures = result.items
+          .filter((item) => item.status === 'failed')
+          .map((item) => `row ${item.rowNumber}: ${item.error ?? 'Import failed'}`)
+          .join('; ');
+        setErrorMessage(`Imported ${result.imported} row(s), failed ${result.failed}. ${failures}`);
+        await loadWorkspace(currentWorkspaceId);
+        return {
+          ok: false,
+          message: `Imported ${result.imported} row(s), failed ${result.failed}. ${failures}`,
+        };
+      }
+      form.reset();
+      await loadWorkspace(currentWorkspaceId);
+      return { ok: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to import CSV payment requests';
+      setErrorMessage(message);
+      return { ok: false, message };
+    }
+  }
+
   function handleOpenOrganization(organizationId: string) {
     navigate({ name: 'organizationHome', organizationId }, setRoute);
     resetViewport();
@@ -1254,7 +1515,7 @@ export function App() {
                     onClick={() => handleOpenWorkspaceRequests(sidebarWorkspace.workspaceId)}
                     type="button"
                   >
-                    Expected transfers
+                    Payment requests
                   </button>
                   <button
                     className={route.name === 'workspaceExceptions' ? 'rail-link is-active' : 'rail-link'}
@@ -1400,9 +1661,19 @@ export function App() {
                 canManage={canManageCurrentOrg}
                 currentWorkspace={currentWorkspace}
                 destinations={destinations}
-                onCreateTransferRequest={handleCreateTransferRequest}
+                onAttachPaymentOrderSignature={handleAttachPaymentOrderSignature}
+                onCancelPaymentOrder={handleCancelPaymentOrder}
+                onCreatePaymentOrder={handleCreatePaymentOrder}
+                onCreatePaymentOrderExecution={handleCreatePaymentOrderExecution}
+                onDownloadPaymentOrderAuditExport={handleDownloadPaymentOrderAuditExport}
+                onDownloadPaymentOrderProof={handleDownloadPaymentOrderProof}
+                onImportPaymentRequestsCsv={handleImportPaymentRequestsCsv}
+                onPreparePaymentOrderExecution={handlePreparePaymentOrderExecution}
+                onSignPreparedPaymentOrder={handleSignPreparedPaymentOrder}
+                onSubmitPaymentOrder={handleSubmitPaymentOrder}
+                paymentOrders={paymentOrders}
+                paymentRequests={paymentRequests}
                 reconciliationRows={reconciliationRows}
-                transferRequests={transferRequests}
               />
             ) : null}
 

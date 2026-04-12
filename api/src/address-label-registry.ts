@@ -124,6 +124,7 @@ function normalizeOrbTag(
 ) {
   const lower = name.toLowerCase();
   const roleTags = ['orb_labeled'];
+  const resolvedTag = tag ?? {};
 
   let labelKind = 'known_recipient';
   if (lower.includes('aggregator authority') || lower.includes('fee')) {
@@ -137,14 +138,14 @@ function normalizeOrbTag(
 
   return {
     entityName: name,
-    entityType: tag.entityType?.trim() || tag.type?.trim() || tag.category?.trim() || 'address',
+    entityType: resolvedTag.entityType?.trim() || resolvedTag.type?.trim() || resolvedTag.category?.trim() || 'address',
     labelKind,
     roleTags,
     source: 'orb_auto',
     sourceRef: config.orbTagsResolveUrl,
     confidence: 'unverified',
     isActive: true,
-    notes: `Auto-resolved from Orb label lookup (${tag.category ?? 'unknown category'}).`,
+    notes: `Auto-resolved from Orb label lookup (${resolvedTag.category ?? 'unknown category'}).`,
   } satisfies Pick<
     AddressLabel,
     | 'entityName'

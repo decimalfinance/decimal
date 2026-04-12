@@ -192,6 +192,10 @@ impl WorkspaceRegistry {
                     amount_raw: request.amount_raw.parse().unwrap_or_default(),
                     requested_at: request.requested_at,
                     request_type: request.request_type.clone(),
+                    submitted_signature: request
+                        .latest_execution
+                        .as_ref()
+                        .and_then(|execution| execution.submitted_signature.clone()),
                     #[cfg(test)]
                     workspace_id: raw_snapshot.workspace.workspace_id.clone(),
                     #[cfg(test)]
@@ -287,6 +291,7 @@ pub struct WorkspaceTransferRequestMatch {
     pub amount_raw: i128,
     pub requested_at: DateTime<Utc>,
     pub request_type: String,
+    pub submitted_signature: Option<String>,
     #[cfg(test)]
     pub workspace_id: String,
     #[cfg(test)]
@@ -329,11 +334,19 @@ struct TransferRequestDetails {
     requested_at: DateTime<Utc>,
     #[serde(rename = "destinationWorkspaceAddress")]
     destination_workspace_address: Option<TransferRequestWorkspaceAddressDetails>,
+    #[serde(rename = "latestExecution")]
+    latest_execution: Option<TransferRequestExecutionDetails>,
 }
 
 #[derive(Deserialize)]
 struct TransferRequestWorkspaceAddressDetails {
     address: String,
+}
+
+#[derive(Deserialize)]
+struct TransferRequestExecutionDetails {
+    #[serde(rename = "submittedSignature")]
+    submitted_signature: Option<String>,
 }
 
 #[cfg(test)]
@@ -357,6 +370,9 @@ mod tests {
                 destination_workspace_address: Some(TransferRequestWorkspaceAddressDetails {
                     address: "Wallet111".to_string(),
                 }),
+                latest_execution: Some(TransferRequestExecutionDetails {
+                    submitted_signature: Some("signature-1".to_string()),
+                }),
             }],
         }]);
 
@@ -372,5 +388,9 @@ mod tests {
         assert_eq!(pending_by_wallet.len(), 1);
         assert_eq!(pending_by_wallet[0].transfer_request_id, "request-1");
         assert_eq!(pending_by_wallet[0].destination_wallet_address, "Wallet111");
+        assert_eq!(
+            pending_by_wallet[0].submitted_signature.as_deref(),
+            Some("signature-1")
+        );
     }
 }

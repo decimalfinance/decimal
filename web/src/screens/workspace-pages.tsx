@@ -7,6 +7,10 @@ import type {
   ExceptionItem,
   OpsHealth,
   ObservedTransfer,
+  PaymentExecutionPacket,
+  PaymentExecutionPreparation,
+  PaymentOrder,
+  PaymentRequest,
   ReconciliationDetail,
   ReconciliationRow,
   TransferRequest,
@@ -16,6 +20,7 @@ import type {
   WorkspaceMember,
 } from '../types';
 import { formatRawUsdc, formatRawUsdcCompact, formatRelativeTime, formatTimestamp, formatTimestampCompact, orbTransactionUrl, shortenAddress } from '../lib/app';
+import { discoverSolanaWallets, subscribeSolanaWallets, type BrowserWalletOption } from '../lib/solana-wallet';
 import { InfoLine, Metric } from '../components/ui';
 
 function TableSurfaceHeader({
@@ -1913,59 +1918,129 @@ export function WorkspaceRequestsPage({
   canManage,
   currentWorkspace,
   destinations,
-  onCreateTransferRequest,
+  onAttachPaymentOrderSignature,
+  onCancelPaymentOrder,
+  onCreatePaymentOrder,
+  onCreatePaymentOrderExecution,
+  onDownloadPaymentOrderAuditExport,
+  onDownloadPaymentOrderProof,
+  onImportPaymentRequestsCsv,
+  onPreparePaymentOrderExecution,
+  onSignPreparedPaymentOrder,
+  onSubmitPaymentOrder,
+  paymentOrders,
+  paymentRequests,
   reconciliationRows,
-  transferRequests,
 }: {
   addresses: WorkspaceAddress[];
   canManage: boolean;
   currentWorkspace: Workspace;
   destinations: Destination[];
-  onCreateTransferRequest: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onAttachPaymentOrderSignature: (paymentOrderId: string, event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onCancelPaymentOrder: (paymentOrderId: string) => Promise<void>;
+  onCreatePaymentOrder: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onCreatePaymentOrderExecution: (paymentOrderId: string, event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onDownloadPaymentOrderAuditExport: (paymentOrderId: string) => Promise<void>;
+  onDownloadPaymentOrderProof: (paymentOrderId: string) => Promise<void>;
+  onImportPaymentRequestsCsv: (event: FormEvent<HTMLFormElement>) => Promise<{ ok: boolean; message?: string }>;
+  onPreparePaymentOrderExecution: (
+    paymentOrderId: string,
+    input?: { sourceWorkspaceAddressId?: string },
+  ) => Promise<PaymentExecutionPreparation | null>;
+  onSignPreparedPaymentOrder: (paymentOrderId: string, packet: PaymentExecutionPacket, walletOptionId?: string) => Promise<string | null>;
+  onSubmitPaymentOrder: (paymentOrderId: string) => Promise<void>;
+  paymentOrders: PaymentOrder[];
+  paymentRequests: PaymentRequest[];
   reconciliationRows: ReconciliationRow[];
-  transferRequests: TransferRequest[];
 }) {
-  const [modalState, setModalState] = useState<{ type: 'create' } | { type: 'view'; transferRequestId: string } | null>(null);
+  const [modalState, setModalState] = useState<{ type: 'create' } | { type: 'import-csv' } | { type: 'view'; paymentOrderId: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRequestDestinationId, setSelectedRequestDestinationId] = useState('');
-  const [requestCreateStatus, setRequestCreateStatus] = useState<'draft' | 'submitted'>('submitted');
+  const [submitNow, setSubmitNow] = useState(true);
+  const [csvImportMessage, setCsvImportMessage] = useState<string | null>(null);
+  const [executionSourceWalletId, setExecutionSourceWalletId] = useState('');
+  const [preparedExecutionByOrderId, setPreparedExecutionByOrderId] = useState<Record<string, PaymentExecutionPacket>>({});
+  const [browserWallets, setBrowserWallets] = useState<BrowserWalletOption[]>(() => discoverSolanaWallets());
+  const [selectedBrowserWalletId, setSelectedBrowserWalletId] = useState('');
+  const [walletSigningState, setWalletSigningState] = useState<{
+    status: 'signing' | 'success' | 'error';
+    message: string;
+  } | null>(null);
   const selectedRequestDestination =
     destinations.find((item) => item.destinationId === selectedRequestDestinationId) ?? null;
   const reconciliationByRequestId = new Map(reconciliationRows.map((row) => [row.transferRequestId, row] as const));
-  const requestRows = [...transferRequests]
-    .sort((left, right) => new Date(right.requestedAt).getTime() - new Date(left.requestedAt).getTime())
+  const paymentOrderById = new Map(paymentOrders.map((order) => [order.paymentOrderId, order] as const));
+  const linkedOrderIds = new Set(paymentRequests.map((request) => request.paymentOrder?.paymentOrderId).filter(Boolean));
+  const paymentWorkItems = [
+    ...paymentRequests.map((request) => ({
+      kind: 'request' as const,
+      id: request.paymentRequestId,
+      createdAt: request.createdAt,
+      request,
+      order: request.paymentOrder ? paymentOrderById.get(request.paymentOrder.paymentOrderId) ?? null : null,
+    })),
+    ...paymentOrders
+      .filter((order) => !order.paymentRequestId && !linkedOrderIds.has(order.paymentOrderId))
+      .map((order) => ({
+        kind: 'order' as const,
+        id: order.paymentOrderId,
+        createdAt: order.createdAt,
+        request: null,
+        order,
+      })),
+  ]
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
     .filter((item) => {
       if (!searchQuery.trim()) {
         return true;
       }
       const query = searchQuery.trim().toLowerCase();
-      const row = reconciliationByRequestId.get(item.transferRequestId);
+      const order = item.order;
+      const request = item.request;
       return [
-        getTransferLabel(item),
-        getDestinationLabel(item.destination, item.destinationWorkspaceAddress),
-        item.destination?.counterparty?.displayName ?? '',
-        item.requestType,
-        item.reason ?? '',
-        item.externalReference ?? '',
-        row?.approvalState ?? '',
-        row?.executionState ?? '',
-        row?.requestDisplayState ?? '',
+        item.id,
+        request?.reason ?? '',
+        request?.payee?.name ?? '',
+        request?.externalReference ?? '',
+        request?.state ?? '',
+        order?.paymentOrderId ?? '',
+        order?.payee?.name ?? '',
+        order?.sourceWorkspaceAddress ? getWalletName(order.sourceWorkspaceAddress) : '',
+        order?.destination.label ?? request?.destination.label ?? '',
+        order?.destination?.counterparty?.displayName ?? request?.counterparty?.displayName ?? '',
+        order?.memo ?? '',
+        order?.externalReference ?? '',
+        order?.invoiceNumber ?? '',
+        order?.state ?? '',
+        order?.derivedState ?? '',
+        order?.reconciliationDetail?.approvalState ?? '',
+        order?.reconciliationDetail?.executionState ?? '',
+        order?.reconciliationDetail?.requestDisplayState ?? '',
       ]
         .join(' ')
         .toLowerCase()
         .includes(query);
     });
-  const selectedRequest =
+  const selectedOrder =
     modalState?.type === 'view'
-      ? transferRequests.find((item) => item.transferRequestId === modalState.transferRequestId) ?? null
+      ? paymentOrders.find((item) => item.paymentOrderId === modalState.paymentOrderId) ?? null
       : null;
-  const selectedRequestRow = selectedRequest
-    ? reconciliationByRequestId.get(selectedRequest.transferRequestId) ?? null
+  const selectedOrderDetail = selectedOrder?.reconciliationDetail ?? null;
+  const selectedRequestRow = selectedOrder?.transferRequestId
+    ? reconciliationByRequestId.get(selectedOrder.transferRequestId) ?? selectedOrderDetail
     : null;
+  const selectedOrderPreparedExecution =
+    selectedOrder
+      ? preparedExecutionByOrderId[selectedOrder.paymentOrderId] ?? getLatestPreparedExecutionPacket(selectedOrder)
+      : null;
+  const selectedOrderProgress =
+    selectedOrder
+      ? getPaymentProgress(selectedOrder, selectedRequestRow, selectedOrderPreparedExecution)
+      : null;
 
   useEffect(() => {
     if (!selectedRequestDestination) {
-      setRequestCreateStatus('submitted');
+      setSubmitNow(true);
       return;
     }
 
@@ -1975,21 +2050,50 @@ export function WorkspaceRequestsPage({
       || selectedRequestDestination.trustState === 'restricted'
       || selectedRequestDestination.trustState === 'unreviewed'
     ) {
-      setRequestCreateStatus('draft');
+      setSubmitNow(false);
       return;
     }
 
-    setRequestCreateStatus('submitted');
+    setSubmitNow(true);
   }, [selectedRequestDestination]);
+
+  useEffect(() => {
+    setExecutionSourceWalletId(selectedOrder?.sourceWorkspaceAddressId ?? '');
+    setSelectedBrowserWalletId('');
+    setWalletSigningState(null);
+  }, [selectedOrder?.paymentOrderId, selectedOrder?.sourceWorkspaceAddressId]);
+
+  useEffect(() => {
+    return subscribeSolanaWallets(setBrowserWallets);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedOrderPreparedExecution) {
+      return;
+    }
+
+    const selectedStillExists = selectedBrowserWalletId
+      ? browserWallets.some((wallet) => wallet.id === selectedBrowserWalletId && wallet.ready)
+      : false;
+    if (selectedStillExists) {
+      return;
+    }
+
+    const exactSignerWallet = browserWallets.find(
+      (wallet) => wallet.ready && wallet.address === selectedOrderPreparedExecution.signerWallet,
+    );
+    const connectableWallet = browserWallets.find((wallet) => wallet.ready && wallet.address === null);
+    setSelectedBrowserWalletId(exactSignerWallet?.id ?? connectableWallet?.id ?? '');
+  }, [browserWallets, selectedBrowserWalletId, selectedOrderPreparedExecution]);
 
   return (
     <div className="page-stack page-stack-tight">
       <section className="section-headline section-headline-compact">
         <div className="section-headline-copy">
-          <p className="eyebrow">Expected Transfers</p>
+          <p className="eyebrow">Payment Requests</p>
           <h1>{currentWorkspace.workspaceName}</h1>
           <p className="section-copy">
-            Create live requests against trusted destinations so approvals, execution, and reconciliation all start from the same object.
+            Start from a real request, control the payment, execute from the source wallet, then prove settlement onchain.
           </p>
         </div>
       </section>
@@ -1998,7 +2102,7 @@ export function WorkspaceRequestsPage({
         <div className="notice-banner">
           <div>
             <strong>Read only.</strong>
-            <p>Only organization admins can create or change planned transfers in this workspace.</p>
+            <p>Only organization admins can create or change payment requests in this workspace.</p>
           </div>
         </div>
       ) : null}
@@ -2006,71 +2110,93 @@ export function WorkspaceRequestsPage({
       <section className="request-shell">
         <div className="content-panel content-panel-strong request-main-panel">
           <TableSurfaceHeader
-            actionDisabled={!canManage || destinations.length === 0}
-            actionLabel="New expected transfer"
-            count={transferRequests.length}
+            actionDisabled={!canManage}
+            actionLabel="New payment request"
+            count={paymentWorkItems.length}
             onAction={() => setModalState({ type: 'create' })}
             onSearchChange={setSearchQuery}
-            searchPlaceholder="Search request, destination, type, or state"
+            searchPlaceholder="Search request, payee, destination, reference, or state"
             searchValue={searchQuery}
-            title="Expected transfers"
+            title="Requests to proof"
           />
+          <div className="inline-action-row">
+            <button
+              className="ghost-button compact-button"
+              disabled={!canManage}
+              onClick={() => {
+                setCsvImportMessage(null);
+                setModalState({ type: 'import-csv' });
+              }}
+              type="button"
+            >
+              Import CSV batch
+            </button>
+            <small>CSV columns: payee, destination, amount, reference, due_date.</small>
+          </div>
 
-          <div className="request-table compact-request-table">
+          <div className="request-table compact-request-table payment-order-table">
             <div className="request-table-head">
-              <span>Request ID</span>
+              <span>Request</span>
               <span>Source</span>
               <span>Destination</span>
               <span>Amount</span>
-              <span>Approval</span>
-              <span>Execution</span>
-              <span>Settlement</span>
-              <span>Requested</span>
+              <span>Progress</span>
+              <span>Created</span>
             </div>
-            {requestRows.length ? (
-              requestRows.map((item) => {
-                const row = reconciliationByRequestId.get(item.transferRequestId) ?? null;
-                const approvalState = row?.approvalState ?? inferApprovalStateFromRequestStatus(item.status);
-                const executionState = row?.executionState ?? inferExecutionStateFromRequestStatus(item.status);
-                const settlementState = row?.requestDisplayState ?? 'pending';
+            {paymentWorkItems.length ? (
+              paymentWorkItems.map((item) => {
+                const order = item.order;
+                const request = item.request;
+                const row = order?.transferRequestId
+                  ? reconciliationByRequestId.get(order.transferRequestId) ?? order.reconciliationDetail
+                  : order?.reconciliationDetail ?? null;
+                const progress = order
+                  ? getPaymentProgress(order, row, getLatestPreparedExecutionPacket(order))
+                  : getInputProgress(request);
 
                 return (
-                  <div key={item.transferRequestId} className="request-table-row">
+                  <div key={item.id} className="request-table-row">
                     <button
                       className="request-row-button"
-                      onClick={() => setModalState({ type: 'view', transferRequestId: item.transferRequestId })}
-                      title={`${item.transferRequestId} // ${getTransferLabel(item)}`}
+                      disabled={!order}
+                      onClick={() => order ? setModalState({ type: 'view', paymentOrderId: order.paymentOrderId }) : undefined}
+                      title={order ? `${order.paymentOrderId} // ${order.sourceWorkspaceAddress ? getWalletName(order.sourceWorkspaceAddress) : 'source not set'} -> ${order.destination.label}` : request?.reason}
                       type="button"
                     >
                       <span className="request-cell-primary">
-                        <strong>{shortenAddress(item.transferRequestId, 8, 6)}</strong>
+                        <strong>{request?.externalReference || request?.reason || (order ? shortenAddress(order.paymentOrderId, 8, 6) : 'request')}</strong>
+                        {request ? <small>{shortenAddress(request.paymentRequestId, 8, 6)}</small> : <small>direct order</small>}
                       </span>
                       <span className="request-cell-single">
-                        <strong>{item.sourceWorkspaceAddress ? getWalletNameLite(item.sourceWorkspaceAddress) : 'Not set'}</strong>
+                        <strong>{order?.sourceWorkspaceAddress ? getWalletName(order.sourceWorkspaceAddress) : 'Not set'}</strong>
                       </span>
                       <span className="request-cell-single">
-                        <strong>{getDestinationLabel(item.destination, item.destinationWorkspaceAddress)}</strong>
+                        <strong>{order?.destination.label ?? request?.destination.label ?? 'No destination'}</strong>
                       </span>
                       <span className="request-cell-amount request-cell-single">
-                        <strong>{formatRawUsdc(item.amountRaw)}</strong>
+                        <strong>{formatRawUsdcCompact(order?.amountRaw ?? request?.amountRaw ?? '0')} {(order?.asset ?? request?.asset ?? 'USDC').toUpperCase()}</strong>
                       </span>
-                      <span className="request-cell-single"><span className={`tone-pill tone-pill-${mapApprovalTone(approvalState)}`}>{getApprovalStateLabel(approvalState)}</span></span>
-                      <span className="request-cell-single"><span className={`tone-pill tone-pill-${mapExecutionTone(executionState)}`}>{getExecutionStateLabel(executionState, row ?? undefined)}</span></span>
-                      <span className="request-cell-single"><span className={`tone-pill tone-pill-${row ? getSettlementTone(row) : settlementState}`}>{row ? getDisplayStateLabel(row) : getDisplayStateLabelFromState(settlementState)}</span></span>
-                      <span className="request-cell-single">{formatTimestampCompact(item.requestedAt)}</span>
+                      <span className="request-cell-single">
+                        <span className="payment-progress-cell">
+                          <span className={`tone-pill tone-pill-${progress.tone}`}>{progress.label}</span>
+                          <small>{progress.description}</small>
+                        </span>
+                      </span>
+                      <span className="request-cell-single">{formatTimestampCompact(item.createdAt)}</span>
                     </button>
                   </div>
                 );
               })
-            ) : transferRequests.length ? (
-              <div className="empty-box compact">No expected transfers match the current search.</div>
+            ) : paymentRequests.length || paymentOrders.length ? (
+              <div className="empty-box compact">No payment requests match the current search.</div>
             ) : (
               <div className="empty-box compact">
-                <strong>No expected transfers yet.</strong>
-                <p>Create the first live or draft request here after you set up destinations in the address book.</p>
+                <strong>No payment requests yet.</strong>
+                <p>Create the first request after you set up a destination in the address book. Requests become the input object for approval, execution, settlement, and proof.</p>
               </div>
             )}
           </div>
+
         </div>
       </section>
 
@@ -2081,9 +2207,9 @@ export function WorkspaceRequestsPage({
               <>
                 <div className="panel-header panel-header-stack">
                   <div>
-                    <p className="eyebrow">Expected transfer</p>
-                    <h2>New expected transfer</h2>
-                    <p className="compact-copy">Pick a destination first. Its trust and scope determine whether the request stays draft, enters approval, or can go live immediately.</p>
+                    <p className="eyebrow">Payment request</p>
+                    <h2>New payment request</h2>
+                    <p className="compact-copy">Start with the human reason for paying. The app will create the controlled payment order underneath it.</p>
                   </div>
                   <button className="ghost-button compact-button danger-button" onClick={() => setModalState(null)} type="button">
                     close
@@ -2092,7 +2218,7 @@ export function WorkspaceRequestsPage({
                 <form
                   className="form-stack modal-form-grid"
                   onSubmit={async (event) => {
-                    await onCreateTransferRequest(event);
+                    await onCreatePaymentOrder(event);
                     setModalState(null);
                   }}
                 >
@@ -2134,39 +2260,56 @@ export function WorkspaceRequestsPage({
                     </div>
                   ) : (
                     <div className="setup-hint-card modal-span-full">
-                      <strong>Before you create requests</strong>
+                      <strong>Before you create payment requests</strong>
                       <p>Use the Address book page to save the wallet and create the destination first.</p>
                     </div>
                   )}
                   <label className="field">
-                    <span>Transfer type</span>
-                    <input name="requestType" placeholder="wallet_transfer" required />
-                  </label>
-                  <label className="field">
-                    <span>Initial request state</span>
+                    <span>Initial flow</span>
                     <select
-                      name="status"
-                      onChange={(event) => setRequestCreateStatus(event.target.value as 'draft' | 'submitted')}
-                      value={requestCreateStatus}
+                      name="submitNow"
+                      onChange={(event) => setSubmitNow(event.target.value === 'true')}
+                      value={submitNow ? 'true' : 'false'}
                     >
-                      <option value="draft">save as draft</option>
+                      <option value="false">save as draft</option>
                       {selectedRequestDestination?.isActive !== false && selectedRequestDestination?.trustState === 'trusted' ? (
-                        <option value="submitted">make live request</option>
+                        <option value="true">create and submit into approval</option>
                       ) : null}
                     </select>
                   </label>
-                  <label className="field modal-span-full">
+                  <label className="field">
                     <span>Amount (raw units)</span>
                     <input name="amountRaw" placeholder="10000 for 0.01 USDC" required />
                     <small className="field-note">USDC uses 6 decimals. Example: 10000 = 0.01 USDC.</small>
                   </label>
                   <label className="field">
-                    <span>Reference</span>
-                    <input name="externalReference" placeholder="Optional" />
+                    <span>Reason</span>
+                    <input name="reason" placeholder="Pay Fuyo LLC for INV-102" required />
                   </label>
                   <label className="field">
-                    <span>Reason</span>
-                    <input name="reason" placeholder="Optional" />
+                    <span>Reference</span>
+                    <input name="externalReference" placeholder="INV-102, payout batch, grant round" />
+                  </label>
+                  <label className="field">
+                    <span>Invoice number</span>
+                    <input name="invoiceNumber" placeholder="Optional" />
+                  </label>
+                  <label className="field">
+                    <span>Due at</span>
+                    <input name="dueAt" type="datetime-local" />
+                  </label>
+                  <label className="field">
+                    <span>Source balance snapshot (raw)</span>
+                    <input name="sourceBalanceRaw" placeholder="Optional" />
+                    <small className="field-note">Optional manual check. If present, the order warns when source funds are below the payment amount.</small>
+                  </label>
+                  <label className="field">
+                    <span>Attachment URL</span>
+                    <input name="attachmentUrl" placeholder="Optional invoice or evidence link" />
+                  </label>
+                  <label className="field modal-span-full">
+                    <span>Memo</span>
+                    <input name="memo" placeholder="Why this payment exists" />
                   </label>
                   <div className="exception-actions modal-span-full">
                     <button
@@ -2180,66 +2323,170 @@ export function WorkspaceRequestsPage({
                       }
                       type="submit"
                     >
-                      Create expected transfer
+                      Create payment request
                     </button>
                   </div>
                 </form>
               </>
             ) : null}
 
-            {modalState.type === 'view' && selectedRequest ? (
+            {modalState.type === 'import-csv' ? (
               <>
-                <div className="registry-modal-hero request-modal-hero">
-                  <div className="registry-modal-hero-copy">
-                    <h2>{getTransferLabel(selectedRequest)}</h2>
-                    <span className={`tone-pill tone-pill-${selectedRequestRow ? getSettlementTone(selectedRequestRow) : 'pending'}`}>
-                      {getDisplayStateLabel(selectedRequestRow ?? { requestDisplayState: 'pending', match: null, exceptions: [] } as Pick<ReconciliationRow, 'requestDisplayState' | 'match' | 'exceptions'>)}
-                    </span>
+                <div className="panel-header panel-header-stack">
+                  <div>
+                    <p className="eyebrow">Batch input</p>
+                    <h2>Import payment requests</h2>
+                    <p className="compact-copy">Use CSV when the work starts from a payout sheet. Payees are created or reused by name.</p>
                   </div>
                   <button className="ghost-button compact-button danger-button" onClick={() => setModalState(null)} type="button">
                     close
                   </button>
                 </div>
+                <form
+                  className="form-stack modal-form-grid"
+                  onSubmit={async (event) => {
+                    setCsvImportMessage(null);
+                    const result = await onImportPaymentRequestsCsv(event);
+                    if (result.ok) {
+                      setModalState(null);
+                    } else {
+                      setCsvImportMessage(result.message ?? 'Import failed. Fix the CSV rows and retry.');
+                    }
+                  }}
+                >
+                  <label className="field">
+                    <span>Source wallet</span>
+                    <select name="sourceWorkspaceAddressId" defaultValue="">
+                      <option value="">Optional</option>
+                      {addresses.map((address) => (
+                        <option key={address.workspaceAddressId} value={address.workspaceAddressId}>
+                          {getWalletName(address)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Initial flow</span>
+                    <select name="submitOrderNow" defaultValue="false">
+                      <option value="false">import as drafts</option>
+                      <option value="true">submit trusted rows immediately</option>
+                    </select>
+                  </label>
+                  <label className="field modal-span-full">
+                    <span>CSV</span>
+                    <textarea
+                      name="csv"
+                      rows={10}
+                      placeholder={[
+                        'payee,destination,amount,reference,due_date',
+                        'Fuyo LLC,fuyo wallet,0.01,INV-102,2026-04-15',
+                      ].join('\n')}
+                      required
+                    />
+                    <small className="field-note">Destination can be a destination label, destination id, wallet address, or token account.</small>
+                  </label>
+                  {csvImportMessage ? (
+                    <div className="setup-hint-card modal-span-full">
+                      <strong>Import needs attention</strong>
+                      <p>{csvImportMessage}</p>
+                    </div>
+                  ) : null}
+                  <div className="exception-actions modal-span-full">
+                    <button className="primary-button" disabled={!canManage} type="submit">
+                      Import payment requests
+                    </button>
+                  </div>
+                </form>
+              </>
+            ) : null}
+
+            {modalState.type === 'view' && selectedOrder ? (
+              <>
+                <div className="registry-modal-hero request-modal-hero">
+                  <div className="registry-modal-hero-copy">
+                    <h2>{selectedOrder.paymentRequest?.reason ?? selectedOrder.memo ?? `${selectedOrder.sourceWorkspaceAddress ? getWalletName(selectedOrder.sourceWorkspaceAddress) : 'Source not set'} -> ${selectedOrder.destination.label}`}</h2>
+                    <span className={`tone-pill tone-pill-${selectedOrderProgress?.tone ?? 'pending'}`}>
+                      {selectedOrderProgress?.label ?? 'draft'}
+                    </span>
+                  </div>
+                  <div className="panel-header-actions">
+                    <button className="primary-button compact-button" onClick={() => void onDownloadPaymentOrderProof(selectedOrder.paymentOrderId)} type="button">
+                      export proof
+                    </button>
+                    <button className="ghost-button compact-button" onClick={() => void onDownloadPaymentOrderAuditExport(selectedOrder.paymentOrderId)} type="button">
+                      export audit
+                    </button>
+                    {selectedOrder.derivedState === 'draft' ? (
+                      <button className="primary-button compact-button" disabled={!canManage} onClick={() => void onSubmitPaymentOrder(selectedOrder.paymentOrderId)} type="button">
+                        submit
+                      </button>
+                    ) : null}
+                    {selectedOrder.derivedState !== 'settled' && selectedOrder.derivedState !== 'closed' && selectedOrder.derivedState !== 'cancelled' ? (
+                      <button className="ghost-button compact-button danger-button" disabled={!canManage} onClick={() => void onCancelPaymentOrder(selectedOrder.paymentOrderId)} type="button">
+                        cancel
+                      </button>
+                    ) : null}
+                    <button className="ghost-button compact-button danger-button" onClick={() => setModalState(null)} type="button">
+                      close
+                    </button>
+                  </div>
+                </div>
 
                 <div className="info-grid-tight">
-                  <InfoLine label="Destination" value={getDestinationLabel(selectedRequest.destination, selectedRequest.destinationWorkspaceAddress)} />
-                  <InfoLine label="Amount" value={`${formatRawUsdc(selectedRequest.amountRaw)} USDC`} />
-                  <InfoLine label="Requested" value={formatTimestamp(selectedRequest.requestedAt)} />
-                  <InfoLine label="Type" value={formatLabel(selectedRequest.requestType)} />
+                  {selectedOrder.paymentRequest ? (
+                    <InfoLine label="Payment request" value={shortenAddress(selectedOrder.paymentRequest.paymentRequestId, 8, 8)} />
+                  ) : null}
+                  <InfoLine label="Payment order" value={shortenAddress(selectedOrder.paymentOrderId, 8, 8)} />
+                  <InfoLine label="Amount" value={`${formatRawUsdcCompact(selectedOrder.amountRaw)} ${selectedOrder.asset.toUpperCase()}`} />
+                  <InfoLine label="Created" value={formatTimestamp(selectedOrder.createdAt)} />
+                  <InfoLine label="Due" value={selectedOrder.dueAt ? formatTimestamp(selectedOrder.dueAt) : 'No due date'} />
+                  <InfoLine label="Source wallet" value={selectedOrder.sourceWorkspaceAddress ? getWalletName(selectedOrder.sourceWorkspaceAddress) : 'Not set'} />
+                  <InfoLine label="Destination" value={selectedOrder.destination.label} />
+                  <InfoLine label="Payee" value={selectedOrder.payee?.name ?? 'Unassigned'} />
+                  <InfoLine label="Counterparty" value={selectedOrder.counterparty?.displayName ?? 'Unassigned'} />
+                  <InfoLine label="Destination trust" value={`${selectedOrder.destination.trustState} // ${selectedOrder.destination.isInternal ? 'internal' : 'external'}`} />
                 </div>
 
-                <div className="state-summary-grid request-state-grid">
-                  <div className="state-summary-card">
-                    <span>Approval</span>
-                  <strong>{getApprovalStateLabel(selectedRequestRow?.approvalState ?? inferApprovalStateFromRequestStatus(selectedRequest.status))}</strong>
-                  </div>
-                  <div className="state-summary-card">
-                    <span>Execution</span>
-                    <strong>{getExecutionStateLabel(
-                      selectedRequestRow?.executionState ?? inferExecutionStateFromRequestStatus(selectedRequest.status),
-                      selectedRequestRow ?? undefined,
-                    )}</strong>
-                  </div>
-                  <div className="state-summary-card">
-                    <span>Settlement</span>
-                    <strong>{selectedRequestRow ? getDisplayStateLabel(selectedRequestRow) : getDisplayStateLabelFromState('pending')}</strong>
-                  </div>
-                </div>
-
-                {selectedRequest.destination ? (
-                  <div className="registry-detail-group">
-                    <div className="registry-detail-head">
-                      <strong>Destination context</strong>
+                {selectedOrderProgress ? (
+                  <div className="payment-progress-panel">
+                    <div className="payment-progress-head">
+                      <span className="eyebrow">Payment progress</span>
+                      <strong>{selectedOrderProgress.label}</strong>
+                      <p>{selectedOrderProgress.description}</p>
                     </div>
-                    <div className="registry-detail-box">
-                      <strong>{selectedRequest.destination.label}</strong>
-                      <small>
-                        {selectedRequest.destination.trustState} // {selectedRequest.destination.isInternal ? 'internal' : 'external'}
-                        {selectedRequest.destination.counterparty ? ` // ${selectedRequest.destination.counterparty.displayName}` : ''}
-                      </small>
+                    <div className="payment-progress-steps" aria-label="Payment progress steps">
+                      {PAYMENT_PROGRESS_STEPS.map((step) => (
+                        <div
+                          key={step.index}
+                          className={
+                            step.index < selectedOrderProgress.step
+                              ? 'payment-progress-step is-complete'
+                              : step.index === selectedOrderProgress.step
+                                ? 'payment-progress-step is-current'
+                                : 'payment-progress-step'
+                          }
+                        >
+                          <span>{step.index}</span>
+                          <strong>{step.label}</strong>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 ) : null}
+
+                <div className="registry-detail-group">
+                  <div className="registry-detail-head">
+                    <strong>Source readiness</strong>
+                  </div>
+                  <div className="registry-detail-box">
+                    <strong>{selectedOrder.balanceWarning.message}</strong>
+                    <small>
+                      {selectedOrder.balanceWarning.balanceRaw
+                        ? `Snapshot: ${formatRawUsdcCompact(selectedOrder.balanceWarning.balanceRaw)} USDC`
+                        : 'No source balance snapshot was captured for this order.'}
+                    </small>
+                  </div>
+                </div>
 
                 {selectedRequestRow?.latestExecution ? (
                   <div className="registry-detail-group">
@@ -2257,6 +2504,190 @@ export function WorkspaceRequestsPage({
                   </div>
                 ) : null}
 
+                {!['settled', 'closed', 'cancelled'].includes(selectedOrder.derivedState) ? (
+                  <div className="registry-detail-group">
+                    <div className="registry-detail-head">
+                      <strong>Prepare payment</strong>
+                    </div>
+                    <div className="execution-prepare-panel">
+                      <div className="execution-prepare-copy">
+                        <strong>{selectedOrderPreparedExecution ? 'Payment packet prepared' : 'Generate the exact USDC transfer packet'}</strong>
+                        <p>
+                          This creates a non-custodial Solana instruction packet. Your browser wallet signs locally; the API never receives private keys.
+                        </p>
+                      </div>
+                      <label className="field">
+                        <span>Source wallet for execution</span>
+                        <select
+                          onChange={(event) => setExecutionSourceWalletId(event.target.value)}
+                          value={executionSourceWalletId}
+                        >
+                          <option value="">Select source wallet</option>
+                          {addresses.filter((address) => address.isActive).map((address) => (
+                            <option key={address.workspaceAddressId} value={address.workspaceAddressId}>
+                              {getWalletName(address)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <button
+                        className="primary-button compact-button"
+                        disabled={!canManage || !executionSourceWalletId}
+                        onClick={async () => {
+                          const prepared = await onPreparePaymentOrderExecution(selectedOrder.paymentOrderId, {
+                            sourceWorkspaceAddressId: executionSourceWalletId,
+                          });
+                          if (prepared) {
+                            setPreparedExecutionByOrderId((current) => ({
+                              ...current,
+                              [selectedOrder.paymentOrderId]: prepared.executionPacket,
+                            }));
+                          }
+                        }}
+                        type="button"
+                      >
+                        prepare payment packet
+                      </button>
+                    </div>
+
+                    {selectedOrderPreparedExecution ? (
+                      <div className="execution-packet-card">
+                        <InfoLine label="From" value={`${shortenAddress(selectedOrderPreparedExecution.source.walletAddress, 6, 6)} // ${shortenAddress(selectedOrderPreparedExecution.source.tokenAccountAddress, 6, 6)}`} />
+                        <InfoLine label="To" value={`${shortenAddress(selectedOrderPreparedExecution.destination.walletAddress, 6, 6)} // ${shortenAddress(selectedOrderPreparedExecution.destination.tokenAccountAddress, 6, 6)}`} />
+                        <InfoLine label="Amount" value={`${formatRawUsdcCompact(selectedOrderPreparedExecution.amountRaw)} ${selectedOrderPreparedExecution.token.symbol}`} />
+                        <InfoLine label="Instructions" value={`${selectedOrderPreparedExecution.instructions.length} Solana instruction(s)`} />
+                        <InfoLine label="Required signer" value={shortenAddress(selectedOrderPreparedExecution.signerWallet, 6, 6)} />
+                        <div className="registry-detail-box">
+                          <strong>Execution packet</strong>
+                          <small>{selectedOrderPreparedExecution.signing.note}</small>
+                        </div>
+                        <label className="field modal-span-full">
+                          <span>Browser wallet</span>
+                          <select
+                            onChange={(event) => {
+                              setSelectedBrowserWalletId(event.target.value);
+                              setWalletSigningState(null);
+                            }}
+                            value={selectedBrowserWalletId}
+                          >
+                            <option value="">Select wallet to sign</option>
+                            {browserWallets.map((wallet) => (
+                              <option key={wallet.id} value={wallet.id} disabled={!wallet.ready}>
+                                {formatBrowserWalletOption(wallet)}
+                              </option>
+                            ))}
+                          </select>
+                          <small className="field-note">
+                            Required signer: {shortenAddress(selectedOrderPreparedExecution.signerWallet, 6, 6)}. The backend never receives private keys.
+                          </small>
+                        </label>
+                        {!browserWallets.length ? (
+                          <div className="registry-detail-box modal-span-full">
+                            <strong>No browser wallets detected</strong>
+                            <small>Unlock Phantom, Solflare, Backpack, or another Solana wallet, then refresh wallets.</small>
+                          </div>
+                        ) : null}
+                        {walletSigningState ? (
+                          <div className="registry-detail-box modal-span-full">
+                            <strong>
+                              {walletSigningState.status === 'signing'
+                                ? 'Waiting for wallet'
+                                : walletSigningState.status === 'success'
+                                  ? 'Transaction submitted'
+                                  : 'Wallet signing failed'}
+                            </strong>
+                            <small>{walletSigningState.message}</small>
+                          </div>
+                        ) : null}
+                        <div className="exception-actions modal-span-full">
+                          <button
+                            className="ghost-button compact-button"
+                            onClick={() => {
+                              setBrowserWallets(discoverSolanaWallets());
+                              setWalletSigningState(null);
+                            }}
+                            type="button"
+                          >
+                            refresh wallets
+                          </button>
+                        </div>
+                        <button
+                          className="primary-button compact-button modal-span-full"
+                          disabled={!canManage || !selectedBrowserWalletId || walletSigningState?.status === 'signing'}
+                          onClick={async () => {
+                            setWalletSigningState({
+                              status: 'signing',
+                              message: 'Approve the transaction in the selected browser wallet.',
+                            });
+                            try {
+                              const signature = await onSignPreparedPaymentOrder(
+                                selectedOrder.paymentOrderId,
+                                selectedOrderPreparedExecution,
+                                selectedBrowserWalletId,
+                              );
+                              if (!signature) {
+                                setWalletSigningState({
+                                  status: 'error',
+                                  message: 'The wallet flow finished without returning a transaction signature.',
+                                });
+                                return;
+                              }
+                              setWalletSigningState({
+                                status: 'success',
+                                message: `Submitted ${shortenAddress(signature, 8, 8)}. The system is now watching for settlement.`,
+                              });
+                            } catch (error) {
+                              setWalletSigningState({
+                                status: 'error',
+                                message: error instanceof Error ? error.message : 'Failed to sign and submit payment.',
+                              });
+                            }
+                          }}
+                          type="button"
+                        >
+                          {walletSigningState?.status === 'signing' ? 'waiting for wallet...' : 'sign and submit with source wallet'}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {selectedOrder.transferRequestId && selectedOrder.derivedState !== 'settled' ? (
+                  <div className="registry-detail-group">
+                    <div className="registry-detail-head">
+                      <strong>External execution evidence</strong>
+                    </div>
+                    <div className="execution-handoff-grid">
+                      <form className="form-stack" onSubmit={(event) => onCreatePaymentOrderExecution(selectedOrder.paymentOrderId, event)}>
+                        <label className="field">
+                          <span>Execution source</span>
+                          <select name="executionSource" defaultValue="manual_signature">
+                            <option value="manual_signature">manual signature</option>
+                            <option value="squads_proposal">Squads proposal</option>
+                            <option value="external_wallet">external wallet</option>
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>External reference</span>
+                          <input name="externalReference" placeholder="Optional proposal or send reference" />
+                        </label>
+                        <button className="primary-button compact-button" disabled={!canManage} type="submit">record execution handoff</button>
+                      </form>
+                      <form className="form-stack" onSubmit={(event) => onAttachPaymentOrderSignature(selectedOrder.paymentOrderId, event)}>
+                        <label className="field">
+                          <span>Submitted signature</span>
+                          <input name="submittedSignature" placeholder="Solana transaction signature" />
+                        </label>
+                        <label className="field">
+                          <span>External reference</span>
+                          <input name="externalReference" placeholder="Optional if signature is not known yet" />
+                        </label>
+                        <button className="primary-button compact-button" disabled={!canManage} type="submit">attach execution evidence</button>
+                      </form>
+                    </div>
+                  </div>
+                ) : null}
+
                 {selectedRequestRow?.matchExplanation ? (
                   <div className="registry-detail-group">
                     <div className="registry-detail-head">
@@ -2268,14 +2699,39 @@ export function WorkspaceRequestsPage({
                   </div>
                 ) : null}
 
-                {selectedRequest.reason || selectedRequest.externalReference ? (
+                {selectedOrder.memo || selectedOrder.externalReference || selectedOrder.invoiceNumber || selectedOrder.attachmentUrl ? (
                   <div className="info-grid-tight">
-                    {selectedRequest.externalReference ? (
-                      <InfoLine label="Reference" value={selectedRequest.externalReference} />
+                    {selectedOrder.externalReference ? (
+                      <InfoLine label="Reference" value={selectedOrder.externalReference} />
                     ) : null}
-                    {selectedRequest.reason ? (
-                      <InfoLine label="Reason" value={selectedRequest.reason} />
+                    {selectedOrder.invoiceNumber ? (
+                      <InfoLine label="Invoice" value={selectedOrder.invoiceNumber} />
                     ) : null}
+                    {selectedOrder.attachmentUrl ? (
+                      <InfoLine label="Attachment" value={selectedOrder.attachmentUrl} />
+                    ) : null}
+                    {selectedOrder.memo ? (
+                      <InfoLine label="Memo" value={selectedOrder.memo} />
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {selectedOrder.events.length ? (
+                  <div className="registry-detail-group">
+                    <div className="registry-detail-head">
+                      <strong>Payment order events</strong>
+                    </div>
+                    <div className="timeline-list">
+                      {selectedOrder.events.slice(0, 8).map((event) => (
+                        <div key={event.paymentOrderEventId} className="timeline-item">
+                          <strong>{formatLabel(event.eventType)}</strong>
+                          <small>
+                            {event.beforeState && event.afterState ? `${formatLabel(event.beforeState)} -> ${formatLabel(event.afterState)} // ` : ''}
+                            {formatTimestamp(event.createdAt)}
+                          </small>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ) : null}
               </>
@@ -2834,6 +3290,173 @@ function getApprovalStateLabel(state: string) {
     default:
       return 'submitted';
   }
+}
+
+const PAYMENT_PROGRESS_STEPS = [
+  { index: 1, label: 'Draft' },
+  { index: 2, label: 'Approval' },
+  { index: 3, label: 'Prepare' },
+  { index: 4, label: 'Submit' },
+  { index: 5, label: 'Settle' },
+] as const;
+
+function getPaymentProgress(
+  order: PaymentOrder,
+  row: ReconciliationRow | null,
+  preparedExecution: PaymentExecutionPacket | null,
+): {
+  step: number;
+  label: string;
+  description: string;
+  tone: 'pending' | 'partial' | 'matched' | 'exception';
+} {
+  const hasOpenException = row?.exceptions.some((item) => item.status !== 'dismissed') ?? false;
+  const hasSubmittedSignature = Boolean(row?.latestExecution?.submittedSignature);
+  const hasPreparedExecution = Boolean(preparedExecution || row?.latestExecution);
+
+  if (order.derivedState === 'cancelled') {
+    return {
+      step: 1,
+      label: 'Cancelled',
+      description: 'This payment order was stopped before completion.',
+      tone: 'exception',
+    };
+  }
+
+  if (order.derivedState === 'closed') {
+    return {
+      step: 5,
+      label: 'Closed',
+      description: 'This payment order is closed.',
+      tone: 'matched',
+    };
+  }
+
+  if (hasOpenException || order.derivedState === 'exception') {
+    return {
+      step: 5,
+      label: 'Needs review',
+      description: 'Settlement did not cleanly match the payment intent.',
+      tone: 'exception',
+    };
+  }
+
+  if (row?.requestDisplayState === 'partial' || order.derivedState === 'partially_settled') {
+    return {
+      step: 5,
+      label: 'Partially paid',
+      description: 'Some USDC arrived, but the payment is not fully settled.',
+      tone: 'partial',
+    };
+  }
+
+  if (row?.requestDisplayState === 'matched' || order.derivedState === 'settled') {
+    return {
+      step: 5,
+      label: 'Completed',
+      description: 'The expected USDC settlement was observed and matched.',
+      tone: 'matched',
+    };
+  }
+
+  if (hasSubmittedSignature || row?.executionState === 'submitted_onchain' || row?.executionState === 'observed') {
+    return {
+      step: 4,
+      label: 'Submitted',
+      description: 'A transaction signature is attached. The system is watching for settlement.',
+      tone: 'partial',
+    };
+  }
+
+  if (hasPreparedExecution || order.derivedState === 'execution_recorded') {
+    return {
+      step: 3,
+      label: 'Prepared to sign',
+      description: 'The payment packet exists, but no onchain transaction has been attached yet.',
+      tone: 'partial',
+    };
+  }
+
+  if (row?.approvalState === 'pending_approval' || row?.approvalState === 'escalated' || order.derivedState === 'pending_approval') {
+    return {
+      step: 2,
+      label: 'Needs approval',
+      description: 'Policy requires an operator approval before execution can be prepared.',
+      tone: 'pending',
+    };
+  }
+
+  if (order.derivedState === 'approved' || order.derivedState === 'ready_for_execution') {
+    return {
+      step: 2,
+      label: 'Approved',
+      description: 'Policy cleared this order. Prepare the payment packet next.',
+      tone: 'pending',
+    };
+  }
+
+  return {
+    step: 1,
+    label: 'Draft',
+    description: 'This payment order has not entered the payment workflow yet.',
+    tone: 'pending',
+  };
+}
+
+function getInputProgress(request: PaymentRequest | null): {
+  step: number;
+  label: string;
+  description: string;
+  tone: 'pending' | 'partial' | 'matched' | 'exception';
+} {
+  if (request?.state === 'cancelled') {
+    return {
+      step: 1,
+      label: 'Cancelled',
+      description: 'This request was stopped before it became a payment order.',
+      tone: 'exception',
+    };
+  }
+
+  return {
+    step: 1,
+    label: 'Requested',
+    description: 'The payment request exists. Create the controlled order next.',
+    tone: 'pending',
+  };
+}
+
+function getLatestPreparedExecutionPacket(order: PaymentOrder): PaymentExecutionPacket | null {
+  const candidate = order.reconciliationDetail?.latestExecution?.metadataJson?.preparedExecution;
+  if (!isPaymentExecutionPacket(candidate)) {
+    return null;
+  }
+  return candidate;
+}
+
+function isPaymentExecutionPacket(value: unknown): value is PaymentExecutionPacket {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Partial<PaymentExecutionPacket>;
+  return (
+    candidate.kind === 'solana_spl_usdc_transfer'
+    && typeof candidate.paymentOrderId === 'string'
+    && typeof candidate.executionRecordId === 'string'
+    && typeof candidate.amountRaw === 'string'
+    && typeof candidate.source === 'object'
+    && candidate.source !== null
+    && typeof candidate.destination === 'object'
+    && candidate.destination !== null
+    && Array.isArray(candidate.instructions)
+  );
+}
+
+function formatBrowserWalletOption(wallet: BrowserWalletOption) {
+  const address = wallet.address ? ` // ${shortenAddress(wallet.address, 6, 6)}` : ' // connect to choose account';
+  const source = wallet.source === 'wallet-standard' ? 'standard' : 'injected';
+  const readiness = wallet.ready ? '' : ' // signing unavailable';
+  return `${wallet.name}${address} // ${source}${readiness}`;
 }
 
 function inferApprovalStateFromRequestStatus(

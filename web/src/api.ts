@@ -10,6 +10,11 @@ import type {
   LoginResponse,
   OpsHealth,
   ObservedTransfer,
+  PaymentExecutionPreparation,
+  PaymentOrder,
+  PaymentProofPacket,
+  PaymentRequest,
+  PaymentRequestsCsvImportResult,
   ReconciliationDetail,
   OrganizationDirectoryItem,
   OrganizationMembership,
@@ -470,6 +475,166 @@ export const api = {
   },
   listTransferRequests(workspaceId: string) {
     return request<{ items: TransferRequest[] }>(`/workspaces/${workspaceId}/transfer-requests`);
+  },
+  listPaymentOrders(workspaceId: string, state?: PaymentOrder['state']) {
+    const params = new URLSearchParams({ limit: '100' });
+    if (state) {
+      params.set('state', state);
+    }
+    return request<{ servedAt: string; items: PaymentOrder[] }>(
+      `/workspaces/${workspaceId}/payment-orders?${params.toString()}`,
+    );
+  },
+  listPaymentRequests(workspaceId: string, state?: PaymentRequest['state']) {
+    const params = new URLSearchParams({ limit: '100' });
+    if (state) {
+      params.set('state', state);
+    }
+    return request<{ servedAt: string; items: PaymentRequest[] }>(
+      `/workspaces/${workspaceId}/payment-requests?${params.toString()}`,
+    );
+  },
+  createPaymentRequest(
+    workspaceId: string,
+    input: {
+      payeeId?: string;
+      destinationId: string;
+      amountRaw: string;
+      asset?: string;
+      reason: string;
+      externalReference?: string;
+      dueAt?: string;
+      metadataJson?: Record<string, unknown>;
+      createOrderNow?: boolean;
+      sourceWorkspaceAddressId?: string;
+      submitOrderNow?: boolean;
+    },
+  ) {
+    return request<PaymentRequest>(`/workspaces/${workspaceId}/payment-requests`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+  importPaymentRequestsCsv(
+    workspaceId: string,
+    input: {
+      csv: string;
+      createOrderNow?: boolean;
+      sourceWorkspaceAddressId?: string;
+      submitOrderNow?: boolean;
+    },
+  ) {
+    return request<PaymentRequestsCsvImportResult>(`/workspaces/${workspaceId}/payment-requests/import-csv`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+  promotePaymentRequest(
+    workspaceId: string,
+    paymentRequestId: string,
+    input?: {
+      sourceWorkspaceAddressId?: string;
+      submitNow?: boolean;
+    },
+  ) {
+    return request<PaymentOrder>(`/workspaces/${workspaceId}/payment-requests/${paymentRequestId}/promote`, {
+      method: 'POST',
+      body: JSON.stringify(input ?? {}),
+    });
+  },
+  getPaymentOrderDetail(workspaceId: string, paymentOrderId: string) {
+    return request<PaymentOrder>(`/workspaces/${workspaceId}/payment-orders/${paymentOrderId}`);
+  },
+  createPaymentOrder(
+    workspaceId: string,
+    input: {
+      payeeId?: string;
+      destinationId: string;
+      sourceWorkspaceAddressId?: string;
+      amountRaw: string;
+      asset?: string;
+      memo?: string;
+      externalReference?: string;
+      invoiceNumber?: string;
+      attachmentUrl?: string;
+      dueAt?: string;
+      sourceBalanceSnapshotJson?: Record<string, unknown>;
+      metadataJson?: Record<string, unknown>;
+      submitNow?: boolean;
+    },
+  ) {
+    return request<PaymentOrder>(`/workspaces/${workspaceId}/payment-orders`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+  submitPaymentOrder(workspaceId: string, paymentOrderId: string) {
+    return request<PaymentOrder>(`/workspaces/${workspaceId}/payment-orders/${paymentOrderId}/submit`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  },
+  cancelPaymentOrder(workspaceId: string, paymentOrderId: string) {
+    return request<PaymentOrder>(`/workspaces/${workspaceId}/payment-orders/${paymentOrderId}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  },
+  createPaymentOrderExecution(
+    workspaceId: string,
+    paymentOrderId: string,
+    input?: {
+      executionSource?: string;
+      externalReference?: string;
+      metadataJson?: Record<string, unknown>;
+    },
+  ) {
+    return request(
+      `/workspaces/${workspaceId}/payment-orders/${paymentOrderId}/create-execution`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input ?? {}),
+      },
+    );
+  },
+  preparePaymentOrderExecution(
+    workspaceId: string,
+    paymentOrderId: string,
+    input?: {
+      sourceWorkspaceAddressId?: string;
+    },
+  ) {
+    return request<PaymentExecutionPreparation>(
+      `/workspaces/${workspaceId}/payment-orders/${paymentOrderId}/prepare-execution`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input ?? {}),
+      },
+    );
+  },
+  attachPaymentOrderSignature(
+    workspaceId: string,
+    paymentOrderId: string,
+    input: {
+      submittedSignature?: string;
+      externalReference?: string;
+      submittedAt?: string;
+      metadataJson?: Record<string, unknown>;
+    },
+  ) {
+    return request(
+      `/workspaces/${workspaceId}/payment-orders/${paymentOrderId}/attach-signature`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+    );
+  },
+  downloadPaymentOrderAuditExport(workspaceId: string, paymentOrderId: string) {
+    return download(`/workspaces/${workspaceId}/payment-orders/${paymentOrderId}/audit-export?format=csv`);
+  },
+  getPaymentOrderProof(workspaceId: string, paymentOrderId: string) {
+    return request<PaymentProofPacket>(`/workspaces/${workspaceId}/payment-orders/${paymentOrderId}/proof`);
   },
   addTransferRequestNote(workspaceId: string, transferRequestId: string, input: { body: string }) {
     return request<TransferRequestNote>(
