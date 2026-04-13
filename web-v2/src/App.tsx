@@ -4237,7 +4237,7 @@ function buildWorkflow(order: PaymentOrder) {
 
 function buildRunWorkflow(run: PaymentRun) {
   const state = run.derivedState;
-  const blocked = state === 'exception' || state === 'partially_settled' || state === 'cancelled';
+  const blocked = state === 'exception' || state === 'partially_settled';
   const settled = state === 'settled' || state === 'closed';
   const approvedDone = run.totals.approvedCount > 0 || settled || state === 'execution_recorded' || state === 'exception' || state === 'partially_settled';
   const submittedDone = ['execution_recorded', 'partially_settled', 'settled', 'closed', 'exception'].includes(state);
@@ -4291,7 +4291,16 @@ function stepState(stepIndex: number, currentIndex: number, blocked: boolean) {
 }
 
 function paymentTimelineStates(state: PaymentOrderState): Record<'request' | 'approval' | 'execution' | 'settlement' | 'proof', 'complete' | 'current' | 'pending' | 'blocked'> {
-  const blocked = state === 'exception' || state === 'partially_settled' || state === 'cancelled';
+  if (state === 'cancelled') {
+    return {
+      request: 'complete',
+      approval: 'blocked',
+      execution: 'pending',
+      settlement: 'pending',
+      proof: 'pending',
+    };
+  }
+  const blocked = state === 'exception' || state === 'partially_settled';
   const indexMap: Record<string, number> = {
     draft: 0,
     pending_approval: 1,
