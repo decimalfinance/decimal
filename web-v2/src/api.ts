@@ -24,14 +24,16 @@ import type {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:3100';
 const AUTH_STORAGE_KEY = 'usdc_ops_v2.session_token';
+const LEGACY_AUTH_STORAGE_KEY = 'usdc_ops.session_token';
 
 let sessionToken = loadStoredToken();
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit & { includeAuth?: boolean }): Promise<T> {
+  const includeAuth = init?.includeAuth ?? true;
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
       'content-type': 'application/json',
-      ...(sessionToken ? { authorization: `Bearer ${sessionToken}` } : {}),
+      ...(includeAuth && sessionToken ? { authorization: `Bearer ${sessionToken}` } : {}),
       ...(init?.headers ?? {}),
     },
     ...init,
@@ -88,6 +90,9 @@ async function download(path: string) {
 }
 
 export const api = {
+  hasSessionToken() {
+    return Boolean(sessionToken);
+  },
   setSessionToken(nextToken: string) {
     sessionToken = nextToken;
     window.localStorage.setItem(AUTH_STORAGE_KEY, nextToken);
@@ -98,6 +103,7 @@ export const api = {
   login(input: { email: string; displayName?: string }) {
     return request<LoginResponse>('/auth/login', {
       method: 'POST',
+      includeAuth: false,
       body: JSON.stringify(input),
     });
   },
@@ -449,6 +455,7 @@ export const api = {
 function clearSessionToken() {
   sessionToken = null;
   window.localStorage.removeItem(AUTH_STORAGE_KEY);
+  window.localStorage.removeItem(LEGACY_AUTH_STORAGE_KEY);
 }
 
 function loadStoredToken() {

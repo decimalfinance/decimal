@@ -81,10 +81,21 @@ function queryKeys(workspaceId?: string, paymentOrderId?: string) {
   };
 }
 
+function toAuthenticatedSession(result: { user: AuthenticatedSession['user']; organizations: AuthenticatedSession['organizations'] }): AuthenticatedSession {
+  return {
+    authenticated: true,
+    user: result.user,
+    organizations: result.organizations,
+  };
+}
+
 export function App() {
+  const location = useLocation();
+  const shouldCheckSession = location.pathname !== '/login' && api.hasSessionToken();
   const sessionQuery = useQuery({
     queryKey: queryKeys().session,
     queryFn: () => api.getSession(),
+    enabled: shouldCheckSession,
     retry: false,
   });
 
@@ -145,8 +156,10 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
   );
 
   async function logout() {
+    await queryClient.cancelQueries();
     await api.logout().catch(() => undefined);
     api.clearSessionToken();
+    queryClient.removeQueries({ queryKey: queryKeys().session });
     queryClient.clear();
     navigate('/login', { replace: true });
   }
@@ -194,17 +207,24 @@ function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [email, setEmail] = useState('');
   const loginMutation = useMutation({
-    mutationFn: (nextEmail: string) => api.login({ email: nextEmail }),
+    mutationFn: (nextEmail: string) => {
+      // Always start login from a clean auth state so stale tokens cannot win.
+      void queryClient.cancelQueries({ queryKey: queryKeys().session });
+      queryClient.removeQueries({ queryKey: queryKeys().session });
+      api.clearSessionToken();
+      return api.login({ email: nextEmail });
+    },
     onSuccess: async (result, submittedEmail) => {
       const expectedEmail = submittedEmail.trim().toLowerCase();
       const actualEmail = result.user.email.trim().toLowerCase();
       if (expectedEmail && expectedEmail !== actualEmail) {
         api.clearSessionToken();
+        queryClient.removeQueries({ queryKey: queryKeys().session });
         setError(`Sign-in mismatch: entered ${submittedEmail}, received session for ${result.user.email}. Please retry.`);
         return;
       }
       api.setSessionToken(result.sessionToken);
-      await queryClient.invalidateQueries({ queryKey: queryKeys().session });
+      queryClient.setQueryData(queryKeys().session, toAuthenticatedSession(result));
       navigate('/', { replace: true });
     },
     onError: (nextError) => {
