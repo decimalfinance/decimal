@@ -134,6 +134,17 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
     () => (sidebarOrdersQuery.data?.items ?? []).filter((order) => order.derivedState === 'pending_approval').length,
     [sidebarOrdersQuery.data?.items],
   );
+  const executionQueueCount = useMemo(
+    () => (sidebarOrdersQuery.data?.items ?? []).filter((order) => paymentExecutionBucket(order) !== null).length,
+    [sidebarOrdersQuery.data?.items],
+  );
+  const paymentsIncompleteCount = useMemo(
+    () =>
+      (sidebarOrdersQuery.data?.items ?? []).filter(
+        (order) => !['settled', 'closed', 'cancelled'].includes(order.derivedState),
+      ).length,
+    [sidebarOrdersQuery.data?.items],
+  );
 
   async function logout() {
     await api.logout().catch(() => undefined);
@@ -148,7 +159,9 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
         session={session}
         workspaceContexts={workspaces}
         activeWorkspaceId={activeWorkspaceId}
+        paymentsIncompleteCount={paymentsIncompleteCount}
         approvalPendingCount={approvalPendingCount}
+        executionQueueCount={executionQueueCount}
         onLogout={logout}
       />
       <main className="main-surface">
@@ -1165,7 +1178,7 @@ function PaymentRunDetailPage({ session }: { session: AuthenticatedSession }) {
       return signature;
     },
     onSuccess: async (signature) => {
-      setMessage(`Submitted ${shortenAddress(signature, 8, 8)}.`);
+      setMessage(`Executed ${shortenAddress(signature, 8, 8)}.`);
       setManualSignature('');
       setExecutionModalOpen(false);
       await Promise.all([
@@ -1355,7 +1368,7 @@ function PaymentRunDetailPage({ session }: { session: AuthenticatedSession }) {
                 ? 'reviewed'
                 : step.label.startsWith('Approve')
                   ? 'approved'
-                  : step.label.startsWith('Submit')
+                  : step.label.startsWith('Execute')
                     ? 'submitted'
                     : step.label.startsWith('Settle')
                       ? 'settled'
@@ -1413,7 +1426,7 @@ function PaymentRunDetailPage({ session }: { session: AuthenticatedSession }) {
                     <p>No resolved approval decisions yet.</p>
                   )
                 ) : null}
-                {(step.label === 'Submit' || step.label === 'Submitted') && expandedRunLifecycleStages.submitted ? (
+                {(step.label === 'Execute' || step.label === 'Executed') && expandedRunLifecycleStages.submitted ? (
                   submissionEvents.length ? (
                     <CompactStageEvents
                       items={submissionEvents.map((event) => ({
@@ -1423,7 +1436,7 @@ function PaymentRunDetailPage({ session }: { session: AuthenticatedSession }) {
                       }))}
                     />
                   ) : (
-                    <p>No signatures submitted yet.</p>
+                    <p>No signatures executed yet.</p>
                   )
                 ) : null}
                 {(step.label === 'Settle' || step.label === 'Settled') && expandedRunLifecycleStages.settled ? (
@@ -1776,7 +1789,7 @@ function ExecutionPage({ session }: { session: AuthenticatedSession }) {
     return m;
   }, [inQueue]);
   const readyToSignCount = inQueue.filter((order) => order.derivedState === 'ready_for_execution').length;
-  const submittedCount = inQueue.filter((order) => order.derivedState === 'execution_recorded').length;
+  const executedCount = inQueue.filter((order) => order.derivedState === 'execution_recorded').length;
   const reviewCount = inQueue.filter((order) => order.derivedState === 'exception' || order.derivedState === 'partially_settled').length;
 
   if (!workspaceId || !workspace) return <ScreenState title="Workspace unavailable" description="Choose a workspace from the sidebar." />;
@@ -1790,11 +1803,11 @@ function ExecutionPage({ session }: { session: AuthenticatedSession }) {
       <div className="metric-strip metric-strip-four">
         <Metric label="In queue" value={String(inQueue.length)} />
         <Metric label="Ready to sign" value={String(readyToSignCount)} />
-        <Metric label="Submitted" value={String(submittedCount)} />
+        <Metric label="Executed" value={String(executedCount)} />
         <Metric label="Needs review" value={String(reviewCount)} />
       </div>
       {inQueue.length === 0 ? (
-        <EmptyState title="Nothing waiting for execution" description="Approved, submitted, or review-needed payments will appear in the groups below." />
+        <EmptyState title="Nothing waiting for execution" description="Approved, executed, or review-needed payments will appear in the groups below." />
       ) : (
         EXECUTION_BUCKETS.map((bucket) => {
           const rows = grouped.get(bucket) ?? [];
@@ -3033,7 +3046,7 @@ function PaymentDetailPage({ session }: { session: AuthenticatedSession }) {
       return signature;
     },
     onSuccess: async (signature) => {
-      setActionMessage(`Submitted ${shortenAddress(signature, 8, 8)}.`);
+      setActionMessage(`Executed ${shortenAddress(signature, 8, 8)}.`);
       setExecutionModalOpen(false);
       await queryClient.invalidateQueries({ queryKey: queryKeys(workspaceId, paymentOrderId).paymentOrder });
     },
@@ -3098,7 +3111,7 @@ function PaymentDetailPage({ session }: { session: AuthenticatedSession }) {
   const effectiveSourceAddressId = selectedSourceAddressId || order.sourceWorkspaceAddressId || sourceAddresses[0]?.workspaceAddressId || '';
   const selectedSourceAddress = sourceAddresses.find((address) => address.workspaceAddressId === effectiveSourceAddressId) ?? null;
   const heroTime = latestExecution?.submittedAt ?? order.createdAt;
-  const heroTimeLabel = latestExecution?.submittedSignature ? 'Submitted' : 'Requested';
+  const heroTimeLabel = latestExecution?.submittedSignature ? 'Executed' : 'Requested';
   const latestDecision = approvalDecisions.slice().sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] ?? null;
   const stageAction = (() => {
     if (order.derivedState === 'draft') {
@@ -3159,7 +3172,7 @@ function PaymentDetailPage({ session }: { session: AuthenticatedSession }) {
             ['Amount', `${formatRawUsdcCompact(order.amountRaw)} ${assetSymbol(order.asset)}`],
             ['From', order.sourceWorkspaceAddress?.address ? <AddressLink key="from" value={order.sourceWorkspaceAddress.address} /> : 'Source not set'],
             ['To', order.destination?.walletAddress ? <AddressLink key="to" value={order.destination.walletAddress} /> : 'Destination unavailable'],
-            ['Signature', latestExecution?.submittedSignature ? shortenAddress(latestExecution.submittedSignature) : 'Not submitted'],
+            ['Signature', latestExecution?.submittedSignature ? shortenAddress(latestExecution.submittedSignature) : 'Not executed'],
             ['Time label', heroTimeLabel],
             ['Time', formatRelativeTime(heroTime)],
           ]}
@@ -3212,7 +3225,7 @@ function PaymentDetailPage({ session }: { session: AuthenticatedSession }) {
             <span className="vertical-timeline-marker" />
             <div className="vertical-timeline-content">
               <strong>Execution</strong>
-              <p>{latestExecution?.submittedSignature ? `Submitted on-chain with ${shortenAddress(latestExecution.submittedSignature)}.` : 'Not submitted on-chain yet.'}</p>
+              <p>{latestExecution?.submittedSignature ? `Executed on-chain with ${shortenAddress(latestExecution.submittedSignature)}.` : 'Not executed on-chain yet.'}</p>
             </div>
           </article>
           <article className={`vertical-timeline-item vertical-timeline-item-${stageState.settlement}`}>
@@ -3903,7 +3916,7 @@ function PaymentHero({ order }: { order: PaymentOrder }) {
     ?? order.reconciliationDetail?.match?.signature
     ?? null;
   const heroTime = order.reconciliationDetail?.latestExecution?.submittedAt ?? order.createdAt;
-  const heroTimeLabel = latestSignature ? 'Submitted' : 'Requested';
+  const heroTimeLabel = latestSignature ? 'Executed' : 'Requested';
 
   return (
     <section className="payment-hero">
@@ -3913,7 +3926,7 @@ function PaymentHero({ order }: { order: PaymentOrder }) {
       </div>
       <div className="payment-hero-grid">
         <HeroCell label="Signature">
-          {latestSignature ? <AddressLink value={latestSignature} kind="transaction" /> : <span>Not submitted</span>}
+          {latestSignature ? <AddressLink value={latestSignature} kind="transaction" /> : <span>Not executed</span>}
         </HeroCell>
         <HeroCell label="From">
           {order.sourceWorkspaceAddress?.address ? <AddressLink value={order.sourceWorkspaceAddress.address} /> : <span>Source not set</span>}
@@ -3962,7 +3975,7 @@ function ExecutionPanel({
     <div className="execution-stack">
       {latestSignature ? (
         <div className="notice notice-success">
-          Submitted signature <AddressLink value={latestSignature} kind="transaction" />
+          Executed signature <AddressLink value={latestSignature} kind="transaction" />
         </div>
       ) : null}
       {packet ? (
@@ -4009,7 +4022,7 @@ function ExecutionPanel({
       </button>
       <div className="manual-signature">
         <label className="field">
-          Manual submitted signature
+          Manual executed signature
           <input value={manualSignature} onChange={(event) => onManualSignatureChange(event.target.value)} placeholder="Paste transaction signature" />
         </label>
         <button className="button button-secondary" onClick={onAttachSignature} type="button">
@@ -4088,7 +4101,7 @@ function RunExecutionPanel({
       </button>
       <div className="manual-signature">
         <label className="field">
-          Manual submitted signature
+          Manual executed signature
           <input value={manualSignature} onChange={(event) => onManualSignatureChange(event.target.value)} placeholder="Paste transaction signature" />
         </label>
         <button className="button button-secondary" onClick={onAttachSignature} type="button">
@@ -4435,7 +4448,7 @@ function buildWorkflow(order: PaymentOrder) {
       { label: 'Imported', subtext: '1 row', state: 'complete' as const },
       { label: 'Reviewed', subtext: 'Not started', state: 'pending' as const },
       { label: 'Approval', subtext: 'Rejected', state: 'blocked' as const },
-      { label: 'Submit', subtext: 'Not started', state: 'pending' as const },
+      { label: 'Execute', subtext: 'Not started', state: 'pending' as const },
       { label: 'Settle', subtext: 'Waiting', state: 'pending' as const },
       { label: 'Prove', subtext: 'Pending', state: 'pending' as const },
     ];
@@ -4465,7 +4478,7 @@ function buildWorkflow(order: PaymentOrder) {
     { label: 'Imported', subtext: '1 row', state: 'complete' as const },
     { label: tenseLabel(reviewState === 'complete', 'Reviewed', 'Review'), subtext: reviewState === 'complete' ? 'Reviewed' : 'Review pending', state: reviewState },
     { label: tenseLabel(approveState === 'complete', 'Approved', 'Approve'), subtext: getApprovalLabel(order), state: approveState },
-    { label: tenseLabel(submitState === 'complete', 'Submitted', 'Submit'), subtext: getExecutionLabel(order), state: submitState },
+    { label: tenseLabel(submitState === 'complete', 'Executed', 'Execute'), subtext: getExecutionLabel(order), state: submitState },
     { label: tenseLabel(settleState === 'complete', 'Settled', 'Settle'), subtext: getSettlementLabel(order), state: settleState },
     { label: tenseLabel(proveState === 'complete', 'Proven', 'Prove'), subtext: proveState === 'complete' ? 'Ready' : 'Pending', state: proveState },
   ];
@@ -4506,8 +4519,8 @@ function buildRunWorkflow(run: PaymentRun) {
       state: approvedState,
     },
     {
-      label: tenseLabel(submittedState === 'complete', 'Submitted', 'Submit'),
-      subtext: blocked ? 'Needs review' : submittedDone ? 'On chain' : approvedDone ? 'Ready to sign and submit' : 'Pending',
+      label: tenseLabel(submittedState === 'complete', 'Executed', 'Execute'),
+      subtext: blocked ? 'Needs review' : submittedDone ? 'On chain' : approvedDone ? 'Ready to sign and execute' : 'Pending',
       state: submittedState,
     },
     {
@@ -4579,7 +4592,7 @@ function getApprovalSummary(order: PaymentOrder) {
 
 function getExecutionLabel(order: PaymentOrder) {
   if (order.derivedState === 'ready_for_execution') return 'Ready to sign';
-  if (order.derivedState === 'execution_recorded') return 'Submitted';
+  if (order.derivedState === 'execution_recorded') return 'Executed';
   if (order.derivedState === 'settled' || order.derivedState === 'closed') return 'Completed';
   if (order.derivedState === 'exception' || order.derivedState === 'partially_settled') return 'Needs review';
   return 'Not started';

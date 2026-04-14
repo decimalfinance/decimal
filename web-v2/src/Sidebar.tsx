@@ -217,13 +217,17 @@ export function AppSidebar({
   session,
   workspaceContexts,
   activeWorkspaceId,
+  paymentsIncompleteCount,
   approvalPendingCount,
+  executionQueueCount,
   onLogout,
 }: {
   session: AuthenticatedSession;
   workspaceContexts: WorkspaceContext[];
   activeWorkspaceId?: string;
+  paymentsIncompleteCount?: number;
   approvalPendingCount?: number;
+  executionQueueCount?: number;
   onLogout: () => void;
 }) {
   return (
@@ -259,8 +263,14 @@ export function AppSidebar({
                       end={item.end}
                       icon={item.icon}
                       badgeCount={
-                        item.label === 'Approvals' && workspace.workspaceId === activeWorkspaceId
-                          ? approvalPendingCount
+                        workspace.workspaceId === activeWorkspaceId
+                          ? item.label === 'Payments'
+                            ? paymentsIncompleteCount
+                            : item.label === 'Approvals'
+                              ? approvalPendingCount
+                              : item.label === 'Execution'
+                                ? executionQueueCount
+                                : undefined
                           : undefined
                       }
                     >

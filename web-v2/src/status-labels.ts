@@ -5,7 +5,7 @@ const PAYMENT_STATUS: Record<PaymentOrderState, string> = {
   pending_approval: 'Needs approval',
   approved: 'Approved',
   ready_for_execution: 'Ready to sign',
-  execution_recorded: 'Submitted',
+  execution_recorded: 'Executed',
   partially_settled: 'Partial',
   settled: 'Completed',
   exception: 'Needs review',
@@ -69,15 +69,15 @@ export type ExecutionBucket =
   | 'needs_source'
   | 'ready_to_prepare'
   | 'ready_to_sign'
-  | 'submitted'
+  | 'executed'
   | 'needs_review';
 
-export const EXECUTION_BUCKETS: ExecutionBucket[] = ['needs_source', 'ready_to_prepare', 'ready_to_sign', 'submitted', 'needs_review'];
+export const EXECUTION_BUCKETS: ExecutionBucket[] = ['needs_source', 'ready_to_prepare', 'ready_to_sign', 'executed', 'needs_review'];
 
 export function paymentExecutionBucket(order: PaymentOrder): ExecutionBucket | null {
   const s = order.derivedState;
   if (s === 'exception' || s === 'partially_settled') return 'needs_review';
-  if (s === 'execution_recorded') return 'submitted';
+  if (s === 'execution_recorded') return 'executed';
   if (s === 'ready_for_execution') return 'ready_to_sign';
   if (s === 'approved') {
     return order.sourceWorkspaceAddressId ? 'ready_to_prepare' : 'needs_source';
@@ -93,8 +93,8 @@ export function executionBucketTitle(bucket: ExecutionBucket): string {
       return 'Ready to prepare';
     case 'ready_to_sign':
       return 'Ready to sign';
-    case 'submitted':
-      return 'Submitted — settling';
+    case 'executed':
+      return 'Executed — settling';
     case 'needs_review':
       return 'Needs execution review';
     default:
@@ -107,7 +107,7 @@ const RUN_STATUS: Record<string, string> = {
   pending_approval: 'In approval',
   approved: 'Approved',
   ready_for_execution: 'Ready to sign',
-  execution_recorded: 'Submitted',
+  execution_recorded: 'Executed',
   partially_settled: 'Partial',
   settled: 'Completed',
   exception: 'Needs review',
