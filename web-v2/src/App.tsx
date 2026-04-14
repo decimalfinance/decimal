@@ -119,6 +119,21 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
   const workspaces = useMemo(() => getWorkspaces(session), [session]);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const location = useLocation();
+  const activeWorkspaceId = useMemo(() => {
+    const match = location.pathname.match(/^\/workspaces\/([^/]+)/);
+    return match?.[1];
+  }, [location.pathname]);
+  const sidebarOrdersQuery = useQuery({
+    queryKey: queryKeys(activeWorkspaceId).paymentOrders,
+    queryFn: () => api.listPaymentOrders(activeWorkspaceId!),
+    enabled: Boolean(activeWorkspaceId),
+    refetchInterval: 5_000,
+  });
+  const approvalPendingCount = useMemo(
+    () => (sidebarOrdersQuery.data?.items ?? []).filter((order) => order.derivedState === 'pending_approval').length,
+    [sidebarOrdersQuery.data?.items],
+  );
 
   async function logout() {
     await api.logout().catch(() => undefined);
@@ -129,7 +144,13 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
 
   return (
     <div className="app-shell">
-      <AppSidebar session={session} workspaceContexts={workspaces} onLogout={logout} />
+      <AppSidebar
+        session={session}
+        workspaceContexts={workspaces}
+        activeWorkspaceId={activeWorkspaceId}
+        approvalPendingCount={approvalPendingCount}
+        onLogout={logout}
+      />
       <main className="main-surface">
         <Routes>
           <Route path="/" element={<HomeRedirect session={session} />} />
@@ -1660,10 +1681,7 @@ function ApprovalsTable({
           </span>
           <span>{formatRawUsdcCompact(order.amountRaw)} {assetSymbol(order.asset)}</span>
           <span>
-            <small>
-              {approvalReasonLine(order)}{' '}
-              <StatusBadge tone={toneForGenericState(order.destination.trustState)}>{trustDisplay(order.destination.trustState)}</StatusBadge>
-            </small>
+            <small>{approvalReasonLine(order)}</small>
           </span>
           <span>{formatRelativeTime(order.createdAt)}</span>
           <span className="table-actions">

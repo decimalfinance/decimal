@@ -160,11 +160,13 @@ function SidebarLink({
   to,
   end,
   icon,
+  badgeCount,
   children,
 }: {
   to: string;
   end?: boolean;
   icon: ReactNode;
+  badgeCount?: number;
   children: ReactNode;
 }) {
   return (
@@ -175,6 +177,11 @@ function SidebarLink({
     >
       <span className="sidebar-link-icon-wrap">{icon}</span>
       <span className="sidebar-link-label">{children}</span>
+      {badgeCount && badgeCount > 0 ? (
+        <span className="sidebar-link-badge" aria-label={`${badgeCount} pending`}>
+          {badgeCount}
+        </span>
+      ) : null}
     </NavLink>
   );
 }
@@ -209,10 +216,14 @@ function initialsFromEmail(email: string) {
 export function AppSidebar({
   session,
   workspaceContexts,
+  activeWorkspaceId,
+  approvalPendingCount,
   onLogout,
 }: {
   session: AuthenticatedSession;
   workspaceContexts: WorkspaceContext[];
+  activeWorkspaceId?: string;
+  approvalPendingCount?: number;
   onLogout: () => void;
 }) {
   return (
@@ -242,7 +253,17 @@ export function AppSidebar({
                 <p className="sidebar-section-label">Operations</p>
                 <div className="sidebar-link-list" role="list">
                   {nav.operations.map((item) => (
-                    <SidebarLink key={item.to + String(item.end)} to={item.to} end={item.end} icon={item.icon}>
+                    <SidebarLink
+                      key={item.to + String(item.end)}
+                      to={item.to}
+                      end={item.end}
+                      icon={item.icon}
+                      badgeCount={
+                        item.label === 'Approvals' && workspace.workspaceId === activeWorkspaceId
+                          ? approvalPendingCount
+                          : undefined
+                      }
+                    >
                       {item.label}
                     </SidebarLink>
                   ))}
