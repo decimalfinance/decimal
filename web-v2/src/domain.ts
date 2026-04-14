@@ -5,10 +5,10 @@ export {
   orbTransactionUrl,
   shortenAddress,
   solanaAccountUrl,
-} from '../../web/src/lib/app';
+} from './lib/app';
 export {
   discoverSolanaWallets,
   signAndSubmitPreparedPayment,
   subscribeSolanaWallets,
   type BrowserWalletOption,
-} from '../../web/src/lib/solana-wallet';
+} from './lib/solana-wallet';
