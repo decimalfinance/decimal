@@ -543,6 +543,12 @@ function PaymentsPage({ session }: { session: AuthenticatedSession }) {
   const addresses = addressesQuery.data?.items ?? [];
   const destinations = destinationsQuery.data?.items ?? [];
   const payees = payeesQuery.data?.items ?? [];
+  const standaloneNeedsAction = standaloneOrders.filter(isActionableOrder).length;
+  const runNeedsAction = paymentRuns.filter((run) => ['draft', 'pending_approval', 'ready_for_execution', 'execution_recorded', 'partially_settled', 'exception'].includes(run.derivedState)).length;
+  const standaloneReadyToSign = standaloneOrders.filter((order) => order.derivedState === 'ready_for_execution').length;
+  const runReadyToSign = paymentRuns.filter((run) => run.derivedState === 'ready_for_execution').length;
+  const standaloneCompleted = standaloneOrders.filter((order) => order.derivedState === 'settled' || order.derivedState === 'closed').length;
+  const runCompleted = paymentRuns.filter((run) => run.derivedState === 'settled' || run.derivedState === 'closed').length;
   const unifiedRows = [
     ...standaloneOrders.map((order) => ({
       kind: 'payment' as const,
@@ -583,9 +589,9 @@ function PaymentsPage({ session }: { session: AuthenticatedSession }) {
       }
     >
       <div className="metric-strip">
-        <Metric label="Needs action" value={String(standaloneOrders.filter(isActionableOrder).length)} />
-        <Metric label="Ready to sign" value={String(standaloneOrders.filter((order) => order.derivedState === 'ready_for_execution').length)} />
-        <Metric label="Completed" value={String(standaloneOrders.filter((order) => order.derivedState === 'settled' || order.derivedState === 'closed').length)} />
+        <Metric label="Needs action" value={String(standaloneNeedsAction + runNeedsAction)} />
+        <Metric label="Ready to sign" value={String(standaloneReadyToSign + runReadyToSign)} />
+        <Metric label="Completed" value={String(standaloneCompleted + runCompleted)} />
       </div>
       <section className="panel">
         <SectionHeader title={`Payments and batches [${unifiedRows.length}]`} description="Individual payments and batch runs in one operational ledger." />
@@ -1640,10 +1646,27 @@ function ApprovalsPage({ session }: { session: AuthenticatedSession }) {
     const decisions = order.reconciliationDetail?.approvalDecisions ?? [];
     return decisions.some((decision) => ['approve', 'reject', 'escalate'].includes(decision.action));
   });
+  const latestDecisions = history
+    .map((order) => {
+      const decisions = (order.reconciliationDetail?.approvalDecisions ?? [])
+        .filter((decision) => ['approve', 'reject', 'escalate'].includes(decision.action))
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      return decisions[0] ?? null;
+    })
+    .filter((decision): decision is NonNullable<typeof decision> => Boolean(decision));
+  const approvedCount = latestDecisions.filter((decision) => decision.action === 'approve').length;
+  const rejectedCount = latestDecisions.filter((decision) => decision.action === 'reject').length;
+  const escalatedCount = latestDecisions.filter((decision) => decision.action === 'escalate').length;
 
   return (
     <PageFrame eyebrow="Approvals" title={`Approval queue [${pending.length}]`} description="Live approval queue and full decision history for audit visibility.">
       {message ? <div className="notice">{message}</div> : null}
+      <div className="metric-strip metric-strip-four">
+        <Metric label="Pending" value={String(pending.length)} />
+        <Metric label="Approved" value={String(approvedCount)} />
+        <Metric label="Rejected" value={String(rejectedCount)} />
+        <Metric label="Escalated" value={String(escalatedCount)} />
+      </div>
       <section className="panel">
         <SectionHeader title={`Pending approvals [${pending.length}]`} description="Payments blocked by policy or destination trust until a human decision is recorded." />
         <ApprovalsTable
@@ -1788,9 +1811,22 @@ function ExecutionPage({ session }: { session: AuthenticatedSession }) {
     }
     return m;
   }, [inQueue]);
+  const allOrders = ordersQuery.data?.items ?? [];
   const readyToSignCount = inQueue.filter((order) => order.derivedState === 'ready_for_execution').length;
-  const executedCount = inQueue.filter((order) => order.derivedState === 'execution_recorded').length;
+  const executedCount = allOrders.filter((order) => hasExecutionRecorded(order)).length;
   const reviewCount = inQueue.filter((order) => order.derivedState === 'exception' || order.derivedState === 'partially_settled').length;
+  const executedHistory = useMemo(
+    () =>
+      allOrders
+        .filter((order) => Boolean(order.reconciliationDetail?.latestExecution?.submittedSignature))
+        .sort((a, b) => {
+          const aTime = new Date(a.reconciliationDetail?.latestExecution?.submittedAt ?? a.updatedAt).getTime();
+          const bTime = new Date(b.reconciliationDetail?.latestExecution?.submittedAt ?? b.updatedAt).getTime();
+          return bTime - aTime;
+        })
+        .slice(0, 12),
+    [allOrders],
+  );
 
   if (!workspaceId || !workspace) return <ScreenState title="Workspace unavailable" description="Choose a workspace from the sidebar." />;
 
@@ -1833,6 +1869,27 @@ function ExecutionPage({ session }: { session: AuthenticatedSession }) {
           );
         })
       )}
+      <section className="panel panel-spaced">
+        <SectionHeader title={`Recent executed [${executedHistory.length}]`} description="Most recent payments that already have execution signatures." />
+        <ActionPaymentTable
+          workspaceId={workspaceId}
+          paymentOrders={executedHistory}
+          actionHeader="Open"
+          emptyTitle="No executed payments yet"
+          emptyDescription="Executed payments with signatures will appear here."
+          reasonHeader="Execution signature"
+          renderReason={(order) =>
+            order.reconciliationDetail?.latestExecution?.submittedSignature
+              ? <AddressLink value={order.reconciliationDetail.latestExecution.submittedSignature} kind="transaction" />
+              : 'N/A'
+          }
+          renderAction={(order) => (
+            <Link className="button button-secondary button-small" to={`/workspaces/${workspaceId}/payments/${order.paymentOrderId}#execution`}>
+              Open payment
+            </Link>
+          )}
+        />
+      </section>
     </PageFrame>
   );
 }
@@ -1858,13 +1915,19 @@ function SettlementPage({ session }: { session: AuthenticatedSession }) {
   const observedTransfers = transfersQuery.data?.items ?? [];
   const matchedCount = reconciliationRows.filter((row) => row.requestDisplayState === 'matched').length;
   const exceptionCount = reconciliationRows.filter((row) => row.requestDisplayState === 'exception').length;
-  const pendingCount = reconciliationRows.filter((row) => row.requestDisplayState === 'pending').length;
+  const rejectedCount = reconciliationRows.filter(
+    (row) => row.approvalState === 'rejected' || row.executionState === 'rejected',
+  ).length;
+  const pendingCount = reconciliationRows.filter(
+    (row) => row.requestDisplayState === 'pending' && row.approvalState !== 'rejected' && row.executionState !== 'rejected',
+  ).length;
   return (
     <PageFrame eyebrow="Settlement" title="Settlement and reconciliation" description="Payment-centric chain truth first; use the debug tab for raw observed USDC movement.">
-      <div className="metric-strip metric-strip-four">
+      <div className="metric-strip metric-strip-five">
         <Metric label="Rows tracked" value={String(reconciliationRows.length)} />
         <Metric label="Matched" value={String(matchedCount)} />
         <Metric label="Pending" value={String(pendingCount)} />
+        <Metric label="Rejected" value={String(rejectedCount)} />
         <Metric label="Exceptions" value={String(exceptionCount)} />
       </div>
       <Tabs
@@ -1916,8 +1979,8 @@ function SettlementReconciliationTable({
             <small>{shortenAddress(row.transferRequestId, 8, 6)}</small>
           </span>
           <span>{formatRawUsdcCompact(row.amountRaw)} {assetSymbol(row.asset)}</span>
-          <span><StatusBadge tone={toneForGenericState(row.requestDisplayState)}>{displayReconciliationState(row.requestDisplayState)}</StatusBadge></span>
-          <span>{row.match ? row.match.matchStatus.replaceAll('_', ' ') : 'Not matched'}</span>
+          <span><StatusBadge tone={toneForGenericState(settlementDisplayState(row))}>{settlementDisplayState(row)}</StatusBadge></span>
+          <span>{settlementMatchLabel(row)}</span>
           <span>{row.match?.signature ? <AddressLink value={row.match.signature} kind="transaction" /> : 'N/A'}</span>
           <span className="cell-due-compact">{formatDateCompact(row.match?.updatedAt ?? row.requestedAt)}</span>
         </div>
@@ -2719,10 +2782,19 @@ function ExceptionsPage({ session }: { session: AuthenticatedSession }) {
 
   if (!workspaceId || !workspace) return <ScreenState title="Workspace unavailable" description="Choose a workspace from the sidebar." />;
   const exceptions = exceptionsQuery.data?.items ?? [];
+  const openCount = exceptions.filter((exception) => exception.status === 'open').length;
+  const reviewedCount = exceptions.filter((exception) => exception.status === 'reviewed').length;
+  const dismissedCount = exceptions.filter((exception) => exception.status === 'dismissed').length;
 
   return (
     <PageFrame eyebrow="Exceptions" title={`Exceptions [${exceptions.length}]`} description="Resolve operational problems created by settlement mismatch, partials, or unknown activity.">
       {message ? <div className="notice">{message}</div> : null}
+      <div className="metric-strip metric-strip-four">
+        <Metric label="Total" value={String(exceptions.length)} />
+        <Metric label="Open" value={String(openCount)} />
+        <Metric label="Reviewed" value={String(reviewedCount)} />
+        <Metric label="Dismissed" value={String(dismissedCount)} />
+      </div>
       <ExceptionsTable
         workspaceId={workspaceId}
         exceptions={exceptions}
@@ -3550,7 +3622,7 @@ function ActionPaymentTable({
   emptyTitle: string;
   emptyDescription: string;
   reasonHeader?: string;
-  renderReason?: (order: PaymentOrder) => string;
+  renderReason?: (order: PaymentOrder) => ReactNode;
   renderAction: (order: PaymentOrder) => ReactNode;
 }) {
   if (!paymentOrders.length) {
@@ -3848,10 +3920,8 @@ function ExceptionsTable({
       <div className="data-table-row data-table-head data-table-row-exceptions-v2 data-table-sticky-head">
         <span>Severity</span>
         <span>Payment / context</span>
-        <span>Amount</span>
-        <span>Type</span>
+        <span>Why flagged</span>
         <span>Signature</span>
-        <span>Owner</span>
         <span>Status</span>
         <span>Actions</span>
       </div>
@@ -3867,13 +3937,14 @@ function ExceptionsTable({
               <Link to={`/workspaces/${workspaceId}/exceptions/${exception.exceptionId}`}>
                 <strong>{payeeLabel}</strong>
               </Link>
-              <small>{humanizeExceptionReason(exception.reasonCode)}</small>
+              <small>{linked ? `${formatRawUsdcCompact(linked.amountRaw)} ${assetSymbol(linked.asset)}` : 'No linked payment'}</small>
             </span>
-            <span>{linked ? `${formatRawUsdcCompact(linked.amountRaw)} ${assetSymbol(linked.asset)}` : 'N/A'}</span>
-            <span>{exception.exceptionType}</span>
+            <span>
+              <strong>{humanizeExceptionReason(exception.reasonCode)}</strong>
+              <small>{exception.exceptionType}</small>
+            </span>
             <span>{exception.signature ? <AddressLink value={exception.signature} kind="transaction" /> : 'N/A'}</span>
-            <span>{exception.assignedToUser?.email ?? 'N/A'}</span>
-            <span>{exception.status}</span>
+            <span><StatusBadge tone={toneForGenericState(exception.status)}>{exception.status}</StatusBadge></span>
             <span className="table-actions">
               <Link className="button button-secondary button-small" to={`/workspaces/${workspaceId}/exceptions/${exception.exceptionId}`}>
                 Open
@@ -4621,6 +4692,27 @@ function getSettlementLabel(order: PaymentOrder) {
   if (order.derivedState === 'partially_settled') return 'Partial';
   if (order.derivedState === 'exception') return 'Needs review';
   return 'Waiting';
+}
+
+function settlementDisplayState(row: ReconciliationRow) {
+  if (row.approvalState === 'rejected' || row.executionState === 'rejected') return 'Rejected';
+  return displayReconciliationState(row.requestDisplayState);
+}
+
+function settlementMatchLabel(row: ReconciliationRow) {
+  if (row.approvalState === 'rejected' || row.executionState === 'rejected') return 'Not applicable';
+  return row.match ? row.match.matchStatus.replaceAll('_', ' ') : 'Not matched';
+}
+
+function hasExecutionRecorded(order: PaymentOrder): boolean {
+  if (order.reconciliationDetail?.latestExecution?.submittedSignature) return true;
+  if (order.reconciliationDetail?.latestExecution?.submittedAt) return true;
+  return (
+    order.derivedState === 'execution_recorded'
+    || order.derivedState === 'partially_settled'
+    || order.derivedState === 'settled'
+    || order.derivedState === 'closed'
+  );
 }
 
 function getFormString(formData: FormData, key: string) {

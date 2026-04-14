@@ -191,7 +191,15 @@ export function toneForGenericState(state: string): 'success' | 'warning' | 'dan
   if (normalized.includes('partial') || normalized.includes('waiting') || normalized.includes('ready') || normalized.includes('pending') || normalized.includes('unknown') || normalized.includes('unreviewed')) {
     return 'warning';
   }
-  if (normalized.includes('exception') || normalized.includes('review') || normalized.includes('cancel') || normalized.includes('insufficient') || normalized.includes('blocked') || normalized.includes('restricted')) {
+  if (
+    normalized.includes('exception') ||
+    normalized.includes('review') ||
+    normalized.includes('cancel') ||
+    normalized.includes('reject') ||
+    normalized.includes('insufficient') ||
+    normalized.includes('blocked') ||
+    normalized.includes('restricted')
+  ) {
     return 'danger';
   }
   return 'neutral';

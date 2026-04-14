@@ -458,6 +458,10 @@ a {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.metric-strip-five {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
 .metric {
   padding: 24px;
   background: var(--surface);
@@ -1798,7 +1802,7 @@ a {
 }
 
 .data-table-row-exceptions-v2 {
-  grid-template-columns: 0.55fr 1fr 0.75fr 0.55fr 0.45fr 0.45fr 0.55fr 1.1fr;
+  grid-template-columns: 0.6fr 1.15fr 1.2fr 0.95fr 0.6fr 1fr;
 }
 
 .data-table-row-payments-ext {
