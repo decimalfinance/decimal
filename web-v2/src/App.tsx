@@ -4922,13 +4922,16 @@ function buildRunWorkflow(run: PaymentRun) {
   const state = run.derivedState;
   const blocked = state === 'exception' || state === 'partially_settled';
   const settled = state === 'settled' || state === 'closed';
+  const pendingApproval = run.totals.pendingApprovalCount;
+  const draftCount = Math.max(run.totals.actionableCount - pendingApproval - run.totals.approvedCount, 0);
   const approvedDone = run.totals.approvedCount > 0 || settled || state === 'execution_recorded' || state === 'exception' || state === 'partially_settled';
   const submittedDone = ['execution_recorded', 'partially_settled', 'settled', 'closed', 'exception'].includes(state);
-  const reviewedCurrent = !approvedDone && run.totals.pendingApprovalCount > 0;
+  const reviewedCurrent = !approvedDone && draftCount > 0;
+  const approvedCurrent = !approvedDone && pendingApproval > 0;
   const submittedCurrent = approvedDone && !submittedDone && !blocked;
   const settledCurrent = !blocked && !settled && submittedDone;
   const reviewedState = reviewedCurrent ? ('current' as const) : ('complete' as const);
-  const approvedState = approvedDone ? ('complete' as const) : ('pending' as const);
+  const approvedState = approvedDone ? ('complete' as const) : approvedCurrent ? ('current' as const) : ('pending' as const);
   const submittedState = blocked ? ('blocked' as const) : submittedDone ? ('complete' as const) : submittedCurrent ? ('current' as const) : ('pending' as const);
   const settledState = blocked ? ('blocked' as const) : settled ? ('complete' as const) : settledCurrent ? ('current' as const) : ('pending' as const);
   const provenState = settled ? ('complete' as const) : ('pending' as const);
@@ -4944,12 +4947,12 @@ function buildRunWorkflow(run: PaymentRun) {
     { label: 'Imported', subtext: `${run.totals.orderCount} rows`, state: 'complete' as const },
     {
       label: tenseLabel(reviewedState === 'complete', 'Reviewed', 'Review'),
-      subtext: run.totals.pendingApprovalCount ? `${run.totals.pendingApprovalCount} need approval` : 'Reviewed',
+      subtext: draftCount > 0 ? `${draftCount} awaiting review` : 'Reviewed',
       state: reviewedState,
     },
     {
       label: tenseLabel(approvedState === 'complete', 'Approved', 'Approve'),
-      subtext: approvalSummary,
+      subtext: pendingApproval > 0 ? `${pendingApproval} need approval` : approvalSummary,
       state: approvedState,
     },
     {
