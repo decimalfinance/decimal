@@ -11,6 +11,7 @@ import { authRouter } from './routes/auth.js';
 import { eventsRouter } from './routes/events.js';
 import { healthRouter } from './routes/health.js';
 import { internalRouter } from './routes/internal.js';
+import { notifyMatchingIndexChanged, shouldInvalidateMatchingIndex } from './matching-index-events.js';
 import { organizationsRouter } from './routes/organizations.js';
 import { opsRouter } from './routes/ops.js';
 import { payeesRouter } from './routes/payees.js';
@@ -42,6 +43,19 @@ export function createApp() {
   });
 
   app.use(express.json());
+
+  app.use((req, res, next) => {
+    const shouldInvalidate = shouldInvalidateMatchingIndex(req.method, req.path);
+    if (shouldInvalidate) {
+      res.on('finish', () => {
+        if (res.statusCode >= 200 && res.statusCode < 400) {
+          notifyMatchingIndexChanged(`${req.method} ${req.path}`);
+        }
+      });
+    }
+
+    next();
+  });
 
   app.use(healthRouter);
   app.use(capabilitiesRouter);

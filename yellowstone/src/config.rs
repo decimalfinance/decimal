@@ -1,5 +1,4 @@
 use std::env;
-use std::time::Duration;
 
 pub struct AppConfig {
     pub yellowstone_endpoint: String,
@@ -10,7 +9,6 @@ pub struct AppConfig {
     pub clickhouse_password: String,
     pub control_plane_api_url: String,
     pub control_plane_service_token: Option<String>,
-    pub workspace_refresh_interval: Duration,
     pub debug_account_logs: bool,
     pub debug_stream_logs: bool,
     pub debug_parsed_updates: bool,
@@ -29,12 +27,6 @@ impl AppConfig {
         let control_plane_api_url = env::var("CONTROL_PLANE_API_URL")
             .unwrap_or_else(|_| "http://127.0.0.1:3100".to_string());
         let control_plane_service_token = non_empty_env("CONTROL_PLANE_SERVICE_TOKEN");
-        let workspace_refresh_interval = Duration::from_secs(
-            env::var("WORKSPACE_REFRESH_INTERVAL_SECONDS")
-                .ok()
-                .and_then(|value| value.parse::<u64>().ok())
-                .unwrap_or(1),
-        );
         let debug_account_logs = env::var("DEBUG_YELLOWSTONE_ACCOUNTS")
             .ok()
             .map(|value| matches!(value.trim(), "1" | "true" | "TRUE" | "yes" | "YES"))
@@ -57,7 +49,6 @@ impl AppConfig {
             clickhouse_password,
             control_plane_api_url,
             control_plane_service_token,
-            workspace_refresh_interval,
             debug_account_logs,
             debug_stream_logs,
             debug_parsed_updates,

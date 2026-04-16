@@ -1,9 +1,13 @@
 use chrono::{DateTime, Utc};
+use futures::StreamExt;
 use reqwest::Client;
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::sync::Mutex;
 
+#[derive(Clone)]
 pub struct ControlPlaneClient {
     client: Client,
     base_url: String,
@@ -23,35 +27,26 @@ impl ControlPlaneClient {
     }
 
     pub async fn fetch_registry(&self) -> Result<WorkspaceRegistry, reqwest::Error> {
-        let workspaces = self.fetch_workspaces().await?;
-        let mut snapshots = Vec::with_capacity(workspaces.items.len());
-
-        for workspace in workspaces.items {
-            let url = format!(
-                "{}/internal/workspaces/{}/matching-context",
-                self.base_url, workspace.workspace_id
-            );
-            let snapshot = self
-                .with_internal_auth(self.client.get(url))
-                .send()
-                .await?
-                .error_for_status()?
-                .json::<WorkspaceMatchingSnapshot>()
-                .await?;
-            snapshots.push(snapshot);
-        }
-
-        Ok(WorkspaceRegistry::new(snapshots))
-    }
-
-    async fn fetch_workspaces(&self) -> Result<WorkspaceListResponse, reqwest::Error> {
-        let url = format!("{}/internal/workspaces", self.base_url);
-        self.with_internal_auth(self.client.get(url))
+        let url = format!("{}/internal/matching-index", self.base_url);
+        let index = self
+            .with_internal_auth(self.client.get(url))
             .send()
             .await?
             .error_for_status()?
-            .json::<WorkspaceListResponse>()
-            .await
+            .json::<MatchingIndexResponse>()
+            .await?;
+
+        Ok(WorkspaceRegistry::new(index.version, index.workspaces))
+    }
+
+    async fn connect_matching_index_event_stream(
+        &self,
+    ) -> Result<reqwest::Response, reqwest::Error> {
+        let url = format!("{}/internal/matching-index/events", self.base_url);
+        self.with_internal_auth(self.client.get(url))
+            .send()
+            .await?
+            .error_for_status()
     }
 
     fn with_internal_auth(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
@@ -65,34 +60,19 @@ impl ControlPlaneClient {
 
 pub struct WorkspaceRegistryCache {
     client: ControlPlaneClient,
-    refresh_interval: Duration,
     last_refresh_at: Option<Instant>,
     last_refresh_error_log_at: Option<Instant>,
     registry: WorkspaceRegistry,
 }
 
 impl WorkspaceRegistryCache {
-    pub fn new(client: ControlPlaneClient, refresh_interval: Duration) -> Self {
+    pub fn new(client: ControlPlaneClient) -> Self {
         Self {
             client,
-            refresh_interval,
             last_refresh_at: None,
             last_refresh_error_log_at: None,
             registry: WorkspaceRegistry::default(),
         }
-    }
-
-    pub async fn refresh_if_stale(&mut self) -> Result<(), reqwest::Error> {
-        let should_refresh = self
-            .last_refresh_at
-            .map(|last_refresh| last_refresh.elapsed() >= self.refresh_interval)
-            .unwrap_or(true);
-
-        if should_refresh {
-            self.refresh_now().await?;
-        }
-
-        Ok(())
     }
 
     pub async fn refresh_now(&mut self) -> Result<(), reqwest::Error> {
@@ -115,11 +95,6 @@ impl WorkspaceRegistryCache {
         Err(last_error.expect("refresh retry loop should capture error"))
     }
 
-    pub fn refresh_age(&self) -> Option<Duration> {
-        self.last_refresh_at
-            .map(|last_refresh| last_refresh.elapsed())
-    }
-
     pub fn should_log_refresh_error(&mut self) -> bool {
         let should_log = self
             .last_refresh_error_log_at
@@ -136,6 +111,10 @@ impl WorkspaceRegistryCache {
     pub fn registry(&self) -> &WorkspaceRegistry {
         &self.registry
     }
+
+    pub fn client(&self) -> ControlPlaneClient {
+        self.client.clone()
+    }
 }
 
 #[cfg(test)]
@@ -143,7 +122,6 @@ impl WorkspaceRegistryCache {
     pub fn with_registry(registry: WorkspaceRegistry) -> Self {
         Self {
             client: ControlPlaneClient::new("http://127.0.0.1:0".to_string(), None),
-            refresh_interval: Duration::from_secs(3600),
             last_refresh_at: Some(Instant::now()),
             last_refresh_error_log_at: None,
             registry,
@@ -153,15 +131,20 @@ impl WorkspaceRegistryCache {
 
 #[derive(Clone, Default)]
 pub struct WorkspaceRegistry {
+    version: u64,
     wallet_matches_by_address: HashMap<String, Vec<WorkspaceAddressMatch>>,
+    watched_addresses: HashSet<String>,
+    submitted_signatures: HashSet<String>,
     pending_requests_by_workspace_wallet:
         HashMap<String, HashMap<String, Vec<WorkspaceTransferRequestMatch>>>,
 }
 
 impl WorkspaceRegistry {
-    fn new(raw_snapshots: Vec<WorkspaceMatchingSnapshot>) -> Self {
+    fn new(version: u64, raw_snapshots: Vec<WorkspaceMatchingSnapshot>) -> Self {
         let mut wallet_matches_by_address: HashMap<String, Vec<WorkspaceAddressMatch>> =
             HashMap::new();
+        let mut watched_addresses = HashSet::new();
+        let mut submitted_signatures = HashSet::new();
         let mut pending_requests_by_workspace_wallet: HashMap<
             String,
             HashMap<String, Vec<WorkspaceTransferRequestMatch>>,
@@ -169,6 +152,11 @@ impl WorkspaceRegistry {
 
         for raw_snapshot in raw_snapshots {
             for address in &raw_snapshot.addresses {
+                watched_addresses.insert(address.address.clone());
+                if let Some(usdc_ata_address) = &address.usdc_ata_address {
+                    watched_addresses.insert(usdc_ata_address.clone());
+                }
+
                 let matched = WorkspaceAddressMatch {
                     workspace_id: raw_snapshot.workspace.workspace_id.clone(),
                     #[cfg(test)]
@@ -188,6 +176,30 @@ impl WorkspaceRegistry {
                 };
 
                 let destination_wallet_address = destination_workspace_address.address.clone();
+                watched_addresses.insert(destination_wallet_address.clone());
+                if let Some(usdc_ata_address) = &destination_workspace_address.usdc_ata_address {
+                    watched_addresses.insert(usdc_ata_address.clone());
+                }
+                if let Some(source_workspace_address) = &request.source_workspace_address {
+                    watched_addresses.insert(source_workspace_address.address.clone());
+                    if let Some(usdc_ata_address) = &source_workspace_address.usdc_ata_address {
+                        watched_addresses.insert(usdc_ata_address.clone());
+                    }
+                }
+                if let Some(destination) = &request.destination {
+                    watched_addresses.insert(destination.wallet_address.clone());
+                    if let Some(token_account_address) = &destination.token_account_address {
+                        watched_addresses.insert(token_account_address.clone());
+                    }
+                }
+                if let Some(submitted_signature) = request
+                    .latest_execution
+                    .as_ref()
+                    .and_then(|execution| execution.submitted_signature.clone())
+                {
+                    submitted_signatures.insert(submitted_signature);
+                }
+
                 let request_match = WorkspaceTransferRequestMatch {
                     transfer_request_id: request.transfer_request_id.clone(),
                     amount_raw: request.amount_raw.parse().unwrap_or_default(),
@@ -213,9 +225,24 @@ impl WorkspaceRegistry {
         }
 
         Self {
+            version,
             wallet_matches_by_address,
+            watched_addresses,
+            submitted_signatures,
             pending_requests_by_workspace_wallet,
         }
+    }
+
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+
+    pub fn is_watched_address(&self, address: &str) -> bool {
+        self.watched_addresses.contains(address)
+    }
+
+    pub fn is_submitted_signature(&self, signature: &str) -> bool {
+        self.submitted_signatures.contains(signature)
     }
 
     pub fn matches_for_wallet(&self, address: &str) -> Option<&[WorkspaceAddressMatch]> {
@@ -241,10 +268,13 @@ impl WorkspaceRegistry {
     pub fn from_matches(matches: Vec<WorkspaceAddressMatch>) -> Self {
         let mut wallet_matches_by_address: HashMap<String, Vec<WorkspaceAddressMatch>> =
             HashMap::new();
+        let mut watched_addresses = HashSet::new();
 
         for matched in matches {
             #[cfg(test)]
             let wallet_address = matched.wallet_address.clone();
+            #[cfg(test)]
+            watched_addresses.insert(wallet_address.clone());
             wallet_matches_by_address
                 .entry(wallet_address)
                 .or_default()
@@ -252,7 +282,10 @@ impl WorkspaceRegistry {
         }
 
         Self {
+            version: 1,
             wallet_matches_by_address,
+            watched_addresses,
+            submitted_signatures: HashSet::new(),
             pending_requests_by_workspace_wallet: HashMap::new(),
         }
     }
@@ -268,6 +301,15 @@ impl WorkspaceRegistry {
             let workspace_id = request.workspace_id.clone();
             #[cfg(test)]
             let destination_wallet_address = request.destination_wallet_address.clone();
+            #[cfg(test)]
+            registry
+                .watched_addresses
+                .insert(destination_wallet_address.clone());
+            if let Some(submitted_signature) = &request.submitted_signature {
+                registry
+                    .submitted_signatures
+                    .insert(submitted_signature.clone());
+            }
             registry
                 .pending_requests_by_workspace_wallet
                 .entry(workspace_id)
@@ -301,9 +343,83 @@ pub struct WorkspaceTransferRequestMatch {
     pub destination_wallet_address: String,
 }
 
+pub async fn run_matching_index_event_listener(registry_cache: Arc<Mutex<WorkspaceRegistryCache>>) {
+    let mut reconnect_backoff = Duration::from_secs(1);
+
+    loop {
+        let client = {
+            let cache = registry_cache.lock().await;
+            cache.client()
+        };
+
+        let response = match client.connect_matching_index_event_stream().await {
+            Ok(response) => response,
+            Err(error) => {
+                eprintln!(
+                    "Matching index event stream failed to connect: {}. Reconnecting in {:?}...",
+                    error, reconnect_backoff
+                );
+                tokio::time::sleep(reconnect_backoff).await;
+                reconnect_backoff = (reconnect_backoff * 2).min(Duration::from_secs(15));
+                continue;
+            }
+        };
+
+        reconnect_backoff = Duration::from_secs(1);
+        let mut stream = response.bytes_stream();
+        let mut buffered = String::new();
+
+        while let Some(chunk) = stream.next().await {
+            match chunk {
+                Ok(bytes) => {
+                    buffered.push_str(&String::from_utf8_lossy(&bytes));
+                    while let Some(event_end) = buffered.find("\n\n") {
+                        let event = buffered[..event_end].to_string();
+                        buffered = buffered[event_end + 2..].to_string();
+
+                        if event
+                            .lines()
+                            .any(|line| line.starts_with("event: matching_index_"))
+                        {
+                            let mut cache = registry_cache.lock().await;
+                            match cache.refresh_now().await {
+                                Ok(()) => {
+                                    println!(
+                                        "Matching index refreshed to version {}.",
+                                        cache.registry().version()
+                                    );
+                                }
+                                Err(error) => {
+                                    if cache.should_log_refresh_error() {
+                                        eprintln!(
+                                            "Matching index refresh after event failed; continuing with last known index: {}",
+                                            error
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(error) => {
+                    eprintln!(
+                        "Matching index event stream errored: {}. Reconnecting in {:?}...",
+                        error, reconnect_backoff
+                    );
+                    break;
+                }
+            }
+        }
+
+        tokio::time::sleep(reconnect_backoff).await;
+        reconnect_backoff = (reconnect_backoff * 2).min(Duration::from_secs(15));
+    }
+}
+
 #[derive(Deserialize)]
-struct WorkspaceListResponse {
-    items: Vec<WorkspaceView>,
+struct MatchingIndexResponse {
+    version: u64,
+    workspaces: Vec<WorkspaceMatchingSnapshot>,
 }
 
 #[derive(Deserialize)]
@@ -323,6 +439,8 @@ struct WorkspaceView {
 #[derive(Deserialize)]
 struct WorkspaceAddressView {
     address: String,
+    #[serde(rename = "usdcAtaAddress")]
+    usdc_ata_address: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -337,6 +455,9 @@ struct TransferRequestDetails {
     requested_at: DateTime<Utc>,
     #[serde(rename = "destinationWorkspaceAddress")]
     destination_workspace_address: Option<TransferRequestWorkspaceAddressDetails>,
+    #[serde(rename = "sourceWorkspaceAddress")]
+    source_workspace_address: Option<TransferRequestWorkspaceAddressDetails>,
+    destination: Option<TransferRequestDestinationDetails>,
     #[serde(rename = "latestExecution")]
     latest_execution: Option<TransferRequestExecutionDetails>,
 }
@@ -344,6 +465,16 @@ struct TransferRequestDetails {
 #[derive(Deserialize)]
 struct TransferRequestWorkspaceAddressDetails {
     address: String,
+    #[serde(rename = "usdcAtaAddress")]
+    usdc_ata_address: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct TransferRequestDestinationDetails {
+    #[serde(rename = "walletAddress")]
+    wallet_address: String,
+    #[serde(rename = "tokenAccountAddress")]
+    token_account_address: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -358,26 +489,33 @@ mod tests {
 
     #[test]
     fn registry_indexes_wallets_and_pending_requests() {
-        let registry = WorkspaceRegistry::new(vec![WorkspaceMatchingSnapshot {
-            workspace: WorkspaceView {
-                workspace_id: "workspace-1".to_string(),
-            },
-            addresses: vec![WorkspaceAddressView {
-                address: "Wallet111".to_string(),
-            }],
-            transfer_requests: vec![TransferRequestDetails {
-                transfer_request_id: "request-1".to_string(),
-                request_type: "wallet_transfer".to_string(),
-                amount_raw: "10000".to_string(),
-                requested_at: Utc::now(),
-                destination_workspace_address: Some(TransferRequestWorkspaceAddressDetails {
+        let registry = WorkspaceRegistry::new(
+            42,
+            vec![WorkspaceMatchingSnapshot {
+                workspace: WorkspaceView {
+                    workspace_id: "workspace-1".to_string(),
+                },
+                addresses: vec![WorkspaceAddressView {
                     address: "Wallet111".to_string(),
-                }),
-                latest_execution: Some(TransferRequestExecutionDetails {
-                    submitted_signature: Some("signature-1".to_string()),
-                }),
+                    usdc_ata_address: Some("Ata111".to_string()),
+                }],
+                transfer_requests: vec![TransferRequestDetails {
+                    transfer_request_id: "request-1".to_string(),
+                    request_type: "wallet_transfer".to_string(),
+                    amount_raw: "10000".to_string(),
+                    requested_at: Utc::now(),
+                    destination_workspace_address: Some(TransferRequestWorkspaceAddressDetails {
+                        address: "Wallet111".to_string(),
+                        usdc_ata_address: Some("Ata111".to_string()),
+                    }),
+                    source_workspace_address: None,
+                    destination: None,
+                    latest_execution: Some(TransferRequestExecutionDetails {
+                        submitted_signature: Some("signature-1".to_string()),
+                    }),
+                }],
             }],
-        }]);
+        );
 
         let wallet_matches = registry
             .matches_for_wallet("Wallet111")
@@ -395,5 +533,9 @@ mod tests {
             pending_by_wallet[0].submitted_signature.as_deref(),
             Some("signature-1")
         );
+        assert_eq!(registry.version(), 42);
+        assert!(registry.is_watched_address("Wallet111"));
+        assert!(registry.is_watched_address("Ata111"));
+        assert!(registry.is_submitted_signature("signature-1"));
     }
 }

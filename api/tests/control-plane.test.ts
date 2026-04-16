@@ -2422,6 +2422,97 @@ test('internal service routes enforce the control-plane token when configured', 
   }
 });
 
+test('internal matching index exposes one snapshot and increments on relevant mutations', async () => {
+  const setup = await createOrganizationWorkspace();
+  const workspaceId = setup.workspace.workspaceId;
+  const recipientWallet = 'So11111111111111111111111111111111111111112';
+  const expectedAta = deriveUsdcAtaForWallet(recipientWallet);
+
+  const beforeResponse = await fetch(`${baseUrl}/internal/matching-index`);
+  assert.equal(beforeResponse.status, 200);
+  const before = await beforeResponse.json();
+  assert.equal(typeof before.version, 'number');
+
+  await post(
+    `/workspaces/${workspaceId}/addresses`,
+    {
+      chain: 'solana',
+      address: recipientWallet,
+      displayName: 'Matching Index Wallet',
+    },
+    setup.sessionToken,
+  );
+
+  const afterResponse = await fetch(`${baseUrl}/internal/matching-index`);
+  assert.equal(afterResponse.status, 200);
+  const after = await afterResponse.json();
+  assert.equal(after.version > before.version, true);
+
+  const workspaceSnapshot = after.workspaces.find(
+    (workspace: { workspace: { workspaceId: string } }) =>
+      workspace.workspace.workspaceId === workspaceId,
+  );
+  assert.ok(workspaceSnapshot);
+  assert.equal(workspaceSnapshot.addresses.length, 1);
+  assert.equal(workspaceSnapshot.addresses[0].address, recipientWallet);
+  assert.equal(workspaceSnapshot.addresses[0].usdcAtaAddress, expectedAta);
+});
+
+test('internal matching index updates when execution evidence attaches a submitted signature', async () => {
+  const setup = await createTransferRequestSetup();
+  const workspaceId = setup.workspace.workspaceId;
+  const transferRequestId = setup.transferRequest.transferRequestId;
+  const signature = '2U2yzRbpiNmj6fYH2Jjc2v4tmnG6hTdbu8fZ8vUUR9JiBf6qcWjHz1P7LidC9phHcU4TUkT9w7FRmFvh59qTQmAk';
+
+  const createExecutionResponse = await fetch(
+    `${baseUrl}/workspaces/${workspaceId}/transfer-requests/${transferRequestId}/executions`,
+    {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...authHeaders(setup.sessionToken),
+      },
+      body: JSON.stringify({
+        executionSource: 'manual_operator',
+      }),
+    },
+  );
+  assert.equal(createExecutionResponse.status, 201);
+  const executionRecord = await createExecutionResponse.json();
+
+  const beforeResponse = await fetch(`${baseUrl}/internal/matching-index`);
+  assert.equal(beforeResponse.status, 200);
+  const before = await beforeResponse.json();
+
+  const attachSignatureResponse = await fetch(
+    `${baseUrl}/workspaces/${workspaceId}/executions/${executionRecord.executionRecordId}`,
+    {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        ...authHeaders(setup.sessionToken),
+      },
+      body: JSON.stringify({ submittedSignature: signature }),
+    },
+  );
+  assert.equal(attachSignatureResponse.status, 200);
+
+  const afterResponse = await fetch(`${baseUrl}/internal/matching-index`);
+  assert.equal(afterResponse.status, 200);
+  const after = await afterResponse.json();
+  assert.equal(after.version > before.version, true);
+
+  const workspaceSnapshot = after.workspaces.find(
+    (workspace: { workspace: { workspaceId: string } }) =>
+      workspace.workspace.workspaceId === workspaceId,
+  );
+  const requestSnapshot = workspaceSnapshot.transferRequests.find(
+    (request: { transferRequestId: string }) =>
+      request.transferRequestId === transferRequestId,
+  );
+  assert.equal(requestSnapshot.latestExecution.submittedSignature, signature);
+});
+
 test('address label endpoints support create, search, and patch flows directly', async () => {
   const login = await loginUser('labels@example.com', 'Label User');
   const created = await post(

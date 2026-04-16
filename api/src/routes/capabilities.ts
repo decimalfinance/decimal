@@ -98,6 +98,8 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
         routes: [
           'GET /internal/workspaces',
           'GET /internal/workspaces/:workspaceId/matching-context',
+          'GET /internal/matching-index',
+          'GET /internal/matching-index/events',
         ],
       },
     ],

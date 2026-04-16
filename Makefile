@@ -3,7 +3,7 @@ SHELL := /bin/zsh
 POSTGRES_URL ?= postgresql://usdc_ops:usdc_ops@127.0.0.1:54329/usdc_ops?schema=public
 PSQL_QUIET := PGOPTIONS='-c client_min_messages=warning' psql -v ON_ERROR_STOP=1 -q
 
-.PHONY: infra-up infra-down dev dev2 test test-api test-worker test-web-v2 sync-postgres-schema sync-clickhouse-schema reset-data latest-slot latency-report
+.PHONY: infra-up infra-down dev test test-api test-worker test-frontend sync-postgres-schema sync-clickhouse-schema reset-data latest-slot latency-report
 
 infra-up:
 	set -euo pipefail && docker compose up -d postgres clickhouse && $(MAKE) sync-postgres-schema && $(MAKE) sync-clickhouse-schema
@@ -103,7 +103,7 @@ dev:
 	typeset -a pids && \
 	(cd api && exec npm run dev) & \
 	pids+=($$!) && \
-	(cd web-v2 && exec npm run dev) & \
+	(cd frontend && exec npm run dev) & \
 	pids+=($$!) && \
 	if [[ -n "$${YELLOWSTONE_ENDPOINT:-}" ]]; then \
 	  for _ in {1..60}; do \
@@ -121,9 +121,7 @@ dev:
 	trap 'for pid in "$${pids[@]:-}"; do kill -TERM "$$pid" 2>/dev/null || true; done; sleep 0.5; for pid in "$${pids[@]:-}"; do kill -KILL "$$pid" 2>/dev/null || true; done; wait "$${pids[@]}" 2>/dev/null || true' EXIT && \
 	wait "$${pids[@]}" || true
 
-dev2: dev
-
-test: test-api test-worker test-web-v2
+test: test-api test-worker test-frontend
 
 test-api:
 	set -euo pipefail && \
@@ -143,7 +141,7 @@ test-worker:
 	cd yellowstone && \
 	cargo test -- --test-threads=1
 
-test-web-v2:
+test-frontend:
 	set -euo pipefail && \
-	cd web-v2 && \
+	cd frontend && \
 	npm run build

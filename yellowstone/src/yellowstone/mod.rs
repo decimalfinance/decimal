@@ -1,5 +1,6 @@
 use crate::control_plane::{
     WorkspaceRegistry, WorkspaceRegistryCache, WorkspaceTransferRequestMatch,
+    run_matching_index_event_listener,
 };
 use crate::storage::{
     ClickHouseWriter, ExceptionRow, MatcherEventRow, ObservedPaymentRow, ObservedTransactionRow,
@@ -11,9 +12,11 @@ use crate::yellowstone::formatting::{
 use crate::yellowstone::matcher::{
     BookRequest, MatcherState, RequestFillState, allocate_observation,
 };
-use crate::yellowstone::payment_reconstruction::reconstruct_observed_payments;
+use crate::yellowstone::payment_reconstruction::{ObservedPayment, reconstruct_observed_payments};
 use crate::yellowstone::transaction_context::{TransactionContext, build_transaction_context};
-use crate::yellowstone::transfer_reconstruction::reconstruct_observed_transfers;
+use crate::yellowstone::transfer_reconstruction::{
+    ObservedTransfer, reconstruct_observed_transfers,
+};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use chrono::{DateTime, Utc};
@@ -22,8 +25,10 @@ use serde_json::json;
 use spl_token::solana_program::program_pack::Pack;
 use spl_token::state::{Account as SplTokenAccount, Mint as SplTokenMint};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
+use tokio::sync::Mutex;
 use uuid::Uuid;
 use yellowstone_grpc_proto::geyser::subscribe_update::UpdateOneof;
 use yellowstone_grpc_proto::prelude::SubscribeUpdate;
@@ -49,7 +54,6 @@ const OBSERVED_TRANSFERS_BUFFER_MAX_ROWS: usize = 2_048;
 const OBSERVED_PAYMENTS_BUFFER_MAX_ROWS: usize = 512;
 const STREAM_RECONNECT_INITIAL_BACKOFF: Duration = Duration::from_secs(1);
 const STREAM_RECONNECT_MAX_BACKOFF: Duration = Duration::from_secs(15);
-const MATCH_RETRY_REFRESH_MIN_AGE: Duration = Duration::from_millis(500);
 
 #[derive(Default)]
 struct WorkerState {
@@ -120,7 +124,7 @@ pub struct YellowstoneWorker {
     endpoint: String,
     x_token: Option<String>,
     writer: ClickHouseWriter,
-    registry_cache: tokio::sync::Mutex<WorkspaceRegistryCache>,
+    registry_cache: Arc<Mutex<WorkspaceRegistryCache>>,
     recent_signatures: tokio::sync::Mutex<RecentSignatureCache>,
     pending_raw_observations: tokio::sync::Mutex<PendingRawObservations>,
     pending_materialized_observations: tokio::sync::Mutex<PendingMaterializedObservations>,
@@ -144,7 +148,7 @@ impl YellowstoneWorker {
             endpoint,
             x_token,
             writer,
-            registry_cache: tokio::sync::Mutex::new(registry_cache),
+            registry_cache: Arc::new(Mutex::new(registry_cache)),
             recent_signatures: tokio::sync::Mutex::new(RecentSignatureCache::default()),
             pending_raw_observations: tokio::sync::Mutex::new(PendingRawObservations::default()),
             pending_materialized_observations: tokio::sync::Mutex::new(
@@ -166,6 +170,9 @@ impl YellowstoneWorker {
         if let Err(error) = self.refresh_registry_if_stale().await {
             eprintln!("Failed to load workspace registry on startup: {}", error);
         }
+        tokio::spawn(run_matching_index_event_listener(
+            self.registry_cache.clone(),
+        ));
         let mut worker_state = WorkerState::default();
         if let Err(error) = hydrate_matcher_state(&self.writer, &mut worker_state).await {
             eprintln!("Failed to hydrate matcher state on startup: {}", error);
@@ -235,15 +242,6 @@ impl YellowstoneWorker {
                 }
                 match stream.next().await {
                     Some(Ok(update)) => {
-                        if let Err(error) = self.refresh_registry_if_stale().await {
-                            let mut cache = self.registry_cache.lock().await;
-                            if cache.should_log_refresh_error() {
-                                eprintln!(
-                                    "Workspace registry refresh failed; continuing with last known cache: {}",
-                                    error
-                                );
-                            }
-                        }
                         self.handle_update(update, &mut worker_state).await;
                     }
                     Some(Err(error)) => {
@@ -296,7 +294,7 @@ impl YellowstoneWorker {
 
     async fn refresh_registry_if_stale(&self) -> Result<(), reqwest::Error> {
         let mut cache = self.registry_cache.lock().await;
-        cache.refresh_if_stale().await
+        cache.refresh_now().await
     }
 
     async fn enqueue_raw_observation(&self, row: RawObservationRow) {
@@ -421,7 +419,12 @@ impl YellowstoneWorker {
                         parser_version: 1,
                     };
 
-                    self.enqueue_raw_observation(raw_row).await;
+                    if self
+                        .should_store_account_observation(&pubkey, &signature, &account.data)
+                        .await
+                    {
+                        self.enqueue_raw_observation(raw_row).await;
+                    }
 
                     if self.debug_account_logs {
                         match filters.as_str() {
@@ -622,46 +625,12 @@ impl YellowstoneWorker {
             let registry_guard = self.registry_cache.lock().await;
             registry_guard.registry().clone()
         };
-        let registry = self
-            .refresh_registry_for_matching_retry(&registry, &context)
-            .await;
         if self
             .materialize_observed_settlement(&registry, &context, worker_received_at, worker_state)
             .await
         {
             let mut recent_signatures = self.recent_signatures.lock().await;
             recent_signatures.insert(&context.signature);
-        }
-    }
-
-    async fn refresh_registry_for_matching_retry(
-        &self,
-        registry: &WorkspaceRegistry,
-        context: &TransactionContext,
-    ) -> WorkspaceRegistry {
-        if !should_retry_matching_with_fresh_registry(registry, context) {
-            return registry.clone();
-        }
-
-        let mut registry_cache = self.registry_cache.lock().await;
-        let refresh_age = registry_cache
-            .refresh_age()
-            .unwrap_or(MATCH_RETRY_REFRESH_MIN_AGE);
-        if refresh_age < MATCH_RETRY_REFRESH_MIN_AGE {
-            return registry_cache.registry().clone();
-        }
-
-        match registry_cache.refresh_now().await {
-            Ok(()) => registry_cache.registry().clone(),
-            Err(error) => {
-                if registry_cache.should_log_refresh_error() {
-                    eprintln!(
-                        "Workspace registry refresh for matching retry failed; continuing with last known cache: {}",
-                        error
-                    );
-                }
-                registry_cache.registry().clone()
-            }
         }
     }
 
@@ -675,6 +644,10 @@ impl YellowstoneWorker {
         let processing_time = Utc::now();
         let observed_transfers = reconstruct_observed_transfers(context);
         let observed_payments = reconstruct_observed_payments(context, &observed_transfers);
+
+        if !is_relevant_context(registry, context, &observed_transfers, &observed_payments) {
+            return true;
+        }
 
         let observed_transaction_row = ObservedTransactionRow {
             signature: context.signature.clone(),
@@ -1152,6 +1125,28 @@ impl YellowstoneWorker {
 
         true
     }
+
+    async fn should_store_account_observation(
+        &self,
+        token_account_address: &str,
+        signature: &str,
+        account_data: &[u8],
+    ) -> bool {
+        let registry = {
+            let registry_guard = self.registry_cache.lock().await;
+            registry_guard.registry().clone()
+        };
+
+        if registry.is_submitted_signature(signature)
+            || registry.is_watched_address(token_account_address)
+        {
+            return true;
+        }
+
+        SplTokenAccount::unpack(account_data)
+            .map(|token_account| registry.is_watched_address(&token_account.owner.to_string()))
+            .unwrap_or(false)
+    }
 }
 
 impl YellowstoneWorker {
@@ -1250,29 +1245,58 @@ fn select_requests_for_observation<'a>(
     }
 }
 
-fn should_retry_matching_with_fresh_registry(
+fn is_relevant_context(
     registry: &WorkspaceRegistry,
     context: &TransactionContext,
+    observed_transfers: &[ObservedTransfer],
+    observed_payments: &[ObservedPayment],
 ) -> bool {
-    let observed_transfers = reconstruct_observed_transfers(context);
-    let observed_payments = reconstruct_observed_payments(context, &observed_transfers);
+    if registry.is_submitted_signature(&context.signature) {
+        return true;
+    }
+
+    if context
+        .participants
+        .iter()
+        .any(|address| registry.is_watched_address(address))
+    {
+        return true;
+    }
+
+    if context.usdc_balance_changes.iter().any(|change| {
+        registry.is_watched_address(&change.token_account)
+            || registry.is_watched_address(&change.wallet_owner)
+    }) {
+        return true;
+    }
+
+    if observed_transfers.iter().any(|transfer| {
+        transfer
+            .source_token_account
+            .as_deref()
+            .is_some_and(|address| registry.is_watched_address(address))
+            || transfer
+                .source_wallet
+                .as_deref()
+                .is_some_and(|address| registry.is_watched_address(address))
+            || registry.is_watched_address(&transfer.destination_token_account)
+            || transfer
+                .destination_wallet
+                .as_deref()
+                .is_some_and(|address| registry.is_watched_address(address))
+    }) {
+        return true;
+    }
 
     observed_payments.iter().any(|payment| {
-        let Some(destination_wallet) = payment.destination_wallet.as_deref() else {
-            return false;
-        };
-
-        let Some(destination_matches) = registry.matches_for_wallet(destination_wallet) else {
-            return false;
-        };
-
-        !destination_matches.iter().any(|matched| {
-            registry
-                .pending_requests_for_destination_wallet(&matched.workspace_id, destination_wallet)
-                .unwrap_or(&[])
-                .iter()
-                .any(|request| is_within_match_window(request.requested_at, context.event_time))
-        })
+        payment
+            .source_wallet
+            .as_deref()
+            .is_some_and(|address| registry.is_watched_address(address))
+            || payment
+                .destination_wallet
+                .as_deref()
+                .is_some_and(|address| registry.is_watched_address(address))
     })
 }
 
@@ -1395,7 +1419,7 @@ mod tests {
     }
 
     #[test]
-    fn matching_retry_triggers_when_workspace_wallet_exists_but_request_is_missing() {
+    fn relevance_gate_accepts_watched_destination_wallet() {
         let destination_wallet = Pubkey::new_unique();
         let destination_token_account = Pubkey::new_unique();
         let workspace_id = Uuid::new_v4().to_string();
@@ -1403,49 +1427,6 @@ mod tests {
             workspace_id,
             wallet_address: destination_wallet.to_string(),
         }]);
-
-        let update = make_usdc_transaction_update(
-            21,
-            "1111111111111111111111111111111B",
-            vec![TokenBalanceDelta {
-                token_account: destination_token_account,
-                wallet_owner: destination_wallet,
-                amount_before_raw: 0,
-                amount_after_raw: 9_213,
-            }],
-        );
-        let tx = match update.update_oneof {
-            Some(UpdateOneof::Transaction(tx)) => tx,
-            _ => panic!("expected transaction update"),
-        };
-        let context =
-            build_transaction_context(&tx, Utc::now()).expect("transaction context should build");
-
-        assert!(should_retry_matching_with_fresh_registry(
-            &registry, &context
-        ));
-    }
-
-    #[test]
-    fn matching_retry_does_not_trigger_when_request_is_already_present() {
-        let destination_wallet = Pubkey::new_unique();
-        let destination_token_account = Pubkey::new_unique();
-        let workspace_id = Uuid::new_v4().to_string();
-        let registry = WorkspaceRegistry::with_transfer_requests(
-            vec![WorkspaceAddressMatch {
-                workspace_id: workspace_id.clone(),
-                wallet_address: destination_wallet.to_string(),
-            }],
-            vec![WorkspaceTransferRequestMatch {
-                transfer_request_id: Uuid::new_v4().to_string(),
-                workspace_id,
-                destination_wallet_address: destination_wallet.to_string(),
-                amount_raw: 10_000,
-                requested_at: Utc::now(),
-                request_type: "wallet_transfer".to_string(),
-                submitted_signature: None,
-            }],
-        );
 
         let update = make_usdc_transaction_update(
             22,
@@ -1463,9 +1444,47 @@ mod tests {
         };
         let context =
             build_transaction_context(&tx, Utc::now()).expect("transaction context should build");
+        let observed_transfers = reconstruct_observed_transfers(&context);
+        let observed_payments = reconstruct_observed_payments(&context, &observed_transfers);
 
-        assert!(!should_retry_matching_with_fresh_registry(
-            &registry, &context
+        assert!(is_relevant_context(
+            &registry,
+            &context,
+            &observed_transfers,
+            &observed_payments
+        ));
+    }
+
+    #[test]
+    fn relevance_gate_rejects_unwatched_usdc_transfer() {
+        let destination_wallet = Pubkey::new_unique();
+        let destination_token_account = Pubkey::new_unique();
+        let registry = WorkspaceRegistry::default();
+
+        let update = make_usdc_transaction_update(
+            23,
+            "1111111111111111111111111111111D",
+            vec![TokenBalanceDelta {
+                token_account: destination_token_account,
+                wallet_owner: destination_wallet,
+                amount_before_raw: 0,
+                amount_after_raw: 9_213,
+            }],
+        );
+        let tx = match update.update_oneof {
+            Some(UpdateOneof::Transaction(tx)) => tx,
+            _ => panic!("expected transaction update"),
+        };
+        let context =
+            build_transaction_context(&tx, Utc::now()).expect("transaction context should build");
+        let observed_transfers = reconstruct_observed_transfers(&context);
+        let observed_payments = reconstruct_observed_payments(&context, &observed_transfers);
+
+        assert!(!is_relevant_context(
+            &registry,
+            &context,
+            &observed_transfers,
+            &observed_payments
         ));
     }
 
@@ -1947,7 +1966,12 @@ mod tests {
         let destination_wallet = Pubkey::new_unique();
         let destination_token_account = Pubkey::new_unique();
 
-        let worker = test_worker(WorkspaceRegistry::default());
+        let worker = test_worker(WorkspaceRegistry::from_matches(vec![
+            WorkspaceAddressMatch {
+                workspace_id: Uuid::new_v4().to_string(),
+                wallet_address: destination_wallet.to_string(),
+            },
+        ]));
         let mut state = WorkerState::default();
         let signature = "1111111111111111111111111111111A";
 
