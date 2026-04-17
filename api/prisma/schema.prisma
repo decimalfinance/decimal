@@ -131,6 +131,27 @@ model ApiKey {
   @@map("api_keys")
 }
 
+model IdempotencyRecord {
+  idempotencyRecordId String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("idempotency_record_id")
+  key                 String
+  requestMethod       String   @map("request_method")
+  requestPath         String   @map("request_path")
+  requestHash         String   @map("request_hash")
+  actorType           String   @map("actor_type")
+  actorId             String   @map("actor_id")
+  status              String   @default("processing")
+  statusCode          Int?     @map("status_code")
+  responseBodyJson    Json?    @map("response_body_json")
+  createdAt           DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt           DateTime @updatedAt @db.Timestamptz(6) @map("updated_at")
+  expiresAt           DateTime @db.Timestamptz(6) @map("expires_at")
+
+  @@unique([actorType, actorId, requestMethod, requestPath, key])
+  @@index([actorType, actorId, createdAt(sort: Desc)])
+  @@index([expiresAt])
+  @@map("idempotency_records")
+}
+
 model WorkspaceAddress {
   workspaceAddressId     String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("workspace_address_id")
   workspaceId            String           @db.Uuid @map("workspace_id")

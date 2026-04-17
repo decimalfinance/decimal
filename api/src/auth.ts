@@ -117,7 +117,9 @@ export function requireAuth() {
       if (!auth) {
         res.status(401).json({
           error: 'Unauthorized',
+          code: 'unauthorized',
           message: 'Authentication required',
+          requestId: req.requestId,
         });
         return;
       }
@@ -127,7 +129,23 @@ export function requireAuth() {
       if (auth.authType === 'api_key' && !isApiKeyPathAllowed(req.path, auth.workspaceId)) {
         res.status(403).json({
           error: 'Forbidden',
+          code: 'forbidden',
           message: 'API key is scoped to one workspace and cannot access this route',
+          requestId: req.requestId,
+        });
+        return;
+      }
+
+      const requiredScope = auth.authType === 'api_key'
+        ? getRequiredApiKeyScope(req.method, req.path, auth.workspaceId)
+        : null;
+      if (requiredScope && !auth.scopes.includes(requiredScope)) {
+        res.status(403).json({
+          error: 'Forbidden',
+          code: 'forbidden',
+          message: `API key requires scope "${requiredScope}" for this route`,
+          requiredScope,
+          requestId: req.requestId,
         });
         return;
       }
@@ -157,4 +175,48 @@ function isApiKeyPathAllowed(path: string, workspaceId: string) {
   return path === '/auth/session'
     || path === '/auth/logout'
     || path.startsWith(`/workspaces/${workspaceId}/`);
+}
+
+function getRequiredApiKeyScope(method: string, path: string, workspaceId: string) {
+  if (path === '/auth/session' || path === '/auth/logout') {
+    return null;
+  }
+
+  if (!path.startsWith(`/workspaces/${workspaceId}/`)) {
+    return null;
+  }
+
+  if (path.includes('/api-keys')) {
+    return 'api_keys:write';
+  }
+
+  if (path.includes('/agent/tasks')) {
+    return 'reconciliation:read';
+  }
+
+  if (path.includes('/proof') || path.includes('/audit-export') || path.includes('/audit-log') || path.includes('/exports')) {
+    return 'proofs:read';
+  }
+
+  if (path.includes('/reconciliation') || path.includes('/transfers') || path.includes('/ops-health')) {
+    return 'reconciliation:read';
+  }
+
+  if (path.includes('/exceptions')) {
+    return method === 'GET' ? 'reconciliation:read' : 'exceptions:write';
+  }
+
+  if (path.includes('/approval')) {
+    return method === 'GET' ? 'workspace:read' : 'approvals:write';
+  }
+
+  if (path.includes('/prepare-execution') || path.includes('/attach-signature') || path.includes('/create-execution') || path.includes('/executions')) {
+    return method === 'GET' ? 'workspace:read' : 'execution:write';
+  }
+
+  if (path.includes('/payment-requests') || path.includes('/payment-orders') || path.includes('/payment-runs') || path.includes('/transfer-requests')) {
+    return method === 'GET' ? 'workspace:read' : 'payments:write';
+  }
+
+  return method === 'GET' ? 'workspace:read' : 'workspace:write';
 }

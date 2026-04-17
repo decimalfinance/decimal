@@ -7,12 +7,14 @@ import { config } from '../src/config.js';
 import { executeClickHouse, insertClickHouseRows } from '../src/clickhouse.js';
 import { getOrResolveAddressLabels } from '../src/address-label-registry.js';
 import { prisma } from '../src/prisma.js';
+import { resetRateLimitBuckets } from '../src/rate-limit.js';
 import { deriveUsdcAtaForWallet } from '../src/solana.js';
 
 const TRUNCATE_SQL = `
 TRUNCATE TABLE
   auth_sessions,
   api_keys,
+  idempotency_records,
   organization_memberships,
   approval_decisions,
   approval_policies,
@@ -62,6 +64,8 @@ before(async () => {
 });
 
 beforeEach(async () => {
+  resetRateLimitBuckets();
+  config.rateLimitEnabled = false;
   await executeWithDeadlockRetry(() => prisma.$executeRawUnsafe(TRUNCATE_SQL));
   await clearClickHouseTables();
 });
@@ -86,6 +90,69 @@ test('health endpoint returns ok', async () => {
   assert.ok(
     capabilities.workflows.some((workflow: { id: string }) => workflow.id === 'csv_to_payment_run'),
   );
+  assert.equal(capabilities.apiSurface.idempotency.includes('Idempotency-Key'), true);
+  assert.ok(
+    capabilities.agentActionContracts.some(
+      (contract: { id: string; requiredScope: string }) =>
+        contract.id === 'explain_reconciliation' && contract.requiredScope === 'reconciliation:read',
+    ),
+  );
+  assert.ok(
+    capabilities.agentActionContracts.some(
+      (contract: { id: string; requiredScope: string }) =>
+        contract.id === 'export_payment_proof' && contract.requiredScope === 'proofs:read',
+    ),
+  );
+});
+
+test('public and API-key routes enforce configured rate limits', async () => {
+  const setup = await createOrganizationWorkspace();
+  const key = await post(
+    `/workspaces/${setup.workspace.workspaceId}/api-keys`,
+    { label: 'rate limited agent' },
+    setup.sessionToken,
+  );
+
+  const originalEnabled = config.rateLimitEnabled;
+  const originalPublicMax = config.publicRateLimitMax;
+  const originalPublicWindow = config.publicRateLimitWindowMs;
+  const originalApiKeyMax = config.apiKeyRateLimitMax;
+  const originalApiKeyWindow = config.apiKeyRateLimitWindowMs;
+
+  try {
+    config.rateLimitEnabled = true;
+    config.publicRateLimitMax = 2;
+    config.publicRateLimitWindowMs = 60_000;
+    resetRateLimitBuckets();
+
+    assert.equal((await fetch(`${baseUrl}/capabilities`)).status, 200);
+    assert.equal((await fetch(`${baseUrl}/capabilities`)).status, 200);
+    const publicLimited = await fetch(`${baseUrl}/capabilities`);
+    assert.equal(publicLimited.status, 429);
+    assert.equal((await publicLimited.json()).code, 'rate_limit_exceeded');
+
+    config.apiKeyRateLimitMax = 1;
+    config.apiKeyRateLimitWindowMs = 60_000;
+    resetRateLimitBuckets();
+
+    const firstAgentRequest = await fetch(`${baseUrl}/workspaces/${setup.workspace.workspaceId}/agent/tasks`, {
+      headers: authHeaders(key.token),
+    });
+    assert.equal(firstAgentRequest.status, 200);
+
+    const secondAgentRequest = await fetch(`${baseUrl}/workspaces/${setup.workspace.workspaceId}/agent/tasks`, {
+      headers: authHeaders(key.token),
+    });
+    assert.equal(secondAgentRequest.status, 429);
+    assert.equal((await secondAgentRequest.json()).code, 'rate_limit_exceeded');
+  } finally {
+    config.rateLimitEnabled = originalEnabled;
+    config.publicRateLimitMax = originalPublicMax;
+    config.publicRateLimitWindowMs = originalPublicWindow;
+    config.apiKeyRateLimitMax = originalApiKeyMax;
+    config.apiKeyRateLimitWindowMs = originalApiKeyWindow;
+    resetRateLimitBuckets();
+  }
 });
 
 test('login creates a user session and session starts without organizations', async () => {
@@ -2068,6 +2135,48 @@ test('dedicated reconciliation queue endpoint supports display-state filtering a
   assert.deepEqual(detail.exceptions[0].availableActions, ['reviewed', 'expected', 'dismissed']);
 });
 
+test('reconciliation explain endpoint returns deterministic outcome, edge cases, and evidence', async () => {
+  const setup = await createSeededPartialExceptionRequest();
+
+  const explainResponse = await fetch(
+    `${baseUrl}/workspaces/${setup.workspace.workspaceId}/reconciliation-queue/${setup.transferRequest.transferRequestId}/explain`,
+    { headers: authHeaders(setup.sessionToken) },
+  );
+  assert.equal(explainResponse.status, 200);
+  const explain = await explainResponse.json();
+
+  assert.equal(explain.transferRequestId, setup.transferRequest.transferRequestId);
+  assert.equal(explain.outcome, 'partial_settlement');
+  assert.equal(explain.recommendedAction, 'review_partial_settlement');
+  assert.equal(explain.amount.requestedRaw, '2500000');
+  assert.equal(explain.amount.matchedRaw, '1250000');
+  assert.equal(explain.matching.status, 'matched_partial');
+  assert.equal(explain.confidence.band, 'partial');
+  assert.equal(explain.edgeCases.length, 1);
+  assert.equal(explain.edgeCases[0].code, 'partial_settlement');
+  assert.equal(explain.evidence.linkedSignature, setup.signature);
+  assert.equal(explain.evidence.observedTransfers[0].transferId, setup.transferId);
+  assert.equal(explain.evidence.observedPayment.paymentId, setup.paymentId);
+
+  const refreshResponse = await fetch(
+    `${baseUrl}/workspaces/${setup.workspace.workspaceId}/reconciliation-queue/${setup.transferRequest.transferRequestId}/refresh`,
+    {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...authHeaders(setup.sessionToken),
+      },
+      body: JSON.stringify({ reason: 'agent-read-model-check' }),
+    },
+  );
+  assert.equal(refreshResponse.status, 200);
+  const refreshed = await refreshResponse.json();
+
+  assert.equal(refreshed.outcome, 'partial_settlement');
+  assert.equal(refreshed.refresh.mode, 'read_model_refresh');
+  assert.equal(refreshed.refresh.mutated, false);
+});
+
 test('exception actions and notes update detail state and preserve operator audit', async () => {
   const setup = await createSeededPartialExceptionRequest();
   const exceptionId = setup.exceptionId;
@@ -2293,6 +2402,30 @@ test('phase e audit export and unified timeline include approval and execution s
   const auditCsv = await auditExport.text();
   assert.match(auditCsv, /approval_decision/);
   assert.match(auditCsv, /execution_record/);
+
+  const auditLogResponse = await fetch(
+    `${baseUrl}/workspaces/${setup.workspace.workspaceId}/audit-log?limit=20`,
+    { headers: authHeaders(setup.sessionToken) },
+  );
+  assert.equal(auditLogResponse.status, 200);
+  const auditLog = await auditLogResponse.json();
+  assert.ok(auditLog.items.some((item: { entityType: string; eventType: string }) =>
+    item.entityType === 'transfer_request' && item.eventType === 'request_created'));
+  assert.ok(auditLog.items.some((item: { entityType: string; eventType: string }) =>
+    item.entityType === 'approval' && item.eventType === 'approval_auto_approved'));
+  assert.ok(auditLog.items.some((item: { entityType: string; eventType: string }) =>
+    item.entityType === 'execution' && item.eventType === 'execution_ready_for_execution'));
+  assert.ok(auditLog.items.some((item: { entityType: string; eventType: string }) =>
+    item.entityType === 'export' && item.eventType === 'export_audit'));
+
+  const executionAuditResponse = await fetch(
+    `${baseUrl}/workspaces/${setup.workspace.workspaceId}/audit-log?entityType=execution`,
+    { headers: authHeaders(setup.sessionToken) },
+  );
+  assert.equal(executionAuditResponse.status, 200);
+  const executionAudit = await executionAuditResponse.json();
+  assert.ok(executionAudit.items.length >= 1);
+  assert.ok(executionAudit.items.every((item: { entityType: string }) => item.entityType === 'execution'));
 });
 
 test('phase e ops health exposes lag and latency status', async () => {
@@ -2521,7 +2654,7 @@ test('workspace API keys authenticate scoped agent clients and can be revoked', 
     `/workspaces/${setup.workspace.workspaceId}/api-keys`,
     {
       label: 'reconciliation agent',
-      scopes: ['workspace:read', 'payments:write', 'reconciliation:read'],
+      scopes: ['workspace:read', 'workspace:write', 'payments:write', 'reconciliation:read'],
     },
     setup.sessionToken,
   );
@@ -2547,7 +2680,31 @@ test('workspace API keys authenticate scoped agent clients and can be revoked', 
   const agentSession = await agentSessionResponse.json();
   assert.equal(agentSession.authType, 'api_key');
   assert.equal(agentSession.actor.workspaceId, setup.workspace.workspaceId);
-  assert.deepEqual(agentSession.actor.scopes, ['workspace:read', 'payments:write', 'reconciliation:read']);
+  assert.deepEqual(agentSession.actor.scopes, ['workspace:read', 'workspace:write', 'payments:write', 'reconciliation:read']);
+
+  const readOnlyKey = await post(
+    `/workspaces/${setup.workspace.workspaceId}/api-keys`,
+    {
+      label: 'read only agent',
+      scopes: ['workspace:read'],
+    },
+    setup.sessionToken,
+  );
+
+  const deniedCreateAddressResponse = await fetch(`${baseUrl}/workspaces/${setup.workspace.workspaceId}/addresses`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...authHeaders(readOnlyKey.token),
+    },
+    body: JSON.stringify({
+      chain: 'solana',
+      address: 'So11111111111111111111111111111111111111115',
+      displayName: 'Denied Wallet',
+    }),
+  });
+  assert.equal(deniedCreateAddressResponse.status, 403);
+  assert.equal((await deniedCreateAddressResponse.json()).requiredScope, 'workspace:write');
 
   const createdAddress = await post(
     `/workspaces/${setup.workspace.workspaceId}/addresses`,
@@ -2577,8 +2734,8 @@ test('workspace API keys authenticate scoped agent clients and can be revoked', 
   const agentKeyManagementResponse = await fetch(`${baseUrl}/workspaces/${setup.workspace.workspaceId}/api-keys`, {
     headers: authHeaders(createdKey.token),
   });
-  assert.equal(agentKeyManagementResponse.status, 400);
-  assert.match((await agentKeyManagementResponse.json()).message, /Human workspace admin session required/i);
+  assert.equal(agentKeyManagementResponse.status, 403);
+  assert.equal((await agentKeyManagementResponse.json()).requiredScope, 'api_keys:write');
 
   const revokeResponse = await fetch(
     `${baseUrl}/workspaces/${setup.workspace.workspaceId}/api-keys/${createdKey.apiKeyId}/revoke`,
@@ -2635,6 +2792,167 @@ test('agent tasks expose actionable reconciliation work without frontend assumpt
   assert.equal(approvalTask.kind, 'approval_review');
   assert.equal(approvalTask.resource.type, 'transfer_request');
   assert.ok(approvalTask.availableActions.some((action: { id: string }) => action.id === 'approve'));
+});
+
+test('agent task updates expose an SSE stream for API clients', async () => {
+  const setup = await createOrganizationWorkspace();
+  const key = await post(
+    `/workspaces/${setup.workspace.workspaceId}/api-keys`,
+    {
+      label: 'streaming agent',
+      scopes: ['reconciliation:read'],
+    },
+    setup.sessionToken,
+  );
+  const controller = new AbortController();
+
+  const response = await fetch(`${baseUrl}/workspaces/${setup.workspace.workspaceId}/agent/tasks/events`, {
+    headers: authHeaders(key.token),
+    signal: controller.signal,
+  });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /text\/event-stream/);
+
+  const reader = response.body?.getReader();
+  assert.ok(reader);
+  const chunk = await reader.read();
+  const text = Buffer.from(chunk.value ?? new Uint8Array()).toString('utf8');
+  assert.match(text, /event: agent_tasks_snapshot/);
+  assert.match(text, new RegExp(setup.workspace.workspaceId));
+  controller.abort();
+  await reader.cancel().catch(() => {});
+});
+
+test('agent exception task actions match the exception action API contract', async () => {
+  const setup = await createSeededPartialExceptionRequest();
+  const key = await post(
+    `/workspaces/${setup.workspace.workspaceId}/api-keys`,
+    {
+      label: 'exception agent',
+      scopes: ['reconciliation:read', 'exceptions:write'],
+    },
+    setup.sessionToken,
+  );
+
+  const tasksResponse = await fetch(`${baseUrl}/workspaces/${setup.workspace.workspaceId}/agent/tasks`, {
+    headers: authHeaders(key.token),
+  });
+  assert.equal(tasksResponse.status, 200);
+  const tasks = await tasksResponse.json();
+  const exceptionTask = tasks.items.find((item: { taskId: string }) => item.taskId === `exception:${setup.exceptionId}`);
+  assert.ok(exceptionTask);
+  assert.deepEqual(
+    exceptionTask.availableActions.map((action: { body: { action: string } }) => action.body.action).sort(),
+    ['dismissed', 'reviewed'],
+  );
+});
+
+test('API-key payment mutations preserve machine actor identity in audit events', async () => {
+  const setup = await createOrganizationWorkspace();
+  const key = await post(
+    `/workspaces/${setup.workspace.workspaceId}/api-keys`,
+    {
+      label: 'payment writer agent',
+      scopes: ['workspace:read', 'payments:write'],
+    },
+    setup.sessionToken,
+  );
+  const address = await post(
+    `/workspaces/${setup.workspace.workspaceId}/addresses`,
+    {
+      chain: 'solana',
+      address: 'So11111111111111111111111111111111111111112',
+      displayName: 'Machine Audit Wallet',
+    },
+    setup.sessionToken,
+  );
+  const destination = await post(
+    `/workspaces/${setup.workspace.workspaceId}/destinations`,
+    {
+      linkedWorkspaceAddressId: address.workspaceAddressId,
+      label: 'Machine audit destination',
+      trustState: 'trusted',
+    },
+    setup.sessionToken,
+  );
+
+  const order = await post(
+    `/workspaces/${setup.workspace.workspaceId}/payment-orders`,
+    {
+      destinationId: destination.destinationId,
+      amountRaw: '10000',
+      memo: 'created by agent',
+    },
+    key.token,
+  );
+
+  const detailResponse = await fetch(
+    `${baseUrl}/workspaces/${setup.workspace.workspaceId}/payment-orders/${order.paymentOrderId}`,
+    { headers: authHeaders(key.token) },
+  );
+  assert.equal(detailResponse.status, 200);
+  const detail = await detailResponse.json();
+  assert.equal(detail.events[0].actorType, 'api_key');
+  assert.equal(detail.events[0].actorId, key.apiKeyId);
+  assert.equal(detail.createdByUserId, null);
+});
+
+test('mutating routes support idempotent retries and reject key reuse with a different body', async () => {
+  const setup = await createOrganizationWorkspace();
+  const key = `wallet-create-${crypto.randomUUID()}`;
+  const body = {
+    chain: 'solana',
+    address: 'So11111111111111111111111111111111111111112',
+    displayName: 'Retry Safe Wallet',
+  };
+
+  const firstResponse = await fetch(`${baseUrl}/workspaces/${setup.workspace.workspaceId}/addresses`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'idempotency-key': key,
+      ...authHeaders(setup.sessionToken),
+    },
+    body: JSON.stringify(body),
+  });
+  assert.equal(firstResponse.status, 201);
+  const first = await firstResponse.json();
+
+  const retryResponse = await fetch(`${baseUrl}/workspaces/${setup.workspace.workspaceId}/addresses`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'idempotency-key': key,
+      ...authHeaders(setup.sessionToken),
+    },
+    body: JSON.stringify(body),
+  });
+  assert.equal(retryResponse.status, 201);
+  assert.equal(retryResponse.headers.get('idempotency-replayed'), 'true');
+  const retry = await retryResponse.json();
+  assert.equal(retry.workspaceAddressId, first.workspaceAddressId);
+
+  const listResponse = await fetch(`${baseUrl}/workspaces/${setup.workspace.workspaceId}/addresses`, {
+    headers: authHeaders(setup.sessionToken),
+  });
+  assert.equal(listResponse.status, 200);
+  const list = await listResponse.json();
+  assert.equal(list.items.length, 1);
+
+  const conflictResponse = await fetch(`${baseUrl}/workspaces/${setup.workspace.workspaceId}/addresses`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'idempotency-key': key,
+      ...authHeaders(setup.sessionToken),
+    },
+    body: JSON.stringify({
+      ...body,
+      displayName: 'Different Wallet Name',
+    }),
+  });
+  assert.equal(conflictResponse.status, 409);
+  assert.equal((await conflictResponse.json()).error, 'IdempotencyConflict');
 });
 
 test('address label endpoints support create, search, and patch flows directly', async () => {
@@ -2906,8 +3224,16 @@ test('transfer request and exception endpoints reject invalid mutation cases dir
 test('protected workspace routes reject anonymous callers', async () => {
   const setup = await createOrganizationWorkspace();
 
-  const response = await fetch(`${baseUrl}/workspaces/${setup.workspace.workspaceId}/addresses`);
+  const response = await fetch(`${baseUrl}/workspaces/${setup.workspace.workspaceId}/addresses`, {
+    headers: {
+      'x-request-id': 'agent-request-1',
+    },
+  });
   assert.equal(response.status, 401);
+  assert.equal(response.headers.get('x-request-id'), 'agent-request-1');
+  const payload = await response.json();
+  assert.equal(payload.code, 'unauthorized');
+  assert.equal(payload.requestId, 'agent-request-1');
 });
 
 async function loginUser(email: string, displayName: string) {

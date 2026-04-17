@@ -280,6 +280,9 @@ test('payment runs import CSV rows and prepare one batch execution packet', asyn
   assert.equal(imported.paymentRun.runName, 'April payroll run');
   assert.equal(imported.paymentRun.totals.orderCount, 2);
   assert.equal(imported.paymentRun.totals.totalAmountRaw, '30000');
+  assert.equal(imported.paymentRun.reconciliationSummary.requestedAmountRaw, '30000');
+  assert.equal(imported.paymentRun.reconciliationSummary.matchedAmountRaw, '0');
+  assert.equal(imported.paymentRun.reconciliationSummary.settlementCounts.pending, 2);
 
   const prepared = await post(
     `/workspaces/${setup.workspace.workspaceId}/payment-runs/${imported.paymentRun.paymentRunId}/prepare-execution`,
@@ -294,7 +297,7 @@ test('payment runs import CSV rows and prepare one batch execution packet', asyn
   assert.equal(prepared.executionPacket.transfers.length, 2);
   assert.equal(prepared.executionPacket.instructions.length, 4);
   assert.equal(prepared.executionPacket.amountRaw, '30000');
-  assert.equal(prepared.paymentRun.derivedState, 'execution_recorded');
+  assert.equal(prepared.paymentRun.derivedState, 'ready_for_execution');
 
   const preparedAgain = await post(
     `/workspaces/${setup.workspace.workspaceId}/payment-runs/${imported.paymentRun.paymentRunId}/prepare-execution`,
@@ -321,6 +324,20 @@ test('payment runs import CSV rows and prepare one batch execution packet', asyn
   assert.equal(attached.executionRecords.length, 2);
   assert.ok(attached.executionRecords.every((record: { submittedSignature: string; state: string }) => record.submittedSignature === signature && record.state === 'submitted_onchain'));
   assert.equal(attached.paymentRun.derivedState, 'submitted_onchain');
+
+  const runProof = await get(
+    `/workspaces/${setup.workspace.workspaceId}/payment-runs/${imported.paymentRun.paymentRunId}/proof`,
+    setup.sessionToken,
+  );
+  assert.equal(runProof.packetType, 'stablecoin_payment_run_proof');
+  assert.match(runProof.proofId, /^axoria_payment_run_proof_/);
+  assert.match(runProof.canonicalDigest, /^[a-f0-9]{64}$/);
+  assert.equal(runProof.orderProofs.length, 2);
+  assert.equal(runProof.readiness.counts.total, 2);
+  assert.equal(runProof.reconciliationSummary.requestedAmountRaw, '30000');
+  assert.equal(runProof.reconciliationSummary.settlementCounts.pending, 2);
+  assert.equal(runProof.agentSummary.canTreatAsFinal, false);
+  assert.equal(runProof.orders[0].proofId, runProof.orderProofs[0].proofId);
 });
 
 test('payment order duplicate references and unsafe source wallets are rejected', async () => {
@@ -583,11 +600,19 @@ test('payment orders derive settled and exception states from existing reconcili
     setup.sessionToken,
   );
   assert.equal(proof.packetType, 'stablecoin_payment_proof');
+  assert.match(proof.proofId, /^axoria_payment_proof_/);
+  assert.match(proof.canonicalDigest, /^[a-f0-9]{64}$/);
   assert.equal(proof.status, 'complete');
+  assert.equal(proof.readiness.status, 'needs_review');
+  assert.deepEqual(proof.readiness.warnings, ['execution_evidence_present']);
   assert.equal(proof.intent.paymentOrderId, paymentOrder.paymentOrderId);
   assert.equal(proof.intent.amountRaw, '10000');
+  assert.equal(proof.intent.amountUsdc, '0.010000');
   assert.equal(proof.settlement.matchStatus, 'matched_exact');
   assert.equal(proof.settlement.matchedAmountRaw, '10000');
+  assert.equal(proof.settlement.reconciliationOutcome, 'matched_exact');
+  assert.equal(proof.agentSummary.canTreatAsFinal, false);
+  assert.equal(proof.verification.reconciliation.outcome, 'matched_exact');
 
   const partialOrder = await createSubmittedPaymentOrder(setup, 'MATCH-PARTIAL');
   await seedPartialSettlement({

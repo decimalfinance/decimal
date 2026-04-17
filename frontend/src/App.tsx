@@ -263,7 +263,9 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
     queryKey: queryKeys(activeWorkspaceId).paymentOrders,
     queryFn: () => api.listPaymentOrders(activeWorkspaceId!),
     enabled: Boolean(activeWorkspaceId),
-    refetchInterval: 5_000,
+    // Keeps sidebar badges (approvals / execution queue) fresh without hammering the API.
+    refetchInterval: () =>
+      typeof document !== 'undefined' && document.hidden ? false : 15_000,
   });
   const approvalPendingCount = useMemo(
     () => (sidebarOrdersQuery.data?.items ?? []).filter((order) => order.derivedState === 'pending_approval').length,
@@ -1426,6 +1428,9 @@ function PaymentRunDetailPage({ session }: { session: AuthenticatedSession }) {
     proven: false,
   });
   useEffect(() => subscribeSolanaWallets(setWallets), []);
+  useEffect(() => {
+    setPrepared(null);
+  }, [selectedSourceAddressId]);
   const workspace = findWorkspace(session, workspaceId);
   const addressesQuery = useQuery({
     queryKey: queryKeys(workspaceId).addresses,
@@ -1437,8 +1442,19 @@ function PaymentRunDetailPage({ session }: { session: AuthenticatedSession }) {
     queryKey: queryKeys(workspaceId, paymentRunId).paymentRun,
     queryFn: () => api.getPaymentRunDetail(workspaceId!, paymentRunId!),
     enabled: Boolean(workspaceId && paymentRunId),
-    refetchInterval: 5_000,
+    refetchInterval: (query) => {
+      if (typeof document !== 'undefined' && document.hidden) return false;
+      const state = query.state.data?.derivedState;
+      if (state === 'settled' || state === 'closed') return false;
+      return 8_000;
+    },
   });
+  const sourceAddresses = addressesQuery.data?.items ?? [];
+  const effectiveSourceAddressId =
+    selectedSourceAddressId
+    || runQuery.data?.sourceWorkspaceAddressId
+    || sourceAddresses[0]?.workspaceAddressId
+    || '';
   const prepareMutation = useMutation({
     mutationFn: (sourceWorkspaceAddressId: string) => api.preparePaymentRunExecution(workspaceId!, paymentRunId!, {
       sourceWorkspaceAddressId,
@@ -1465,12 +1481,23 @@ function PaymentRunDetailPage({ session }: { session: AuthenticatedSession }) {
   const signMutation = useMutation({
     mutationFn: async () => {
       if (!effectiveSourceAddressId) throw new Error('Choose a source wallet before executing this run.');
+      const sourceAddressRow = sourceAddresses.find((row) => row.workspaceAddressId === effectiveSourceAddressId);
+      if (!sourceAddressRow?.address) {
+        throw new Error('Source wallet is still loading or unavailable. Wait a moment and try again.');
+      }
       let preparation = prepared;
-      if (!preparation || preparation.paymentRun.sourceWorkspaceAddressId !== effectiveSourceAddressId) {
+      const sourceMismatch =
+        !preparation
+        || preparation.paymentRun.sourceWorkspaceAddressId !== effectiveSourceAddressId
+        || preparation.executionPacket.signerWallet !== sourceAddressRow.address;
+      if (sourceMismatch) {
         preparation = await api.preparePaymentRunExecution(workspaceId!, paymentRunId!, {
           sourceWorkspaceAddressId: effectiveSourceAddressId,
         });
         setPrepared(preparation);
+      }
+      if (!preparation) {
+        throw new Error('Batch execution preparation is missing. Try Prepare packet only, then execute again.');
       }
       const signature = await signAndSubmitPreparedPayment(preparation.executionPacket, selectedWalletId);
       await api.attachPaymentRunSignature(workspaceId!, paymentRunId!, {
@@ -1566,8 +1593,6 @@ function PaymentRunDetailPage({ session }: { session: AuthenticatedSession }) {
     if (['submitted_onchain', 'observed', 'settled'].includes(latestExecution.state)) return false;
     return ['approved', 'ready_for_execution', 'execution_recorded'].includes(order.derivedState);
   });
-  const sourceAddresses = addressesQuery.data?.items ?? [];
-  const effectiveSourceAddressId = selectedSourceAddressId || run.sourceWorkspaceAddressId || sourceAddresses[0]?.workspaceAddressId || '';
   const selectedWallet = wallets.find((wallet) => wallet.id === selectedWalletId);
   const selectedSourceAddress = sourceAddresses.find((address) => address.workspaceAddressId === effectiveSourceAddressId) ?? null;
   const canExecuteBatch = executableOrders.length > 0;
@@ -1634,8 +1659,13 @@ function PaymentRunDetailPage({ session }: { session: AuthenticatedSession }) {
               {approvePendingMutation.isPending ? 'Advancing...' : `Advance approvals (${approvalsQueueCount})`}
             </button>
           ) : null}
-          <button className="button button-secondary" onClick={() => setExecutionModalOpen(true)} type="button">
-            Execute payments
+          <button
+            className="button button-secondary"
+            onClick={() => setExecutionModalOpen(true)}
+            type="button"
+            title="Opens the execution panel. The API is called from there when you choose a wallet and confirm—prepare, then sign in the browser."
+          >
+            Open execution
           </button>
           <button className="button button-primary" onClick={() => proofMutation.mutate()} type="button">Export run proof</button>
           <button
@@ -1783,6 +1813,9 @@ function PaymentRunDetailPage({ session }: { session: AuthenticatedSession }) {
           <EmptyState title="No source wallets available" description="Add a wallet in Address book before preparing this batch." />
         ) : (
           <div className="form-stack">
+            <p className="section-copy">
+              Prepare and sign happen here: the backend builds the transaction packet, then your browser wallet submits the signed transaction.
+            </p>
             <label className="field">
               Source wallet
               <select
@@ -3535,6 +3568,9 @@ function PaymentDetailPage({ session }: { session: AuthenticatedSession }) {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
   useEffect(() => subscribeSolanaWallets(setWallets), []);
+  useEffect(() => {
+    setPreparedPacket(null);
+  }, [selectedSourceAddressId]);
 
   const workspace = findWorkspace(session, workspaceId);
   const paymentOrderQuery = useQuery({
@@ -3607,8 +3643,15 @@ function PaymentDetailPage({ session }: { session: AuthenticatedSession }) {
         || addressesQuery.data?.items?.[0]?.workspaceAddressId
         || '';
       if (!sourceWorkspaceAddressId) throw new Error('Select a source wallet before execution.');
+      const sourceAddressRow = addressesQuery.data?.items?.find(
+        (row) => row.workspaceAddressId === sourceWorkspaceAddressId,
+      );
+      if (!sourceAddressRow?.address) {
+        throw new Error('Source wallet is still loading or unavailable. Wait a moment and try again.');
+      }
+
       let packet = preparedPacket ?? getPreparedPacket(paymentOrderQuery.data);
-      if (!packet) {
+      if (!packet || packet.signerWallet !== sourceAddressRow.address) {
         const prepared = await api.preparePaymentOrderExecution(workspaceId!, paymentOrderId!, {
           sourceWorkspaceAddressId,
         });
@@ -3705,7 +3748,12 @@ function PaymentDetailPage({ session }: { session: AuthenticatedSession }) {
         </button>
       );
     }
-    if (order.derivedState === 'approved' || order.derivedState === 'ready_for_execution' || order.derivedState === 'execution_recorded') {
+    const hasChainSignature = Boolean(order.reconciliationDetail?.latestExecution?.submittedSignature?.trim());
+    const canExecuteFromUi =
+      order.derivedState === 'approved'
+      || order.derivedState === 'ready_for_execution'
+      || (order.derivedState === 'execution_recorded' && !hasChainSignature);
+    if (canExecuteFromUi) {
       return (
         <button className="button button-secondary" onClick={() => setExecutionModalOpen(true)} type="button">
           Execute payment
@@ -5310,7 +5358,8 @@ function safeShortAddress(value: string | null | undefined) {
 function getPreparedPacket(order: PaymentOrder | undefined): PaymentExecutionPacket | null {
   const records = order?.reconciliationDetail?.executionRecords ?? [];
   for (const record of records) {
-    const packet = (record.metadataJson as { executionPacket?: unknown } | undefined)?.executionPacket;
+    const meta = record.metadataJson as { executionPacket?: unknown; preparedExecution?: unknown } | undefined;
+    const packet = meta?.executionPacket ?? meta?.preparedExecution;
     if (isPaymentExecutionPacket(packet)) return packet;
   }
   return null;

@@ -4,6 +4,9 @@ import { prisma } from './prisma.js';
 
 export const DEFAULT_AGENT_SCOPES = [
   'workspace:read',
+  'workspace:write',
+  'approvals:write',
+  'execution:write',
   'payments:write',
   'reconciliation:read',
   'exceptions:write',

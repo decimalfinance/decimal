@@ -1,6 +1,8 @@
 import express from 'express';
+import crypto from 'node:crypto';
 import { ZodError } from 'zod';
 import { requireAuth } from './auth.js';
+import { notifyAgentTasksChanged } from './agent-task-events.js';
 import { addressLabelsRouter } from './routes/address-labels.js';
 import { addressesRouter } from './routes/addresses.js';
 import { agentRouter } from './routes/agent.js';
@@ -12,6 +14,7 @@ import { destinationsRouter } from './routes/destinations.js';
 import { authRouter } from './routes/auth.js';
 import { eventsRouter } from './routes/events.js';
 import { healthRouter } from './routes/health.js';
+import { idempotencyMiddleware } from './idempotency.js';
 import { internalRouter } from './routes/internal.js';
 import { notifyMatchingIndexChanged, shouldInvalidateMatchingIndex } from './matching-index-events.js';
 import { organizationsRouter } from './routes/organizations.js';
@@ -20,10 +23,18 @@ import { payeesRouter } from './routes/payees.js';
 import { paymentOrdersRouter } from './routes/payment-orders.js';
 import { paymentRequestsRouter } from './routes/payment-requests.js';
 import { paymentRunsRouter } from './routes/payment-runs.js';
+import { apiKeyRateLimitMiddleware, publicRateLimitMiddleware } from './rate-limit.js';
 import { transferRequestsRouter } from './routes/transfer-requests.js';
 
 export function createApp() {
   const app = express();
+
+  app.use((req, res, next) => {
+    const requestId = normalizeRequestId(req.header('x-request-id')) ?? crypto.randomUUID();
+    req.requestId = requestId;
+    res.setHeader('x-request-id', requestId);
+    next();
+  });
 
   app.use((req, res, next) => {
     const origin = req.header('origin');
@@ -44,6 +55,7 @@ export function createApp() {
     next();
   });
 
+  app.use(publicRateLimitMiddleware());
   app.use(express.json());
 
   app.use((req, res, next) => {
@@ -52,6 +64,7 @@ export function createApp() {
       res.on('finish', () => {
         if (res.statusCode >= 200 && res.statusCode < 400) {
           notifyMatchingIndexChanged(`${req.method} ${req.path}`);
+          notifyAgentTasksChanged(`${req.method} ${req.path}`, extractWorkspaceIdFromPath(req.path));
         }
       });
     }
@@ -64,6 +77,8 @@ export function createApp() {
   app.use(authRouter);
   app.use(internalRouter);
   app.use(requireAuth());
+  app.use(apiKeyRateLimitMiddleware());
+  app.use(idempotencyMiddleware());
   app.use(addressLabelsRouter);
   app.use(agentRouter);
   app.use(apiKeysRouter);
@@ -83,7 +98,9 @@ export function createApp() {
     if (error instanceof ZodError) {
       res.status(400).json({
         error: 'ValidationError',
+        code: 'validation_error',
         message: 'Request validation failed',
+        requestId: _req.requestId,
         issues: error.issues.map((issue) => ({
           path: issue.path.join('.'),
           code: issue.code,
@@ -96,14 +113,18 @@ export function createApp() {
     if (error instanceof Error) {
       res.status(400).json({
         error: error.name,
+        code: normalizeErrorCode(error.name),
         message: error.message,
+        requestId: _req.requestId,
       });
       return;
     }
 
     res.status(500).json({
       error: 'InternalServerError',
+      code: 'internal_server_error',
       message: 'Unexpected error',
+      requestId: _req.requestId,
     });
   });
 
@@ -112,4 +133,28 @@ export function createApp() {
 
 function isLocalDevOrigin(origin: string) {
   return /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
+}
+
+function extractWorkspaceIdFromPath(path: string) {
+  return path.match(/^\/workspaces\/([^/]+)/)?.[1] ?? null;
+}
+
+declare global {
+  namespace Express {
+    interface Request {
+      requestId?: string;
+    }
+  }
+}
+
+function normalizeRequestId(value?: string | null) {
+  const trimmed = value?.trim();
+  return trimmed && /^[a-zA-Z0-9._:-]{1,120}$/.test(trimmed) ? trimmed : null;
+}
+
+function normalizeErrorCode(errorName: string) {
+  return errorName
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[^a-zA-Z0-9_]+/g, '_')
+    .toLowerCase();
 }

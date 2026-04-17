@@ -47,11 +47,15 @@ export type PaymentOrderWithRelations = PaymentOrder & {
 };
 
 type PaymentOrderClient = typeof prisma | Prisma.TransactionClient;
+type PaymentActorInput = {
+  actorUserId: string | null;
+  actorType?: 'user' | 'api_key';
+  actorId?: string | null;
+};
 
 export async function createPaymentOrder(
-  args: {
+  args: PaymentActorInput & {
     workspaceId: string;
-    actorUserId: string;
     destinationId: string;
     sourceWorkspaceAddressId?: string | null;
     amountRaw: string | bigint;
@@ -145,7 +149,7 @@ export async function createPaymentOrder(
         state: 'draft',
         sourceBalanceSnapshotJson: (args.sourceBalanceSnapshotJson ?? { status: 'unknown' }) as Prisma.InputJsonValue,
         metadataJson: (args.metadataJson ?? {}) as Prisma.InputJsonValue,
-        createdByUserId: args.actorUserId,
+        createdByUserId: args.actorUserId ?? undefined,
       },
     });
 
@@ -153,8 +157,7 @@ export async function createPaymentOrder(
       paymentOrderId: paymentOrder.paymentOrderId,
       workspaceId: args.workspaceId,
       eventType: 'payment_order_created',
-      actorType: 'user',
-      actorId: args.actorUserId,
+      ...buildPaymentEventActor(args),
       beforeState: null,
       afterState: paymentOrder.state,
       payloadJson: {
@@ -176,6 +179,8 @@ export async function createPaymentOrder(
       workspaceId: args.workspaceId,
       paymentOrderId: created.paymentOrderId,
       actorUserId: args.actorUserId,
+      actorType: args.actorType,
+      actorId: args.actorId,
     });
   }
 
@@ -215,10 +220,9 @@ export async function getPaymentOrderDetail(workspaceId: string, paymentOrderId:
 }
 
 export async function updatePaymentOrder(
-  args: {
+  args: PaymentActorInput & {
     workspaceId: string;
     paymentOrderId: string;
-    actorUserId: string;
     input: {
       sourceWorkspaceAddressId?: string | null;
       memo?: string | null;
@@ -312,8 +316,7 @@ export async function updatePaymentOrder(
       paymentOrderId: current.paymentOrderId,
       workspaceId: args.workspaceId,
       eventType: 'payment_order_updated',
-      actorType: 'user',
-      actorId: args.actorUserId,
+      ...buildPaymentEventActor(args),
       beforeState: current.state,
       afterState: current.state,
       payloadJson: {
@@ -326,10 +329,9 @@ export async function updatePaymentOrder(
 }
 
 export async function submitPaymentOrder(
-  args: {
+  args: PaymentActorInput & {
     workspaceId: string;
     paymentOrderId: string;
-    actorUserId: string;
   },
 ) {
   const current = await prisma.paymentOrder.findFirstOrThrow({
@@ -378,7 +380,7 @@ export async function submitPaymentOrder(
         requestType: 'payment_order',
         asset: current.asset,
         amountRaw: current.amountRaw,
-        requestedByUserId: args.actorUserId,
+        requestedByUserId: args.actorUserId ?? undefined,
         reason: current.memo,
         externalReference: current.externalReference ?? current.invoiceNumber,
         status: finalRequestStatus,
@@ -397,9 +399,7 @@ export async function submitPaymentOrder(
       transferRequestId: transferRequest.transferRequestId,
       workspaceId: args.workspaceId,
       eventType: 'request_created',
-      actorType: 'user',
-      actorId: args.actorUserId,
-      eventSource: 'user',
+      ...buildTransferEventActor(args),
       beforeState: null,
       afterState: finalRequestStatus,
       payloadJson: {
@@ -455,10 +455,9 @@ export async function submitPaymentOrder(
   return getPaymentOrderDetail(args.workspaceId, args.paymentOrderId);
 }
 
-export async function cancelPaymentOrder(args: {
+export async function cancelPaymentOrder(args: PaymentActorInput & {
   workspaceId: string;
   paymentOrderId: string;
-  actorUserId: string;
 }) {
   const current = await prisma.paymentOrder.findFirstOrThrow({
     where: {
@@ -485,8 +484,7 @@ export async function cancelPaymentOrder(args: {
       paymentOrderId: current.paymentOrderId,
       workspaceId: args.workspaceId,
       eventType: 'payment_order_cancelled',
-      actorType: 'user',
-      actorId: args.actorUserId,
+      ...buildPaymentEventActor(args),
       beforeState: current.state,
       afterState: 'cancelled',
       payloadJson: {},
@@ -496,10 +494,9 @@ export async function cancelPaymentOrder(args: {
   return getPaymentOrderDetail(args.workspaceId, args.paymentOrderId);
 }
 
-export async function createPaymentOrderExecution(args: {
+export async function createPaymentOrderExecution(args: PaymentActorInput & {
   workspaceId: string;
   paymentOrderId: string;
-  actorUserId: string;
   executionSource: string;
   externalReference?: string | null;
   metadataJson?: Prisma.InputJsonValue;
@@ -524,7 +521,7 @@ export async function createPaymentOrderExecution(args: {
         transferRequestId: transferRequest.transferRequestId,
         workspaceId: args.workspaceId,
         executionSource: args.executionSource,
-        executorUserId: args.actorUserId,
+        executorUserId: args.actorUserId ?? undefined,
         state: 'ready_for_execution',
         metadataJson: {
           ...(isRecordLike(args.metadataJson) ? args.metadataJson : {}),
@@ -559,9 +556,7 @@ export async function createPaymentOrderExecution(args: {
       transferRequestId: transferRequest.transferRequestId,
       workspaceId: args.workspaceId,
       eventType: 'execution_created',
-      actorType: 'user',
-      actorId: args.actorUserId,
-      eventSource: 'user',
+      ...buildTransferEventActor(args),
       beforeState: transferRequest.status,
       afterState: transferRequest.status === 'approved' ? 'ready_for_execution' : transferRequest.status,
       payloadJson: {
@@ -576,8 +571,7 @@ export async function createPaymentOrderExecution(args: {
       paymentOrderId: current.paymentOrderId,
       workspaceId: args.workspaceId,
       eventType: 'payment_order_execution_created',
-      actorType: 'user',
-      actorId: args.actorUserId,
+      ...buildPaymentEventActor(args),
       beforeState: current.state,
       afterState: 'execution_recorded',
       linkedTransferRequestId: transferRequest.transferRequestId,
@@ -594,10 +588,9 @@ export async function createPaymentOrderExecution(args: {
   return serializeExecutionRecord(executionRecord);
 }
 
-export async function preparePaymentOrderExecution(args: {
+export async function preparePaymentOrderExecution(args: PaymentActorInput & {
   workspaceId: string;
   paymentOrderId: string;
-  actorUserId: string;
   sourceWorkspaceAddressId?: string | null;
 }) {
   let current = await prisma.paymentOrder.findFirstOrThrow({
@@ -640,8 +633,7 @@ export async function preparePaymentOrderExecution(args: {
         paymentOrderId: current.paymentOrderId,
         workspaceId: args.workspaceId,
         eventType: 'payment_order_source_selected',
-        actorType: 'user',
-        actorId: args.actorUserId,
+        ...buildPaymentEventActor(args),
         beforeState: current.state,
         afterState: current.state,
         payloadJson: {
@@ -665,6 +657,8 @@ export async function preparePaymentOrderExecution(args: {
       workspaceId: args.workspaceId,
       paymentOrderId: args.paymentOrderId,
       actorUserId: args.actorUserId,
+      actorType: args.actorType,
+      actorId: args.actorId,
     });
     current = await prisma.paymentOrder.findFirstOrThrow({
       where: { workspaceId: args.workspaceId, paymentOrderId: args.paymentOrderId },
@@ -721,7 +715,7 @@ export async function preparePaymentOrderExecution(args: {
         transferRequestId: transferRequest.transferRequestId,
         workspaceId: args.workspaceId,
         executionSource: 'prepared_solana_transfer',
-        executorUserId: args.actorUserId,
+        executorUserId: args.actorUserId ?? undefined,
         state: 'ready_for_execution',
         metadataJson: {
           paymentOrderId: current.paymentOrderId,
@@ -772,9 +766,7 @@ export async function preparePaymentOrderExecution(args: {
       transferRequestId: transferRequest.transferRequestId,
       workspaceId: args.workspaceId,
       eventType: 'execution_prepared',
-      actorType: 'user',
-      actorId: args.actorUserId,
-      eventSource: 'user',
+      ...buildTransferEventActor(args),
       beforeState: transferRequest.status,
       afterState: transferRequest.status === 'approved' ? 'ready_for_execution' : transferRequest.status,
       payloadJson: {
@@ -791,8 +783,7 @@ export async function preparePaymentOrderExecution(args: {
       paymentOrderId: current.paymentOrderId,
       workspaceId: args.workspaceId,
       eventType: 'payment_order_execution_prepared',
-      actorType: 'user',
-      actorId: args.actorUserId,
+      ...buildPaymentEventActor(args),
       beforeState: current.state,
       afterState: 'execution_recorded',
       linkedTransferRequestId: transferRequest.transferRequestId,
@@ -819,10 +810,9 @@ export async function preparePaymentOrderExecution(args: {
   };
 }
 
-export async function attachPaymentOrderSignature(args: {
+export async function attachPaymentOrderSignature(args: PaymentActorInput & {
   workspaceId: string;
   paymentOrderId: string;
-  actorUserId: string;
   submittedSignature?: string | null;
   externalReference?: string | null;
   submittedAt?: Date | null;
@@ -923,9 +913,7 @@ export async function attachPaymentOrderSignature(args: {
       transferRequestId: transferRequest.transferRequestId,
       workspaceId: args.workspaceId,
       eventType: hasSubmittedSignature ? 'execution_signature_attached' : 'execution_reference_attached',
-      actorType: 'user',
-      actorId: args.actorUserId,
-      eventSource: 'user',
+      ...buildTransferEventActor(args),
       beforeState: transferRequest.status,
       afterState: hasSubmittedSignature ? 'submitted_onchain' : transferRequest.status,
       linkedSignature: hasSubmittedSignature ? args.submittedSignature!.trim() : null,
@@ -940,8 +928,7 @@ export async function attachPaymentOrderSignature(args: {
       paymentOrderId: current.paymentOrderId,
       workspaceId: args.workspaceId,
       eventType: hasSubmittedSignature ? 'payment_order_signature_attached' : 'payment_order_execution_reference_attached',
-      actorType: 'user',
-      actorId: args.actorUserId,
+      ...buildPaymentEventActor(args),
       beforeState: current.state,
       afterState: 'execution_recorded',
       linkedTransferRequestId: transferRequest.transferRequestId,
@@ -959,10 +946,9 @@ export async function attachPaymentOrderSignature(args: {
 }
 
 async function createExecutionRecordForSignature(
-  args: {
+  args: PaymentActorInput & {
     workspaceId: string;
     paymentOrderId: string;
-    actorUserId: string;
     externalReference?: string | null;
     metadataJson?: Prisma.InputJsonValue;
   },
@@ -973,7 +959,7 @@ async function createExecutionRecordForSignature(
       transferRequestId,
       workspaceId: args.workspaceId,
       executionSource: args.externalReference ? 'external_proposal' : 'manual_signature',
-      executorUserId: args.actorUserId,
+      executorUserId: args.actorUserId ?? undefined,
       state: 'ready_for_execution',
       metadataJson: {
         ...(isRecordLike(args.metadataJson) ? args.metadataJson : {}),
@@ -1068,6 +1054,14 @@ function derivePaymentOrderState(
   }
 
   if (reconciliationDetail.latestExecution) {
+    const latest = reconciliationDetail.latestExecution;
+    const hasSignature = Boolean(latest.submittedSignature?.trim());
+    const awaitingWallet =
+      !hasSignature
+      && (latest.state === 'ready_for_execution' || latest.state === 'broadcast_failed');
+    if (awaitingWallet) {
+      return 'ready_for_execution';
+    }
     return 'execution_recorded';
   }
 
@@ -1367,7 +1361,7 @@ async function createPaymentOrderEvent(
     paymentOrderId: string;
     workspaceId: string;
     eventType: string;
-    actorType: 'user' | 'system' | 'worker';
+    actorType: 'user' | 'system' | 'worker' | 'api_key';
     actorId?: string | null;
     beforeState?: string | null;
     afterState?: string | null;
@@ -1392,6 +1386,21 @@ async function createPaymentOrderEvent(
       payloadJson: args.payloadJson,
     },
   });
+}
+
+function buildPaymentEventActor(args: PaymentActorInput) {
+  return {
+    actorType: args.actorType ?? 'user',
+    actorId: args.actorId ?? args.actorUserId,
+  };
+}
+
+function buildTransferEventActor(args: PaymentActorInput) {
+  const actor = buildPaymentEventActor(args);
+  return {
+    ...actor,
+    eventSource: actor.actorType,
+  };
 }
 
 function serializePaymentOrderEvent(event: PaymentOrderEvent) {

@@ -15,6 +15,7 @@ import { buildPaymentOrderAuditRows, buildPaymentOrderProofPacket } from '../pay
 import { isPaymentOrderState } from '../payment-order-state.js';
 import { isSolanaSignatureLike } from '../solana.js';
 import { assertWorkspaceAccess, assertWorkspaceAdmin } from '../workspace-access.js';
+import { actorFromAuth } from '../actor.js';
 
 export const paymentOrdersRouter = Router();
 
@@ -110,10 +111,11 @@ paymentOrdersRouter.post('/workspaces/:workspaceId/payment-orders', async (req, 
     const { workspaceId } = workspaceParamsSchema.parse(req.params);
     await assertWorkspaceAdmin(workspaceId, req.auth!);
     const input = createPaymentOrderSchema.parse(req.body);
+    const actor = actorFromAuth(req.auth!);
 
     const detail = await createPaymentOrder({
       workspaceId,
-      actorUserId: req.auth!.userId,
+      ...actor,
       destinationId: input.destinationId,
       payeeId: input.payeeId,
       sourceWorkspaceAddressId: input.sourceWorkspaceAddressId,
@@ -150,11 +152,12 @@ paymentOrdersRouter.patch('/workspaces/:workspaceId/payment-orders/:paymentOrder
     const { workspaceId, paymentOrderId } = paymentOrderParamsSchema.parse(req.params);
     await assertWorkspaceAdmin(workspaceId, req.auth!);
     const input = updatePaymentOrderSchema.parse(req.body);
+    const actor = actorFromAuth(req.auth!);
 
     res.json(await updatePaymentOrder({
       workspaceId,
       paymentOrderId,
-      actorUserId: req.auth!.userId,
+      ...actor,
       input: {
         ...input,
         dueAt: input.dueAt === undefined ? undefined : input.dueAt ? new Date(input.dueAt) : null,
@@ -169,11 +172,12 @@ paymentOrdersRouter.post('/workspaces/:workspaceId/payment-orders/:paymentOrderI
   try {
     const { workspaceId, paymentOrderId } = paymentOrderParamsSchema.parse(req.params);
     await assertWorkspaceAdmin(workspaceId, req.auth!);
+    const actor = actorFromAuth(req.auth!);
 
     res.json(await submitPaymentOrder({
       workspaceId,
       paymentOrderId,
-      actorUserId: req.auth!.userId,
+      ...actor,
     }));
   } catch (error) {
     next(error);
@@ -184,11 +188,12 @@ paymentOrdersRouter.post('/workspaces/:workspaceId/payment-orders/:paymentOrderI
   try {
     const { workspaceId, paymentOrderId } = paymentOrderParamsSchema.parse(req.params);
     await assertWorkspaceAdmin(workspaceId, req.auth!);
+    const actor = actorFromAuth(req.auth!);
 
     res.json(await cancelPaymentOrder({
       workspaceId,
       paymentOrderId,
-      actorUserId: req.auth!.userId,
+      ...actor,
     }));
   } catch (error) {
     next(error);
@@ -202,11 +207,12 @@ paymentOrdersRouter.post(
       const { workspaceId, paymentOrderId } = paymentOrderParamsSchema.parse(req.params);
       await assertWorkspaceAdmin(workspaceId, req.auth!);
       const input = prepareExecutionSchema.parse(req.body);
+      const actor = actorFromAuth(req.auth!);
 
       const prepared = await preparePaymentOrderExecution({
         workspaceId,
         paymentOrderId,
-        actorUserId: req.auth!.userId,
+        ...actor,
         sourceWorkspaceAddressId: input.sourceWorkspaceAddressId,
       });
 
@@ -224,11 +230,12 @@ paymentOrdersRouter.post(
       const { workspaceId, paymentOrderId } = paymentOrderParamsSchema.parse(req.params);
       await assertWorkspaceAdmin(workspaceId, req.auth!);
       const input = createExecutionSchema.parse(req.body);
+      const actor = actorFromAuth(req.auth!);
 
       const executionRecord = await createPaymentOrderExecution({
         workspaceId,
         paymentOrderId,
-        actorUserId: req.auth!.userId,
+        ...actor,
         executionSource: input.executionSource,
         externalReference: input.externalReference,
         metadataJson: input.metadataJson,
@@ -248,11 +255,12 @@ paymentOrdersRouter.post(
       const { workspaceId, paymentOrderId } = paymentOrderParamsSchema.parse(req.params);
       await assertWorkspaceAdmin(workspaceId, req.auth!);
       const input = attachSignatureSchema.parse(req.body);
+      const actor = actorFromAuth(req.auth!);
 
       const executionRecord = await attachPaymentOrderSignature({
         workspaceId,
         paymentOrderId,
-        actorUserId: req.auth!.userId,
+        ...actor,
         submittedSignature: input.submittedSignature,
         externalReference: input.externalReference,
         submittedAt: input.submittedAt ? new Date(input.submittedAt) : null,

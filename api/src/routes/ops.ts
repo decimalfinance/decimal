@@ -10,6 +10,7 @@ import {
 } from '../reconciliation.js';
 import { prisma } from '../prisma.js';
 import { assertWorkspaceAccess } from '../workspace-access.js';
+import { listWorkspaceAuditLog } from '../workspace-audit-log.js';
 
 export const opsRouter = Router();
 
@@ -33,6 +34,11 @@ const exportQuerySchema = z.object({
 
 const historyQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(25),
+});
+
+const auditLogQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(250).default(100),
+  entityType: z.enum(['payment_order', 'transfer_request', 'approval', 'execution', 'exception', 'export']).optional(),
 });
 
 type TxHealthRow = {
@@ -128,6 +134,22 @@ opsRouter.get('/workspaces/:workspaceId/export-jobs', async (req, res, next) => 
         requestedByUser: item.requestedByUser,
       })),
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+opsRouter.get('/workspaces/:workspaceId/audit-log', async (req, res, next) => {
+  try {
+    const { workspaceId } = workspaceParamsSchema.parse(req.params);
+    const query = auditLogQuerySchema.parse(req.query);
+    await assertWorkspaceAccess(workspaceId, req.auth!);
+
+    res.json(await listWorkspaceAuditLog({
+      workspaceId,
+      limit: query.limit,
+      entityType: query.entityType,
+    }));
   } catch (error) {
     next(error);
   }

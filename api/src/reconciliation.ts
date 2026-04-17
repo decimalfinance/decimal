@@ -683,6 +683,132 @@ export async function getReconciliationDetail(workspaceId: string, transferReque
   };
 }
 
+type ReconciliationDetail = Awaited<ReturnType<typeof getReconciliationDetail>>;
+type ReconciliationException = ReconciliationDetail['exceptions'][number];
+type ReconciliationOutcome =
+  | 'pending'
+  | 'ready_for_execution'
+  | 'submitted_onchain'
+  | 'observed_pending_match'
+  | 'matched_exact'
+  | 'matched_split'
+  | 'partial_settlement'
+  | 'exception'
+  | 'broadcast_failed'
+  | 'closed';
+type ReconciliationRecommendedAction =
+  | 'none'
+  | 'prepare_execution'
+  | 'attach_execution_signature'
+  | 'wait_for_settlement'
+  | 'review_observed_execution'
+  | 'review_partial_settlement'
+  | 'review_exception'
+  | 'export_proof';
+
+export async function getReconciliationExplanation(workspaceId: string, transferRequestId: string) {
+  const detail = await getReconciliationDetail(workspaceId, transferRequestId);
+  const activeExceptions = detail.exceptions.filter(isActiveException);
+  const edgeCases = buildReconciliationEdgeCases(detail, activeExceptions);
+  const outcome = deriveReconciliationOutcome(detail, activeExceptions);
+  const submittedSignature = detail.latestExecution?.submittedSignature ?? null;
+  const signatureMatched =
+    submittedSignature !== null
+    && (
+      detail.match?.signature === submittedSignature
+      || detail.linkedSignature === submittedSignature
+      || detail.linkedObservedTransfers.some((transfer) => transfer.signature === submittedSignature)
+    );
+
+  return {
+    servedAt: new Date().toISOString(),
+    workspaceId,
+    transferRequestId,
+    outcome,
+    summary: buildReconciliationSummary(detail, outcome, activeExceptions),
+    confidence: {
+      score: detail.match?.confidenceScore ?? null,
+      band: detail.match?.confidenceBand ?? (activeExceptions.length ? 'needs_review' : 'unknown'),
+      rule: detail.match?.matchRule ?? null,
+      candidateCount: detail.match?.candidateCount ?? 0,
+    },
+    amount: {
+      requestedRaw: detail.amountRaw,
+      requestedUsdc: formatRawUsdc(detail.amountRaw),
+      matchedRaw: detail.match?.matchedAmountRaw ?? '0',
+      matchedUsdc: detail.match?.matchedAmountRaw ? formatRawUsdc(detail.match.matchedAmountRaw) : '0.000000',
+      varianceRaw: detail.match?.amountVarianceRaw ?? detail.amountRaw,
+      varianceUsdc: detail.match?.amountVarianceRaw ? formatRawUsdc(detail.match.amountVarianceRaw) : formatRawUsdc(detail.amountRaw),
+    },
+    states: {
+      requestStatus: detail.status,
+      displayState: detail.requestDisplayState,
+      approval: detail.approvalState,
+      execution: detail.executionState,
+    },
+    matching: detail.match
+      ? {
+          signature: detail.match.signature,
+          observedTransferId: detail.match.observedTransferId,
+          status: detail.match.matchStatus,
+          destinationMatchType: detail.match.destinationMatchType,
+          timeDeltaSeconds: detail.match.timeDeltaSeconds,
+          chainToMatchMs: detail.match.chainToMatchMs,
+          explanation: detail.matchExplanation ?? detail.match.explanation,
+        }
+      : null,
+    execution: {
+      latestExecution: detail.latestExecution,
+      submittedSignature,
+      observedExecutionTransaction: detail.observedExecutionTransaction,
+      signatureObserved: Boolean(detail.observedExecutionTransaction),
+      signatureMatched,
+    },
+    edgeCases,
+    evidence: {
+      linkedSignature: detail.linkedSignature,
+      linkedPaymentId: detail.linkedPaymentId,
+      linkedTransferIds: detail.linkedTransferIds,
+      observedTransfers: detail.linkedObservedTransfers.map((transfer) => ({
+        transferId: transfer.transferId,
+        signature: transfer.signature,
+        sourceWallet: transfer.sourceWallet,
+        destinationWallet: transfer.destinationWallet,
+        amountRaw: transfer.amountRaw,
+        amountUsdc: formatRawUsdc(transfer.amountRaw),
+        eventTime: transfer.eventTime,
+      })),
+      observedPayment: detail.linkedObservedPayment
+        ? {
+            paymentId: detail.linkedObservedPayment.paymentId,
+            signature: detail.linkedObservedPayment.signature,
+            sourceWallet: detail.linkedObservedPayment.sourceWallet,
+            destinationWallet: detail.linkedObservedPayment.destinationWallet,
+            netDestinationAmountRaw: detail.linkedObservedPayment.netDestinationAmountRaw,
+            netDestinationAmountUsdc: formatRawUsdc(detail.linkedObservedPayment.netDestinationAmountRaw),
+            eventTime: detail.linkedObservedPayment.eventTime,
+          }
+        : null,
+      relatedPaymentCount: detail.relatedObservedPayments.length,
+      exceptionIds: detail.exceptions.map((exception) => exception.exceptionId),
+    },
+    recommendedAction: deriveRecommendedAction(detail, outcome, activeExceptions),
+  };
+}
+
+export async function getReconciliationRefreshPreview(workspaceId: string, transferRequestId: string) {
+  const explanation = await getReconciliationExplanation(workspaceId, transferRequestId);
+
+  return {
+    ...explanation,
+    refresh: {
+      mode: 'read_model_refresh',
+      mutated: false,
+      note: 'The control plane returned the current reconciliation read model. Matching is performed by the streaming worker, not rerun inside this API request.',
+    },
+  };
+}
+
 export async function applyExceptionAction(args: {
   workspaceId: string;
   exceptionId: string;
@@ -1287,6 +1413,175 @@ export function getAvailableExceptionActions(status: string) {
     }
   }
   return actions;
+}
+
+function deriveReconciliationOutcome(
+  detail: ReconciliationDetail,
+  activeExceptions: ReconciliationException[],
+): ReconciliationOutcome {
+  if (detail.status === 'closed') {
+    return 'closed';
+  }
+
+  if (activeExceptions.some((exception) => exception.reasonCode === 'partial_settlement')) {
+    return 'partial_settlement';
+  }
+
+  if (activeExceptions.length) {
+    return 'exception';
+  }
+
+  switch (detail.match?.matchStatus) {
+    case 'matched_exact':
+      return 'matched_exact';
+    case 'matched_split':
+      return 'matched_split';
+    case 'matched_partial':
+      return 'partial_settlement';
+    default:
+      break;
+  }
+
+  if (detail.latestExecution?.state === 'broadcast_failed') {
+    return 'broadcast_failed';
+  }
+
+  if (detail.observedExecutionTransaction && !detail.match) {
+    return 'observed_pending_match';
+  }
+
+  if (detail.executionState === 'ready_for_execution') {
+    return 'ready_for_execution';
+  }
+
+  if (detail.executionState === 'submitted_onchain') {
+    return 'submitted_onchain';
+  }
+
+  return 'pending';
+}
+
+function buildReconciliationSummary(
+  detail: ReconciliationDetail,
+  outcome: ReconciliationOutcome,
+  activeExceptions: ReconciliationException[],
+) {
+  const requested = `${formatRawUsdc(detail.amountRaw)} ${detail.asset.toUpperCase()}`;
+  const matched = detail.match ? `${formatRawUsdc(detail.match.matchedAmountRaw)} ${detail.asset.toUpperCase()}` : null;
+  const destinationLabel =
+    detail.destination?.label
+    ?? detail.destinationWorkspaceAddress?.displayName
+    ?? detail.destinationWorkspaceAddress?.address
+    ?? 'destination';
+
+  switch (outcome) {
+    case 'matched_exact':
+      return `${requested} was matched exactly to ${destinationLabel}.`;
+    case 'matched_split':
+      return `${requested} was fully matched across multiple observed settlement legs to ${destinationLabel}.`;
+    case 'partial_settlement':
+      return `${matched ?? 'Observed settlement'} only partially covers the requested ${requested}; review the remaining variance.`;
+    case 'exception':
+      return `Reconciliation needs review: ${activeExceptions.map((exception) => exception.reasonCode).join(', ')}.`;
+    case 'observed_pending_match':
+      return 'The submitted execution signature was observed onchain, but no settlement match has been recorded yet.';
+    case 'ready_for_execution':
+      return 'The request is approved and ready for execution, but no submitted signature has been attached.';
+    case 'submitted_onchain':
+      return 'Execution evidence is attached. The system is waiting for onchain observation and settlement matching.';
+    case 'broadcast_failed':
+      return 'The latest execution attempt failed before observed settlement.';
+    case 'closed':
+      return `The request is closed with reconciliation state ${detail.requestDisplayState}.`;
+    case 'pending':
+    default:
+      return 'The request is not ready for settlement matching yet.';
+  }
+}
+
+function buildReconciliationEdgeCases(
+  detail: ReconciliationDetail,
+  activeExceptions: ReconciliationException[],
+) {
+  const edgeCases = activeExceptions.map((exception) => ({
+    code: exception.reasonCode,
+    severity: exception.severity,
+    status: exception.status,
+    summary: exception.explanation,
+    evidence: {
+      exceptionId: exception.exceptionId,
+      signature: exception.signature,
+      observedTransferId: exception.observedTransferId,
+    },
+  }));
+
+  if (detail.match?.matchStatus === 'matched_split') {
+    edgeCases.push({
+      code: 'split_settlement',
+      severity: 'info',
+      status: 'observed',
+      summary: detail.matchExplanation ?? 'The requested amount was satisfied across multiple observed settlement legs.',
+      evidence: {
+        exceptionId: null,
+        signature: detail.match.signature,
+        observedTransferId: detail.match.observedTransferId,
+      },
+    });
+  }
+
+  if (detail.observedExecutionTransaction && !detail.match) {
+    edgeCases.push({
+      code: 'execution_observed_without_match',
+      severity: 'warning',
+      status: 'observed',
+      summary: 'A submitted execution signature was observed onchain, but no settlement match exists yet.',
+      evidence: {
+        exceptionId: null,
+        signature: detail.observedExecutionTransaction.signature,
+        observedTransferId: null,
+      },
+    });
+  }
+
+  return edgeCases;
+}
+
+function deriveRecommendedAction(
+  detail: ReconciliationDetail,
+  outcome: ReconciliationOutcome,
+  activeExceptions: ReconciliationException[],
+): ReconciliationRecommendedAction {
+  if (activeExceptions.some((exception) => exception.reasonCode === 'partial_settlement')) {
+    return 'review_partial_settlement';
+  }
+
+  if (activeExceptions.length || outcome === 'exception') {
+    return 'review_exception';
+  }
+
+  switch (outcome) {
+    case 'matched_exact':
+    case 'matched_split':
+    case 'closed':
+      return 'export_proof';
+    case 'ready_for_execution':
+      return detail.latestExecution ? 'attach_execution_signature' : 'prepare_execution';
+    case 'submitted_onchain':
+      return 'wait_for_settlement';
+    case 'observed_pending_match':
+      return 'review_observed_execution';
+    case 'partial_settlement':
+      return 'review_partial_settlement';
+    case 'broadcast_failed':
+      return 'prepare_execution';
+    case 'pending':
+    default:
+      return 'none';
+  }
+}
+
+function isActiveException(exception: ReconciliationException) {
+  return exception.status !== 'dismissed' && exception.status !== 'expected';
 }
 
 function applyExceptionStateOverlay(

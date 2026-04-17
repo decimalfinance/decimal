@@ -8,6 +8,8 @@ import {
   applyExceptionAction,
   getExceptionDetail,
   getReconciliationDetail,
+  getReconciliationExplanation,
+  getReconciliationRefreshPreview,
   listReconciliationQueue,
   listWorkspaceExceptions,
   updateExceptionMetadata,
@@ -233,6 +235,34 @@ eventsRouter.get(
       await assertWorkspaceAccess(workspaceId, req.auth!);
       const detail = await getReconciliationDetail(workspaceId, transferRequestId);
       res.json(detail);
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+eventsRouter.get(
+  '/workspaces/:workspaceId/reconciliation-queue/:transferRequestId/explain',
+  async (req, res, next) => {
+    try {
+      const { workspaceId, transferRequestId } = transferRequestParamsSchema.parse(req.params);
+      await assertWorkspaceAccess(workspaceId, req.auth!);
+      const explanation = await getReconciliationExplanation(workspaceId, transferRequestId);
+      res.json(explanation);
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+eventsRouter.post(
+  '/workspaces/:workspaceId/reconciliation-queue/:transferRequestId/refresh',
+  async (req, res, next) => {
+    try {
+      const { workspaceId, transferRequestId } = transferRequestParamsSchema.parse(req.params);
+      await assertWorkspaceAccess(workspaceId, req.auth!);
+      const explanation = await getReconciliationRefreshPreview(workspaceId, transferRequestId);
+      res.json(explanation);
     } catch (error) {
       next(error);
     }

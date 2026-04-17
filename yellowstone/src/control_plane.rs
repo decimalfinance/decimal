@@ -17,8 +17,11 @@ pub struct ControlPlaneClient {
 impl ControlPlaneClient {
     pub fn new(base_url: String, service_token: Option<String>) -> Self {
         Self {
+            // No default timeout: `GET /internal/matching-index/events` is a long-lived SSE
+            // stream. A client-wide timeout applies to the entire body and would abort the
+            // stream after a few seconds (surfacing as reqwest's generic "error decoding
+            // response body"). Short timeouts are set per request where appropriate.
             client: Client::builder()
-                .timeout(Duration::from_secs(3))
                 .build()
                 .expect("control plane client should build"),
             base_url,
@@ -29,7 +32,7 @@ impl ControlPlaneClient {
     pub async fn fetch_registry(&self) -> Result<WorkspaceRegistry, reqwest::Error> {
         let url = format!("{}/internal/matching-index", self.base_url);
         let index = self
-            .with_internal_auth(self.client.get(url))
+            .with_internal_auth(self.client.get(url).timeout(Duration::from_secs(3)))
             .send()
             .await?
             .error_for_status()?

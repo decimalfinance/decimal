@@ -484,6 +484,7 @@ async function serializePaymentRunSummary(run: PaymentRunWithRelations) {
     limit: 250,
   });
   const totals = summarizeRunOrders(orders.items);
+  const reconciliationSummary = summarizeRunReconciliation(orders.items);
   const derivedState = derivePaymentRunState(run.state, orders.items);
 
   return {
@@ -505,6 +506,7 @@ async function serializePaymentRunSummary(run: PaymentRunWithRelations) {
       displayName: run.createdByUser.displayName,
     } : null,
     totals,
+    reconciliationSummary,
   };
 }
 
@@ -530,6 +532,84 @@ function summarizeRunOrders(orders: Array<{ amountRaw: string; derivedState: str
     ].includes(order.derivedState)).length,
     readyCount: actionableOrders.filter((order) => ['approved', 'ready_for_execution', 'execution_recorded'].includes(order.derivedState)).length,
   };
+}
+
+function summarizeRunReconciliation(orders: Array<{
+  amountRaw: string;
+  derivedState: string;
+  reconciliationDetail: {
+    requestDisplayState: string;
+    match: {
+      matchedAmountRaw: string;
+      amountVarianceRaw: string;
+    } | null;
+    exceptions: Array<{
+      status: string;
+    }>;
+  } | null;
+}>) {
+  const settlementCounts = {
+    pending: 0,
+    matched: 0,
+    partial: 0,
+    exception: 0,
+    closed: 0,
+    none: 0,
+  };
+  let requestedAmountRaw = 0n;
+  let matchedAmountRaw = 0n;
+  let varianceAmountRaw = 0n;
+  let openExceptionCount = 0;
+
+  for (const order of orders) {
+    requestedAmountRaw += BigInt(order.amountRaw);
+    const displayState = order.derivedState === 'closed'
+      ? 'closed'
+      : order.reconciliationDetail?.requestDisplayState ?? 'none';
+
+    if (isSettlementCountKey(displayState)) {
+      settlementCounts[displayState] += 1;
+    } else {
+      settlementCounts.none += 1;
+    }
+
+    if (order.reconciliationDetail?.match) {
+      matchedAmountRaw += BigInt(order.reconciliationDetail.match.matchedAmountRaw);
+      varianceAmountRaw += BigInt(order.reconciliationDetail.match.amountVarianceRaw);
+    } else {
+      varianceAmountRaw += BigInt(order.amountRaw);
+    }
+
+    openExceptionCount += order.reconciliationDetail?.exceptions.filter(
+      (exception) => exception.status !== 'dismissed' && exception.status !== 'expected',
+    ).length ?? 0;
+  }
+
+  const actionableCount = orders.filter((order) => order.derivedState !== 'cancelled').length;
+  const completedCount = settlementCounts.matched + settlementCounts.closed;
+
+  return {
+    requestedAmountRaw: requestedAmountRaw.toString(),
+    matchedAmountRaw: matchedAmountRaw.toString(),
+    varianceAmountRaw: varianceAmountRaw.toString(),
+    settlementCounts,
+    openExceptionCount,
+    completedCount,
+    completionRatio: actionableCount ? completedCount / actionableCount : 0,
+    needsReview:
+      openExceptionCount > 0
+      || settlementCounts.partial > 0
+      || settlementCounts.exception > 0,
+  };
+}
+
+function isSettlementCountKey(value: string): value is 'pending' | 'matched' | 'partial' | 'exception' | 'closed' | 'none' {
+  return value === 'pending'
+    || value === 'matched'
+    || value === 'partial'
+    || value === 'exception'
+    || value === 'closed'
+    || value === 'none';
 }
 
 function derivePaymentRunState(storedState: string, orders: Array<{ derivedState: string }>) {

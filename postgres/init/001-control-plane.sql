@@ -80,6 +80,24 @@ CREATE TABLE IF NOT EXISTS api_keys
   UNIQUE (workspace_id, label)
 );
 
+CREATE TABLE IF NOT EXISTS idempotency_records
+(
+  idempotency_record_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  key TEXT NOT NULL,
+  request_method TEXT NOT NULL,
+  request_path TEXT NOT NULL,
+  request_hash TEXT NOT NULL,
+  actor_type TEXT NOT NULL,
+  actor_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'processing',
+  status_code INTEGER,
+  response_body_json JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  UNIQUE (actor_type, actor_id, request_method, request_path, key)
+);
+
 CREATE TABLE IF NOT EXISTS workspace_addresses
 (
   workspace_address_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -641,6 +659,10 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_workspace_status_created_at
   ON api_keys(workspace_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_api_keys_organization_created_at
   ON api_keys(organization_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_idempotency_records_actor_created_at
+  ON idempotency_records(actor_type, actor_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_idempotency_records_expires_at
+  ON idempotency_records(expires_at);
 CREATE INDEX IF NOT EXISTS idx_workspaces_organization_id ON workspaces(organization_id);
 CREATE INDEX IF NOT EXISTS idx_workspace_addresses_workspace_id ON workspace_addresses(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_workspace_addresses_address ON workspace_addresses(address);
@@ -759,6 +781,11 @@ FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS trg_api_keys_updated_at ON api_keys;
 CREATE TRIGGER trg_api_keys_updated_at
 BEFORE UPDATE ON api_keys
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_idempotency_records_updated_at ON idempotency_records;
+CREATE TRIGGER trg_idempotency_records_updated_at
+BEFORE UPDATE ON idempotency_records
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_workspace_addresses_updated_at ON workspace_addresses;

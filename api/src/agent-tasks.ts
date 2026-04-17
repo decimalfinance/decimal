@@ -108,13 +108,13 @@ export async function listAgentTasks(args: {
           id: 'mark_reviewed',
           method: 'POST',
           href: `/workspaces/${args.workspaceId}/exceptions/${exception.exceptionId}/actions`,
-          body: { action: 'mark_reviewed' },
+          body: { action: 'reviewed' },
         },
         {
           id: 'dismiss',
           method: 'POST',
           href: `/workspaces/${args.workspaceId}/exceptions/${exception.exceptionId}/actions`,
-          body: { action: 'dismiss' },
+          body: { action: 'dismissed' },
         },
       ],
       context: {
