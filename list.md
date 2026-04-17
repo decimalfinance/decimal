@@ -92,7 +92,7 @@
 - [x] API latency metrics.
 - [x] Worker stream health metrics.
 - [x] Matching engine metrics.
-- [ ] Error-rate metrics by route and worker stage.
+- [x] Error-rate metrics by route and worker stage.
 - [ ] Dead-letter/error table for failed processing.
 - [ ] Alerting rules for worker disconnect, stale stream, high exception rate, API failures.
 - [x] Structured logs with request IDs.

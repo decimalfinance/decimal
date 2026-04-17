@@ -3,6 +3,8 @@ import { prisma } from '../prisma.js';
 import { config } from '../config.js';
 import { ACTIVE_MATCHING_REQUEST_STATUSES } from '../transfer-request-lifecycle.js';
 import { getMatchingIndexVersion, subscribeToMatchingIndexChanges } from '../matching-index-events.js';
+import { listRouteMetrics, listWorkerStageMetrics, recordWorkerStageMetric } from '../ops-metrics.js';
+import { z } from 'zod';
 
 export const internalRouter = Router();
 
@@ -85,6 +87,25 @@ internalRouter.get('/internal/matching-index', async (_req, res, next) => {
 internalRouter.get('/internal/matching-index/events', (req, res) => {
   const unsubscribe = subscribeToMatchingIndexChanges(res);
   req.on('close', unsubscribe);
+});
+
+const workerStageEventSchema = z.object({
+  stage: z.string().trim().min(1).max(100),
+  status: z.enum(['ok', 'error']),
+  message: z.string().trim().min(1).max(1000).optional(),
+});
+
+internalRouter.post('/internal/worker-stage-events', (req, res) => {
+  const payload = workerStageEventSchema.parse(req.body);
+  const metric = recordWorkerStageMetric(payload);
+  res.json({ ok: true, metric });
+});
+
+internalRouter.get('/internal/ops-metrics', (_req, res) => {
+  res.json({
+    routeMetrics: listRouteMetrics(),
+    workerStageMetrics: listWorkerStageMetrics(),
+  });
 });
 
 async function buildWorkspaceMatchingSnapshot(workspaceId: string) {

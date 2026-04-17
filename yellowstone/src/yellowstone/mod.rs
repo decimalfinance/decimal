@@ -169,6 +169,21 @@ impl YellowstoneWorker {
 
         if let Err(error) = self.refresh_registry_if_stale().await {
             eprintln!("Failed to load workspace registry on startup: {}", error);
+            let _ = self
+                .registry_cache
+                .lock()
+                .await
+                .client()
+                .report_worker_stage("startup_registry_refresh", "error", Some(&error.to_string()))
+                .await;
+        } else {
+            let _ = self
+                .registry_cache
+                .lock()
+                .await
+                .client()
+                .report_worker_stage("startup_registry_refresh", "ok", None)
+                .await;
         }
         tokio::spawn(run_matching_index_event_listener(
             self.registry_cache.clone(),
@@ -236,9 +251,31 @@ impl YellowstoneWorker {
             let should_reconnect = loop {
                 if let Err(error) = self.flush_pending_raw_observations(false).await {
                     eprintln!("Failed to flush buffered raw observations: {}", error);
+                    let _ = self
+                        .registry_cache
+                        .lock()
+                        .await
+                        .client()
+                        .report_worker_stage(
+                            "flush_raw_observations",
+                            "error",
+                            Some(&error.to_string()),
+                        )
+                        .await;
                 }
                 if let Err(error) = self.flush_pending_materialized_observations(false).await {
                     eprintln!("Failed to flush buffered observed settlements: {}", error);
+                    let _ = self
+                        .registry_cache
+                        .lock()
+                        .await
+                        .client()
+                        .report_worker_stage(
+                            "flush_materialized_observations",
+                            "error",
+                            Some(&error.to_string()),
+                        )
+                        .await;
                 }
                 match stream.next().await {
                     Some(Ok(update)) => {
@@ -258,6 +295,17 @@ impl YellowstoneWorker {
                                 "Yellowstone stream error: {}. Reconnecting in {:?}...",
                                 error, reconnect_backoff
                             );
+                            let _ = self
+                                .registry_cache
+                                .lock()
+                                .await
+                                .client()
+                                .report_worker_stage(
+                                    "stream_receive",
+                                    "error",
+                                    Some(&error.to_string()),
+                                )
+                                .await;
                         }
                         break true;
                     }
@@ -276,12 +324,34 @@ impl YellowstoneWorker {
                     "Failed to flush buffered raw observations before reconnect: {}",
                     error
                 );
+                let _ = self
+                    .registry_cache
+                    .lock()
+                    .await
+                    .client()
+                    .report_worker_stage(
+                        "flush_raw_observations",
+                        "error",
+                        Some(&error.to_string()),
+                    )
+                    .await;
             }
             if let Err(error) = self.flush_pending_materialized_observations(true).await {
                 eprintln!(
                     "Failed to flush buffered observed settlements before reconnect: {}",
                     error
                 );
+                let _ = self
+                    .registry_cache
+                    .lock()
+                    .await
+                    .client()
+                    .report_worker_stage(
+                        "flush_materialized_observations",
+                        "error",
+                        Some(&error.to_string()),
+                    )
+                    .await;
             }
 
             if should_reconnect {

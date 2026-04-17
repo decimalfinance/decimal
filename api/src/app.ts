@@ -18,6 +18,7 @@ import { healthRouter } from './routes/health.js';
 import { idempotencyMiddleware } from './idempotency.js';
 import { internalRouter } from './routes/internal.js';
 import { notifyMatchingIndexChanged, shouldInvalidateMatchingIndex } from './matching-index-events.js';
+import { recordRouteMetric } from './ops-metrics.js';
 import { openApiRouter } from './routes/openapi.js';
 import { organizationsRouter } from './routes/organizations.js';
 import { opsRouter } from './routes/ops.js';
@@ -70,6 +71,14 @@ export function createApp() {
         }
       });
     }
+
+    res.on('finish', () => {
+      recordRouteMetric({
+        method: req.method,
+        route: req.path,
+        statusCode: res.statusCode,
+      });
+    });
 
     next();
   });

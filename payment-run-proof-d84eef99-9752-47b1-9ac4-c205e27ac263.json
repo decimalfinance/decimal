@@ -1,0 +1,122 @@
+{
+  "proofId": "axoria_payment_run_proof_57ae23f4f5aa5d22e14fd832",
+  "canonicalDigest": "57ae23f4f5aa5d22e14fd8325233f88b727b5035251a1666b1b2a5614db4376e",
+  "canonicalDigestAlgorithm": "sha256:stable-json-v1",
+  "generatedAt": "2026-04-17T13:37:23.071Z",
+  "packetType": "stablecoin_payment_run_proof",
+  "version": 1,
+  "detailLevel": "summary",
+  "workspaceId": "e69b82d4-cdf3-432d-8667-f4499570cfca",
+  "paymentRunId": "d84eef99-9752-47b1-9ac4-c205e27ac263",
+  "runName": "payouts",
+  "status": "settled",
+  "readiness": {
+    "status": "complete",
+    "counts": {
+      "total": 2,
+      "complete": 2,
+      "in_progress": 0,
+      "needs_review": 0,
+      "blocked": 0
+    },
+    "recommendedAction": "archive_or_share_run_proof"
+  },
+  "totals": {
+    "orderCount": 2,
+    "actionableCount": 2,
+    "cancelledCount": 0,
+    "totalAmountRaw": "20000",
+    "settledCount": 2,
+    "exceptionCount": 0,
+    "pendingApprovalCount": 0,
+    "approvedCount": 2,
+    "readyCount": 0
+  },
+  "reconciliationSummary": {
+    "requestedAmountRaw": "20000",
+    "matchedAmountRaw": "20000",
+    "varianceAmountRaw": "0",
+    "settlementCounts": {
+      "pending": 0,
+      "matched": 2,
+      "partial": 0,
+      "exception": 0,
+      "closed": 0,
+      "none": 0
+    },
+    "openExceptionCount": 0,
+    "completedCount": 2,
+    "completionRatio": 1,
+    "needsReview": false
+  },
+  "orders": [
+    {
+      "paymentOrderId": "0e73c0ff-f0c2-458d-80fc-2145e1e5ad4d",
+      "paymentRequestId": "bbae41c4-69b1-4415-b18f-db2322ac2e41",
+      "transferRequestId": "c023916b-64bc-4184-9b5c-e82bba9ed53c",
+      "payee": {
+        "payeeId": "15c9a383-f152-40c2-8fd1-4c36d53350ff",
+        "name": "Beta Supplies"
+      },
+      "destination": {
+        "destinationId": "1c48140d-fa47-4c1e-981b-08c424394d56",
+        "label": "Beta Supplies",
+        "walletAddress": "33yL624hoHqChSDR2y8L2cBjYRGEgQ9QSqcuKFfm1BnP",
+        "trustState": "unreviewed",
+        "isInternal": false
+      },
+      "amountRaw": "10000",
+      "asset": "usdc",
+      "reference": "INV-1002",
+      "state": "settled",
+      "approvalState": "approved",
+      "executionState": "submitted_onchain",
+      "settlementState": "matched",
+      "submittedSignature": "5FjYuAkHgYWgdfyq6XK8zy2eQSptAHEHE2YDTibgpNAj6CqobnyPso8vaPFqxp5yu9QBxs4nsbG4rTyR6yrRYc3q",
+      "matchStatus": "matched_exact",
+      "matchedAmountRaw": "10000",
+      "exceptionCount": 0,
+      "proofStatus": "complete",
+      "proofId": "axoria_payment_proof_c7a0e8b51880847c55b135fc",
+      "proofDigest": "c7a0e8b51880847c55b135fc282041a21193a2c49e6bfdd6d25f38c73b7f0de1",
+      "fullProofEndpoint": "/workspaces/e69b82d4-cdf3-432d-8667-f4499570cfca/payment-orders/0e73c0ff-f0c2-458d-80fc-2145e1e5ad4d/proof"
+    },
+    {
+      "paymentOrderId": "55312361-6afb-4518-82e7-2081be020533",
+      "paymentRequestId": "93706863-dc47-4e75-83f1-35fd7aa1e9b4",
+      "transferRequestId": "458472ac-27f9-44ac-8643-4ce9e3d46589",
+      "payee": {
+        "payeeId": "4f01c8e7-eb91-494f-9ce6-7ff4385a28c2",
+        "name": "Acme Corp"
+      },
+      "destination": {
+        "destinationId": "aba92931-caf7-41cb-a3d1-0d087778e0d0",
+        "label": "Acme Corp",
+        "walletAddress": "8cZ65A8ERdVsXq3YnEdMNimwG7DhGe1tPszysJwh43Zx",
+        "trustState": "unreviewed",
+        "isInternal": false
+      },
+      "amountRaw": "10000",
+      "asset": "usdc",
+      "reference": "INV-1001",
+      "state": "settled",
+      "approvalState": "approved",
+      "executionState": "submitted_onchain",
+      "settlementState": "matched",
+      "submittedSignature": "5FjYuAkHgYWgdfyq6XK8zy2eQSptAHEHE2YDTibgpNAj6CqobnyPso8vaPFqxp5yu9QBxs4nsbG4rTyR6yrRYc3q",
+      "matchStatus": "matched_exact",
+      "matchedAmountRaw": "10000",
+      "exceptionCount": 0,
+      "proofStatus": "complete",
+      "proofId": "axoria_payment_proof_ba3a9dac180b37eacb0d4268",
+      "proofDigest": "ba3a9dac180b37eacb0d426814af1f5ee71944a80da9a9e5d7c49ae6f35d9641",
+      "fullProofEndpoint": "/workspaces/e69b82d4-cdf3-432d-8667-f4499570cfca/payment-orders/55312361-6afb-4518-82e7-2081be020533/proof"
+    }
+  ],
+  "orderProofs": [],
+  "agentSummary": {
+    "canTreatAsFinal": true,
+    "needsHumanReview": false,
+    "recommendedAction": "archive_or_share_run_proof"
+  }
+}

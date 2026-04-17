@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use reqwest::Client;
 use serde::Deserialize;
+use serde_json;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -50,6 +51,29 @@ impl ControlPlaneClient {
             .send()
             .await?
             .error_for_status()
+    }
+
+    pub async fn report_worker_stage(
+        &self,
+        stage: &str,
+        status: &str,
+        message: Option<&str>,
+    ) -> Result<(), reqwest::Error> {
+        let url = format!("{}/internal/worker-stage-events", self.base_url);
+        let mut payload = serde_json::json!({
+            "stage": stage,
+            "status": status,
+        });
+
+        if let Some(message) = message {
+            payload["message"] = serde_json::Value::String(message.to_string());
+        }
+
+        self.with_internal_auth(self.client.post(url).json(&payload))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
     }
 
     fn with_internal_auth(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
@@ -391,6 +415,14 @@ pub async fn run_matching_index_event_listener(registry_cache: Arc<Mutex<Workspa
                                         "Matching index refreshed to version {}.",
                                         cache.registry().version()
                                     );
+                                    let _ = cache
+                                        .client()
+                                        .report_worker_stage(
+                                            "matching_index_refresh",
+                                            "ok",
+                                            Some(&format!("version={}", cache.registry().version())),
+                                        )
+                                        .await;
                                 }
                                 Err(error) => {
                                     if cache.should_log_refresh_error() {
@@ -399,6 +431,14 @@ pub async fn run_matching_index_event_listener(registry_cache: Arc<Mutex<Workspa
                                             error
                                         );
                                     }
+                                    let _ = cache
+                                        .client()
+                                        .report_worker_stage(
+                                            "matching_index_refresh",
+                                            "error",
+                                            Some(&error.to_string()),
+                                        )
+                                        .await;
                                 }
                             }
                         }

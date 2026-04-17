@@ -147,6 +147,8 @@ export const API_ENDPOINTS = [
   endpoint('internal_matching_context', 'GET', '/internal/workspaces/{workspaceId}/matching-context', ['internal'], 'Worker matching context', 'service_token'),
   endpoint('internal_matching_index', 'GET', '/internal/matching-index', ['internal'], 'Worker matching index snapshot', 'service_token'),
   endpoint('internal_matching_index_events', 'GET', '/internal/matching-index/events', ['internal'], 'Worker matching index SSE', 'service_token'),
+  endpoint('internal_ops_metrics', 'GET', '/internal/ops-metrics', ['internal'], 'Route and worker stage metrics', 'service_token'),
+  endpoint('internal_worker_stage_events', 'POST', '/internal/worker-stage-events', ['internal'], 'Worker stage metric ingest', 'service_token'),
 ] as const satisfies readonly ApiEndpoint[];
 
 export type ApiEndpointId = (typeof API_ENDPOINTS)[number]['id'];

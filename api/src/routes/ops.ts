@@ -11,6 +11,7 @@ import {
 import { prisma } from '../prisma.js';
 import { assertWorkspaceAccess } from '../workspace-access.js';
 import { listWorkspaceAuditLog } from '../workspace-audit-log.js';
+import { listRouteMetrics, listWorkerStageMetrics } from '../ops-metrics.js';
 
 export const opsRouter = Router();
 
@@ -384,6 +385,8 @@ opsRouter.get('/workspaces/:workspaceId/ops-health', async (req, res, next) => {
       observedTransactionCount: Number(tx?.observed_count ?? 0),
       matchCount: Number(match?.match_count ?? 0),
       openExceptionCount: exceptionRows.filter((item) => item.status !== 'dismissed').length,
+      routeErrors: listRouteMetrics().filter((metric) => metric.statusClass.startsWith('5')),
+      workerStageErrors: listWorkerStageMetrics().filter((metric) => metric.status === 'error'),
       latencies: {
         yellowstoneToWorkerMs: {
           p50: numberOrNull(tx?.p50_yellowstone_to_worker_ms),

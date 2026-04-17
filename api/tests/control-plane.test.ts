@@ -2462,6 +2462,48 @@ test('phase e ops health exposes lag and latency status', async () => {
   assert.equal(payload.openExceptionCount, 1);
 });
 
+test('internal ops metrics collect route and worker stage failures', async () => {
+  const setup = await createOrganizationWorkspace();
+
+  const missingRouteResponse = await fetch(`${baseUrl}/workspaces/${setup.workspace.workspaceId}/definitely-missing`, {
+    headers: authHeaders(setup.sessionToken),
+  });
+  assert.equal(missingRouteResponse.status, 404);
+
+  const workerStageResponse = await fetch(`${baseUrl}/internal/worker-stage-events`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-service-token': 'internal-secret',
+    },
+    body: JSON.stringify({
+      stage: 'matching_index_refresh',
+      status: 'error',
+      message: 'refresh failed',
+    }),
+  });
+  assert.equal(workerStageResponse.status, 200);
+
+  const metricsResponse = await fetch(`${baseUrl}/internal/ops-metrics`, {
+    headers: {
+      'x-service-token': 'internal-secret',
+    },
+  });
+  assert.equal(metricsResponse.status, 200);
+  const metrics = await metricsResponse.json();
+  assert.ok(metrics.routeMetrics.some((metric: { route: string; statusClass: string }) =>
+    metric.route.includes('/definitely-missing') && metric.statusClass === '4xx'));
+  assert.ok(metrics.workerStageMetrics.some((metric: { stage: string; status: string }) =>
+    metric.stage === 'matching_index_refresh' && metric.status === 'error'));
+
+  const healthResponse = await fetch(`${baseUrl}/workspaces/${setup.workspace.workspaceId}/ops-health`, {
+    headers: authHeaders(setup.sessionToken),
+  });
+  assert.equal(healthResponse.status, 200);
+  const health = await healthResponse.json();
+  assert.ok(health.workerStageErrors.some((metric: { stage: string }) => metric.stage === 'matching_index_refresh'));
+});
+
 test('auth logout invalidates the session and protected routes reject the old token', async () => {
   const login = await loginUser('logout@example.com', 'Logout User');
   const organization = await post(
