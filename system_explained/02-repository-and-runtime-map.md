@@ -149,9 +149,9 @@ Postgres owns the control-plane truth:
 - Users.
 - Organizations.
 - Workspaces.
-- Addresses.
-- Destinations.
-- Payees.
+- Treasury wallets (Solana wallets we own; source of every payment).
+- Destinations (counterparty wallets we pay).
+- Counterparties (optional business-entity tag on destinations).
 - Payment requests.
 - Payment runs.
 - Payment orders.

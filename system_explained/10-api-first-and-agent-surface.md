@@ -157,7 +157,7 @@ An operations copilot that watches Axoria tasks, prepares safe next actions, exp
 More advanced later:
 
 - agent imports CSV from trusted source
-- agent validates payees/destinations
+- agent validates destinations (including trust state and counterparty tags)
 - agent flags duplicate/suspicious payouts
 - agent prepares batch execution packet
 - human/multisig signs

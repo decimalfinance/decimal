@@ -203,9 +203,9 @@ Protected routes include:
 - API keys.
 - Organization management.
 - Workspace operations.
-- Address book.
-- Destinations.
-- Payees.
+- Treasury wallets (`/workspaces/:id/treasury-wallets`, `/balances`).
+- Counterparties and Destinations.
+- Address labels (chain-wide, not workspace-scoped, but auth'd).
 - Payment requests.
 - Payment runs.
 - Payment orders.

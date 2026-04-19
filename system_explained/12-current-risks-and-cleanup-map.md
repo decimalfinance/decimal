@@ -2,6 +2,17 @@
 
 This file is intentionally direct. It lists the main risks and cleanup areas that a new engineer should understand before making changes.
 
+## Recently resolved (context — do not reopen)
+
+- **Schema split** (landed 2026-04-19): `WorkspaceAddress` → `TreasuryWallet`; `Destination` made first-class (stores `walletAddress` directly); `Payee` removed entirely; `Counterparty` is an optional org-scoped tag. All compat shims removed. Old code that still mentions the legacy names is actively legacy.
+- **Frontend v2**: fully rebuilt around an institutional dual-theme design system (`--ax-*` tokens, `brand.md`). All primary pages use the `rd-*` batch-expandable pattern. Toast system, institutional sidebar, and the Axoria positioning landed.
+- **Pricing**: SOL/USD via Binance SOLUSDT with a 60s TTL and stale fallback, wired into `/treasury-wallets/balances`.
+
+## Doc-staleness risk
+
+- `system_explained/` was last reconciled with the schema split on 2026-04-20. If you land changes to the schema, routes, or page structure, update the relevant chapter (usually 04, 09, 13, 14) in the same PR. A stale doc is worse than no doc.
+- External price dependency on Binance is not alerted on — if the endpoint fails and stale fallback also fails, balances will show `"solUsdPrice": null` and the Overview hero falls back to USDC-only. Consider adding ops-health coverage.
+
 ## Product Risks
 
 ### Input Layer Is Still Young

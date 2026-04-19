@@ -2,31 +2,32 @@
 
 This folder is the onboarding manual for Axoria. It explains the product, the runtime architecture, the codebase, the data model, the reconciliation pipeline, the API surface, the frontend, the worker, observability, and the current risks.
 
-The goal is not to describe only the happy path. The goal is to make a new engineer productive enough to change the system without accidentally breaking reconciliation, execution tracking, or proof generation.
+The goal is not to describe only the happy path. The goal is to make a new engineer productive enough to change the system without accidentally breaking execution tracking, reconciliation, or proof generation.
 
 ## What Axoria Is
 
-Axoria is a stablecoin payment reconciliation and control system for Solana USDC.
+Axoria is the **deterministic financial workflow engine for crypto payments**.
 
-In product terms, Axoria helps an operator answer:
+The product takes a CSV or API-created payout intent, walks it through policy approval, one-signature batch execution, and on-chain matching, then hands back a cryptographic proof packet that a finance or audit team can verify.
+
+Axoria is deliberately narrow. The current wedge is **Solana USDC payouts** — not general reconciliation, not a wallet watcher, not an analytics dashboard. Payouts come first because that's where crypto operations break down for finance teams; everything else (inbound matching, treasury analytics, agent runtime) is downstream of getting this one flow right.
+
+In product terms, Axoria answers:
 
 - What payment did we intend to make?
-- Who requested it?
-- Was it allowed by policy?
-- What wallet was supposed to send it?
-- What destination was supposed to receive it?
-- Was an execution packet prepared?
-- Was a transaction submitted?
+- Who requested it? Was it allowed by policy?
+- Which treasury wallet sent it? Which destination received it?
+- Was an execution packet prepared? Was a signature submitted?
 - Did Solana show the expected USDC movement?
-- Did the observed settlement match the business intent?
+- Does observed settlement match the business intent?
 - If not, what exception should an operator review?
-- Can we export a proof packet that explains the whole lifecycle?
+- Can we export a signed, deterministic proof packet?
 
 In system terms, Axoria has four layers:
 
 ```text
 Input layer
-Payment requests, payment runs, CSV imports, payees, destinations.
+Payment requests, payment runs, CSV imports, destinations, counterparties.
 
 Control plane
 Approval policy, payment orders, execution packets, state machines, audit events.
@@ -38,7 +39,7 @@ Verification and proof
 Yellowstone observation, matching engine, reconciliation state, exceptions, proof packets.
 ```
 
-The frontend is only one client of the system. The backend is intended to be the source of truth and an API-first surface that can be used by humans, scripts, and eventually agents.
+The backend is the source of truth and is API-first. The frontend is one client; human operators, scripts, and agents can all drive the same flows.
 
 ## How To Read These Docs
 
@@ -61,33 +62,40 @@ Read these files in order if you are new:
 
 ## Source Of Truth
 
-The current source of truth is the code, not older README files. Some older docs still describe earlier versions of the product such as expected transfers only. Use these files and the current code as the authoritative description.
+The current source of truth is the code, not older README files or older screenshots. These docs and the code are authoritative; anything that disagrees is stale.
 
-Important code entrypoints:
+Important code and docs entrypoints:
 
-- `api/src/app.ts`: Express app composition and route mounting.
-- `api/prisma/schema.prisma`: Postgres schema.
-- `api/src/api-contract.ts`: Canonical API contract used for OpenAPI.
-- `yellowstone/src/main.rs`: Yellowstone worker entrypoint.
-- `yellowstone/src/yellowstone/mod.rs`: Worker loop and matching pipeline.
-- `frontend/src/App.tsx`: Main React application and page composition.
-- `Makefile`: Developer workflows.
-- `docker-compose.yml`: Local infrastructure.
+- `api/src/app.ts` — Express app composition and route mounting.
+- `api/prisma/schema.prisma` — Postgres schema.
+- `api/src/api-contract.ts` — canonical API contract used for OpenAPI.
+- `api/src/treasury-wallets.ts` — workspace treasury-wallet service (our-owned Solana wallets).
+- `api/src/pricing.ts` — SOL/USD price via Binance with 60s TTL and stale fallback.
+- `yellowstone/src/main.rs` — Yellowstone worker entrypoint.
+- `yellowstone/src/yellowstone/mod.rs` — worker loop and matching pipeline.
+- `frontend/src/App.tsx` — React router shell.
+- `frontend/src/pages/*.tsx` — one file per top-level page.
+- `frontend/src/styles/*.css` — institutional dual-theme design system (`canonical.css`, `run-detail.css`, `sidebar.css`).
+- `brand.md` — brand direction (colors, typography, voice). Source of truth for `--ax-*` tokens.
+- `landing-page-content.md` — landing page brief: positioning, section spec, handoff instructions.
+- `Makefile` — developer workflows.
+- `docker-compose.yml` — local infrastructure.
 
 ## Vocabulary
 
-The project contains several similarly named objects. These are not interchangeable:
+The project contains several similarly named objects. These are **not** interchangeable:
 
-- `WorkspaceAddress`: a raw wallet/address Axoria knows about.
-- `Counterparty`: a business owner or external/internal entity.
-- `Destination`: the operator-facing payment endpoint. Payment orders pay destinations.
-- `Payee`: lightweight input-layer object used to make payment requests more human.
-- `PaymentRequest`: an input object, often created manually or from CSV.
-- `PaymentRun`: a batch of payment requests/orders, usually imported from CSV.
-- `PaymentOrder`: the main business/control object for one intended payment.
-- `TransferRequest`: the lower-level expected settlement object used by the matcher.
-- `ExecutionRecord`: evidence that someone prepared/submitted/observed an execution attempt.
-- `SettlementMatch`: the ClickHouse record proving observed settlement was matched to an expected request.
-- `Exception`: a reconciliation issue that needs operator review.
+- `TreasuryWallet` — a Solana wallet **we own** in a workspace. Sources for payments. Only these are watched for "ours" on-chain. (Renamed from the older `WorkspaceAddress`.)
+- `Destination` — a counterparty wallet we pay. Stores `walletAddress` directly; we do not own it. First-class table with its own trust state, notes, and optional counterparty tag.
+- `Counterparty` — an optional business-entity tag (org-scoped) you can attach to destinations for grouping and reporting. Not required.
+- `PaymentRequest` — an input object, typically created manually or from CSV. Captures business intent (reason, amount, destination, reference).
+- `PaymentRun` — a batch of payment requests/orders, usually imported from CSV. Owns a `sourceTreasuryWalletId` (the batch signer).
+- `PaymentOrder` — the main control-plane object for one intended payment. Drives policy, execution packets, and matching.
+- `TransferRequest` — the lower-level expected-settlement object used by the matcher.
+- `ExecutionRecord` — evidence that someone prepared / submitted / observed an execution attempt.
+- `SettlementMatch` — the ClickHouse record proving observed settlement was matched to an expected request.
+- `Exception` — a reconciliation issue that needs operator review.
 
-If you remember only one thing: users should mostly think in `PaymentRequest`, `PaymentRun`, and `PaymentOrder`; the reconciliation engine thinks in `TransferRequest`, observed transfers, matches, and exceptions.
+If you remember only one thing: **humans think in `PaymentRequest` / `PaymentRun` / `PaymentOrder` and `Destination`; the matcher thinks in `TransferRequest` / observed transfers / matches / exceptions; the worker only cares about `TreasuryWallet` addresses as the "ours" set.**
+
+There is no `Payee` and no `WorkspaceAddress` anymore — both were removed in the 2026-04-19 schema split. Older docs, notes, or commit messages may mention them; treat any such reference as legacy.

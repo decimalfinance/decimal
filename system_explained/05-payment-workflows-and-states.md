@@ -42,18 +42,18 @@ Created from:
 
 Important fields:
 
-- payee
-- destination
+- destination (required)
+- counterparty tag (optional)
 - amount
+- reason
 - reference
 - due date
-- source
 - metadata
 
 Typical flow:
 
 1. Create payment request.
-2. Validate destination/payee/amount.
+2. Validate destination and amount.
 3. Optionally assign it to a payment run.
 4. Promote it into a payment order.
 5. Continue through payment order flow.
@@ -67,17 +67,20 @@ A payment run is a batch container.
 Typical CSV:
 
 ```csv
-payee,destination,amount,reference,due_date
+counterparty,destination,amount,reference,due_date
 Acme Corp,8cZ65A8ERdVsXq3YnEdMNimwG7DhGe1tPszysJwh43Zx,0.01,INV-1001,2026-04-15
 Beta Supplies,33yL624hoHqChSDR2y8L2cBjYRGEgQ9QSqcuKFfm1BnP,0.01,INV-1002,2026-04-18
 ```
 
+The `counterparty` column is optional human-readable context used to tag or auto-create a `Counterparty`. The `destination` column is the external Solana wallet address of the recipient. CSV imports are idempotent by SHA-256 fingerprint: re-submitting the same file returns the existing run with `importResult.imported: 0`.
+
 Import creates:
 
 - one `PaymentRun`
-- multiple `PaymentRequest` rows
+- one `Destination` per unique wallet (or reuses the existing one by `(workspaceId, walletAddress)`)
+- one `PaymentRequest` per row
 - corresponding `PaymentOrder` rows
-- payee/destination associations where possible
+- optional `Counterparty` tags when the counterparty column matches or when one is auto-created
 
 The run is useful for payroll-like or vendor batch workflows.
 

@@ -283,7 +283,8 @@ Stages can include:
 
 Check:
 
-- Is the workspace address/destination in Postgres?
+- Is the `TreasuryWallet` in Postgres? (Only treasury wallets are watched as "ours.")
+- Is the expected `Destination` registered? (Matching needs the counterparty side too.)
 - Did the API emit matching-index refresh?
 - Does `/internal/matching-index` include the request/signature?
 - Did the worker refresh its matching index after mutation?

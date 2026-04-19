@@ -253,8 +253,8 @@ When relevant control-plane state changes, the API emits a matching-index refres
 
 Examples:
 
-- New workspace address.
-- New destination.
+- New treasury wallet (ours — source side of payments, watched as "ours" on-chain).
+- New destination (theirs — counterparty side of expected matches).
 - New transfer request.
 - Payment order submitted.
 - Signature attached.

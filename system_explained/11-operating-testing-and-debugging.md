@@ -209,8 +209,10 @@ The frontend uses configured RPC. A 403 from RPC means provider access issue, no
 Expected header:
 
 ```csv
-payee,destination,amount,reference,due_date
+counterparty,destination,amount,reference,due_date
 ```
+
+`counterparty` is optional human-readable context. `destination` is the external Solana wallet address of the recipient. Re-importing the same CSV returns the existing `PaymentRun` with `importResult.imported: 0` (idempotent by fingerprint); the frontend surfaces this as an error toast ("This CSV was already imported as …").
 
 If import does nothing:
 
