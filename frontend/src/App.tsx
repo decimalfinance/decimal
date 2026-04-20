@@ -14,6 +14,7 @@ import { ProofsPage as ProofsPageV2 } from './pages/Proofs';
 import { ExecutionPage as ExecutionPageV2 } from './pages/Execution';
 import { SettlementPage as SettlementPageV2 } from './pages/Settlement';
 import { ApprovalsPage as ApprovalsPageV2 } from './pages/Approvals';
+import { LandingPage as LandingPageV2 } from './pages/Landing';
 import { useToast } from './ui/Toast';
 import type {
   ApprovalPolicy,
@@ -110,136 +111,12 @@ export function App() {
 
   return (
     <Routes>
-      <Route path="/" element={<LandingPage />} />
-      <Route path="/landing" element={<LandingPage />} />
+      <Route path="/" element={<LandingPageV2 />} />
+      <Route path="/landing" element={<LandingPageV2 />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/*" element={<RequireSession sessionQuery={sessionQuery} />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
-  );
-}
-
-function LandingPage() {
-  return (
-    <main className="axoria-landing">
-      <header className="axoria-header">
-        <Link className="axoria-wordmark" to="/">
-          <img src="/axoria.png" alt="axoria" />
-        </Link>
-        <nav className="axoria-nav" aria-label="Primary">
-          <a href="#how-it-works">how it works</a>
-          <a href="#features">features</a>
-          <Link className="axoria-signin" to="/login">
-            sign in
-          </Link>
-        </nav>
-      </header>
-
-      <section className="axoria-hero">
-        <div className="axoria-hero-content">
-          <h1>Payment operations for stablecoin teams, with audit ready certainty</h1>
-          <p>
-            Track every payment from request to approval, execution, and onchain settlement with
-            real time exception detection and proof packets your finance and compliance teams can trust.
-          </p>
-          <Link className="axoria-cta" to="/login">
-            Get started
-          </Link>
-        </div>
-      </section>
-
-      <section className="axoria-section" id="how-it-works">
-        <div className="axoria-section-head">
-          <h2>How it works</h2>
-          <p>One operational flow from payment request to audit-ready proof.</p>
-        </div>
-        <div className="axoria-steps">
-          <article className="axoria-step">
-            <div className="axoria-step-top">
-              <div className="axoria-step-visual" aria-hidden>
-                <span>◎</span>
-              </div>
-              <span className="axoria-step-number">01</span>
-            </div>
-            <h3>Create intent</h3>
-            <p>Create payment requests manually or import payout runs from CSV.</p>
-          </article>
-          <article className="axoria-step">
-            <div className="axoria-step-top">
-              <div className="axoria-step-visual" aria-hidden>
-                <span>◌</span>
-              </div>
-              <span className="axoria-step-number">02</span>
-            </div>
-            <h3>Route approvals</h3>
-            <p>Apply policy rules by amount, destination trust state, and transfer type.</p>
-          </article>
-          <article className="axoria-step">
-            <div className="axoria-step-top">
-              <div className="axoria-step-visual" aria-hidden>
-                <span>◈</span>
-              </div>
-              <span className="axoria-step-number">03</span>
-            </div>
-            <h3>Execute on-chain</h3>
-            <p>Prepare execution packets, sign with your wallet workflow, and submit.</p>
-          </article>
-          <article className="axoria-step">
-            <div className="axoria-step-top">
-              <div className="axoria-step-visual" aria-hidden>
-                <span>✦</span>
-              </div>
-              <span className="axoria-step-number">04</span>
-            </div>
-            <h3>Reconcile and prove</h3>
-            <p>Match observed settlement to intent, flag exceptions, and export proof.</p>
-          </article>
-        </div>
-      </section>
-
-      <section className="axoria-section axoria-features" id="features">
-        <div className="axoria-section-head">
-          <p className="axoria-section-eyebrow">capabilities</p>
-          <h2>Built for operators who need certainty</h2>
-          <p>
-            Axoria gives your team a single source of truth across approval, execution, settlement,
-            and exceptions.
-          </p>
-        </div>
-        <div className="axoria-feature-list">
-          <article>
-            <h3>Policy-based approvals</h3>
-            <p>Automatically route high-risk or high-value payments to human review.</p>
-          </article>
-          <article>
-            <h3>Run-based execution</h3>
-            <p>Import, prepare, and execute batch payouts with clear lifecycle visibility.</p>
-          </article>
-          <article>
-            <h3>Exception detection</h3>
-            <p>Surface mismatches, partial settlements, and execution anomalies in real time.</p>
-          </article>
-          <article>
-            <h3>On-chain reconciliation</h3>
-            <p>Map observed transfers to intended payment outcomes with timeline context.</p>
-          </article>
-          <article>
-            <h3>Audit-ready proof exports</h3>
-            <p>Generate evidence packets for finance, compliance, and external audit.</p>
-          </article>
-        </div>
-      </section>
-
-      <section className="axoria-band">
-        <h2>Operate stablecoin payments with proof, not guesswork</h2>
-        <p>
-          Replace fragmented payment ops with one workflow from request to verified settlement.
-        </p>
-        <Link className="axoria-cta" to="/login">
-          Start with Axoria
-        </Link>
-      </section>
-    </main>
   );
 }
 
