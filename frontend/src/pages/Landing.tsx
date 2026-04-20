@@ -4,6 +4,7 @@ import '../styles/landing.css';
 import { CodeWall } from './landing/CodeWall';
 import { IconArrowRight, IconMoon, IconSun } from './landing/Icons';
 import { Hero } from './landing/Hero';
+import { ConveyorHero } from './landing/heroVisuals/ConveyorHero';
 import { Workflow } from './landing/Workflow';
 import { Features } from './landing/Features';
 import { FinalCTA } from './landing/FinalCTA';
@@ -59,6 +60,9 @@ export function LandingPage() {
             <a href="#how" className="hide-m">
               How it works
             </a>
+            <a href="#features" className="hide-m">
+              Features
+            </a>
             <button
               type="button"
               className="lp-theme-toggle"
@@ -78,7 +82,7 @@ export function LandingPage() {
         </div>
       </nav>
       <main>
-        <Hero startHref="/login" />
+        <Hero startHref="/login" visual={<ConveyorHero accent="var(--ax-accent)" />} />
         <Workflow />
         <Features />
         <FinalCTA startHref="/login" />
