@@ -18,3 +18,7 @@ frontend/vite.config.js
 frontend/vite.config.d.ts
 
 yellowstone/target/
+
+# Local-only working files
+list.md
+stablecoin ops v1.mp4
