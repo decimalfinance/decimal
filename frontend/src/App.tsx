@@ -263,11 +263,6 @@ function LoginPage() {
   return (
     <main className="login-shell">
       <section className="login-panel">
-        <p className="eyebrow">Stablecoin payment control</p>
-        <h1>Run payments from request to proof.</h1>
-        <p>
-          A cleaner workspace for approval, execution, settlement, exceptions, and audit proof.
-        </p>
         <form className="login-form" onSubmit={handleSubmit}>
           <label>
             Email

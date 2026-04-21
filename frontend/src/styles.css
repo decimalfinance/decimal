@@ -1879,7 +1879,7 @@ a {
   min-height: 100vh;
   place-items: center;
   padding: 32px;
-  background: linear-gradient(180deg, #ffffff 0%, #f7f7f5 100%);
+  background: linear-gradient(180deg, var(--bg) 0%, var(--bg-subtle) 100%);
 }
 
 .login-panel {
