@@ -312,8 +312,15 @@ export function ReviewMockup() {
 }
 
 export function ProofJsonMockup() {
+  const isDark =
+    typeof document !== 'undefined' &&
+    document.documentElement.getAttribute('data-theme') === 'dark';
+  const frameBg = isDark ? '#17171B' : '#E7E2D5';
+  const digestBg = isDark ? '#2A1F08' : '#E8CF7A';
+  const digestBorder = isDark ? '#6B4D12' : '#B68A1C';
+
   return (
-    <div className="lp-proof-frame">
+    <div className="lp-proof-frame" style={{ backgroundColor: frameBg }}>
       <div className="lp-proof-topbar">
         <div>
           <div
@@ -344,7 +351,10 @@ export function ProofJsonMockup() {
         </span>
       </div>
 
-      <div className="lp-proof-digest">
+      <div
+        className="lp-proof-digest"
+        style={{ backgroundColor: digestBg, borderColor: digestBorder }}
+      >
         <span className="lp-proof-digest-label mono">Proof digest · sha-256 canonical</span>
         <span className="lp-proof-digest-value mono">
           6e4f15f3·168546ec·7ea80328·eda76d82
