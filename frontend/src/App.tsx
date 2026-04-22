@@ -199,6 +199,20 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
       (sidebarPayersQuery.data?.items ?? []).filter((s) => s.trustState === 'unreviewed').length,
     [sidebarPayersQuery.data?.items],
   );
+  const sidebarDestinationsQuery = useQuery({
+    queryKey: ['sidebar-destinations', activeWorkspaceId] as const,
+    queryFn: () => api.listDestinations(activeWorkspaceId!),
+    enabled: Boolean(activeWorkspaceId),
+    refetchInterval: () =>
+      typeof document !== 'undefined' && document.hidden ? false : 30_000,
+  });
+  const destinationsUnreviewedCount = useMemo(
+    () =>
+      (sidebarDestinationsQuery.data?.items ?? []).filter(
+        (d) => d.trustState === 'unreviewed' && d.isActive,
+      ).length,
+    [sidebarDestinationsQuery.data?.items],
+  );
 
   async function logout() {
     await queryClient.cancelQueries();
@@ -217,6 +231,7 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
         activeWorkspaceId={activeWorkspaceId}
         paymentsIncompleteCount={paymentsIncompleteCount}
         collectionsOpenCount={collectionsOpenCount}
+        destinationsUnreviewedCount={destinationsUnreviewedCount}
         payersUnreviewedCount={payersUnreviewedCount}
         approvalPendingCount={approvalPendingCount}
         executionQueueCount={executionQueueCount}

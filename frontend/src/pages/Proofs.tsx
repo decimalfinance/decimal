@@ -2,15 +2,37 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { api } from '../api';
-import type { AuthenticatedSession, PaymentOrder, PaymentRun } from '../types';
+import type {
+  AuthenticatedSession,
+  CollectionRequest,
+  CollectionRunSummary,
+  PaymentOrder,
+  PaymentRun,
+} from '../types';
 import { formatRawUsdcCompact, shortenAddress } from '../domain';
-import { displayPaymentStatus, displayRunStatus, statusToneForPayment } from '../status-labels';
+import {
+  displayCollectionSourceName,
+  displayCollectionStatus,
+  displayPaymentStatus,
+  displayRunStatus,
+  statusToneForCollection,
+  statusToneForPayment,
+} from '../status-labels';
 import { useToast } from '../ui/Toast';
 import { ProofJsonView } from '../proof-json-view';
 
 type ProofGroup =
   | { kind: 'run'; key: string; run: PaymentRun; orders: PaymentOrder[] }
   | { kind: 'single'; key: string; order: PaymentOrder };
+
+type CollectionProofGroup =
+  | {
+      kind: 'collection-run';
+      key: string;
+      run: CollectionRunSummary;
+      requests: CollectionRequest[];
+    }
+  | { kind: 'collection'; key: string; collection: CollectionRequest };
 
 function assetSymbol(asset: string | undefined): string {
   return (asset ?? 'usdc').toUpperCase();
@@ -61,10 +83,43 @@ function runReadinessLine(run: PaymentRun): string {
   return `${t.settledCount}/${t.actionableCount} matched · ${t.exceptionCount} exception${t.exceptionCount === 1 ? '' : 's'}`;
 }
 
+function collectionIsSettled(c: CollectionRequest): boolean {
+  return c.derivedState === 'collected' || c.derivedState === 'closed';
+}
+
+function collectionRunIsSettled(r: CollectionRunSummary): boolean {
+  return r.derivedState === 'collected' || r.derivedState === 'closed';
+}
+
+function collectionReadinessLine(c: CollectionRequest): string {
+  const hasSource = Boolean(c.collectionSource);
+  const hasMatch = Boolean(c.reconciliationDetail?.match?.signature);
+  const hasException = Boolean(c.reconciliationDetail?.exceptions?.length);
+  return [
+    hasSource ? 'source linked' : 'source pending',
+    hasMatch ? 'settlement matched' : 'match pending',
+    hasException ? 'has exceptions' : 'no exceptions',
+  ].join(' · ');
+}
+
+function collectionRunReadinessLine(r: CollectionRunSummary): string {
+  const s = r.summary;
+  return `${s.collected}/${s.total} collected · ${s.exception} exception${s.exception === 1 ? '' : 's'}`;
+}
+
+function collectionPayerLabel(c: CollectionRequest): string {
+  if (c.collectionSource) {
+    return displayCollectionSourceName(c.collectionSource.label, c.collectionSource.walletAddress);
+  }
+  if (c.payerWalletAddress) return shortenAddress(c.payerWalletAddress, 4, 4);
+  return 'Any payer';
+}
+
 export function ProofsPage({ session: _session }: { session: AuthenticatedSession }) {
   const { workspaceId } = useParams<{ workspaceId: string }>();
   const { error: toastError } = useToast();
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
+  const [expandedCollectionRunId, setExpandedCollectionRunId] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ title: string; data: Record<string, unknown> } | null>(null);
 
   const ordersQuery = useQuery({
@@ -76,6 +131,18 @@ export function ProofsPage({ session: _session }: { session: AuthenticatedSessio
   const runsQuery = useQuery({
     queryKey: ['payment-runs', workspaceId] as const,
     queryFn: () => api.listPaymentRuns(workspaceId!),
+    enabled: Boolean(workspaceId),
+    refetchInterval: 10_000,
+  });
+  const collectionsQuery = useQuery({
+    queryKey: ['collections', workspaceId] as const,
+    queryFn: () => api.listCollections(workspaceId!),
+    enabled: Boolean(workspaceId),
+    refetchInterval: 10_000,
+  });
+  const collectionRunsQuery = useQuery({
+    queryKey: ['collection-runs', workspaceId] as const,
+    queryFn: () => api.listCollectionRuns(workspaceId!),
     enabled: Boolean(workspaceId),
     refetchInterval: 10_000,
   });
@@ -106,6 +173,40 @@ export function ProofsPage({ session: _session }: { session: AuthenticatedSessio
       const packet = await api.getPaymentRunProof(workspaceId!, run.paymentRunId);
       return {
         title: `Run proof · ${run.runName}`,
+        data: JSON.parse(JSON.stringify(packet)) as Record<string, unknown>,
+      };
+    },
+    onSuccess: setPreview,
+    onError: (err) => toastError(err instanceof Error ? err.message : 'Unable to load preview.'),
+  });
+  const exportCollectionMutation = useMutation({
+    mutationFn: (id: string) => api.getCollectionProof(workspaceId!, id),
+    onSuccess: (proof, id) => downloadJson(`collection-proof-${id}.json`, proof),
+    onError: (err) =>
+      toastError(err instanceof Error ? err.message : 'Unable to export collection proof.'),
+  });
+  const exportCollectionRunMutation = useMutation({
+    mutationFn: (id: string) => api.getCollectionRunProof(workspaceId!, id),
+    onSuccess: (proof, id) => downloadJson(`collection-run-proof-${id}.json`, proof),
+    onError: (err) =>
+      toastError(err instanceof Error ? err.message : 'Unable to export collection run proof.'),
+  });
+  const previewCollectionMutation = useMutation({
+    mutationFn: async (c: CollectionRequest) => {
+      const packet = await api.getCollectionProof(workspaceId!, c.collectionRequestId);
+      return {
+        title: `Collection proof · ${collectionPayerLabel(c)}`,
+        data: JSON.parse(JSON.stringify(packet)) as Record<string, unknown>,
+      };
+    },
+    onSuccess: setPreview,
+    onError: (err) => toastError(err instanceof Error ? err.message : 'Unable to load preview.'),
+  });
+  const previewCollectionRunMutation = useMutation({
+    mutationFn: async (r: CollectionRunSummary) => {
+      const packet = await api.getCollectionRunProof(workspaceId!, r.collectionRunId);
+      return {
+        title: `Collection run proof · ${r.runName}`,
         data: JSON.parse(JSON.stringify(packet)) as Record<string, unknown>,
       };
     },
@@ -153,7 +254,37 @@ export function ProofsPage({ session: _session }: { session: AuthenticatedSessio
     })),
   ];
 
+  const collections = collectionsQuery.data?.items ?? [];
+  const collectionRuns = collectionRunsQuery.data?.items ?? [];
+  const standaloneCollections = collections.filter((c) => !c.collectionRunId);
+
+  const collectionsByRun = useMemo(() => {
+    const map = new Map<string, CollectionRequest[]>();
+    for (const c of collections) {
+      if (!c.collectionRunId) continue;
+      const list = map.get(c.collectionRunId) ?? [];
+      list.push(c);
+      map.set(c.collectionRunId, list);
+    }
+    return map;
+  }, [collections]);
+
+  const collectionGroups: CollectionProofGroup[] = [
+    ...collectionRuns.map<CollectionProofGroup>((r) => ({
+      kind: 'collection-run' as const,
+      key: `collection-run:${r.collectionRunId}`,
+      run: r,
+      requests: collectionsByRun.get(r.collectionRunId) ?? [],
+    })),
+    ...standaloneCollections.map<CollectionProofGroup>((c) => ({
+      kind: 'collection' as const,
+      key: `collection:${c.collectionRequestId}`,
+      collection: c,
+    })),
+  ];
+
   const isLoading = ordersQuery.isLoading || runsQuery.isLoading;
+  const collectionsLoading = collectionsQuery.isLoading || collectionRunsQuery.isLoading;
 
   return (
     <main className="page-frame">
@@ -162,13 +293,19 @@ export function ProofsPage({ session: _session }: { session: AuthenticatedSessio
           <p className="eyebrow">Proofs</p>
           <h1>Proof packets</h1>
           <p>
-            Every batch and standalone payment has a proof packet. Preview in-app or export the JSON for audit
-            handoff — available anytime, for every payment, forever. Batches expand to reveal the payments inside.
+            Every payment and collection has a proof packet. Preview in-app or export the JSON for
+            audit hand-off — available forever. Batches expand to reveal the items inside.
           </p>
         </div>
       </header>
 
       <section className="rd-section" style={{ marginTop: 0 }}>
+        <div className="rd-section-head">
+          <div>
+            <h2 className="rd-section-title">Payments</h2>
+            <p className="rd-section-sub">Outbound — USDC you sent.</p>
+          </div>
+        </div>
         <div className="rd-table-shell">
           {isLoading ? (
             <div style={{ padding: 16 }}>
@@ -260,6 +397,121 @@ export function ProofsPage({ session: _session }: { session: AuthenticatedSessio
                           onExport={() => exportOrderMutation.mutate(order.paymentOrderId)}
                           previewing={previewOrderMutation.isPending}
                           exporting={exportOrderMutation.isPending}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </section>
+
+      <section className="rd-section">
+        <div className="rd-section-head">
+          <div>
+            <h2 className="rd-section-title">Collections</h2>
+            <p className="rd-section-sub">Inbound — USDC you received.</p>
+          </div>
+        </div>
+        <div className="rd-table-shell">
+          {collectionsLoading ? (
+            <div style={{ padding: 16 }}>
+              <div className="rd-skeleton rd-skeleton-block" style={{ height: 56, marginBottom: 8 }} />
+              <div className="rd-skeleton rd-skeleton-block" style={{ height: 56, marginBottom: 8 }} />
+              <div className="rd-skeleton rd-skeleton-block" style={{ height: 56 }} />
+            </div>
+          ) : collectionGroups.length === 0 ? (
+            <div className="rd-empty-cell" style={{ padding: '64px 24px' }}>
+              <strong>No collection proofs yet</strong>
+              <p style={{ margin: 0 }}>
+                Once a collection is created, its proof packet is generated and shows up here.
+                Export becomes available once the collection is settled on-chain.
+              </p>
+            </div>
+          ) : (
+            <table className="rd-table">
+              <thead>
+                <tr>
+                  <th style={{ width: '30%' }}>Batch / Collection</th>
+                  <th style={{ width: '10%' }}>Items</th>
+                  <th className="rd-num" style={{ width: '14%' }}>
+                    Total
+                  </th>
+                  <th style={{ width: '22%' }}>Readiness</th>
+                  <th style={{ width: '12%' }}>Status</th>
+                  <th style={{ width: '12%' }} aria-label="Proof actions" />
+                </tr>
+              </thead>
+              <tbody>
+                {collectionGroups.map((group) => {
+                  if (group.kind === 'collection-run') {
+                    const expanded = expandedCollectionRunId === group.run.collectionRunId;
+                    const runTone = statusToneForCollection(group.run.derivedState);
+                    return (
+                      <CollectionRunGroupRows
+                        key={group.key}
+                        workspaceId={workspaceId}
+                        group={group}
+                        expanded={expanded}
+                        onToggle={() =>
+                          setExpandedCollectionRunId((curr) =>
+                            curr === group.run.collectionRunId ? null : group.run.collectionRunId,
+                          )
+                        }
+                        runTone={toneToPill(runTone)}
+                        onPreviewRun={(r) => previewCollectionRunMutation.mutate(r)}
+                        onExportRun={(r) => exportCollectionRunMutation.mutate(r.collectionRunId)}
+                        previewingRun={previewCollectionRunMutation.isPending}
+                        exportingRun={exportCollectionRunMutation.isPending}
+                        onPreviewRequest={(c) => previewCollectionMutation.mutate(c)}
+                        onExportRequest={(c) =>
+                          exportCollectionMutation.mutate(c.collectionRequestId)
+                        }
+                        previewingRequest={previewCollectionMutation.isPending}
+                        exportingRequest={exportCollectionMutation.isPending}
+                      />
+                    );
+                  }
+                  const c = group.collection;
+                  const cTone = statusToneForCollection(c.derivedState);
+                  const settled = collectionIsSettled(c);
+                  return (
+                    <tr key={group.key}>
+                      <td>
+                        <div className="rd-recipient-main">
+                          <span className="rd-recipient-name">{collectionPayerLabel(c)}</span>
+                          <span className="rd-recipient-ref">
+                            Single · {shortenAddress(c.collectionRequestId, 6, 4)}
+                          </span>
+                        </div>
+                      </td>
+                      <td>
+                        <span style={{ color: 'var(--ax-text-faint)', fontSize: 12 }}>1</span>
+                      </td>
+                      <td className="rd-num">
+                        {formatRawUsdcCompact(c.amountRaw)} {assetSymbol(c.asset)}
+                      </td>
+                      <td>
+                        <span style={{ fontSize: 12, color: 'var(--ax-text-muted)' }}>
+                          {collectionReadinessLine(c)}
+                        </span>
+                      </td>
+                      <td>
+                        <span className="rd-pill" data-tone={toneToPill(cTone)}>
+                          <span className="rd-pill-dot" aria-hidden />
+                          {displayCollectionStatus(c.derivedState)}
+                        </span>
+                      </td>
+                      <td>
+                        <ProofActionButtons
+                          onPreview={() => previewCollectionMutation.mutate(c)}
+                          onExport={() => exportCollectionMutation.mutate(c.collectionRequestId)}
+                          previewing={previewCollectionMutation.isPending}
+                          exporting={exportCollectionMutation.isPending}
+                          exportDisabled={!settled}
+                          exportDisabledReason="Proof is available once the collection is settled on-chain."
                         />
                       </td>
                     </tr>
@@ -418,8 +670,11 @@ function ProofActionButtons(props: {
   onExport: () => void;
   previewing: boolean;
   exporting: boolean;
+  exportDisabled?: boolean;
+  exportDisabledReason?: string;
 }) {
-  const { onPreview, onExport, previewing, exporting } = props;
+  const { onPreview, onExport, previewing, exporting, exportDisabled, exportDisabledReason } =
+    props;
   return (
     <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-start' }}>
       <button
@@ -437,8 +692,9 @@ function ProofActionButtons(props: {
         className="rd-btn rd-btn-secondary"
         style={{ minHeight: 28, padding: '4px 10px', fontSize: 12 }}
         onClick={onExport}
-        disabled={exporting}
+        disabled={exporting || exportDisabled}
         aria-busy={exporting}
+        title={exportDisabled ? exportDisabledReason : undefined}
       >
         Export
       </button>
@@ -465,6 +721,153 @@ function Chevron({ expanded }: { expanded: boolean }) {
         <path d="M6 3l5 5-5 5" />
       </svg>
     </span>
+  );
+}
+
+function CollectionRunGroupRows(props: {
+  workspaceId: string;
+  group: Extract<CollectionProofGroup, { kind: 'collection-run' }>;
+  expanded: boolean;
+  onToggle: () => void;
+  runTone: 'success' | 'warning' | 'danger' | 'info';
+  onPreviewRun: (r: CollectionRunSummary) => void;
+  onExportRun: (r: CollectionRunSummary) => void;
+  previewingRun: boolean;
+  exportingRun: boolean;
+  onPreviewRequest: (c: CollectionRequest) => void;
+  onExportRequest: (c: CollectionRequest) => void;
+  previewingRequest: boolean;
+  exportingRequest: boolean;
+}) {
+  const {
+    workspaceId,
+    group,
+    expanded,
+    onToggle,
+    runTone,
+    onPreviewRun,
+    onExportRun,
+    previewingRun,
+    exportingRun,
+    onPreviewRequest,
+    onExportRequest,
+    previewingRequest,
+    exportingRequest,
+  } = props;
+  const { run, requests } = group;
+  const runSettled = collectionRunIsSettled(run);
+  return (
+    <>
+      <tr
+        style={{ cursor: 'pointer', background: expanded ? 'var(--ax-surface-2)' : undefined }}
+        onClick={onToggle}
+      >
+        <td>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Chevron expanded={expanded} />
+            <div className="rd-recipient-main">
+              <span className="rd-recipient-name">{run.runName}</span>
+              <span className="rd-recipient-ref">
+                Batch · {shortenAddress(run.collectionRunId, 6, 4)}
+              </span>
+            </div>
+          </div>
+        </td>
+        <td>
+          <span style={{ fontSize: 13, color: 'var(--ax-text-secondary)' }}>
+            {run.summary.total}
+          </span>
+        </td>
+        <td className="rd-num">
+          {formatRawUsdcCompact(run.summary.totalAmountRaw)} USDC
+        </td>
+        <td>
+          <span style={{ fontSize: 12, color: 'var(--ax-text-muted)' }}>
+            {collectionRunReadinessLine(run)}
+          </span>
+        </td>
+        <td>
+          <span className="rd-pill" data-tone={runTone}>
+            <span className="rd-pill-dot" aria-hidden />
+            {displayCollectionStatus(run.derivedState)}
+          </span>
+        </td>
+        <td onClick={(e) => e.stopPropagation()}>
+          <ProofActionButtons
+            onPreview={() => onPreviewRun(run)}
+            onExport={() => onExportRun(run)}
+            previewing={previewingRun}
+            exporting={exportingRun}
+            exportDisabled={!runSettled}
+            exportDisabledReason="Proof is available once every collection in the run has settled on-chain."
+          />
+        </td>
+      </tr>
+      {expanded
+        ? requests.map((c) => {
+            const settled = collectionIsSettled(c);
+            return (
+              <tr key={`child:${c.collectionRequestId}`} style={{ background: 'var(--ax-surface)' }}>
+                <td>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingLeft: 28 }}>
+                    <span
+                      aria-hidden
+                      style={{
+                        color: 'var(--ax-text-faint)',
+                        fontFamily: 'var(--ax-font-mono)',
+                        fontSize: 11,
+                      }}
+                    >
+                      ↳
+                    </span>
+                    <div className="rd-recipient-main">
+                      <Link
+                        to={`/workspaces/${workspaceId}/collections/${c.collectionRequestId}`}
+                        style={{ color: 'var(--ax-text)', textDecoration: 'none', fontWeight: 500 }}
+                      >
+                        {collectionPayerLabel(c)}
+                      </Link>
+                      <span className="rd-recipient-ref">
+                        {c.externalReference ?? shortenAddress(c.collectionRequestId, 6, 4)}
+                      </span>
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  <span style={{ fontSize: 12, color: 'var(--ax-text-faint)' }}>—</span>
+                </td>
+                <td className="rd-num">
+                  {formatRawUsdcCompact(c.amountRaw)} {assetSymbol(c.asset)}
+                </td>
+                <td>
+                  <span style={{ fontSize: 12, color: 'var(--ax-text-muted)' }}>
+                    {collectionReadinessLine(c)}
+                  </span>
+                </td>
+                <td>
+                  <span
+                    className="rd-pill"
+                    data-tone={toneToPill(statusToneForCollection(c.derivedState))}
+                  >
+                    <span className="rd-pill-dot" aria-hidden />
+                    {displayCollectionStatus(c.derivedState)}
+                  </span>
+                </td>
+                <td>
+                  <ProofActionButtons
+                    onPreview={() => onPreviewRequest(c)}
+                    onExport={() => onExportRequest(c)}
+                    previewing={previewingRequest}
+                    exporting={exportingRequest}
+                    exportDisabled={!settled}
+                    exportDisabledReason="Proof is available once this collection is settled on-chain."
+                  />
+                </td>
+              </tr>
+            );
+          })
+        : null}
+    </>
   );
 }
 

@@ -222,6 +222,7 @@ export function AppSidebar({
   activeWorkspaceId,
   paymentsIncompleteCount,
   collectionsOpenCount,
+  destinationsUnreviewedCount,
   payersUnreviewedCount,
   approvalPendingCount,
   executionQueueCount,
@@ -233,6 +234,7 @@ export function AppSidebar({
   activeWorkspaceId?: string;
   paymentsIncompleteCount?: number;
   collectionsOpenCount?: number;
+  destinationsUnreviewedCount?: number;
   payersUnreviewedCount?: number;
   approvalPendingCount?: number;
   executionQueueCount?: number;
@@ -378,7 +380,12 @@ export function AppSidebar({
               <div className="ax-nav-group-label">Registry</div>
               <NavLinkItem to={`${base}/wallets`} icon={icons.wallet} label="Wallets" />
               <NavLinkItem to={`${base}/counterparties`} icon={icons.counterparty} label="Counterparties" />
-              <NavLinkItem to={`${base}/destinations`} icon={icons.destinations} label="Destinations" />
+              <NavLinkItem
+                to={`${base}/destinations`}
+                icon={icons.destinations}
+                label="Destinations"
+                badge={destinationsUnreviewedCount}
+              />
               <NavLinkItem
                 to={`${base}/payers`}
                 icon={icons.payers}
