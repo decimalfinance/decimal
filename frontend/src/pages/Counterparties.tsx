@@ -2,49 +2,59 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api';
-import type { AuthenticatedSession, Counterparty, Destination } from '../types';
-import { shortenAddress, solanaAccountUrl } from '../domain';
+import type { AuthenticatedSession, CollectionSource, Counterparty, Destination } from '../types';
+import { shortenAddress, orbAccountUrl } from '../domain';
 import { useToast } from '../ui/Toast';
 
-type TrustFilter = 'all' | 'trusted' | 'unreviewed' | 'blocked';
+type CategoryFilter = 'all' | 'categorized' | 'uncategorized';
 
-function trustTone(trust: Destination['trustState']): 'success' | 'warning' | 'danger' | 'info' {
-  if (trust === 'trusted') return 'success';
-  if (trust === 'blocked' || trust === 'restricted') return 'danger';
-  return 'warning';
+type CounterpartyRollup = {
+  counterparty: Counterparty;
+  destinations: Destination[];
+  payers: CollectionSource[];
+};
+
+function groupByCounterparty(
+  counterparties: Counterparty[],
+  destinations: Destination[],
+  payers: CollectionSource[],
+): CounterpartyRollup[] {
+  return counterparties
+    .map((c) => ({
+      counterparty: c,
+      destinations: destinations.filter((d) => d.counterpartyId === c.counterpartyId && d.isActive),
+      payers: payers.filter((p) => p.counterpartyId === c.counterpartyId),
+    }))
+    .sort((a, b) => a.counterparty.displayName.localeCompare(b.counterparty.displayName));
 }
 
-function destinationCountFor(counterpartyId: string, destinations: Destination[]): number {
-  return destinations.filter((d) => d.counterpartyId === counterpartyId && d.isActive).length;
-}
-
-export function CounterpartiesPage({ session }: { session: AuthenticatedSession }) {
+export function CounterpartiesPage({ session: _session }: { session: AuthenticatedSession }) {
   const { workspaceId } = useParams<{ workspaceId: string }>();
   const queryClient = useQueryClient();
   const { success, error: toastError } = useToast();
 
-  const [addCounterpartyOpen, setAddCounterpartyOpen] = useState(false);
-  const [addDestinationOpen, setAddDestinationOpen] = useState(false);
-  const [editDestination, setEditDestination] = useState<Destination | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<TrustFilter>('all');
+  const [filter, setFilter] = useState<CategoryFilter>('all');
 
-  const destinationsQuery = useQuery({
-    queryKey: ['destinations', workspaceId] as const,
-    queryFn: () => api.listDestinations(workspaceId!),
-    enabled: Boolean(workspaceId),
-  });
   const counterpartiesQuery = useQuery({
     queryKey: ['counterparties', workspaceId] as const,
     queryFn: () => api.listCounterparties(workspaceId!),
     enabled: Boolean(workspaceId),
   });
+  const destinationsQuery = useQuery({
+    queryKey: ['destinations', workspaceId] as const,
+    queryFn: () => api.listDestinations(workspaceId!),
+    enabled: Boolean(workspaceId),
+  });
+  const payersQuery = useQuery({
+    queryKey: ['collection-sources', workspaceId] as const,
+    queryFn: () => api.listCollectionSources(workspaceId!),
+    enabled: Boolean(workspaceId),
+  });
 
   async function invalidate() {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['destinations', workspaceId] }),
-      queryClient.invalidateQueries({ queryKey: ['counterparties', workspaceId] }),
-    ]);
+    await queryClient.invalidateQueries({ queryKey: ['counterparties', workspaceId] });
   }
 
   const createCounterpartyMutation = useMutation({
@@ -55,71 +65,12 @@ export function CounterpartiesPage({ session }: { session: AuthenticatedSession 
       }),
     onSuccess: async () => {
       success('Counterparty saved.');
-      setAddCounterpartyOpen(false);
+      setAddOpen(false);
       await invalidate();
     },
-    onError: (err) => toastError(err instanceof Error ? err.message : 'Unable to save counterparty.'),
+    onError: (err) =>
+      toastError(err instanceof Error ? err.message : 'Unable to save counterparty.'),
   });
-
-  const createDestinationMutation = useMutation({
-    mutationFn: (form: FormData) =>
-      api.createDestination(workspaceId!, {
-        walletAddress: String(form.get('walletAddress') ?? '').trim(),
-        label: String(form.get('label') ?? '').trim(),
-        counterpartyId: String(form.get('counterpartyId') ?? '').trim() || undefined,
-        trustState: (String(form.get('trustState') ?? 'unreviewed') as Destination['trustState']),
-        notes: String(form.get('notes') ?? '').trim() || undefined,
-      }),
-    onSuccess: async () => {
-      success('Destination saved.');
-      setAddDestinationOpen(false);
-      await invalidate();
-    },
-    onError: (err) => toastError(err instanceof Error ? err.message : 'Unable to save destination.'),
-  });
-
-  const updateDestinationMutation = useMutation({
-    mutationFn: ({ destinationId, input }: {
-      destinationId: string;
-      input: {
-        label: string;
-        trustState: Destination['trustState'];
-        counterpartyId: string | null;
-        notes?: string;
-        isActive?: boolean;
-      };
-    }) => api.updateDestination(workspaceId!, destinationId, input),
-    onSuccess: async () => {
-      success('Destination updated.');
-      setEditDestination(null);
-      await invalidate();
-    },
-    onError: (err) => toastError(err instanceof Error ? err.message : 'Unable to update destination.'),
-  });
-
-  const destinations = destinationsQuery.data?.items ?? [];
-  const counterparties = counterpartiesQuery.data?.items ?? [];
-
-  const filteredDestinations = useMemo(() => {
-    let out = destinations;
-    if (filter === 'trusted') out = out.filter((d) => d.trustState === 'trusted');
-    else if (filter === 'unreviewed') out = out.filter((d) => d.trustState === 'unreviewed');
-    else if (filter === 'blocked') out = out.filter((d) => d.trustState === 'blocked' || d.trustState === 'restricted');
-    const q = search.trim().toLowerCase();
-    if (q) {
-      out = out.filter(
-        (d) =>
-          d.label.toLowerCase().includes(q)
-          || d.walletAddress.toLowerCase().includes(q)
-          || (d.counterparty?.displayName ?? '').toLowerCase().includes(q),
-      );
-    }
-    return out;
-  }, [destinations, filter, search]);
-
-  const trustedCount = destinations.filter((d) => d.trustState === 'trusted').length;
-  const unreviewedCount = destinations.filter((d) => d.trustState === 'unreviewed').length;
-  const blockedCount = destinations.filter((d) => d.trustState === 'blocked' || d.trustState === 'restricted').length;
 
   if (!workspaceId) {
     return (
@@ -132,51 +83,79 @@ export function CounterpartiesPage({ session }: { session: AuthenticatedSession 
     );
   }
 
+  const counterparties = counterpartiesQuery.data?.items ?? [];
+  const destinations = destinationsQuery.data?.items ?? [];
+  const payers = payersQuery.data?.items ?? [];
+
+  const rollups = useMemo(
+    () => groupByCounterparty(counterparties, destinations, payers),
+    [counterparties, destinations, payers],
+  );
+
+  const filteredRollups = useMemo(() => {
+    let out = rollups;
+    if (filter === 'categorized') out = out.filter((r) => r.counterparty.category);
+    else if (filter === 'uncategorized') out = out.filter((r) => !r.counterparty.category);
+
+    const q = search.trim().toLowerCase();
+    if (q) {
+      out = out.filter((r) => {
+        if (r.counterparty.displayName.toLowerCase().includes(q)) return true;
+        if ((r.counterparty.category ?? '').toLowerCase().includes(q)) return true;
+        if (r.destinations.some((d) => d.label.toLowerCase().includes(q))) return true;
+        if (r.payers.some((p) => p.label.toLowerCase().includes(q))) return true;
+        return false;
+      });
+    }
+    return out;
+  }, [rollups, filter, search]);
+
+  const withDestinations = rollups.filter((r) => r.destinations.length > 0).length;
+  const withPayers = rollups.filter((r) => r.payers.length > 0).length;
+  const uncategorized = rollups.filter((r) => !r.counterparty.category).length;
+  const orphanDestinations = destinations.filter((d) => !d.counterpartyId && d.isActive).length;
+  const orphanPayers = payers.filter((p) => !p.counterpartyId).length;
+
+  const isLoading =
+    counterpartiesQuery.isLoading || destinationsQuery.isLoading || payersQuery.isLoading;
+
   return (
     <main className="page-frame">
       <header className="page-header">
         <div>
           <p className="eyebrow">Counterparties</p>
-          <h1>Who you pay</h1>
+          <h1>Your business relationships</h1>
           <p>
-            Destinations are Solana wallets you pay. Counterparties are the business entities behind them —
-            optional but useful for grouping and reporting.
+            A counterparty is the business entity behind a wallet — a vendor, contractor, or
+            customer. Group destinations (who you pay) and payers (who pays you) under one name to
+            track activity end-to-end.
           </p>
         </div>
         <div className="page-actions">
-          <button type="button" className="button button-secondary" onClick={() => setAddCounterpartyOpen(true)}>
+          <button type="button" className="button button-primary" onClick={() => setAddOpen(true)}>
             + Add counterparty
-          </button>
-          <button type="button" className="button button-primary" onClick={() => setAddDestinationOpen(true)}>
-            + Add destination
           </button>
         </div>
       </header>
 
       <div className="rd-metrics">
         <div className="rd-metric">
-          <span className="rd-metric-label">Destinations</span>
-          <span className="rd-metric-value">{destinations.length}</span>
-          <span className="rd-metric-sub">Active payout endpoints</span>
-        </div>
-        <div className="rd-metric">
           <span className="rd-metric-label">Counterparties</span>
           <span className="rd-metric-value">{counterparties.length}</span>
-          <span className="rd-metric-sub">Business entities tracked</span>
         </div>
         <div className="rd-metric">
-          <span className="rd-metric-label">Trusted</span>
-          <span className="rd-metric-value" data-tone="success">
-            {trustedCount}
-          </span>
-          <span className="rd-metric-sub">Auto-approvable per policy</span>
+          <span className="rd-metric-label">With destinations</span>
+          <span className="rd-metric-value">{withDestinations}</span>
         </div>
         <div className="rd-metric">
-          <span className="rd-metric-label">Needs review</span>
-          <span className="rd-metric-value" data-tone={unreviewedCount + blockedCount > 0 ? 'warning' : undefined}>
-            {unreviewedCount + blockedCount}
+          <span className="rd-metric-label">With payers</span>
+          <span className="rd-metric-value">{withPayers}</span>
+        </div>
+        <div className="rd-metric">
+          <span className="rd-metric-label">Uncategorized</span>
+          <span className="rd-metric-value" data-tone={uncategorized > 0 ? 'warning' : undefined}>
+            {uncategorized}
           </span>
-          <span className="rd-metric-sub">Unreviewed, restricted, or blocked</span>
         </div>
       </div>
 
@@ -188,14 +167,20 @@ export function CounterpartiesPage({ session }: { session: AuthenticatedSession 
           </svg>
           <input
             type="search"
-            placeholder="Search labels, counterparties, addresses"
+            placeholder="Search counterparty, category, wallet label"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            aria-label="Search destinations"
+            aria-label="Search counterparties"
           />
         </div>
-        <div className="rd-tabs" role="tablist" aria-label="Trust filter">
-          {(['all', 'trusted', 'unreviewed', 'blocked'] as const).map((key) => (
+        <div className="rd-tabs" role="tablist" aria-label="Category filter">
+          {(
+            [
+              ['all', 'All'],
+              ['categorized', 'Categorized'],
+              ['uncategorized', 'Uncategorized'],
+            ] as const
+          ).map(([key, label]) => (
             <button
               key={key}
               role="tab"
@@ -204,226 +189,290 @@ export function CounterpartiesPage({ session }: { session: AuthenticatedSession 
               onClick={() => setFilter(key)}
               type="button"
             >
-              {key === 'all' ? 'All' : key.charAt(0).toUpperCase() + key.slice(1)}
+              {label}
             </button>
           ))}
         </div>
         <div className="rd-toolbar-right">
           <span className="rd-section-meta">
-            {filteredDestinations.length} of {destinations.length}
+            {filteredRollups.length} of {rollups.length}
           </span>
         </div>
       </div>
 
-      <section className="rd-section" style={{ marginTop: 0 }}>
-        <div className="rd-table-shell">
-          {destinationsQuery.isLoading ? (
-            <div style={{ padding: 16 }}>
-              <div className="rd-skeleton rd-skeleton-block" style={{ height: 56, marginBottom: 8 }} />
-              <div className="rd-skeleton rd-skeleton-block" style={{ height: 56, marginBottom: 8 }} />
-              <div className="rd-skeleton rd-skeleton-block" style={{ height: 56 }} />
-            </div>
-          ) : filteredDestinations.length === 0 ? (
-            <div className="rd-empty-cell" style={{ padding: '64px 24px' }}>
-              <strong>{destinations.length === 0 ? 'No destinations yet' : 'Nothing matches'}</strong>
-              <p style={{ margin: '0 0 16px' }}>
-                {destinations.length === 0
-                  ? "Add a destination to start paying someone."
-                  : 'Clear the search or change the filter to see more.'}
-              </p>
-              {destinations.length === 0 ? (
-                <button type="button" className="button button-primary" onClick={() => setAddDestinationOpen(true)}>
-                  + Add destination
-                </button>
-              ) : null}
-            </div>
-          ) : (
-            <table className="rd-table">
-              <thead>
-                <tr>
-                  <th style={{ width: '24%' }}>Label</th>
-                  <th style={{ width: '18%' }}>Counterparty</th>
-                  <th style={{ width: '22%' }}>Wallet</th>
-                  <th style={{ width: '12%' }}>Trust</th>
-                  <th style={{ width: '12%' }}>Type</th>
-                  <th style={{ width: '12%' }} aria-label="Actions" />
-                </tr>
-              </thead>
-              <tbody>
-                {filteredDestinations.map((d) => (
-                  <tr key={d.destinationId}>
-                    <td>
-                      <span style={{ color: 'var(--ax-text)', fontWeight: 500 }}>{d.label}</span>
-                    </td>
-                    <td>
-                      {d.counterparty ? (
-                        <span className="rd-origin" data-kind="run">
-                          {d.counterparty.displayName}
-                        </span>
-                      ) : (
-                        <span style={{ color: 'var(--ax-text-faint)', fontSize: 12 }}>Unassigned</span>
-                      )}
-                    </td>
-                    <td>
-                      <a
-                        href={solanaAccountUrl(d.walletAddress)}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="rd-addr-link"
-                        title={d.walletAddress}
-                      >
-                        <span>{shortenAddress(d.walletAddress, 4, 4)}</span>
-                        <ExternalIcon />
-                      </a>
-                    </td>
-                    <td>
-                      <span className="rd-pill" data-tone={trustTone(d.trustState)}>
-                        <span className="rd-pill-dot" aria-hidden />
-                        {d.trustState}
-                      </span>
-                    </td>
-                    <td>
-                      <span style={{ fontSize: 12, color: 'var(--ax-text-secondary)' }}>
-                        {d.isInternal ? 'Internal' : 'External'}
-                      </span>
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="rd-btn rd-btn-ghost"
-                        style={{ minHeight: 32, padding: '6px 10px', fontSize: 12 }}
-                        onClick={() => setEditDestination(d)}
-                        aria-label={`Edit ${d.label}`}
-                      >
-                        Edit
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </section>
-
-      <section className="rd-section">
-        <div className="rd-section-head">
-          <div>
-            <h2 className="rd-section-title">Counterparties ({counterparties.length})</h2>
-            <p className="rd-section-sub">Business entities you've tagged. Optional — destinations work without them.</p>
+      {orphanDestinations + orphanPayers > 0 ? (
+        <div
+          className="rd-card"
+          style={{
+            padding: '12px 16px',
+            marginBottom: 16,
+            borderColor: 'var(--ax-border)',
+            background: 'var(--ax-surface-2)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ fontSize: 13, color: 'var(--ax-text-secondary)' }}>
+            <strong style={{ color: 'var(--ax-text)' }}>Unassigned wallets: </strong>
+            {orphanDestinations} destination{orphanDestinations === 1 ? '' : 's'} and{' '}
+            {orphanPayers} payer{orphanPayers === 1 ? '' : 's'} are not linked to any counterparty.
+            Edit them from the Destinations or Payers pages to group them here.
           </div>
         </div>
-        {counterparties.length === 0 ? (
-          <div className="rd-card">
-            <div className="rd-empty-cell" style={{ padding: '32px 16px' }}>
-              <strong>No counterparties yet</strong>
-              <p style={{ margin: 0 }}>Tag destinations with a counterparty to track who you're paying.</p>
+      ) : null}
+
+      <section className="rd-section" style={{ marginTop: 0 }}>
+        {isLoading ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 12 }}>
+            <div className="rd-skeleton rd-skeleton-block" style={{ height: 160 }} />
+            <div className="rd-skeleton rd-skeleton-block" style={{ height: 160 }} />
+            <div className="rd-skeleton rd-skeleton-block" style={{ height: 160 }} />
+          </div>
+        ) : filteredRollups.length === 0 ? (
+          <div className="rd-table-shell">
+            <div className="rd-empty-cell" style={{ padding: '64px 24px' }}>
+              <strong>{rollups.length === 0 ? 'No counterparties yet' : 'Nothing matches'}</strong>
+              <p style={{ margin: '0 0 16px' }}>
+                {rollups.length === 0
+                  ? 'Add a counterparty to group destinations and payers by business relationship.'
+                  : 'Clear the search or change the filter to see more.'}
+              </p>
+              {rollups.length === 0 ? (
+                <button
+                  type="button"
+                  className="button button-primary"
+                  onClick={() => setAddOpen(true)}
+                >
+                  + Add counterparty
+                </button>
+              ) : null}
             </div>
           </div>
         ) : (
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
               gap: 12,
             }}
           >
-            {counterparties.map((c) => {
-              const count = destinationCountFor(c.counterpartyId, destinations);
-              return (
-                <div className="rd-card" key={c.counterpartyId} style={{ padding: 16 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                    <strong style={{ color: 'var(--ax-text)' }}>{c.displayName}</strong>
-                    <span style={{ fontSize: 12, color: 'var(--ax-text-muted)' }}>
-                      {count} destination{count === 1 ? '' : 's'}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--ax-text-muted)', marginTop: 4 }}>
-                    {c.category || 'Uncategorised'}
-                  </div>
-                </div>
-              );
-            })}
+            {filteredRollups.map((rollup) => (
+              <CounterpartyCard key={rollup.counterparty.counterpartyId} rollup={rollup} />
+            ))}
           </div>
         )}
       </section>
 
-      {addCounterpartyOpen ? (
+      {addOpen ? (
         <Dialog
           title="Add counterparty"
-          body="A counterparty is an optional business entity you can tag destinations with."
+          body="A counterparty is a business entity you can link destinations and payers to."
           pending={createCounterpartyMutation.isPending}
-          onClose={() => setAddCounterpartyOpen(false)}
+          onClose={() => setAddOpen(false)}
           onSubmit={(form) => createCounterpartyMutation.mutate(form)}
           submitLabel="Save counterparty"
         >
           <label className="field">
             Name
-            <input name="displayName" required placeholder="Acme Corp" autoComplete="organization" />
+            <input
+              name="displayName"
+              required
+              placeholder="Acme Corp"
+              autoComplete="organization"
+            />
           </label>
           <label className="field">
             Category
-            <input name="category" placeholder="vendor, contractor, internal" autoComplete="off" />
-          </label>
-        </Dialog>
-      ) : null}
-
-      {editDestination ? (
-        <EditDestinationDialog
-          destination={editDestination}
-          counterparties={counterparties}
-          pending={updateDestinationMutation.isPending}
-          onClose={() => setEditDestination(null)}
-          onSubmit={(input) =>
-            updateDestinationMutation.mutate({ destinationId: editDestination.destinationId, input })
-          }
-        />
-      ) : null}
-
-      {addDestinationOpen ? (
-        <Dialog
-          title="Add destination"
-          body="A destination is a Solana wallet you want to pay. You do not need to own it."
-          pending={createDestinationMutation.isPending}
-          onClose={() => setAddDestinationOpen(false)}
-          onSubmit={(form) => createDestinationMutation.mutate(form)}
-          submitLabel="Save destination"
-        >
-          <label className="field">
-            Label
-            <input name="label" required placeholder="Acme payout wallet" autoComplete="off" />
-          </label>
-          <label className="field">
-            Solana address
-            <input name="walletAddress" required placeholder="Counterparty wallet address" autoComplete="off" />
-          </label>
-          <label className="field">
-            Counterparty (optional)
-            <select name="counterpartyId" defaultValue="">
-              <option value="">Unassigned</option>
-              {counterparties.map((c) => (
-                <option key={c.counterpartyId} value={c.counterpartyId}>
-                  {c.displayName}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            Trust state
-            <select name="trustState" defaultValue="unreviewed">
-              <option value="unreviewed">Unreviewed</option>
-              <option value="trusted">Trusted</option>
-              <option value="restricted">Restricted</option>
-              <option value="blocked">Blocked</option>
-            </select>
-          </label>
-          <label className="field">
-            Notes
-            <input name="notes" placeholder="Optional context" autoComplete="off" />
+            <input
+              name="category"
+              placeholder="vendor, contractor, customer, internal"
+              autoComplete="off"
+            />
           </label>
         </Dialog>
       ) : null}
     </main>
+  );
+}
+
+function CounterpartyCard({ rollup }: { rollup: CounterpartyRollup }) {
+  const { counterparty, destinations, payers } = rollup;
+  const [expanded, setExpanded] = useState(false);
+  const total = destinations.length + payers.length;
+  const canExpand = total > 0;
+
+  return (
+    <div className="rd-card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ color: 'var(--ax-text)', fontWeight: 600, fontSize: 15, wordBreak: 'break-word' }}>
+            {counterparty.displayName}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--ax-text-muted)', marginTop: 2 }}>
+            {counterparty.category || 'Uncategorized'}
+          </div>
+        </div>
+        <span
+          className="rd-pill"
+          data-tone={counterparty.status === 'active' ? 'success' : 'warning'}
+          style={{ flexShrink: 0 }}
+        >
+          <span className="rd-pill-dot" aria-hidden />
+          {counterparty.status || 'active'}
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', gap: 16 }}>
+        <CountTile label="Destinations" value={destinations.length} />
+        <CountTile label="Payers" value={payers.length} />
+      </div>
+
+      {canExpand ? (
+        <>
+          <button
+            type="button"
+            className="rd-btn rd-btn-ghost"
+            style={{ minHeight: 32, padding: '6px 10px', fontSize: 12, alignSelf: 'flex-start' }}
+            onClick={() => setExpanded((v) => !v)}
+            aria-expanded={expanded}
+          >
+            {expanded ? 'Hide wallets' : `Show ${total} wallet${total === 1 ? '' : 's'}`}
+          </button>
+          {expanded ? (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 10,
+                borderTop: '1px solid var(--ax-border)',
+                paddingTop: 12,
+              }}
+            >
+              {destinations.length ? (
+                <WalletGroup
+                  label="Destinations"
+                  items={destinations.map((d) => ({
+                    id: d.destinationId,
+                    label: d.label,
+                    walletAddress: d.walletAddress,
+                    trust: d.trustState,
+                  }))}
+                />
+              ) : null}
+              {payers.length ? (
+                <WalletGroup
+                  label="Payers"
+                  items={payers.map((p) => ({
+                    id: p.collectionSourceId,
+                    label: p.label,
+                    walletAddress: p.walletAddress,
+                    trust: p.trustState,
+                  }))}
+                />
+              ) : null}
+            </div>
+          ) : null}
+        </>
+      ) : (
+        <div style={{ fontSize: 12, color: 'var(--ax-text-faint)' }}>
+          No wallets linked yet. Tag a destination or payer with this counterparty to populate it.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CountTile({ label, value }: { label: string; value: number }) {
+  return (
+    <div
+      style={{
+        flex: 1,
+        padding: '8px 10px',
+        background: 'var(--ax-surface-2)',
+        border: '1px solid var(--ax-border)',
+        borderRadius: 8,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
+          color: 'var(--ax-text-muted)',
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ fontSize: 20, fontWeight: 600, color: 'var(--ax-text)', marginTop: 2 }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function WalletGroup({
+  label,
+  items,
+}: {
+  label: string;
+  items: { id: string; label: string; walletAddress: string; trust: string }[];
+}) {
+  function trustToneFor(trust: string): 'success' | 'warning' | 'danger' | 'info' {
+    if (trust === 'trusted') return 'success';
+    if (trust === 'blocked' || trust === 'restricted') return 'danger';
+    if (trust === 'unreviewed') return 'warning';
+    return 'info';
+  }
+  return (
+    <div>
+      <div
+        style={{
+          fontSize: 10,
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
+          color: 'var(--ax-text-muted)',
+          marginBottom: 6,
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {items.map((item) => (
+          <div
+            key={item.id}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 10,
+              fontSize: 13,
+            }}
+          >
+            <span style={{ color: 'var(--ax-text)', flexShrink: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {item.label}
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+              <a
+                href={orbAccountUrl(item.walletAddress)}
+                target="_blank"
+                rel="noreferrer"
+                className="rd-mono"
+                style={{ fontSize: 11, color: 'var(--ax-accent)' }}
+              >
+                {shortenAddress(item.walletAddress, 4, 4)}
+              </a>
+              <span className="rd-pill" data-tone={trustToneFor(item.trust)} style={{ fontSize: 10 }}>
+                <span className="rd-pill-dot" aria-hidden />
+                {item.trust}
+              </span>
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -460,170 +509,17 @@ function Dialog(props: {
             <button type="button" className="button button-secondary" onClick={onClose}>
               Cancel
             </button>
-            <button type="submit" className="button button-primary" disabled={pending} aria-busy={pending}>
+            <button
+              type="submit"
+              className="button button-primary"
+              disabled={pending}
+              aria-busy={pending}
+            >
               {pending ? 'Saving…' : submitLabel}
             </button>
           </div>
         </form>
       </div>
     </div>
-  );
-}
-
-function EditDestinationDialog(props: {
-  destination: Destination;
-  counterparties: Counterparty[];
-  pending: boolean;
-  onClose: () => void;
-  onSubmit: (input: {
-    label: string;
-    trustState: Destination['trustState'];
-    counterpartyId: string | null;
-    notes?: string;
-    isActive?: boolean;
-  }) => void;
-}) {
-  const { destination, counterparties, pending, onClose, onSubmit } = props;
-  const [label, setLabel] = useState(destination.label);
-  const [trustState, setTrustState] = useState<Destination['trustState']>(destination.trustState);
-  const [counterpartyId, setCounterpartyId] = useState(destination.counterpartyId ?? '');
-  const [notes, setNotes] = useState(destination.notes ?? '');
-  const [isActive, setIsActive] = useState(destination.isActive);
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
-    }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  return (
-    <div className="rd-dialog-backdrop" role="dialog" aria-modal="true" aria-labelledby="rd-edit-destination-title">
-      <div className="rd-dialog" style={{ maxWidth: 560 }}>
-        <h2 id="rd-edit-destination-title" className="rd-dialog-title">
-          Edit destination
-        </h2>
-        <p className="rd-dialog-body">
-          Change how this destination is labelled, classified, and trusted.
-        </p>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            onSubmit({
-              label: label.trim(),
-              trustState,
-              counterpartyId: counterpartyId || null,
-              notes: notes.trim() ? notes.trim() : undefined,
-              isActive,
-            });
-          }}
-        >
-          <div
-            style={{
-              padding: '10px 12px',
-              borderRadius: 10,
-              background: 'var(--ax-surface-2)',
-              border: '1px solid var(--ax-border)',
-              marginBottom: 4,
-            }}
-          >
-            <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--ax-text-muted)' }}>
-              Wallet
-            </div>
-            <div style={{ fontFamily: 'var(--ax-font-mono)', fontSize: 12, color: 'var(--ax-text)', wordBreak: 'break-all' }}>
-              {destination.walletAddress}
-            </div>
-          </div>
-
-          <label className="field">
-            Label
-            <input
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-              required
-              autoComplete="off"
-            />
-          </label>
-
-          <label className="field">
-            Trust state
-            <select value={trustState} onChange={(e) => setTrustState(e.target.value as Destination['trustState'])}>
-              <option value="unreviewed">Unreviewed</option>
-              <option value="trusted">Trusted</option>
-              <option value="restricted">Restricted</option>
-              <option value="blocked">Blocked</option>
-            </select>
-          </label>
-
-          <label className="field">
-            Counterparty
-            <select value={counterpartyId} onChange={(e) => setCounterpartyId(e.target.value)}>
-              <option value="">Unassigned</option>
-              {counterparties.map((c) => (
-                <option key={c.counterpartyId} value={c.counterpartyId}>
-                  {c.displayName}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="field">
-            Notes / origin
-            <input
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Where this wallet came from, why you trust it, etc."
-              autoComplete="off"
-            />
-          </label>
-
-          <label
-            className="field"
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 10,
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={isActive}
-              onChange={(e) => setIsActive(e.target.checked)}
-            />
-            <span style={{ fontSize: 13, color: 'var(--ax-text-secondary)' }}>
-              Active (show in payment destination pickers)
-            </span>
-          </label>
-
-          <div className="rd-dialog-actions" style={{ marginTop: 20 }}>
-            <button type="button" className="button button-secondary" onClick={onClose}>
-              Cancel
-            </button>
-            <button type="submit" className="button button-primary" disabled={pending} aria-busy={pending}>
-              {pending ? 'Saving…' : 'Save changes'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-function ExternalIcon() {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      width="12"
-      height="12"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M6 3h7v7M13 3 6 10M3 5v8h8" />
-    </svg>
   );
 }

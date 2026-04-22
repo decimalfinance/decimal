@@ -4,6 +4,7 @@ import { ZodError } from 'zod';
 import { mapKnownError, normalizeErrorCode } from './api-errors.js';
 import { requireAuth } from './auth.js';
 import { capabilitiesRouter } from './routes/capabilities.js';
+import { collectionSourcesRouter } from './routes/collection-sources.js';
 import { collectionsRouter } from './routes/collections.js';
 import { config } from './config.js';
 import { approvalsRouter } from './routes/approvals.js';
@@ -80,6 +81,7 @@ export function createApp() {
   app.use(treasuryWalletsRouter);
   app.use(approvalsRouter);
   app.use(destinationsRouter);
+  app.use(collectionSourcesRouter);
   app.use(paymentRequestsRouter);
   app.use(paymentRunsRouter);
   app.use(paymentOrdersRouter);

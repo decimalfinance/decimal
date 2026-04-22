@@ -6,6 +6,8 @@ import type {
   CollectionRunCsvPreview,
   CollectionRunImportResult,
   CollectionRunSummary,
+  CollectionSource,
+  CollectionSourceTrustState,
   Counterparty,
   Destination,
   ExceptionItem,
@@ -471,6 +473,7 @@ export const api = {
     input: {
       collectionRunId?: string;
       receivingTreasuryWalletId: string;
+      collectionSourceId?: string;
       counterpartyId?: string;
       payerWalletAddress?: string;
       payerTokenAccountAddress?: string;
@@ -486,6 +489,53 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(input),
     });
+  },
+  listCollectionSources(workspaceId: string, params?: { limit?: number }) {
+    const qs = new URLSearchParams();
+    qs.set('limit', String(params?.limit ?? 100));
+    return request<{ items: CollectionSource[]; limit: number }>(
+      `/workspaces/${workspaceId}/collection-sources?${qs.toString()}`,
+    );
+  },
+  createCollectionSource(
+    workspaceId: string,
+    input: {
+      counterpartyId?: string;
+      walletAddress: string;
+      tokenAccountAddress?: string;
+      sourceType?: string;
+      trustState?: CollectionSourceTrustState;
+      label: string;
+      notes?: string;
+      isActive?: boolean;
+    },
+  ) {
+    return request<CollectionSource>(`/workspaces/${workspaceId}/collection-sources`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+  updateCollectionSource(
+    workspaceId: string,
+    collectionSourceId: string,
+    input: {
+      counterpartyId?: string | null;
+      walletAddress?: string;
+      tokenAccountAddress?: string | null;
+      sourceType?: string;
+      trustState?: CollectionSourceTrustState;
+      label?: string;
+      notes?: string | null;
+      isActive?: boolean;
+    },
+  ) {
+    return request<CollectionSource>(
+      `/workspaces/${workspaceId}/collection-sources/${collectionSourceId}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(input),
+      },
+    );
   },
   previewCollectionCsv(
     workspaceId: string,

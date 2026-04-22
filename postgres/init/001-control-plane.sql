@@ -225,6 +225,27 @@ CREATE TABLE IF NOT EXISTS destinations
   UNIQUE (workspace_id, wallet_address)
 );
 
+CREATE TABLE IF NOT EXISTS collection_sources
+(
+  collection_source_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+  counterparty_id UUID REFERENCES counterparties(counterparty_id) ON DELETE SET NULL,
+  chain TEXT NOT NULL DEFAULT 'solana',
+  asset TEXT NOT NULL DEFAULT 'usdc',
+  wallet_address TEXT NOT NULL,
+  token_account_address TEXT,
+  source_type TEXT NOT NULL DEFAULT 'payer_wallet',
+  trust_state TEXT NOT NULL DEFAULT 'unreviewed',
+  label TEXT NOT NULL,
+  notes TEXT,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (workspace_id, wallet_address),
+  UNIQUE (workspace_id, label)
+);
+
 CREATE TABLE IF NOT EXISTS approval_policies
 (
   approval_policy_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -343,6 +364,7 @@ CREATE TABLE IF NOT EXISTS collection_requests
   workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
   collection_run_id UUID REFERENCES collection_runs(collection_run_id) ON DELETE SET NULL,
   receiving_treasury_wallet_id UUID NOT NULL REFERENCES treasury_wallets(treasury_wallet_id) ON DELETE RESTRICT,
+  collection_source_id UUID REFERENCES collection_sources(collection_source_id) ON DELETE SET NULL,
   counterparty_id UUID REFERENCES counterparties(counterparty_id) ON DELETE SET NULL,
   transfer_request_id UUID UNIQUE REFERENCES transfer_requests(transfer_request_id) ON DELETE SET NULL,
   payer_wallet_address TEXT,
@@ -359,6 +381,9 @@ CREATE TABLE IF NOT EXISTS collection_requests
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (workspace_id, receiving_treasury_wallet_id, amount_raw, external_reference)
 );
+
+ALTER TABLE collection_requests
+  ADD COLUMN IF NOT EXISTS collection_source_id UUID REFERENCES collection_sources(collection_source_id) ON DELETE SET NULL;
 
 CREATE TABLE IF NOT EXISTS collection_request_events
 (
@@ -591,6 +616,14 @@ ALTER TABLE collection_request_events
     actor_type IN ('user', 'system', 'worker')
   );
 
+ALTER TABLE collection_sources
+  DROP CONSTRAINT IF EXISTS chk_collection_sources_trust_state;
+
+ALTER TABLE collection_sources
+  ADD CONSTRAINT chk_collection_sources_trust_state CHECK (
+    trust_state IN ('unreviewed', 'trusted', 'restricted', 'blocked')
+  );
+
 ALTER TABLE payment_order_events
   DROP CONSTRAINT IF EXISTS chk_payment_order_events_actor_type;
 
@@ -664,6 +697,12 @@ CREATE INDEX IF NOT EXISTS idx_destinations_counterparty_created_at
   ON destinations(counterparty_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_destinations_wallet_address
   ON destinations(wallet_address);
+CREATE INDEX IF NOT EXISTS idx_collection_sources_workspace_trust_created_at
+  ON collection_sources(workspace_id, trust_state, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_collection_sources_counterparty_created_at
+  ON collection_sources(counterparty_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_collection_sources_wallet_address
+  ON collection_sources(wallet_address);
 CREATE INDEX IF NOT EXISTS idx_approval_policies_workspace_id
   ON approval_policies(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_approval_decisions_workspace_created_at
@@ -717,6 +756,8 @@ CREATE INDEX IF NOT EXISTS idx_collection_requests_run_created_at
   ON collection_requests(collection_run_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_collection_requests_receiving_created_at
   ON collection_requests(receiving_treasury_wallet_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_collection_requests_source_created_at
+  ON collection_requests(collection_source_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_collection_requests_counterparty_created_at
   ON collection_requests(counterparty_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_collection_request_events_request_created_at
@@ -782,6 +823,11 @@ FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS trg_destinations_updated_at ON destinations;
 CREATE TRIGGER trg_destinations_updated_at
 BEFORE UPDATE ON destinations
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_collection_sources_updated_at ON collection_sources;
+CREATE TRIGGER trg_collection_sources_updated_at
+BEFORE UPDATE ON collection_sources
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_approval_policies_updated_at ON approval_policies;

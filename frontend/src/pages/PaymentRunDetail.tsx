@@ -16,7 +16,7 @@ import {
   orbTransactionUrl,
   shortenAddress,
   signAndSubmitPreparedPayment,
-  solanaAccountUrl,
+  orbAccountUrl,
   subscribeSolanaWallets,
   type BrowserWalletOption,
 } from '../domain';
@@ -902,7 +902,7 @@ function RecipientsTable({ workspaceId, orders }: { workspaceId: string; orders:
                 <td>
                   <a
                     className="rd-addr-link"
-                    href={solanaAccountUrl(order.destination.walletAddress)}
+                    href={orbAccountUrl(order.destination.walletAddress)}
                     target="_blank"
                     rel="noreferrer"
                     title={order.destination.walletAddress}

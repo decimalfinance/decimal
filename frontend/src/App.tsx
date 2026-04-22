@@ -11,8 +11,10 @@ import { PaymentDetailPage as PaymentDetailPageV2 } from './pages/PaymentDetail'
 import { CollectionsPage } from './pages/Collections';
 import { CollectionDetailPage } from './pages/CollectionDetail';
 import { CollectionRunDetailPage } from './pages/CollectionRunDetail';
+import { CollectionSourcesPage } from './pages/CollectionSources';
 import { WalletsPage } from './pages/Wallets';
 import { CounterpartiesPage } from './pages/Counterparties';
+import { DestinationsPage } from './pages/Destinations';
 import { ProofsPage as ProofsPageV2 } from './pages/Proofs';
 import { ExecutionPage as ExecutionPageV2 } from './pages/Execution';
 import { SettlementPage as SettlementPageV2 } from './pages/Settlement';
@@ -185,6 +187,18 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
       ).length,
     [sidebarCollectionsQuery.data?.items],
   );
+  const sidebarPayersQuery = useQuery({
+    queryKey: ['sidebar-collection-sources', activeWorkspaceId] as const,
+    queryFn: () => api.listCollectionSources(activeWorkspaceId!),
+    enabled: Boolean(activeWorkspaceId),
+    refetchInterval: () =>
+      typeof document !== 'undefined' && document.hidden ? false : 30_000,
+  });
+  const payersUnreviewedCount = useMemo(
+    () =>
+      (sidebarPayersQuery.data?.items ?? []).filter((s) => s.trustState === 'unreviewed').length,
+    [sidebarPayersQuery.data?.items],
+  );
 
   async function logout() {
     await queryClient.cancelQueries();
@@ -203,6 +217,7 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
         activeWorkspaceId={activeWorkspaceId}
         paymentsIncompleteCount={paymentsIncompleteCount}
         collectionsOpenCount={collectionsOpenCount}
+        payersUnreviewedCount={payersUnreviewedCount}
         approvalPendingCount={approvalPendingCount}
         executionQueueCount={executionQueueCount}
         onWorkspaceSwitch={(workspaceId) => navigate(`/workspaces/${workspaceId}`)}
@@ -216,6 +231,7 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
           <Route path="/workspaces/:workspaceId" element={<CommandCenterPageV2 session={session} />} />
           <Route path="/workspaces/:workspaceId/wallets" element={<WalletsPage session={session} />} />
           <Route path="/workspaces/:workspaceId/counterparties" element={<CounterpartiesPage session={session} />} />
+          <Route path="/workspaces/:workspaceId/destinations" element={<DestinationsPage session={session} />} />
           <Route path="/workspaces/:workspaceId/registry" element={<AddressBookPage session={session} />} />
           <Route path="/workspaces/:workspaceId/requests" element={<PaymentRequestsPage session={session} />} />
           <Route path="/workspaces/:workspaceId/runs" element={<PaymentsPageV2 session={session} />} />
@@ -225,6 +241,7 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
           <Route path="/workspaces/:workspaceId/collections" element={<CollectionsPage session={session} />} />
           <Route path="/workspaces/:workspaceId/collections/:collectionRequestId" element={<CollectionDetailPage />} />
           <Route path="/workspaces/:workspaceId/collection-runs/:collectionRunId" element={<CollectionRunDetailPage />} />
+          <Route path="/workspaces/:workspaceId/payers" element={<CollectionSourcesPage session={session} />} />
           <Route path="/workspaces/:workspaceId/approvals" element={<ApprovalsPageV2 session={session} />} />
           <Route path="/workspaces/:workspaceId/execution" element={<ExecutionPageV2 session={session} />} />
           <Route path="/workspaces/:workspaceId/settlement" element={<SettlementPageV2 session={session} />} />

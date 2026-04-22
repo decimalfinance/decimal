@@ -84,6 +84,7 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
           'POST /organizations',
           'GET /workspaces/:workspaceId/treasury-wallets',
           'GET /workspaces/:workspaceId/destinations',
+          'GET /workspaces/:workspaceId/collection-sources',
         ],
       },
       {
@@ -99,6 +100,7 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
           'POST /workspaces/:workspaceId/collections/import-csv/preview',
           'POST /workspaces/:workspaceId/collection-runs/import-csv/preview',
           'POST /workspaces/:workspaceId/collection-runs/import-csv',
+          'POST /workspaces/:workspaceId/collection-sources',
         ],
       },
       {
@@ -115,6 +117,7 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
           'POST /workspaces/:workspaceId/payment-runs/:paymentRunId/prepare-execution',
           'POST /workspaces/:workspaceId/payment-runs/:paymentRunId/attach-signature',
           'POST /workspaces/:workspaceId/collections/:collectionRequestId/cancel',
+          'PATCH /workspaces/:workspaceId/collection-sources/:collectionSourceId',
         ],
       },
       {

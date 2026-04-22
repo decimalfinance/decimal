@@ -21,6 +21,7 @@ TRUNCATE TABLE
   collection_request_events,
   collection_requests,
   collection_runs,
+  collection_sources,
   payment_runs,
   payment_order_events,
   payment_orders,
@@ -505,13 +506,26 @@ test('payment run cancellation and close are explicit lifecycle actions', async 
 test('collections create inbound expected transfers against owned receiving wallets', async () => {
   const setup = await createPaymentOrderSetup();
   const payerWallet = Keypair.generate().publicKey.toBase58();
+  const dualRoleSource = await post(
+    `/workspaces/${setup.workspace.workspaceId}/collection-sources`,
+    {
+      counterpartyId: setup.counterparty.counterpartyId,
+      walletAddress: setup.destinationAddress.address,
+      tokenAccountAddress: setup.destinationAddress.usdcAtaAddress,
+      label: 'Vendor payer wallet',
+      trustState: 'trusted',
+    },
+    setup.sessionToken,
+  );
+
+  assert.equal(dualRoleSource.walletAddress, setup.destinationAddress.address);
+  assert.equal(dualRoleSource.trustState, 'trusted');
 
   const collection = await post(
     `/workspaces/${setup.workspace.workspaceId}/collections`,
     {
       receivingTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
-      counterpartyId: setup.counterparty.counterpartyId,
-      payerWalletAddress: payerWallet,
+      collectionSourceId: dualRoleSource.collectionSourceId,
       amountRaw: '25000',
       reason: 'Collect invoice AR-1001',
       externalReference: 'AR-1001',
@@ -525,8 +539,25 @@ test('collections create inbound expected transfers against owned receiving wall
   assert.equal(collection.amountRaw, '25000');
   assert.equal(collection.receivingTreasuryWallet.treasuryWalletId, setup.sourceAddress.treasuryWalletId);
   assert.equal(collection.receivingTreasuryWallet.address, setup.sourceAddress.address);
-  assert.equal(collection.payerWalletAddress, payerWallet);
+  assert.equal(collection.collectionSourceId, dualRoleSource.collectionSourceId);
+  assert.equal(collection.collectionSource.walletAddress, setup.destinationAddress.address);
+  assert.equal(collection.payerWalletAddress, setup.destinationAddress.address);
   assert.ok(collection.transferRequestId);
+
+  const adHocCollection = await post(
+    `/workspaces/${setup.workspace.workspaceId}/collections`,
+    {
+      receivingTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
+      counterpartyId: setup.counterparty.counterpartyId,
+      payerWalletAddress: payerWallet,
+      amountRaw: '26000',
+      reason: 'Collect ad hoc payer',
+      externalReference: 'AR-1002',
+    },
+    setup.sessionToken,
+  );
+  assert.equal(adHocCollection.collectionSource.walletAddress, payerWallet);
+  assert.equal(adHocCollection.collectionSource.trustState, 'unreviewed');
 
   const transferRequest = await prisma.transferRequest.findUniqueOrThrow({
     where: { transferRequestId: collection.transferRequestId },
@@ -539,6 +570,21 @@ test('collections create inbound expected transfers against owned receiving wall
   assert.equal(transferRequest.destination.tokenAccountAddress, setup.sourceAddress.usdcAtaAddress);
   assert.equal(transferRequest.destination.isInternal, true);
   assert.equal(transferRequest.destination.destinationType, 'internal_collection_receiver');
+
+  const publicDestinations = await get(`/workspaces/${setup.workspace.workspaceId}/destinations`, setup.sessionToken);
+  assert.ok(
+    publicDestinations.items.every((destination: { destinationId: string }) => destination.destinationId !== transferRequest.destinationId),
+    'internal collection receiver should not appear in the normal destination address book',
+  );
+
+  const destinationsWithInternal = await get(
+    `/workspaces/${setup.workspace.workspaceId}/destinations?includeInternal=true`,
+    setup.sessionToken,
+  );
+  assert.ok(
+    destinationsWithInternal.items.some((destination: { destinationId: string }) => destination.destinationId === transferRequest.destinationId),
+    'internal collection receiver should remain inspectable when explicitly requested',
+  );
 
   const matchingIndex = await get('/internal/matching-index', setup.sessionToken);
   const workspaceSnapshot = matchingIndex.workspaces.find(
@@ -628,6 +674,18 @@ test('collection runs import CSV rows into a batch of inbound collection request
     },
   });
   assert.equal(transferRequestCount, 2);
+
+  const collectionSources = await get(`/workspaces/${setup.workspace.workspaceId}/collection-sources`, setup.sessionToken);
+  const importedSources = collectionSources.items.filter((item: { walletAddress: string }) => [firstPayerWallet, secondPayerWallet].includes(item.walletAddress));
+  assert.equal(importedSources.length, 2);
+  assert.deepEqual(
+    importedSources.map((item: { trustState: string }) => item.trustState).sort(),
+    ['unreviewed', 'unreviewed'],
+  );
+
+  const destinations = await get(`/workspaces/${setup.workspace.workspaceId}/destinations?includeInternal=true`, setup.sessionToken);
+  const payerDestinations = destinations.items.filter((item: { walletAddress: string }) => [firstPayerWallet, secondPayerWallet].includes(item.walletAddress));
+  assert.equal(payerDestinations.length, 0);
 });
 
 test('payment order duplicate references and unsafe source wallets are rejected', async () => {

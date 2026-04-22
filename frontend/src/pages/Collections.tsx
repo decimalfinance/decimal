@@ -6,6 +6,7 @@ import type {
   AuthenticatedSession,
   CollectionRequest,
   CollectionRunSummary,
+  CollectionSource,
   Counterparty,
   TreasuryWallet,
 } from '../types';
@@ -13,6 +14,8 @@ import { formatRawUsdcCompact, formatRelativeTime, shortenAddress } from '../dom
 import { parseCsvPreview } from '../csv-parse';
 import {
   collectionRunProgressLine,
+  displayCollectionSourceName,
+  displayCollectionSourceTrust,
   displayCollectionStatus,
   statusToneForCollection,
 } from '../status-labels';
@@ -25,6 +28,7 @@ type UnifiedRow =
       name: string;
       receiver: string;
       payer: string;
+      counterpartyName: string | null;
       amountLabel: string;
       reference: string;
       state: string;
@@ -39,6 +43,7 @@ type UnifiedRow =
       name: string;
       receiver: string;
       payer: string;
+      counterpartyName: string | null;
       amountLabel: string;
       reference: string;
       state: string;
@@ -67,7 +72,12 @@ function receiverLabel(wallet: TreasuryWallet | null): string {
 }
 
 function payerLabel(collection: CollectionRequest): string {
-  if (collection.counterparty?.displayName) return collection.counterparty.displayName;
+  if (collection.collectionSource) {
+    return displayCollectionSourceName(
+      collection.collectionSource.label,
+      collection.collectionSource.walletAddress,
+    );
+  }
   if (collection.payerWalletAddress) return shortenAddress(collection.payerWalletAddress, 4, 4);
   return 'Any payer';
 }
@@ -117,6 +127,11 @@ export function CollectionsPage({ session: _session }: { session: AuthenticatedS
     queryFn: () => api.listCounterparties(workspaceId!),
     enabled: Boolean(workspaceId),
   });
+  const collectionSourcesQuery = useQuery({
+    queryKey: ['collection-sources', workspaceId] as const,
+    queryFn: () => api.listCollectionSources(workspaceId!),
+    enabled: Boolean(workspaceId),
+  });
 
   if (!workspaceId) {
     return (
@@ -133,6 +148,7 @@ export function CollectionsPage({ session: _session }: { session: AuthenticatedS
   const runs = collectionRunsQuery.data?.items ?? [];
   const wallets = walletsQuery.data?.items ?? [];
   const counterparties = counterpartiesQuery.data?.items ?? [];
+  const collectionSources = collectionSourcesQuery.data?.items ?? [];
 
   const standalone = collections.filter((c) => !c.collectionRunId);
 
@@ -144,6 +160,7 @@ export function CollectionsPage({ session: _session }: { session: AuthenticatedS
         name: payerLabel(c),
         receiver: receiverLabel(c.receivingTreasuryWallet),
         payer: c.payerWalletAddress ?? '',
+        counterpartyName: c.counterparty?.displayName ?? null,
         amountLabel: `${formatRawUsdcCompact(c.amountRaw)} ${assetSymbol(c.asset)}`,
         reference: c.externalReference ?? '—',
         state: displayCollectionStatus(c.derivedState),
@@ -158,6 +175,7 @@ export function CollectionsPage({ session: _session }: { session: AuthenticatedS
         name: r.runName,
         receiver: receiverLabel(r.receivingTreasuryWallet),
         payer: `${r.summary.total} payer${r.summary.total === 1 ? '' : 's'}`,
+        counterpartyName: null,
         amountLabel: `${formatRawUsdcCompact(r.summary.totalAmountRaw)} USDC`,
         reference: '—',
         state: displayCollectionStatus(r.derivedState),
@@ -186,7 +204,8 @@ export function CollectionsPage({ session: _session }: { session: AuthenticatedS
         (r) =>
           r.name.toLowerCase().includes(q) ||
           r.reference.toLowerCase().includes(q) ||
-          r.payer.toLowerCase().includes(q),
+          r.payer.toLowerCase().includes(q) ||
+          (r.counterpartyName ?? '').toLowerCase().includes(q),
       );
     }
     return out;
@@ -290,27 +309,28 @@ export function CollectionsPage({ session: _session }: { session: AuthenticatedS
         <table className="rd-table">
           <thead>
             <tr>
-              <th style={{ width: '22%' }}>Payer / Run</th>
-              <th style={{ width: '18%' }}>Receiver</th>
-              <th style={{ width: '14%' }}>Reference</th>
-              <th className="rd-num" style={{ width: '14%' }}>
+              <th style={{ width: '20%' }}>Payer / Run</th>
+              <th style={{ width: '14%' }}>Counterparty</th>
+              <th style={{ width: '16%' }}>Receiver</th>
+              <th style={{ width: '12%' }}>Reference</th>
+              <th className="rd-num" style={{ width: '12%' }}>
                 Amount
               </th>
-              <th style={{ width: '12%' }}>Origin</th>
-              <th style={{ width: '14%' }}>Status</th>
-              <th aria-label="Actions" style={{ width: '6%' }} />
+              <th style={{ width: '10%' }}>Origin</th>
+              <th style={{ width: '12%' }}>Status</th>
+              <th aria-label="Actions" style={{ width: '4%' }} />
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={7} className="rd-empty-cell">
+                <td colSpan={8} className="rd-empty-cell">
                   <div className="rd-skeleton rd-skeleton-block" style={{ height: 80 }} />
                 </td>
               </tr>
             ) : filteredRows.length === 0 ? (
               <tr>
-                <td colSpan={7} className="rd-empty-cell">
+                <td colSpan={8} className="rd-empty-cell">
                   <strong>
                     {rows.length === 0 ? 'No collections yet' : 'Nothing matches that filter'}
                   </strong>
@@ -333,6 +353,15 @@ export function CollectionsPage({ session: _session }: { session: AuthenticatedS
                       <span className="rd-recipient-name">{row.name}</span>
                       <span className="rd-recipient-ref">{formatRelativeTime(row.createdAt)}</span>
                     </div>
+                  </td>
+                  <td>
+                    {row.counterpartyName ? (
+                      <span className="rd-origin" data-kind="run">
+                        {row.counterpartyName}
+                      </span>
+                    ) : (
+                      <span style={{ color: 'var(--ax-text-faint)', fontSize: 12 }}>—</span>
+                    )}
                   </td>
                   <td>
                     <span style={{ fontSize: 13, color: 'var(--ax-text-secondary)' }}>{row.receiver}</span>
@@ -414,11 +443,15 @@ export function CollectionsPage({ session: _session }: { session: AuthenticatedS
           workspaceId={workspaceId}
           wallets={wallets}
           counterparties={counterparties}
+          collectionSources={collectionSources}
           onClose={() => setCreateOpen(false)}
           onSuccess={async () => {
             setCreateOpen(false);
             success('Collection created. Waiting for payer.');
             await queryClient.invalidateQueries({ queryKey: ['collections', workspaceId] });
+            await queryClient.invalidateQueries({
+              queryKey: ['collection-sources', workspaceId],
+            });
           }}
           onError={(message) => toastError(message)}
         />
@@ -446,11 +479,19 @@ function CreateCollectionDialog(props: {
   workspaceId: string;
   wallets: TreasuryWallet[];
   counterparties: Counterparty[];
+  collectionSources: CollectionSource[];
   onClose: () => void;
   onSuccess: () => void;
   onError: (message: string) => void;
 }) {
-  const { workspaceId, wallets, counterparties, onClose, onSuccess, onError } = props;
+  const { workspaceId, wallets, counterparties, collectionSources, onClose, onSuccess, onError } =
+    props;
+
+  // Payer picker mode — pick an existing source, type a wallet address, or leave blank
+  const [payerMode, setPayerMode] = useState<'any' | 'existing' | 'new'>('any');
+  const [selectedSourceId, setSelectedSourceId] = useState('');
+  const [newPayerAddress, setNewPayerAddress] = useState('');
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose();
@@ -467,10 +508,18 @@ function CreateCollectionDialog(props: {
       if (!receivingTreasuryWalletId || !amount || !reason) {
         throw new Error('Receiver, amount, and reason are required.');
       }
+      if (payerMode === 'existing' && !selectedSourceId) {
+        throw new Error('Pick an existing payer source or switch the picker back to "Any payer".');
+      }
+      if (payerMode === 'new' && !newPayerAddress.trim()) {
+        throw new Error('Enter the payer wallet address or switch the picker back to "Any payer".');
+      }
       return api.createCollection(workspaceId, {
         receivingTreasuryWalletId,
         counterpartyId: String(form.get('counterpartyId') ?? '') || undefined,
-        payerWalletAddress: String(form.get('payerWalletAddress') ?? '').trim() || undefined,
+        collectionSourceId: payerMode === 'existing' ? selectedSourceId : undefined,
+        payerWalletAddress:
+          payerMode === 'new' ? newPayerAddress.trim() : undefined,
         amountRaw: usdcToRaw(amount),
         reason,
         externalReference: String(form.get('externalReference') ?? '').trim() || undefined,
@@ -479,6 +528,8 @@ function CreateCollectionDialog(props: {
     onSuccess: () => onSuccess(),
     onError: (err) => onError(err instanceof Error ? err.message : 'Could not create collection.'),
   });
+
+  const activeSources = collectionSources.filter((s) => s.isActive);
 
   return (
     <div
@@ -542,25 +593,85 @@ function CreateCollectionDialog(props: {
                 autoComplete="off"
               />
             </label>
+            <div className="rd-field" style={{ gridColumn: '1 / -1' }}>
+              <span className="rd-field-label">Payer</span>
+              <div
+                className="rd-tabs"
+                role="tablist"
+                aria-label="Payer source"
+                style={{ marginBottom: 8 }}
+              >
+                {(['any', 'existing', 'new'] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    role="tab"
+                    className="rd-tab"
+                    aria-selected={payerMode === m}
+                    onClick={() => setPayerMode(m)}
+                    disabled={m === 'existing' && activeSources.length === 0}
+                  >
+                    {m === 'any' ? 'Any payer' : m === 'existing' ? 'Known source' : 'New wallet'}
+                  </button>
+                ))}
+              </div>
+              {payerMode === 'existing' ? (
+                <select
+                  className="rd-select"
+                  value={selectedSourceId}
+                  onChange={(e) => setSelectedSourceId(e.target.value)}
+                >
+                  <option value="">Select a known payer source</option>
+                  {activeSources.map((s) => (
+                    <option key={s.collectionSourceId} value={s.collectionSourceId}>
+                      {s.label} · {displayCollectionSourceTrust(s.trustState)} ·{' '}
+                      {shortenAddress(s.walletAddress, 4, 4)}
+                    </option>
+                  ))}
+                </select>
+              ) : payerMode === 'new' ? (
+                <input
+                  className="rd-input"
+                  placeholder="Solana wallet address"
+                  value={newPayerAddress}
+                  onChange={(e) => setNewPayerAddress(e.target.value)}
+                  autoComplete="off"
+                />
+              ) : (
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 12,
+                    color: 'var(--ax-text-muted)',
+                  }}
+                >
+                  Any payer can clear this collection. The first matching transfer to the receiver
+                  wins.
+                </p>
+              )}
+              {payerMode === 'new' ? (
+                <p
+                  style={{
+                    margin: '6px 0 0',
+                    fontSize: 11,
+                    color: 'var(--ax-text-muted)',
+                  }}
+                >
+                  Unknown addresses are saved as an <em>unreviewed</em> payer source you can trust
+                  later from the Payers page.
+                </p>
+              ) : null}
+            </div>
             <label className="rd-field">
               <span className="rd-field-label">Counterparty (optional)</span>
               <select name="counterpartyId" className="rd-select" defaultValue="">
-                <option value="">Any payer</option>
+                <option value="">—</option>
                 {counterparties.map((c) => (
                   <option key={c.counterpartyId} value={c.counterpartyId}>
                     {c.displayName}
                   </option>
                 ))}
               </select>
-            </label>
-            <label className="rd-field">
-              <span className="rd-field-label">Payer wallet (optional)</span>
-              <input
-                name="payerWalletAddress"
-                placeholder="Solana address"
-                className="rd-input"
-                autoComplete="off"
-              />
             </label>
             <label className="rd-field" style={{ gridColumn: '1 / -1' }}>
               <span className="rd-field-label">Reason</span>

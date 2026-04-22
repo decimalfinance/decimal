@@ -102,9 +102,12 @@ export async function updateCounterparty(workspaceId: string, counterpartyId: st
   return serializeCounterparty(updated);
 }
 
-export async function listDestinations(workspaceId: string, options?: { limit?: number }) {
+export async function listDestinations(workspaceId: string, options?: { limit?: number; includeInternal?: boolean }) {
   const items = await prisma.destination.findMany({
-    where: { workspaceId },
+    where: {
+      workspaceId,
+      ...(options?.includeInternal ? {} : { isInternal: false }),
+    },
     include: {
       counterparty: true,
     },

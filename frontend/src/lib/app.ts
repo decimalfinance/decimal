@@ -118,6 +118,10 @@ export function orbTransactionUrl(signature: string) {
   return `https://orbmarkets.io/tx/${signature}?tab=summary`;
 }
 
+export function orbAccountUrl(address: string) {
+  return `https://orbmarkets.io/address/${address}?tab=summary`;
+}
+
 export function solanaAccountUrl(address: string) {
   return `https://explorer.solana.com/address/${address}`;
 }

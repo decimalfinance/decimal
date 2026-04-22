@@ -51,6 +51,12 @@ export const API_ENDPOINTS = [
     requestBody: { walletAddress: 'string', tokenAccountAddress: 'string optional', label: 'string', trustState: 'trusted | unreviewed | restricted' },
   }),
   endpoint('update_destination', 'PATCH', '/workspaces/{workspaceId}/destinations/{destinationId}', ['address book'], 'Update payment destination', 'session', { scope: 'workspace:write' }),
+  endpoint('list_collection_sources', 'GET', '/workspaces/{workspaceId}/collection-sources', ['address book'], 'List inbound collection sources', 'session', { scope: 'workspace:read' }),
+  endpoint('create_collection_source', 'POST', '/workspaces/{workspaceId}/collection-sources', ['address book'], 'Create inbound collection source', 'session', {
+    scope: 'workspace:write',
+    requestBody: { walletAddress: 'string', label: 'string', trustState: 'unreviewed | trusted | restricted | blocked' },
+  }),
+  endpoint('update_collection_source', 'PATCH', '/workspaces/{workspaceId}/collection-sources/{collectionSourceId}', ['address book'], 'Update inbound collection source', 'session', { scope: 'workspace:write' }),
 
   endpoint('get_approval_policy', 'GET', '/workspaces/{workspaceId}/approval-policy', ['approval'], 'Get workspace approval policy', 'session', { scope: 'workspace:read' }),
   endpoint('update_approval_policy', 'PATCH', '/workspaces/{workspaceId}/approval-policy', ['approval'], 'Update workspace approval policy', 'session', { scope: 'approvals:write' }),

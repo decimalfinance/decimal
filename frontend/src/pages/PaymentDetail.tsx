@@ -16,7 +16,7 @@ import {
   orbTransactionUrl,
   shortenAddress,
   signAndSubmitPreparedPayment,
-  solanaAccountUrl,
+  orbAccountUrl,
   subscribeSolanaWallets,
   type BrowserWalletOption,
 } from '../domain';
@@ -336,7 +336,7 @@ export function PaymentDetailPage() {
               <span className="rd-mono">{amountLabel}</span>
               <span className="rd-meta-sep">·</span>
               <a
-                href={solanaAccountUrl(order.destination.walletAddress)}
+                href={orbAccountUrl(order.destination.walletAddress)}
                 target="_blank"
                 rel="noreferrer"
                 className="rd-addr-link"
@@ -406,7 +406,7 @@ export function PaymentDetailPage() {
               <DetailEntry label="From">
                 {order.sourceTreasuryWallet?.address ? (
                   <a
-                    href={solanaAccountUrl(order.sourceTreasuryWallet.address)}
+                    href={orbAccountUrl(order.sourceTreasuryWallet.address)}
                     target="_blank"
                     rel="noreferrer"
                     className="rd-addr-link"
@@ -423,7 +423,7 @@ export function PaymentDetailPage() {
               </DetailEntry>
               <DetailEntry label="To">
                 <a
-                  href={solanaAccountUrl(order.destination.walletAddress)}
+                  href={orbAccountUrl(order.destination.walletAddress)}
                   target="_blank"
                   rel="noreferrer"
                   className="rd-addr-link"

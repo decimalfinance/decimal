@@ -25,7 +25,15 @@ const counterpartyParamsSchema = workspaceParamsSchema.extend({
   counterpartyId: z.string().uuid(),
 });
 
-const listAddressBookQuerySchema = listQuerySchema({ defaultLimit: 100, maxLimit: 250 });
+const booleanQuerySchema = z.preprocess((value) => {
+  if (value === undefined) return undefined;
+  if (typeof value === 'string') return value === 'true' || value === '1';
+  return value;
+}, z.boolean().default(false));
+
+const listAddressBookQuerySchema = listQuerySchema({ defaultLimit: 100, maxLimit: 250 }).extend({
+  includeInternal: booleanQuerySchema,
+});
 
 const createCounterpartySchema = z.object({
   displayName: z.string().trim().min(1).max(200),

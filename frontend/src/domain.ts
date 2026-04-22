@@ -4,6 +4,7 @@ export {
   formatRelativeTime,
   formatTimestamp,
   formatUsd,
+  orbAccountUrl,
   orbTransactionUrl,
   shortenAddress,
   solanaAccountUrl,

@@ -105,6 +105,20 @@ const icons = {
       <path d="M4 16.5a6 6 0 0 1 12 0" />
     </SvgIcon>
   ),
+  destinations: (
+    <SvgIcon>
+      <path d="M3 10h10" />
+      <path d="M10 6l4 4-4 4" />
+      <circle cx="16.5" cy="10" r="1.2" fill="currentColor" />
+    </SvgIcon>
+  ),
+  payers: (
+    <SvgIcon>
+      <circle cx="10" cy="7" r="3" />
+      <path d="M4 16.5a6 6 0 0 1 12 0" />
+      <path d="M14 5l2 2 3-3" />
+    </SvgIcon>
+  ),
   chevron: (
     <SvgIcon className="ax-ws-button-chev">
       <path d="M5 7.5 10 12.5 15 7.5" />
@@ -208,6 +222,7 @@ export function AppSidebar({
   activeWorkspaceId,
   paymentsIncompleteCount,
   collectionsOpenCount,
+  payersUnreviewedCount,
   approvalPendingCount,
   executionQueueCount,
   onWorkspaceSwitch,
@@ -218,6 +233,7 @@ export function AppSidebar({
   activeWorkspaceId?: string;
   paymentsIncompleteCount?: number;
   collectionsOpenCount?: number;
+  payersUnreviewedCount?: number;
   approvalPendingCount?: number;
   executionQueueCount?: number;
   onWorkspaceSwitch: (workspaceId: string) => void;
@@ -362,6 +378,13 @@ export function AppSidebar({
               <div className="ax-nav-group-label">Registry</div>
               <NavLinkItem to={`${base}/wallets`} icon={icons.wallet} label="Wallets" />
               <NavLinkItem to={`${base}/counterparties`} icon={icons.counterparty} label="Counterparties" />
+              <NavLinkItem to={`${base}/destinations`} icon={icons.destinations} label="Destinations" />
+              <NavLinkItem
+                to={`${base}/payers`}
+                icon={icons.payers}
+                label="Payers"
+                badge={payersUnreviewedCount}
+              />
             </div>
 
             <details className="ax-nav-advanced">

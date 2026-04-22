@@ -7,10 +7,17 @@ import {
   formatRawUsdcCompact,
   formatRelativeTime,
   formatTimestamp,
+  orbAccountUrl,
+  orbTransactionUrl,
   shortenAddress,
-  solanaAccountUrl,
 } from '../domain';
-import { displayCollectionStatus, statusToneForCollection } from '../status-labels';
+import {
+  collectionSourceTrustTone,
+  displayCollectionSourceName,
+  displayCollectionSourceTrust,
+  displayCollectionStatus,
+  statusToneForCollection,
+} from '../status-labels';
 import { useToast } from '../ui/Toast';
 
 type StageState = 'complete' | 'current' | 'pending' | 'blocked';
@@ -174,11 +181,14 @@ export function CollectionDetailPage() {
   const lifecycle = buildLifecycle(collection);
   const statusTone = statusToneForCollection(collection.derivedState);
   const amountLabel = `${formatRawUsdcCompact(collection.amountRaw)} ${assetSymbol(collection.asset)}`;
-  const payerName =
-    collection.counterparty?.displayName ??
-    (collection.payerWalletAddress
+  const payerName = collection.collectionSource
+    ? displayCollectionSourceName(
+        collection.collectionSource.label,
+        collection.collectionSource.walletAddress,
+      )
+    : collection.payerWalletAddress
       ? shortenAddress(collection.payerWalletAddress, 4, 4)
-      : 'Any payer');
+      : 'Any payer';
   const receiverWallet = collection.receivingTreasuryWallet;
   const settledSignature =
     collection.reconciliationDetail?.match?.signature ??
@@ -256,11 +266,40 @@ export function CollectionDetailPage() {
               }}
             >
               <DetailEntry label="Payer">
-                {collection.counterparty?.displayName ? (
-                  <span>{collection.counterparty.displayName}</span>
+                {collection.collectionSource ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <Link
+                      to={`/workspaces/${workspaceId}/payers`}
+                      className="rd-addr-link"
+                      style={{ fontSize: 13 }}
+                    >
+                      <span>{payerName}</span>
+                    </Link>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span
+                        className="rd-pill"
+                        data-tone={toneToPill(
+                          collectionSourceTrustTone(collection.collectionSource.trustState),
+                        )}
+                        style={{ fontSize: 11 }}
+                      >
+                        <span className="rd-pill-dot" aria-hidden />
+                        {displayCollectionSourceTrust(collection.collectionSource.trustState)}
+                      </span>
+                      <a
+                        href={orbAccountUrl(collection.collectionSource.walletAddress)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rd-mono"
+                        style={{ fontSize: 11, color: 'var(--ax-text-muted)' }}
+                      >
+                        {shortenAddress(collection.collectionSource.walletAddress, 4, 4)}
+                      </a>
+                    </div>
+                  </div>
                 ) : collection.payerWalletAddress ? (
                   <a
-                    href={solanaAccountUrl(collection.payerWalletAddress)}
+                    href={orbAccountUrl(collection.payerWalletAddress)}
                     target="_blank"
                     rel="noreferrer"
                     className="rd-addr-link"
@@ -271,9 +310,21 @@ export function CollectionDetailPage() {
                   <span style={{ color: 'var(--ax-text-muted)' }}>Any payer</span>
                 )}
               </DetailEntry>
+              <DetailEntry label="Counterparty">
+                {collection.counterparty?.displayName ? (
+                  <Link
+                    to={`/workspaces/${workspaceId}/counterparties`}
+                    className="rd-addr-link"
+                  >
+                    <span>{collection.counterparty.displayName}</span>
+                  </Link>
+                ) : (
+                  <span style={{ color: 'var(--ax-text-muted)' }}>—</span>
+                )}
+              </DetailEntry>
               <DetailEntry label="Receiver">
                 <a
-                  href={solanaAccountUrl(receiverWallet.address)}
+                  href={orbAccountUrl(receiverWallet.address)}
                   target="_blank"
                   rel="noreferrer"
                   className="rd-addr-link"
@@ -291,13 +342,6 @@ export function CollectionDetailPage() {
               <DetailEntry label="Reference">
                 {collection.externalReference ? (
                   <span className="rd-mono">{collection.externalReference}</span>
-                ) : (
-                  <span style={{ color: 'var(--ax-text-muted)' }}>—</span>
-                )}
-              </DetailEntry>
-              <DetailEntry label="Reason">
-                {collection.reason ? (
-                  <span>{collection.reason}</span>
                 ) : (
                   <span style={{ color: 'var(--ax-text-muted)' }}>—</span>
                 )}
@@ -322,7 +366,7 @@ export function CollectionDetailPage() {
               {settledSignature ? (
                 <DetailEntry label="Settlement signature">
                   <a
-                    href={`https://solscan.io/tx/${settledSignature}`}
+                    href={orbTransactionUrl(settledSignature)}
                     target="_blank"
                     rel="noreferrer"
                     className="rd-tx-link"
@@ -373,7 +417,7 @@ export function CollectionDetailPage() {
                   meta={matchedAt ? formatTimestamp(matchedAt) : formatRelativeTime(collection.updatedAt)}
                   body={
                     <a
-                      href={`https://solscan.io/tx/${settledSignature}`}
+                      href={orbTransactionUrl(settledSignature)}
                       target="_blank"
                       rel="noreferrer"
                       className="rd-tx-link"

@@ -24,7 +24,7 @@ infra-down:
 reset-data:
 	set -euo pipefail && \
 	docker compose up -d postgres clickhouse && \
-	docker compose exec -T postgres sh -lc "$(PSQL_QUIET) -U usdc_ops -d usdc_ops -c \"TRUNCATE TABLE auth_sessions, organization_memberships, collection_request_events, collection_requests, collection_runs, transfer_requests, treasury_wallets, workspaces, organizations, users RESTART IDENTITY CASCADE;\"" >/dev/null && \
+	docker compose exec -T postgres sh -lc "$(PSQL_QUIET) -U usdc_ops -d usdc_ops -c \"TRUNCATE TABLE auth_sessions, organization_memberships, collection_request_events, collection_requests, collection_runs, collection_sources, transfer_requests, treasury_wallets, workspaces, organizations, users RESTART IDENTITY CASCADE;\"" >/dev/null && \
 	docker compose exec -T clickhouse sh -lc "clickhouse-client --multiquery -q \"TRUNCATE TABLE IF EXISTS usdc_ops.exceptions; TRUNCATE TABLE IF EXISTS usdc_ops.settlement_matches; TRUNCATE TABLE IF EXISTS usdc_ops.request_book_snapshots; TRUNCATE TABLE IF EXISTS usdc_ops.matcher_events; TRUNCATE TABLE IF EXISTS usdc_ops.observed_payments; TRUNCATE TABLE IF EXISTS usdc_ops.observed_transfers; TRUNCATE TABLE IF EXISTS usdc_ops.observed_transactions;\"" >/dev/null && \
 	echo "Application data cleared from Postgres and ClickHouse."
 

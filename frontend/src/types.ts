@@ -552,6 +552,27 @@ export type CollectionRequestState =
   | 'closed'
   | 'cancelled';
 
+export type CollectionSourceTrustState = 'unreviewed' | 'trusted' | 'restricted' | 'blocked';
+
+export type CollectionSource = {
+  collectionSourceId: string;
+  workspaceId: string;
+  counterpartyId: string | null;
+  chain: string;
+  asset: string;
+  walletAddress: string;
+  tokenAccountAddress: string | null;
+  sourceType: string;
+  trustState: CollectionSourceTrustState;
+  label: string;
+  notes: string | null;
+  isActive: boolean;
+  metadataJson: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  counterparty: Counterparty | null;
+};
+
 export type CollectionRequestEvent = {
   collectionRequestEventId: string;
   collectionRequestId: string;
@@ -571,6 +592,7 @@ export type CollectionRequest = {
   workspaceId: string;
   collectionRunId: string | null;
   receivingTreasuryWalletId: string;
+  collectionSourceId: string | null;
   counterpartyId: string | null;
   transferRequestId: string | null;
   payerWalletAddress: string | null;
@@ -592,6 +614,7 @@ export type CollectionRequest = {
     createdAt: string;
   } | null;
   receivingTreasuryWallet: TreasuryWallet;
+  collectionSource: CollectionSource | null;
   counterparty: Counterparty | null;
   transferRequest: {
     transferRequestId: string;

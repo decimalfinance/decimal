@@ -85,6 +85,7 @@ model Workspace {
   organization          Organization           @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
   treasuryWallets       TreasuryWallet[]
   destinations          Destination[]
+  collectionSources     CollectionSource[]
   transferRequests      TransferRequest[]
   approvalPolicy        ApprovalPolicy?
   approvalDecisions     ApprovalDecision[]
@@ -167,6 +168,7 @@ model Counterparty {
   updatedAt         DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
   organization      Organization     @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
   destinations      Destination[]
+  collectionSources CollectionSource[]
   paymentOrders     PaymentOrder[]
   paymentRequests   PaymentRequest[]
   collectionRequests CollectionRequest[]
@@ -204,6 +206,36 @@ model Destination {
   @@index([workspaceId, createdAt(sort: Desc)])
   @@index([counterpartyId, createdAt(sort: Desc)])
   @@map("destinations")
+}
+
+// CollectionSource — counterparty endpoint we receive money from.
+// A wallet may be both a Destination and a CollectionSource, but the roles stay
+// separate because outbound trust and inbound recognition are different policies.
+model CollectionSource {
+  collectionSourceId String              @id @default(dbgenerated("gen_random_uuid()")) @map("collection_source_id") @db.Uuid
+  counterpartyId     String?             @map("counterparty_id") @db.Uuid
+  workspaceId        String              @map("workspace_id") @db.Uuid
+  chain              String              @default("solana")
+  asset              String              @default("usdc")
+  walletAddress      String              @map("wallet_address")
+  tokenAccountAddress String?            @map("token_account_address")
+  sourceType         String              @default("payer_wallet") @map("source_type")
+  trustState         String              @default("unreviewed") @map("trust_state")
+  label              String
+  notes              String?
+  isActive           Boolean             @default(true) @map("is_active")
+  metadataJson       Json                @default("{}") @map("metadata_json")
+  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  counterparty       Counterparty?       @relation(fields: [counterpartyId], references: [counterpartyId], onDelete: SetNull)
+  workspace          Workspace           @relation(fields: [workspaceId], references: [workspaceId], onDelete: Cascade)
+  collectionRequests CollectionRequest[]
+
+  @@unique([workspaceId, walletAddress])
+  @@unique([workspaceId, label])
+  @@index([workspaceId, trustState, createdAt(sort: Desc)])
+  @@index([counterpartyId, createdAt(sort: Desc)])
+  @@map("collection_sources")
 }
 
 model TransferRequest {
@@ -360,6 +392,7 @@ model CollectionRequest {
   workspaceId               String                   @map("workspace_id") @db.Uuid
   collectionRunId           String?                  @map("collection_run_id") @db.Uuid
   receivingTreasuryWalletId String                   @map("receiving_treasury_wallet_id") @db.Uuid
+  collectionSourceId        String?                  @map("collection_source_id") @db.Uuid
   counterpartyId            String?                  @map("counterparty_id") @db.Uuid
   transferRequestId         String?                  @unique @map("transfer_request_id") @db.Uuid
   payerWalletAddress        String?                  @map("payer_wallet_address")
@@ -377,6 +410,7 @@ model CollectionRequest {
   workspace                 Workspace                @relation(fields: [workspaceId], references: [workspaceId], onDelete: Cascade)
   collectionRun             CollectionRun?           @relation(fields: [collectionRunId], references: [collectionRunId], onDelete: SetNull)
   receivingTreasuryWallet   TreasuryWallet           @relation("CollectionReceivingWallet", fields: [receivingTreasuryWalletId], references: [treasuryWalletId], onDelete: Restrict)
+  collectionSource          CollectionSource?        @relation(fields: [collectionSourceId], references: [collectionSourceId], onDelete: SetNull)
   counterparty              Counterparty?            @relation(fields: [counterpartyId], references: [counterpartyId], onDelete: SetNull)
   transferRequest           TransferRequest?         @relation(fields: [transferRequestId], references: [transferRequestId], onDelete: SetNull)
   createdByUser             User?                    @relation("CollectionRequestCreatedByUser", fields: [createdByUserId], references: [userId], onDelete: SetNull)
@@ -386,6 +420,7 @@ model CollectionRequest {
   @@index([workspaceId, state, createdAt(sort: Desc)])
   @@index([collectionRunId, createdAt(sort: Desc)])
   @@index([receivingTreasuryWalletId, createdAt(sort: Desc)])
+  @@index([collectionSourceId, createdAt(sort: Desc)])
   @@index([counterpartyId, createdAt(sort: Desc)])
   @@map("collection_requests")
 }

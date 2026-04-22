@@ -23,6 +23,7 @@ TRUNCATE TABLE
   collection_request_events,
   collection_requests,
   collection_runs,
+  collection_sources,
   payment_runs,
   payment_order_events,
   payment_orders,

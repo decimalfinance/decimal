@@ -8,7 +8,7 @@ import {
   formatRawUsdcCompact,
   formatUsd,
   shortenAddress,
-  solanaAccountUrl,
+  orbAccountUrl,
 } from '../domain';
 import { useToast } from '../ui/Toast';
 
@@ -213,7 +213,7 @@ export function WalletsPage({ session }: { session: AuthenticatedSession }) {
                     </td>
                     <td>
                       <a
-                        href={solanaAccountUrl(row.address)}
+                        href={orbAccountUrl(row.address)}
                         target="_blank"
                         rel="noreferrer"
                         className="rd-addr-link"

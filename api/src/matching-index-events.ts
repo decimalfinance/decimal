@@ -68,6 +68,7 @@ export function shouldInvalidateMatchingIndex(method: string, path: string) {
     /\/organizations(?:\/|$)/,
     /\/workspaces\/[^/]+\/treasury-wallets(?:\/|$)/,
     /\/workspaces\/[^/]+\/destinations(?:\/|$)/,
+    /\/workspaces\/[^/]+\/collection-sources(?:\/|$)/,
     /\/workspaces\/[^/]+\/payment-orders(?:\/|$)/,
     /\/workspaces\/[^/]+\/payment-requests(?:\/|$)/,
     /\/workspaces\/[^/]+\/payment-runs(?:\/|$)/,
