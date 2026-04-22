@@ -4,6 +4,7 @@ import { ZodError } from 'zod';
 import { mapKnownError, normalizeErrorCode } from './api-errors.js';
 import { requireAuth } from './auth.js';
 import { capabilitiesRouter } from './routes/capabilities.js';
+import { collectionsRouter } from './routes/collections.js';
 import { config } from './config.js';
 import { approvalsRouter } from './routes/approvals.js';
 import { destinationsRouter } from './routes/destinations.js';
@@ -82,6 +83,7 @@ export function createApp() {
   app.use(paymentRequestsRouter);
   app.use(paymentRunsRouter);
   app.use(paymentOrdersRouter);
+  app.use(collectionsRouter);
   app.use(eventsRouter);
 
   app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

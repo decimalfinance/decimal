@@ -41,6 +41,13 @@ const icons = {
       <path d="M5.5 12.5h2" />
     </SvgIcon>
   ),
+  collections: (
+    <SvgIcon>
+      <path d="M10 3v9" />
+      <path d="M6 8.5 10 12.5 14 8.5" />
+      <path d="M3 14.5h14v2H3z" />
+    </SvgIcon>
+  ),
   proofs: (
     <SvgIcon>
       <path d="M5 2.5h6L15 6.5v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1Z" />
@@ -200,6 +207,7 @@ export function AppSidebar({
   workspaceContexts,
   activeWorkspaceId,
   paymentsIncompleteCount,
+  collectionsOpenCount,
   approvalPendingCount,
   executionQueueCount,
   onWorkspaceSwitch,
@@ -209,6 +217,7 @@ export function AppSidebar({
   workspaceContexts: WorkspaceContext[];
   activeWorkspaceId?: string;
   paymentsIncompleteCount?: number;
+  collectionsOpenCount?: number;
   approvalPendingCount?: number;
   executionQueueCount?: number;
   onWorkspaceSwitch: (workspaceId: string) => void;
@@ -338,6 +347,12 @@ export function AppSidebar({
                 icon={icons.payments}
                 label="Payments"
                 badge={paymentsIncompleteCount}
+              />
+              <NavLinkItem
+                to={`${base}/collections`}
+                icon={icons.collections}
+                label="Collections"
+                badge={collectionsOpenCount}
               />
               <NavLinkItem to={`${base}/policy`} icon={icons.policy} label="Policy" />
               <NavLinkItem to={`${base}/proofs`} icon={icons.proofs} label="Proofs" />

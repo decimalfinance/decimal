@@ -1,4 +1,12 @@
-import type { Destination, PaymentOrder, PaymentOrderState, PaymentRun } from './api';
+import type {
+  CollectionRequest,
+  CollectionRequestState,
+  CollectionRunSummary,
+  Destination,
+  PaymentOrder,
+  PaymentOrderState,
+  PaymentRun,
+} from './api';
 
 const PAYMENT_STATUS: Record<PaymentOrderState, string> = {
   draft: 'Draft',
@@ -172,6 +180,62 @@ export function displayReconciliationState(state: string): string {
     exception: 'Exception',
   };
   return map[state] ?? state.replaceAll('_', ' ');
+}
+
+const COLLECTION_STATUS: Record<CollectionRequestState, string> = {
+  open: 'Awaiting payment',
+  partially_collected: 'Partial',
+  collected: 'Collected',
+  exception: 'Needs review',
+  closed: 'Closed',
+  cancelled: 'Cancelled',
+};
+
+export function displayCollectionStatus(state: string): string {
+  if (state in COLLECTION_STATUS) return COLLECTION_STATUS[state as CollectionRequestState];
+  return state.replaceAll('_', ' ');
+}
+
+export function statusToneForCollection(
+  derivedState: string,
+): 'success' | 'warning' | 'danger' | 'neutral' {
+  switch (derivedState) {
+    case 'collected':
+    case 'closed':
+      return 'success';
+    case 'open':
+      return 'warning';
+    case 'partially_collected':
+      return 'warning';
+    case 'exception':
+    case 'cancelled':
+      return 'danger';
+    default:
+      return 'neutral';
+  }
+}
+
+export function nextCollectionAction(collection: CollectionRequest): string {
+  switch (collection.derivedState) {
+    case 'open':
+      return 'Awaiting payer';
+    case 'partially_collected':
+      return 'Review partial receipt';
+    case 'exception':
+      return 'Review exception';
+    case 'collected':
+    case 'closed':
+      return 'Collected';
+    case 'cancelled':
+      return '—';
+    default:
+      return 'Review';
+  }
+}
+
+export function collectionRunProgressLine(run: CollectionRunSummary): string {
+  const s = run.summary;
+  return `${s.collected}/${s.total} collected · ${s.exception} exc · ${s.partiallyCollected} partial`;
 }
 
 export function displayPaymentRequestState(state: string): string {

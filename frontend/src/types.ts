@@ -544,6 +544,130 @@ export type PaymentProofPacket = {
   auditTrail: ReconciliationTimelineItem[];
 };
 
+export type CollectionRequestState =
+  | 'open'
+  | 'partially_collected'
+  | 'collected'
+  | 'exception'
+  | 'closed'
+  | 'cancelled';
+
+export type CollectionRequestEvent = {
+  collectionRequestEventId: string;
+  collectionRequestId: string;
+  workspaceId: string;
+  eventType: string;
+  actorType: string;
+  actorId: string | null;
+  beforeState: string | null;
+  afterState: string | null;
+  linkedTransferRequestId: string | null;
+  payloadJson: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type CollectionRequest = {
+  collectionRequestId: string;
+  workspaceId: string;
+  collectionRunId: string | null;
+  receivingTreasuryWalletId: string;
+  counterpartyId: string | null;
+  transferRequestId: string | null;
+  payerWalletAddress: string | null;
+  payerTokenAccountAddress: string | null;
+  amountRaw: string;
+  asset: string;
+  reason: string;
+  externalReference: string | null;
+  dueAt: string | null;
+  state: CollectionRequestState;
+  derivedState: CollectionRequestState;
+  metadataJson: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  collectionRun: {
+    collectionRunId: string;
+    runName: string;
+    state: string;
+    createdAt: string;
+  } | null;
+  receivingTreasuryWallet: TreasuryWallet;
+  counterparty: Counterparty | null;
+  transferRequest: {
+    transferRequestId: string;
+    requestType: string;
+    status: string;
+    amountRaw: string;
+    externalReference: string | null;
+    destinationId: string;
+  } | null;
+  createdByUser: User | null;
+  reconciliationDetail: ReconciliationDetail | null;
+  events?: CollectionRequestEvent[];
+};
+
+export type CollectionRunSummary = {
+  collectionRunId: string;
+  workspaceId: string;
+  receivingTreasuryWalletId: string | null;
+  runName: string;
+  inputSource: string;
+  state: string;
+  derivedState: string;
+  metadataJson: Record<string, unknown>;
+  createdByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  receivingTreasuryWallet: TreasuryWallet | null;
+  createdByUser: User | null;
+  summary: {
+    total: number;
+    open: number;
+    partiallyCollected: number;
+    collected: number;
+    exception: number;
+    totalAmountRaw: string;
+  };
+  collectionRequests?: CollectionRequest[];
+};
+
+export type CollectionCsvPreviewItem = {
+  rowNumber: number;
+  status: 'ready' | 'warning' | 'failed';
+  warnings?: string[];
+  parsed?: Record<string, unknown>;
+  duplicate?: { collectionRequestId: string; state: string } | null;
+  error?: string;
+};
+
+export type CollectionCsvPreview = {
+  totalRows: number;
+  ready: number;
+  warnings: number;
+  failed: number;
+  canImport: boolean;
+  items: CollectionCsvPreviewItem[];
+};
+
+export type CollectionRunCsvPreview = CollectionCsvPreview & {
+  csvFingerprint: string;
+};
+
+export type CollectionRunImportResult = {
+  collectionRun: CollectionRunSummary;
+  importResult: {
+    idempotentReplay?: boolean;
+    imported: number;
+    failed: number;
+    items: Array<{
+      rowNumber: number;
+      status: 'imported' | 'failed';
+      collectionRequest?: CollectionRequest;
+      error?: string;
+    }>;
+  };
+};
+
 export type ExceptionItem = {
   exceptionId: string;
   transferRequestId: string | null;

@@ -51,6 +51,17 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
         ],
       },
       {
+        id: 'collections',
+        summary: 'Create expected inbound collections or import a receivables CSV, then let the existing onchain reconciliation layer prove what was collected.',
+        steps: [
+          'POST /workspaces/:workspaceId/collections',
+          'POST /workspaces/:workspaceId/collection-runs/import-csv/preview',
+          'POST /workspaces/:workspaceId/collection-runs/import-csv',
+          'GET /workspaces/:workspaceId/collections/:collectionRequestId',
+          'GET /workspaces/:workspaceId/collection-runs/:collectionRunId',
+        ],
+      },
+      {
         id: 'exception_ops',
         summary: 'List reconciliation exceptions, inspect context, update metadata, add notes, and resolve or reopen.',
         steps: [
@@ -84,6 +95,10 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
           'POST /workspaces/:workspaceId/payment-requests/import-csv',
           'POST /workspaces/:workspaceId/payment-runs/import-csv/preview',
           'POST /workspaces/:workspaceId/payment-runs/import-csv',
+          'POST /workspaces/:workspaceId/collections',
+          'POST /workspaces/:workspaceId/collections/import-csv/preview',
+          'POST /workspaces/:workspaceId/collection-runs/import-csv/preview',
+          'POST /workspaces/:workspaceId/collection-runs/import-csv',
         ],
       },
       {
@@ -99,6 +114,7 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
           'POST /workspaces/:workspaceId/payment-runs/:paymentRunId/close',
           'POST /workspaces/:workspaceId/payment-runs/:paymentRunId/prepare-execution',
           'POST /workspaces/:workspaceId/payment-runs/:paymentRunId/attach-signature',
+          'POST /workspaces/:workspaceId/collections/:collectionRequestId/cancel',
         ],
       },
       {
@@ -111,6 +127,10 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
           'GET /workspaces/:workspaceId/transfers',
           'GET /workspaces/:workspaceId/payment-orders/:paymentOrderId/proof',
           'GET /workspaces/:workspaceId/payment-runs/:paymentRunId/proof',
+          'GET /workspaces/:workspaceId/collections',
+          'GET /workspaces/:workspaceId/collections/:collectionRequestId',
+          'GET /workspaces/:workspaceId/collection-runs',
+          'GET /workspaces/:workspaceId/collection-runs/:collectionRunId',
           'GET /workspaces/:workspaceId/audit-log',
           'GET /workspaces/:workspaceId/ops-health',
         ],

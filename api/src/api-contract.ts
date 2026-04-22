@@ -85,6 +85,22 @@ export const API_ENDPOINTS = [
     query: { detail: 'summary | compact | full', format: 'json | markdown' },
   }),
 
+  endpoint('list_collections', 'GET', '/workspaces/{workspaceId}/collections', ['collections'], 'List expected inbound collections', 'session', { scope: 'workspace:read' }),
+  endpoint('create_collection', 'POST', '/workspaces/{workspaceId}/collections', ['collections'], 'Create expected inbound collection', 'session', {
+    scope: 'payments:write',
+    requestBody: { receivingTreasuryWalletId: 'string uuid', amountRaw: 'string', reason: 'string', externalReference: 'string optional' },
+  }),
+  endpoint('preview_collections_csv', 'POST', '/workspaces/{workspaceId}/collections/import-csv/preview', ['collections'], 'Preview collection CSV import without side effects', 'session', { scope: 'workspace:read' }),
+  endpoint('get_collection', 'GET', '/workspaces/{workspaceId}/collections/{collectionRequestId}', ['collections'], 'Get expected collection detail', 'session', { scope: 'workspace:read' }),
+  endpoint('cancel_collection', 'POST', '/workspaces/{workspaceId}/collections/{collectionRequestId}/cancel', ['collections'], 'Cancel expected collection', 'session', { scope: 'payments:write' }),
+  endpoint('list_collection_runs', 'GET', '/workspaces/{workspaceId}/collection-runs', ['collections'], 'List collection runs', 'session', { scope: 'workspace:read' }),
+  endpoint('import_collection_run_csv', 'POST', '/workspaces/{workspaceId}/collection-runs/import-csv', ['collections'], 'Import CSV as collection run', 'session', {
+    scope: 'payments:write',
+    requestBody: { csv: 'string', runName: 'string optional', receivingTreasuryWalletId: 'string optional' },
+  }),
+  endpoint('preview_collection_run_csv', 'POST', '/workspaces/{workspaceId}/collection-runs/import-csv/preview', ['collections'], 'Preview collection run CSV import', 'session', { scope: 'workspace:read' }),
+  endpoint('get_collection_run', 'GET', '/workspaces/{workspaceId}/collection-runs/{collectionRunId}', ['collections'], 'Get collection run detail', 'session', { scope: 'workspace:read' }),
+
   endpoint('list_payment_orders', 'GET', '/workspaces/{workspaceId}/payment-orders', ['payment orders'], 'List payment orders', 'session', { scope: 'workspace:read' }),
   endpoint('create_payment_order', 'POST', '/workspaces/{workspaceId}/payment-orders', ['payment orders'], 'Create payment order', 'session', { scope: 'payments:write' }),
   endpoint('get_payment_order', 'GET', '/workspaces/{workspaceId}/payment-orders/{paymentOrderId}', ['payment orders'], 'Get payment order detail', 'session', { scope: 'workspace:read' }),

@@ -323,6 +323,58 @@ CREATE TABLE IF NOT EXISTS payment_requests
   UNIQUE (workspace_id, destination_id, amount_raw, external_reference)
 );
 
+CREATE TABLE IF NOT EXISTS collection_runs
+(
+  collection_run_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+  receiving_treasury_wallet_id UUID REFERENCES treasury_wallets(treasury_wallet_id) ON DELETE SET NULL,
+  run_name TEXT NOT NULL,
+  input_source TEXT NOT NULL DEFAULT 'manual',
+  state TEXT NOT NULL DEFAULT 'open',
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_by_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS collection_requests
+(
+  collection_request_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+  collection_run_id UUID REFERENCES collection_runs(collection_run_id) ON DELETE SET NULL,
+  receiving_treasury_wallet_id UUID NOT NULL REFERENCES treasury_wallets(treasury_wallet_id) ON DELETE RESTRICT,
+  counterparty_id UUID REFERENCES counterparties(counterparty_id) ON DELETE SET NULL,
+  transfer_request_id UUID UNIQUE REFERENCES transfer_requests(transfer_request_id) ON DELETE SET NULL,
+  payer_wallet_address TEXT,
+  payer_token_account_address TEXT,
+  amount_raw BIGINT NOT NULL,
+  asset TEXT NOT NULL DEFAULT 'usdc',
+  reason TEXT NOT NULL,
+  external_reference TEXT,
+  due_at TIMESTAMPTZ,
+  state TEXT NOT NULL DEFAULT 'open',
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_by_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (workspace_id, receiving_treasury_wallet_id, amount_raw, external_reference)
+);
+
+CREATE TABLE IF NOT EXISTS collection_request_events
+(
+  collection_request_event_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  collection_request_id UUID NOT NULL REFERENCES collection_requests(collection_request_id) ON DELETE CASCADE,
+  workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+  event_type TEXT NOT NULL,
+  actor_type TEXT NOT NULL,
+  actor_id TEXT,
+  before_state TEXT,
+  after_state TEXT,
+  linked_transfer_request_id UUID,
+  payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS payment_order_events
 (
   payment_order_event_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -515,6 +567,30 @@ ALTER TABLE payment_requests
     state IN ('submitted', 'converted_to_order', 'cancelled')
   );
 
+ALTER TABLE collection_runs
+  DROP CONSTRAINT IF EXISTS chk_collection_runs_state;
+
+ALTER TABLE collection_runs
+  ADD CONSTRAINT chk_collection_runs_state CHECK (
+    state IN ('open', 'partially_collected', 'collected', 'exception', 'closed', 'cancelled')
+  );
+
+ALTER TABLE collection_requests
+  DROP CONSTRAINT IF EXISTS chk_collection_requests_state;
+
+ALTER TABLE collection_requests
+  ADD CONSTRAINT chk_collection_requests_state CHECK (
+    state IN ('open', 'partially_collected', 'collected', 'exception', 'closed', 'cancelled')
+  );
+
+ALTER TABLE collection_request_events
+  DROP CONSTRAINT IF EXISTS chk_collection_request_events_actor_type;
+
+ALTER TABLE collection_request_events
+  ADD CONSTRAINT chk_collection_request_events_actor_type CHECK (
+    actor_type IN ('user', 'system', 'worker')
+  );
+
 ALTER TABLE payment_order_events
   DROP CONSTRAINT IF EXISTS chk_payment_order_events_actor_type;
 
@@ -555,18 +631,11 @@ ALTER TABLE exception_states
     status IN ('open', 'reviewed', 'expected', 'dismissed', 'reopened')
   );
 
-ALTER TABLE address_labels
-  DROP CONSTRAINT IF EXISTS chk_address_labels_confidence;
-
-ALTER TABLE address_labels
-  ADD CONSTRAINT chk_address_labels_confidence CHECK (
-    confidence IN ('seeded', 'verified', 'operator', 'unverified', 'unresolved')
-  );
-
 DROP TABLE IF EXISTS workspace_objects CASCADE;
 DROP TABLE IF EXISTS workspace_labels CASCADE;
 DROP TABLE IF EXISTS global_entity_addresses CASCADE;
 DROP TABLE IF EXISTS global_entities CASCADE;
+DROP TABLE IF EXISTS address_labels CASCADE;
 CREATE INDEX IF NOT EXISTS idx_memberships_organization_id ON organization_memberships(organization_id);
 CREATE INDEX IF NOT EXISTS idx_memberships_user_id ON organization_memberships(user_id);
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_id ON auth_sessions(user_id);
@@ -638,6 +707,22 @@ CREATE INDEX IF NOT EXISTS idx_payment_requests_destination_created_at
   ON payment_requests(destination_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_payment_requests_counterparty_created_at
   ON payment_requests(counterparty_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_collection_runs_workspace_state_created_at
+  ON collection_runs(workspace_id, state, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_collection_runs_receiving_created_at
+  ON collection_runs(receiving_treasury_wallet_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_collection_requests_workspace_state_created_at
+  ON collection_requests(workspace_id, state, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_collection_requests_run_created_at
+  ON collection_requests(collection_run_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_collection_requests_receiving_created_at
+  ON collection_requests(receiving_treasury_wallet_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_collection_requests_counterparty_created_at
+  ON collection_requests(counterparty_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_collection_request_events_request_created_at
+  ON collection_request_events(collection_request_id, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_collection_request_events_workspace_created_at
+  ON collection_request_events(workspace_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_transfer_request_events_request_created_at
   ON transfer_request_events(transfer_request_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_transfer_request_events_workspace_created_at
@@ -654,11 +739,6 @@ CREATE INDEX IF NOT EXISTS idx_exception_states_workspace_exception
   ON exception_states(workspace_id, exception_id);
 CREATE INDEX IF NOT EXISTS idx_exception_states_workspace_status_updated_at
   ON exception_states(workspace_id, status, updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_address_labels_chain_address
-  ON address_labels(chain, address);
-CREATE INDEX IF NOT EXISTS idx_address_labels_entity_name
-  ON address_labels(entity_name);
-
 DROP TRIGGER IF EXISTS trg_organizations_updated_at ON organizations;
 CREATE TRIGGER trg_organizations_updated_at
 BEFORE UPDATE ON organizations
@@ -727,6 +807,16 @@ FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS trg_payment_requests_updated_at ON payment_requests;
 CREATE TRIGGER trg_payment_requests_updated_at
 BEFORE UPDATE ON payment_requests
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_collection_runs_updated_at ON collection_runs;
+CREATE TRIGGER trg_collection_runs_updated_at
+BEFORE UPDATE ON collection_runs
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_collection_requests_updated_at ON collection_requests;
+CREATE TRIGGER trg_collection_requests_updated_at
+BEFORE UPDATE ON collection_requests
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_exception_states_updated_at ON exception_states;

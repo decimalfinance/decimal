@@ -18,6 +18,9 @@ TRUNCATE TABLE
   transfer_request_events,
   exception_notes,
   exception_states,
+  collection_request_events,
+  collection_requests,
+  collection_runs,
   payment_runs,
   payment_order_events,
   payment_orders,
@@ -497,6 +500,134 @@ test('payment run cancellation and close are explicit lifecycle actions', async 
     where: { transferRequestId: order.transferRequestId },
   });
   assert.equal(transferRequest.status, 'closed');
+});
+
+test('collections create inbound expected transfers against owned receiving wallets', async () => {
+  const setup = await createPaymentOrderSetup();
+  const payerWallet = Keypair.generate().publicKey.toBase58();
+
+  const collection = await post(
+    `/workspaces/${setup.workspace.workspaceId}/collections`,
+    {
+      receivingTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
+      counterpartyId: setup.counterparty.counterpartyId,
+      payerWalletAddress: payerWallet,
+      amountRaw: '25000',
+      reason: 'Collect invoice AR-1001',
+      externalReference: 'AR-1001',
+      dueAt: '2026-04-20T00:00:00.000Z',
+    },
+    setup.sessionToken,
+  );
+
+  assert.equal(collection.state, 'open');
+  assert.equal(collection.derivedState, 'open');
+  assert.equal(collection.amountRaw, '25000');
+  assert.equal(collection.receivingTreasuryWallet.treasuryWalletId, setup.sourceAddress.treasuryWalletId);
+  assert.equal(collection.receivingTreasuryWallet.address, setup.sourceAddress.address);
+  assert.equal(collection.payerWalletAddress, payerWallet);
+  assert.ok(collection.transferRequestId);
+
+  const transferRequest = await prisma.transferRequest.findUniqueOrThrow({
+    where: { transferRequestId: collection.transferRequestId },
+    include: { destination: true },
+  });
+  assert.equal(transferRequest.requestType, 'collection_request');
+  assert.equal(transferRequest.status, 'approved');
+  assert.equal(transferRequest.sourceTreasuryWalletId, null);
+  assert.equal(transferRequest.destination.walletAddress, setup.sourceAddress.address);
+  assert.equal(transferRequest.destination.tokenAccountAddress, setup.sourceAddress.usdcAtaAddress);
+  assert.equal(transferRequest.destination.isInternal, true);
+  assert.equal(transferRequest.destination.destinationType, 'internal_collection_receiver');
+
+  const matchingIndex = await get('/internal/matching-index', setup.sessionToken);
+  const workspaceSnapshot = matchingIndex.workspaces.find(
+    (workspace: { workspace: { workspaceId: string } }) => workspace.workspace.workspaceId === setup.workspace.workspaceId,
+  );
+  assert.ok(workspaceSnapshot);
+  const match = workspaceSnapshot.matches.find(
+    (item: { transferRequestId: string }) => item.transferRequestId === collection.transferRequestId,
+  );
+  assert.equal(match.requestType, 'collection_request');
+  assert.equal(match.destination.walletAddress, setup.sourceAddress.address);
+  assert.equal(match.destination.isInternal, true);
+
+  await seedExactSettlement({
+    workspaceId: setup.workspace.workspaceId,
+    transferRequestId: collection.transferRequestId,
+    destinationWallet: setup.sourceAddress.address,
+    destinationTokenAccount: setup.sourceAddress.usdcAtaAddress,
+    amountRaw: '25000',
+  });
+
+  const collected = await get(
+    `/workspaces/${setup.workspace.workspaceId}/collections/${collection.collectionRequestId}`,
+    setup.sessionToken,
+  );
+  assert.equal(collected.derivedState, 'collected');
+  assert.equal(collected.reconciliationDetail.requestDisplayState, 'matched');
+  assert.equal(collected.reconciliationDetail.match.matchedAmountRaw, '25000');
+});
+
+test('collection runs import CSV rows into a batch of inbound collection requests', async () => {
+  const setup = await createPaymentOrderSetup();
+  const firstPayerWallet = Keypair.generate().publicKey.toBase58();
+  const secondPayerWallet = Keypair.generate().publicKey.toBase58();
+  const csv = [
+    'counterparty,receiving_wallet,payer_wallet,amount,reference,due_date',
+    `Acme Customer,${setup.sourceAddress.displayName},${firstPayerWallet},0.03,AR-RUN-1,2026-04-20`,
+    `Beta Customer,${setup.sourceAddress.address},${secondPayerWallet},0.04,AR-RUN-2,2026-04-21`,
+  ].join('\n');
+
+  const preview = await post(
+    `/workspaces/${setup.workspace.workspaceId}/collection-runs/import-csv/preview`,
+    { csv },
+    setup.sessionToken,
+  );
+  assert.equal(preview.totalRows, 2);
+  assert.equal(preview.ready, 2);
+  assert.equal(preview.failed, 0);
+  assert.equal(preview.canImport, true);
+  assert.match(preview.csvFingerprint, /^[a-f0-9]{64}$/);
+
+  const imported = await post(
+    `/workspaces/${setup.workspace.workspaceId}/collection-runs/import-csv`,
+    {
+      runName: 'April receivables',
+      csv,
+      importKey: 'collection-run-1',
+      notes: 'Monthly AR upload',
+    },
+    setup.sessionToken,
+  );
+
+  assert.equal(imported.importResult.imported, 2);
+  assert.equal(imported.importResult.failed, 0);
+  assert.equal(imported.collectionRun.runName, 'April receivables');
+  assert.equal(imported.collectionRun.summary.total, 2);
+  assert.equal(imported.collectionRun.summary.totalAmountRaw, '70000');
+  assert.equal(imported.collectionRun.collectionRequests.length, 2);
+  assert.equal(imported.collectionRun.collectionRequests[0].transferRequest.requestType, 'collection_request');
+
+  const replay = await post(
+    `/workspaces/${setup.workspace.workspaceId}/collection-runs/import-csv`,
+    {
+      runName: 'Should replay',
+      csv,
+      importKey: 'collection-run-1',
+    },
+    setup.sessionToken,
+  );
+  assert.equal(replay.importResult.idempotentReplay, true);
+  assert.equal(replay.collectionRun.collectionRunId, imported.collectionRun.collectionRunId);
+
+  const transferRequestCount = await prisma.transferRequest.count({
+    where: {
+      workspaceId: setup.workspace.workspaceId,
+      requestType: 'collection_request',
+    },
+  });
+  assert.equal(transferRequestCount, 2);
 });
 
 test('payment order duplicate references and unsafe source wallets are rejected', async () => {

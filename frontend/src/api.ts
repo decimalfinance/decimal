@@ -1,6 +1,11 @@
 import type {
   ApprovalPolicy,
   AuthenticatedSession,
+  CollectionCsvPreview,
+  CollectionRequest,
+  CollectionRunCsvPreview,
+  CollectionRunImportResult,
+  CollectionRunSummary,
   Counterparty,
   Destination,
   ExceptionItem,
@@ -445,6 +450,107 @@ export const api = {
   },
   getPaymentOrderProof(workspaceId: string, paymentOrderId: string) {
     return request<PaymentProofPacket>(`/workspaces/${workspaceId}/payment-orders/${paymentOrderId}/proof`);
+  },
+  listCollections(
+    workspaceId: string,
+    params?: { state?: string; collectionRunId?: string; limit?: number },
+  ) {
+    const qs = new URLSearchParams();
+    qs.set('limit', String(params?.limit ?? 100));
+    if (params?.state) qs.set('state', params.state);
+    if (params?.collectionRunId) qs.set('collectionRunId', params.collectionRunId);
+    return request<{
+      items: CollectionRequest[];
+      limit: number;
+      state: string | null;
+      collectionRunId: string | null;
+    }>(`/workspaces/${workspaceId}/collections?${qs.toString()}`);
+  },
+  createCollection(
+    workspaceId: string,
+    input: {
+      collectionRunId?: string;
+      receivingTreasuryWalletId: string;
+      counterpartyId?: string;
+      payerWalletAddress?: string;
+      payerTokenAccountAddress?: string;
+      amountRaw: string;
+      asset?: string;
+      reason: string;
+      externalReference?: string;
+      dueAt?: string;
+      metadataJson?: Record<string, unknown>;
+    },
+  ) {
+    return request<CollectionRequest>(`/workspaces/${workspaceId}/collections`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+  previewCollectionCsv(
+    workspaceId: string,
+    input: { csv: string; receivingTreasuryWalletId?: string },
+  ) {
+    return request<CollectionCsvPreview>(
+      `/workspaces/${workspaceId}/collections/import-csv/preview`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+    );
+  },
+  getCollection(workspaceId: string, collectionRequestId: string) {
+    return request<CollectionRequest>(
+      `/workspaces/${workspaceId}/collections/${collectionRequestId}`,
+    );
+  },
+  cancelCollection(workspaceId: string, collectionRequestId: string) {
+    return request<CollectionRequest>(
+      `/workspaces/${workspaceId}/collections/${collectionRequestId}/cancel`,
+      {
+        method: 'POST',
+        body: JSON.stringify({}),
+      },
+    );
+  },
+  listCollectionRuns(workspaceId: string) {
+    return request<{ items: CollectionRunSummary[]; limit: number }>(
+      `/workspaces/${workspaceId}/collection-runs`,
+    );
+  },
+  importCollectionRunCsv(
+    workspaceId: string,
+    input: {
+      csv: string;
+      runName?: string;
+      receivingTreasuryWalletId?: string;
+      importKey?: string;
+    },
+  ) {
+    return request<CollectionRunImportResult>(
+      `/workspaces/${workspaceId}/collection-runs/import-csv`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+    );
+  },
+  previewCollectionRunCsv(
+    workspaceId: string,
+    input: { csv: string; receivingTreasuryWalletId?: string },
+  ) {
+    return request<CollectionRunCsvPreview>(
+      `/workspaces/${workspaceId}/collection-runs/import-csv/preview`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+    );
+  },
+  getCollectionRun(workspaceId: string, collectionRunId: string) {
+    return request<CollectionRunSummary>(
+      `/workspaces/${workspaceId}/collection-runs/${collectionRunId}`,
+    );
   },
 };
 

@@ -8,6 +8,9 @@ import { PaymentRunDetailPage as PaymentRunDetailPageV2 } from './pages/PaymentR
 import { CommandCenterPage as CommandCenterPageV2 } from './pages/CommandCenter';
 import { PaymentsPage as PaymentsPageV2 } from './pages/Payments';
 import { PaymentDetailPage as PaymentDetailPageV2 } from './pages/PaymentDetail';
+import { CollectionsPage } from './pages/Collections';
+import { CollectionDetailPage } from './pages/CollectionDetail';
+import { CollectionRunDetailPage } from './pages/CollectionRunDetail';
 import { WalletsPage } from './pages/Wallets';
 import { CounterpartiesPage } from './pages/Counterparties';
 import { ProofsPage as ProofsPageV2 } from './pages/Proofs';
@@ -168,6 +171,20 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
       ).length,
     [sidebarOrdersQuery.data?.items],
   );
+  const sidebarCollectionsQuery = useQuery({
+    queryKey: ['sidebar-collections', activeWorkspaceId] as const,
+    queryFn: () => api.listCollections(activeWorkspaceId!),
+    enabled: Boolean(activeWorkspaceId),
+    refetchInterval: () =>
+      typeof document !== 'undefined' && document.hidden ? false : 15_000,
+  });
+  const collectionsOpenCount = useMemo(
+    () =>
+      (sidebarCollectionsQuery.data?.items ?? []).filter(
+        (c) => !['collected', 'closed', 'cancelled'].includes(c.derivedState),
+      ).length,
+    [sidebarCollectionsQuery.data?.items],
+  );
 
   async function logout() {
     await queryClient.cancelQueries();
@@ -185,6 +202,7 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
         workspaceContexts={workspaces}
         activeWorkspaceId={activeWorkspaceId}
         paymentsIncompleteCount={paymentsIncompleteCount}
+        collectionsOpenCount={collectionsOpenCount}
         approvalPendingCount={approvalPendingCount}
         executionQueueCount={executionQueueCount}
         onWorkspaceSwitch={(workspaceId) => navigate(`/workspaces/${workspaceId}`)}
@@ -204,6 +222,9 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
           <Route path="/workspaces/:workspaceId/runs/:paymentRunId" element={<PaymentRunDetailPageV2 />} />
           <Route path="/workspaces/:workspaceId/payments" element={<PaymentsPageV2 session={session} />} />
           <Route path="/workspaces/:workspaceId/payments/:paymentOrderId" element={<PaymentDetailPageV2 />} />
+          <Route path="/workspaces/:workspaceId/collections" element={<CollectionsPage session={session} />} />
+          <Route path="/workspaces/:workspaceId/collections/:collectionRequestId" element={<CollectionDetailPage />} />
+          <Route path="/workspaces/:workspaceId/collection-runs/:collectionRunId" element={<CollectionRunDetailPage />} />
           <Route path="/workspaces/:workspaceId/approvals" element={<ApprovalsPageV2 session={session} />} />
           <Route path="/workspaces/:workspaceId/execution" element={<ExecutionPageV2 session={session} />} />
           <Route path="/workspaces/:workspaceId/settlement" element={<SettlementPageV2 session={session} />} />
