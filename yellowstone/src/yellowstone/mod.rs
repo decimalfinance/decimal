@@ -684,6 +684,9 @@ impl YellowstoneWorker {
                     .filter(|request| {
                         is_within_match_window(request.requested_at, context.event_time)
                     })
+                    .filter(|request| {
+                        request_matches_observed_source(request, payment.source_wallet.as_deref())
+                    })
                     .collect();
 
                 let (allocatable_requests, match_rule, match_rule_label) =
@@ -759,6 +762,7 @@ impl YellowstoneWorker {
                             "windowed_request_count": windowed_requests.len(),
                             "eligible_request_count": eligible_request_count,
                             "signature_matched_request_count": signature_matched_request_count,
+                            "source_wallet": payment.source_wallet,
                             "match_rule": match_rule,
                                 "route_group": payment.route_group,
                                 "payment_kind": payment.payment_kind,
@@ -1094,6 +1098,20 @@ fn is_within_match_window(requested_at: DateTime<Utc>, observed_at: DateTime<Utc
     (-MATCH_WINDOW_BEFORE_REQUEST_SECONDS..=MATCH_WINDOW_AFTER_REQUEST_SECONDS).contains(&delta)
 }
 
+fn request_matches_observed_source(
+    request: &WorkspaceTransferRequestMatch,
+    observed_source_wallet: Option<&str>,
+) -> bool {
+    if request.request_type != "collection_request" {
+        return true;
+    }
+
+    match request.expected_source_wallet_address.as_deref() {
+        Some(expected_source_wallet) => observed_source_wallet == Some(expected_source_wallet),
+        None => true,
+    }
+}
+
 fn select_requests_for_observation<'a>(
     windowed_requests: &'a [&'a WorkspaceTransferRequestMatch],
     observed_signature: &str,
@@ -1242,6 +1260,7 @@ mod tests {
             amount_raw: 10_000,
             requested_at,
             request_type: "wallet_transfer".to_string(),
+            expected_source_wallet_address: None,
             submitted_signature: None,
         };
         let signature_request = WorkspaceTransferRequestMatch {
@@ -1251,6 +1270,7 @@ mod tests {
             amount_raw: 10_000,
             requested_at,
             request_type: "wallet_transfer".to_string(),
+            expected_source_wallet_address: None,
             submitted_signature: Some("observed-signature".to_string()),
         };
         let windowed_requests = vec![&fifo_request, &signature_request];
@@ -1276,6 +1296,7 @@ mod tests {
             amount_raw: 10_000,
             requested_at,
             request_type: "wallet_transfer".to_string(),
+            expected_source_wallet_address: None,
             submitted_signature: None,
         };
         let other_signature_request = WorkspaceTransferRequestMatch {
@@ -1285,6 +1306,7 @@ mod tests {
             amount_raw: 10_000,
             requested_at,
             request_type: "wallet_transfer".to_string(),
+            expected_source_wallet_address: None,
             submitted_signature: Some("different-signature".to_string()),
         };
         let windowed_requests = vec![&fifo_request, &other_signature_request];
@@ -1294,6 +1316,25 @@ mod tests {
 
         assert_eq!(match_rule, "payment_book_fifo_allocator");
         assert_eq!(selected_requests.len(), 2);
+    }
+
+    #[test]
+    fn collection_requests_only_match_expected_payer_source_when_defined() {
+        let requested_at = Utc::now();
+        let request = WorkspaceTransferRequestMatch {
+            transfer_request_id: "collection-request".to_string(),
+            workspace_id: "workspace-1".to_string(),
+            destination_wallet_address: "receiver-wallet".to_string(),
+            amount_raw: 10_000,
+            requested_at,
+            request_type: "collection_request".to_string(),
+            expected_source_wallet_address: Some("expected-payer".to_string()),
+            submitted_signature: None,
+        };
+
+        assert!(request_matches_observed_source(&request, Some("expected-payer")));
+        assert!(!request_matches_observed_source(&request, Some("different-payer")));
+        assert!(!request_matches_observed_source(&request, None));
     }
 
     #[test]
@@ -1392,6 +1433,7 @@ mod tests {
                 amount_raw: 50_000_000,
                 requested_at: Utc::now(),
                 request_type: "wallet_transfer".to_string(),
+                expected_source_wallet_address: None,
                 submitted_signature: None,
             }],
         );
@@ -1541,6 +1583,7 @@ mod tests {
                 amount_raw: 10_000,
                 requested_at: Utc::now(),
                 request_type: "wallet_transfer".to_string(),
+                expected_source_wallet_address: None,
                 submitted_signature: None,
             }],
         );

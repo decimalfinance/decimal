@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams } from 'react-router';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { api } from '../api';
 import type { CollectionRequest, CollectionRunSummary } from '../types';
 import { formatRawUsdcCompact, formatRelativeTime, shortenAddress } from '../domain';
@@ -8,6 +8,7 @@ import {
   displayCollectionStatus,
   statusToneForCollection,
 } from '../status-labels';
+import { useToast } from '../ui/Toast';
 
 function toneToPill(
   tone: 'success' | 'warning' | 'danger' | 'neutral',
@@ -37,12 +38,26 @@ export function CollectionRunDetailPage() {
     collectionRunId: string;
   }>();
   const navigate = useNavigate();
+  const { error: toastError } = useToast();
 
   const runQuery = useQuery({
     queryKey: ['collection-run', workspaceId, collectionRunId] as const,
     queryFn: () => api.getCollectionRun(workspaceId!, collectionRunId!),
     enabled: Boolean(workspaceId && collectionRunId),
     refetchInterval: 10_000,
+  });
+
+  const proofQuery = useQuery({
+    queryKey: ['collection-run-proof', workspaceId, collectionRunId] as const,
+    queryFn: () => api.getCollectionRunProof(workspaceId!, collectionRunId!),
+    enabled: Boolean(workspaceId && collectionRunId),
+    refetchInterval: 15_000,
+  });
+
+  const proofDownloadMutation = useMutation({
+    mutationFn: () => api.downloadCollectionRunProofJson(workspaceId!, collectionRunId!),
+    onError: (err) =>
+      toastError(err instanceof Error ? err.message : 'Could not export collection run proof.'),
   });
 
   if (!workspaceId || !collectionRunId) {
@@ -81,6 +96,7 @@ export function CollectionRunDetailPage() {
 
   const requests = run.collectionRequests ?? [];
   const tone = statusToneForCollection(run.derivedState);
+  const isSettled = run.derivedState === 'collected' || run.derivedState === 'closed';
 
   return (
     <main className="page-frame">
@@ -102,10 +118,26 @@ export function CollectionRunDetailPage() {
             {collectionRunProgressLine(run)}
           </p>
         </div>
-        <span className="rd-pill" data-tone={toneToPill(tone)}>
-          <span className="rd-pill-dot" aria-hidden />
-          {displayCollectionStatus(run.derivedState)}
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span className="rd-pill" data-tone={toneToPill(tone)}>
+            <span className="rd-pill-dot" aria-hidden />
+            {displayCollectionStatus(run.derivedState)}
+          </span>
+          <button
+            type="button"
+            className="rd-btn rd-btn-secondary"
+            onClick={() => proofDownloadMutation.mutate()}
+            disabled={!isSettled || proofDownloadMutation.isPending}
+            aria-busy={proofDownloadMutation.isPending}
+            title={
+              isSettled
+                ? undefined
+                : 'Proof is available once every collection in the run has settled on-chain.'
+            }
+          >
+            {proofDownloadMutation.isPending ? 'Exporting…' : 'Export proof'}
+          </button>
+        </div>
       </header>
 
       <section className="rd-metrics" style={{ marginTop: 12 }}>
@@ -153,6 +185,20 @@ export function CollectionRunDetailPage() {
           </span>
         </div>
       </section>
+
+      {proofQuery.data ? (
+        <section className="rd-card" style={{ marginTop: 16 }}>
+          <div className="rd-section-head" style={{ marginBottom: 0 }}>
+            <div>
+              <h2 className="rd-section-title">Run proof</h2>
+              <p className="rd-section-sub">
+                {proofQuery.data.readiness.status} · digest{' '}
+                <span className="rd-mono">{shortenAddress(proofQuery.data.canonicalDigest, 10, 10)}</span>
+              </p>
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       <section style={{ marginTop: 24 }}>
         <h2 style={{ fontSize: 14, fontWeight: 500, color: 'var(--ax-text-secondary)', margin: '0 0 12px' }}>

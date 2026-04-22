@@ -44,6 +44,7 @@ export function createApp() {
     res.setHeader('Access-Control-Allow-Origin', allowOrigin);
     res.setHeader('Access-Control-Allow-Headers', 'content-type,authorization,idempotency-key,x-request-id');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+    res.setHeader('Access-Control-Expose-Headers', 'content-disposition,x-request-id');
 
     if (req.method === 'OPTIONS') {
       res.status(204).end();

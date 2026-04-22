@@ -111,6 +111,24 @@ export function CollectionDetailPage() {
     },
   });
 
+  const proofQuery = useQuery({
+    queryKey: ['collection-proof', workspaceId, collectionRequestId] as const,
+    queryFn: () => api.getCollectionProof(workspaceId!, collectionRequestId!),
+    enabled: Boolean(workspaceId && collectionRequestId),
+    refetchInterval: (query) => {
+      if (typeof document !== 'undefined' && document.hidden) return false;
+      const status = query.state.data?.status;
+      if (status === 'complete' || status === 'closed' || status === 'cancelled') return false;
+      return 10_000;
+    },
+  });
+
+  const proofDownloadMutation = useMutation({
+    mutationFn: () => api.downloadCollectionProofJson(workspaceId!, collectionRequestId!),
+    onError: (err) =>
+      toastError(err instanceof Error ? err.message : 'Could not export collection proof.'),
+  });
+
   const cancelMutation = useMutation({
     mutationFn: () => api.cancelCollection(workspaceId!, collectionRequestId!),
     onSuccess: async () => {
@@ -196,6 +214,8 @@ export function CollectionDetailPage() {
     null;
   const matchedAt = collection.reconciliationDetail?.match?.matchedAt ?? null;
   const canCancel = collection.derivedState === 'open';
+  const isSettled =
+    collection.derivedState === 'collected' || collection.derivedState === 'closed';
 
   return (
     <main className="page-frame" data-layout="rd">
@@ -228,6 +248,20 @@ export function CollectionDetailPage() {
               <span className="rd-pill-dot" aria-hidden />
               {displayCollectionStatus(collection.derivedState)}
             </span>
+            <button
+              type="button"
+              className="rd-btn rd-btn-secondary"
+              onClick={() => proofDownloadMutation.mutate()}
+              disabled={!isSettled || proofDownloadMutation.isPending}
+              aria-busy={proofDownloadMutation.isPending}
+              title={
+                isSettled
+                  ? undefined
+                  : 'Proof is available once the collection is settled on-chain.'
+              }
+            >
+              {proofDownloadMutation.isPending ? 'Exporting…' : 'Export proof'}
+            </button>
           </div>
         </header>
 
@@ -378,6 +412,47 @@ export function CollectionDetailPage() {
             </dl>
           </div>
         </section>
+
+        {proofQuery.data ? (
+          <section className="rd-section">
+            <div className="rd-section-head">
+              <div>
+                <h2 className="rd-section-title">Proof readiness</h2>
+                <p className="rd-section-sub">
+                  Source review, reconciliation state, and verifier digest for this collection.
+                </p>
+              </div>
+            </div>
+            <div className="rd-card">
+              <dl
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                  gap: 20,
+                  margin: 0,
+                }}
+              >
+                <DetailEntry label="Proof state">
+                  <span className="rd-mono">{proofQuery.data.status}</span>
+                </DetailEntry>
+                <DetailEntry label="Readiness">
+                  <span className="rd-mono">{proofQuery.data.readiness.status}</span>
+                </DetailEntry>
+                <DetailEntry label="Source review">
+                  <span className="rd-mono">{proofQuery.data.collectionSourceReview.status}</span>
+                </DetailEntry>
+                <DetailEntry label="Digest">
+                  <span className="rd-mono">{shortenAddress(proofQuery.data.canonicalDigest, 10, 10)}</span>
+                </DetailEntry>
+              </dl>
+              <div style={{ marginTop: 18 }}>
+                <p className="rd-primary-body" style={{ margin: 0 }}>
+                  {proofQuery.data.collectionSourceReview.message}
+                </p>
+              </div>
+            </div>
+          </section>
+        ) : null}
 
         <section className="rd-section">
           <div className="rd-section-head">

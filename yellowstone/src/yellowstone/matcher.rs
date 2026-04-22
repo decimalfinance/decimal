@@ -144,6 +144,7 @@ mod tests {
             amount_raw,
             requested_at,
             request_type: "wallet_transfer".to_string(),
+            expected_source_wallet_address: None,
             submitted_signature: None,
         }
     }

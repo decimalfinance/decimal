@@ -41,7 +41,7 @@ const updateCollectionSourceSchema = z.object({
   sourceType: z.string().trim().min(1).max(100).optional(),
   trustState: z.enum(['unreviewed', 'trusted', 'restricted', 'blocked']).optional(),
   label: z.string().trim().min(1).max(200).optional(),
-  notes: z.string().trim().max(5000).optional(),
+  notes: z.string().trim().max(5000).nullable().optional(),
   isActive: z.boolean().optional(),
 }).refine(
   (value) =>

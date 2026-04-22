@@ -12,6 +12,7 @@ import {
   previewCollectionRequestsCsv,
   previewCollectionRunCsv,
 } from '../collections.js';
+import { buildCollectionProofPacket, buildCollectionRunProofPacket } from '../collection-proof.js';
 import { assertWorkspaceAccess, assertWorkspaceAdmin } from '../workspace-access.js';
 import { asyncRoute, sendCreated, sendJson, sendList, unwrapItems } from '../route-helpers.js';
 
@@ -60,6 +61,10 @@ const collectionRunCsvSchema = z.object({
   runName: z.string().trim().max(200).optional(),
   receivingTreasuryWalletId: z.string().uuid().optional(),
   importKey: z.string().trim().max(200).optional(),
+});
+
+const collectionRunProofQuerySchema = z.object({
+  detail: z.enum(['summary', 'compact', 'full']).default('summary'),
 });
 
 collectionsRouter.get('/workspaces/:workspaceId/collections', asyncRoute(async (req, res) => {
@@ -124,6 +129,12 @@ collectionsRouter.get('/workspaces/:workspaceId/collections/:collectionRequestId
   sendJson(res, await getCollectionRequestDetail(workspaceId, collectionRequestId));
 }));
 
+collectionsRouter.get('/workspaces/:workspaceId/collections/:collectionRequestId/proof', asyncRoute(async (req, res) => {
+  const { workspaceId, collectionRequestId } = collectionRequestParamsSchema.parse(req.params);
+  await assertWorkspaceAccess(workspaceId, req.auth!);
+  sendJson(res, await buildCollectionProofPacket(workspaceId, collectionRequestId));
+}));
+
 collectionsRouter.post('/workspaces/:workspaceId/collections/:collectionRequestId/cancel', asyncRoute(async (req, res) => {
   const { workspaceId, collectionRequestId } = collectionRequestParamsSchema.parse(req.params);
   await assertWorkspaceAdmin(workspaceId, req.auth!);
@@ -175,4 +186,11 @@ collectionsRouter.get('/workspaces/:workspaceId/collection-runs/:collectionRunId
   const { workspaceId, collectionRunId } = collectionRunParamsSchema.parse(req.params);
   await assertWorkspaceAccess(workspaceId, req.auth!);
   sendJson(res, await getCollectionRunDetail(workspaceId, collectionRunId));
+}));
+
+collectionsRouter.get('/workspaces/:workspaceId/collection-runs/:collectionRunId/proof', asyncRoute(async (req, res) => {
+  const { workspaceId, collectionRunId } = collectionRunParamsSchema.parse(req.params);
+  const query = collectionRunProofQuerySchema.parse(req.query);
+  await assertWorkspaceAccess(workspaceId, req.auth!);
+  sendJson(res, await buildCollectionRunProofPacket(workspaceId, collectionRunId, { detail: query.detail }));
 }));

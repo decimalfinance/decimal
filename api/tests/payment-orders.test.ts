@@ -597,10 +597,13 @@ test('collections create inbound expected transfers against owned receiving wall
   assert.equal(match.requestType, 'collection_request');
   assert.equal(match.destination.walletAddress, setup.sourceAddress.address);
   assert.equal(match.destination.isInternal, true);
+  assert.equal(match.expectedSourceWalletAddress, setup.destinationAddress.address);
 
   await seedExactSettlement({
     workspaceId: setup.workspace.workspaceId,
     transferRequestId: collection.transferRequestId,
+    sourceWallet: setup.destinationAddress.address,
+    sourceTokenAccount: setup.destinationAddress.usdcAtaAddress!,
     destinationWallet: setup.sourceAddress.address,
     destinationTokenAccount: setup.sourceAddress.usdcAtaAddress,
     amountRaw: '25000',
@@ -613,6 +616,18 @@ test('collections create inbound expected transfers against owned receiving wall
   assert.equal(collected.derivedState, 'collected');
   assert.equal(collected.reconciliationDetail.requestDisplayState, 'matched');
   assert.equal(collected.reconciliationDetail.match.matchedAmountRaw, '25000');
+
+  const proof = await get(
+    `/workspaces/${setup.workspace.workspaceId}/collections/${collection.collectionRequestId}/proof`,
+    setup.sessionToken,
+  );
+  assert.equal(proof.packetType, 'stablecoin_collection_proof');
+  assert.equal(proof.status, 'complete');
+  assert.equal(proof.collectionSourceReview.status, 'pass');
+  assert.equal(proof.collectionSourceReview.expectedSourceWallet, setup.destinationAddress.address);
+  assert.equal(proof.collectionSourceReview.observedSourceWallet, setup.destinationAddress.address);
+  assert.equal(proof.readiness.status, 'complete');
+
 });
 
 test('collection runs import CSV rows into a batch of inbound collection requests', async () => {
@@ -686,6 +701,16 @@ test('collection runs import CSV rows into a batch of inbound collection request
   const destinations = await get(`/workspaces/${setup.workspace.workspaceId}/destinations?includeInternal=true`, setup.sessionToken);
   const payerDestinations = destinations.items.filter((item: { walletAddress: string }) => [firstPayerWallet, secondPayerWallet].includes(item.walletAddress));
   assert.equal(payerDestinations.length, 0);
+
+  const runProof = await get(
+    `/workspaces/${setup.workspace.workspaceId}/collection-runs/${imported.collectionRun.collectionRunId}/proof`,
+    setup.sessionToken,
+  );
+  assert.equal(runProof.packetType, 'stablecoin_collection_run_proof');
+  assert.equal(runProof.collections.length, 2);
+  assert.equal(runProof.readiness.status, 'needs_review');
+  assert.equal(runProof.collections[0].sourceReviewStatus, 'source_needs_review');
+
 });
 
 test('payment order duplicate references and unsafe source wallets are rejected', async () => {
@@ -1101,6 +1126,8 @@ async function createPaymentOrderSetup(options?: {
 async function seedExactSettlement(args: {
   workspaceId: string;
   transferRequestId: string;
+  sourceWallet?: string;
+  sourceTokenAccount?: string;
   destinationWallet: string;
   destinationTokenAccount: string;
   amountRaw: string;
@@ -1112,11 +1139,29 @@ async function seedExactSettlement(args: {
   const createdAt = '2026-04-10 12:30:01.000';
 
   await insertClickHouseRows('observed_transfers', [
-    observedTransferRow({ transferId, signature, destinationWallet: args.destinationWallet, destinationTokenAccount: args.destinationTokenAccount, amountRaw: args.amountRaw, eventTime, createdAt }),
+    observedTransferRow({
+      transferId,
+      signature,
+      sourceWallet: args.sourceWallet,
+      sourceTokenAccount: args.sourceTokenAccount,
+      destinationWallet: args.destinationWallet,
+      destinationTokenAccount: args.destinationTokenAccount,
+      amountRaw: args.amountRaw,
+      eventTime,
+      createdAt,
+    }),
   ]);
 
   await insertClickHouseRows('observed_payments', [
-    observedPaymentRow({ paymentId, signature, destinationWallet: args.destinationWallet, amountRaw: args.amountRaw, eventTime, createdAt }),
+    observedPaymentRow({
+      paymentId,
+      signature,
+      sourceWallet: args.sourceWallet,
+      destinationWallet: args.destinationWallet,
+      amountRaw: args.amountRaw,
+      eventTime,
+      createdAt,
+    }),
   ]);
 
   await insertClickHouseRows('settlement_matches', [
@@ -1211,6 +1256,8 @@ async function seedPartialSettlement(args: {
 function observedTransferRow(args: {
   transferId: string;
   signature: string;
+  sourceWallet?: string;
+  sourceTokenAccount?: string;
   destinationWallet: string;
   destinationTokenAccount: string;
   amountRaw: string;
@@ -1223,8 +1270,8 @@ function observedTransferRow(args: {
     slot: 411111111,
     event_time: args.eventTime,
     asset: 'usdc',
-    source_token_account: 'Fe6xZzfQf6nmx4Z1TnYeo3gvBmXXuE3VtMuKmBGJe3dm',
-    source_wallet: 'PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW',
+    source_token_account: args.sourceTokenAccount ?? 'Fe6xZzfQf6nmx4Z1TnYeo3gvBmXXuE3VtMuKmBGJe3dm',
+    source_wallet: args.sourceWallet ?? 'PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW',
     destination_token_account: args.destinationTokenAccount,
     destination_wallet: args.destinationWallet,
     amount_raw: args.amountRaw,
@@ -1242,6 +1289,7 @@ function observedTransferRow(args: {
 function observedPaymentRow(args: {
   paymentId: string;
   signature: string;
+  sourceWallet?: string;
   destinationWallet: string;
   amountRaw: string;
   eventTime: string;
@@ -1253,7 +1301,7 @@ function observedPaymentRow(args: {
     slot: 411111111,
     event_time: args.eventTime,
     asset: 'usdc',
-    source_wallet: 'PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW',
+    source_wallet: args.sourceWallet ?? 'PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW',
     destination_wallet: args.destinationWallet,
     gross_amount_raw: args.amountRaw,
     gross_amount_decimal: '0.010000',

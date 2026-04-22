@@ -607,46 +607,6 @@ async function serializeCollectionRequest(request: CollectionRequestWithRelation
     ? await safeGetReconciliationDetail(request.workspaceId, request.transferRequestId)
     : null;
 
-  if (
-    !request.collectionSourceId &&
-    reconciliationDetail?.requestDisplayState === 'matched' &&
-    Array.isArray(reconciliationDetail.linkedObservedTransfers)
-  ) {
-    const payerWallet = reconciliationDetail.linkedObservedTransfers.find(
-      (t: { sourceWallet?: string | null }) => t.sourceWallet,
-    )?.sourceWallet ?? null;
-    if (payerWallet) {
-      try {
-        const source = await findOrCreateCollectionSourceForPayer({
-          workspaceId: request.workspaceId,
-          counterpartyId: request.counterpartyId,
-          payerWalletAddress: payerWallet,
-          inputSource: 'auto_matched',
-        });
-        const adoptedCounterpartyId =
-          !request.counterpartyId && source.counterpartyId ? source.counterpartyId : null;
-        await prisma.collectionRequest.update({
-          where: { collectionRequestId: request.collectionRequestId },
-          data: {
-            collectionSourceId: source.collectionSourceId,
-            ...(adoptedCounterpartyId ? { counterpartyId: adoptedCounterpartyId } : {}),
-          },
-        });
-        request.collectionSourceId = source.collectionSourceId;
-        request.collectionSource = source;
-        if (adoptedCounterpartyId) {
-          request.counterpartyId = adoptedCounterpartyId;
-          request.counterparty = source.counterparty ?? null;
-        }
-      } catch (err) {
-        console.error('Failed to auto-link collection source on match', {
-          collectionRequestId: request.collectionRequestId,
-          error: err instanceof Error ? err.message : err,
-        });
-      }
-    }
-  }
-
   const derivedState = deriveCollectionState(request.state, reconciliationDetail);
   return {
     collectionRequestId: request.collectionRequestId,

@@ -1,0 +1,1085 @@
+{
+  "proofId": "axoria_payment_proof_60652ce6281d2a613d673879",
+  "canonicalDigest": "60652ce6281d2a613d673879066a27234d926c60b31b3963de3ccd2dea6ae3a9",
+  "canonicalDigestAlgorithm": "sha256:stable-json-v1",
+  "generatedAt": "2026-04-22T17:19:08.630Z",
+  "packetType": "stablecoin_payment_proof",
+  "version": 1,
+  "workspaceId": "4eed5cf0-26b6-4099-981c-b13de11ef3e1",
+  "status": "complete",
+  "readiness": {
+    "status": "complete",
+    "blockers": [],
+    "warnings": [],
+    "pending": [],
+    "checks": [
+      {
+        "id": "intent_captured",
+        "label": "Payment intent is captured",
+        "status": "pass",
+        "detail": "Payment request/order fields are present in the proof packet."
+      },
+      {
+        "id": "approval_cleared",
+        "label": "Approval is cleared",
+        "status": "pass",
+        "detail": "Approval state is approved."
+      },
+      {
+        "id": "execution_evidence_present",
+        "label": "Execution evidence is present",
+        "status": "pass",
+        "detail": "Submitted signature 21pboosGUwi4nd77MnCzB7WLvKdzM56DPDfafARyFvKy1cNo6kJ14TE47Q2jEKfayi7nFRBXZWh2Vmkr42X22PFE."
+      },
+      {
+        "id": "settlement_reconciled",
+        "label": "Settlement is reconciled",
+        "status": "pass",
+        "detail": "0.010000 USDC was matched exactly to wallet 2."
+      },
+      {
+        "id": "exceptions_resolved",
+        "label": "Exceptions are resolved or absent",
+        "status": "pass",
+        "detail": "No exceptions are linked."
+      }
+    ],
+    "recommendedAction": "archive_or_share_proof"
+  },
+  "intent": {
+    "paymentRequestId": "b4766686-9358-47c1-a11c-7e6fb3edf227",
+    "paymentOrderId": "3754ab08-f63a-4d9b-a5d5-9f8ddfd1c118",
+    "transferRequestId": "de60ea90-2c52-4d9f-8f90-9edff5b71629",
+    "reference": "inv 0",
+    "reason": "test payment",
+    "amountRaw": "10000",
+    "amountUsdc": "0.010000",
+    "asset": "usdc",
+    "dueAt": null,
+    "createdAt": "2026-04-22T17:18:46.134Z",
+    "attachmentUrl": null
+  },
+  "parties": {
+    "source": {
+      "treasuryWalletId": "a98ec47f-fc5c-49d7-9119-a26f1feee66d",
+      "label": "fuyo",
+      "walletAddress": "PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW",
+      "usdcAtaAddress": "Fe6xZzfQf6nmx4Z1TnYeo3gvBmXXuE3VtMuKmBGJe3dm"
+    },
+    "destination": {
+      "destinationId": "5ce998d1-282b-416e-b691-ebb4c4d9142d",
+      "label": "wallet 2",
+      "walletAddress": "VhfmPjvQxSiQW2FjnvoghewGGVYaWcz4cmDxpFPQEti",
+      "tokenAccountAddress": "64HWdAaTsTVvsQWQnw4PKVWeQ5BQXJ5dT6fTwerqo9US",
+      "trustState": "unreviewed",
+      "isInternal": false
+    },
+    "counterparty": null
+  },
+  "approval": {
+    "state": "approved",
+    "decisions": [
+      {
+        "action": "routed_for_approval",
+        "actorType": "system",
+        "actorEmail": null,
+        "comment": null,
+        "createdAt": "2026-04-22T17:18:46.159Z"
+      },
+      {
+        "action": "approve",
+        "actorType": "user",
+        "actorEmail": "hello@gmail.com",
+        "comment": null,
+        "createdAt": "2026-04-22T17:18:49.705Z"
+      }
+    ]
+  },
+  "execution": {
+    "state": "submitted_onchain",
+    "executionSource": "prepared_solana_transfer",
+    "submittedSignature": "21pboosGUwi4nd77MnCzB7WLvKdzM56DPDfafARyFvKy1cNo6kJ14TE47Q2jEKfayi7nFRBXZWh2Vmkr42X22PFE",
+    "submittedAt": "2026-04-22T17:19:00.995Z",
+    "externalExecutionReference": "prepared:3754ab08-f63a-4d9b-a5d5-9f8ddfd1c118",
+    "metadataJson": {
+      "paymentOrderId": "3754ab08-f63a-4d9b-a5d5-9f8ddfd1c118",
+      "preparedExecution": {
+        "kind": "solana_spl_usdc_transfer",
+        "memo": "test payment",
+        "token": {
+          "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "symbol": "USDC",
+          "decimals": 6
+        },
+        "source": {
+          "label": "fuyo",
+          "walletAddress": "PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW",
+          "treasuryWalletId": "a98ec47f-fc5c-49d7-9119-a26f1feee66d",
+          "tokenAccountAddress": "Fe6xZzfQf6nmx4Z1TnYeo3gvBmXXuE3VtMuKmBGJe3dm"
+        },
+        "network": "solana-mainnet",
+        "signing": {
+          "mode": "wallet_adapter_or_external_signer",
+          "note": "Client must add a recent blockhash, sign with the source wallet, and submit to Solana. The API never receives private keys.",
+          "requiresRecentBlockhash": true
+        },
+        "version": 1,
+        "feePayer": "PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW",
+        "amountRaw": "10000",
+        "createdAt": "2026-04-22T17:18:53.071Z",
+        "reference": "inv 0",
+        "destination": {
+          "label": "wallet 2",
+          "destinationId": "5ce998d1-282b-416e-b691-ebb4c4d9142d",
+          "walletAddress": "VhfmPjvQxSiQW2FjnvoghewGGVYaWcz4cmDxpFPQEti",
+          "counterpartyName": null,
+          "tokenAccountAddress": "64HWdAaTsTVvsQWQnw4PKVWeQ5BQXJ5dT6fTwerqo9US"
+        },
+        "instructions": [
+          {
+            "keys": [
+              {
+                "pubkey": "PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW",
+                "isSigner": true,
+                "isWritable": true
+              },
+              {
+                "pubkey": "64HWdAaTsTVvsQWQnw4PKVWeQ5BQXJ5dT6fTwerqo9US",
+                "isSigner": false,
+                "isWritable": true
+              },
+              {
+                "pubkey": "VhfmPjvQxSiQW2FjnvoghewGGVYaWcz4cmDxpFPQEti",
+                "isSigner": false,
+                "isWritable": false
+              },
+              {
+                "pubkey": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "isSigner": false,
+                "isWritable": false
+              },
+              {
+                "pubkey": "11111111111111111111111111111111",
+                "isSigner": false,
+                "isWritable": false
+              },
+              {
+                "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                "isSigner": false,
+                "isWritable": false
+              }
+            ],
+            "programId": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+            "dataBase64": "AQ=="
+          },
+          {
+            "keys": [
+              {
+                "pubkey": "Fe6xZzfQf6nmx4Z1TnYeo3gvBmXXuE3VtMuKmBGJe3dm",
+                "isSigner": false,
+                "isWritable": true
+              },
+              {
+                "pubkey": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "isSigner": false,
+                "isWritable": false
+              },
+              {
+                "pubkey": "64HWdAaTsTVvsQWQnw4PKVWeQ5BQXJ5dT6fTwerqo9US",
+                "isSigner": false,
+                "isWritable": true
+              },
+              {
+                "pubkey": "PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW",
+                "isSigner": true,
+                "isWritable": false
+              }
+            ],
+            "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+            "dataBase64": "DBAnAAAAAAAABg=="
+          }
+        ],
+        "signerWallet": "PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW",
+        "paymentOrderId": "3754ab08-f63a-4d9b-a5d5-9f8ddfd1c118",
+        "requiredSigners": [
+          "PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW"
+        ],
+        "executionRecordId": "443dc080-a4eb-4183-a242-3f62ccc36fc7",
+        "transferRequestId": "de60ea90-2c52-4d9f-8f90-9edff5b71629"
+      },
+      "externalExecutionReference": "prepared:3754ab08-f63a-4d9b-a5d5-9f8ddfd1c118"
+    }
+  },
+  "settlement": {
+    "state": "matched",
+    "matchStatus": "matched_exact",
+    "matchRule": "payment_submitted_signature_allocator",
+    "matchedAmountRaw": "10000",
+    "matchedAmountUsdc": "0.010000",
+    "amountVarianceRaw": "0",
+    "amountVarianceUsdc": "0.000000",
+    "signature": "21pboosGUwi4nd77MnCzB7WLvKdzM56DPDfafARyFvKy1cNo6kJ14TE47Q2jEKfayi7nFRBXZWh2Vmkr42X22PFE",
+    "observedEventTime": "2026-04-22T17:19:01.213Z",
+    "matchedAt": "2026-04-22T17:19:01.401Z",
+    "confidenceBand": "exact",
+    "reconciliationOutcome": "matched_exact",
+    "reconciliationSummary": "0.010000 USDC was matched exactly to wallet 2."
+  },
+  "exceptions": [],
+  "verification": {
+    "reconciliation": {
+      "servedAt": "2026-04-22T17:19:08.627Z",
+      "workspaceId": "4eed5cf0-26b6-4099-981c-b13de11ef3e1",
+      "transferRequestId": "de60ea90-2c52-4d9f-8f90-9edff5b71629",
+      "outcome": "matched_exact",
+      "summary": "0.010000 USDC was matched exactly to wallet 2.",
+      "confidence": {
+        "score": 100,
+        "band": "exact",
+        "rule": "payment_submitted_signature_allocator",
+        "candidateCount": 1
+      },
+      "amount": {
+        "requestedRaw": "10000",
+        "requestedUsdc": "0.010000",
+        "matchedRaw": "10000",
+        "matchedUsdc": "0.010000",
+        "varianceRaw": "0",
+        "varianceUsdc": "0.000000"
+      },
+      "states": {
+        "requestStatus": "submitted_onchain",
+        "displayState": "matched",
+        "approval": "approved",
+        "execution": "settled"
+      },
+      "matching": {
+        "signature": "21pboosGUwi4nd77MnCzB7WLvKdzM56DPDfafARyFvKy1cNo6kJ14TE47Q2jEKfayi7nFRBXZWh2Vmkr42X22PFE",
+        "observedTransferId": "dc59b09c-d9c9-4ecd-b0a1-8a536b9f5884",
+        "status": "matched_exact",
+        "destinationMatchType": "wallet_destination",
+        "timeDeltaSeconds": 15,
+        "chainToMatchMs": 188,
+        "explanation": "Allocated total 0.010000 of requested 0.010000 USDC to wallet VhfmPjvQxSiQW2FjnvoghewGGVYaWcz4cmDxpFPQEti using submitted-signature matching."
+      },
+      "execution": {
+        "latestExecution": {
+          "executionRecordId": "443dc080-a4eb-4183-a242-3f62ccc36fc7",
+          "transferRequestId": "de60ea90-2c52-4d9f-8f90-9edff5b71629",
+          "workspaceId": "4eed5cf0-26b6-4099-981c-b13de11ef3e1",
+          "submittedSignature": "21pboosGUwi4nd77MnCzB7WLvKdzM56DPDfafARyFvKy1cNo6kJ14TE47Q2jEKfayi7nFRBXZWh2Vmkr42X22PFE",
+          "executionSource": "prepared_solana_transfer",
+          "executorUserId": "725b0711-42c2-49af-8a37-178507c1c5fe",
+          "state": "submitted_onchain",
+          "submittedAt": "2026-04-22T17:19:00.995Z",
+          "metadataJson": {
+            "paymentOrderId": "3754ab08-f63a-4d9b-a5d5-9f8ddfd1c118",
+            "preparedExecution": {
+              "kind": "solana_spl_usdc_transfer",
+              "memo": "test payment",
+              "token": {
+                "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "symbol": "USDC",
+                "decimals": 6
+              },
+              "source": {
+                "label": "fuyo",
+                "walletAddress": "PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW",
+                "treasuryWalletId": "a98ec47f-fc5c-49d7-9119-a26f1feee66d",
+                "tokenAccountAddress": "Fe6xZzfQf6nmx4Z1TnYeo3gvBmXXuE3VtMuKmBGJe3dm"
+              },
+              "network": "solana-mainnet",
+              "signing": {
+                "mode": "wallet_adapter_or_external_signer",
+                "note": "Client must add a recent blockhash, sign with the source wallet, and submit to Solana. The API never receives private keys.",
+                "requiresRecentBlockhash": true
+              },
+              "version": 1,
+              "feePayer": "PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW",
+              "amountRaw": "10000",
+              "createdAt": "2026-04-22T17:18:53.071Z",
+              "reference": "inv 0",
+              "destination": {
+                "label": "wallet 2",
+                "destinationId": "5ce998d1-282b-416e-b691-ebb4c4d9142d",
+                "walletAddress": "VhfmPjvQxSiQW2FjnvoghewGGVYaWcz4cmDxpFPQEti",
+                "counterpartyName": null,
+                "tokenAccountAddress": "64HWdAaTsTVvsQWQnw4PKVWeQ5BQXJ5dT6fTwerqo9US"
+              },
+              "instructions": [
+                {
+                  "keys": [
+                    {
+                      "pubkey": "PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW",
+                      "isSigner": true,
+                      "isWritable": true
+                    },
+                    {
+                      "pubkey": "64HWdAaTsTVvsQWQnw4PKVWeQ5BQXJ5dT6fTwerqo9US",
+                      "isSigner": false,
+                      "isWritable": true
+                    },
+                    {
+                      "pubkey": "VhfmPjvQxSiQW2FjnvoghewGGVYaWcz4cmDxpFPQEti",
+                      "isSigner": false,
+                      "isWritable": false
+                    },
+                    {
+                      "pubkey": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                      "isSigner": false,
+                      "isWritable": false
+                    },
+                    {
+                      "pubkey": "11111111111111111111111111111111",
+                      "isSigner": false,
+                      "isWritable": false
+                    },
+                    {
+                      "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                      "isSigner": false,
+                      "isWritable": false
+                    }
+                  ],
+                  "programId": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+                  "dataBase64": "AQ=="
+                },
+                {
+                  "keys": [
+                    {
+                      "pubkey": "Fe6xZzfQf6nmx4Z1TnYeo3gvBmXXuE3VtMuKmBGJe3dm",
+                      "isSigner": false,
+                      "isWritable": true
+                    },
+                    {
+                      "pubkey": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                      "isSigner": false,
+                      "isWritable": false
+                    },
+                    {
+                      "pubkey": "64HWdAaTsTVvsQWQnw4PKVWeQ5BQXJ5dT6fTwerqo9US",
+                      "isSigner": false,
+                      "isWritable": true
+                    },
+                    {
+                      "pubkey": "PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW",
+                      "isSigner": true,
+                      "isWritable": false
+                    }
+                  ],
+                  "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                  "dataBase64": "DBAnAAAAAAAABg=="
+                }
+              ],
+              "signerWallet": "PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW",
+              "paymentOrderId": "3754ab08-f63a-4d9b-a5d5-9f8ddfd1c118",
+              "requiredSigners": [
+                "PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW"
+              ],
+              "executionRecordId": "443dc080-a4eb-4183-a242-3f62ccc36fc7",
+              "transferRequestId": "de60ea90-2c52-4d9f-8f90-9edff5b71629"
+            },
+            "externalExecutionReference": "prepared:3754ab08-f63a-4d9b-a5d5-9f8ddfd1c118"
+          },
+          "createdAt": "2026-04-22T17:18:53.076Z",
+          "updatedAt": "2026-04-22T17:19:01.029Z",
+          "executorUser": {
+            "userId": "725b0711-42c2-49af-8a37-178507c1c5fe",
+            "email": "hello@gmail.com",
+            "displayName": "hello"
+          }
+        },
+        "submittedSignature": "21pboosGUwi4nd77MnCzB7WLvKdzM56DPDfafARyFvKy1cNo6kJ14TE47Q2jEKfayi7nFRBXZWh2Vmkr42X22PFE",
+        "observedExecutionTransaction": {
+          "signature": "21pboosGUwi4nd77MnCzB7WLvKdzM56DPDfafARyFvKy1cNo6kJ14TE47Q2jEKfayi7nFRBXZWh2Vmkr42X22PFE",
+          "slot": 414954030,
+          "eventTime": "2026-04-22T17:19:01.213Z",
+          "status": "observed",
+          "createdAt": "2026-04-22T17:19:01.541Z"
+        },
+        "signatureObserved": true,
+        "signatureMatched": true
+      },
+      "edgeCases": [],
+      "evidence": {
+        "linkedSignature": "21pboosGUwi4nd77MnCzB7WLvKdzM56DPDfafARyFvKy1cNo6kJ14TE47Q2jEKfayi7nFRBXZWh2Vmkr42X22PFE",
+        "linkedPaymentId": null,
+        "linkedTransferIds": [
+          "dc59b09c-d9c9-4ecd-b0a1-8a536b9f5884"
+        ],
+        "observedTransfers": [
+          {
+            "transferId": "dc59b09c-d9c9-4ecd-b0a1-8a536b9f5884",
+            "signature": "21pboosGUwi4nd77MnCzB7WLvKdzM56DPDfafARyFvKy1cNo6kJ14TE47Q2jEKfayi7nFRBXZWh2Vmkr42X22PFE",
+            "sourceWallet": "PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW",
+            "destinationWallet": "VhfmPjvQxSiQW2FjnvoghewGGVYaWcz4cmDxpFPQEti",
+            "amountRaw": "10000",
+            "amountUsdc": "0.010000",
+            "eventTime": "2026-04-22T17:19:01.213Z"
+          }
+        ],
+        "observedPayment": {
+          "paymentId": "396d4f6d-7940-42bc-ae0e-169a83170295",
+          "signature": "21pboosGUwi4nd77MnCzB7WLvKdzM56DPDfafARyFvKy1cNo6kJ14TE47Q2jEKfayi7nFRBXZWh2Vmkr42X22PFE",
+          "sourceWallet": "PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW",
+          "destinationWallet": "VhfmPjvQxSiQW2FjnvoghewGGVYaWcz4cmDxpFPQEti",
+          "netDestinationAmountRaw": "10000",
+          "netDestinationAmountUsdc": "0.010000",
+          "eventTime": "2026-04-22T17:19:01.213Z"
+        },
+        "relatedPaymentCount": 1,
+        "exceptionIds": []
+      },
+      "recommendedAction": "export_proof"
+    },
+    "checks": [
+      {
+        "id": "intent_captured",
+        "label": "Payment intent is captured",
+        "status": "pass",
+        "detail": "Payment request/order fields are present in the proof packet."
+      },
+      {
+        "id": "approval_cleared",
+        "label": "Approval is cleared",
+        "status": "pass",
+        "detail": "Approval state is approved."
+      },
+      {
+        "id": "execution_evidence_present",
+        "label": "Execution evidence is present",
+        "status": "pass",
+        "detail": "Submitted signature 21pboosGUwi4nd77MnCzB7WLvKdzM56DPDfafARyFvKy1cNo6kJ14TE47Q2jEKfayi7nFRBXZWh2Vmkr42X22PFE."
+      },
+      {
+        "id": "settlement_reconciled",
+        "label": "Settlement is reconciled",
+        "status": "pass",
+        "detail": "0.010000 USDC was matched exactly to wallet 2."
+      },
+      {
+        "id": "exceptions_resolved",
+        "label": "Exceptions are resolved or absent",
+        "status": "pass",
+        "detail": "No exceptions are linked."
+      }
+    ]
+  },
+  "sourceArtifacts": {
+    "paymentRequest": {
+      "paymentRequestId": "b4766686-9358-47c1-a11c-7e6fb3edf227",
+      "workspaceId": "4eed5cf0-26b6-4099-981c-b13de11ef3e1",
+      "destinationId": "5ce998d1-282b-416e-b691-ebb4c4d9142d",
+      "counterpartyId": null,
+      "requestedByUserId": "725b0711-42c2-49af-8a37-178507c1c5fe",
+      "amountRaw": "10000",
+      "asset": "usdc",
+      "reason": "test payment",
+      "externalReference": "inv 0",
+      "dueAt": null,
+      "state": "converted_to_order",
+      "metadataJson": {},
+      "createdAt": "2026-04-22T17:18:46.115Z",
+      "updatedAt": "2026-04-22T17:18:46.201Z",
+      "requestedByUser": {
+        "userId": "725b0711-42c2-49af-8a37-178507c1c5fe",
+        "email": "hello@gmail.com",
+        "displayName": "hello"
+      }
+    },
+    "paymentOrderEvents": [
+      {
+        "paymentOrderEventId": "65388ea1-0f4e-4f88-a73d-035a05ed04ec",
+        "paymentOrderId": "3754ab08-f63a-4d9b-a5d5-9f8ddfd1c118",
+        "workspaceId": "4eed5cf0-26b6-4099-981c-b13de11ef3e1",
+        "eventType": "payment_order_created",
+        "actorType": "user",
+        "actorId": "725b0711-42c2-49af-8a37-178507c1c5fe",
+        "beforeState": null,
+        "afterState": "draft",
+        "linkedTransferRequestId": null,
+        "linkedExecutionRecordId": null,
+        "linkedSignature": null,
+        "payloadJson": {
+          "asset": "usdc",
+          "amountRaw": "10000",
+          "paymentRunId": null,
+          "destinationId": "5ce998d1-282b-416e-b691-ebb4c4d9142d",
+          "paymentRequestId": "b4766686-9358-47c1-a11c-7e6fb3edf227",
+          "sourceTreasuryWalletId": "a98ec47f-fc5c-49d7-9119-a26f1feee66d"
+        },
+        "createdAt": "2026-04-22T17:18:46.138Z"
+      },
+      {
+        "paymentOrderEventId": "44cfe4bc-b65d-4163-938c-6af0c82d82a3",
+        "paymentOrderId": "3754ab08-f63a-4d9b-a5d5-9f8ddfd1c118",
+        "workspaceId": "4eed5cf0-26b6-4099-981c-b13de11ef3e1",
+        "eventType": "payment_order_approval_required",
+        "actorType": "system",
+        "actorId": null,
+        "beforeState": "draft",
+        "afterState": "pending_approval",
+        "linkedTransferRequestId": "de60ea90-2c52-4d9f-8f90-9edff5b71629",
+        "linkedExecutionRecordId": null,
+        "linkedSignature": null,
+        "payloadJson": {
+          "rules": {
+            "requireTrustedDestination": true,
+            "requireApprovalForExternal": false,
+            "requireApprovalForInternal": false,
+            "externalApprovalThresholdRaw": "50000000",
+            "internalApprovalThresholdRaw": "250000000"
+          },
+          "reasons": [
+            {
+              "code": "destination_not_trusted",
+              "message": "Destination \"wallet 2\" is unreviewed and cannot skip approval"
+            }
+          ],
+          "isActive": true,
+          "policyName": "Default workspace policy",
+          "approvalPolicyId": "ef43ef5f-4157-4560-9775-1606fcb24bac",
+          "requiresApproval": true
+        },
+        "createdAt": "2026-04-22T17:18:46.167Z"
+      },
+      {
+        "paymentOrderEventId": "beab31b8-f318-439c-b33a-e6c8dd0ab3a3",
+        "paymentOrderId": "3754ab08-f63a-4d9b-a5d5-9f8ddfd1c118",
+        "workspaceId": "4eed5cf0-26b6-4099-981c-b13de11ef3e1",
+        "eventType": "payment_order_execution_prepared",
+        "actorType": "user",
+        "actorId": "725b0711-42c2-49af-8a37-178507c1c5fe",
+        "beforeState": "pending_approval",
+        "afterState": "execution_recorded",
+        "linkedTransferRequestId": "de60ea90-2c52-4d9f-8f90-9edff5b71629",
+        "linkedExecutionRecordId": "443dc080-a4eb-4183-a242-3f62ccc36fc7",
+        "linkedSignature": null,
+        "payloadJson": {
+          "amountRaw": "10000",
+          "sourceWallet": "PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW",
+          "executionSource": "prepared_solana_transfer",
+          "destinationWallet": "VhfmPjvQxSiQW2FjnvoghewGGVYaWcz4cmDxpFPQEti"
+        },
+        "createdAt": "2026-04-22T17:18:53.093Z"
+      },
+      {
+        "paymentOrderEventId": "b352aeb2-40a4-43d5-9639-159584cdd362",
+        "paymentOrderId": "3754ab08-f63a-4d9b-a5d5-9f8ddfd1c118",
+        "workspaceId": "4eed5cf0-26b6-4099-981c-b13de11ef3e1",
+        "eventType": "payment_order_signature_attached",
+        "actorType": "user",
+        "actorId": "725b0711-42c2-49af-8a37-178507c1c5fe",
+        "beforeState": "execution_recorded",
+        "afterState": "execution_recorded",
+        "linkedTransferRequestId": "de60ea90-2c52-4d9f-8f90-9edff5b71629",
+        "linkedExecutionRecordId": "443dc080-a4eb-4183-a242-3f62ccc36fc7",
+        "linkedSignature": "21pboosGUwi4nd77MnCzB7WLvKdzM56DPDfafARyFvKy1cNo6kJ14TE47Q2jEKfayi7nFRBXZWh2Vmkr42X22PFE",
+        "payloadJson": {
+          "externalExecutionReference": null
+        },
+        "createdAt": "2026-04-22T17:19:01.043Z"
+      }
+    ],
+    "transferRequestEvents": [
+      {
+        "transferRequestEventId": "7762d9de-c317-47a9-a39c-4ff33209045d",
+        "transferRequestId": "de60ea90-2c52-4d9f-8f90-9edff5b71629",
+        "workspaceId": "4eed5cf0-26b6-4099-981c-b13de11ef3e1",
+        "eventType": "request_created",
+        "actorType": "user",
+        "actorId": "725b0711-42c2-49af-8a37-178507c1c5fe",
+        "eventSource": "user",
+        "beforeState": null,
+        "afterState": "pending_approval",
+        "linkedSignature": null,
+        "linkedPaymentId": null,
+        "linkedTransferIds": [],
+        "payloadJson": {
+          "asset": "usdc",
+          "source": "payment_order",
+          "amountRaw": "10000",
+          "paymentRunId": null,
+          "paymentOrderId": "3754ab08-f63a-4d9b-a5d5-9f8ddfd1c118"
+        },
+        "createdAt": "2026-04-22T17:18:46.157Z"
+      },
+      {
+        "transferRequestEventId": "38bca302-27b1-42f8-b48d-86a790913b31",
+        "transferRequestId": "de60ea90-2c52-4d9f-8f90-9edff5b71629",
+        "workspaceId": "4eed5cf0-26b6-4099-981c-b13de11ef3e1",
+        "eventType": "approval_required",
+        "actorType": "system",
+        "actorId": null,
+        "eventSource": "system",
+        "beforeState": "submitted",
+        "afterState": "pending_approval",
+        "linkedSignature": null,
+        "linkedPaymentId": null,
+        "linkedTransferIds": [],
+        "payloadJson": {
+          "rules": {
+            "requireTrustedDestination": true,
+            "requireApprovalForExternal": false,
+            "requireApprovalForInternal": false,
+            "externalApprovalThresholdRaw": "50000000",
+            "internalApprovalThresholdRaw": "250000000"
+          },
+          "reasons": [
+            {
+              "code": "destination_not_trusted",
+              "message": "Destination \"wallet 2\" is unreviewed and cannot skip approval"
+            }
+          ],
+          "isActive": true,
+          "policyName": "Default workspace policy",
+          "approvalPolicyId": "ef43ef5f-4157-4560-9775-1606fcb24bac",
+          "requiresApproval": true
+        },
+        "createdAt": "2026-04-22T17:18:46.161Z"
+      },
+      {
+        "transferRequestEventId": "a88ff066-e98b-4979-a318-fc4312b15f8d",
+        "transferRequestId": "de60ea90-2c52-4d9f-8f90-9edff5b71629",
+        "workspaceId": "4eed5cf0-26b6-4099-981c-b13de11ef3e1",
+        "eventType": "approval_decision",
+        "actorType": "user",
+        "actorId": "725b0711-42c2-49af-8a37-178507c1c5fe",
+        "eventSource": "user",
+        "beforeState": "pending_approval",
+        "afterState": "approved",
+        "linkedSignature": null,
+        "linkedPaymentId": null,
+        "linkedTransferIds": [],
+        "payloadJson": {
+          "action": "approve",
+          "comment": null,
+          "approvalDecisionId": "ed49e218-086c-4ab8-be03-b2fe28087299"
+        },
+        "createdAt": "2026-04-22T17:18:49.714Z"
+      },
+      {
+        "transferRequestEventId": "6fba6512-eaa7-43e9-baf3-926e7fc255a0",
+        "transferRequestId": "de60ea90-2c52-4d9f-8f90-9edff5b71629",
+        "workspaceId": "4eed5cf0-26b6-4099-981c-b13de11ef3e1",
+        "eventType": "execution_prepared",
+        "actorType": "user",
+        "actorId": "725b0711-42c2-49af-8a37-178507c1c5fe",
+        "eventSource": "user",
+        "beforeState": "approved",
+        "afterState": "ready_for_execution",
+        "linkedSignature": null,
+        "linkedPaymentId": null,
+        "linkedTransferIds": [],
+        "payloadJson": {
+          "amountRaw": "10000",
+          "sourceWallet": "PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW",
+          "paymentOrderId": "3754ab08-f63a-4d9b-a5d5-9f8ddfd1c118",
+          "executionSource": "prepared_solana_transfer",
+          "destinationWallet": "VhfmPjvQxSiQW2FjnvoghewGGVYaWcz4cmDxpFPQEti",
+          "executionRecordId": "443dc080-a4eb-4183-a242-3f62ccc36fc7"
+        },
+        "createdAt": "2026-04-22T17:18:53.091Z"
+      },
+      {
+        "transferRequestEventId": "45270a08-3b02-4f3f-be99-a6590a2c3de8",
+        "transferRequestId": "de60ea90-2c52-4d9f-8f90-9edff5b71629",
+        "workspaceId": "4eed5cf0-26b6-4099-981c-b13de11ef3e1",
+        "eventType": "execution_signature_attached",
+        "actorType": "user",
+        "actorId": "725b0711-42c2-49af-8a37-178507c1c5fe",
+        "eventSource": "user",
+        "beforeState": "ready_for_execution",
+        "afterState": "submitted_onchain",
+        "linkedSignature": "21pboosGUwi4nd77MnCzB7WLvKdzM56DPDfafARyFvKy1cNo6kJ14TE47Q2jEKfayi7nFRBXZWh2Vmkr42X22PFE",
+        "linkedPaymentId": null,
+        "linkedTransferIds": [],
+        "payloadJson": {
+          "paymentOrderId": "3754ab08-f63a-4d9b-a5d5-9f8ddfd1c118",
+          "executionRecordId": "443dc080-a4eb-4183-a242-3f62ccc36fc7",
+          "externalExecutionReference": null
+        },
+        "createdAt": "2026-04-22T17:19:01.042Z"
+      }
+    ],
+    "executionRecords": [
+      {
+        "executionRecordId": "443dc080-a4eb-4183-a242-3f62ccc36fc7",
+        "transferRequestId": "de60ea90-2c52-4d9f-8f90-9edff5b71629",
+        "workspaceId": "4eed5cf0-26b6-4099-981c-b13de11ef3e1",
+        "submittedSignature": "21pboosGUwi4nd77MnCzB7WLvKdzM56DPDfafARyFvKy1cNo6kJ14TE47Q2jEKfayi7nFRBXZWh2Vmkr42X22PFE",
+        "executionSource": "prepared_solana_transfer",
+        "executorUserId": "725b0711-42c2-49af-8a37-178507c1c5fe",
+        "state": "submitted_onchain",
+        "submittedAt": "2026-04-22T17:19:00.995Z",
+        "metadataJson": {
+          "paymentOrderId": "3754ab08-f63a-4d9b-a5d5-9f8ddfd1c118",
+          "preparedExecution": {
+            "kind": "solana_spl_usdc_transfer",
+            "memo": "test payment",
+            "token": {
+              "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+              "symbol": "USDC",
+              "decimals": 6
+            },
+            "source": {
+              "label": "fuyo",
+              "walletAddress": "PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW",
+              "treasuryWalletId": "a98ec47f-fc5c-49d7-9119-a26f1feee66d",
+              "tokenAccountAddress": "Fe6xZzfQf6nmx4Z1TnYeo3gvBmXXuE3VtMuKmBGJe3dm"
+            },
+            "network": "solana-mainnet",
+            "signing": {
+              "mode": "wallet_adapter_or_external_signer",
+              "note": "Client must add a recent blockhash, sign with the source wallet, and submit to Solana. The API never receives private keys.",
+              "requiresRecentBlockhash": true
+            },
+            "version": 1,
+            "feePayer": "PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW",
+            "amountRaw": "10000",
+            "createdAt": "2026-04-22T17:18:53.071Z",
+            "reference": "inv 0",
+            "destination": {
+              "label": "wallet 2",
+              "destinationId": "5ce998d1-282b-416e-b691-ebb4c4d9142d",
+              "walletAddress": "VhfmPjvQxSiQW2FjnvoghewGGVYaWcz4cmDxpFPQEti",
+              "counterpartyName": null,
+              "tokenAccountAddress": "64HWdAaTsTVvsQWQnw4PKVWeQ5BQXJ5dT6fTwerqo9US"
+            },
+            "instructions": [
+              {
+                "keys": [
+                  {
+                    "pubkey": "PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW",
+                    "isSigner": true,
+                    "isWritable": true
+                  },
+                  {
+                    "pubkey": "64HWdAaTsTVvsQWQnw4PKVWeQ5BQXJ5dT6fTwerqo9US",
+                    "isSigner": false,
+                    "isWritable": true
+                  },
+                  {
+                    "pubkey": "VhfmPjvQxSiQW2FjnvoghewGGVYaWcz4cmDxpFPQEti",
+                    "isSigner": false,
+                    "isWritable": false
+                  },
+                  {
+                    "pubkey": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                    "isSigner": false,
+                    "isWritable": false
+                  },
+                  {
+                    "pubkey": "11111111111111111111111111111111",
+                    "isSigner": false,
+                    "isWritable": false
+                  },
+                  {
+                    "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                    "isSigner": false,
+                    "isWritable": false
+                  }
+                ],
+                "programId": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+                "dataBase64": "AQ=="
+              },
+              {
+                "keys": [
+                  {
+                    "pubkey": "Fe6xZzfQf6nmx4Z1TnYeo3gvBmXXuE3VtMuKmBGJe3dm",
+                    "isSigner": false,
+                    "isWritable": true
+                  },
+                  {
+                    "pubkey": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                    "isSigner": false,
+                    "isWritable": false
+                  },
+                  {
+                    "pubkey": "64HWdAaTsTVvsQWQnw4PKVWeQ5BQXJ5dT6fTwerqo9US",
+                    "isSigner": false,
+                    "isWritable": true
+                  },
+                  {
+                    "pubkey": "PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW",
+                    "isSigner": true,
+                    "isWritable": false
+                  }
+                ],
+                "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                "dataBase64": "DBAnAAAAAAAABg=="
+              }
+            ],
+            "signerWallet": "PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW",
+            "paymentOrderId": "3754ab08-f63a-4d9b-a5d5-9f8ddfd1c118",
+            "requiredSigners": [
+              "PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW"
+            ],
+            "executionRecordId": "443dc080-a4eb-4183-a242-3f62ccc36fc7",
+            "transferRequestId": "de60ea90-2c52-4d9f-8f90-9edff5b71629"
+          },
+          "externalExecutionReference": "prepared:3754ab08-f63a-4d9b-a5d5-9f8ddfd1c118"
+        },
+        "createdAt": "2026-04-22T17:18:53.076Z",
+        "updatedAt": "2026-04-22T17:19:01.029Z",
+        "executorUser": {
+          "userId": "725b0711-42c2-49af-8a37-178507c1c5fe",
+          "email": "hello@gmail.com",
+          "displayName": "hello"
+        }
+      }
+    ],
+    "observedTransfers": [
+      {
+        "transferId": "dc59b09c-d9c9-4ecd-b0a1-8a536b9f5884",
+        "signature": "21pboosGUwi4nd77MnCzB7WLvKdzM56DPDfafARyFvKy1cNo6kJ14TE47Q2jEKfayi7nFRBXZWh2Vmkr42X22PFE",
+        "slot": 414954030,
+        "eventTime": "2026-04-22T17:19:01.213Z",
+        "asset": "usdc",
+        "sourceTokenAccount": "Fe6xZzfQf6nmx4Z1TnYeo3gvBmXXuE3VtMuKmBGJe3dm",
+        "sourceWallet": "PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW",
+        "destinationTokenAccount": "64HWdAaTsTVvsQWQnw4PKVWeQ5BQXJ5dT6fTwerqo9US",
+        "destinationWallet": "VhfmPjvQxSiQW2FjnvoghewGGVYaWcz4cmDxpFPQEti",
+        "amountRaw": "10000",
+        "amountDecimal": 0.01,
+        "transferKind": "credit",
+        "instructionIndex": 1,
+        "innerInstructionIndex": null,
+        "routeGroup": "21pboosGUwi4nd77MnCzB7WLvKdzM56DPDfafARyFvKy1cNo6kJ14TE47Q2jEKfayi7nFRBXZWh2Vmkr42X22PFE:ix:1",
+        "legRole": "direct_settlement",
+        "propertiesJson": {
+          "destination_account": "64HWdAaTsTVvsQWQnw4PKVWeQ5BQXJ5dT6fTwerqo9US",
+          "destination_amount_after_raw": 280000,
+          "destination_amount_before_raw": 270000,
+          "instruction_kind": "transfer_checked",
+          "program_id": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+          "reconstruction_source": "instruction_transfer",
+          "source_account": "Fe6xZzfQf6nmx4Z1TnYeo3gvBmXXuE3VtMuKmBGJe3dm"
+        },
+        "createdAt": "2026-04-22T17:19:01.551Z"
+      }
+    ],
+    "observedPayment": {
+      "paymentId": "396d4f6d-7940-42bc-ae0e-169a83170295",
+      "signature": "21pboosGUwi4nd77MnCzB7WLvKdzM56DPDfafARyFvKy1cNo6kJ14TE47Q2jEKfayi7nFRBXZWh2Vmkr42X22PFE",
+      "slot": 414954030,
+      "eventTime": "2026-04-22T17:19:01.213Z",
+      "asset": "usdc",
+      "sourceWallet": "PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW",
+      "destinationWallet": "VhfmPjvQxSiQW2FjnvoghewGGVYaWcz4cmDxpFPQEti",
+      "grossAmountRaw": "10000",
+      "grossAmountDecimal": 0.01,
+      "netDestinationAmountRaw": "10000",
+      "netDestinationAmountDecimal": 0.01,
+      "feeAmountRaw": "0",
+      "feeAmountDecimal": 0,
+      "routeCount": 1,
+      "paymentKind": "direct",
+      "reconstructionRule": "route_group_balance_bundle",
+      "confidenceBand": "high",
+      "propertiesJson": {
+        "destinations": [
+          {
+            "amount_raw": "10000",
+            "wallet": "VhfmPjvQxSiQW2FjnvoghewGGVYaWcz4cmDxpFPQEti"
+          }
+        ],
+        "route_group": "21pboosGUwi4nd77MnCzB7WLvKdzM56DPDfafARyFvKy1cNo6kJ14TE47Q2jEKfayi7nFRBXZWh2Vmkr42X22PFE:ix:1",
+        "transfer_count": 1,
+        "transfer_legs": [
+          {
+            "amount_raw": "10000",
+            "destination_token_account": "64HWdAaTsTVvsQWQnw4PKVWeQ5BQXJ5dT6fTwerqo9US",
+            "destination_wallet": "VhfmPjvQxSiQW2FjnvoghewGGVYaWcz4cmDxpFPQEti",
+            "leg_role": "direct_settlement",
+            "source_token_account": "Fe6xZzfQf6nmx4Z1TnYeo3gvBmXXuE3VtMuKmBGJe3dm",
+            "source_wallet": "PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW"
+          }
+        ]
+      },
+      "createdAt": "2026-04-22T17:19:01.558Z"
+    }
+  },
+  "agentSummary": {
+    "recommendedAction": "export_proof",
+    "canTreatAsFinal": true,
+    "needsHumanReview": false
+  },
+  "auditTrail": [
+    {
+      "timelineType": "request_event",
+      "createdAt": "2026-04-22T17:18:46.157Z",
+      "eventType": "request_created",
+      "actorType": "user",
+      "actorId": "725b0711-42c2-49af-8a37-178507c1c5fe",
+      "eventSource": "user",
+      "beforeState": null,
+      "afterState": "pending_approval",
+      "linkedSignature": null,
+      "linkedPaymentId": null,
+      "linkedTransferIds": [],
+      "payloadJson": {
+        "asset": "usdc",
+        "source": "payment_order",
+        "amountRaw": "10000",
+        "paymentRunId": null,
+        "paymentOrderId": "3754ab08-f63a-4d9b-a5d5-9f8ddfd1c118"
+      }
+    },
+    {
+      "timelineType": "approval_decision",
+      "createdAt": "2026-04-22T17:18:46.159Z",
+      "action": "routed_for_approval",
+      "comment": null,
+      "actorUser": null,
+      "payloadJson": {
+        "rules": {
+          "requireTrustedDestination": true,
+          "requireApprovalForExternal": false,
+          "requireApprovalForInternal": false,
+          "externalApprovalThresholdRaw": "50000000",
+          "internalApprovalThresholdRaw": "250000000"
+        },
+        "reasons": [
+          {
+            "code": "destination_not_trusted",
+            "message": "Destination \"wallet 2\" is unreviewed and cannot skip approval"
+          }
+        ],
+        "isActive": true,
+        "policyName": "Default workspace policy",
+        "approvalPolicyId": "ef43ef5f-4157-4560-9775-1606fcb24bac",
+        "requiresApproval": true
+      }
+    },
+    {
+      "timelineType": "request_event",
+      "createdAt": "2026-04-22T17:18:46.161Z",
+      "eventType": "approval_required",
+      "actorType": "system",
+      "actorId": null,
+      "eventSource": "system",
+      "beforeState": "submitted",
+      "afterState": "pending_approval",
+      "linkedSignature": null,
+      "linkedPaymentId": null,
+      "linkedTransferIds": [],
+      "payloadJson": {
+        "rules": {
+          "requireTrustedDestination": true,
+          "requireApprovalForExternal": false,
+          "requireApprovalForInternal": false,
+          "externalApprovalThresholdRaw": "50000000",
+          "internalApprovalThresholdRaw": "250000000"
+        },
+        "reasons": [
+          {
+            "code": "destination_not_trusted",
+            "message": "Destination \"wallet 2\" is unreviewed and cannot skip approval"
+          }
+        ],
+        "isActive": true,
+        "policyName": "Default workspace policy",
+        "approvalPolicyId": "ef43ef5f-4157-4560-9775-1606fcb24bac",
+        "requiresApproval": true
+      }
+    },
+    {
+      "timelineType": "approval_decision",
+      "createdAt": "2026-04-22T17:18:49.705Z",
+      "action": "approve",
+      "comment": null,
+      "actorUser": {
+        "userId": "725b0711-42c2-49af-8a37-178507c1c5fe",
+        "email": "hello@gmail.com",
+        "displayName": "hello"
+      },
+      "payloadJson": {}
+    },
+    {
+      "timelineType": "request_event",
+      "createdAt": "2026-04-22T17:18:49.714Z",
+      "eventType": "approval_decision",
+      "actorType": "user",
+      "actorId": "725b0711-42c2-49af-8a37-178507c1c5fe",
+      "eventSource": "user",
+      "beforeState": "pending_approval",
+      "afterState": "approved",
+      "linkedSignature": null,
+      "linkedPaymentId": null,
+      "linkedTransferIds": [],
+      "payloadJson": {
+        "action": "approve",
+        "comment": null,
+        "approvalDecisionId": "ed49e218-086c-4ab8-be03-b2fe28087299"
+      }
+    },
+    {
+      "timelineType": "request_event",
+      "createdAt": "2026-04-22T17:18:53.091Z",
+      "eventType": "execution_prepared",
+      "actorType": "user",
+      "actorId": "725b0711-42c2-49af-8a37-178507c1c5fe",
+      "eventSource": "user",
+      "beforeState": "approved",
+      "afterState": "ready_for_execution",
+      "linkedSignature": null,
+      "linkedPaymentId": null,
+      "linkedTransferIds": [],
+      "payloadJson": {
+        "amountRaw": "10000",
+        "sourceWallet": "PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW",
+        "paymentOrderId": "3754ab08-f63a-4d9b-a5d5-9f8ddfd1c118",
+        "executionSource": "prepared_solana_transfer",
+        "destinationWallet": "VhfmPjvQxSiQW2FjnvoghewGGVYaWcz4cmDxpFPQEti",
+        "executionRecordId": "443dc080-a4eb-4183-a242-3f62ccc36fc7"
+      }
+    },
+    {
+      "timelineType": "execution_record",
+      "createdAt": "2026-04-22T17:19:01.029Z",
+      "state": "submitted_onchain",
+      "executionSource": "prepared_solana_transfer",
+      "submittedSignature": "21pboosGUwi4nd77MnCzB7WLvKdzM56DPDfafARyFvKy1cNo6kJ14TE47Q2jEKfayi7nFRBXZWh2Vmkr42X22PFE",
+      "executorUser": {
+        "userId": "725b0711-42c2-49af-8a37-178507c1c5fe",
+        "email": "hello@gmail.com",
+        "displayName": "hello"
+      }
+    },
+    {
+      "timelineType": "request_event",
+      "createdAt": "2026-04-22T17:19:01.042Z",
+      "eventType": "execution_signature_attached",
+      "actorType": "user",
+      "actorId": "725b0711-42c2-49af-8a37-178507c1c5fe",
+      "eventSource": "user",
+      "beforeState": "ready_for_execution",
+      "afterState": "submitted_onchain",
+      "linkedSignature": "21pboosGUwi4nd77MnCzB7WLvKdzM56DPDfafARyFvKy1cNo6kJ14TE47Q2jEKfayi7nFRBXZWh2Vmkr42X22PFE",
+      "linkedPaymentId": null,
+      "linkedTransferIds": [],
+      "payloadJson": {
+        "paymentOrderId": "3754ab08-f63a-4d9b-a5d5-9f8ddfd1c118",
+        "executionRecordId": "443dc080-a4eb-4183-a242-3f62ccc36fc7",
+        "externalExecutionReference": null
+      }
+    },
+    {
+      "timelineType": "match_result",
+      "createdAt": "2026-04-22T17:19:01.401Z",
+      "matchStatus": "matched_exact",
+      "explanation": "Allocated total 0.010000 of requested 0.010000 USDC to wallet VhfmPjvQxSiQW2FjnvoghewGGVYaWcz4cmDxpFPQEti using submitted-signature matching.",
+      "linkedSignature": "21pboosGUwi4nd77MnCzB7WLvKdzM56DPDfafARyFvKy1cNo6kJ14TE47Q2jEKfayi7nFRBXZWh2Vmkr42X22PFE",
+      "linkedTransferIds": [
+        "dc59b09c-d9c9-4ecd-b0a1-8a536b9f5884"
+      ]
+    },
+    {
+      "timelineType": "observed_execution",
+      "createdAt": "2026-04-22T17:19:01.541Z",
+      "signature": "21pboosGUwi4nd77MnCzB7WLvKdzM56DPDfafARyFvKy1cNo6kJ14TE47Q2jEKfayi7nFRBXZWh2Vmkr42X22PFE",
+      "slot": 414954030,
+      "status": "observed"
+    }
+  ]
+}

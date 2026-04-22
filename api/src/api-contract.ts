@@ -98,6 +98,9 @@ export const API_ENDPOINTS = [
   }),
   endpoint('preview_collections_csv', 'POST', '/workspaces/{workspaceId}/collections/import-csv/preview', ['collections'], 'Preview collection CSV import without side effects', 'session', { scope: 'workspace:read' }),
   endpoint('get_collection', 'GET', '/workspaces/{workspaceId}/collections/{collectionRequestId}', ['collections'], 'Get expected collection detail', 'session', { scope: 'workspace:read' }),
+  endpoint('collection_proof', 'GET', '/workspaces/{workspaceId}/collections/{collectionRequestId}/proof', ['proof'], 'Export expected collection proof', 'session', {
+    scope: 'proofs:read',
+  }),
   endpoint('cancel_collection', 'POST', '/workspaces/{workspaceId}/collections/{collectionRequestId}/cancel', ['collections'], 'Cancel expected collection', 'session', { scope: 'payments:write' }),
   endpoint('list_collection_runs', 'GET', '/workspaces/{workspaceId}/collection-runs', ['collections'], 'List collection runs', 'session', { scope: 'workspace:read' }),
   endpoint('import_collection_run_csv', 'POST', '/workspaces/{workspaceId}/collection-runs/import-csv', ['collections'], 'Import CSV as collection run', 'session', {
@@ -106,6 +109,10 @@ export const API_ENDPOINTS = [
   }),
   endpoint('preview_collection_run_csv', 'POST', '/workspaces/{workspaceId}/collection-runs/import-csv/preview', ['collections'], 'Preview collection run CSV import', 'session', { scope: 'workspace:read' }),
   endpoint('get_collection_run', 'GET', '/workspaces/{workspaceId}/collection-runs/{collectionRunId}', ['collections'], 'Get collection run detail', 'session', { scope: 'workspace:read' }),
+  endpoint('collection_run_proof', 'GET', '/workspaces/{workspaceId}/collection-runs/{collectionRunId}/proof', ['proof'], 'Export collection run proof', 'session', {
+    scope: 'proofs:read',
+    query: { detail: 'summary | compact | full' },
+  }),
 
   endpoint('list_payment_orders', 'GET', '/workspaces/{workspaceId}/payment-orders', ['payment orders'], 'List payment orders', 'session', { scope: 'workspace:read' }),
   endpoint('create_payment_order', 'POST', '/workspaces/{workspaceId}/payment-orders', ['payment orders'], 'Create payment order', 'session', { scope: 'payments:write' }),

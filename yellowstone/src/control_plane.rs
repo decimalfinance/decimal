@@ -187,6 +187,7 @@ impl WorkspaceRegistry {
                     amount_raw: request.amount_raw.parse().unwrap_or_default(),
                     requested_at: request.requested_at,
                     request_type: request.request_type.clone(),
+                    expected_source_wallet_address: request.expected_source_wallet_address.clone(),
                     submitted_signature: request
                         .latest_execution
                         .as_ref()
@@ -321,6 +322,7 @@ pub struct WorkspaceTransferRequestMatch {
     pub amount_raw: i128,
     pub requested_at: DateTime<Utc>,
     pub request_type: String,
+    pub expected_source_wallet_address: Option<String>,
     pub submitted_signature: Option<String>,
     #[cfg(test)]
     pub workspace_id: String,
@@ -434,6 +436,8 @@ struct TransferRequestDetails {
     transfer_request_id: String,
     #[serde(rename = "requestType")]
     request_type: String,
+    #[serde(rename = "expectedSourceWalletAddress")]
+    expected_source_wallet_address: Option<String>,
     #[serde(rename = "amountRaw")]
     amount_raw: String,
     #[serde(rename = "requestedAt")]
@@ -474,6 +478,7 @@ mod tests {
                 matches: vec![TransferRequestDetails {
                     transfer_request_id: "request-1".to_string(),
                     request_type: "wallet_transfer".to_string(),
+                    expected_source_wallet_address: None,
                     amount_raw: "10000".to_string(),
                     requested_at: Utc::now(),
                     destination: TransferRequestDestinationDetails {

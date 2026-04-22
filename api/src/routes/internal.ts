@@ -115,6 +115,11 @@ async function buildWorkspaceMatchingSnapshot(workspaceId: string) {
             counterparty: true,
           },
         },
+        collectionRequest: {
+          include: {
+            collectionSource: true,
+          },
+        },
       },
       orderBy: { createdAt: 'desc' },
     }),
@@ -131,6 +136,11 @@ async function buildWorkspaceMatchingSnapshot(workspaceId: string) {
     workspaceId: request.workspaceId,
     paymentOrderId: request.paymentOrderId,
     sourceTreasuryWalletId: request.sourceTreasuryWalletId,
+    collectionRequestId: request.collectionRequest?.collectionRequestId ?? null,
+    collectionSourceId: request.collectionRequest?.collectionSourceId ?? null,
+    expectedSourceWalletAddress: request.collectionRequest?.collectionSource?.walletAddress ?? request.collectionRequest?.payerWalletAddress ?? null,
+    expectedSourceTokenAccountAddress: request.collectionRequest?.collectionSource?.tokenAccountAddress ?? request.collectionRequest?.payerTokenAccountAddress ?? null,
+    collectionSourceTrustState: request.collectionRequest?.collectionSource?.trustState ?? null,
     requestType: request.requestType,
     asset: request.asset,
     amountRaw: request.amountRaw.toString(),

@@ -3,6 +3,8 @@ import type {
   AuthenticatedSession,
   CollectionCsvPreview,
   CollectionRequest,
+  CollectionProofPacket,
+  CollectionRunProofPacket,
   CollectionRunCsvPreview,
   CollectionRunImportResult,
   CollectionRunSummary,
@@ -69,7 +71,7 @@ async function request<T>(path: string, init?: RequestInit & { includeAuth?: boo
   return response.json() as Promise<T>;
 }
 
-async function download(path: string) {
+async function download(path: string, fallbackFileName = 'export.csv') {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
       ...(sessionToken ? { authorization: `Bearer ${sessionToken}` } : {}),
@@ -82,8 +84,8 @@ async function download(path: string) {
 
   const blob = await response.blob();
   const disposition = response.headers.get('content-disposition');
-  const fileNameMatch = disposition?.match(/filename=\"([^\"]+)\"/);
-  const fileName = fileNameMatch?.[1] ?? 'export.csv';
+  const fileNameMatch = disposition?.match(/filename="([^"]+)"/);
+  const fileName = fileNameMatch?.[1] ?? fallbackFileName;
   const url = window.URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
@@ -554,6 +556,17 @@ export const api = {
       `/workspaces/${workspaceId}/collections/${collectionRequestId}`,
     );
   },
+  getCollectionProof(workspaceId: string, collectionRequestId: string) {
+    return request<CollectionProofPacket>(
+      `/workspaces/${workspaceId}/collections/${collectionRequestId}/proof`,
+    );
+  },
+  downloadCollectionProofJson(workspaceId: string, collectionRequestId: string) {
+    return download(
+      `/workspaces/${workspaceId}/collections/${collectionRequestId}/proof`,
+      `collection-${collectionRequestId}-proof.json`,
+    );
+  },
   cancelCollection(workspaceId: string, collectionRequestId: string) {
     return request<CollectionRequest>(
       `/workspaces/${workspaceId}/collections/${collectionRequestId}/cancel`,
@@ -600,6 +613,17 @@ export const api = {
   getCollectionRun(workspaceId: string, collectionRunId: string) {
     return request<CollectionRunSummary>(
       `/workspaces/${workspaceId}/collection-runs/${collectionRunId}`,
+    );
+  },
+  getCollectionRunProof(workspaceId: string, collectionRunId: string) {
+    return request<CollectionRunProofPacket>(
+      `/workspaces/${workspaceId}/collection-runs/${collectionRunId}/proof`,
+    );
+  },
+  downloadCollectionRunProofJson(workspaceId: string, collectionRunId: string) {
+    return download(
+      `/workspaces/${workspaceId}/collection-runs/${collectionRunId}/proof`,
+      `collection-run-${collectionRunId}-proof.json`,
     );
   },
 };

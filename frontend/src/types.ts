@@ -544,6 +544,71 @@ export type PaymentProofPacket = {
   auditTrail: ReconciliationTimelineItem[];
 };
 
+export type ProofReadiness = {
+  status: 'complete' | 'in_progress' | 'needs_review' | 'blocked';
+  blockers: string[];
+  warnings: string[];
+  pending: string[];
+  checks: Array<{
+    id: string;
+    label: string;
+    status: 'pass' | 'pending' | 'warn' | 'fail';
+    detail: string;
+  }>;
+  recommendedAction: string;
+};
+
+export type CollectionSourceReview = {
+  status:
+    | 'pass'
+    | 'unspecified_source'
+    | 'source_needs_review'
+    | 'awaiting_observation'
+    | 'source_mismatch'
+    | 'source_restricted';
+  severity: 'none' | 'info' | 'warning' | 'error';
+  expectedSourceWallet: string | null;
+  observedSourceWallet: string | null;
+  trustState: CollectionSourceTrustState | null;
+  message: string;
+};
+
+export type CollectionProofPacket = {
+  proofId: string;
+  canonicalDigest: string;
+  canonicalDigestAlgorithm: string;
+  packetType: 'stablecoin_collection_proof';
+  version: number;
+  generatedAt: string;
+  workspaceId: string;
+  status: 'complete' | 'partial' | 'exception' | 'closed' | 'cancelled' | 'in_progress';
+  readiness: ProofReadiness;
+  intent: Record<string, unknown>;
+  parties: Record<string, unknown>;
+  collectionSourceReview: CollectionSourceReview;
+  settlement: Record<string, unknown>;
+  exceptions: Array<Record<string, unknown>>;
+  auditTrail: ReconciliationTimelineItem[];
+};
+
+export type CollectionRunProofPacket = {
+  proofId: string;
+  canonicalDigest: string;
+  canonicalDigestAlgorithm: string;
+  packetType: 'stablecoin_collection_run_proof';
+  version: number;
+  generatedAt: string;
+  workspaceId: string;
+  collectionRunId: string;
+  runName: string;
+  status: string;
+  readiness: Omit<ProofReadiness, 'checks'> & {
+    counts: Record<string, number>;
+  };
+  summary: CollectionRunSummary['summary'];
+  collections: Array<Record<string, unknown>>;
+};
+
 export type CollectionRequestState =
   | 'open'
   | 'partially_collected'
