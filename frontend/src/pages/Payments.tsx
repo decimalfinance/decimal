@@ -15,7 +15,12 @@ import {
   shortenAddress,
 } from '../domain';
 import { parseCsvPreview } from '../csv-parse';
-import { displayPaymentStatus, displayRunStatus, statusToneForPayment } from '../status-labels';
+import {
+  displayPaymentStatus,
+  displayRunStatus,
+  hasRealDestinationName,
+  statusToneForPayment,
+} from '../status-labels';
 import { useToast } from '../ui/Toast';
 
 type UnifiedRow =
@@ -23,7 +28,9 @@ type UnifiedRow =
       kind: 'single';
       id: string;
       name: string;
+      counterpartyName: string | null;
       destination: string;
+      destinationLabel: string | null;
       source: string;
       amountLabel: string;
       state: string;
@@ -36,7 +43,9 @@ type UnifiedRow =
       kind: 'run';
       id: string;
       name: string;
+      counterpartyName: string | null;
       destination: string;
+      destinationLabel: string | null;
       source: string;
       amountLabel: string;
       state: string;
@@ -131,8 +140,12 @@ export function PaymentsPage({ session }: { session: AuthenticatedSession }) {
       ...standaloneOrders.map<UnifiedRow>((o) => ({
         kind: 'single',
         id: o.paymentOrderId,
-        name: o.counterparty?.displayName ?? o.destination.label,
+        name: o.destination.label,
+        counterpartyName: o.counterparty?.displayName ?? null,
         destination: o.destination.walletAddress,
+        destinationLabel: hasRealDestinationName(o.destination.label, o.destination.walletAddress)
+          ? o.destination.label
+          : null,
         source: sourceLabel(o.sourceTreasuryWallet),
         amountLabel: `${formatRawUsdcCompact(o.amountRaw)} ${assetSymbol(o.asset)}`,
         state: displayPaymentStatus(o.derivedState),
@@ -145,7 +158,9 @@ export function PaymentsPage({ session }: { session: AuthenticatedSession }) {
         kind: 'run',
         id: r.paymentRunId,
         name: r.runName,
+        counterpartyName: null,
         destination: `${r.totals.orderCount} destination${r.totals.orderCount === 1 ? '' : 's'}`,
+        destinationLabel: null,
         source: sourceLabel(r.sourceTreasuryWallet),
         amountLabel: `${formatRawUsdcCompact(r.totals.totalAmountRaw)} USDC`,
         state: displayRunStatus(r.derivedState),
@@ -171,7 +186,10 @@ export function PaymentsPage({ session }: { session: AuthenticatedSession }) {
     const q = search.trim().toLowerCase();
     if (q) {
       out = out.filter(
-        (r) => r.name.toLowerCase().includes(q) || r.destination.toLowerCase().includes(q),
+        (r) =>
+          r.name.toLowerCase().includes(q) ||
+          r.destination.toLowerCase().includes(q) ||
+          (r.counterpartyName ?? '').toLowerCase().includes(q),
       );
     }
     return out;
@@ -276,13 +294,14 @@ export function PaymentsPage({ session }: { session: AuthenticatedSession }) {
           <table className="rd-table">
             <thead>
               <tr>
-                <th style={{ width: '22%' }}>Recipient / Run</th>
-                <th style={{ width: '18%' }}>Destination</th>
-                <th style={{ width: '16%' }}>Source</th>
-                <th className="rd-num" style={{ width: '14%' }}>
+                <th style={{ width: '20%' }}>Recipient / Run</th>
+                <th style={{ width: '14%' }}>Counterparty</th>
+                <th style={{ width: '14%' }}>Destination</th>
+                <th style={{ width: '12%' }}>Source</th>
+                <th className="rd-num" style={{ width: '12%' }}>
                   Amount
                 </th>
-                <th style={{ width: '12%' }}>Origin</th>
+                <th style={{ width: '10%' }}>Origin</th>
                 <th style={{ width: '12%' }}>Status</th>
                 <th aria-label="Actions" style={{ width: '6%' }} />
               </tr>
@@ -290,13 +309,13 @@ export function PaymentsPage({ session }: { session: AuthenticatedSession }) {
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={7} className="rd-empty-cell">
+                  <td colSpan={8} className="rd-empty-cell">
                     <div className="rd-skeleton rd-skeleton-block" style={{ height: 80 }} />
                   </td>
                 </tr>
               ) : filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="rd-empty-cell">
+                  <td colSpan={8} className="rd-empty-cell">
                     <strong>{rows.length === 0 ? 'No payments yet' : 'Nothing matches that filter'}</strong>
                     <p style={{ margin: 0 }}>
                       {rows.length === 0
@@ -319,8 +338,23 @@ export function PaymentsPage({ session }: { session: AuthenticatedSession }) {
                       </div>
                     </td>
                     <td>
+                      {row.counterpartyName ? (
+                        <span className="rd-origin" data-kind="run">
+                          {row.counterpartyName}
+                        </span>
+                      ) : (
+                        <span style={{ color: 'var(--ax-text-faint)', fontSize: 12 }}>—</span>
+                      )}
+                    </td>
+                    <td>
                       {row.kind === 'single' ? (
-                        <span className="rd-addr">{shortenAddress(row.destination, 4, 4)}</span>
+                        row.destinationLabel ? (
+                          <span style={{ color: 'var(--ax-text)', fontWeight: 500 }}>
+                            {row.destinationLabel}
+                          </span>
+                        ) : (
+                          <span className="rd-addr">{shortenAddress(row.destination, 4, 4)}</span>
+                        )
                       ) : (
                         <span style={{ color: 'var(--ax-text-muted)', fontSize: 12 }}>{row.destination}</span>
                       )}
