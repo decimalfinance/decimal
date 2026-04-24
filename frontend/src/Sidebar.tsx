@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router';
 import type { AuthenticatedSession, OrganizationMembership, Workspace } from './api';
+import { useTour } from './Tour';
 
 type WorkspaceContext = {
   organization: OrganizationMembership;
@@ -158,6 +159,13 @@ const icons = {
       <path d="M10 4v12M4 10h12" />
     </SvgIcon>
   ),
+  tutorial: (
+    <SvgIcon className="ax-user-menu-icon">
+      <circle cx="10" cy="10" r="7" />
+      <path d="M7.5 7.5a2.5 2.5 0 1 1 3.5 2.3c-.8.3-1 .8-1 1.5v.2" />
+      <circle cx="10" cy="14.5" r="0.6" fill="currentColor" />
+    </SvgIcon>
+  ),
 };
 
 function initialsFromEmail(email: string) {
@@ -242,6 +250,7 @@ export function AppSidebar({
   onLogout: () => void;
 }) {
   const navigate = useNavigate();
+  const tour = useTour();
   const activeContext =
     workspaceContexts.find((ctx) => ctx.workspace.workspaceId === activeWorkspaceId) ?? workspaceContexts[0];
   const activeWorkspace = activeContext?.workspace;
@@ -359,38 +368,47 @@ export function AppSidebar({
           <>
             <div className="ax-nav-group">
               <div className="ax-nav-group-label">Operations</div>
-              <NavLinkItem to={base} end icon={icons.overview} label="Overview" />
+              <NavLinkItem to={base} end icon={icons.overview} label="Overview" tourKey="overview" />
               <NavLinkItem
                 to={`${base}/payments`}
                 icon={icons.payments}
                 label="Payments"
                 badge={paymentsIncompleteCount}
+                tourKey="payments"
               />
               <NavLinkItem
                 to={`${base}/collections`}
                 icon={icons.collections}
                 label="Collections"
                 badge={collectionsOpenCount}
+                tourKey="collections"
               />
-              <NavLinkItem to={`${base}/policy`} icon={icons.policy} label="Policy" />
-              <NavLinkItem to={`${base}/proofs`} icon={icons.proofs} label="Proofs" />
+              <NavLinkItem to={`${base}/policy`} icon={icons.policy} label="Policy" tourKey="policy" />
+              <NavLinkItem to={`${base}/proofs`} icon={icons.proofs} label="Proofs" tourKey="proofs" />
             </div>
 
             <div className="ax-nav-group">
               <div className="ax-nav-group-label">Registry</div>
-              <NavLinkItem to={`${base}/wallets`} icon={icons.wallet} label="Wallets" />
-              <NavLinkItem to={`${base}/counterparties`} icon={icons.counterparty} label="Counterparties" />
+              <NavLinkItem to={`${base}/wallets`} icon={icons.wallet} label="Wallets" tourKey="wallets" />
+              <NavLinkItem
+                to={`${base}/counterparties`}
+                icon={icons.counterparty}
+                label="Counterparties"
+                tourKey="counterparties"
+              />
               <NavLinkItem
                 to={`${base}/destinations`}
                 icon={icons.destinations}
                 label="Destinations"
                 badge={destinationsUnreviewedCount}
+                tourKey="destinations"
               />
               <NavLinkItem
                 to={`${base}/payers`}
                 icon={icons.payers}
                 label="Payers"
                 badge={payersUnreviewedCount}
+                tourKey="payers"
               />
             </div>
 
@@ -484,6 +502,18 @@ export function AppSidebar({
                 type="button"
                 role="menuitem"
                 className="ax-user-menu-item"
+                onClick={() => {
+                  setUserMenuOpen(false);
+                  tour.start();
+                }}
+              >
+                {icons.tutorial}
+                <span>Show tutorial</span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="ax-user-menu-item"
                 data-tone="danger"
                 onClick={() => {
                   setUserMenuOpen(false);
@@ -507,18 +537,21 @@ function NavLinkItem({
   icon,
   label,
   badge,
+  tourKey,
 }: {
   to: string;
   end?: boolean;
   icon: ReactNode;
   label: string;
   badge?: number;
+  tourKey?: string;
 }) {
   return (
     <NavLink
       to={to}
       end={end}
       className={({ isActive }) => `ax-nav-link${isActive ? ' ax-nav-link-active' : ''}`}
+      data-tour-key={tourKey}
     >
       <span className="ax-nav-link-icon">{icon}</span>
       <span className="ax-nav-link-label">{label}</span>

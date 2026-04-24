@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api';
@@ -11,6 +11,7 @@ import {
   shortenAddress,
 } from '../domain';
 import { displayPaymentStatus, displayRunStatus, statusToneForPayment } from '../status-labels';
+import { useTour } from '../Tour';
 
 function assetSymbol(asset: string | undefined): string {
   return (asset ?? 'usdc').toUpperCase();
@@ -196,6 +197,13 @@ export function CommandCenterPage({ session }: { session: AuthenticatedSession }
     && destinationCount === 0
     && !hasData;
 
+  const tour = useTour();
+  useEffect(() => {
+    if (isBrandNew && !tour.isDismissed && !tour.isOpen) {
+      tour.start();
+    }
+  }, [isBrandNew, tour]);
+
   return (
     <main className="page-frame">
       <header className="page-header">
@@ -206,40 +214,6 @@ export function CommandCenterPage({ session }: { session: AuthenticatedSession }
         </div>
       </header>
 
-      {isBrandNew ? (
-        <section className="rd-card" style={{ padding: 28, marginBottom: 32 }}>
-          <p className="rd-metric-label" style={{ marginBottom: 8 }}>Get started</p>
-          <h2 style={{ margin: '0 0 6px', fontSize: 22, fontWeight: 500, letterSpacing: '-0.01em', color: 'var(--ax-text)' }}>
-            Three steps to your first payment
-          </h2>
-          <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--ax-text-muted)', maxWidth: '60ch' }}>
-            Axoria needs to know where money comes from and where it goes before it can track anything. Start here.
-          </p>
-          <ol style={{ display: 'grid', gap: 12, paddingLeft: 0, listStyle: 'none', margin: 0 }}>
-            <OnboardingStep
-              n={1}
-              title="Add a treasury wallet"
-              body="Register a Solana wallet you control. Balances start flowing in immediately."
-              to={`/workspaces/${workspaceId}/wallets`}
-              cta="Add wallet"
-            />
-            <OnboardingStep
-              n={2}
-              title="Add a destination"
-              body="The counterparty wallet you want to pay. One per payee."
-              to={`/workspaces/${workspaceId}/counterparties`}
-              cta="Add destination"
-            />
-            <OnboardingStep
-              n={3}
-              title="Create a payment"
-              body="Single or CSV batch. Policy routes it, you sign it, we match it."
-              to={`/workspaces/${workspaceId}/payments`}
-              cta="Go to payments"
-            />
-          </ol>
-        </section>
-      ) : null}
 
         <div className="rd-section-head" style={{ marginBottom: 14 }}>
           <div>
@@ -427,61 +401,6 @@ export function CommandCenterPage({ session }: { session: AuthenticatedSession }
   );
 }
 
-function OnboardingStep(props: {
-  n: number;
-  title: string;
-  body: string;
-  to: string;
-  cta: string;
-}) {
-  return (
-    <li
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 16,
-        padding: 16,
-        borderRadius: 'var(--ax-r-sm)',
-        border: '1px solid var(--ax-border)',
-        background: 'var(--ax-surface-2)',
-      }}
-    >
-      <span
-        aria-hidden
-        style={{
-          flexShrink: 0,
-          width: 28,
-          height: 28,
-          borderRadius: 8,
-          background: 'var(--ax-accent-dim)',
-          color: 'var(--ax-accent)',
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: 12,
-          fontWeight: 600,
-          fontFamily: 'var(--ax-font-mono)',
-        }}
-      >
-        {props.n}
-      </span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--ax-text)' }}>{props.title}</div>
-        <div style={{ fontSize: 12, color: 'var(--ax-text-muted)', marginTop: 2 }}>{props.body}</div>
-      </div>
-      <Link
-        to={props.to}
-        className="button button-secondary"
-        style={{ minHeight: 32, padding: '6px 12px', fontSize: 12 }}
-      >
-        {props.cta}
-        <span className="rd-btn-arrow" aria-hidden>
-          →
-        </span>
-      </Link>
-    </li>
-  );
-}
 
 function RefreshIcon({ spinning }: { spinning?: boolean }) {
   return (

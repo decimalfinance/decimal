@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AppSidebar } from './Sidebar';
+import { TourProvider } from './Tour';
 import { api, ApiError } from './api';
 import { PaymentRunDetailPage as PaymentRunDetailPageV2 } from './pages/PaymentRunDetail';
 import { CommandCenterPage as CommandCenterPageV2 } from './pages/CommandCenter';
@@ -228,6 +229,7 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
   }
 
   return (
+    <TourProvider>
     <div className="app-shell">
       <AppSidebar
         session={session}
@@ -271,6 +273,7 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
         </Routes>
       </main>
     </div>
+    </TourProvider>
   );
 }
 
