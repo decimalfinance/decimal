@@ -9,7 +9,7 @@ Source basis:
 
 Raw artifact:
 
-- `tmp/copilot_agent_payments.json`
+- `outputs/copilot_agent_payments.json`
 
 ## Market snapshot from Copilot
 

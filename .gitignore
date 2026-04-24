@@ -30,3 +30,6 @@ yellowstone/target/
 list.md
 stablecoin ops v1.mp4
 .vercel
+
+# Scratch dir for one-off research dumps
+tmp/
