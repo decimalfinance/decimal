@@ -41,6 +41,18 @@ Sync the Prisma schema to the remote database:
 make sync-remote-postgres-schema
 ```
 
+That command now also applies Supabase-specific hardening:
+
+- enables RLS on every table in `public`
+- revokes `anon` and `authenticated` access to the `public` schema
+- revokes default privileges for future tables, sequences, and functions
+
+If you only need to re-apply the security posture after schema changes:
+
+```bash
+make sync-remote-postgres-security
+```
+
 `make dev` will automatically:
 
 - use local Docker Postgres when `DATABASE_URL` points to `localhost` or `127.0.0.1`

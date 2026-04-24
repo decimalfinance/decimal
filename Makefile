@@ -3,7 +3,7 @@ SHELL := /bin/zsh
 POSTGRES_URL ?= postgresql://usdc_ops:usdc_ops@127.0.0.1:54329/usdc_ops?schema=public
 PSQL_QUIET := PGOPTIONS='-c client_min_messages=warning' psql -v ON_ERROR_STOP=1 -q
 
-.PHONY: infra-up infra-down dev test test-api test-worker test-frontend sync-postgres-schema sync-remote-postgres-schema sync-clickhouse-schema reset-data latest-slot latency-report
+.PHONY: infra-up infra-down dev test test-api test-worker test-frontend sync-postgres-schema sync-remote-postgres-schema sync-remote-postgres-security sync-clickhouse-schema reset-data latest-slot latency-report
 
 infra-up:
 	set -euo pipefail && docker compose up -d postgres clickhouse && $(MAKE) sync-postgres-schema && $(MAKE) sync-clickhouse-schema
@@ -21,7 +21,20 @@ sync-remote-postgres-schema:
 	fi && \
 	cd api && \
 	set -a && source .env && set +a && \
-	npx prisma db push --accept-data-loss >/dev/null
+	npx prisma db push --accept-data-loss >/dev/null && \
+	cd .. && \
+	$(MAKE) sync-remote-postgres-security
+
+sync-remote-postgres-security:
+	set -euo pipefail && \
+	if [[ ! -f api/.env ]]; then \
+	  echo "api/.env is required for remote Postgres hardening."; \
+	  exit 1; \
+	fi && \
+	cd api && \
+	set -a && source .env && set +a && \
+	export PSQL_DATABASE_URL="$${DATABASE_URL%%\?*}" && \
+	psql "$$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f ../postgres/init/002-supabase-hardening.sql >/dev/null
 
 sync-clickhouse-schema:
 	set -euo pipefail && \
@@ -102,7 +115,7 @@ dev:
 	  docker compose exec -T postgres sh -lc "$(PSQL_QUIET) -U usdc_ops -d usdc_ops -f /docker-entrypoint-initdb.d/001-control-plane.sql" >/dev/null; \
 	else \
 	  echo "Using remote Postgres from api/.env"; \
-	  (cd api && npx prisma db push --accept-data-loss >/dev/null); \
+	  $(MAKE) sync-remote-postgres-schema; \
 	fi && \
 	docker compose up -d clickhouse && \
 	docker compose exec -T clickhouse sh -lc 'clickhouse-client --multiquery < /docker-entrypoint-initdb.d/001-bootstrap.sql >/dev/null && clickhouse-client --multiquery < /docker-entrypoint-initdb.d/002-schema.sql >/dev/null' && \
