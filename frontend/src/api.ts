@@ -28,8 +28,9 @@ import type {
   Workspace,
   TreasuryWallet,
 } from './types';
+import { getPublicApiBaseUrl } from './public-config';
 
-const API_BASE_URL = resolveApiBaseUrl();
+const API_BASE_URL = getPublicApiBaseUrl();
 const AUTH_STORAGE_KEY = 'usdc_ops_v2.session_token';
 const LEGACY_AUTH_STORAGE_KEY = 'usdc_ops.session_token';
 
@@ -660,15 +661,5 @@ function loadStoredToken() {
   return window.localStorage.getItem(AUTH_STORAGE_KEY);
 }
 
-function resolveApiBaseUrl() {
-  const configured = String(import.meta.env.VITE_API_BASE_URL ?? '').trim();
-  if (configured) {
-    return configured.replace(/\/+$/, '');
-  }
-  if (import.meta.env.PROD) {
-    throw new Error('VITE_API_BASE_URL must be set for production builds.');
-  }
-  return 'http://127.0.0.1:3100';
-}
 
 export type * from './types';

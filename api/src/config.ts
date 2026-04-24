@@ -1,3 +1,20 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+type FileConfig = {
+  host?: string;
+  port?: number;
+  publicApiUrl?: string | null;
+  clickhouseUrl?: string;
+  clickhouseDatabase?: string;
+  corsOrigins?: string[];
+  trustProxy?: boolean;
+  rateLimitEnabled?: boolean;
+  publicRateLimitWindowMs?: number;
+  publicRateLimitMax?: number;
+};
+
 type AxoriaConfig = {
   nodeEnv: string;
   isProduction: boolean;
@@ -20,56 +37,56 @@ export const config: AxoriaConfig = buildConfig();
 function buildConfig(): AxoriaConfig {
   const nodeEnv = process.env.NODE_ENV ?? 'development';
   const isProduction = nodeEnv === 'production';
-  const corsOrigins = parseCorsOrigins(process.env.CORS_ORIGIN);
-  const trustProxy = parseBoolean(process.env.TRUST_PROXY, false);
+  const fileConfig = loadApiFileConfig();
   const controlPlaneServiceToken = (process.env.CONTROL_PLANE_SERVICE_TOKEN ?? '').trim();
 
   const nextConfig: AxoriaConfig = {
     nodeEnv,
     isProduction,
-    host: process.env.HOST ?? '0.0.0.0',
-    port: parseNumber(process.env.PORT, 3100),
-    publicApiUrl: normalizeOptionalUrl(process.env.PUBLIC_API_URL),
+    host: fileConfig.host ?? '0.0.0.0',
+    port: fileConfig.port ?? 3100,
+    publicApiUrl: normalizeOptionalUrl(fileConfig.publicApiUrl),
     solanaRpcUrl: process.env.SOLANA_RPC_URL ?? 'https://api.mainnet-beta.solana.com',
-    clickhouseUrl: process.env.CLICKHOUSE_URL ?? 'http://127.0.0.1:8123',
-    clickhouseDatabase: process.env.CLICKHOUSE_DATABASE ?? 'usdc_ops',
-    corsOrigins,
-    trustProxy,
+    clickhouseUrl: fileConfig.clickhouseUrl ?? 'http://127.0.0.1:8123',
+    clickhouseDatabase: fileConfig.clickhouseDatabase ?? 'usdc_ops',
+    corsOrigins: normalizeStringArray(fileConfig.corsOrigins),
+    trustProxy: fileConfig.trustProxy ?? false,
     controlPlaneServiceToken,
     rateLimitEnabled:
-      (process.env.RATE_LIMIT_ENABLED ?? (nodeEnv === 'test' ? 'false' : 'true')) === 'true',
-    publicRateLimitWindowMs: parseNumber(process.env.PUBLIC_RATE_LIMIT_WINDOW_MS, 60_000),
-    publicRateLimitMax: parseNumber(process.env.PUBLIC_RATE_LIMIT_MAX, 120),
+      fileConfig.rateLimitEnabled ?? (nodeEnv === 'test' ? false : true),
+    publicRateLimitWindowMs: fileConfig.publicRateLimitWindowMs ?? 60_000,
+    publicRateLimitMax: fileConfig.publicRateLimitMax ?? 120,
   };
 
   validateConfig(nextConfig);
   return nextConfig;
 }
 
-function parseCorsOrigins(value?: string) {
-  return (value ?? '')
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-}
+function loadApiFileConfig(): FileConfig {
+  const explicitPath = process.env.AXORIA_API_CONFIG_PATH?.trim();
+  const candidates = [
+    explicitPath,
+    path.resolve(process.cwd(), 'config/api.config.json'),
+    path.resolve(process.cwd(), '../config/api.config.json'),
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../config/api.config.json'),
+  ].filter(Boolean) as string[];
 
-function parseBoolean(value: string | undefined, defaultValue: boolean) {
-  if (!value) {
-    return defaultValue;
+  for (const candidate of candidates) {
+    if (!fs.existsSync(candidate)) {
+      continue;
+    }
+    const raw = fs.readFileSync(candidate, 'utf8');
+    return JSON.parse(raw) as FileConfig;
   }
-  return matchesTruthy(value);
+
+  return {};
 }
 
-function matchesTruthy(value: string) {
-  return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+function normalizeStringArray(values: string[] | undefined) {
+  return (values ?? []).map((value) => value.trim()).filter(Boolean);
 }
 
-function parseNumber(value: string | undefined, fallback: number) {
-  const parsed = value ? Number(value) : NaN;
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function normalizeOptionalUrl(value: string | undefined) {
+function normalizeOptionalUrl(value: string | null | undefined) {
   const trimmed = value?.trim();
   return trimmed ? trimmed.replace(/\/+$/, '') : null;
 }
@@ -80,11 +97,7 @@ function validateConfig(nextConfig: AxoriaConfig) {
   }
 
   if (nextConfig.corsOrigins.length === 0) {
-    throw new Error('CORS_ORIGIN must list at least one allowed origin in production.');
-  }
-
-  if (nextConfig.corsOrigins.includes('*')) {
-    throw new Error('CORS_ORIGIN cannot be "*" in production.');
+    throw new Error('config/api.config.json must define at least one CORS origin in production.');
   }
 
   if (!nextConfig.controlPlaneServiceToken) {
@@ -92,6 +105,6 @@ function validateConfig(nextConfig: AxoriaConfig) {
   }
 
   if (!nextConfig.publicApiUrl) {
-    throw new Error('PUBLIC_API_URL is required in production.');
+    throw new Error('config/api.config.json must define publicApiUrl in production.');
   }
 }

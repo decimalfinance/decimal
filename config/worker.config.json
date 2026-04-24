@@ -1,0 +1,8 @@
+{
+  "yellowstoneEndpoint": "https://solana-rpc.parafi.tech:10443",
+  "clickhouseUrl": "http://127.0.0.1:8123",
+  "clickhouseDatabase": "usdc_ops",
+  "clickhouseUser": "default",
+  "controlPlaneApiUrl": "https://api.axoria.fun",
+  "workspaceRefreshIntervalSeconds": 60
+}

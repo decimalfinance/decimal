@@ -17,28 +17,12 @@ import {
 import bs58 from 'bs58';
 import { Buffer } from 'buffer';
 import type { PaymentExecutionPacket } from '../types';
+import { getPublicSolanaRpcUrl } from '../public-config';
 
-/** Public mainnet RPC fallback when no explicit RPC or Alchemy key is configured. */
-const DEFAULT_SOLANA_RPC_URL = 'https://api.mainnet-beta.solana.com';
 const SOLANA_MAINNET_CHAIN = 'solana:mainnet';
 
-/**
- * Solana HTTP RPC for blockhash + broadcast. Precedence:
- * 1. `VITE_SOLANA_RPC_URL` — full `https://…` URL (any provider)
- * 2. `VITE_ALCHEMY_API_KEY` — full Alchemy Solana URL **or** only the key segment after `/v2/`
- * 3. Public mainnet fallback
- */
 export function resolveSolanaRpcUrl(): string {
-  const explicit = String(import.meta.env.VITE_SOLANA_RPC_URL ?? '').trim();
-  if (explicit) return explicit;
-
-  const alchemy = String(import.meta.env.VITE_ALCHEMY_API_KEY ?? '').trim();
-  if (alchemy) {
-    if (/^https?:\/\//i.test(alchemy)) return alchemy;
-    return `https://solana-mainnet.g.alchemy.com/v2/${alchemy}`;
-  }
-
-  return DEFAULT_SOLANA_RPC_URL;
+  return getPublicSolanaRpcUrl();
 }
 
 type SolanaWalletProvider = {
@@ -181,7 +165,7 @@ export async function signAndSubmitPreparedPayment(packet: PaymentExecutionPacke
   const rpcUrl = resolveSolanaRpcUrl().trim();
   if (!/^https?:\/\//i.test(rpcUrl)) {
     throw new Error(
-      `Invalid Solana RPC URL "${rpcUrl}". Set VITE_SOLANA_RPC_URL or VITE_ALCHEMY_API_KEY in frontend/.env.`,
+      `Invalid Solana RPC URL "${rpcUrl}". Set solanaRpcUrl in config/frontend.public.json.`,
     );
   }
 
@@ -193,7 +177,7 @@ export async function signAndSubmitPreparedPayment(packet: PaymentExecutionPacke
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(
-      `Could not reach Solana RPC (needed before your wallet can sign). Check VITE_SOLANA_RPC_URL / VITE_ALCHEMY_API_KEY and network. ${detail}`,
+      `Could not reach Solana RPC (needed before your wallet can sign). Check config/frontend.public.json and network. ${detail}`,
     );
   }
   const transaction = buildTransactionFromPacket(packet);
