@@ -108,9 +108,8 @@ const icons = {
   ),
   destinations: (
     <SvgIcon>
-      <path d="M3 10h10" />
-      <path d="M10 6l4 4-4 4" />
-      <circle cx="16.5" cy="10" r="1.2" fill="currentColor" />
+      <path d="M10 17.5s-5.5-4.5-5.5-9a5.5 5.5 0 0 1 11 0c0 4.5-5.5 9-5.5 9Z" />
+      <circle cx="10" cy="8.5" r="2.2" />
     </SvgIcon>
   ),
   payers: (

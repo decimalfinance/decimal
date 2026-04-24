@@ -17,9 +17,9 @@ export function FinalCTA({ startHref = '/login' }: { startHref?: string }) {
               fontWeight: 500,
             }}
           >
-            Ship USDC on rails
+            Ship your first
             <br />
-            <span style={{ color: 'var(--ax-accent)' }}>built for audit.</span>
+            <span style={{ color: 'var(--ax-accent)' }}>payout.</span>
           </h2>
           <p
             className="lp-lead"
