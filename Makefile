@@ -3,7 +3,7 @@ SHELL := /bin/zsh
 POSTGRES_URL ?= postgresql://usdc_ops:usdc_ops@127.0.0.1:54329/usdc_ops?schema=public
 PSQL_QUIET := PGOPTIONS='-c client_min_messages=warning' psql -v ON_ERROR_STOP=1 -q
 
-.PHONY: infra-up infra-down dev dev-api dev-frontend dev-worker tunnel prod-backend test test-api test-worker test-frontend sync-postgres-schema sync-remote-postgres-schema sync-remote-postgres-security sync-clickhouse-schema reset-data reset-prod-data latest-slot latency-report help
+.PHONY: infra-up infra-down dev dev-api dev-frontend dev-worker tunnel prod-backend test test-api test-worker test-frontend sync-postgres-schema sync-remote-postgres-schema sync-remote-postgres-security sync-clickhouse-schema reset-data reset-prod-data help
 
 infra-up:
 	set -euo pipefail && docker compose up -d postgres clickhouse && $(MAKE) sync-postgres-schema && $(MAKE) sync-clickhouse-schema
@@ -50,58 +50,6 @@ reset-data:
 	docker compose exec -T postgres sh -lc "$(PSQL_QUIET) -U usdc_ops -d usdc_ops -c \"TRUNCATE TABLE auth_sessions, organization_memberships, collection_request_events, collection_requests, collection_runs, collection_sources, transfer_requests, treasury_wallets, workspaces, organizations, users RESTART IDENTITY CASCADE;\"" >/dev/null && \
 	docker compose exec -T clickhouse sh -lc "clickhouse-client --multiquery -q \"TRUNCATE TABLE IF EXISTS usdc_ops.exceptions; TRUNCATE TABLE IF EXISTS usdc_ops.settlement_matches; TRUNCATE TABLE IF EXISTS usdc_ops.request_book_snapshots; TRUNCATE TABLE IF EXISTS usdc_ops.matcher_events; TRUNCATE TABLE IF EXISTS usdc_ops.observed_payments; TRUNCATE TABLE IF EXISTS usdc_ops.observed_transfers; TRUNCATE TABLE IF EXISTS usdc_ops.observed_transactions;\"" >/dev/null && \
 	echo "Application data cleared from Postgres and ClickHouse."
-
-latest-slot:
-	set -euo pipefail && \
-	docker compose up -d clickhouse >/dev/null && \
-	echo "Latest observed tx slot:" && \
-	docker compose exec -T clickhouse clickhouse-client --query "SELECT coalesce(max(slot), 0) FROM usdc_ops.observed_transactions"
-
-latency-report:
-	set -euo pipefail && \
-	docker compose up -d clickhouse >/dev/null && \
-	docker compose exec -T clickhouse clickhouse-client --query "\
-WITH recent AS (\
-  SELECT \
-    signature, \
-    slot, \
-    event_time, \
-    yellowstone_created_at, \
-    worker_received_at, \
-    created_at AS tx_write_at \
-  FROM usdc_ops.observed_transactions \
-  ORDER BY tx_write_at DESC \
-  LIMIT 20\
-), pay AS (\
-  SELECT signature, min(created_at) AS payment_write_at \
-  FROM usdc_ops.observed_payments \
-  WHERE signature IN (SELECT signature FROM recent) \
-  GROUP BY signature\
-), m AS (\
-  SELECT signature, min(matched_at) AS matched_at \
-  FROM usdc_ops.settlement_matches \
-  WHERE signature IN (SELECT signature FROM recent) \
-  GROUP BY signature\
-) \
-SELECT \
-  recent.slot, \
-  recent.signature, \
-  recent.event_time, \
-  recent.yellowstone_created_at, \
-  recent.worker_received_at, \
-  recent.tx_write_at, \
-  pay.payment_write_at, \
-  m.matched_at, \
-  if(isNull(recent.yellowstone_created_at) OR isNull(recent.worker_received_at), NULL, dateDiff('millisecond', recent.yellowstone_created_at, recent.worker_received_at)) AS yellowstone_to_worker_ms, \
-  if(isNull(recent.worker_received_at), NULL, dateDiff('millisecond', recent.worker_received_at, recent.tx_write_at)) AS worker_to_tx_write_ms, \
-  if(isNull(recent.worker_received_at) OR isNull(pay.payment_write_at), NULL, dateDiff('millisecond', recent.worker_received_at, pay.payment_write_at)) AS worker_to_payment_write_ms, \
-  if(isNull(recent.worker_received_at) OR isNull(m.matched_at), NULL, dateDiff('millisecond', recent.worker_received_at, m.matched_at)) AS worker_to_match_ms, \
-  dateDiff('millisecond', recent.event_time, recent.tx_write_at) AS event_to_tx_write_ms \
-FROM recent \
-LEFT JOIN pay ON pay.signature = recent.signature \
-LEFT JOIN m ON m.signature = recent.signature \
-ORDER BY recent.tx_write_at DESC \
-FORMAT Vertical"
 
 dev:
 	set -euo pipefail && \
