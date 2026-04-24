@@ -1,0 +1,3865 @@
+{
+  "direct_agent_payments": {
+    "results": [
+      {
+        "slug": "solana-a2a-payment",
+        "name": "Solana a2a payment",
+        "oneLiner": "Account-to-account payment system leveraging Solana Pay for seamless transactions.",
+        "similarity": 0.05606758832565284,
+        "hackathon": {
+          "name": "Cypherpunk",
+          "slug": "cypherpunk",
+          "startDate": "2025-09-25"
+        },
+        "tracks": [
+          {
+            "name": "Infrastructure",
+            "key": "cypherpunk/infrastructure"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/google-agentic-commerce/a2a-x402",
+          "demo": null,
+          "presentation": "https://www.youtube.com/watch?v=amAq-WHAFs8",
+          "technicalDemo": "https://www.youtube.com/watch?v=amAq-WHAFs8",
+          "twitter": null,
+          "colosseum": "https://arena.colosseum.org/projects/explore/solana-a2a-payment"
+        },
+        "evidence": [
+          "a2a payment with Solana Pay support",
+          "Account-to-account payment system leveraging Solana Pay for seamless transactions."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 1
+        },
+        "tags": {
+          "problemTags": [
+            "high payment processing fees",
+            "slow settlement times",
+            "complex checkout flows"
+          ],
+          "solutionTags": [
+            "a2a payments",
+            "qr code payments",
+            "direct wallet transfers"
+          ],
+          "primitives": [
+            "solana pay",
+            "spl-token",
+            "payments"
+          ],
+          "techStack": [
+            "solana",
+            "solana pay",
+            "typescript"
+          ],
+          "targetUsers": [
+            "merchants",
+            "e-commerce platforms",
+            "retailers"
+          ]
+        },
+        "crowdedness": 223,
+        "cluster": {
+          "key": "v1-c26",
+          "label": "Simplified Solana Payment Solutions"
+        }
+      },
+      {
+        "slug": "mcpay",
+        "name": "MCPay",
+        "oneLiner": "Monetize Model Context Protocol tools and AI agent capabilities using the x402 payment standard on Solana.",
+        "similarity": 0.05144747725392887,
+        "hackathon": {
+          "name": "Cypherpunk",
+          "slug": "cypherpunk",
+          "startDate": "2025-09-25"
+        },
+        "tracks": [
+          {
+            "name": "Consumer Apps",
+            "key": "cypherpunk/consumer-apps"
+          },
+          {
+            "name": "Infrastructure",
+            "key": "cypherpunk/infrastructure"
+          },
+          {
+            "name": "Stablecoins",
+            "key": "cypherpunk/stablecoins"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/microchipgnu/MCPay",
+          "demo": null,
+          "presentation": "https://youtu.be/00LULE4sDJY",
+          "technicalDemo": "https://youtu.be/KAqft_GZBuY",
+          "twitter": "https://twitter.com/mcpaytech",
+          "colosseum": "https://arena.colosseum.org/projects/explore/mcpay"
+        },
+        "evidence": [
+          "Charge for Model Context Protocol tools, data sources",
+          "Monetize Model Context Protocol tools and AI agent capabilities using the x402 payment standard on Solana."
+        ],
+        "prize": {
+          "type": "TRACK_PRIZE",
+          "name": "1st Place - Stablecoins",
+          "placement": 1,
+          "amount": 25000,
+          "trackName": "Stablecoins"
+        },
+        "accelerator": {
+          "companySlug": "frames",
+          "companyName": "Frames",
+          "batchKey": "accelerator/c4",
+          "batchName": "C4"
+        },
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 1
+        },
+        "tags": {
+          "problemTags": [
+            "ai tool monetization",
+            "agent payment friction",
+            "lack of standardized billing"
+          ],
+          "solutionTags": [
+            "x402 protocol",
+            "automated agent payments",
+            "mcp tool billing"
+          ],
+          "primitives": [
+            "payments",
+            "stablecoins",
+            "smart contracts"
+          ],
+          "techStack": [
+            "solana",
+            "model context protocol",
+            "x402",
+            "typescript"
+          ],
+          "targetUsers": [
+            "ai developers",
+            "mcp tool creators",
+            "agent operators"
+          ]
+        },
+        "crowdedness": 325,
+        "cluster": {
+          "key": "v1-c14",
+          "label": "Solana AI Agent Infrastructure"
+        }
+      },
+      {
+        "slug": "tributary-1",
+        "name": "Tributary",
+        "oneLiner": "Automated, non-custodial subscription payments for businesses on Solana with a Web2-like user experience.",
+        "similarity": 0.04808362369337979,
+        "hackathon": {
+          "name": "Cypherpunk",
+          "slug": "cypherpunk",
+          "startDate": "2025-09-25"
+        },
+        "tracks": [
+          {
+            "name": "Consumer Apps",
+            "key": "cypherpunk/consumer-apps"
+          },
+          {
+            "name": "Infrastructure",
+            "key": "cypherpunk/infrastructure"
+          },
+          {
+            "name": "Stablecoins",
+            "key": "cypherpunk/stablecoins"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/tributary-so/tributary",
+          "demo": null,
+          "presentation": "https://youtu.be/HwulPezwCSQ",
+          "technicalDemo": "https://youtu.be/94tAF2PvMpw",
+          "twitter": "https://twitter.com/tributaryso",
+          "colosseum": "https://arena.colosseum.org/projects/explore/tributary-1"
+        },
+        "evidence": [
+          "Tributary lets Solana businesses run automated subscriptions\u2014no",
+          "Automated, non-custodial subscription payments for businesses on Solana with a Web2-like user experience."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 3
+        },
+        "tags": {
+          "problemTags": [
+            "manual payment friction",
+            "unpredictable revenue for on-chain businesses",
+            "custodial risk in subscriptions",
+            "complex crypto checkout"
+          ],
+          "solutionTags": [
+            "smart contract automated billing",
+            "one-time approval flow",
+            "on-chain subscription management",
+            "pull-based payments"
+          ],
+          "primitives": [
+            "smart contracts",
+            "stablecoins",
+            "token-allowance",
+            "recurring-payments"
+          ],
+          "techStack": [
+            "solana",
+            "rust",
+            "anchor",
+            "react",
+            "typescript"
+          ],
+          "targetUsers": [
+            "saas companies",
+            "content creators",
+            "web3 businesses",
+            "dao operators"
+          ]
+        },
+        "crowdedness": 202,
+        "cluster": {
+          "key": "v1-c16",
+          "label": "Stablecoin Payment Rails and Infrastructure"
+        }
+      },
+      {
+        "slug": "aeon-protocol",
+        "name": "Aeon Protocol",
+        "oneLiner": "Infrastructure for merchants to accept blockchain-based subscriptions and recurring payments.",
+        "similarity": 0.04625668449197861,
+        "hackathon": {
+          "name": "Radar",
+          "slug": "radar",
+          "startDate": "2024-09-02"
+        },
+        "tracks": [
+          {
+            "name": "Infrastructure",
+            "key": "radar/infrastructure"
+          },
+          {
+            "name": "Payments",
+            "key": "radar/payments"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/1802-Labs/aeon-program-v1",
+          "demo": null,
+          "presentation": "https://youtu.be/-Ookg8kyRRs",
+          "technicalDemo": null,
+          "twitter": "https://twitter.com/https://x.com/1802labs",
+          "colosseum": "https://arena.colosseum.org/projects/explore/aeon-protocol"
+        },
+        "evidence": [
+          "At Aeon, we provide an infrastructure that enables",
+          "Infrastructure for merchants to accept blockchain-based subscriptions and recurring payments."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 6
+        },
+        "tags": {
+          "problemTags": [
+            "manual payment renewals",
+            "lack of native subscription support",
+            "high friction for recurring crypto payments"
+          ],
+          "solutionTags": [
+            "smart contract based subscriptions",
+            "automated pull payments",
+            "merchant dashboard"
+          ],
+          "primitives": [
+            "recurring payments",
+            "smart contracts",
+            "stablecoins"
+          ],
+          "techStack": [
+            "solana",
+            "anchor",
+            "rust",
+            "react"
+          ],
+          "targetUsers": [
+            "saas providers",
+            "merchants",
+            "content creators"
+          ]
+        },
+        "crowdedness": 202,
+        "cluster": {
+          "key": "v1-c16",
+          "label": "Stablecoin Payment Rails and Infrastructure"
+        }
+      },
+      {
+        "slug": "subscription-based-payment-services",
+        "name": "SUBSCRIPTION BASED PAYMENT SERVICES",
+        "oneLiner": "A subscription-based payment gateway for Solana dApps to manage recurring user payments.",
+        "similarity": 0.03225806451612903,
+        "hackathon": {
+          "name": "Renaissance",
+          "slug": "renaissance",
+          "startDate": "2024-03-04"
+        },
+        "tracks": [
+          {
+            "name": "DeFi & Payments",
+            "key": "renaissance/defi--payments"
+          },
+          {
+            "name": "Consumer Apps",
+            "key": "renaissance/consumer-apps"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/0xrobinr",
+          "demo": null,
+          "presentation": "https://robinrajput.com",
+          "technicalDemo": null,
+          "twitter": null,
+          "colosseum": "https://arena.colosseum.org/projects/explore/subscription-based-payment-services"
+        },
+        "evidence": [
+          "*ignore my broken english in solana, we are",
+          "A subscription-based payment gateway for Solana dApps to manage recurring user payments."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 1
+        },
+        "tags": {
+          "problemTags": [
+            "lack of native subscription models",
+            "manual recurring payments",
+            "friction in dapp monetization"
+          ],
+          "solutionTags": [
+            "subscription payment gateway",
+            "automated billing cycles",
+            "integrated payment sdk"
+          ],
+          "primitives": [
+            "payments",
+            "subscriptions",
+            "smart contracts"
+          ],
+          "techStack": [
+            "solana",
+            "evm"
+          ],
+          "targetUsers": [
+            "dapp developers",
+            "saas providers",
+            "content creators"
+          ]
+        },
+        "crowdedness": 223,
+        "cluster": {
+          "key": "v1-c26",
+          "label": "Simplified Solana Payment Solutions"
+        }
+      },
+      {
+        "slug": "solaibot",
+        "name": "SolAIBot",
+        "oneLiner": "Toolset for AI agents to autonomously access paid services using Solana payments and agent-to-agent commerce.",
+        "similarity": 0.030303030303030304,
+        "hackathon": {
+          "name": "Cypherpunk",
+          "slug": "cypherpunk",
+          "startDate": "2025-09-25"
+        },
+        "tracks": [
+          {
+            "name": "Consumer Apps",
+            "key": "cypherpunk/consumer-apps"
+          },
+          {
+            "name": "DeFi",
+            "key": "cypherpunk/defi"
+          },
+          {
+            "name": "Stablecoins",
+            "key": "cypherpunk/stablecoins"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/quantaliz/solaibot",
+          "demo": null,
+          "presentation": "https://youtu.be/cwwICOWi-qE",
+          "technicalDemo": "https://youtu.be/ieUBE9uDSwE",
+          "twitter": "https://twitter.com/quantaliz",
+          "colosseum": "https://arena.colosseum.org/projects/explore/solaibot"
+        },
+        "evidence": [
+          "We've built a **toolset** for AI agents",
+          "Toolset for AI agents to autonomously access paid services using Solana payments and agent-to-agent commerce."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 1
+        },
+        "team": {
+          "count": 1
+        },
+        "tags": {
+          "problemTags": [
+            "cloud dependency",
+            "payment barriers for ai",
+            "lack of agent autonomy",
+            "privacy risks"
+          ],
+          "solutionTags": [
+            "on-device ai",
+            "autonomous payment toolkit",
+            "agent-to-agent marketplace",
+            "mobile wallet adapter integration"
+          ],
+          "primitives": [
+            "payments",
+            "stablecoins",
+            "mobile-wallet-adapter",
+            "solana-agent-kit"
+          ],
+          "techStack": [
+            "solana",
+            "android",
+            "node.js",
+            "fetch.ai",
+            "uagents"
+          ],
+          "targetUsers": [
+            "ai developers",
+            "autonomous agent creators",
+            "privacy-conscious users"
+          ]
+        },
+        "crowdedness": 325,
+        "cluster": {
+          "key": "v1-c14",
+          "label": "Solana AI Agent Infrastructure"
+        }
+      },
+      {
+        "slug": "x402-sdk-for-solana",
+        "name": "x402 SDK for Solana",
+        "oneLiner": "A software development kit for implementing the x402 hybrid token standard on Solana.",
+        "similarity": 0.030303030303030304,
+        "hackathon": {
+          "name": "Cypherpunk",
+          "slug": "cypherpunk",
+          "startDate": "2025-09-25"
+        },
+        "tracks": [
+          {
+            "name": "Infrastructure",
+            "key": "cypherpunk/infrastructure"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/xilibi2003/x402-sdk-for-solana",
+          "demo": null,
+          "presentation": "https://youtu.be/dkUcKi0_R40",
+          "technicalDemo": "https://www.youtube.com/watch?v=E-wKweRm36c",
+          "twitter": "https://twitter.com/tinyxiong_eth",
+          "colosseum": "https://arena.colosseum.org/projects/explore/x402-sdk-for-solana"
+        },
+        "evidence": [
+          "A set of x402 SDK for Solana",
+          "A software development kit for implementing the x402 hybrid token standard on Solana."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 1
+        },
+        "tags": {
+          "problemTags": [
+            "complex hybrid token implementation",
+            "lack of standardized nft fractionalization",
+            "high barrier to entry for x402"
+          ],
+          "solutionTags": [
+            "developer sdk",
+            "hybrid token standard",
+            "fractionalized nft tooling"
+          ],
+          "primitives": [
+            "hybrid tokens",
+            "nft",
+            "spl-token",
+            "fractionalization"
+          ],
+          "techStack": [
+            "solana",
+            "rust",
+            "typescript",
+            "anchor"
+          ],
+          "targetUsers": [
+            "solana developers",
+            "nft project creators",
+            "defi protocol builders"
+          ]
+        },
+        "crowdedness": 257,
+        "cluster": {
+          "key": "v1-c5",
+          "label": "Solana Data and Monitoring Infrastructure"
+        }
+      },
+      {
+        "slug": "deplan-2.0-rebuilt",
+        "name": "DePlan 2.0 [rebuilt]",
+        "oneLiner": "Tokenized pay-as-you-go subscription protocol on Solana for fair usage-based pricing and higher conversion.",
+        "similarity": 0.027777777777777776,
+        "hackathon": {
+          "name": "Radar",
+          "slug": "radar",
+          "startDate": "2024-09-02"
+        },
+        "tracks": [
+          {
+            "name": "Payments",
+            "key": "radar/payments"
+          },
+          {
+            "name": "Consumer",
+            "key": "radar/consumer"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/deplan-xyz",
+          "demo": null,
+          "presentation": "https://vimeo.com/1016722602",
+          "technicalDemo": null,
+          "twitter": "https://twitter.com/https://x.com/DePlan_xyz",
+          "colosseum": "https://arena.colosseum.org/projects/explore/deplan-2.0-rebuilt"
+        },
+        "evidence": [
+          "Tokenized subscriptions' usage on Solana allows increase conversion",
+          "Tokenized pay-as-you-go subscription protocol on Solana for fair usage-based pricing and higher conversion."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 4
+        },
+        "tags": {
+          "problemTags": [
+            "high subscription churn",
+            "fixed pricing inefficiency",
+            "low conversion for saas",
+            "overpaying for unused services"
+          ],
+          "solutionTags": [
+            "tokenized subscriptions",
+            "usage-based billing",
+            "pay-per-use model",
+            "automated payments"
+          ],
+          "primitives": [
+            "tokenization",
+            "payments",
+            "smart contracts",
+            "subscriptions"
+          ],
+          "techStack": [
+            "solana",
+            "rust",
+            "anchor"
+          ],
+          "targetUsers": [
+            "saas platforms",
+            "content creators",
+            "digital service providers",
+            "web3 consumers"
+          ]
+        },
+        "crowdedness": 189,
+        "cluster": {
+          "key": "v1-c10",
+          "label": "Solana DePIN Infrastructure Networks"
+        }
+      }
+    ],
+    "filtersApplied": {},
+    "totalFound": 9,
+    "hasMore": true
+  },
+  "mpp_x402": {
+    "results": [
+      {
+        "slug": "x402-sdk-for-solana",
+        "name": "x402 SDK for Solana",
+        "oneLiner": "A software development kit for implementing the x402 hybrid token standard on Solana.",
+        "similarity": 0.05298913043478261,
+        "hackathon": {
+          "name": "Cypherpunk",
+          "slug": "cypherpunk",
+          "startDate": "2025-09-25"
+        },
+        "tracks": [
+          {
+            "name": "Infrastructure",
+            "key": "cypherpunk/infrastructure"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/xilibi2003/x402-sdk-for-solana",
+          "demo": null,
+          "presentation": "https://youtu.be/dkUcKi0_R40",
+          "technicalDemo": "https://www.youtube.com/watch?v=E-wKweRm36c",
+          "twitter": "https://twitter.com/tinyxiong_eth",
+          "colosseum": "https://arena.colosseum.org/projects/explore/x402-sdk-for-solana"
+        },
+        "evidence": [
+          "A set of x402 SDK for Solana",
+          "A software development kit for implementing the x402 hybrid token standard on Solana."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 1
+        },
+        "tags": {
+          "problemTags": [
+            "complex hybrid token implementation",
+            "lack of standardized nft fractionalization",
+            "high barrier to entry for x402"
+          ],
+          "solutionTags": [
+            "developer sdk",
+            "hybrid token standard",
+            "fractionalized nft tooling"
+          ],
+          "primitives": [
+            "hybrid tokens",
+            "nft",
+            "spl-token",
+            "fractionalization"
+          ],
+          "techStack": [
+            "solana",
+            "rust",
+            "typescript",
+            "anchor"
+          ],
+          "targetUsers": [
+            "solana developers",
+            "nft project creators",
+            "defi protocol builders"
+          ]
+        },
+        "crowdedness": 257,
+        "cluster": {
+          "key": "v1-c5",
+          "label": "Solana Data and Monitoring Infrastructure"
+        }
+      },
+      {
+        "slug": "slotcast",
+        "name": "Slotcast",
+        "oneLiner": "Facilitates x402 machine-to-machine payments by reserving Solana slots for precise transaction timing.",
+        "similarity": 0.04876615746180964,
+        "hackathon": {
+          "name": "Cypherpunk",
+          "slug": "cypherpunk",
+          "startDate": "2025-09-25"
+        },
+        "tracks": [
+          {
+            "name": "Infrastructure",
+            "key": "cypherpunk/infrastructure"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/akalmykov/slotcast",
+          "demo": null,
+          "presentation": "https://youtu.be/pfLeULCIRJw",
+          "technicalDemo": "https://youtu.be/pfLeULCIRJw",
+          "twitter": null,
+          "colosseum": "https://arena.colosseum.org/projects/explore/slotcast"
+        },
+        "evidence": [
+          "Slotcast is a Raiku powered facilitator for x402",
+          "Facilitates x402 machine-to-machine payments by reserving Solana slots for precise transaction timing."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 1
+        },
+        "tags": {
+          "problemTags": [
+            "transaction timing uncertainty",
+            "m2m payment synchronization",
+            "unpredictable slot inclusion"
+          ],
+          "solutionTags": [
+            "ahead-of-time slot reservation",
+            "scheduled transaction execution",
+            "raiku integration"
+          ],
+          "primitives": [
+            "payments",
+            "scheduling",
+            "m2m"
+          ],
+          "techStack": [
+            "solana",
+            "raiku",
+            "x402"
+          ],
+          "targetUsers": [
+            "iot developers",
+            "automated payment systems",
+            "m2m service providers"
+          ]
+        },
+        "crowdedness": 202,
+        "cluster": {
+          "key": "v1-c16",
+          "label": "Stablecoin Payment Rails and Infrastructure"
+        }
+      },
+      {
+        "slug": "corbits.dev",
+        "name": "CORBITS.DEV ",
+        "oneLiner": "Enabling AI agents to pay for APIs instantly via x402 with a real-time merchant revops dashboard.",
+        "similarity": 0.04825581395348837,
+        "hackathon": {
+          "name": "Cypherpunk",
+          "slug": "cypherpunk",
+          "startDate": "2025-09-25"
+        },
+        "tracks": [
+          {
+            "name": "Consumer Apps",
+            "key": "cypherpunk/consumer-apps"
+          },
+          {
+            "name": "DeFi",
+            "key": "cypherpunk/defi"
+          },
+          {
+            "name": "Infrastructure",
+            "key": "cypherpunk/infrastructure"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/faremeter/402-dashboard",
+          "demo": null,
+          "presentation": "https://www.loom.com/share/9ee2f9685b8749b2bfabc1f9567db53f",
+          "technicalDemo": "https://www.loom.com/share/16e371a9bd8f43ac82164f958ef2c1ca",
+          "twitter": "https://twitter.com/corbits_dev",
+          "colosseum": "https://arena.colosseum.org/projects/explore/corbits.dev"
+        },
+        "evidence": [
+          "agents pay for APIs instantly using x402 - no accounts, no keys, just pay and go. For merchants, new payment methods are added in hours, endpoints are proxied in minutes, and transactions are processed in real",
+          "Enabling AI agents to pay for APIs instantly via x402 with a real-time merchant revops dashboard."
+        ],
+        "prize": {
+          "type": "TRACK_PRIZE",
+          "name": "2nd Place - Infrastructure",
+          "placement": 2,
+          "amount": 20000,
+          "trackName": "Infrastructure"
+        },
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 1
+        },
+        "tags": {
+          "problemTags": [
+            "api payment friction",
+            "ai agent payment barriers",
+            "complex merchant onboarding",
+            "lack of real-time api revenue data"
+          ],
+          "solutionTags": [
+            "x402 protocol implementation",
+            "api proxying",
+            "real-time transaction monitoring",
+            "open-source merchant dashboard"
+          ],
+          "primitives": [
+            "x402",
+            "micropayments",
+            "api proxy",
+            "on-chain payments"
+          ],
+          "techStack": [
+            "solana",
+            "react",
+            "typescript",
+            "rust"
+          ],
+          "targetUsers": [
+            "ai agent developers",
+            "api providers",
+            "saas merchants",
+            "devops engineers"
+          ]
+        },
+        "crowdedness": 202,
+        "cluster": {
+          "key": "v1-c16",
+          "label": "Stablecoin Payment Rails and Infrastructure"
+        }
+      },
+      {
+        "slug": "tedix-ai-commerce-powered-by-solana",
+        "name": "Tedix - AI Commerce Powered by Solana",
+        "oneLiner": "AI commerce infrastructure on Solana enabling autonomous agent payments for digital and physical goods.",
+        "similarity": 0.04669365721997301,
+        "hackathon": {
+          "name": "Cypherpunk",
+          "slug": "cypherpunk",
+          "startDate": "2025-09-25"
+        },
+        "tracks": [
+          {
+            "name": "Consumer Apps",
+            "key": "cypherpunk/consumer-apps"
+          },
+          {
+            "name": "Stablecoins",
+            "key": "cypherpunk/stablecoins"
+          },
+          {
+            "name": "Undefined",
+            "key": "cypherpunk/undefined"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/koikar/tedix-cypherpunk",
+          "demo": null,
+          "presentation": "https://youtu.be/P8sAqrku8hs",
+          "technicalDemo": "https://youtu.be/hQS1g7IzES8",
+          "twitter": "https://twitter.com/tedixdev",
+          "colosseum": "https://arena.colosseum.org/projects/explore/tedix-ai-commerce-powered-by-solana"
+        },
+        "evidence": [
+          "directly inside AI chats through MCP & the new x402 protocol, powered by Solana\u2019s speed, scalability, and stablecoin infrastructure. Imagine your AI is not just generating insights, but buying Statista reports, booking via GetYourGuide",
+          "AI commerce infrastructure on Solana enabling autonomous agent payments for digital and physical goods."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 2
+        },
+        "tags": {
+          "problemTags": [
+            "ai agents cannot pay for goods",
+            "fragmented e-commerce in ai chats",
+            "lack of machine-to-machine payment rails"
+          ],
+          "solutionTags": [
+            "model context protocol (mcp)",
+            "x402 protocol",
+            "stablecoin infrastructure",
+            "autonomous commerce-as-a-service"
+          ],
+          "primitives": [
+            "stablecoins",
+            "autonomous agents",
+            "payments",
+            "smart contracts"
+          ],
+          "techStack": [
+            "solana",
+            "mcp",
+            "x402 protocol",
+            "rust"
+          ],
+          "targetUsers": [
+            "ai agent developers",
+            "e-commerce brands",
+            "digital service providers"
+          ]
+        },
+        "crowdedness": 325,
+        "cluster": {
+          "key": "v1-c14",
+          "label": "Solana AI Agent Infrastructure"
+        }
+      },
+      {
+        "slug": "web3commerce-solana-pay",
+        "name": "Web3Commerce Solana Pay",
+        "oneLiner": "A Solana Pay payment gateway for WordPress and WooCommerce supporting SOL and major stablecoins.",
+        "similarity": 0.04333706606942889,
+        "hackathon": {
+          "name": "Renaissance",
+          "slug": "renaissance",
+          "startDate": "2024-03-04"
+        },
+        "tracks": [
+          {
+            "name": "DeFi & Payments",
+            "key": "renaissance/defi--payments"
+          },
+          {
+            "name": "Consumer Apps",
+            "key": "renaissance/consumer-apps"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/aztemi/wc-solana-pay",
+          "demo": null,
+          "presentation": "https://wordpress.org/plugins/wc-solana-pay/",
+          "technicalDemo": null,
+          "twitter": null,
+          "colosseum": "https://arena.colosseum.org/projects/explore/web3commerce-solana-pay"
+        },
+        "evidence": [
+          "This is a Solana Pay powered payment gateway",
+          "A Solana Pay payment gateway for WordPress and WooCommerce supporting SOL and major stablecoins."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 1
+        },
+        "tags": {
+          "problemTags": [
+            "high merchant transaction fees",
+            "complex crypto payment integration",
+            "lack of web3 support in ecommerce",
+            "slow cross-border settlements"
+          ],
+          "solutionTags": [
+            "solana pay integration",
+            "woocommerce plugin",
+            "qr code checkout",
+            "stablecoin settlement"
+          ],
+          "primitives": [
+            "solana pay",
+            "stablecoins",
+            "payments"
+          ],
+          "techStack": [
+            "solana",
+            "wordpress",
+            "woocommerce",
+            "php",
+            "javascript"
+          ],
+          "targetUsers": [
+            "ecommerce merchants",
+            "wordpress developers",
+            "online retailers"
+          ]
+        },
+        "crowdedness": 202,
+        "cluster": {
+          "key": "v1-c16",
+          "label": "Stablecoin Payment Rails and Infrastructure"
+        }
+      },
+      {
+        "slug": "autonomous-vehicle-micropayments",
+        "name": "Autonomous Vehicle Micropayments",
+        "oneLiner": "A decentralized micropayment and orchestration system for autonomous vehicle delivery networks on Solana.",
+        "similarity": 0.041346153846153845,
+        "hackathon": {
+          "name": "Cypherpunk",
+          "slug": "cypherpunk",
+          "startDate": "2025-09-25"
+        },
+        "tracks": [
+          {
+            "name": "Consumer Apps",
+            "key": "cypherpunk/consumer-apps"
+          },
+          {
+            "name": "DeFi",
+            "key": "cypherpunk/defi"
+          },
+          {
+            "name": "Infrastructure",
+            "key": "cypherpunk/infrastructure"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/nunoedgar-invest/Autonomous-Vehicle-Micropayments",
+          "demo": null,
+          "presentation": "https://youtu.be/mVLU0M1L15U?si=2F8lWheO8WpHyGNh",
+          "technicalDemo": "https://youtu.be/mVLU0M1L15U?si=2F8lWheO8WpHyGNh",
+          "twitter": "https://twitter.com/nunoedgarnfer2",
+          "colosseum": "https://arena.colosseum.org/projects/explore/autonomous-vehicle-micropayments"
+        },
+        "evidence": [
+          "include **Escrow Payments** to secure funds until delivery completion, **Multi-Agent Coordination** for fleet management, and **Automatic Settlement** via smart contracts upon successful delivery. The architecture details how participants, ",
+          "A decentralized micropayment and orchestration system for autonomous vehicle delivery networks on Solana."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 1
+        },
+        "tags": {
+          "problemTags": [
+            "high transaction fees for micropayments",
+            "lack of trust in autonomous delivery",
+            "inefficient fleet payment settlement"
+          ],
+          "solutionTags": [
+            "blockchain-based escrow",
+            "iot-orchestrated payments",
+            "pda-managed funds",
+            "automated smart contract settlement"
+          ],
+          "primitives": [
+            "escrow",
+            "micropayments",
+            "pda",
+            "smart-contracts",
+            "iot"
+          ],
+          "techStack": [
+            "solana",
+            "rust",
+            "iot",
+            "anchor"
+          ],
+          "targetUsers": [
+            "autonomous vehicle operators",
+            "delivery service providers",
+            "iot developers"
+          ]
+        },
+        "crowdedness": 149,
+        "cluster": {
+          "key": "v1-c15",
+          "label": "Decentralized Freelance Marketplaces"
+        }
+      },
+      {
+        "slug": "sodi-protocol",
+        "name": "Sodi Protocol",
+        "oneLiner": "Royalty inscription and meme coin launchpad protocol on Solana.",
+        "similarity": 0.030303030303030304,
+        "hackathon": {
+          "name": "Radar",
+          "slug": "radar",
+          "startDate": "2024-09-02"
+        },
+        "tracks": [
+          {
+            "name": "DeFi",
+            "key": "radar/defi"
+          },
+          {
+            "name": "DAOs & Network States",
+            "key": "radar/daos--network-states"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/orgs/Sodi-Fun/repositories",
+          "demo": null,
+          "presentation": "https://sodi.fun/",
+          "technicalDemo": null,
+          "twitter": "https://twitter.com/https://x.com/sodi_ai",
+          "colosseum": "https://arena.colosseum.org/projects/explore/sodi-protocol"
+        },
+        "evidence": [
+          "Royalty inscription & meme launchpad protocol on Solana",
+          "Royalty inscription and meme coin launchpad protocol on Solana."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 1
+        },
+        "tags": {
+          "problemTags": [
+            "lack of royalty enforcement",
+            "unfair token launches",
+            "limited inscription utility"
+          ],
+          "solutionTags": [
+            "royalty inscription protocol",
+            "meme coin launchpad",
+            "fair launch model"
+          ],
+          "primitives": [
+            "inscriptions",
+            "launchpad",
+            "royalties",
+            "token"
+          ],
+          "techStack": [
+            "solana",
+            "rust",
+            "anchor"
+          ],
+          "targetUsers": [
+            "meme coin creators",
+            "nft collectors",
+            "defi traders"
+          ]
+        },
+        "crowdedness": 183,
+        "cluster": {
+          "key": "v1-c25",
+          "label": "Solana Token Launchpads"
+        }
+      },
+      {
+        "slug": "pop402",
+        "name": "pop402",
+        "oneLiner": "A facilitator-first proof-of-purchase service issuing cryptographic receipts for content gating and subscriptions.",
+        "similarity": 0.03225806451612903,
+        "hackathon": {
+          "name": "Cypherpunk",
+          "slug": "cypherpunk",
+          "startDate": "2025-09-25"
+        },
+        "tracks": [
+          {
+            "name": "Consumer Apps",
+            "key": "cypherpunk/consumer-apps"
+          },
+          {
+            "name": "DeFi",
+            "key": "cypherpunk/defi"
+          },
+          {
+            "name": "Infrastructure",
+            "key": "cypherpunk/infrastructure"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/bozp-pzob/service-x402-receipt",
+          "demo": null,
+          "presentation": "https://youtu.be/V4rQxn4DrOU",
+          "technicalDemo": "https://youtu.be/V4rQxn4DrOU",
+          "twitter": "https://twitter.com/bozp_pzob",
+          "colosseum": "https://arena.colosseum.org/projects/explore/pop402"
+        },
+        "evidence": [
+          "pop402 is a facilitator\u2011first proof\u2011of\u2011purchase service: merchants point their existing x402 `/verify` and `/settle` endpoints at a pop402 facilitator and include a compact `X-PAYMENT-META` header or a short\u2011lived signed",
+          "A facilitator-first proof-of-purchase service issuing cryptographic receipts for content gating and subscriptions."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 1
+        },
+        "tags": {
+          "problemTags": [
+            "complex payment integration",
+            "lack of portable purchase proof",
+            "difficult content gating",
+            "opaque subscription management"
+          ],
+          "solutionTags": [
+            "facilitator-first payment validation",
+            "cryptographic receipt issuance",
+            "usage-limited license enforcement",
+            "header-based payment metadata"
+          ],
+          "primitives": [
+            "token-gating",
+            "cryptographic-proof",
+            "subscription",
+            "digital-receipt"
+          ],
+          "techStack": [
+            "solana",
+            "http-headers",
+            "wallet-signatures",
+            "api"
+          ],
+          "targetUsers": [
+            "merchants",
+            "api-providers",
+            "content-creators",
+            "developers"
+          ]
+        },
+        "crowdedness": 184,
+        "cluster": {
+          "key": "v1-c11",
+          "label": "Solana-Based Decentralized E-commerce"
+        }
+      }
+    ],
+    "filtersApplied": {},
+    "totalFound": 9,
+    "hasMore": true
+  },
+  "merchant_monetization": {
+    "results": [
+      {
+        "slug": "blocksub",
+        "name": "BLOCKSUB",
+        "oneLiner": "An SDK for developers to easily integrate recurring blockchain-based subscriptions with minimal code.",
+        "similarity": 0.05521821631878558,
+        "hackathon": {
+          "name": "Radar",
+          "slug": "radar",
+          "startDate": "2024-09-02"
+        },
+        "tracks": [
+          {
+            "name": "Infrastructure",
+            "key": "radar/infrastructure"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/Haleem-code/BLOCKSUB",
+          "demo": null,
+          "presentation": "https://drive.google.com/file/d/17QcGSX5zi1hc8jAWZXWgVPmYlwnExDyT/view?usp=drivesdk",
+          "technicalDemo": null,
+          "twitter": "https://twitter.com/x.com/blocksub",
+          "colosseum": "https://arena.colosseum.org/projects/explore/blocksub"
+        },
+        "evidence": [
+          "BlockSub SDK makes integrating blockchain-based subscriptions simple",
+          "An SDK for developers to easily integrate recurring blockchain-based subscriptions with minimal code."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 4
+        },
+        "tags": {
+          "problemTags": [
+            "complex recurring billing",
+            "manual payment management",
+            "high development overhead for subscriptions"
+          ],
+          "solutionTags": [
+            "subscription sdk",
+            "automated billing logic",
+            "developer tools"
+          ],
+          "primitives": [
+            "subscriptions",
+            "recurring payments",
+            "smart contracts"
+          ],
+          "techStack": [
+            "solana",
+            "typescript",
+            "react"
+          ],
+          "targetUsers": [
+            "dapp developers",
+            "web3 saas founders",
+            "content creators"
+          ]
+        },
+        "crowdedness": 257,
+        "cluster": {
+          "key": "v1-c5",
+          "label": "Solana Data and Monitoring Infrastructure"
+        }
+      },
+      {
+        "slug": "palapa",
+        "name": "PALAPA \ud83c\udf34",
+        "oneLiner": "A monetization layer enabling developers to integrate crypto payments without writing custom smart contracts.",
+        "similarity": 0.05202020202020202,
+        "hackathon": {
+          "name": "Breakout",
+          "slug": "breakout",
+          "startDate": "2025-04-14"
+        },
+        "tracks": [
+          {
+            "name": "Consumer Apps",
+            "key": "breakout/consumer-apps"
+          },
+          {
+            "name": "Gaming",
+            "key": "breakout/gaming"
+          },
+          {
+            "name": "Infrastructure",
+            "key": "breakout/infrastructure"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/Gabsplat/Palapa-contract",
+          "demo": null,
+          "presentation": "https://youtu.be/UITHOMSaQYU",
+          "technicalDemo": "https://youtu.be/UITHOMSaQYU",
+          "twitter": "https://twitter.com/nerdconf_ar",
+          "colosseum": "https://arena.colosseum.org/projects/explore/palapa"
+        },
+        "evidence": [
+          "Monetization layer for vibe-coders without smart contracts",
+          "A monetization layer enabling developers to integrate crypto payments without writing custom smart contracts."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 2
+        },
+        "tags": {
+          "problemTags": [
+            "complex smart contract development",
+            "high barrier to crypto entry",
+            "integration friction"
+          ],
+          "solutionTags": [
+            "pre-built payment infrastructure",
+            "no-code smart contract layer",
+            "developer abstraction"
+          ],
+          "primitives": [
+            "payments",
+            "smart contracts",
+            "token"
+          ],
+          "techStack": [
+            "solana",
+            "react",
+            "anchor",
+            "typescript"
+          ],
+          "targetUsers": [
+            "vibe-coders",
+            "frontend developers",
+            "indie hackers",
+            "game developers"
+          ]
+        },
+        "crowdedness": 223,
+        "cluster": {
+          "key": "v1-c26",
+          "label": "Simplified Solana Payment Solutions"
+        }
+      },
+      {
+        "slug": "linkwave",
+        "name": "LinkWave",
+        "oneLiner": "Effortless crypto subscription management on Solana using stablecoins.",
+        "similarity": 0.04904306220095694,
+        "hackathon": {
+          "name": "Breakout",
+          "slug": "breakout",
+          "startDate": "2025-04-14"
+        },
+        "tracks": [
+          {
+            "name": "Consumer Apps",
+            "key": "breakout/consumer-apps"
+          },
+          {
+            "name": "DeFi",
+            "key": "breakout/defi"
+          },
+          {
+            "name": "Infrastructure",
+            "key": "breakout/infrastructure"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/linkwave-com/linkwave.git",
+          "demo": null,
+          "presentation": "https://www.loom.com/share/d97e1028767a4a92988b5aef612c09ef?sid=bdb6df3d-e31f-4bf4-8b9c-a0886114167b",
+          "technicalDemo": "https://www.loom.com/share/4ac228254a1543a49f48689a668bd174?sid=0552ae9c-1b45-4aef-8a3a-415319ebf56e",
+          "twitter": "https://twitter.com/_LinkWave",
+          "colosseum": "https://arena.colosseum.org/projects/explore/linkwave"
+        },
+        "evidence": [
+          "Making crypto subscriptions effortless. Built on Solana. Powered",
+          "Effortless crypto subscription management on Solana using stablecoins."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 2
+        },
+        "tags": {
+          "problemTags": [
+            "manual recurring payments",
+            "payment volatility",
+            "subscription friction"
+          ],
+          "solutionTags": [
+            "automated billing",
+            "stablecoin payments",
+            "subscription management platform"
+          ],
+          "primitives": [
+            "recurring payments",
+            "stablecoins",
+            "smart contracts"
+          ],
+          "techStack": [
+            "solana",
+            "anchor"
+          ],
+          "targetUsers": [
+            "saas companies",
+            "content creators",
+            "web3 service providers"
+          ]
+        },
+        "crowdedness": 202,
+        "cluster": {
+          "key": "v1-c16",
+          "label": "Stablecoin Payment Rails and Infrastructure"
+        }
+      },
+      {
+        "slug": "x402-agnic-hub",
+        "name": "x402 Agnic Hub",
+        "oneLiner": "Monetize APIs and services in minutes using stablecoins and the x402 protocol.",
+        "similarity": 0.04785714285714286,
+        "hackathon": {
+          "name": "Cypherpunk",
+          "slug": "cypherpunk",
+          "startDate": "2025-09-25"
+        },
+        "tracks": [
+          {
+            "name": "Infrastructure",
+            "key": "cypherpunk/infrastructure"
+          },
+          {
+            "name": "Stablecoins",
+            "key": "cypherpunk/stablecoins"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/asadsafari/AgnicBillo",
+          "demo": null,
+          "presentation": "https://youtu.be/LRA9jppmMYM",
+          "technicalDemo": "https://youtu.be/smzWTrCQw0U",
+          "twitter": null,
+          "colosseum": "https://arena.colosseum.org/projects/explore/x402-agnic-hub"
+        },
+        "evidence": [
+          "Turn your API into revenue in 5 min",
+          "Monetize APIs and services in minutes using stablecoins and the x402 protocol."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 2
+        },
+        "tags": {
+          "problemTags": [
+            "api monetization barriers",
+            "complex payment integration",
+            "lack of crypto-native billing"
+          ],
+          "solutionTags": [
+            "api-to-revenue gateway",
+            "stablecoin payments",
+            "automated billing"
+          ],
+          "primitives": [
+            "stablecoins",
+            "payments",
+            "smart contracts"
+          ],
+          "techStack": [
+            "solana",
+            "rust",
+            "typescript"
+          ],
+          "targetUsers": [
+            "api developers",
+            "saas founders",
+            "web3 infrastructure providers"
+          ]
+        },
+        "crowdedness": 202,
+        "cluster": {
+          "key": "v1-c16",
+          "label": "Stablecoin Payment Rails and Infrastructure"
+        }
+      },
+      {
+        "slug": "ai-driven-saas-platform-for-accelerated-software-development",
+        "name": "AI-Driven SaaS Platform for Accelerated Software Development",
+        "oneLiner": "AI-powered software development automation platform using Solana for usage-based microtransaction payments.",
+        "similarity": 0.0454780361757106,
+        "hackathon": {
+          "name": "Radar",
+          "slug": "radar",
+          "startDate": "2024-09-02"
+        },
+        "tracks": [
+          {
+            "name": "Payments",
+            "key": "radar/payments"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/openreachtech/solana-hackathon-demo",
+          "demo": null,
+          "presentation": "https://youtu.be/m8uNCoP-hec",
+          "technicalDemo": null,
+          "twitter": "https://twitter.com/https://x.com/clc_dao",
+          "colosseum": "https://arena.colosseum.org/projects/explore/ai-driven-saas-platform-for-accelerated-software-development"
+        },
+        "evidence": [
+          "Our solution automates the entire software development process",
+          "AI-powered software development automation platform using Solana for usage-based microtransaction payments."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 1
+        },
+        "tags": {
+          "problemTags": [
+            "slow software development cycles",
+            "high development costs",
+            "complex api implementation",
+            "rigid saas pricing models"
+          ],
+          "solutionTags": [
+            "ai-driven code generation",
+            "microtransaction-based payments",
+            "automated testing",
+            "er diagram to code conversion"
+          ],
+          "primitives": [
+            "microtransactions",
+            "payments"
+          ],
+          "techStack": [
+            "solana",
+            "ai",
+            "react"
+          ],
+          "targetUsers": [
+            "software developers",
+            "startups",
+            "enterprise dev teams"
+          ]
+        },
+        "crowdedness": 325,
+        "cluster": {
+          "key": "v1-c14",
+          "label": "Solana AI Agent Infrastructure"
+        }
+      },
+      {
+        "slug": "arrow-api",
+        "name": "Arrow API",
+        "oneLiner": "A developer API for building and managing Solana SOL and SPL token transaction data.",
+        "similarity": 0.04336075205640423,
+        "hackathon": {
+          "name": "Cypherpunk",
+          "slug": "cypherpunk",
+          "startDate": "2025-09-25"
+        },
+        "tracks": [
+          {
+            "name": "Consumer Apps",
+            "key": "cypherpunk/consumer-apps"
+          },
+          {
+            "name": "Infrastructure",
+            "key": "cypherpunk/infrastructure"
+          },
+          {
+            "name": "Stablecoins",
+            "key": "cypherpunk/stablecoins"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/will-mcdeezy/solana-yatori-nuxt-ionic-mobile",
+          "demo": null,
+          "presentation": "https://www.youtube.com/watch?v=-vw9mgmeXGw",
+          "technicalDemo": "https://www.youtube.com/watch?v=Frh4szBn0cE",
+          "twitter": "https://twitter.com/Yatori_io",
+          "colosseum": "https://arena.colosseum.org/projects/explore/arrow-api"
+        },
+        "evidence": [
+          "Solana transaction data builder API for SOL/SPL transactions",
+          "A developer API for building and managing Solana SOL and SPL token transaction data."
+        ],
+        "prize": {
+          "type": "HONORABLE_MENTION",
+          "name": "Honorable Mention - Infrastructure",
+          "placement": null,
+          "amount": null,
+          "trackName": "Infrastructure"
+        },
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 1
+        },
+        "team": {
+          "count": 4
+        },
+        "tags": {
+          "problemTags": [
+            "complex transaction construction",
+            "high barrier to entry for dapp devs",
+            "manual transaction data encoding"
+          ],
+          "solutionTags": [
+            "transaction builder api",
+            "abstracted transaction logic",
+            "automated data encoding"
+          ],
+          "primitives": [
+            "spl-token",
+            "transaction-builder",
+            "api"
+          ],
+          "techStack": [
+            "solana",
+            "typescript",
+            "json-rpc"
+          ],
+          "targetUsers": [
+            "dapp developers",
+            "web3 engineers",
+            "solana developers"
+          ]
+        },
+        "crowdedness": 257,
+        "cluster": {
+          "key": "v1-c5",
+          "label": "Solana Data and Monitoring Infrastructure"
+        }
+      },
+      {
+        "slug": "subscription-based-payment-services",
+        "name": "SUBSCRIPTION BASED PAYMENT SERVICES",
+        "oneLiner": "A subscription-based payment gateway for Solana dApps to manage recurring user payments.",
+        "similarity": 0.03125,
+        "hackathon": {
+          "name": "Renaissance",
+          "slug": "renaissance",
+          "startDate": "2024-03-04"
+        },
+        "tracks": [
+          {
+            "name": "DeFi & Payments",
+            "key": "renaissance/defi--payments"
+          },
+          {
+            "name": "Consumer Apps",
+            "key": "renaissance/consumer-apps"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/0xrobinr",
+          "demo": null,
+          "presentation": "https://robinrajput.com",
+          "technicalDemo": null,
+          "twitter": null,
+          "colosseum": "https://arena.colosseum.org/projects/explore/subscription-based-payment-services"
+        },
+        "evidence": [
+          "*ignore my broken english in solana, we are",
+          "A subscription-based payment gateway for Solana dApps to manage recurring user payments."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 1
+        },
+        "tags": {
+          "problemTags": [
+            "lack of native subscription models",
+            "manual recurring payments",
+            "friction in dapp monetization"
+          ],
+          "solutionTags": [
+            "subscription payment gateway",
+            "automated billing cycles",
+            "integrated payment sdk"
+          ],
+          "primitives": [
+            "payments",
+            "subscriptions",
+            "smart contracts"
+          ],
+          "techStack": [
+            "solana",
+            "evm"
+          ],
+          "targetUsers": [
+            "dapp developers",
+            "saas providers",
+            "content creators"
+          ]
+        },
+        "crowdedness": 223,
+        "cluster": {
+          "key": "v1-c26",
+          "label": "Simplified Solana Payment Solutions"
+        }
+      },
+      {
+        "slug": "deplan",
+        "name": "DePlan",
+        "oneLiner": "A pay-as-you-go monetization protocol on Solana that replaces traditional subscriptions with usage-based payments.",
+        "similarity": 0.02857142857142857,
+        "hackathon": {
+          "name": "Renaissance",
+          "slug": "renaissance",
+          "startDate": "2024-03-04"
+        },
+        "tracks": [
+          {
+            "name": "DePin",
+            "key": "renaissance/depin"
+          },
+          {
+            "name": "Consumer Apps",
+            "key": "renaissance/consumer-apps"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/orgs/deplan-xyz/repositories",
+          "demo": null,
+          "presentation": "https://vimeo.com/931008211",
+          "technicalDemo": null,
+          "twitter": "https://twitter.com/https://twitter.com/DePlan_xyz",
+          "colosseum": "https://arena.colosseum.org/projects/explore/deplan"
+        },
+        "evidence": [
+          "The sustainable internet with no subscriptions. Pay-As",
+          "A pay-as-you-go monetization protocol on Solana that replaces traditional subscriptions with usage-based payments."
+        ],
+        "prize": {
+          "type": "TRACK_PRIZE",
+          "name": "5th Place - Consumer Apps",
+          "placement": 5,
+          "amount": 5000,
+          "trackName": "Consumer Apps"
+        },
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 4
+        },
+        "tags": {
+          "problemTags": [
+            "subscription fatigue",
+            "high entry barriers for users",
+            "inefficient monetization for small apps",
+            "lack of granular payment options"
+          ],
+          "solutionTags": [
+            "usage-based billing",
+            "micropayments",
+            "decentralized payment infrastructure",
+            "sdk for developers"
+          ],
+          "primitives": [
+            "micropayments",
+            "smart contracts",
+            "token-gating",
+            "payment-streaming"
+          ],
+          "techStack": [
+            "solana",
+            "rust",
+            "typescript",
+            "react"
+          ],
+          "targetUsers": [
+            "saas developers",
+            "content consumers",
+            "app developers",
+            "digital service providers"
+          ]
+        },
+        "crowdedness": 189,
+        "cluster": {
+          "key": "v1-c10",
+          "label": "Solana DePIN Infrastructure Networks"
+        }
+      }
+    ],
+    "filtersApplied": {},
+    "totalFound": 9,
+    "hasMore": true
+  },
+  "stablecoin_subscriptions": {
+    "results": [
+      {
+        "slug": "linkwave",
+        "name": "LinkWave",
+        "oneLiner": "Effortless crypto subscription management on Solana using stablecoins.",
+        "similarity": 0.07762147303743229,
+        "hackathon": {
+          "name": "Breakout",
+          "slug": "breakout",
+          "startDate": "2025-04-14"
+        },
+        "tracks": [
+          {
+            "name": "Consumer Apps",
+            "key": "breakout/consumer-apps"
+          },
+          {
+            "name": "DeFi",
+            "key": "breakout/defi"
+          },
+          {
+            "name": "Infrastructure",
+            "key": "breakout/infrastructure"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/linkwave-com/linkwave.git",
+          "demo": null,
+          "presentation": "https://www.loom.com/share/d97e1028767a4a92988b5aef612c09ef?sid=bdb6df3d-e31f-4bf4-8b9c-a0886114167b",
+          "technicalDemo": "https://www.loom.com/share/4ac228254a1543a49f48689a668bd174?sid=0552ae9c-1b45-4aef-8a3a-415319ebf56e",
+          "twitter": "https://twitter.com/_LinkWave",
+          "colosseum": "https://arena.colosseum.org/projects/explore/linkwave"
+        },
+        "evidence": [
+          "Making crypto subscriptions effortless. Built on Solana. Powered",
+          "Effortless crypto subscription management on Solana using stablecoins."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 2
+        },
+        "tags": {
+          "problemTags": [
+            "manual recurring payments",
+            "payment volatility",
+            "subscription friction"
+          ],
+          "solutionTags": [
+            "automated billing",
+            "stablecoin payments",
+            "subscription management platform"
+          ],
+          "primitives": [
+            "recurring payments",
+            "stablecoins",
+            "smart contracts"
+          ],
+          "techStack": [
+            "solana",
+            "anchor"
+          ],
+          "targetUsers": [
+            "saas companies",
+            "content creators",
+            "web3 service providers"
+          ]
+        },
+        "crowdedness": 202,
+        "cluster": {
+          "key": "v1-c16",
+          "label": "Stablecoin Payment Rails and Infrastructure"
+        }
+      },
+      {
+        "slug": "bundl",
+        "name": "Bundl",
+        "oneLiner": "Unified subscription management platform for stablecoin payments with automated renewals and yield generation.",
+        "similarity": 0.05454545454545455,
+        "hackathon": {
+          "name": "Cypherpunk",
+          "slug": "cypherpunk",
+          "startDate": "2025-09-25"
+        },
+        "tracks": [
+          {
+            "name": "Consumer Apps",
+            "key": "cypherpunk/consumer-apps"
+          },
+          {
+            "name": "Infrastructure",
+            "key": "cypherpunk/infrastructure"
+          },
+          {
+            "name": "Stablecoins",
+            "key": "cypherpunk/stablecoins"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/BlockApex/bundl-subs",
+          "demo": null,
+          "presentation": "https://www.youtube.com/watch?v=eD_yqIc1Wtg ",
+          "technicalDemo": "https://youtu.be/PgfyBQ3OxC8",
+          "twitter": "https://twitter.com/bundlsubs",
+          "colosseum": "https://arena.colosseum.org/projects/explore/bundl"
+        },
+        "evidence": [
+          "single stablecoin bill, and save via exclusive bundle discounts. Merchants can launch subscriptions and start accepting stablecoin payments instantly. (Coming soon) Payments split automatically to vendors, renewals run on-chain, and yield o",
+          "Unified subscription management platform for stablecoin payments with automated renewals and yield generation."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 6
+        },
+        "tags": {
+          "problemTags": [
+            "fragmented billing",
+            "manual crypto payments",
+            "high subscription costs",
+            "idle capital"
+          ],
+          "solutionTags": [
+            "stablecoin aggregation",
+            "automated payment splitting",
+            "yield generation",
+            "subscription bundling"
+          ],
+          "primitives": [
+            "stablecoins",
+            "recurring payments",
+            "yield",
+            "smart contracts",
+            "nft"
+          ],
+          "techStack": [
+            "solana",
+            "anchor",
+            "react",
+            "solana mobile stack"
+          ],
+          "targetUsers": [
+            "crypto consumers",
+            "saas merchants",
+            "wallet providers",
+            "cex operators"
+          ]
+        },
+        "crowdedness": 202,
+        "cluster": {
+          "key": "v1-c16",
+          "label": "Stablecoin Payment Rails and Infrastructure"
+        }
+      },
+      {
+        "slug": "debyth",
+        "name": "Debyth",
+        "oneLiner": "Recurring stablecoin payment infrastructure for businesses.",
+        "similarity": 0.05477941176470588,
+        "hackathon": {
+          "name": "Breakout",
+          "slug": "breakout",
+          "startDate": "2025-04-14"
+        },
+        "tracks": [
+          {
+            "name": "DeFi",
+            "key": "breakout/defi"
+          },
+          {
+            "name": "Infrastructure",
+            "key": "breakout/infrastructure"
+          },
+          {
+            "name": "Stablecoins",
+            "key": "breakout/stablecoins"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/Khrees2412/debyth-protocol",
+          "demo": null,
+          "presentation": "https://www.loom.com/share/265b6559a94c47d7b934d7e863245452?sid=9e1b8a2a-72db-423c-b45a-0966830ed2ff",
+          "technicalDemo": "https://www.loom.com/share/e9154565b2f149b3908a27f90838bf52?sid=d9f1f88b-be37-46b0-bfd1-b6dfbb5d22ed",
+          "twitter": "https://twitter.com/delightfulcodes",
+          "colosseum": "https://arena.colosseum.org/projects/explore/debyth"
+        },
+        "evidence": [
+          "Recurring stablecoins payments infrastructure for businesses",
+          "Recurring stablecoin payment infrastructure for businesses."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 2
+        },
+        "tags": {
+          "problemTags": [
+            "manual payment processing",
+            "payment volatility",
+            "subscription management overhead",
+            "lack of crypto recurring billing"
+          ],
+          "solutionTags": [
+            "automated smart contract billing",
+            "stablecoin payment rails",
+            "recurring payment engine",
+            "business dashboard"
+          ],
+          "primitives": [
+            "stablecoins",
+            "smart contracts",
+            "payments"
+          ],
+          "techStack": [
+            "solana",
+            "rust",
+            "anchor"
+          ],
+          "targetUsers": [
+            "web3 businesses",
+            "saas platforms",
+            "merchants",
+            "dao operators"
+          ]
+        },
+        "crowdedness": 202,
+        "cluster": {
+          "key": "v1-c16",
+          "label": "Stablecoin Payment Rails and Infrastructure"
+        }
+      },
+      {
+        "slug": "aeon-protocol",
+        "name": "Aeon Protocol",
+        "oneLiner": "Infrastructure for merchants to accept blockchain-based subscriptions and recurring payments.",
+        "similarity": 0.05080645161290323,
+        "hackathon": {
+          "name": "Radar",
+          "slug": "radar",
+          "startDate": "2024-09-02"
+        },
+        "tracks": [
+          {
+            "name": "Infrastructure",
+            "key": "radar/infrastructure"
+          },
+          {
+            "name": "Payments",
+            "key": "radar/payments"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/1802-Labs/aeon-program-v1",
+          "demo": null,
+          "presentation": "https://youtu.be/-Ookg8kyRRs",
+          "technicalDemo": null,
+          "twitter": "https://twitter.com/https://x.com/1802labs",
+          "colosseum": "https://arena.colosseum.org/projects/explore/aeon-protocol"
+        },
+        "evidence": [
+          "provide an infrastructure that enables service providers and merchants to accept true blockchain subscriptions and recurring payments on their platforms",
+          "Infrastructure for merchants to accept blockchain-based subscriptions and recurring payments."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 6
+        },
+        "tags": {
+          "problemTags": [
+            "manual payment renewals",
+            "lack of native subscription support",
+            "high friction for recurring crypto payments"
+          ],
+          "solutionTags": [
+            "smart contract based subscriptions",
+            "automated pull payments",
+            "merchant dashboard"
+          ],
+          "primitives": [
+            "recurring payments",
+            "smart contracts",
+            "stablecoins"
+          ],
+          "techStack": [
+            "solana",
+            "anchor",
+            "rust",
+            "react"
+          ],
+          "targetUsers": [
+            "saas providers",
+            "merchants",
+            "content creators"
+          ]
+        },
+        "crowdedness": 202,
+        "cluster": {
+          "key": "v1-c16",
+          "label": "Stablecoin Payment Rails and Infrastructure"
+        }
+      },
+      {
+        "slug": "blocksub-1",
+        "name": "Blocksub",
+        "oneLiner": "A subscription SDK for Web3 developers to integrate recurring payments and user subscriptions into web applications.",
+        "similarity": 0.04543114543114543,
+        "hackathon": {
+          "name": "Breakout",
+          "slug": "breakout",
+          "startDate": "2025-04-14"
+        },
+        "tracks": [
+          {
+            "name": "Infrastructure",
+            "key": "breakout/infrastructure"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/Haleem-code/blocksub",
+          "demo": null,
+          "presentation": "https://www.loom.com/share/ed807591f8244989879ee63798e513f1?sid=7467512d-8179-4984-a702-a4992fc6fe8a",
+          "technicalDemo": "https://youtu.be/O8V3xsCZpcQ",
+          "twitter": "https://twitter.com/blocksub_",
+          "colosseum": "https://arena.colosseum.org/projects/explore/blocksub-1"
+        },
+        "evidence": [
+          "A subscription SDK for seamless user subscriptions and",
+          "A subscription SDK for Web3 developers to integrate recurring payments and user subscriptions into web applications."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 4
+        },
+        "tags": {
+          "problemTags": [
+            "complex subscription management",
+            "lack of recurring payment infrastructure",
+            "difficult web3 payment integration"
+          ],
+          "solutionTags": [
+            "subscription sdk",
+            "automated billing",
+            "developer dashboard integration"
+          ],
+          "primitives": [
+            "recurring payments",
+            "smart contracts",
+            "payments"
+          ],
+          "techStack": [
+            "solana",
+            "sdk",
+            "javascript",
+            "typescript"
+          ],
+          "targetUsers": [
+            "web3 developers",
+            "saas platforms",
+            "dapp operators"
+          ]
+        },
+        "crowdedness": 257,
+        "cluster": {
+          "key": "v1-c5",
+          "label": "Solana Data and Monitoring Infrastructure"
+        }
+      },
+      {
+        "slug": "solana-a2a-payment",
+        "name": "Solana a2a payment",
+        "oneLiner": "Account-to-account payment system leveraging Solana Pay for seamless transactions.",
+        "similarity": 0.030303030303030304,
+        "hackathon": {
+          "name": "Cypherpunk",
+          "slug": "cypherpunk",
+          "startDate": "2025-09-25"
+        },
+        "tracks": [
+          {
+            "name": "Infrastructure",
+            "key": "cypherpunk/infrastructure"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/google-agentic-commerce/a2a-x402",
+          "demo": null,
+          "presentation": "https://www.youtube.com/watch?v=amAq-WHAFs8",
+          "technicalDemo": "https://www.youtube.com/watch?v=amAq-WHAFs8",
+          "twitter": null,
+          "colosseum": "https://arena.colosseum.org/projects/explore/solana-a2a-payment"
+        },
+        "evidence": [
+          "payment with Solana Pay support",
+          "Account-to-account payment system leveraging Solana Pay for seamless transactions."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 1
+        },
+        "tags": {
+          "problemTags": [
+            "high payment processing fees",
+            "slow settlement times",
+            "complex checkout flows"
+          ],
+          "solutionTags": [
+            "a2a payments",
+            "qr code payments",
+            "direct wallet transfers"
+          ],
+          "primitives": [
+            "solana pay",
+            "spl-token",
+            "payments"
+          ],
+          "techStack": [
+            "solana",
+            "solana pay",
+            "typescript"
+          ],
+          "targetUsers": [
+            "merchants",
+            "e-commerce platforms",
+            "retailers"
+          ]
+        },
+        "crowdedness": 223,
+        "cluster": {
+          "key": "v1-c26",
+          "label": "Simplified Solana Payment Solutions"
+        }
+      },
+      {
+        "slug": "solana-dev-ai-helper",
+        "name": "Solana DEV AI Helper",
+        "oneLiner": "AI-powered assistant for building, debugging, and navigating the Solana development ecosystem.",
+        "similarity": 0.029411764705882353,
+        "hackathon": {
+          "name": "Breakout",
+          "slug": "breakout",
+          "startDate": "2025-04-14"
+        },
+        "tracks": [
+          {
+            "name": "AI",
+            "key": "breakout/ai"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/xilibi2003/solana-code-mcp",
+          "demo": null,
+          "presentation": "https://www.loom.com/share/3bba93e97dc141359fb08eb09de58c6a?sid=86879db9-1446-4648-80dd-a7efcc4ee6a0",
+          "technicalDemo": "https://www.youtube.com/watch?v=lJD2HCBp95U",
+          "twitter": "https://twitter.com/tinyxiong_eth",
+          "colosseum": "https://arena.colosseum.org/projects/explore/solana-dev-ai-helper"
+        },
+        "evidence": [
+          "Solana DEV AI Helper",
+          "AI-powered assistant for building, debugging, and navigating the Solana development ecosystem."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 1
+        },
+        "tags": {
+          "problemTags": [
+            "high barrier to entry for solana dev",
+            "complex anchor syntax",
+            "debugging rust errors",
+            "fragmented documentation"
+          ],
+          "solutionTags": [
+            "ai-assisted development",
+            "natural language to code",
+            "automated error analysis",
+            "interactive dev bot"
+          ],
+          "primitives": [
+            "llm",
+            "ai-agent"
+          ],
+          "techStack": [
+            "solana",
+            "rust",
+            "anchor",
+            "openai",
+            "typescript"
+          ],
+          "targetUsers": [
+            "solana developers",
+            "rust engineers",
+            "web3 builders"
+          ]
+        },
+        "crowdedness": 325,
+        "cluster": {
+          "key": "v1-c14",
+          "label": "Solana AI Agent Infrastructure"
+        }
+      },
+      {
+        "slug": "blocksub-2",
+        "name": "BlockSub",
+        "oneLiner": "Stripe-like subscription and recurring payment infrastructure for Solana developers via a simple API.",
+        "similarity": 0.05064102564102564,
+        "hackathon": {
+          "name": "Cypherpunk",
+          "slug": "cypherpunk",
+          "startDate": "2025-09-25"
+        },
+        "tracks": [
+          {
+            "name": "Consumer Apps",
+            "key": "cypherpunk/consumer-apps"
+          },
+          {
+            "name": "DeFi",
+            "key": "cypherpunk/defi"
+          },
+          {
+            "name": "Infrastructure",
+            "key": "cypherpunk/infrastructure"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/shaheer-ali-dev/Blocksub",
+          "demo": null,
+          "presentation": "https://youtu.be/9TDEMCRELxw?si=LiU-4ezjQMazEYKb",
+          "technicalDemo": "https://youtu.be/2lBG73BktKw?si=hhtBoMYBJn11d78_",
+          "twitter": "https://twitter.com/ray_shaheer_ali",
+          "colosseum": "https://arena.colosseum.org/projects/explore/blocksub-2"
+        },
+        "evidence": [
+          "BlockSub brings Stripe-like subscriptions to Solana, enabling developers to accept recurring and one-time crypto payments through a simple API. With hosted checkouts, vault-based security, and a relayer network, BlockSub eliminates the comp",
+          "Stripe-like subscription and recurring payment infrastructure for Solana developers via a simple API."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 1
+        },
+        "tags": {
+          "problemTags": [
+            "complex payment flows",
+            "lack of recurring crypto payments",
+            "high barrier to entry for web3 payments"
+          ],
+          "solutionTags": [
+            "subscription management api",
+            "relayer network for automation",
+            "hosted checkout infrastructure"
+          ],
+          "primitives": [
+            "subscriptions",
+            "vaults",
+            "relayer",
+            "payments"
+          ],
+          "techStack": [
+            "solana",
+            "api"
+          ],
+          "targetUsers": [
+            "web3 developers",
+            "saas platforms",
+            "content creators",
+            "merchants"
+          ]
+        },
+        "crowdedness": 202,
+        "cluster": {
+          "key": "v1-c16",
+          "label": "Stablecoin Payment Rails and Infrastructure"
+        }
+      }
+    ],
+    "filtersApplied": {},
+    "totalFound": 9,
+    "hasMore": true
+  },
+  "agent_commerce": {
+    "results": [
+      {
+        "slug": "solana-a2a-payment",
+        "name": "Solana a2a payment",
+        "oneLiner": "Account-to-account payment system leveraging Solana Pay for seamless transactions.",
+        "similarity": 0.06256109481915934,
+        "hackathon": {
+          "name": "Cypherpunk",
+          "slug": "cypherpunk",
+          "startDate": "2025-09-25"
+        },
+        "tracks": [
+          {
+            "name": "Infrastructure",
+            "key": "cypherpunk/infrastructure"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/google-agentic-commerce/a2a-x402",
+          "demo": null,
+          "presentation": "https://www.youtube.com/watch?v=amAq-WHAFs8",
+          "technicalDemo": "https://www.youtube.com/watch?v=amAq-WHAFs8",
+          "twitter": null,
+          "colosseum": "https://arena.colosseum.org/projects/explore/solana-a2a-payment"
+        },
+        "evidence": [
+          "a2a payment with Solana Pay support",
+          "Account-to-account payment system leveraging Solana Pay for seamless transactions."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 1
+        },
+        "tags": {
+          "problemTags": [
+            "high payment processing fees",
+            "slow settlement times",
+            "complex checkout flows"
+          ],
+          "solutionTags": [
+            "a2a payments",
+            "qr code payments",
+            "direct wallet transfers"
+          ],
+          "primitives": [
+            "solana pay",
+            "spl-token",
+            "payments"
+          ],
+          "techStack": [
+            "solana",
+            "solana pay",
+            "typescript"
+          ],
+          "targetUsers": [
+            "merchants",
+            "e-commerce platforms",
+            "retailers"
+          ]
+        },
+        "crowdedness": 223,
+        "cluster": {
+          "key": "v1-c26",
+          "label": "Simplified Solana Payment Solutions"
+        }
+      },
+      {
+        "slug": "spi-solana-payment-interface",
+        "name": "SPI - Solana payment interface",
+        "oneLiner": "A Solana Pay-based merchant gateway featuring loyalty programs and membership verification using Merkle proofs.",
+        "similarity": 0.052667578659370724,
+        "hackathon": {
+          "name": "Cypherpunk",
+          "slug": "cypherpunk",
+          "startDate": "2025-09-25"
+        },
+        "tracks": [
+          {
+            "name": "Consumer Apps",
+            "key": "cypherpunk/consumer-apps"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/krey-yon/rn-spi",
+          "demo": null,
+          "presentation": "https://youtube.com/shorts/bJsawzqlGko",
+          "technicalDemo": "https://youtube.com/shorts/bJsawzqlGko",
+          "twitter": "https://twitter.com/Krey_yon",
+          "colosseum": "https://arena.colosseum.org/projects/explore/spi-solana-payment-interface"
+        },
+        "evidence": [
+          "payment gateway for merchants with extra features on top solana pay like loyalty program and prime memberships which can be verify with merkle proof",
+          "A Solana Pay-based merchant gateway featuring loyalty programs and membership verification using Merkle proofs."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 1
+        },
+        "tags": {
+          "problemTags": [
+            "high merchant fees",
+            "lack of integrated loyalty systems",
+            "expensive on-chain storage for memberships",
+            "fragmented payment experiences"
+          ],
+          "solutionTags": [
+            "solana pay integration",
+            "merkle tree verification",
+            "tokenized loyalty rewards",
+            "tiered membership access"
+          ],
+          "primitives": [
+            "solana pay",
+            "merkle-proof",
+            "loyalty-token",
+            "membership-nft"
+          ],
+          "techStack": [
+            "solana",
+            "rust",
+            "react",
+            "typescript"
+          ],
+          "targetUsers": [
+            "e-commerce merchants",
+            "retailers",
+            "web3 consumers",
+            "loyalty program managers"
+          ]
+        },
+        "crowdedness": 223,
+        "cluster": {
+          "key": "v1-c26",
+          "label": "Simplified Solana Payment Solutions"
+        }
+      },
+      {
+        "slug": "solaibot",
+        "name": "SolAIBot",
+        "oneLiner": "Toolset for AI agents to autonomously access paid services using Solana payments and agent-to-agent commerce.",
+        "similarity": 0.03225806451612903,
+        "hackathon": {
+          "name": "Cypherpunk",
+          "slug": "cypherpunk",
+          "startDate": "2025-09-25"
+        },
+        "tracks": [
+          {
+            "name": "Consumer Apps",
+            "key": "cypherpunk/consumer-apps"
+          },
+          {
+            "name": "DeFi",
+            "key": "cypherpunk/defi"
+          },
+          {
+            "name": "Stablecoins",
+            "key": "cypherpunk/stablecoins"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/quantaliz/solaibot",
+          "demo": null,
+          "presentation": "https://youtu.be/cwwICOWi-qE",
+          "technicalDemo": "https://youtu.be/ieUBE9uDSwE",
+          "twitter": "https://twitter.com/quantaliz",
+          "colosseum": "https://arena.colosseum.org/projects/explore/solaibot"
+        },
+        "evidence": [
+          "We've built a **toolset** for AI agents",
+          "Toolset for AI agents to autonomously access paid services using Solana payments and agent-to-agent commerce."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 1
+        },
+        "team": {
+          "count": 1
+        },
+        "tags": {
+          "problemTags": [
+            "cloud dependency",
+            "payment barriers for ai",
+            "lack of agent autonomy",
+            "privacy risks"
+          ],
+          "solutionTags": [
+            "on-device ai",
+            "autonomous payment toolkit",
+            "agent-to-agent marketplace",
+            "mobile wallet adapter integration"
+          ],
+          "primitives": [
+            "payments",
+            "stablecoins",
+            "mobile-wallet-adapter",
+            "solana-agent-kit"
+          ],
+          "techStack": [
+            "solana",
+            "android",
+            "node.js",
+            "fetch.ai",
+            "uagents"
+          ],
+          "targetUsers": [
+            "ai developers",
+            "autonomous agent creators",
+            "privacy-conscious users"
+          ]
+        },
+        "crowdedness": 325,
+        "cluster": {
+          "key": "v1-c14",
+          "label": "Solana AI Agent Infrastructure"
+        }
+      },
+      {
+        "slug": "agent-cred",
+        "name": "Agent-Cred",
+        "oneLiner": "Payment infrastructure for AI agents on Solana using a hotkey/coldkey architecture for secure autonomous transactions.",
+        "similarity": 0.03125,
+        "hackathon": {
+          "name": "Cypherpunk",
+          "slug": "cypherpunk",
+          "startDate": "2025-09-25"
+        },
+        "tracks": [
+          {
+            "name": "DeFi",
+            "key": "cypherpunk/defi"
+          },
+          {
+            "name": "Infrastructure",
+            "key": "cypherpunk/infrastructure"
+          },
+          {
+            "name": "Stablecoins",
+            "key": "cypherpunk/stablecoins"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/DanpheLabs/agent-cred",
+          "demo": null,
+          "presentation": "https://www.youtube.com/watch?v=HWYgq-QqCrI",
+          "technicalDemo": "https://www.youtube.com/watch?v=HWYgq-QqCrI",
+          "twitter": "https://twitter.com/crypto_erlich",
+          "colosseum": "https://arena.colosseum.org/projects/explore/agent-cred"
+        },
+        "evidence": [
+          "AgentCred is a payment infrastructure built specifically for",
+          "Payment infrastructure for AI agents on Solana using a hotkey/coldkey architecture for secure autonomous transactions."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 2
+        },
+        "tags": {
+          "problemTags": [
+            "ai agent payment friction",
+            "security risks in autonomous wallets",
+            "lack of agent-specific payment rails"
+          ],
+          "solutionTags": [
+            "dual-key wallet architecture",
+            "autonomous payment infrastructure",
+            "real-time monitoring",
+            "developer sdk"
+          ],
+          "primitives": [
+            "wallets",
+            "payments",
+            "stablecoins",
+            "smart contracts"
+          ],
+          "techStack": [
+            "solana",
+            "rust",
+            "typescript",
+            "react"
+          ],
+          "targetUsers": [
+            "ai developers",
+            "autonomous agent operators",
+            "web3 infrastructure providers"
+          ]
+        },
+        "crowdedness": 325,
+        "cluster": {
+          "key": "v1-c14",
+          "label": "Solana AI Agent Infrastructure"
+        }
+      },
+      {
+        "slug": "solana-buildpack",
+        "name": "Solana Buildpack",
+        "oneLiner": "A Cloud Native Buildpack for automated installation and configuration of the Solana Tool Suite.",
+        "similarity": 0.03125,
+        "hackathon": {
+          "name": "Renaissance",
+          "slug": "renaissance",
+          "startDate": "2024-03-04"
+        },
+        "tracks": [
+          {
+            "name": "Infrastructure",
+            "key": "renaissance/infrastructure"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/amp-buildpacks/solana",
+          "demo": null,
+          "presentation": "https://github.com/amp-buildpacks/solana/blob/main/README.md",
+          "technicalDemo": null,
+          "twitter": null,
+          "colosseum": "https://arena.colosseum.org/projects/explore/solana-buildpack"
+        },
+        "evidence": [
+          "A Cloud Native Buildpack that provides the Solana",
+          "A Cloud Native Buildpack for automated installation and configuration of the Solana Tool Suite."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 1
+        },
+        "tags": {
+          "problemTags": [
+            "complex environment setup",
+            "inconsistent build environments",
+            "manual toolchain installation",
+            "ci/cd configuration overhead"
+          ],
+          "solutionTags": [
+            "cloud native buildpacks",
+            "automated toolchain provisioning",
+            "standardized build environments"
+          ],
+          "primitives": [
+            "infrastructure",
+            "developer tools"
+          ],
+          "techStack": [
+            "solana",
+            "cloud native buildpacks",
+            "docker",
+            "bash",
+            "rust"
+          ],
+          "targetUsers": [
+            "solana developers",
+            "devops engineers",
+            "smart contract developers"
+          ]
+        },
+        "crowdedness": 257,
+        "cluster": {
+          "key": "v1-c5",
+          "label": "Solana Data and Monitoring Infrastructure"
+        }
+      },
+      {
+        "slug": "solana-cntt-16",
+        "name": "Solana CNTT-16",
+        "oneLiner": "A consumer-focused application built on Solana for the Radar hackathon.",
+        "similarity": 0.030303030303030304,
+        "hackathon": {
+          "name": "Radar",
+          "slug": "radar",
+          "startDate": "2024-09-02"
+        },
+        "tracks": [
+          {
+            "name": "Consumer",
+            "key": "radar/consumer"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/HoangHa2004/Solana",
+          "demo": null,
+          "presentation": "https://www.canva.com/design/DAGSh9i7zi0/uZucI2onmU0GTA80RBhdTg/edit",
+          "technicalDemo": null,
+          "twitter": null,
+          "colosseum": "https://arena.colosseum.org/projects/explore/solana-cntt-16"
+        },
+        "evidence": [
+          "About my team\u2019s project",
+          "A consumer-focused application built on Solana for the Radar hackathon."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 3
+        },
+        "tags": {
+          "problemTags": [
+            "lack of consumer dapps",
+            "complex blockchain interactions"
+          ],
+          "solutionTags": [
+            "user-friendly interface",
+            "solana-based infrastructure"
+          ],
+          "primitives": [
+            "token",
+            "smart-contracts"
+          ],
+          "techStack": [
+            "solana",
+            "rust",
+            "typescript"
+          ],
+          "targetUsers": [
+            "web3 consumers",
+            "solana users"
+          ]
+        },
+        "crowdedness": 223,
+        "cluster": {
+          "key": "v1-c26",
+          "label": "Simplified Solana Payment Solutions"
+        }
+      },
+      {
+        "slug": "latinum-agentic-commerce",
+        "name": "Latinum Agentic Commerce",
+        "oneLiner": "Payment middleware and MCP-compatible wallet enabling AI agents to autonomously pay for services and tools.",
+        "similarity": 0.02631578947368421,
+        "hackathon": {
+          "name": "Breakout",
+          "slug": "breakout",
+          "startDate": "2025-04-14"
+        },
+        "tracks": [
+          {
+            "name": "AI",
+            "key": "breakout/ai"
+          },
+          {
+            "name": "Stablecoins",
+            "key": "breakout/stablecoins"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/dennj/latinum-colosseum",
+          "demo": null,
+          "presentation": "https://www.loom.com/share/f973889fd0e44180a4831da3c9f478d5",
+          "technicalDemo": "https://www.loom.com/share/6103c79b7bea4100a4fc1642c6cd4624",
+          "twitter": "https://twitter.com/LatinumAI",
+          "colosseum": "https://arena.colosseum.org/projects/explore/latinum-agentic-commerce"
+        },
+        "evidence": [
+          "Latinum is a payment middleware that enables MCP",
+          "Payment middleware and MCP-compatible wallet enabling AI agents to autonomously pay for services and tools."
+        ],
+        "prize": {
+          "type": "TRACK_PRIZE",
+          "name": "1st Place - AI",
+          "placement": 1,
+          "amount": 25000,
+          "trackName": "AI"
+        },
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 2
+        },
+        "tags": {
+          "problemTags": [
+            "mcp server monetization",
+            "manual api key management",
+            "agent payment friction",
+            "subscription fatigue"
+          ],
+          "solutionTags": [
+            "mcp-compatible wallet",
+            "agentic commerce middleware",
+            "autonomous budget management",
+            "stablecoin payments"
+          ],
+          "primitives": [
+            "wallet",
+            "stablecoin",
+            "payment-gateway",
+            "smart-contract"
+          ],
+          "techStack": [
+            "solana",
+            "mcp",
+            "typescript",
+            "react"
+          ],
+          "targetUsers": [
+            "mcp developers",
+            "ai agent builders",
+            "saas providers",
+            "autonomous agents"
+          ]
+        },
+        "crowdedness": 202,
+        "cluster": {
+          "key": "v1-c16",
+          "label": "Stablecoin Payment Rails and Infrastructure"
+        }
+      },
+      {
+        "slug": "buyhere-api",
+        "name": "BuyHere APi",
+        "oneLiner": "API-driven directory for discovering products and services within local neighborhoods.",
+        "similarity": 0.02702702702702703,
+        "hackathon": {
+          "name": "Radar",
+          "slug": "radar",
+          "startDate": "2024-09-02"
+        },
+        "tracks": [
+          {
+            "name": "Consumer",
+            "key": "radar/consumer"
+          },
+          {
+            "name": "Infrastructure",
+            "key": "radar/infrastructure"
+          }
+        ],
+        "links": {
+          "github": "https://github.com/Orendy/buyhereapi",
+          "demo": null,
+          "presentation": "https://www.canva.com/design/DAGSu3ekeVA/jI7SqsBQFkPrcR4zVPxJOw/view?utm_content=DAGSu3ekeVA&utm_campaign=designshare&utm_medium=link&utm_source=editor",
+          "technicalDemo": null,
+          "twitter": "https://twitter.com/https://x.com/buyheretweets?t=3ZcXmmaAk2KB1M5LxGt6qw&s=09",
+          "colosseum": "https://arena.colosseum.org/projects/explore/buyhere-api"
+        },
+        "evidence": [
+          "API showing online directory of products and services",
+          "API-driven directory for discovering products and services within local neighborhoods."
+        ],
+        "prize": null,
+        "accelerator": null,
+        "metrics": {
+          "updatesCount": 0
+        },
+        "team": {
+          "count": 3
+        },
+        "tags": {
+          "problemTags": [
+            "fragmented local commerce",
+            "lack of neighborhood product data",
+            "difficulty finding local services"
+          ],
+          "solutionTags": [
+            "hyper-local directory",
+            "api-based discovery",
+            "neighborhood commerce infrastructure"
+          ],
+          "primitives": [
+            "api",
+            "directory"
+          ],
+          "techStack": [
+            "solana",
+            "rest-api"
+          ],
+          "targetUsers": [
+            "local businesses",
+            "neighborhood residents",
+            "developers"
+          ]
+        },
+        "crowdedness": 184,
+        "cluster": {
+          "key": "v1-c11",
+          "label": "Solana-Based Decentralized E-commerce"
+        }
+      }
+    ],
+    "filtersApplied": {},
+    "totalFound": 9,
+    "hasMore": true
+  },
+  "compare": {
+    "totalsA": {
+      "projects": 293,
+      "winners": 293
+    },
+    "totalsB": {
+      "projects": 5428,
+      "winners": 293
+    },
+    "results": {
+      "problemTags": [
+        {
+          "key": "fragmented liquidity",
+          "label": "fragmented liquidity",
+          "countA": 13,
+          "shareA": 0.04436860068259386,
+          "countB": 120,
+          "shareB": 0.02210759027266028,
+          "lift": 1.0069397042093287,
+          "delta": 0.022261010409933578,
+          "examplesA": [
+            "armor-wallet",
+            "cashmerelabs-1"
+          ],
+          "examplesB": [
+            "mecha",
+            "lince"
+          ]
+        },
+        {
+          "key": "information overload",
+          "label": "information overload",
+          "countA": 3,
+          "shareA": 0.010238907849829351,
+          "countB": 87,
+          "shareB": 0.016028002947678702,
+          "lift": -0.36118630104742855,
+          "delta": -0.005789095097849351,
+          "examplesA": [
+            "daiko",
+            "lomen-ai-perplexity-for-solana"
+          ],
+          "examplesB": [
+            "marketwizard",
+            "pie.fun"
+          ]
+        },
+        {
+          "key": "high platform fees",
+          "label": "high platform fees",
+          "countA": 0,
+          "shareA": 0,
+          "countB": 68,
+          "shareB": 0.012527634487840826,
+          "lift": -1,
+          "delta": -0.012527634487840826,
+          "examplesA": [],
+          "examplesB": [
+            "fan-live-~web3-streaming~",
+            "finuverse"
+          ]
+        },
+        {
+          "key": "high barrier to entry",
+          "label": "high barrier to entry",
+          "countA": 0,
+          "shareA": 0,
+          "countB": 66,
+          "shareB": 0.012159174649963155,
+          "lift": -1,
+          "delta": -0.012159174649963155,
+          "examplesA": [],
+          "examplesB": [
+            "wealthsphere-1",
+            "web3k-wallet"
+          ]
+        },
+        {
+          "key": "complex web3 onboarding",
+          "label": "complex web3 onboarding",
+          "countA": 2,
+          "shareA": 0.006825938566552901,
+          "countB": 58,
+          "shareB": 0.010685335298452468,
+          "lift": -0.36118630104742844,
+          "delta": -0.003859396731899567,
+          "examplesA": [
+            "chakra-drive",
+            "typex-keyboard"
+          ],
+          "examplesB": [
+            "pett.ai-on-solana",
+            "openauth"
+          ]
+        },
+        {
+          "key": "lack of transparency",
+          "label": "lack of transparency",
+          "countA": 0,
+          "shareA": 0,
+          "countB": 55,
+          "shareB": 0.010132645541635961,
+          "lift": -1,
+          "delta": -0.010132645541635961,
+          "examplesA": [],
+          "examplesB": [
+            "request-on-chain-ticketing",
+            "solibra-wallet"
+          ]
+        },
+        {
+          "key": "low community engagement",
+          "label": "low community engagement",
+          "countA": 1,
+          "shareA": 0.0034129692832764505,
+          "countB": 41,
+          "shareB": 0.007553426676492263,
+          "lift": -0.5481561641554982,
+          "delta": -0.0041404573932158125,
+          "examplesA": [
+            "barnfight"
+          ],
+          "examplesB": [
+            "priddi.market",
+            "safe-staker"
+          ]
+        },
+        {
+          "key": "capital inefficiency",
+          "label": "capital inefficiency",
+          "countA": 4,
+          "shareA": 0.013651877133105802,
+          "countB": 41,
+          "shareB": 0.007553426676492263,
+          "lift": 0.8073753433780071,
+          "delta": 0.0060984504566135396,
+          "examplesA": [
+            "feels.fun",
+            "ratex"
+          ],
+          "examplesB": [
+            "brrr-day",
+            "propmet"
+          ]
+        },
+        {
+          "key": "rug pulls",
+          "label": "rug pulls",
+          "countA": 3,
+          "shareA": 0.010238907849829351,
+          "countB": 37,
+          "shareB": 0.0068165070007369195,
+          "lift": 0.5020754542938843,
+          "delta": 0.0034224008490924317,
+          "examplesA": [
+            "hype3",
+            "chosendotfun"
+          ],
+          "examplesB": [
+            "big-fish-alert",
+            "prophetsentinel-airiskguardianfordefi"
+          ]
+        },
+        {
+          "key": "liquidity fragmentation",
+          "label": "liquidity fragmentation",
+          "countA": 4,
+          "shareA": 0.013651877133105802,
+          "countB": 36,
+          "shareB": 0.006632277081798084,
+          "lift": 1.058399696624953,
+          "delta": 0.0070196000513077185,
+          "examplesA": [
+            "riverboat",
+            "hype3"
+          ],
+          "examplesB": [
+            "trenchgames.win",
+            "brrr-day"
+          ]
+        },
+        {
+          "key": "high transaction fees",
+          "label": "high transaction fees",
+          "countA": 2,
+          "shareA": 0.006825938566552901,
+          "countB": 36,
+          "shareB": 0.006632277081798084,
+          "lift": 0.029199848312476462,
+          "delta": 0.00019366148475481737,
+          "examplesA": [
+            "xeno-money",
+            "scrim"
+          ],
+          "examplesB": [
+            "chainpay-1",
+            "uadep"
+          ]
+        },
+        {
+          "key": "high intermediary fees",
+          "label": "high intermediary fees",
+          "countA": 1,
+          "shareA": 0.0034129692832764505,
+          "countB": 34,
+          "shareB": 0.006263817243920413,
+          "lift": -0.4551294920698655,
+          "delta": -0.0028508479606439625,
+          "examplesA": [
+            "paystream-1"
+          ],
+          "examplesB": [
+            "vericar",
+            "sunsound"
+          ]
+        }
+      ],
+      "solutionTags": [
+        {
+          "key": "rwa tokenization",
+          "label": "rwa tokenization",
+          "countA": 6,
+          "shareA": 0.020477815699658702,
+          "countB": 112,
+          "shareB": 0.020633750921149593,
+          "lift": -0.007557289127254951,
+          "delta": -0.000155935221490891,
+          "examplesA": [
+            "watchtower",
+            "vitalfi"
+          ],
+          "examplesB": [
+            "defi-reit",
+            "h2u"
+          ]
+        },
+        {
+          "key": "tokenized rewards",
+          "label": "tokenized rewards",
+          "countA": 0,
+          "shareA": 0,
+          "countB": 95,
+          "shareB": 0.01750184229918939,
+          "lift": -1,
+          "delta": -0.01750184229918939,
+          "examplesA": [],
+          "examplesB": [
+            "quantum-compass",
+            "runverse"
+          ]
+        },
+        {
+          "key": "decentralized marketplace",
+          "label": "decentralized marketplace",
+          "countA": 1,
+          "shareA": 0.0034129692832764505,
+          "countB": 69,
+          "shareB": 0.012711864406779662,
+          "lift": -0.7315130830489193,
+          "delta": -0.00929889512350321,
+          "examplesA": [
+            "bizzed"
+          ],
+          "examplesB": [
+            "g'sprout",
+            "nft-game-market"
+          ]
+        },
+        {
+          "key": "smart contract escrow",
+          "label": "smart contract escrow",
+          "countA": 0,
+          "shareA": 0,
+          "countB": 67,
+          "shareB": 0.01234340456890199,
+          "lift": -1,
+          "delta": -0.01234340456890199,
+          "examplesA": [],
+          "examplesB": [
+            "stellar_crowdfunding",
+            "veladao"
+          ]
+        },
+        {
+          "key": "on-chain verification",
+          "label": "on-chain verification",
+          "countA": 0,
+          "shareA": 0,
+          "countB": 55,
+          "shareB": 0.010132645541635961,
+          "lift": -1,
+          "delta": -0.010132645541635961,
+          "examplesA": [],
+          "examplesB": [
+            "request-on-chain-ticketing",
+            "edubuk"
+          ]
+        },
+        {
+          "key": "natural language processing",
+          "label": "natural language processing",
+          "countA": 3,
+          "shareA": 0.010238907849829351,
+          "countB": 45,
+          "shareB": 0.008290346352247605,
+          "lift": 0.23503981797497153,
+          "delta": 0.0019485614975817463,
+          "examplesA": [
+            "lomen-ai-perplexity-for-solana",
+            "lexicon"
+          ],
+          "examplesB": [
+            "solviz",
+            "discord-digester"
+          ]
+        },
+        {
+          "key": "decentralized identity",
+          "label": "decentralized identity",
+          "countA": 2,
+          "shareA": 0.006825938566552901,
+          "countB": 43,
+          "shareB": 0.007921886514369933,
+          "lift": -0.13834431304071748,
+          "delta": -0.0010959479478170322,
+          "examplesA": [
+            "pow-cards",
+            "humanship-id"
+          ],
+          "examplesB": [
+            "skillful",
+            "streaks.quest"
+          ]
+        },
+        {
+          "key": "gamification",
+          "label": "gamification",
+          "countA": 1,
+          "shareA": 0.0034129692832764505,
+          "countB": 43,
+          "shareB": 0.007921886514369933,
+          "lift": -0.5691721565203587,
+          "delta": -0.004508917231093482,
+          "examplesA": [
+            "trump.fun"
+          ],
+          "examplesB": [
+            "big-fish-alert",
+            "bible-by-heart"
+          ]
+        },
+        {
+          "key": "stablecoin payments",
+          "label": "stablecoin payments",
+          "countA": 5,
+          "shareA": 0.017064846416382253,
+          "countB": 43,
+          "shareB": 0.007921886514369933,
+          "lift": 1.1541392173982064,
+          "delta": 0.00914295990201232,
+          "examplesA": [
+            "xeno-money",
+            "cargobill"
+          ],
+          "examplesB": [
+            "ledger-and-pay",
+            "ouh!-1"
+          ]
+        },
+        {
+          "key": "decentralized physical infrastructure",
+          "label": "decentralized physical infrastructure",
+          "countA": 7,
+          "shareA": 0.023890784982935155,
+          "countB": 42,
+          "shareB": 0.007737656595431098,
+          "lift": 2.087599544937429,
+          "delta": 0.016153128387504056,
+          "examplesA": [
+            "netsepio",
+            "trekn-1"
+          ],
+          "examplesB": [
+            "kyro",
+            "ketchup-republic"
+          ]
+        },
+        {
+          "key": "tokenized incentives",
+          "label": "tokenized incentives",
+          "countA": 2,
+          "shareA": 0.006825938566552901,
+          "countB": 42,
+          "shareB": 0.007737656595431098,
+          "lift": -0.11782870144644897,
+          "delta": -0.0009117180288781973,
+          "examplesA": [
+            "wayfi",
+            "aquasave"
+          ],
+          "examplesB": [
+            "learnfi",
+            "vitaltoken"
+          ]
+        },
+        {
+          "key": "smart contract automation",
+          "label": "smart contract automation",
+          "countA": 0,
+          "shareA": 0,
+          "countB": 40,
+          "shareB": 0.007369196757553427,
+          "lift": -1,
+          "delta": -0.007369196757553427,
+          "examplesA": [],
+          "examplesB": [
+            "sodh",
+            "chainlease"
+          ]
+        }
+      ],
+      "primitives": [
+        {
+          "key": "nft",
+          "label": "nft",
+          "countA": 25,
+          "shareA": 0.08532423208191127,
+          "countB": 1355,
+          "shareB": 0.24963154016212233,
+          "lift": -0.6581993123685503,
+          "delta": -0.16430730808021105,
+          "examplesA": [
+            "blockride",
+            "jogojogo"
+          ],
+          "examplesB": [
+            "perkpal",
+            "nectart"
+          ]
+        },
+        {
+          "key": "payments",
+          "label": "payments",
+          "countA": 29,
+          "shareA": 0.09897610921501707,
+          "countB": 635,
+          "shareB": 0.11698599852616065,
+          "lift": -0.15394910107226356,
+          "delta": -0.018009889311143584,
+          "examplesA": [
+            "aquanode",
+            "split-finance"
+          ],
+          "examplesB": [
+            "dansr",
+            "github-solana-dispenser-solidpull"
+          ]
+        },
+        {
+          "key": "token-gating",
+          "label": "token-gating",
+          "countA": 14,
+          "shareA": 0.04778156996587031,
+          "countB": 583,
+          "shareB": 0.10740604274134119,
+          "lift": -0.5551314549318284,
+          "delta": -0.05962447277547088,
+          "examplesA": [
+            "detask:-on-chain-work-on-solana",
+            "tokengator"
+          ],
+          "examplesB": [
+            "uni-sol-bridge",
+            "perkpal"
+          ]
+        },
+        {
+          "key": "oracle",
+          "label": "oracle",
+          "countA": 39,
+          "shareA": 0.13310580204778158,
+          "countB": 568,
+          "shareB": 0.10464259395725865,
+          "lift": 0.27200403787915217,
+          "delta": 0.028463208090522926,
+          "examplesA": [
+            "flowgate",
+            "riverboat"
+          ],
+          "examplesB": [
+            "regret-market",
+            "x402-prediction-market"
+          ]
+        },
+        {
+          "key": "smart contracts",
+          "label": "smart contracts",
+          "countA": 18,
+          "shareA": 0.06143344709897611,
+          "countB": 537,
+          "shareB": 0.09893146647015476,
+          "lift": -0.37903025911872945,
+          "delta": -0.03749801937117865,
+          "examplesA": [
+            "agent-arc",
+            "xcrow"
+          ],
+          "examplesB": [
+            "sodh",
+            "secret-hitler"
+          ]
+        },
+        {
+          "key": "dao",
+          "label": "dao",
+          "countA": 20,
+          "shareA": 0.06825938566552901,
+          "countB": 431,
+          "shareB": 0.07940309506263818,
+          "lift": -0.14034351417055346,
+          "delta": -0.011143709397109167,
+          "examplesA": [
+            "bizzed",
+            "marshmallow"
+          ],
+          "examplesB": [
+            "uni-sol-bridge",
+            "nectart"
+          ]
+        },
+        {
+          "key": "token",
+          "label": "token",
+          "countA": 10,
+          "shareA": 0.034129692832764506,
+          "countB": 423,
+          "shareB": 0.07792925571112749,
+          "lift": -0.5620426177393718,
+          "delta": -0.04379956287836299,
+          "examplesA": [
+            "carrot",
+            "marshmallow"
+          ],
+          "examplesB": [
+            "carrot",
+            "mintory"
+          ]
+        },
+        {
+          "key": "staking",
+          "label": "staking",
+          "countA": 24,
+          "shareA": 0.08191126279863481,
+          "countB": 420,
+          "shareB": 0.07737656595431099,
+          "lift": 0.05860555826426128,
+          "delta": 0.004534696844323824,
+          "examplesA": [
+            "split-finance",
+            "marshmallow"
+          ],
+          "examplesB": [
+            "deep-dungeon-duel",
+            "challengex-challenge-to-be-healthy-and-incentivize-on-solana"
+          ]
+        },
+        {
+          "key": "tokenization",
+          "label": "tokenization",
+          "countA": 28,
+          "shareA": 0.09556313993174062,
+          "countB": 410,
+          "shareB": 0.07553426676492263,
+          "lift": 0.2651627403646051,
+          "delta": 0.020028873166817993,
+          "examplesA": [
+            "blockride",
+            "soltera"
+          ],
+          "examplesB": [
+            "munki.ai",
+            "blockride"
+          ]
+        },
+        {
+          "key": "escrow",
+          "label": "escrow",
+          "countA": 15,
+          "shareA": 0.051194539249146756,
+          "countB": 408,
+          "shareB": 0.07516580692704496,
+          "lift": -0.31891186508733194,
+          "delta": -0.0239712676778982,
+          "examplesA": [
+            "xcrow",
+            "localsolana"
+          ],
+          "examplesB": [
+            "terrafund",
+            "tinder-tutor"
+          ]
+        },
+        {
+          "key": "rwa",
+          "label": "rwa",
+          "countA": 21,
+          "shareA": 0.07167235494880546,
+          "countB": 366,
+          "shareB": 0.06742815033161385,
+          "lift": 0.06294410563419683,
+          "delta": 0.004244204617191605,
+          "examplesA": [
+            "blockride",
+            "green-energy-network-(gen)"
+          ],
+          "examplesB": [
+            "blockride",
+            "defi-reit"
+          ]
+        },
+        {
+          "key": "marketplace",
+          "label": "marketplace",
+          "countA": 13,
+          "shareA": 0.04436860068259386,
+          "countB": 350,
+          "shareB": 0.06448047162859248,
+          "lift": -0.31190638712823004,
+          "delta": -0.020111870945998624,
+          "examplesA": [
+            "bizzed",
+            "skytrade-drones-radar-and-air-rights-marketplace"
+          ],
+          "examplesB": [
+            "skillful",
+            "finuverse"
+          ]
+        }
+      ]
+    }
+  },
+  "archives": {
+    "results": [
+      {
+        "documentId": "ac1d4899-e555-47cb-b8f8-378e72daac35",
+        "title": "Tourists in the bazaar: Why agents will need B2B payments \u2014 and why stablecoins will get there first",
+        "author": "Sam Broner",
+        "source": "a16z_crypto",
+        "url": "https://a16zcrypto.com/posts/article/against-b2b-payments-stablecoins",
+        "publishedAt": "2026-02-19",
+        "similarity": 0.04918032786885246,
+        "snippet": "end. The store handles the complexity of distributing payments to each vendor. Agents need the same model: a unified view of proposed purchases across multiple vendors, with one-click approval for the batch. The user sees \u201cyour agent wan...",
+        "chunkIndex": 7
+      },
+      {
+        "documentId": "21fe158b-da81-40d7-89c0-a726e79191e2",
+        "title": "Agentic Payments and Crypto\u2019s Emerging Role in the AI Economy",
+        "author": null,
+        "source": "galaxy_research",
+        "url": "https://www.galaxy.com/insights/research/x402-ai-agents-crypto-payments",
+        "publishedAt": "2026-01-07",
+        "similarity": 0.04788306451612903,
+        "snippet": "with increasing reliability. Agent tooling has taken a leap forward with the release of foundational primitives including the Model Context Protocol (MCP), Agent-to-Agent (A2A) Protocol, Agent Payments Protocol (AP2), and the x402 standa...",
+        "chunkIndex": 1
+      },
+      {
+        "documentId": "21fe158b-da81-40d7-89c0-a726e79191e2",
+        "title": "Agentic Payments and Crypto\u2019s Emerging Role in the AI Economy",
+        "author": null,
+        "source": "galaxy_research",
+        "url": "https://www.galaxy.com/insights/research/x402-ai-agents-crypto-payments",
+        "publishedAt": "2026-01-07",
+        "similarity": 0.045949904158859384,
+        "snippet": "x402 is built for software paying other software. An agent sees a price, pays automatically, and immediately gets access to a service. This works well for APIs, data, and digital tools that agents use as part of their workflow. ACP and S...",
+        "chunkIndex": 12
+      },
+      {
+        "documentId": "2b640ae9-558b-4e2f-a978-97304b1d3c7b",
+        "title": "Agency by design: Preserving user control in a post-interface world",
+        "author": "Christian Crowley",
+        "source": "a16z_crypto",
+        "url": "https://a16zcrypto.com/posts/article/preserving-user-control-ai-agents",
+        "publishedAt": "2025-12-09",
+        "similarity": 0.03125,
+        "snippet": "o production systems. x402 gives agent policy-signing authority, MPC-secured key management, and verifiable onchain execution. Through Coinbase Bazaar, agents can autonomously discover and pay for services while every transaction remains...",
+        "chunkIndex": 13
+      },
+      {
+        "documentId": "4d08657d-16b8-44f1-a484-7dfd3911ca50",
+        "title": "Return of the L1 wars: It\u2019s all about AI Agents ",
+        "author": "Vivekdeep Gupta",
+        "source": "superteam_blog",
+        "url": "https://blog.superteam.fun/p/layer-1-wars-its-about-ai-agents",
+        "publishedAt": "2025-09-25",
+        "similarity": 0.031024531024531024,
+        "snippet": "leading to limited features, reconciliation or security issues.Micropayments are discouraged, and many times are tagged as fraudulent transactions. Try making multiple similar, small payments to a merchant. This makes probabilistic or st...",
+        "chunkIndex": 8
+      },
+      {
+        "documentId": "c72c0339-afec-4d53-a3e4-c35963504da3",
+        "title": "Crypto Markets, Privacy, And Payments",
+        "author": null,
+        "source": "pantera_capital",
+        "url": "https://panteracapital.com/blockchain-letter/crypto-markets-privacy-and-payments",
+        "publishedAt": "2025-11-27",
+        "similarity": 0.03076923076923077,
+        "snippet": "the peer-to-peer flow of information. But back then, such a system simply did not exist. So 402 was left undefined, and instead of protocol-native micropayments, the web economy of the 2000s and 2010s became cluttered with advertisements...",
+        "chunkIndex": 7
+      }
+    ],
+    "filtersApplied": {
+      "sources": [
+        "satoshi_forum_posts",
+        "satoshi_emails",
+        "cryptography_mailing_list",
+        "nick_szabo_essays",
+        "nick_szabo_blog",
+        "nick_szabo_legacy",
+        "robin_hanson_overcoming_bias",
+        "arxiv_crypto",
+        "solana_simd_repo",
+        "solana_simd_discussions",
+        "solana_forum_developer_discourse",
+        "solana_core_community_calls",
+        "solana_core_community_call_transcripts",
+        "solana_foundation_delegation_program",
+        "solana_docs",
+        "agave_docs",
+        "spl_docs",
+        "solana_repo_issues",
+        "solana_program_library_issues",
+        "agave_repo_issues",
+        "solana_simd_repo_issues",
+        "solana_stackexchange",
+        "colosseum_blog",
+        "solana_news",
+        "helius_blog",
+        "solana_cookbook",
+        "superteam_blog",
+        "jito_research",
+        "firedancer_docs",
+        "triton_yellowstone_docs",
+        "yellowstone_grpc_repo",
+        "helius_rpc_docs",
+        "sec3_security_blog",
+        "ottersec_blog",
+        "neodyme_blog",
+        "magicblock_docs",
+        "magicblock_blog",
+        "squads_docs",
+        "squads_blog",
+        "realms_docs",
+        "breakpoint_2022_transcripts",
+        "breakpoint_2023_transcripts",
+        "breakpoint_2024_transcripts",
+        "breakpoint_2025_transcripts",
+        "paradigm_research",
+        "a16z_crypto",
+        "multicoin_capital",
+        "pantera_capital",
+        "paul_graham_essays",
+        "sam_altman_blog",
+        "chainalysis_research",
+        "jupiter_docs",
+        "orca_docs",
+        "raydium_docs",
+        "marinade_docs",
+        "tensor_docs",
+        "drift_docs",
+        "nakamoto_institute",
+        "jito_docs",
+        "meteora_docs",
+        "phantom_docs",
+        "placeholder_vc",
+        "alliance_essays",
+        "electric_capital",
+        "galaxy_research",
+        "coin_metrics"
+      ]
+    },
+    "searchTier": "vector",
+    "totalFound": 0,
+    "totalMatched": 0,
+    "hasMore": true
+  }
+}
