@@ -30,9 +30,9 @@ export function Hero({
                 fontWeight: 500,
               }}
             >
-              The payout infrastructure
+              The payouts and collections
               <br />
-              <span style={{ color: 'var(--ax-accent)' }}>for stablecoin teams.</span>
+              <span style={{ color: 'var(--ax-accent)' }}>infrastructure for stablecoin teams.</span>
             </h1>
             <p className="lp-lead" style={{ fontSize: 19, maxWidth: '52ch' }}>
               Helping businesses move USDC on Solana with deterministic workflows, on-chain
