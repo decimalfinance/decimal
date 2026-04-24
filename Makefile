@@ -3,7 +3,7 @@ SHELL := /bin/zsh
 POSTGRES_URL ?= postgresql://usdc_ops:usdc_ops@127.0.0.1:54329/usdc_ops?schema=public
 PSQL_QUIET := PGOPTIONS='-c client_min_messages=warning' psql -v ON_ERROR_STOP=1 -q
 
-.PHONY: infra-up infra-down dev test test-api test-worker test-frontend sync-postgres-schema sync-remote-postgres-schema sync-remote-postgres-security sync-clickhouse-schema reset-data latest-slot latency-report
+.PHONY: infra-up infra-down dev dev-api dev-frontend dev-worker tunnel prod-backend test test-api test-worker test-frontend sync-postgres-schema sync-remote-postgres-schema sync-remote-postgres-security sync-clickhouse-schema reset-data reset-prod-data latest-slot latency-report help
 
 infra-up:
 	set -euo pipefail && docker compose up -d postgres clickhouse && $(MAKE) sync-postgres-schema && $(MAKE) sync-clickhouse-schema
@@ -171,3 +171,111 @@ test-frontend:
 	set -euo pipefail && \
 	cd frontend && \
 	npm run build
+
+# Run individual pieces ---------------------------------------------------
+# Each target runs one process. Meant for separate terminals.
+
+dev-api:
+	set -euo pipefail && \
+	if [[ -f api/.env ]]; then set -a && source api/.env && set +a; fi && \
+	cd api && npm run dev
+
+dev-frontend:
+	set -euo pipefail && \
+	cd frontend && npm run dev
+
+dev-worker:
+	set -euo pipefail && \
+	if [[ -f yellowstone/.env ]]; then set -a && source yellowstone/.env && set +a; fi && \
+	cd yellowstone && cargo run
+
+tunnel:
+	set -euo pipefail && \
+	cloudflared tunnel run axoria-api
+
+# Production-backed local runtime ------------------------------------------
+# Starts the local services that back the deployed Vercel frontend:
+#   ClickHouse (local docker) -> API (Supabase DATABASE_URL from api/.env)
+#   -> Yellowstone worker -> Cloudflare Tunnel exposing api.axoria.fun
+# Does NOT run a local frontend. https://axoria.fun is live from Vercel.
+
+prod-backend:
+	set -euo pipefail && \
+	if [[ ! -f api/.env ]]; then \
+	  echo "api/.env is required for prod-backend."; \
+	  exit 1; \
+	fi && \
+	if [[ -f api/.env ]]; then set -a && source api/.env && set +a; fi && \
+	if [[ -f yellowstone/.env ]]; then set -a && source yellowstone/.env && set +a; fi && \
+	export CLICKHOUSE_URL="$${CLICKHOUSE_URL:-http://127.0.0.1:8123}" && \
+	export CONTROL_PLANE_API_URL="$${CONTROL_PLANE_API_URL:-https://api.axoria.fun}" && \
+	if [[ "$${DATABASE_URL}" == *"127.0.0.1"* || "$${DATABASE_URL}" == *"localhost"* ]]; then \
+	  echo "prod-backend expects a remote DATABASE_URL in api/.env, got local: $${DATABASE_URL}"; \
+	  exit 1; \
+	fi && \
+	docker compose up -d clickhouse && \
+	docker compose exec -T clickhouse sh -lc 'clickhouse-client --multiquery < /docker-entrypoint-initdb.d/001-bootstrap.sql >/dev/null && clickhouse-client --multiquery < /docker-entrypoint-initdb.d/002-schema.sql >/dev/null' && \
+	for _ in {1..60}; do \
+	  if curl -fsS "$${CLICKHOUSE_URL}/ping" >/dev/null 2>&1; then \
+	    break; \
+	  fi; \
+	  sleep 1; \
+	done && \
+	(cd api && npm run prisma:generate >/dev/null) && \
+	pkill -f "cloudflared tunnel run axoria-api" >/dev/null 2>&1 || true && \
+	typeset -a pids && \
+	(cd api && exec npm run dev) & \
+	pids+=($$!) && \
+	cloudflared tunnel run axoria-api & \
+	pids+=($$!) && \
+	if [[ -n "$${YELLOWSTONE_ENDPOINT:-}" ]]; then \
+	  for _ in {1..60}; do \
+	    if curl -fsS "http://127.0.0.1:3100/health" >/dev/null 2>&1; then \
+	      break; \
+	    fi; \
+	    sleep 1; \
+	  done; \
+	  (cd yellowstone && exec cargo run) & \
+	  pids+=($$!); \
+	else \
+	  echo "Skipping Yellowstone worker because YELLOWSTONE_ENDPOINT is not set."; \
+	fi && \
+	trap 'trap - INT TERM EXIT; for pid in "$${pids[@]:-}"; do kill -TERM "$$pid" 2>/dev/null || true; done; sleep 0.5; for pid in "$${pids[@]:-}"; do kill -KILL "$$pid" 2>/dev/null || true; done; wait "$${pids[@]}" 2>/dev/null || true; exit 130' INT TERM && \
+	trap 'for pid in "$${pids[@]:-}"; do kill -TERM "$$pid" 2>/dev/null || true; done; sleep 0.5; for pid in "$${pids[@]:-}"; do kill -KILL "$$pid" 2>/dev/null || true; done; wait "$${pids[@]}" 2>/dev/null || true' EXIT && \
+	wait "$${pids[@]}" || true
+
+# Production data reset ---------------------------------------------------
+# Wipes every public table in Supabase Postgres + every usdc_ops table in
+# local ClickHouse. Prompts for confirmation; set SKIP_CONFIRM=1 to skip.
+
+reset-prod-data:
+	./scripts/reset-prod-data.sh
+
+# Help --------------------------------------------------------------------
+
+help:
+	@echo "Axoria Make targets:"
+	@echo ""
+	@echo "  Local dev (docker postgres + clickhouse, api + frontend + worker)"
+	@echo "    dev                Start everything locally in one terminal"
+	@echo "    infra-up           Start local postgres + clickhouse only"
+	@echo "    infra-down         Stop local postgres + clickhouse"
+	@echo ""
+	@echo "  Individual processes (one terminal each)"
+	@echo "    dev-api            API only"
+	@echo "    dev-frontend       Vite frontend only"
+	@echo "    dev-worker         Yellowstone worker only"
+	@echo "    tunnel             Cloudflare Tunnel (api.axoria.fun -> localhost:3100)"
+	@echo ""
+	@echo "  Production-backed runtime (Supabase + local ClickHouse + tunnel)"
+	@echo "    prod-backend       API + worker + tunnel, serving https://axoria.fun"
+	@echo ""
+	@echo "  Data"
+	@echo "    reset-data         Truncate local docker postgres + clickhouse"
+	@echo "    reset-prod-data    Truncate Supabase + local ClickHouse (PROMPTS)"
+	@echo ""
+	@echo "  Tests"
+	@echo "    test               Run api + worker + frontend tests"
+	@echo "    test-api"
+	@echo "    test-worker"
+	@echo "    test-frontend"
