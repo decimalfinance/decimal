@@ -5,6 +5,7 @@ import { AddressInfo } from 'node:net';
 import { Keypair } from '@solana/web3.js';
 import { createApp } from '../src/app.js';
 import { executeClickHouse, insertClickHouseRows } from '../src/clickhouse.js';
+import { config } from '../src/config.js';
 import { prisma } from '../src/prisma.js';
 
 const TRUNCATE_SQL = `
@@ -586,7 +587,16 @@ test('collections create inbound expected transfers against owned receiving wall
     'internal collection receiver should remain inspectable when explicitly requested',
   );
 
-  const matchingIndex = await get('/internal/matching-index', setup.sessionToken);
+  const internalResponse = await fetch(`${baseUrl}/internal/matching-index`, {
+    headers: {
+      ...(config.controlPlaneServiceToken
+        ? { 'x-service-token': config.controlPlaneServiceToken }
+        : authHeaders(setup.sessionToken)),
+    },
+  });
+  const internalText = await internalResponse.text();
+  assert.equal(internalResponse.status, 200, internalText);
+  const matchingIndex = JSON.parse(internalText);
   const workspaceSnapshot = matchingIndex.workspaces.find(
     (workspace: { workspace: { workspaceId: string } }) => workspace.workspace.workspaceId === setup.workspace.workspaceId,
   );

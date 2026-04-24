@@ -3,7 +3,7 @@ SHELL := /bin/zsh
 POSTGRES_URL ?= postgresql://usdc_ops:usdc_ops@127.0.0.1:54329/usdc_ops?schema=public
 PSQL_QUIET := PGOPTIONS='-c client_min_messages=warning' psql -v ON_ERROR_STOP=1 -q
 
-.PHONY: infra-up infra-down dev test test-api test-worker test-frontend sync-postgres-schema sync-clickhouse-schema reset-data latest-slot latency-report
+.PHONY: infra-up infra-down dev test test-api test-worker test-frontend sync-postgres-schema sync-remote-postgres-schema sync-clickhouse-schema reset-data latest-slot latency-report
 
 infra-up:
 	set -euo pipefail && docker compose up -d postgres clickhouse && $(MAKE) sync-postgres-schema && $(MAKE) sync-clickhouse-schema
@@ -12,6 +12,16 @@ sync-postgres-schema:
 	set -euo pipefail && \
 	docker compose up -d postgres && \
 	docker compose exec -T postgres sh -lc "$(PSQL_QUIET) -U usdc_ops -d usdc_ops -f /docker-entrypoint-initdb.d/001-control-plane.sql" >/dev/null
+
+sync-remote-postgres-schema:
+	set -euo pipefail && \
+	if [[ ! -f api/.env ]]; then \
+	  echo "api/.env is required for remote Postgres sync."; \
+	  exit 1; \
+	fi && \
+	cd api && \
+	set -a && source .env && set +a && \
+	npx prisma db push --accept-data-loss >/dev/null
 
 sync-clickhouse-schema:
 	set -euo pipefail && \
@@ -82,18 +92,23 @@ FORMAT Vertical"
 
 dev:
 	set -euo pipefail && \
-	export DATABASE_URL="$${DATABASE_URL:-$(POSTGRES_URL)}" && \
-	export CONTROL_PLANE_API_URL="$${CONTROL_PLANE_API_URL:-http://127.0.0.1:3100}" && \
-	export CLICKHOUSE_URL="$${CLICKHOUSE_URL:-http://127.0.0.1:8123}" && \
+	if [[ -f api/.env ]]; then set -a && source api/.env && set +a; fi && \
 	if [[ -f yellowstone/.env ]]; then set -a && source yellowstone/.env && set +a; fi && \
-	docker compose up -d postgres clickhouse && \
-	docker compose exec -T postgres sh -lc "$(PSQL_QUIET) -U usdc_ops -d usdc_ops -f /docker-entrypoint-initdb.d/001-control-plane.sql" >/dev/null && \
+	export DATABASE_URL="$${DATABASE_URL:-$(POSTGRES_URL)}" && \
+	export CONTROL_PLANE_API_URL="$${CONTROL_PLANE_API_URL:-https://api.axoria.fun}" && \
+	export CLICKHOUSE_URL="$${CLICKHOUSE_URL:-http://127.0.0.1:8123}" && \
+	if [[ "$${DATABASE_URL}" == *"127.0.0.1"* || "$${DATABASE_URL}" == *"localhost"* ]]; then \
+	  docker compose up -d postgres && \
+	  docker compose exec -T postgres sh -lc "$(PSQL_QUIET) -U usdc_ops -d usdc_ops -f /docker-entrypoint-initdb.d/001-control-plane.sql" >/dev/null; \
+	else \
+	  echo "Using remote Postgres from api/.env"; \
+	  (cd api && npx prisma db push --accept-data-loss >/dev/null); \
+	fi && \
+	docker compose up -d clickhouse && \
 	docker compose exec -T clickhouse sh -lc 'clickhouse-client --multiquery < /docker-entrypoint-initdb.d/001-bootstrap.sql >/dev/null && clickhouse-client --multiquery < /docker-entrypoint-initdb.d/002-schema.sql >/dev/null' && \
 	for _ in {1..60}; do \
-	  if docker compose exec -T postgres pg_isready -U usdc_ops -d usdc_ops >/dev/null 2>&1; then \
-	    if curl -fsS "$${CLICKHOUSE_URL}/ping" >/dev/null 2>&1; then \
-	      break; \
-	    fi; \
+	  if curl -fsS "$${CLICKHOUSE_URL}/ping" >/dev/null 2>&1; then \
+	    break; \
 	  fi; \
 	  sleep 1; \
 	done && \

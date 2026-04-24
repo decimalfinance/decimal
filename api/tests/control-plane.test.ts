@@ -245,6 +245,35 @@ test('auth registration and login require the right password', async () => {
   assert.equal(login.user.email, 'auth@example.com');
 });
 
+test('service token protection only applies to internal routes', async () => {
+  const originalServiceToken = config.controlPlaneServiceToken;
+  const originalNodeEnv = config.nodeEnv;
+
+  try {
+    config.controlPlaneServiceToken = 'service-token-check';
+    config.nodeEnv = 'production';
+
+    const register = await post('/auth/register', {
+      email: 'service-token-check@example.com',
+      password: 'DemoPass123!',
+      displayName: 'Service Token Check',
+    });
+    assert.equal(register.status, 'authenticated');
+
+    const organizations = await get('/organizations', register.sessionToken);
+    assert.deepEqual(organizations.items, []);
+
+    const internalResponse = await fetch(`${baseUrl}/internal/matching-index`, {
+      headers: authHeaders(register.sessionToken),
+    });
+    assert.equal(internalResponse.status, 401);
+    assert.equal((await internalResponse.json()).message, 'Internal service token required');
+  } finally {
+    config.controlPlaneServiceToken = originalServiceToken;
+    config.nodeEnv = originalNodeEnv;
+  }
+});
+
 async function get(path: string, token?: string) {
   const response = await fetch(`${baseUrl}${path}`, {
     headers: token ? authHeaders(token) : undefined,

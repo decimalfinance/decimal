@@ -7,6 +7,11 @@ import { getMatchingIndexVersion, subscribeToMatchingIndexChanges } from '../mat
 export const internalRouter = Router();
 
 internalRouter.use((req, res, next) => {
+  if (!req.path.startsWith('/internal')) {
+    next();
+    return;
+  }
+
   if (!config.controlPlaneServiceToken) {
     if (config.nodeEnv === 'production') {
       res.status(503).json({
