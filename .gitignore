@@ -33,3 +33,6 @@ stablecoin ops v1.mp4
 
 # Scratch dir for one-off research dumps
 tmp/
+
+# Local Postgres backups
+backups/

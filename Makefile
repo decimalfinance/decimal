@@ -3,7 +3,9 @@ SHELL := /bin/zsh
 POSTGRES_URL ?= postgresql://usdc_ops:usdc_ops@127.0.0.1:54329/usdc_ops?schema=public
 PSQL_QUIET := PGOPTIONS='-c client_min_messages=warning' psql -v ON_ERROR_STOP=1 -q
 
-.PHONY: infra-up infra-down dev dev-api dev-frontend dev-worker tunnel prod-backend test test-api test-worker test-frontend sync-postgres-schema sync-remote-postgres-schema sync-remote-postgres-security sync-clickhouse-schema reset-data reset-prod-data help
+.SILENT:
+
+.PHONY: infra-up infra-down dev dev-api dev-frontend dev-worker tunnel prod-backend test test-api test-worker test-frontend sync-postgres-schema sync-clickhouse-schema reset-data reset-prod-data backup-db restore-db list-backups help
 
 infra-up:
 	set -euo pipefail && docker compose up -d postgres clickhouse && $(MAKE) sync-postgres-schema && $(MAKE) sync-clickhouse-schema
@@ -12,29 +14,6 @@ sync-postgres-schema:
 	set -euo pipefail && \
 	docker compose up -d postgres && \
 	docker compose exec -T postgres sh -lc "$(PSQL_QUIET) -U usdc_ops -d usdc_ops -f /docker-entrypoint-initdb.d/001-control-plane.sql" >/dev/null
-
-sync-remote-postgres-schema:
-	set -euo pipefail && \
-	if [[ ! -f api/.env ]]; then \
-	  echo "api/.env is required for remote Postgres sync."; \
-	  exit 1; \
-	fi && \
-	cd api && \
-	set -a && source .env && set +a && \
-	npx prisma db push --accept-data-loss >/dev/null && \
-	cd .. && \
-	$(MAKE) sync-remote-postgres-security
-
-sync-remote-postgres-security:
-	set -euo pipefail && \
-	if [[ ! -f api/.env ]]; then \
-	  echo "api/.env is required for remote Postgres hardening."; \
-	  exit 1; \
-	fi && \
-	cd api && \
-	set -a && source .env && set +a && \
-	export PSQL_DATABASE_URL="$${DATABASE_URL%%\?*}" && \
-	psql "$$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f ../postgres/init/002-supabase-hardening.sql >/dev/null
 
 sync-clickhouse-schema:
 	set -euo pipefail && \
@@ -58,13 +37,7 @@ dev:
 	export DATABASE_URL="$${DATABASE_URL:-$(POSTGRES_URL)}" && \
 	export CONTROL_PLANE_API_URL="$${CONTROL_PLANE_API_URL:-https://api.axoria.fun}" && \
 	export CLICKHOUSE_URL="$${CLICKHOUSE_URL:-http://127.0.0.1:8123}" && \
-	if [[ "$${DATABASE_URL}" == *"127.0.0.1"* || "$${DATABASE_URL}" == *"localhost"* ]]; then \
-	  docker compose up -d postgres && \
-	  docker compose exec -T postgres sh -lc "$(PSQL_QUIET) -U usdc_ops -d usdc_ops -f /docker-entrypoint-initdb.d/001-control-plane.sql" >/dev/null; \
-	else \
-	  echo "Using remote Postgres from api/.env"; \
-	  $(MAKE) sync-remote-postgres-schema; \
-	fi && \
+	$(MAKE) sync-postgres-schema && \
 	docker compose up -d clickhouse && \
 	docker compose exec -T clickhouse sh -lc 'clickhouse-client --multiquery < /docker-entrypoint-initdb.d/001-bootstrap.sql >/dev/null && clickhouse-client --multiquery < /docker-entrypoint-initdb.d/002-schema.sql >/dev/null' && \
 	for _ in {1..60}; do \
@@ -143,8 +116,8 @@ tunnel:
 
 # Production-backed local runtime ------------------------------------------
 # Starts the local services that back the deployed Vercel frontend:
-#   ClickHouse (local docker) -> API (Supabase DATABASE_URL from api/.env)
-#   -> Yellowstone worker -> Cloudflare Tunnel exposing api.axoria.fun
+#   Postgres + ClickHouse (local docker) -> API -> Yellowstone worker
+#   -> Cloudflare Tunnel exposing api.axoria.fun
 # Does NOT run a local frontend. https://axoria.fun is live from Vercel.
 
 prod-backend:
@@ -153,14 +126,11 @@ prod-backend:
 	  echo "api/.env is required for prod-backend."; \
 	  exit 1; \
 	fi && \
-	if [[ -f api/.env ]]; then set -a && source api/.env && set +a; fi && \
+	set -a && source api/.env && set +a && \
 	if [[ -f yellowstone/.env ]]; then set -a && source yellowstone/.env && set +a; fi && \
 	export CLICKHOUSE_URL="$${CLICKHOUSE_URL:-http://127.0.0.1:8123}" && \
 	export CONTROL_PLANE_API_URL="$${CONTROL_PLANE_API_URL:-https://api.axoria.fun}" && \
-	if [[ "$${DATABASE_URL}" == *"127.0.0.1"* || "$${DATABASE_URL}" == *"localhost"* ]]; then \
-	  echo "prod-backend expects a remote DATABASE_URL in api/.env, got local: $${DATABASE_URL}"; \
-	  exit 1; \
-	fi && \
+	$(MAKE) sync-postgres-schema && \
 	docker compose up -d clickhouse && \
 	docker compose exec -T clickhouse sh -lc 'clickhouse-client --multiquery < /docker-entrypoint-initdb.d/001-bootstrap.sql >/dev/null && clickhouse-client --multiquery < /docker-entrypoint-initdb.d/002-schema.sql >/dev/null' && \
 	for _ in {1..60}; do \
@@ -193,11 +163,35 @@ prod-backend:
 	wait "$${pids[@]}" || true
 
 # Production data reset ---------------------------------------------------
-# Wipes every public table in Supabase Postgres + every usdc_ops table in
-# local ClickHouse. Prompts for confirmation; set SKIP_CONFIRM=1 to skip.
+# Wipes every public table in whatever Postgres DATABASE_URL points at
+# (local or remote) + every usdc_ops table in local ClickHouse.
+# Prompts for confirmation; set SKIP_CONFIRM=1 to skip.
 
 reset-prod-data:
 	./scripts/reset-prod-data.sh
+
+# Postgres backup / restore -----------------------------------------------
+# Plain-SQL pg_dump of the local docker postgres into ./backups/.
+# Use restore-db FILE=backups/<name>.sql to restore.
+
+backup-db:
+	set -euo pipefail && \
+	mkdir -p backups && \
+	docker compose up -d postgres >/dev/null && \
+	OUT="backups/usdc_ops-$$(date +%Y%m%d-%H%M%S).sql" && \
+	docker compose exec -T postgres pg_dump -U usdc_ops -d usdc_ops --clean --if-exists --no-owner > "$$OUT" && \
+	echo "Backup written to $$OUT ($$(du -h "$$OUT" | cut -f1))"
+
+restore-db:
+	set -euo pipefail && \
+	if [[ -z "$${FILE:-}" ]]; then echo "Usage: make restore-db FILE=backups/<name>.sql"; exit 1; fi && \
+	if [[ ! -f "$${FILE}" ]]; then echo "File not found: $${FILE}"; exit 1; fi && \
+	docker compose up -d postgres >/dev/null && \
+	docker compose exec -T postgres psql -U usdc_ops -d usdc_ops < "$${FILE}" >/dev/null && \
+	echo "Restored from $${FILE}"
+
+list-backups:
+	@ls -lh backups/ 2>/dev/null || echo "No backups yet. Run: make backup-db"
 
 # Help --------------------------------------------------------------------
 
@@ -215,12 +209,15 @@ help:
 	@echo "    dev-worker         Yellowstone worker only"
 	@echo "    tunnel             Cloudflare Tunnel (api.axoria.fun -> localhost:3100)"
 	@echo ""
-	@echo "  Production-backed runtime (Supabase + local ClickHouse + tunnel)"
+	@echo "  Production-backed runtime (local postgres + clickhouse + tunnel)"
 	@echo "    prod-backend       API + worker + tunnel, serving https://axoria.fun"
 	@echo ""
 	@echo "  Data"
 	@echo "    reset-data         Truncate local docker postgres + clickhouse"
-	@echo "    reset-prod-data    Truncate Supabase + local ClickHouse (PROMPTS)"
+	@echo "    reset-prod-data    Truncate Postgres (DATABASE_URL) + local ClickHouse (PROMPTS)"
+	@echo "    backup-db          pg_dump local postgres -> backups/<timestamp>.sql"
+	@echo "    restore-db         Restore from backup: make restore-db FILE=backups/<name>.sql"
+	@echo "    list-backups       List existing backups"
 	@echo ""
 	@echo "  Tests"
 	@echo "    test               Run api + worker + frontend tests"

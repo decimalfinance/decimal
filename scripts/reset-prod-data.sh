@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Truncate every application table in:
-#   - the Postgres database from DATABASE_URL in api/.env (Supabase, in practice)
+#   - the Postgres database from DATABASE_URL in api/.env (local docker by default)
 #   - the local ClickHouse usdc_ops database
 #
 # DESTRUCTIVE. Wipes users, workspaces, payments, collections, proofs, everything.

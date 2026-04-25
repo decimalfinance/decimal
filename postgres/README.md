@@ -13,52 +13,37 @@ It stores:
 - mappings
 - onboarding state
 
-## Local Docker Postgres
+## Local Docker Postgres (used for both dev and prod-backend)
 
-Use the local Postgres container for tests and fully local development.
+Axoria runs against the local Postgres container in every environment —
+tests, local dev, and the production-backed runtime serving https://axoria.fun
+via Cloudflare Tunnel.
 
 ```bash
 docker compose up -d postgres
 ```
 
-Apply the local bootstrap schema:
+Apply the bootstrap schema (idempotent):
 
 ```bash
 make sync-postgres-schema
 ```
 
-## Remote Supabase Postgres
+`make dev` and `make prod-backend` both call this automatically.
 
-Use Supabase for the real Axoria control plane.
+### Backups
 
-The API reads the remote connection string from:
-
-- `api/.env`
-
-Sync the Prisma schema to the remote database:
+Plain-SQL `pg_dump` into `./backups/`:
 
 ```bash
-make sync-remote-postgres-schema
+make backup-db
+make list-backups
+make restore-db FILE=backups/usdc_ops-<timestamp>.sql
 ```
 
-That command now also applies Supabase-specific hardening:
+The `backups/` directory is gitignored. Run a backup before any risky change.
 
-- enables RLS on every table in `public`
-- revokes `anon` and `authenticated` access to the `public` schema
-- revokes default privileges for future tables, sequences, and functions
-
-If you only need to re-apply the security posture after schema changes:
-
-```bash
-make sync-remote-postgres-security
-```
-
-`make dev` will automatically:
-
-- use local Docker Postgres when `DATABASE_URL` points to `localhost` or `127.0.0.1`
-- use remote Postgres when `api/.env` contains a non-local `DATABASE_URL`
-
-## Open SQL shell against local Docker Postgres
+## Open SQL shell
 
 ```bash
 docker exec -it usdc-ops-postgres psql -U usdc_ops -d usdc_ops
