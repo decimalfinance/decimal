@@ -20,6 +20,7 @@ import {
   statusToneForCollection,
 } from '../status-labels';
 import { useToast } from '../ui/Toast';
+import { AddCollectionSourceDialog } from './CollectionSources';
 
 type UnifiedRow =
   | {
@@ -486,19 +487,34 @@ function CreateCollectionDialog(props: {
 }) {
   const { workspaceId, wallets, counterparties, collectionSources, onClose, onSuccess, onError } =
     props;
+  const queryClient = useQueryClient();
+  const { success } = useToast();
 
   // Payer picker mode — pick an existing source, type a wallet address, or leave blank
   const [payerMode, setPayerMode] = useState<'any' | 'existing' | 'new'>('any');
   const [selectedSourceId, setSelectedSourceId] = useState('');
   const [newPayerAddress, setNewPayerAddress] = useState('');
+  const [addSourceOpen, setAddSourceOpen] = useState(false);
+  const [knownSourceIdsBeforeAdd, setKnownSourceIdsBeforeAdd] = useState<string[] | null>(null);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && !addSourceOpen) onClose();
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, addSourceOpen]);
+
+  // After a new source is added, auto-select it once it appears in the refreshed list.
+  useEffect(() => {
+    if (!knownSourceIdsBeforeAdd) return;
+    const oldIds = new Set(knownSourceIdsBeforeAdd);
+    const newSource = collectionSources.find((s) => !oldIds.has(s.collectionSourceId) && s.isActive);
+    if (newSource) {
+      setSelectedSourceId(newSource.collectionSourceId);
+      setKnownSourceIdsBeforeAdd(null);
+    }
+  }, [collectionSources, knownSourceIdsBeforeAdd]);
 
   const mutation = useMutation({
     mutationFn: async (form: FormData) => {
@@ -609,26 +625,79 @@ function CreateCollectionDialog(props: {
                     className="rd-tab"
                     aria-selected={payerMode === m}
                     onClick={() => setPayerMode(m)}
-                    disabled={m === 'existing' && activeSources.length === 0}
                   >
                     {m === 'any' ? 'Any payer' : m === 'existing' ? 'Known source' : 'New wallet'}
                   </button>
                 ))}
               </div>
               {payerMode === 'existing' ? (
-                <select
-                  className="rd-select"
-                  value={selectedSourceId}
-                  onChange={(e) => setSelectedSourceId(e.target.value)}
-                >
-                  <option value="">Select a known payer source</option>
-                  {activeSources.map((s) => (
-                    <option key={s.collectionSourceId} value={s.collectionSourceId}>
-                      {s.label} · {displayCollectionSourceTrust(s.trustState)} ·{' '}
-                      {shortenAddress(s.walletAddress, 4, 4)}
-                    </option>
-                  ))}
-                </select>
+                activeSources.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <select
+                      className="rd-select"
+                      value={selectedSourceId}
+                      onChange={(e) => setSelectedSourceId(e.target.value)}
+                    >
+                      <option value="">Select a known payer source</option>
+                      {activeSources.map((s) => (
+                        <option key={s.collectionSourceId} value={s.collectionSourceId}>
+                          {s.label} · {displayCollectionSourceTrust(s.trustState)} ·{' '}
+                          {shortenAddress(s.walletAddress, 4, 4)}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="rd-link-button"
+                      onClick={() => {
+                        setKnownSourceIdsBeforeAdd(
+                          collectionSources.map((s) => s.collectionSourceId),
+                        );
+                        setAddSourceOpen(true);
+                      }}
+                      style={{
+                        alignSelf: 'flex-start',
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--ax-accent)',
+                        cursor: 'pointer',
+                        fontSize: 12,
+                        padding: 0,
+                      }}
+                    >
+                      + Add another known source
+                    </button>
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 8,
+                      padding: 12,
+                      border: '1px dashed var(--ax-border)',
+                      borderRadius: 6,
+                    }}
+                  >
+                    <p style={{ margin: 0, fontSize: 13, color: 'var(--ax-text-muted)' }}>
+                      No known payer sources yet. Save a wallet here so it carries trust state and a
+                      counterparty link to every future collection.
+                    </p>
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() => {
+                        setKnownSourceIdsBeforeAdd(
+                          collectionSources.map((s) => s.collectionSourceId),
+                        );
+                        setAddSourceOpen(true);
+                      }}
+                      style={{ alignSelf: 'flex-start' }}
+                    >
+                      + Add a known source
+                    </button>
+                  </div>
+                )
               ) : payerMode === 'new' ? (
                 <input
                   className="rd-input"
@@ -704,6 +773,21 @@ function CreateCollectionDialog(props: {
           ) : null}
         </form>
       </div>
+      {addSourceOpen ? (
+        <AddCollectionSourceDialog
+          workspaceId={workspaceId}
+          counterparties={counterparties}
+          onClose={() => setAddSourceOpen(false)}
+          onSuccess={() => {
+            setAddSourceOpen(false);
+            success('Payer source saved.');
+            queryClient.invalidateQueries({
+              queryKey: ['collection-sources', workspaceId],
+            });
+          }}
+          onError={(message) => onError(message)}
+        />
+      ) : null}
     </div>
   );
 }

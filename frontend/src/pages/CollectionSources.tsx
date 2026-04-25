@@ -315,7 +315,7 @@ export function CollectionSourcesPage({ session: _session }: { session: Authenti
   );
 }
 
-function AddCollectionSourceDialog(props: {
+export function AddCollectionSourceDialog(props: {
   workspaceId: string;
   counterparties: Counterparty[];
   onClose: () => void;
