@@ -16,7 +16,7 @@ It stores:
 ## Local Docker Postgres (used for both dev and prod-backend)
 
 Decimal runs against the local Postgres container in every environment —
-tests, local dev, and the production-backed runtime serving https://axoria.fun
+tests, local dev, and the production-backed runtime serving https://decimal.finance
 via Cloudflare Tunnel.
 
 ```bash

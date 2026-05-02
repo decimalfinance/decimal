@@ -311,7 +311,7 @@ The collections wedge landed recently (CollectionRequest / CollectionRun / Colle
 
 ## Operational Risks (laptop-hosted production)
 
-The "production" runtime serving https://axoria.fun runs on the user's laptop. This is intentional (free, low latency, see `local_prod_architecture.md`) but adds operational risks not present in managed-infra setups:
+The "production" runtime serving https://decimal.finance runs on the user's laptop. This is intentional (free, low latency, see `local_prod_architecture.md`) but adds operational risks not present in managed-infra setups:
 
 - Mac sleep / lid close kills the cloudflared tunnel. Mitigation: `caffeinate -i make prod-backend`.
 - Internet drop kills the API entirely. Mitigation: mobile hotspot backup before any demo.

@@ -3,6 +3,6 @@
   "clickhouseUrl": "http://127.0.0.1:8123",
   "clickhouseDatabase": "usdc_ops",
   "clickhouseUser": "default",
-  "controlPlaneApiUrl": "https://api.axoria.fun",
+  "controlPlaneApiUrl": "https://api.decimal.finance",
   "workspaceRefreshIntervalSeconds": 60
 }

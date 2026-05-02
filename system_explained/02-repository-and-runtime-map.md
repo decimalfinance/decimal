@@ -25,16 +25,16 @@ This repository contains one product split across several runtime processes.
 
 ## Runtime Processes
 
-The production-backed runtime that serves https://axoria.fun consists of:
+The production-backed runtime that serves https://decimal.finance consists of:
 
 ```text
 Frontend (Vercel CDN)
-  Static React/Vite SPA at https://axoria.fun. No Vercel functions, no proxy.
+  Static React/Vite SPA at https://decimal.finance. No Vercel functions, no proxy.
   Served from CDN edge. Build output = frontend/dist.
 
 Cloudflare Tunnel (cloudflared)
   Outbound tunnel from the laptop to Cloudflare. Exposes the laptop API as
-  https://api.axoria.fun. The browser hits this URL directly — Vercel is NOT
+  https://api.decimal.finance. The browser hits this URL directly — Vercel is NOT
   in the API call path.
 
 API (laptop)
@@ -140,7 +140,7 @@ Do not move high-volume chain event data into Postgres casually.
 ## Control Flow Between Services
 
 ```text
-Browser (axoria.fun, Vercel CDN)
+Browser (decimal.finance, Vercel CDN)
   -> Cloudflare Tunnel
   -> API (laptop)
   -> Postgres control-plane records

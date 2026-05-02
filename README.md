@@ -52,7 +52,7 @@ Current deployment:
 
 - frontend on Vercel
 - backend API, PostgreSQL, ClickHouse, and Yellowstone worker on a MacBook
-- Cloudflare Tunnel exposing `api.axoria.fun`
+- Cloudflare Tunnel exposing `api.decimal.finance`
 
 ## Repo structure
 

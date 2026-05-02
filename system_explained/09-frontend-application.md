@@ -7,16 +7,16 @@ The frontend lives in `frontend/` and is a Vite + React + TypeScript app with Re
 - `frontend/src/App.tsx` — router shell + shared layout + auth gate. Still ~5,280 lines because some legacy inline page components (Policy, Exceptions, parts of the address book) and shared row/table primitives haven't been extracted yet. Most user-facing pages have been moved out.
 - `frontend/src/Sidebar.tsx` — institutional sidebar: workspace switcher, nav groups (**Operations** / **Registry** / **Advanced**), theme toggle, profile menu, walkthrough tutorial trigger on first signup.
 - `frontend/src/pages/*.tsx` — one file per top-level extracted page (see "Page-by-page notes" below).
-- `frontend/src/pages/landing/*.tsx` — landing page composed of `Hero`, `Features`, `Workflow`, `ProductUI`, `CodeWall`, `FinalCTA`, `Icons`, `heroVisuals/`. Shipped via Vercel at https://axoria.fun.
+- `frontend/src/pages/landing/*.tsx` — landing page composed of `Hero`, `Features`, `Workflow`, `ProductUI`, `CodeWall`, `FinalCTA`, `Icons`, `heroVisuals/`. Shipped via Vercel at https://decimal.finance.
 - `frontend/src/api.ts` — typed HTTP client for every endpoint the UI uses.
-- `frontend/src/public-config.ts` — reads `config/frontend.public.json` for `apiBaseUrl` (`https://api.axoria.fun` in prod) and the public Solana RPC URL.
+- `frontend/src/public-config.ts` — reads `config/frontend.public.json` for `apiBaseUrl` (`https://api.decimal.finance` in prod) and the public Solana RPC URL.
 - `frontend/src/domain.ts` — cross-cutting helpers: address shortening, USDC formatting, Solana wallet discovery / signing, USD value computation.
 - `frontend/src/ui/Toast.tsx` — toast provider used by every page for success / error / info notices.
 - `frontend/src/styles/` — the design system (see below).
 
 ## Deployment
 
-Frontend is deployed to Vercel CDN at https://axoria.fun. `vercel.json` configures it as a static SPA: `buildCommand: "cd frontend && npm install && npm run build"`, `outputDirectory: "frontend/dist"`, framework null, with a single SPA-fallback rewrite to `index.html`. There are NO Vercel functions and NO API proxy — the browser hits the API directly at `https://api.axoria.fun` (Cloudflare tunnel to the laptop).
+Frontend is deployed to Vercel CDN at https://decimal.finance. `vercel.json` configures it as a static SPA: `buildCommand: "cd frontend && npm install && npm run build"`, `outputDirectory: "frontend/dist"`, framework null, with a single SPA-fallback rewrite to `index.html`. There are NO Vercel functions and NO API proxy — the browser hits the API directly at `https://api.decimal.finance` (Cloudflare tunnel to the laptop).
 
 ## Design system
 

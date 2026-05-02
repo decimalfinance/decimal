@@ -35,7 +35,7 @@ dev:
 	if [[ -f api/.env ]]; then set -a && source api/.env && set +a; fi && \
 	if [[ -f yellowstone/.env ]]; then set -a && source yellowstone/.env && set +a; fi && \
 	export DATABASE_URL="$${DATABASE_URL:-$(POSTGRES_URL)}" && \
-	export CONTROL_PLANE_API_URL="$${CONTROL_PLANE_API_URL:-https://api.axoria.fun}" && \
+	export CONTROL_PLANE_API_URL="$${CONTROL_PLANE_API_URL:-https://api.decimal.finance}" && \
 	export CLICKHOUSE_URL="$${CLICKHOUSE_URL:-http://127.0.0.1:8123}" && \
 	$(MAKE) sync-postgres-schema && \
 	docker compose up -d clickhouse && \
@@ -112,13 +112,13 @@ dev-worker:
 
 tunnel:
 	set -euo pipefail && \
-	cloudflared tunnel run axoria-api
+	cloudflared tunnel run decimal-api
 
 # Production-backed local runtime ------------------------------------------
 # Starts the local services that back the deployed Vercel frontend:
 #   Postgres + ClickHouse (local docker) -> API -> Yellowstone worker
-#   -> Cloudflare Tunnel exposing api.axoria.fun
-# Does NOT run a local frontend. https://axoria.fun is live from Vercel.
+#   -> Cloudflare Tunnel exposing api.decimal.finance
+# Does NOT run a local frontend. https://decimal.finance is live from Vercel.
 
 prod-backend:
 	set -euo pipefail && \
@@ -129,7 +129,7 @@ prod-backend:
 	set -a && source api/.env && set +a && \
 	if [[ -f yellowstone/.env ]]; then set -a && source yellowstone/.env && set +a; fi && \
 	export CLICKHOUSE_URL="$${CLICKHOUSE_URL:-http://127.0.0.1:8123}" && \
-	export CONTROL_PLANE_API_URL="$${CONTROL_PLANE_API_URL:-https://api.axoria.fun}" && \
+	export CONTROL_PLANE_API_URL="$${CONTROL_PLANE_API_URL:-https://api.decimal.finance}" && \
 	$(MAKE) sync-postgres-schema && \
 	docker compose up -d clickhouse && \
 	docker compose exec -T clickhouse sh -lc 'clickhouse-client --multiquery < /docker-entrypoint-initdb.d/001-bootstrap.sql >/dev/null && clickhouse-client --multiquery < /docker-entrypoint-initdb.d/002-schema.sql >/dev/null' && \
@@ -140,11 +140,11 @@ prod-backend:
 	  sleep 1; \
 	done && \
 	(cd api && npm run prisma:generate >/dev/null) && \
-	pkill -f "cloudflared tunnel run axoria-api" >/dev/null 2>&1 || true && \
+	pkill -f "cloudflared tunnel run decimal-api" >/dev/null 2>&1 || true && \
 	typeset -a pids && \
 	(cd api && exec npm run dev) & \
 	pids+=($$!) && \
-	cloudflared tunnel run axoria-api & \
+	cloudflared tunnel run decimal-api & \
 	pids+=($$!) && \
 	if [[ -n "$${YELLOWSTONE_ENDPOINT:-}" ]]; then \
 	  for _ in {1..60}; do \
@@ -207,10 +207,10 @@ help:
 	@echo "    dev-api            API only"
 	@echo "    dev-frontend       Vite frontend only"
 	@echo "    dev-worker         Yellowstone worker only"
-	@echo "    tunnel             Cloudflare Tunnel (api.axoria.fun -> localhost:3100)"
+	@echo "    tunnel             Cloudflare Tunnel (api.decimal.finance -> localhost:3100)"
 	@echo ""
 	@echo "  Production-backed runtime (local postgres + clickhouse + tunnel)"
-	@echo "    prod-backend       API + worker + tunnel, serving https://axoria.fun"
+	@echo "    prod-backend       API + worker + tunnel, serving https://decimal.finance"
 	@echo ""
 	@echo "  Data"
 	@echo "    reset-data         Truncate local docker postgres + clickhouse"

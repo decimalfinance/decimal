@@ -160,7 +160,7 @@ The worker only treats `TreasuryWallet.address` entries as "ours." Destination w
 
 ## Infrastructure
 
-- `Makefile` — `make prod-backend` (production-backed runtime serving https://axoria.fun), `make dev` (full local stack), `make infra-up`, `make test`, `make backup-db` / `make restore-db` / `make list-backups`, `make reset-data`, `make reset-prod-data`, individual `dev-api` / `dev-frontend` / `dev-worker` / `tunnel`. `.SILENT` is set so recipe text is not echoed.
+- `Makefile` — `make prod-backend` (production-backed runtime serving https://decimal.finance), `make dev` (full local stack), `make infra-up`, `make test`, `make backup-db` / `make restore-db` / `make list-backups`, `make reset-data`, `make reset-prod-data`, individual `dev-api` / `dev-frontend` / `dev-worker` / `tunnel`. `.SILENT` is set so recipe text is not echoed.
 - `docker-compose.yml` — Postgres + ClickHouse dev stack. Container names: `usdc-ops-postgres`, `usdc-ops-clickhouse`. Postgres volume: `stablecoin_intelligence_postgres_data`.
 - `vercel.json` — frontend deploy config (static SPA, no functions).
 - `postgres/init/001-control-plane.sql` — initial Postgres seed / support objects (idempotent CREATE IF NOT EXISTS). Note: `002-supabase-hardening.sql` was deleted 2026-04-26 when the project moved off Supabase to local docker — it would have errored against any non-Supabase Postgres because it referenced the `anon` and `authenticated` roles.

@@ -1,6 +1,6 @@
 # 11 Operating Testing And Debugging
 
-This file explains how to run, test, and debug Decimal locally and on the production-backed runtime that serves https://axoria.fun.
+This file explains how to run, test, and debug Decimal locally and on the production-backed runtime that serves https://decimal.finance.
 
 ## Run Modes
 
@@ -12,7 +12,7 @@ Decimal has two practical run modes; pick by intent.
 make prod-backend
 ```
 
-Brings up local Postgres and ClickHouse via docker compose, applies schemas, starts the API, kills any stale `cloudflared` and starts a fresh tunnel exposing the API as `https://api.axoria.fun`, waits for `/health`, then compiles and starts the Yellowstone worker. The deployed Vercel frontend at https://axoria.fun talks to this API. There is no local frontend in this mode.
+Brings up local Postgres and ClickHouse via docker compose, applies schemas, starts the API, kills any stale `cloudflared` and starts a fresh tunnel exposing the API as `https://api.decimal.finance`, waits for `/health`, then compiles and starts the Yellowstone worker. The deployed Vercel frontend at https://decimal.finance talks to this API. There is no local frontend in this mode.
 
 Requires `api/.env` with a local `DATABASE_URL` and `yellowstone/.env` with `YELLOWSTONE_ENDPOINT` set (the Makefile gates the worker on the env var even though `config/worker.config.json` also carries it).
 
@@ -32,7 +32,7 @@ For separate terminals:
 make dev-api        # API only
 make dev-frontend   # Vite frontend only
 make dev-worker     # Yellowstone worker only
-make tunnel         # Cloudflare tunnel only (api.axoria.fun -> localhost:3100)
+make tunnel         # Cloudflare tunnel only (api.decimal.finance -> localhost:3100)
 ```
 
 ### Infrastructure only
@@ -106,7 +106,7 @@ The "production" runs on the user's laptop. Three things will silently kill the 
 - **Internet drop** kills the tunnel. Mobile hotspot is the backup.
 - **`docker compose down -v`** nukes the Postgres volume. Don't.
 
-The deployed `axoria.fun` frontend on Vercel keeps serving even when the laptop is offline, but every API call from the browser will fail until the tunnel is back.
+The deployed `decimal.finance` frontend on Vercel keeps serving even when the laptop is offline, but every API call from the browser will fail until the tunnel is back.
 
 ## Debug A Payment That Did Not Settle
 
@@ -190,7 +190,7 @@ The worker should not need polling to stay fresh.
 
 ## Debug CORS
 
-Local frontend may run on a different port than the API. The API allows localhost / 127.0.0.1 dev origins by default. The deployed frontend at https://axoria.fun is also allowed by the API CORS config. If a browser request fails with CORS:
+Local frontend may run on a different port than the API. The API allows localhost / 127.0.0.1 dev origins by default. The deployed frontend at https://decimal.finance is also allowed by the API CORS config. If a browser request fails with CORS:
 
 - check method is allowed
 - check route exists
