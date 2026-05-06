@@ -1,5 +1,5 @@
 {
   "apiBaseUrl": "https://api.decimal.finance",
   "localApiBaseUrl": "http://127.0.0.1:3100",
-  "solanaRpcUrl": "https://solana-mainnet.g.alchemy.com/v2/PIc1wmnH_QhOEwH3vtddMUwcYluAEHMU"
+  "solanaRpcUrl": "https://api.devnet.solana.com"
 }

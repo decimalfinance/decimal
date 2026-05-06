@@ -52,6 +52,24 @@ export type LoginResponse = {
   devEmailVerificationCode?: string | null;
 };
 
+export type SolanaNetwork = 'devnet' | 'mainnet';
+
+export type CapabilitiesResponse = {
+  product: string;
+  version: number;
+  generatedAt: string;
+  solana: {
+    network: SolanaNetwork;
+    usdcMint: string;
+    rpcUrl: string;
+  };
+  auth: Record<string, unknown>;
+  apiSurface: Record<string, unknown>;
+  workflows: Array<Record<string, unknown>>;
+  endpointGroups: Array<Record<string, unknown>>;
+  safetyNotes: string[];
+};
+
 export type UserWallet = {
   userWalletId: string;
   userId: string;

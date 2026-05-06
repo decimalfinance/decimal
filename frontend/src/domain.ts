@@ -4,6 +4,8 @@ export {
   formatRelativeTime,
   formatTimestamp,
   formatUsd,
+  explorerAccountUrl,
+  explorerTransactionUrl,
   orbAccountUrl,
   orbTransactionUrl,
   shortenAddress,

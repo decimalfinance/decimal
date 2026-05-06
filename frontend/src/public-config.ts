@@ -1,4 +1,5 @@
 import frontendPublicConfig from '../../config/frontend.public.json';
+import { getRuntimeSolanaRpcUrl } from './solana-network';
 
 type PublicConfig = {
   apiBaseUrl: string;
@@ -19,6 +20,11 @@ export function getPublicApiBaseUrl() {
 }
 
 export function getPublicSolanaRpcUrl() {
+  const runtimeValue = getRuntimeSolanaRpcUrl().trim();
+  if (runtimeValue) {
+    return runtimeValue;
+  }
+
   const value = String(config.solanaRpcUrl ?? '').trim();
   if (!value) {
     return 'https://api.mainnet-beta.solana.com';

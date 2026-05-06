@@ -1,3 +1,6 @@
+import type { SolanaNetwork } from '../solana-network';
+import { getRuntimeSolanaNetwork } from '../solana-network';
+
 export function formatRawUsdc(amountRaw: string) {
   const negative = amountRaw.startsWith('-');
   const digits = negative ? amountRaw.slice(1) : amountRaw;
@@ -115,13 +118,30 @@ export function shortenAddress(value: string | null | undefined, prefix = 6, suf
 }
 
 export function orbTransactionUrl(signature: string) {
-  return `https://orbmarkets.io/tx/${signature}?tab=summary`;
+  return explorerTransactionUrl(signature, getRuntimeSolanaNetwork());
 }
 
 export function orbAccountUrl(address: string) {
-  return `https://orbmarkets.io/address/${address}?tab=summary`;
+  return explorerAccountUrl(address, getRuntimeSolanaNetwork());
 }
 
 export function solanaAccountUrl(address: string) {
-  return `https://explorer.solana.com/address/${address}`;
+  const network = getRuntimeSolanaNetwork();
+  return network === 'devnet'
+    ? `https://explorer.solana.com/address/${address}?cluster=devnet`
+    : `https://explorer.solana.com/address/${address}`;
+}
+
+export function explorerTransactionUrl(signature: string, network: SolanaNetwork) {
+  if (network === 'mainnet') {
+    return `https://orbmarkets.io/tx/${signature}?tab=summary`;
+  }
+  return `https://explorer.solana.com/tx/${signature}?cluster=devnet`;
+}
+
+export function explorerAccountUrl(address: string, network: SolanaNetwork) {
+  if (network === 'mainnet') {
+    return `https://orbmarkets.io/address/${address}?tab=summary`;
+  }
+  return `https://explorer.solana.com/address/${address}?cluster=devnet`;
 }
