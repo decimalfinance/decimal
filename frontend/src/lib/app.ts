@@ -126,22 +126,15 @@ export function orbAccountUrl(address: string) {
 }
 
 export function solanaAccountUrl(address: string) {
-  const network = getRuntimeSolanaNetwork();
-  return network === 'devnet'
-    ? `https://explorer.solana.com/address/${address}?cluster=devnet`
-    : `https://explorer.solana.com/address/${address}`;
+  return explorerAccountUrl(address, getRuntimeSolanaNetwork());
 }
 
 export function explorerTransactionUrl(signature: string, network: SolanaNetwork) {
-  if (network === 'mainnet') {
-    return `https://orbmarkets.io/tx/${signature}?tab=summary`;
-  }
-  return `https://explorer.solana.com/tx/${signature}?cluster=devnet`;
+  const cluster = network === 'devnet' ? '&cluster=devnet' : '';
+  return `https://orbmarkets.io/tx/${signature}?tab=summary${cluster}`;
 }
 
 export function explorerAccountUrl(address: string, network: SolanaNetwork) {
-  if (network === 'mainnet') {
-    return `https://orbmarkets.io/address/${address}?tab=summary`;
-  }
-  return `https://explorer.solana.com/address/${address}?cluster=devnet`;
+  const cluster = network === 'devnet' ? '&cluster=devnet' : '';
+  return `https://orbmarkets.io/address/${address}?tab=summary${cluster}`;
 }
