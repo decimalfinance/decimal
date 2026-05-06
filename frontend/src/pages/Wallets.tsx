@@ -311,7 +311,7 @@ function AddWalletDialog(props: {
               Add wallet
             </h2>
             <p className="rd-dialog-body">
-              Choose a custody provider to create a new Solana wallet for this organization.
+              Choose a custody provider to create a new wallet.
             </p>
             <div className="provider-grid" style={{ marginTop: 8 }}>
               <button
@@ -319,15 +319,10 @@ function AddWalletDialog(props: {
                 type="button"
                 onClick={() => setStep('create')}
               >
-                <span className="provider-icon">P</span>
+                <span className="provider-icon provider-icon-logo" data-provider="privy" aria-hidden />
                 <span className="provider-card-main">
                   <strong>Privy</strong>
                   <small>Embedded Solana wallet managed through Privy. Keys never leave the browser.</small>
-                  <span className="provider-chip-row">
-                    <span className="provider-chip">Solana</span>
-                    <span className="provider-chip">Embedded</span>
-                    <span className="provider-chip">Transfers</span>
-                  </span>
                 </span>
               </button>
             </div>
@@ -352,15 +347,14 @@ function AddWalletDialog(props: {
               }}
             >
               <div className="provider-modal-summary" style={{ marginBottom: 16 }}>
-                <span className="provider-icon provider-icon-large">P</span>
+                <span
+                  className="provider-icon provider-icon-large provider-icon-logo"
+                  data-provider="privy"
+                  aria-hidden
+                />
                 <div>
                   <strong>Privy</strong>
                   <p>Embedded Solana wallet managed through Privy.</p>
-                  <span className="provider-chip-row">
-                    <span className="provider-chip">Solana</span>
-                    <span className="provider-chip">Embedded</span>
-                    <span className="provider-chip">Transfers</span>
-                  </span>
                 </div>
               </div>
               <label className="field">

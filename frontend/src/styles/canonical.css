@@ -308,6 +308,23 @@ input[type='checkbox']:checked::after {
   border-radius: 16px;
 }
 
+/* Provider logo variant — image instead of letter placeholder.
+   Theme-aware via background-image swap on [data-theme='dark']. */
+.provider-icon-logo {
+  background: transparent;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.provider-icon-logo[data-provider='privy'] {
+  background-image: url('/Privy-square-coral.svg');
+}
+
+[data-theme='dark'] .provider-icon-logo[data-provider='privy'] {
+  background-image: url('/Privy-square.svg');
+}
+
 .provider-card-main {
   min-width: 0;
   display: grid;
