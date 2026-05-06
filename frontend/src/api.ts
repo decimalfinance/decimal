@@ -27,6 +27,10 @@ import type {
   PaymentRunImportResult,
   ReconciliationRow,
   Organization,
+  ConfirmSquadsTreasuryRequest,
+  CreateSquadsTreasuryIntentRequest,
+  CreateSquadsTreasuryIntentResponse,
+  SquadsTreasuryStatus,
   TreasuryWallet,
   ManagedWalletProvider,
   UserWallet,
@@ -393,6 +397,46 @@ export const api = {
       }),
     });
   },
+
+  // Squads v4 treasury creation. Three-step flow:
+  //   1. createSquadsTreasuryIntent — backend prepares + partially signs
+  //      a VersionedTransaction; returns intent metadata + serialized tx
+  //   2. (frontend) sign with the user's personal wallet, submit to chain
+  //   3. confirmSquadsTreasury — backend confirms onchain state and
+  //      persists a TreasuryWallet row with source='squads_v4',
+  //      address=vault PDA, sourceRef=multisig PDA
+  // getSquadsTreasuryStatus reads live Squads state for an existing
+  // squads_v4 treasury — useful for badges and a details panel.
+  createSquadsTreasuryIntent(
+    organizationId: string,
+    input: CreateSquadsTreasuryIntentRequest,
+  ) {
+    return request<CreateSquadsTreasuryIntentResponse>(
+      `/organizations/${organizationId}/treasury-wallets/squads/create-intent`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+    );
+  },
+  confirmSquadsTreasury(
+    organizationId: string,
+    input: ConfirmSquadsTreasuryRequest,
+  ) {
+    return request<TreasuryWallet>(
+      `/organizations/${organizationId}/treasury-wallets/squads/confirm`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+    );
+  },
+  getSquadsTreasuryStatus(organizationId: string, treasuryWalletId: string) {
+    return request<SquadsTreasuryStatus>(
+      `/organizations/${organizationId}/treasury-wallets/${treasuryWalletId}/squads/status`,
+    );
+  },
+
   listTransfers(organizationId: string) {
     return request<{ servedAt: string; items: ObservedTransfer[] }>(
       `/organizations/${organizationId}/transfers?limit=100`,

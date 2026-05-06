@@ -160,6 +160,86 @@ export type TreasuryWallet = {
   updatedAt: string;
 };
 
+// Squads v4 treasury creation — see backend api/src/squads-treasury.ts.
+// Frontend obtains an "intent" with a partially-signed VersionedTransaction,
+// adds the user's personal-wallet signature, submits to chain, then calls
+// confirm to persist the new treasury record.
+
+export type SquadsPermission = 'initiate' | 'vote' | 'execute';
+
+export type SquadsTreasuryProvider = 'squads_v4';
+
+export type SquadsTreasurySource = 'squads_v4';
+
+export type CreateSquadsTreasuryIntentRequest = {
+  displayName?: string | null;
+  creatorPersonalWalletId: string;
+  threshold: number;
+  timeLockSeconds?: number;
+  vaultIndex?: number;
+  members: Array<{
+    personalWalletId: string;
+    permissions: SquadsPermission[];
+  }>;
+};
+
+export type SquadsIntentMember = {
+  personalWalletId: string;
+  walletAddress: string;
+  userId: string;
+  membershipId: string;
+  permissions: SquadsPermission[];
+};
+
+export type CreateSquadsTreasuryIntentResponse = {
+  intent: {
+    provider: SquadsTreasuryProvider;
+    programId: string;
+    createKey: string;
+    multisigPda: string;
+    vaultPda: string;
+    vaultIndex: number;
+    threshold: number;
+    timeLockSeconds: number;
+    displayName: string | null;
+    members: SquadsIntentMember[];
+  };
+  transaction: {
+    encoding: 'base64';
+    serializedTransaction: string;
+    requiredSigner: string;
+    recentBlockhash: string;
+    lastValidBlockHeight: number;
+  };
+};
+
+export type ConfirmSquadsTreasuryRequest = {
+  signature: string;
+  displayName?: string | null;
+  createKey: string;
+  multisigPda: string;
+  vaultIndex?: number;
+};
+
+export type SquadsTreasuryStatus = {
+  treasuryWalletId: string;
+  provider: SquadsTreasuryProvider;
+  programId: string;
+  multisigPda: string;
+  vaultPda: string;
+  vaultIndex: number;
+  threshold: number;
+  timeLockSeconds: number;
+  transactionIndex: string;
+  staleTransactionIndex: string;
+  members: Array<{
+    walletAddress: string;
+    permissionsMask: number;
+    permissions: SquadsPermission[];
+  }>;
+  localStateMatchesChain: boolean;
+};
+
 export type TreasuryWalletLite = {
   treasuryWalletId: string;
   address: string;
