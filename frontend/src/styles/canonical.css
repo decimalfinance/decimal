@@ -265,11 +265,10 @@ input[type='checkbox']:checked::after {
 }
 
 .provider-card {
-  min-height: 152px;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 14px;
-  align-items: start;
+  align-items: center;
   padding: 16px;
   border: 1px solid var(--ax-border);
   border-radius: var(--ax-r-sm);
@@ -308,8 +307,7 @@ input[type='checkbox']:checked::after {
   border-radius: 16px;
 }
 
-/* Provider logo variant — image instead of letter placeholder.
-   Theme-aware via background-image swap on [data-theme='dark']. */
+/* Provider logo variant — image instead of letter placeholder. */
 .provider-icon-logo {
   background: transparent;
   background-size: cover;
@@ -319,10 +317,6 @@ input[type='checkbox']:checked::after {
 
 .provider-icon-logo[data-provider='privy'] {
   background-image: url('/Privy-square-coral.svg');
-}
-
-[data-theme='dark'] .provider-icon-logo[data-provider='privy'] {
-  background-image: url('/Privy-square.svg');
 }
 
 .provider-card-main {
