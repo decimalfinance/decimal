@@ -7,6 +7,7 @@ import type {
   CreateSquadsTreasuryIntentResponse,
   UserWallet,
 } from '../types';
+import { Connection, VersionedTransaction } from '@solana/web3.js';
 import {
   computeWalletUsdValue,
   formatRawUsdcCompact,
@@ -14,7 +15,15 @@ import {
   shortenAddress,
   orbAccountUrl,
 } from '../domain';
+import { resolveSolanaRpcUrl } from '../lib/solana-wallet';
 import { useToast } from '../ui/Toast';
+
+function decodeBase64ToBytes(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i);
+  return out;
+}
 
 const LAMPORTS_PER_SOL = 1_000_000_000n;
 
@@ -457,12 +466,27 @@ function CreateSquadsTreasuryDialog(props: {
   onError: (message: string) => void;
   onConfirmed: () => Promise<void> | void;
 }) {
-  const { organizationId, personalWallets, personalWalletsLoading, onClose, onError } = props;
+  const { organizationId, personalWallets, personalWalletsLoading, onClose, onError, onConfirmed } = props;
   const navigate = useNavigate();
   const [step, setStep] = useState<'config' | 'review' | 'sign'>('config');
   const [name, setName] = useState('');
   const [creatorWalletId, setCreatorWalletId] = useState('');
   const [pendingIntent, setPendingIntent] = useState<CreateSquadsTreasuryIntentResponse | null>(null);
+  // Phase tracks the live progress of the sign-and-confirm pipeline.
+  // 'submitted-pending-confirm' is the recoverable state: tx hit chain
+  // but the backend confirm step failed — we keep the signature and
+  // let the user retry just the confirm leg without re-signing.
+  const [phase, setPhase] = useState<
+    | 'idle'
+    | 'signing'
+    | 'submitting'
+    | 'confirming-onchain'
+    | 'persisting'
+    | 'submitted-pending-confirm'
+    | 'error'
+  >('idle');
+  const [submittedSignature, setSubmittedSignature] = useState<string | null>(null);
+  const [phaseError, setPhaseError] = useState<string | null>(null);
 
   // Auto-select the only wallet if exactly one exists.
   useEffect(() => {
@@ -502,6 +526,85 @@ function CreateSquadsTreasuryDialog(props: {
     },
     onError: (err) => onError(err instanceof Error ? err.message : 'Could not prepare Squads transaction.'),
   });
+
+  // Run the full Sign + Submit + Confirm-on-chain + Confirm-with-backend
+  // pipeline. Recoverable failure modes:
+  //   - sign / submit fail before chain accepts -> no signature kept,
+  //     user can retry from scratch
+  //   - confirm-on-chain or confirm-with-backend fail AFTER chain
+  //     accepted -> we keep the signature in state so the next click
+  //     skips signing and resumes from confirmation
+  async function runSignAndConfirm() {
+    if (!pendingIntent) return;
+    if (!creatorWalletId) {
+      setPhase('error');
+      setPhaseError('Creator wallet missing.');
+      return;
+    }
+    setPhaseError(null);
+
+    let signatureToConfirm = submittedSignature;
+
+    try {
+      const connection = new Connection(resolveSolanaRpcUrl(), 'confirmed');
+
+      if (!signatureToConfirm) {
+        // Step 1: backend signs with the user's Privy wallet.
+        setPhase('signing');
+        const signed = await api.signPersonalWalletVersionedTransaction(creatorWalletId, {
+          serializedTransactionBase64: pendingIntent.transaction.serializedTransaction,
+        });
+
+        // Step 2: submit the now-fully-signed tx to chain.
+        setPhase('submitting');
+        const signedBytes = decodeBase64ToBytes(signed.signedTransactionBase64);
+        // Validate it deserializes before we send (catches an obvious
+        // malformed response cheaply).
+        VersionedTransaction.deserialize(signedBytes);
+        const sig = await connection.sendRawTransaction(signedBytes, {
+          skipPreflight: false,
+          preflightCommitment: 'confirmed',
+        });
+        setSubmittedSignature(sig);
+        signatureToConfirm = sig;
+
+        // Step 3: wait for chain confirmation against the intent's
+        // blockhash + last valid block height.
+        setPhase('confirming-onchain');
+        const confirmResult = await connection.confirmTransaction(
+          {
+            signature: sig,
+            blockhash: pendingIntent.transaction.recentBlockhash,
+            lastValidBlockHeight: pendingIntent.transaction.lastValidBlockHeight,
+          },
+          'confirmed',
+        );
+        if (confirmResult.value.err) {
+          throw new Error(`On-chain error: ${JSON.stringify(confirmResult.value.err)}`);
+        }
+      }
+
+      // Step 4: persist via backend.
+      setPhase('persisting');
+      await api.confirmSquadsTreasury(organizationId, {
+        signature: signatureToConfirm!,
+        displayName: pendingIntent.intent.displayName,
+        createKey: pendingIntent.intent.createKey,
+        multisigPda: pendingIntent.intent.multisigPda,
+        vaultIndex: pendingIntent.intent.vaultIndex,
+      });
+
+      await onConfirmed();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Squads creation failed.';
+      setPhaseError(message);
+      // If we have a submitted signature already, surface a recoverable
+      // state so the user can retry just the confirm leg. Otherwise it's
+      // a hard error and we reset to allow re-signing.
+      setPhase(signatureToConfirm ? 'submitted-pending-confirm' : 'error');
+      onError(message);
+    }
+  }
 
   // Empty state: user has no personal wallet -> can't create a Squads
   // treasury at all (need at least one signer).
@@ -666,34 +769,63 @@ function CreateSquadsTreasuryDialog(props: {
             Sign and confirm
           </h2>
           <p className="rd-dialog-body">
-            The Squads transaction is prepared and partially signed by Decimal. Sign with the required personal wallet, submit to chain, and Decimal persists the new treasury.
+            Decimal will sign with your Privy-backed personal wallet, submit to chain, and persist the new treasury record. Don't close this window.
           </p>
-          <div
-            style={{
-              padding: 12,
-              border: '1px dashed var(--ax-warning)',
-              borderRadius: 6,
-              background: 'var(--ax-surface-1)',
-              fontSize: 13,
-              lineHeight: 1.5,
-            }}
-          >
-            <strong style={{ display: 'block', marginBottom: 4 }}>Signing not yet wired</strong>
-            <span style={{ color: 'var(--ax-text-muted)' }}>
-              Personal wallets are Privy server-managed and the frontend has no Privy SDK. The next backend tranche should add an endpoint that signs a serialized VersionedTransaction with the user's Privy wallet — once it exists, this dialog calls it, submits the signed bytes, and finishes with{' '}
-              <code>confirmSquadsTreasury</code>.
-            </span>
+
+          <div style={{ marginBottom: 12 }}>
+            <SquadsPhaseList phase={phase} />
           </div>
-          <div style={{ marginTop: 12, fontSize: 12, color: 'var(--ax-text-muted)', fontFamily: 'monospace' }}>
+
+          {phaseError ? (
+            <div
+              style={{
+                padding: 12,
+                border: '1px solid var(--ax-danger)',
+                borderRadius: 6,
+                background: 'var(--ax-surface-1)',
+                fontSize: 13,
+                lineHeight: 1.5,
+                marginBottom: 12,
+              }}
+            >
+              <strong style={{ display: 'block', marginBottom: 4, color: 'var(--ax-danger)' }}>
+                {phase === 'submitted-pending-confirm' ? 'Transaction landed but confirmation failed' : 'Squads creation failed'}
+              </strong>
+              <span style={{ color: 'var(--ax-text-muted)' }}>{phaseError}</span>
+              {phase === 'submitted-pending-confirm' && submittedSignature ? (
+                <div style={{ marginTop: 8, fontSize: 12, fontFamily: 'monospace', color: 'var(--ax-text-muted)' }}>
+                  signature: {shortenAddress(submittedSignature, 8, 8)}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div style={{ fontSize: 12, color: 'var(--ax-text-muted)', fontFamily: 'monospace' }}>
             createKey: {shortenAddress(intent.createKey, 6, 6)} · multisig:{' '}
             {shortenAddress(intent.multisigPda, 6, 6)} · vault: {shortenAddress(intent.vaultPda, 6, 6)}
           </div>
+
           <div className="rd-dialog-actions" style={{ marginTop: 20 }}>
-            <button type="button" className="button button-secondary" onClick={() => setStep('review')}>
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={() => setStep('review')}
+              disabled={phase === 'signing' || phase === 'submitting' || phase === 'confirming-onchain' || phase === 'persisting'}
+            >
               Back
             </button>
-            <button type="button" className="button button-primary" disabled aria-disabled>
-              Sign and create (pending backend)
+            <button
+              type="button"
+              className="button button-primary"
+              onClick={() => runSignAndConfirm()}
+              disabled={phase === 'signing' || phase === 'submitting' || phase === 'confirming-onchain' || phase === 'persisting'}
+              aria-busy={phase === 'signing' || phase === 'submitting' || phase === 'confirming-onchain' || phase === 'persisting'}
+            >
+              {phase === 'idle' || phase === 'error'
+                ? 'Sign and create'
+                : phase === 'submitted-pending-confirm'
+                  ? 'Retry confirmation'
+                  : 'Working…'}
             </button>
           </div>
         </>
@@ -721,6 +853,79 @@ function DialogShell(props: {
         {props.children}
       </div>
     </div>
+  );
+}
+
+type SquadsPhase =
+  | 'idle'
+  | 'signing'
+  | 'submitting'
+  | 'confirming-onchain'
+  | 'persisting'
+  | 'submitted-pending-confirm'
+  | 'error';
+
+function SquadsPhaseList({ phase }: { phase: SquadsPhase }) {
+  const steps: Array<{ key: SquadsPhase; label: string }> = [
+    { key: 'signing', label: 'Sign with Privy wallet' },
+    { key: 'submitting', label: 'Submit to Solana' },
+    { key: 'confirming-onchain', label: 'Confirm on-chain' },
+    { key: 'persisting', label: 'Persist treasury record' },
+  ];
+  const order: SquadsPhase[] = ['idle', 'signing', 'submitting', 'confirming-onchain', 'persisting'];
+  const currentIndex = order.indexOf(phase);
+
+  return (
+    <ol style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 6 }}>
+      {steps.map((step, i) => {
+        const stepIndex = order.indexOf(step.key);
+        const isActive = phase === step.key;
+        const isDone =
+          phase === 'submitted-pending-confirm'
+            ? // After a submitted tx, signing + submitting are done; the
+              // current step in flight is confirm-on-chain or persisting
+              i < 2
+            : currentIndex > stepIndex;
+        return (
+          <li
+            key={step.key}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              fontSize: 13,
+              color: isActive
+                ? 'var(--ax-text)'
+                : isDone
+                  ? 'var(--ax-text-muted)'
+                  : 'var(--ax-text-faint)',
+            }}
+          >
+            <span
+              aria-hidden
+              style={{
+                width: 18,
+                height: 18,
+                borderRadius: 9,
+                display: 'inline-grid',
+                placeItems: 'center',
+                fontSize: 11,
+                fontWeight: 600,
+                background: isDone ? 'var(--ax-accent-dim)' : 'var(--ax-surface-2)',
+                color: isDone ? 'var(--ax-accent)' : 'var(--ax-text-muted)',
+                border: isActive ? '1px solid var(--ax-accent)' : '1px solid transparent',
+              }}
+            >
+              {isDone ? '✓' : i + 1}
+            </span>
+            {step.label}
+            {isActive ? (
+              <span style={{ color: 'var(--ax-text-muted)', fontSize: 12 }}>· in progress…</span>
+            ) : null}
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 

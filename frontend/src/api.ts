@@ -243,6 +243,25 @@ export const api = {
       body: JSON.stringify(input),
     });
   },
+  // Backend signs the serialized VersionedTransaction with the user's
+  // Privy-embedded wallet (private key never leaves the backend or
+  // Privy). Backend validates: wallet belongs to caller, is active +
+  // Solana + privy_embedded, the wallet is a required signer on the
+  // transaction, and the transaction includes the Squads v4 program.
+  signPersonalWalletVersionedTransaction(
+    userWalletId: string,
+    input: { serializedTransactionBase64: string },
+  ) {
+    return request<{
+      userWalletId: string;
+      walletAddress: string;
+      signedTransactionBase64: string;
+      encoding: 'base64';
+    }>(`/personal-wallets/${userWalletId}/sign-versioned-transaction`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
   /** @deprecated use createPersonalWalletManaged */
   createManagedWallet(input: {
     provider: ManagedWalletProvider;
