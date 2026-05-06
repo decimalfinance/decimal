@@ -14,6 +14,7 @@ import crypto from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
 import { ApiError, badRequest, notFound } from '../api-errors.js';
+import { assertOrganizationAdmin } from '../organization-access.js';
 import { prisma } from '../prisma.js';
 import { createPrivySolanaWallet, deletePrivyWallet, signPrivySolanaTransaction } from '../privy-wallets.js';
 import { config } from '../config.js';
@@ -75,6 +76,73 @@ userWalletsRouter.get(['/personal-wallets', '/user-wallets'], async (req, res, n
     });
 
     res.json({ items: items.map(serializeUserWallet) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Active personal wallets owned by users with active membership in the
+// organization. Used by the Squads creation dialog so an admin can pick
+// other members' personal wallets as Squads members. Admin-only because
+// only admins can create treasuries.
+const organizationParamsSchema = z.object({
+  organizationId: z.string().uuid(),
+});
+
+userWalletsRouter.get('/organizations/:organizationId/personal-wallets', async (req, res, next) => {
+  try {
+    const { organizationId } = organizationParamsSchema.parse(req.params);
+    await assertOrganizationAdmin(organizationId, req.auth!);
+
+    const wallets = await prisma.personalWallet.findMany({
+      where: {
+        chain: 'solana',
+        status: 'active',
+        user: {
+          memberships: {
+            some: {
+              organizationId,
+              status: 'active',
+            },
+          },
+        },
+      },
+      include: {
+        user: {
+          select: {
+            userId: true,
+            email: true,
+            displayName: true,
+            avatarUrl: true,
+            memberships: {
+              where: { organizationId, status: 'active' },
+              select: { membershipId: true, role: true, status: true },
+              take: 1,
+            },
+          },
+        },
+      },
+      orderBy: [{ user: { displayName: 'asc' } }, { createdAt: 'asc' }],
+    });
+
+    res.json({
+      items: wallets.map((wallet) => ({
+        ...serializeUserWallet(wallet),
+        user: {
+          userId: wallet.user.userId,
+          email: wallet.user.email,
+          displayName: wallet.user.displayName,
+          avatarUrl: wallet.user.avatarUrl,
+        },
+        membership: wallet.user.memberships[0]
+          ? {
+            membershipId: wallet.user.memberships[0].membershipId,
+            role: wallet.user.memberships[0].role,
+            status: wallet.user.memberships[0].status,
+          }
+          : null,
+      })),
+    });
   } catch (error) {
     next(error);
   }
