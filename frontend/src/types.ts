@@ -160,6 +160,24 @@ export type UserWallet = {
  */
 export type PersonalWallet = UserWallet;
 
+/**
+ * Personal wallet enriched with its owner + organization membership for
+ * picking Squads members at treasury creation.
+ */
+export type OrganizationPersonalWallet = UserWallet & {
+  user: {
+    userId: string;
+    email: string;
+    displayName: string;
+    avatarUrl: string | null;
+  };
+  membership: {
+    membershipId: string;
+    role: string;
+    status: string;
+  } | null;
+};
+
 export type ManagedWalletProvider =
   | 'privy'
   | 'fireblocks'

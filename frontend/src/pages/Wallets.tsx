@@ -4,7 +4,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api';
 import type {
   AuthenticatedSession,
+  CreateSquadsTreasuryIntentRequest,
   CreateSquadsTreasuryIntentResponse,
+  OrganizationPersonalWallet,
+  SquadsPermission,
   UserWallet,
 } from '../types';
 import { Connection, VersionedTransaction } from '@solana/web3.js';
@@ -448,25 +451,24 @@ function AddWalletDialog(props: {
   );
 }
 
+const ALL_SQUADS_PERMISSIONS: SquadsPermission[] = ['initiate', 'vote', 'execute'];
+const SQUADS_PERMISSION_LABEL: Record<SquadsPermission, string> = {
+  initiate: 'Initiate',
+  vote: 'Vote',
+  execute: 'Execute',
+};
+
 // CreateSquadsTreasuryDialog
-//
-// MVP scope: 1-of-1 Squads treasury where the only signer is the current
-// user's personal wallet. Multi-member, custom threshold, and custom
-// permissions are deferred to a later tranche — see
-// docs/frontend-squads-treasury-handoff.md.
 //
 // Flow:
 //   no-personal-wallet -> empty-state CTA to /profile
-//   config -> name + creator wallet (auto-selected if 1 personal wallet)
+//   config -> name, creator wallet, member selection (with permissions per
+//             member), threshold. Creator's personal wallet is forced into
+//             the member list (backend constraint).
 //   review -> backend create-intent fetched; show multisig PDA, vault PDA,
-//             required signer, members
-//   sign-confirm -> placeholder. Real signing requires a backend
-//     "sign-with-Privy" endpoint that doesn't exist yet — frontend has no
-//     Privy SDK. Once codex ships that endpoint, this step becomes:
-//       1) POST to that endpoint with the serialized tx
-//       2) submit signed bytes to chain
-//       3) confirmSquadsTreasury(signature, ...intent identifiers)
-//       4) onConfirmed() to close + invalidate queries
+//             required signer, members.
+//   sign  -> backend signs with the creator's Privy wallet, submits to
+//             chain, polls signature, persists treasury record.
 function CreateSquadsTreasuryDialog(props: {
   organizationId: string;
   personalWallets: UserWallet[];
@@ -480,7 +482,45 @@ function CreateSquadsTreasuryDialog(props: {
   const [step, setStep] = useState<'config' | 'review' | 'sign'>('config');
   const [name, setName] = useState('');
   const [creatorWalletId, setCreatorWalletId] = useState('');
+  const [memberPermissions, setMemberPermissions] = useState<Record<string, SquadsPermission[]>>({});
+  const [threshold, setThreshold] = useState<number>(1);
   const [pendingIntent, setPendingIntent] = useState<CreateSquadsTreasuryIntentResponse | null>(null);
+
+  const orgWalletsQuery = useQuery({
+    queryKey: ['organization-personal-wallets', organizationId] as const,
+    queryFn: () => api.listOrganizationPersonalWallets(organizationId),
+    enabled: Boolean(organizationId),
+  });
+  const orgWallets = orgWalletsQuery.data?.items ?? [];
+
+  const voterCount = useMemo(
+    () =>
+      Object.values(memberPermissions).filter((perms) => perms.includes('vote')).length,
+    [memberPermissions],
+  );
+
+  // Force the creator's personal wallet into the member list with all
+  // permissions. Backend rejects intents where the creator isn't a member.
+  useEffect(() => {
+    if (!creatorWalletId) return;
+    setMemberPermissions((prev) => {
+      if (prev[creatorWalletId]) return prev;
+      return { ...prev, [creatorWalletId]: [...ALL_SQUADS_PERMISSIONS] };
+    });
+  }, [creatorWalletId]);
+
+  // Keep threshold within the valid range as voterCount changes.
+  useEffect(() => {
+    if (voterCount === 0) {
+      setThreshold(1);
+      return;
+    }
+    setThreshold((current) => {
+      if (current < 1) return 1;
+      if (current > voterCount) return voterCount;
+      return current;
+    });
+  }, [voterCount]);
   // Phase tracks the live progress of the sign-and-confirm pipeline.
   // 'submitted-pending-confirm' is the recoverable state: tx hit chain
   // but the backend confirm step failed — we keep the signature and
@@ -517,16 +557,27 @@ function CreateSquadsTreasuryDialog(props: {
       if (!creatorWalletId) {
         throw new Error('Pick a personal wallet to act as the Squads creator.');
       }
+      const members: CreateSquadsTreasuryIntentRequest['members'] = Object.entries(memberPermissions)
+        .filter(([, permissions]) => permissions.length > 0)
+        .map(([personalWalletId, permissions]) => ({ personalWalletId, permissions }));
+      if (members.length === 0) {
+        throw new Error('Select at least one member.');
+      }
+      if (!members.some((m) => m.personalWalletId === creatorWalletId)) {
+        throw new Error('Creator wallet must be in the member list.');
+      }
+      const voterCount = members.filter((m) => m.permissions.includes('vote')).length;
+      if (voterCount === 0) {
+        throw new Error('At least one member must have the vote permission.');
+      }
+      if (threshold < 1 || threshold > voterCount) {
+        throw new Error(`Threshold must be between 1 and ${voterCount}.`);
+      }
       return api.createSquadsTreasuryIntent(organizationId, {
         displayName: name.trim() || null,
         creatorPersonalWalletId: creatorWalletId,
-        threshold: 1,
-        members: [
-          {
-            personalWalletId: creatorWalletId,
-            permissions: ['initiate', 'vote', 'execute'],
-          },
-        ],
+        threshold,
+        members,
       });
     },
     onSuccess: (response) => {
@@ -665,7 +716,7 @@ function CreateSquadsTreasuryDialog(props: {
             Create Squads treasury
           </h2>
           <p className="rd-dialog-body">
-            Create an organization treasury controlled by selected member wallets. Decimal will monitor the Squads vault and use it as the source wallet for payments.
+            An organization treasury controlled by a Squads multisig. Pick the signers, their permissions, and how many votes are needed to execute payments.
           </p>
           <form
             onSubmit={(e) => {
@@ -673,37 +724,141 @@ function CreateSquadsTreasuryDialog(props: {
               intentMutation.mutate();
             }}
           >
-            <label className="field">
-              Treasury name
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Ops treasury"
-                autoComplete="off"
-                autoFocus
-              />
-            </label>
-            <label className="field">
-              Creator wallet
-              <select
-                value={creatorWalletId}
-                onChange={(e) => setCreatorWalletId(e.target.value)}
-                required
-                disabled={personalWallets.length === 1}
-              >
-                {personalWallets.length === 0 ? (
-                  <option value="">Loading…</option>
-                ) : null}
-                {personalWallets.map((w) => (
-                  <option key={w.userWalletId} value={w.userWalletId}>
-                    {(w.label ?? 'Untitled')} · {shortenAddress(w.walletAddress, 4, 4)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <p style={{ fontSize: 12, color: 'var(--ax-text-muted)', margin: '4px 0 16px' }}>
-              MVP default: 1-of-1 Squads multisig. The selected wallet is the only signer with all permissions (initiate, vote, execute). Multi-member treasuries land in a later tranche.
-            </p>
+            <SquadsConfigSection title="Basics">
+              <label className="field">
+                Treasury name
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Ops treasury"
+                  autoComplete="off"
+                  autoFocus
+                />
+              </label>
+              <label className="field">
+                Your signing wallet
+                <select
+                  value={creatorWalletId}
+                  onChange={(e) => setCreatorWalletId(e.target.value)}
+                  required
+                  disabled={personalWallets.length <= 1}
+                >
+                  {personalWallets.length === 0 ? <option value="">Loading…</option> : null}
+                  {personalWallets.map((w) => (
+                    <option key={w.userWalletId} value={w.userWalletId}>
+                      {(w.label ?? 'Untitled')} · {shortenAddress(w.walletAddress, 4, 4)}
+                    </option>
+                  ))}
+                </select>
+                <p
+                  style={{
+                    fontSize: 12,
+                    color: 'var(--ax-text-muted)',
+                    margin: '4px 0 0',
+                  }}
+                >
+                  Signs the create transaction on chain. Auto-included as a member.
+                </p>
+              </label>
+            </SquadsConfigSection>
+
+            <SquadsConfigSection
+              title="Members"
+              hint="Personal wallets that will sign Squads proposals. Toggle each permission per member."
+            >
+              {orgWalletsQuery.isLoading ? (
+                <div className="rd-skeleton rd-skeleton-block" style={{ height: 120 }} />
+              ) : orgWallets.length === 0 ? (
+                <div
+                  style={{
+                    padding: 12,
+                    border: '1px dashed var(--ax-border)',
+                    borderRadius: 6,
+                    fontSize: 13,
+                    color: 'var(--ax-text-muted)',
+                  }}
+                >
+                  No active personal wallets among org members. Ask teammates to create a personal wallet on /profile.
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    border: '1px solid var(--ax-border)',
+                    borderRadius: 8,
+                    overflow: 'hidden',
+                    maxHeight: 280,
+                    overflowY: 'auto',
+                  }}
+                >
+                  {orgWallets.map((wallet, idx) => {
+                    const isCreator = wallet.userWalletId === creatorWalletId;
+                    const permissions = memberPermissions[wallet.userWalletId] ?? [];
+                    const selected = permissions.length > 0;
+                    return (
+                      <SquadsMemberRow
+                        key={wallet.userWalletId}
+                        wallet={wallet}
+                        permissions={permissions}
+                        selected={selected}
+                        isCreator={isCreator}
+                        first={idx === 0}
+                        onToggleSelected={() => {
+                          if (isCreator) return;
+                          setMemberPermissions((prev) => {
+                            if (prev[wallet.userWalletId]) {
+                              const { [wallet.userWalletId]: _omit, ...rest } = prev;
+                              return rest;
+                            }
+                            return {
+                              ...prev,
+                              [wallet.userWalletId]: [...ALL_SQUADS_PERMISSIONS],
+                            };
+                          });
+                        }}
+                        onTogglePermission={(perm) => {
+                          setMemberPermissions((prev) => {
+                            const current = prev[wallet.userWalletId] ?? [];
+                            const next = current.includes(perm)
+                              ? current.filter((p) => p !== perm)
+                              : [...current, perm];
+                            if (next.length === 0) {
+                              if (isCreator) return prev;
+                              const { [wallet.userWalletId]: _omit, ...rest } = prev;
+                              return rest;
+                            }
+                            return { ...prev, [wallet.userWalletId]: next };
+                          });
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+            </SquadsConfigSection>
+
+            <SquadsConfigSection title="Approval threshold">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <input
+                  type="number"
+                  min={1}
+                  max={Math.max(1, voterCount)}
+                  value={threshold}
+                  onChange={(e) => setThreshold(Math.max(1, Number(e.target.value) || 1))}
+                  style={{ width: 80 }}
+                />
+                <span style={{ fontSize: 13, color: 'var(--ax-text-muted)' }}>
+                  of {voterCount} voting member{voterCount === 1 ? '' : 's'} must approve before a proposal can execute.
+                </span>
+              </div>
+              {voterCount === 0 ? (
+                <p style={{ fontSize: 12, color: 'var(--ax-warning)', margin: '8px 0 0' }}>
+                  At least one member needs the Vote permission.
+                </p>
+              ) : null}
+            </SquadsConfigSection>
+
             <div className="rd-dialog-actions" style={{ marginTop: 20 }}>
               <button type="button" className="button button-secondary" onClick={onClose} disabled={intentMutation.isPending}>
                 Cancel
@@ -711,7 +866,13 @@ function CreateSquadsTreasuryDialog(props: {
               <button
                 type="submit"
                 className="button button-primary"
-                disabled={!creatorWalletId || intentMutation.isPending}
+                disabled={
+                  !creatorWalletId
+                  || intentMutation.isPending
+                  || voterCount === 0
+                  || threshold < 1
+                  || threshold > voterCount
+                }
                 aria-busy={intentMutation.isPending}
               >
                 {intentMutation.isPending ? 'Preparing…' : 'Prepare transaction'}
@@ -942,6 +1103,137 @@ function SquadsPhaseList({ phase }: { phase: SquadsPhase }) {
         );
       })}
     </ol>
+  );
+}
+
+function SquadsConfigSection({
+  title,
+  hint,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section style={{ marginBottom: 16 }}>
+      <div
+        style={{
+          fontSize: 11,
+          textTransform: 'uppercase',
+          letterSpacing: '0.06em',
+          color: 'var(--ax-text-muted)',
+          fontWeight: 600,
+          marginBottom: 8,
+        }}
+      >
+        {title}
+      </div>
+      {hint ? (
+        <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--ax-text-muted)', lineHeight: 1.5 }}>
+          {hint}
+        </p>
+      ) : null}
+      {children}
+    </section>
+  );
+}
+
+function SquadsMemberRow({
+  wallet,
+  permissions,
+  selected,
+  isCreator,
+  first,
+  onToggleSelected,
+  onTogglePermission,
+}: {
+  wallet: OrganizationPersonalWallet;
+  permissions: SquadsPermission[];
+  selected: boolean;
+  isCreator: boolean;
+  first: boolean;
+  onToggleSelected: () => void;
+  onTogglePermission: (perm: SquadsPermission) => void;
+}) {
+  const displayName = wallet.user.displayName || wallet.user.email;
+  const subtle = wallet.user.displayName ? wallet.user.email : null;
+  const role = wallet.membership?.role ?? 'member';
+
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'auto 1fr auto',
+        alignItems: 'center',
+        gap: 12,
+        padding: '10px 12px',
+        borderTop: first ? 'none' : '1px solid var(--ax-border)',
+        background: selected ? 'var(--ax-surface-1)' : 'transparent',
+        opacity: selected ? 1 : 0.78,
+      }}
+    >
+      <label
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 8,
+          cursor: isCreator ? 'not-allowed' : 'pointer',
+        }}
+        title={isCreator ? 'Creator wallet is required as a member.' : 'Include as Squads member'}
+      >
+        <input
+          type="checkbox"
+          checked={selected}
+          disabled={isCreator}
+          onChange={onToggleSelected}
+        />
+      </label>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontWeight: 500 }}>{displayName}</span>
+          {isCreator ? (
+            <span className="rd-pill rd-pill-info" style={{ fontSize: 10 }}>
+              You · creator
+            </span>
+          ) : null}
+          <span className="rd-pill rd-pill-info" style={{ fontSize: 10 }}>{role}</span>
+        </div>
+        {subtle ? (
+          <div style={{ fontSize: 11, color: 'var(--ax-text-muted)' }}>{subtle}</div>
+        ) : null}
+        <div style={{ fontSize: 11, color: 'var(--ax-text-muted)', fontFamily: 'monospace', marginTop: 2 }}>
+          {wallet.label ? `${wallet.label} · ` : ''}{shortenAddress(wallet.walletAddress, 4, 4)}
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+        {ALL_SQUADS_PERMISSIONS.map((perm) => {
+          const active = permissions.includes(perm);
+          const disabled = !selected;
+          return (
+            <button
+              key={perm}
+              type="button"
+              onClick={() => onTogglePermission(perm)}
+              disabled={disabled}
+              title={`Toggle ${SQUADS_PERMISSION_LABEL[perm]} permission`}
+              style={{
+                fontSize: 11,
+                padding: '3px 9px',
+                borderRadius: 999,
+                border: '1px solid var(--ax-border)',
+                background: active ? 'var(--ax-accent-dim)' : 'transparent',
+                color: active ? 'var(--ax-accent)' : 'var(--ax-text-muted)',
+                cursor: disabled ? 'not-allowed' : 'pointer',
+                opacity: disabled ? 0.5 : 1,
+              }}
+            >
+              {SQUADS_PERMISSION_LABEL[perm]}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

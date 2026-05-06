@@ -42,6 +42,7 @@ import type {
   SquadsTreasuryStatus,
   TreasuryWallet,
   ManagedWalletProvider,
+  OrganizationPersonalWallet,
   UserWallet,
   WalletAuthorization,
   WalletAuthorizationRole,
@@ -255,6 +256,13 @@ export const api = {
   /** @deprecated use listPersonalWallets */
   listUserWallets() {
     return request<{ items: UserWallet[] }>('/personal-wallets');
+  },
+  // Active personal wallets owned by all members of the organization. Admin
+  // only — used by the Squads treasury creation dialog to pick co-signers.
+  listOrganizationPersonalWallets(organizationId: string) {
+    return request<{ items: OrganizationPersonalWallet[] }>(
+      `/organizations/${organizationId}/personal-wallets`,
+    );
   },
   createWalletChallenge(input: { walletAddress: string }) {
     return request<WalletChallenge>('/personal-wallets/challenge', {
