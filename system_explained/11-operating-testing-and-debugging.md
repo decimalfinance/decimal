@@ -12,9 +12,33 @@ Decimal has two practical run modes; pick by intent.
 make prod-backend
 ```
 
-Brings up local Postgres and ClickHouse via docker compose, applies schemas, starts the API, kills any stale `cloudflared` and starts a fresh tunnel exposing the API as `https://api.decimal.finance`, waits for `/health`, then compiles and starts the Yellowstone worker. The deployed Vercel frontend at https://decimal.finance talks to this API. There is no local frontend in this mode.
+Alias for `make prod-backend-mainnet`. Brings up local Postgres and ClickHouse via docker compose, applies schemas, starts the API, kills any stale `cloudflared` and starts a fresh tunnel exposing the API as `https://api.decimal.finance`, waits for `/health`, then compiles and starts the Yellowstone worker. The deployed Vercel frontend at https://decimal.finance talks to this API. There is no local frontend in this mode.
 
 Requires `api/.env` with a local `DATABASE_URL` and `yellowstone/.env` with `YELLOWSTONE_ENDPOINT` set (the Makefile gates the worker on the env var even though `config/worker.config.json` also carries it).
+
+### Production-backed devnet runtime
+
+```bash
+make prod-backend-devnet
+```
+
+Starts the same laptop-hosted API + Cloudflare tunnel, but forces:
+
+- `SOLANA_NETWORK=devnet`
+- `SOLANA_RPC_URL=$SOLANA_DEVNET_RPC_URL`, falling back to `https://api.devnet.solana.com`
+- `SKIP_WORKER=1`
+
+Use this for Squads treasury creation, Privy signing, and other transaction tests that should not burn mainnet SOL. The API exposes the active network through `GET /capabilities`, and the frontend switches RPC/explorer behavior from that response.
+
+There is no devnet Yellowstone worker in this mode. Payment and collection reconciliation will not progress on devnet until a separate devnet observer exists.
+
+### Production-backed mainnet runtime
+
+```bash
+make prod-backend-mainnet
+```
+
+Forces `SOLANA_NETWORK=mainnet` and keeps the current Yellowstone-enabled path. Use this for real demos where live mainnet reconciliation matters.
 
 ### Full local dev stack
 
@@ -23,6 +47,15 @@ make dev
 ```
 
 Brings up Postgres + ClickHouse, then starts API, frontend, and the worker (if `YELLOWSTONE_ENDPOINT` is set) all in one terminal. Use this when iterating on the frontend locally.
+
+Network selectors are supported:
+
+```bash
+make dev devnet    # devnet RPC from SOLANA_DEVNET_RPC_URL; skips Yellowstone
+make dev mainnet   # mainnet RPC from SOLANA_RPC_URL; starts Yellowstone if configured
+```
+
+Use `SOLANA_DEVNET_RPC_URL` in `api/.env` for your private devnet RPC. This keeps local dev commands short and prevents accidentally spending mainnet SOL during Squads treasury tests.
 
 ### Individual processes
 
@@ -203,7 +236,7 @@ If sign/submit fails:
 
 - verify a Solana wallet (Phantom, Solflare, Backpack, etc.) is installed
 - verify the connected wallet matches the required signer (usually the source TreasuryWallet)
-- verify the configured RPC (`SOLANA_RPC_URL` in `api/.env`, currently Alchemy mainnet) is reachable
+- verify the configured RPC is reachable (`SOLANA_NETWORK=devnet` uses `https://api.devnet.solana.com` by default; `mainnet` uses `SOLANA_RPC_URL` from `api/.env` or the public mainnet fallback)
 - verify recent blockhash can be fetched
 - verify the source wallet has a USDC token account and balance
 

@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { config } from '../config.js';
+import { USDC_MINT } from '../solana.js';
 
 export const capabilitiesRouter = Router();
 
@@ -7,6 +9,11 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
     product: 'decimal',
     version: 1,
     generatedAt: new Date().toISOString(),
+    solana: {
+      network: config.solanaNetwork,
+      usdcMint: USDC_MINT.toBase58(),
+      rpcUrl: config.solanaRpcUrl,
+    },
     auth: {
       user: 'Authorization: Bearer <sessionToken>',
       internalWorker: 'x-service-token: <CONTROL_PLANE_SERVICE_TOKEN>',

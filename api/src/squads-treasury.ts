@@ -7,6 +7,8 @@ import { prisma } from './prisma.js';
 import { deriveUsdcAtaForWallet, getSolanaConnection, SOLANA_CHAIN, USDC_ASSET } from './solana.js';
 
 const SQUADS_SOURCE = 'squads_v4';
+// Squads v4 uses the same program id on devnet and mainnet. The value remains
+// configurable so tests or future deployments can override it explicitly.
 const SQUADS_PERMISSION_MAP = {
   initiate: multisig.types.Permission.Initiate,
   vote: multisig.types.Permission.Vote,

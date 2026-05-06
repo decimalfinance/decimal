@@ -5,7 +5,9 @@ PSQL_QUIET := PGOPTIONS='-c client_min_messages=warning' psql -v ON_ERROR_STOP=1
 
 .SILENT:
 
-.PHONY: infra-up infra-down dev dev-api dev-frontend dev-worker tunnel prod-backend test test-api test-worker test-frontend sync-postgres-schema sync-clickhouse-schema reset-data reset-prod-data backup-db restore-db list-backups help
+.PHONY: infra-up infra-down dev devnet mainnet dev-api dev-frontend dev-worker tunnel prod-backend prod-backend-devnet prod-backend-mainnet _prod-backend-shared test test-api test-worker test-frontend sync-postgres-schema sync-clickhouse-schema reset-data reset-prod-data backup-db restore-db list-backups help
+
+NETWORK_SELECTOR := $(strip $(filter devnet mainnet,$(MAKECMDGOALS)))
 
 infra-up:
 	set -euo pipefail && docker compose up -d postgres clickhouse && $(MAKE) sync-postgres-schema && $(MAKE) sync-clickhouse-schema
@@ -34,6 +36,13 @@ dev:
 	set -euo pipefail && \
 	if [[ -f api/.env ]]; then set -a && source api/.env && set +a; fi && \
 	if [[ -f yellowstone/.env ]]; then set -a && source yellowstone/.env && set +a; fi && \
+	NETWORK_SELECTOR="$(NETWORK_SELECTOR)" && \
+	if [[ "$${NETWORK_SELECTOR}" == "devnet" ]]; then \
+	  export SOLANA_NETWORK=devnet; \
+	  export SOLANA_RPC_URL="$${SOLANA_DEVNET_RPC_URL:-https://api.devnet.solana.com}"; \
+	elif [[ "$${NETWORK_SELECTOR}" == "mainnet" ]]; then \
+	  export SOLANA_NETWORK=mainnet; \
+	fi && \
 	export DATABASE_URL="$${DATABASE_URL:-$(POSTGRES_URL)}" && \
 	export CONTROL_PLANE_API_URL="http://127.0.0.1:3100" && \
 	export CLICKHOUSE_URL="$${CLICKHOUSE_URL:-http://127.0.0.1:8123}" && \
@@ -52,7 +61,9 @@ dev:
 	pids+=($$!) && \
 	(cd frontend && exec npm run dev) & \
 	pids+=($$!) && \
-	if [[ -n "$${YELLOWSTONE_ENDPOINT:-}" ]]; then \
+	if [[ "$${SOLANA_NETWORK:-mainnet}" == "devnet" ]]; then \
+	  echo "Skipping Yellowstone worker because SOLANA_NETWORK=devnet."; \
+	elif [[ -n "$${YELLOWSTONE_ENDPOINT:-}" ]]; then \
 	  for _ in {1..60}; do \
 	    if curl -fsS "$${CONTROL_PLANE_API_URL}/health" >/dev/null 2>&1 && curl -fsS "$${CLICKHOUSE_URL}/ping" >/dev/null 2>&1; then \
 	      break; \
@@ -67,6 +78,9 @@ dev:
 	trap 'trap - INT TERM EXIT; for pid in "$${pids[@]:-}"; do kill -TERM "$$pid" 2>/dev/null || true; done; sleep 0.5; for pid in "$${pids[@]:-}"; do kill -KILL "$$pid" 2>/dev/null || true; done; wait "$${pids[@]}" 2>/dev/null || true; exit 130' INT TERM && \
 	trap 'for pid in "$${pids[@]:-}"; do kill -TERM "$$pid" 2>/dev/null || true; done; sleep 0.5; for pid in "$${pids[@]:-}"; do kill -KILL "$$pid" 2>/dev/null || true; done; wait "$${pids[@]}" 2>/dev/null || true' EXIT && \
 	wait "$${pids[@]}" || true
+
+devnet mainnet:
+	@:
 
 test: test-api test-worker test-frontend
 
@@ -121,7 +135,20 @@ tunnel:
 #   -> Cloudflare Tunnel exposing api.decimal.finance
 # Does NOT run a local frontend. https://decimal.finance is live from Vercel.
 
-prod-backend:
+prod-backend: prod-backend-mainnet
+
+prod-backend-devnet:
+	set -euo pipefail && \
+	export FORCE_SOLANA_NETWORK=devnet && \
+	export SKIP_WORKER=1 && \
+	$(MAKE) _prod-backend-shared
+
+prod-backend-mainnet:
+	set -euo pipefail && \
+	export FORCE_SOLANA_NETWORK=mainnet && \
+	$(MAKE) _prod-backend-shared
+
+_prod-backend-shared:
 	set -euo pipefail && \
 	if [[ ! -f api/.env ]]; then \
 	  echo "api/.env is required for prod-backend."; \
@@ -129,6 +156,8 @@ prod-backend:
 	fi && \
 	set -a && source api/.env && set +a && \
 	if [[ -f yellowstone/.env ]]; then set -a && source yellowstone/.env && set +a; fi && \
+	if [[ -n "$${FORCE_SOLANA_NETWORK:-}" ]]; then export SOLANA_NETWORK="$${FORCE_SOLANA_NETWORK}"; fi && \
+	if [[ "$${SOLANA_NETWORK:-}" == "devnet" ]]; then export SOLANA_RPC_URL="$${SOLANA_DEVNET_RPC_URL:-https://api.devnet.solana.com}"; fi && \
 	export CLICKHOUSE_URL="$${CLICKHOUSE_URL:-http://127.0.0.1:8123}" && \
 	export CONTROL_PLANE_API_URL="$${CONTROL_PLANE_API_URL:-https://api.decimal.finance}" && \
 	$(MAKE) sync-postgres-schema && \
@@ -147,7 +176,9 @@ prod-backend:
 	pids+=($$!) && \
 	cloudflared tunnel run decimal-api & \
 	pids+=($$!) && \
-	if [[ -n "$${YELLOWSTONE_ENDPOINT:-}" ]]; then \
+	if [[ "$${SKIP_WORKER:-0}" == "1" ]]; then \
+	  echo "Skipping Yellowstone worker because SKIP_WORKER=1."; \
+	elif [[ -n "$${YELLOWSTONE_ENDPOINT:-}" ]]; then \
 	  for _ in {1..60}; do \
 	    if curl -fsS "http://127.0.0.1:3100/health" >/dev/null 2>&1; then \
 	      break; \
@@ -201,6 +232,8 @@ help:
 	@echo ""
 	@echo "  Local dev (docker postgres + clickhouse, api + frontend + worker)"
 	@echo "    dev                Start everything locally in one terminal"
+	@echo "    dev devnet         Start local dev on devnet using SOLANA_DEVNET_RPC_URL; skips worker"
+	@echo "    dev mainnet        Start local dev on mainnet; starts worker if YELLOWSTONE_ENDPOINT is set"
 	@echo "    infra-up           Start local postgres + clickhouse only"
 	@echo "    infra-down         Stop local postgres + clickhouse"
 	@echo ""
@@ -211,7 +244,9 @@ help:
 	@echo "    tunnel             Cloudflare Tunnel (api.decimal.finance -> localhost:3100)"
 	@echo ""
 	@echo "  Production-backed runtime (local postgres + clickhouse + tunnel)"
-	@echo "    prod-backend       API + worker + tunnel, serving https://decimal.finance"
+	@echo "    prod-backend       Alias for prod-backend-mainnet"
+	@echo "    prod-backend-mainnet API + worker + tunnel on mainnet, serving https://decimal.finance"
+	@echo "    prod-backend-devnet  API + tunnel on devnet; skips Yellowstone worker"
 	@echo ""
 	@echo "  Data"
 	@echo "    reset-data         Truncate local docker postgres + clickhouse"

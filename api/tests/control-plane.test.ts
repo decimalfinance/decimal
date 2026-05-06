@@ -96,6 +96,9 @@ test('public health, capabilities, and OpenAPI endpoints expose the lean API sur
   const capabilities = await capabilitiesResponse.json();
   assert.equal(capabilities.product, 'decimal');
   assert.equal(capabilities.version, 1);
+  assert.equal(capabilities.solana.network, config.solanaNetwork);
+  assert.equal(capabilities.solana.rpcUrl, config.solanaRpcUrl);
+  assert.ok(capabilities.solana.usdcMint);
   assert.ok(capabilities.workflows.some((workflow: { id: string }) => workflow.id === 'single_payment'));
   assert.ok(capabilities.workflows.some((workflow: { id: string }) => workflow.id === 'csv_to_payment_run'));
   assert.equal(capabilities.apiSurface.idempotency.includes('Idempotency-Key'), true);
