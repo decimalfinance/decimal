@@ -113,6 +113,13 @@ const icons = {
       <path d="M12.5 16.5a4 4 0 0 1 5 0" />
     </SvgIcon>
   ),
+  proposals: (
+    <SvgIcon>
+      <path d="M5 2.5h6L15 6.5v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1Z" />
+      <path d="M11 2.5v4h4" />
+      <path d="M7 11l1.5 1.5L13 8" />
+    </SvgIcon>
+  ),
   destinations: (
     <SvgIcon>
       <path d="M10 17.5s-5.5-4.5-5.5-9a5.5 5.5 0 0 1 11 0c0 4.5-5.5 9-5.5 9Z" />
@@ -359,6 +366,12 @@ export function AppSidebar({
             <div className="ax-nav-group">
               <div className="ax-nav-group-label">Operations</div>
               <NavLinkItem to={base} end icon={icons.overview} label="Overview" tourKey="overview" />
+              <NavLinkItem
+                to={`${base}/proposals`}
+                icon={icons.proposals}
+                label="Proposals"
+                tourKey="proposals"
+              />
               <NavLinkItem
                 to={`${base}/payments`}
                 icon={icons.payments}

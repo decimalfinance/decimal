@@ -449,6 +449,15 @@ export type SquadsConfigProposal = {
   createdAtSlot: number | null;
 };
 
+export type SquadsConfigProposalWithTreasury = SquadsConfigProposal & {
+  treasuryWallet: {
+    treasuryWalletId: string;
+    address: string;
+    displayName: string | null;
+    multisigPda: string | null;
+  };
+};
+
 export type SquadsConfigProposalKind =
   | 'config_proposal_create'
   | 'config_proposal_approval'

@@ -42,6 +42,7 @@ import type {
   CreateSquadsChangeThresholdProposalRequest,
   SquadsConfigProposal,
   SquadsConfigProposalApproveRequest,
+  SquadsConfigProposalWithTreasury,
   SquadsConfigProposalExecuteRequest,
   SquadsConfigProposalIntentResponse,
   SquadsProposalListStatusFilter,
@@ -645,6 +646,19 @@ export const api = {
     return request<SquadsTreasuryDetail>(
       `/organizations/${organizationId}/treasury-wallets/${treasuryWalletId}/squads/sync-members`,
       { method: 'POST', body: JSON.stringify({}) },
+    );
+  },
+  // Aggregated across all org Squads treasuries the actor is a member of.
+  listOrganizationSquadsProposals(
+    organizationId: string,
+    options: { status?: SquadsProposalListStatusFilter; limit?: number } = {},
+  ) {
+    const params = new URLSearchParams();
+    if (options.status) params.set('status', options.status);
+    if (options.limit !== undefined) params.set('limit', String(options.limit));
+    const query = params.toString();
+    return request<{ items: SquadsConfigProposalWithTreasury[] }>(
+      `/organizations/${organizationId}/squads/proposals${query ? `?${query}` : ''}`,
     );
   },
   listSquadsConfigProposals(

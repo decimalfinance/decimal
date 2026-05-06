@@ -24,6 +24,8 @@ import { LandingPage as LandingPageV2 } from './pages/Landing';
 import { MembersPage } from './pages/Members';
 import { TreasuryWalletDetailPage } from './pages/TreasuryWalletDetail';
 import { SquadsProposalsPage } from './pages/SquadsProposals';
+import { SquadsProposalDetailPage } from './pages/SquadsProposalDetail';
+import { OrganizationProposalsPage } from './pages/OrganizationProposals';
 import { InviteAcceptPage } from './pages/InviteAccept';
 import { AuthDivider, OAuthButton } from './ui/AuthButtons';
 import { useToast } from './ui/Toast';
@@ -230,7 +232,9 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
           <Route path="/organizations/:organizationId" element={<CommandCenterPageV2 session={session} />} />
           <Route path="/organizations/:organizationId/wallets" element={<WalletsPage session={session} />} />
           <Route path="/organizations/:organizationId/wallets/:treasuryWalletId" element={<TreasuryWalletDetailPage session={session} />} />
+          <Route path="/organizations/:organizationId/proposals" element={<OrganizationProposalsPage session={session} />} />
           <Route path="/organizations/:organizationId/wallets/:treasuryWalletId/proposals" element={<SquadsProposalsPage session={session} />} />
+          <Route path="/organizations/:organizationId/wallets/:treasuryWalletId/proposals/:transactionIndex" element={<SquadsProposalDetailPage session={session} />} />
           <Route path="/organizations/:organizationId/members" element={<MembersPage session={session} />} />
           <Route path="/organizations/:organizationId/counterparties" element={<CounterpartiesPage session={session} />} />
           <Route path="/organizations/:organizationId/destinations" element={<DestinationsPage session={session} />} />

@@ -1,44 +1,31 @@
 import { useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router';
+import { useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../api';
 import type {
   AuthenticatedSession,
-  SquadsConfigProposal,
+  SquadsConfigProposalWithTreasury,
   SquadsProposalListStatusFilter,
-  TreasuryWallet,
 } from '../types';
 import { signAndSubmitIntent } from '../lib/squads-pipeline';
 import { useToast } from '../ui/Toast';
 import { ProposalCard } from '../ui/SquadsProposalCard';
 
-export function SquadsProposalsPage({ session }: { session: AuthenticatedSession }) {
-  const { organizationId, treasuryWalletId } = useParams<{
-    organizationId: string;
-    treasuryWalletId: string;
-  }>();
+type BusyKey = string; // `${treasuryWalletId}:${transactionIndex}`
+
+export function OrganizationProposalsPage({ session }: { session: AuthenticatedSession }) {
+  const { organizationId } = useParams<{ organizationId: string }>();
   const queryClient = useQueryClient();
   const { success, error: toastError } = useToast();
 
   const [statusFilter, setStatusFilter] = useState<SquadsProposalListStatusFilter>('pending');
-  const [busyTransactionIndex, setBusyTransactionIndex] = useState<string | null>(null);
+  const [busyKey, setBusyKey] = useState<BusyKey | null>(null);
   const [busyAction, setBusyAction] = useState<'approve' | 'execute' | null>(null);
-
-  const treasuryListQuery = useQuery({
-    queryKey: ['treasury-wallets', organizationId] as const,
-    queryFn: () => api.listTreasuryWallets(organizationId!),
-    enabled: Boolean(organizationId),
-  });
-
-  const wallet: TreasuryWallet | undefined = useMemo(
-    () => treasuryListQuery.data?.items.find((w) => w.treasuryWalletId === treasuryWalletId),
-    [treasuryListQuery.data, treasuryWalletId],
-  );
 
   const ownPersonalWalletsQuery = useQuery({
     queryKey: ['personal-wallets'] as const,
     queryFn: () => api.listPersonalWallets(),
-    enabled: Boolean(organizationId && treasuryWalletId),
+    enabled: Boolean(organizationId),
   });
   const ownPersonalWallets = useMemo(
     () =>
@@ -49,53 +36,62 @@ export function SquadsProposalsPage({ session }: { session: AuthenticatedSession
   );
 
   const proposalsQuery = useQuery({
-    queryKey: ['squads-config-proposals', organizationId, treasuryWalletId, statusFilter] as const,
+    queryKey: ['organization-squads-proposals', organizationId, statusFilter] as const,
     queryFn: () =>
-      api.listSquadsConfigProposals(organizationId!, treasuryWalletId!, { status: statusFilter }),
-    enabled: Boolean(organizationId && treasuryWalletId),
+      api.listOrganizationSquadsProposals(organizationId!, { status: statusFilter }),
+    enabled: Boolean(organizationId),
     refetchInterval: 20_000,
   });
 
-  async function refreshProposals() {
-    await queryClient.invalidateQueries({
-      queryKey: ['squads-config-proposals', organizationId, treasuryWalletId],
-    });
+  async function refreshProposals(treasuryWalletId?: string) {
     await queryClient.invalidateQueries({
       queryKey: ['organization-squads-proposals', organizationId],
     });
-    await queryClient.invalidateQueries({
-      queryKey: ['treasury-wallet-detail', organizationId, treasuryWalletId],
-    });
+    if (treasuryWalletId) {
+      await queryClient.invalidateQueries({
+        queryKey: ['squads-config-proposals', organizationId, treasuryWalletId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ['treasury-wallet-detail', organizationId, treasuryWalletId],
+      });
+    }
   }
 
   const approveMutation = useMutation({
-    mutationFn: async (input: { proposal: SquadsConfigProposal; signerWalletId: string }) => {
+    mutationFn: async (input: {
+      proposal: SquadsConfigProposalWithTreasury;
+      signerWalletId: string;
+    }) => {
       const intent = await api.createSquadsConfigProposalApprovalIntent(
         organizationId!,
-        treasuryWalletId!,
+        input.proposal.treasuryWallet.treasuryWalletId,
         input.proposal.transactionIndex,
         { memberPersonalWalletId: input.signerWalletId },
       );
       return signAndSubmitIntent({ intent, signerPersonalWalletId: input.signerWalletId });
     },
-    onSuccess: async () => {
+    onSuccess: async (_sig, vars) => {
       success('Approval submitted.');
-      await refreshProposals();
+      await refreshProposals(vars.proposal.treasuryWallet.treasuryWalletId);
     },
     onError: (err) => {
       toastError(err instanceof ApiError || err instanceof Error ? err.message : 'Approve failed.');
     },
     onSettled: () => {
-      setBusyTransactionIndex(null);
+      setBusyKey(null);
       setBusyAction(null);
     },
   });
 
   const executeMutation = useMutation({
-    mutationFn: async (input: { proposal: SquadsConfigProposal; signerWalletId: string }) => {
+    mutationFn: async (input: {
+      proposal: SquadsConfigProposalWithTreasury;
+      signerWalletId: string;
+    }) => {
+      const treasuryWalletId = input.proposal.treasuryWallet.treasuryWalletId;
       const intent = await api.createSquadsConfigProposalExecuteIntent(
         organizationId!,
-        treasuryWalletId!,
+        treasuryWalletId,
         input.proposal.transactionIndex,
         { memberPersonalWalletId: input.signerWalletId },
       );
@@ -104,56 +100,48 @@ export function SquadsProposalsPage({ session }: { session: AuthenticatedSession
         signerPersonalWalletId: input.signerWalletId,
       });
       try {
-        await api.syncSquadsTreasuryMembers(organizationId!, treasuryWalletId!);
+        await api.syncSquadsTreasuryMembers(organizationId!, treasuryWalletId);
       } catch {
-        // sync failure shouldn't block the success path; user can re-sync from
-        // the detail page.
+        // ignore — sync failure is recoverable from the treasury detail page
       }
       return sig;
     },
-    onSuccess: async () => {
+    onSuccess: async (_sig, vars) => {
       success('Proposal executed and synced.');
-      await refreshProposals();
+      await refreshProposals(vars.proposal.treasuryWallet.treasuryWalletId);
     },
     onError: (err) => {
       toastError(err instanceof ApiError || err instanceof Error ? err.message : 'Execute failed.');
     },
     onSettled: () => {
-      setBusyTransactionIndex(null);
+      setBusyKey(null);
       setBusyAction(null);
     },
   });
 
-  if (!organizationId || !treasuryWalletId) {
+  if (!organizationId) {
     return (
       <main className="page-frame">
         <div className="rd-state">
-          <h2 className="rd-state-title">Treasury wallet unavailable</h2>
-          <p className="rd-state-body">Pick a treasury wallet from the list.</p>
+          <h2 className="rd-state-title">Organization unavailable</h2>
+          <p className="rd-state-body">Pick an organization from the sidebar.</p>
         </div>
       </main>
     );
   }
 
   const items = proposalsQuery.data?.items ?? [];
-  const proposalsError = proposalsQuery.error;
-  const isForbidden =
-    proposalsError instanceof ApiError && proposalsError.code === 'not_squads_member';
 
   return (
     <main className="page-frame">
       <header className="page-header">
         <div>
-          <p className="eyebrow">
-            <Link to={`/organizations/${organizationId}/wallets/${treasuryWalletId}`}>
-              ← {wallet?.displayName || 'Treasury wallet'}
-            </Link>
-          </p>
+          <p className="eyebrow">Operations</p>
           <h1>Squads proposals</h1>
           <p>
-            Pending and historical Squads config proposals for this treasury. Each
-            proposal is its own on-chain transaction. Members sign approvals
-            independently — no shared blockhash required.
+            Config proposals across every Squads treasury you sign for in this
+            organization. Approve and execute from here, or open a proposal for
+            the full detail.
           </p>
         </div>
         <div className="page-actions">
@@ -194,28 +182,18 @@ export function SquadsProposalsPage({ session }: { session: AuthenticatedSession
         })}
       </div>
 
-      {isForbidden ? (
-        <section className="rd-section">
-          <div className="rd-empty-cell" style={{ padding: '48px 24px' }}>
-            <strong>Not a Squads member</strong>
-            <p style={{ margin: 0 }}>
-              You're not currently a signer on this Squads treasury, so its
-              proposals aren't visible to you.
-            </p>
-          </div>
-        </section>
-      ) : proposalsQuery.isLoading ? (
+      {proposalsQuery.isLoading ? (
         <section className="rd-section">
           <div className="rd-skeleton rd-skeleton-block" style={{ height: 140, marginBottom: 8 }} />
           <div className="rd-skeleton rd-skeleton-block" style={{ height: 140 }} />
         </section>
-      ) : proposalsError ? (
+      ) : proposalsQuery.error ? (
         <section className="rd-section">
           <div className="rd-empty-cell" style={{ padding: '48px 24px' }}>
             <strong>Couldn't load proposals</strong>
             <p style={{ margin: 0 }}>
-              {proposalsError instanceof Error
-                ? proposalsError.message
+              {proposalsQuery.error instanceof Error
+                ? proposalsQuery.error.message
                 : 'Unknown error.'}
             </p>
           </div>
@@ -226,33 +204,39 @@ export function SquadsProposalsPage({ session }: { session: AuthenticatedSession
             <strong>No {statusFilter === 'all' ? '' : statusFilter} proposals</strong>
             <p style={{ margin: 0 }}>
               {statusFilter === 'pending'
-                ? 'Open proposals will show up here as they need your approval.'
+                ? "When a proposal needs your signature, it'll show up here."
                 : 'Nothing matches this filter.'}
             </p>
           </div>
         </section>
       ) : (
         <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {items.map((proposal) => (
-            <ProposalCard
-              key={proposal.transactionIndex}
-              proposal={proposal}
-              ownPersonalWallets={ownPersonalWallets}
-              currentUserId={session.user.userId}
-              busy={busyTransactionIndex === proposal.transactionIndex ? busyAction : null}
-              detailLinkTo={`/organizations/${organizationId}/wallets/${treasuryWalletId}/proposals/${proposal.transactionIndex}`}
-              onApprove={(signerWalletId) => {
-                setBusyTransactionIndex(proposal.transactionIndex);
-                setBusyAction('approve');
-                approveMutation.mutate({ proposal, signerWalletId });
-              }}
-              onExecute={(signerWalletId) => {
-                setBusyTransactionIndex(proposal.transactionIndex);
-                setBusyAction('execute');
-                executeMutation.mutate({ proposal, signerWalletId });
-              }}
-            />
-          ))}
+          {items.map((proposal) => {
+            const key: BusyKey = `${proposal.treasuryWallet.treasuryWalletId}:${proposal.transactionIndex}`;
+            const treasuryName = proposal.treasuryWallet.displayName || 'Untitled Squads treasury';
+            return (
+              <ProposalCard
+                key={key}
+                proposal={proposal}
+                ownPersonalWallets={ownPersonalWallets}
+                currentUserId={session.user.userId}
+                busy={busyKey === key ? busyAction : null}
+                treasuryLabel={treasuryName}
+                treasuryLinkTo={`/organizations/${organizationId}/wallets/${proposal.treasuryWallet.treasuryWalletId}`}
+                detailLinkTo={`/organizations/${organizationId}/wallets/${proposal.treasuryWallet.treasuryWalletId}/proposals/${proposal.transactionIndex}`}
+                onApprove={(signerWalletId) => {
+                  setBusyKey(key);
+                  setBusyAction('approve');
+                  approveMutation.mutate({ proposal, signerWalletId });
+                }}
+                onExecute={(signerWalletId) => {
+                  setBusyKey(key);
+                  setBusyAction('execute');
+                  executeMutation.mutate({ proposal, signerWalletId });
+                }}
+              />
+            );
+          })}
         </section>
       )}
     </main>
