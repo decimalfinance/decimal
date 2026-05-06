@@ -31,33 +31,18 @@ impl AppConfig {
         let node_env = env::var("NODE_ENV").unwrap_or_else(|_| "development".to_string());
         let is_production = node_env == "production";
         let file_config = load_worker_file_config();
-        let yellowstone_endpoint = if !file_config.yellowstone_endpoint.trim().is_empty() {
-            file_config.yellowstone_endpoint.clone()
-        } else {
-            env::var("YELLOWSTONE_ENDPOINT")?
-        };
+        let yellowstone_endpoint = env_or_file("YELLOWSTONE_ENDPOINT", &file_config.yellowstone_endpoint)
+            .ok_or(env::VarError::NotPresent)?;
         let yellowstone_token = non_empty_env("YELLOWSTONE_TOKEN");
-        let clickhouse_url = if !file_config.clickhouse_url.trim().is_empty() {
-            file_config.clickhouse_url.clone()
-        } else {
-            env::var("CLICKHOUSE_URL").unwrap_or_else(|_| "http://127.0.0.1:8123".to_string())
-        };
-        let clickhouse_database = if !file_config.clickhouse_database.trim().is_empty() {
-            file_config.clickhouse_database.clone()
-        } else {
-            env::var("CLICKHOUSE_DATABASE").unwrap_or_else(|_| "usdc_ops".to_string())
-        };
-        let clickhouse_user = if !file_config.clickhouse_user.trim().is_empty() {
-            file_config.clickhouse_user.clone()
-        } else {
-            env::var("CLICKHOUSE_USER").unwrap_or_else(|_| "default".to_string())
-        };
+        let clickhouse_url = env_or_file("CLICKHOUSE_URL", &file_config.clickhouse_url)
+            .unwrap_or_else(|| "http://127.0.0.1:8123".to_string());
+        let clickhouse_database = env_or_file("CLICKHOUSE_DATABASE", &file_config.clickhouse_database)
+            .unwrap_or_else(|| "usdc_ops".to_string());
+        let clickhouse_user = env_or_file("CLICKHOUSE_USER", &file_config.clickhouse_user)
+            .unwrap_or_else(|| "default".to_string());
         let clickhouse_password = env::var("CLICKHOUSE_PASSWORD").unwrap_or_default();
-        let control_plane_api_url = if !file_config.control_plane_api_url.trim().is_empty() {
-            file_config.control_plane_api_url.clone()
-        } else {
-            env::var("CONTROL_PLANE_API_URL").unwrap_or_else(|_| "http://127.0.0.1:3100".to_string())
-        };
+        let control_plane_api_url = env_or_file("CONTROL_PLANE_API_URL", &file_config.control_plane_api_url)
+            .unwrap_or_else(|| "http://127.0.0.1:3100".to_string());
         let control_plane_service_token = non_empty_env("CONTROL_PLANE_SERVICE_TOKEN");
         let debug_account_logs = env::var("DEBUG_YELLOWSTONE_ACCOUNTS")
             .ok()
@@ -124,6 +109,17 @@ fn non_empty_env(key: &str) -> Option<String> {
             None
         } else {
             Some(trimmed)
+        }
+    })
+}
+
+fn env_or_file(key: &str, file_value: &str) -> Option<String> {
+    non_empty_env(key).or_else(|| {
+        let trimmed = file_value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
         }
     })
 }

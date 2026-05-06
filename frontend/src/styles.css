@@ -1962,6 +1962,47 @@ a {
   color: #ffffff;
 }
 
+.oauth-button {
+  width: 100%;
+  margin-bottom: 18px;
+  gap: 10px;
+}
+
+.oauth-button-mark {
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #111111;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.auth-divider {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 18px;
+  color: var(--text-muted);
+}
+
+.auth-divider span {
+  height: 1px;
+  background: var(--border);
+}
+
+.auth-divider em {
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
 .login-form > button[type='submit'] {
   margin-top: 8px;
 }

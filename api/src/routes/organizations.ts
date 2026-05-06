@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { forbidden } from '../api-errors.js';
+import { assertOrganizationAccess } from '../organization-access.js';
 import { prisma } from '../prisma.js';
 
 export const organizationsRouter = Router();
@@ -52,6 +53,40 @@ organizationsRouter.get('/organizations', async (req, res, next) => {
         status: organization.status,
         isMember: true,
       })),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+organizationsRouter.get('/organizations/:organizationId/summary', async (req, res, next) => {
+  try {
+    const { organizationId } = orgParamsSchema.parse(req.params);
+    await assertOrganizationAccess(organizationId, req.auth!);
+    const [
+      pendingApprovalCount,
+      executionQueueCount,
+      paymentsIncompleteCount,
+      collectionsOpenCount,
+      destinationsUnreviewedCount,
+      payersUnreviewedCount,
+    ] = await Promise.all([
+      prisma.paymentOrder.count({ where: { organizationId, state: 'pending_approval' } }),
+      prisma.paymentOrder.count({ where: { organizationId, state: { in: ['approved', 'ready_for_execution', 'execution_recorded'] } } }),
+      prisma.paymentOrder.count({ where: { organizationId, state: { notIn: ['settled', 'closed', 'cancelled'] } } }),
+      prisma.collectionRequest.count({ where: { organizationId, state: { notIn: ['collected', 'closed', 'cancelled'] } } }),
+      prisma.destination.count({ where: { organizationId, trustState: 'unreviewed', isActive: true } }),
+      prisma.collectionSource.count({ where: { organizationId, trustState: 'unreviewed', isActive: true } }),
+    ]);
+
+    res.json({
+      pendingApprovalCount,
+      executionQueueCount,
+      paymentsIncompleteCount,
+      collectionsOpenCount,
+      destinationsUnreviewedCount,
+      payersUnreviewedCount,
+      generatedAt: new Date().toISOString(),
     });
   } catch (error) {
     next(error);

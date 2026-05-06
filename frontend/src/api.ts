@@ -17,6 +17,7 @@ import type {
   LoginResponse,
   ObservedTransfer,
   OrganizationMembership,
+  OrganizationSummary,
   PaymentExecutionPreparation,
   PaymentOrder,
   PaymentProofPacket,
@@ -27,6 +28,7 @@ import type {
   ReconciliationRow,
   Organization,
   TreasuryWallet,
+  ManagedWalletProvider,
   UserWallet,
   WalletChallenge,
 } from './types';
@@ -125,6 +127,13 @@ export const api = {
   clearSessionToken() {
     clearSessionToken();
   },
+  getGoogleOAuthStartUrl(returnTo = '/setup') {
+    const params = new URLSearchParams({
+      returnTo,
+      frontendOrigin: window.location.origin,
+    });
+    return `${API_BASE_URL}/auth/google/start?${params.toString()}`;
+  },
   register(input: { email: string; password: string; displayName?: string }) {
     return request<LoginResponse>('/auth/register', {
       method: 'POST',
@@ -174,6 +183,9 @@ export const api = {
       body: JSON.stringify({}),
     });
   },
+  getOrganizationSummary(organizationId: string) {
+    return request<OrganizationSummary>(`/organizations/${organizationId}/summary`);
+  },
   listUserWallets() {
     return request<{ items: UserWallet[] }>('/user-wallets');
   },
@@ -203,6 +215,15 @@ export const api = {
     label?: string;
   }) {
     return request<UserWallet>('/user-wallets/embedded', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+  createManagedWallet(input: {
+    provider: ManagedWalletProvider;
+    label?: string;
+  }) {
+    return request<UserWallet>('/user-wallets/managed', {
       method: 'POST',
       body: JSON.stringify(input),
     });

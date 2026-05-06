@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS users
   email TEXT NOT NULL UNIQUE,
   display_name TEXT NOT NULL,
   password_hash TEXT,
+  google_subject TEXT UNIQUE,
+  avatar_url TEXT,
   email_verified_at TIMESTAMPTZ,
   email_verification_code_hash TEXT,
   email_verification_expires_at TIMESTAMPTZ,
@@ -33,6 +35,12 @@ CREATE TABLE IF NOT EXISTS users
 
 ALTER TABLE users
   ADD COLUMN IF NOT EXISTS password_hash TEXT;
+
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS google_subject TEXT;
+
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS avatar_url TEXT;
 
 ALTER TABLE users
   ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
@@ -783,6 +791,7 @@ CREATE INDEX IF NOT EXISTS idx_memberships_organization_id ON organization_membe
 CREATE INDEX IF NOT EXISTS idx_memberships_user_id ON organization_memberships(user_id);
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_id ON auth_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_organization_id ON auth_sessions(organization_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_subject ON users(google_subject) WHERE google_subject IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_idempotency_records_actor_created_at
   ON idempotency_records(actor_type, actor_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_idempotency_records_expires_at

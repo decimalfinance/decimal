@@ -2,6 +2,7 @@ export type User = {
   userId: string;
   email: string;
   displayName: string;
+  avatarUrl?: string | null;
   emailVerifiedAt: string | null;
 };
 
@@ -18,6 +19,16 @@ export type OrganizationMembership = {
   organizationName: string;
   role: string;
   status: string;
+};
+
+export type OrganizationSummary = {
+  pendingApprovalCount: number;
+  executionQueueCount: number;
+  paymentsIncompleteCount: number;
+  collectionsOpenCount: number;
+  destinationsUnreviewedCount: number;
+  payersUnreviewedCount: number;
+  generatedAt: string;
 };
 
 export type OrganizationMember = {
@@ -57,6 +68,14 @@ export type UserWallet = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type ManagedWalletProvider =
+  | 'privy'
+  | 'fireblocks'
+  | 'coinbase_cdp'
+  | 'para'
+  | 'turnkey'
+  | 'dfns';
 
 export type WalletChallenge = {
   chain: 'solana';

@@ -23,6 +23,10 @@ export const API_ENDPOINTS = [
   endpoint('login', 'POST', '/auth/login', ['auth'], 'Create a user session with email and password', 'public', {
     requestBody: { email: 'string email', password: 'string min 8 chars' },
   }),
+  endpoint('google_oauth_start', 'GET', '/auth/google/start', ['auth'], 'Start Google OAuth sign-in', 'public', {
+    query: { returnTo: 'relative path optional', frontendOrigin: 'allowed frontend origin optional' },
+  }),
+  endpoint('google_oauth_callback', 'GET', '/auth/google/callback', ['auth'], 'Complete Google OAuth sign-in', 'public'),
   endpoint('session', 'GET', '/auth/session', ['auth'], 'Inspect current user session', 'session'),
   endpoint('verify_email', 'POST', '/auth/verify-email', ['auth'], 'Verify current user email with a code', 'session', {
     requestBody: { code: 'string' },
@@ -36,8 +40,10 @@ export const API_ENDPOINTS = [
   }),
   endpoint('connect_external_user_wallet', 'POST', '/user-wallets/external', ['wallets'], 'Connect external wallet with signed challenge', 'session'),
   endpoint('register_embedded_user_wallet', 'POST', '/user-wallets/embedded', ['wallets'], 'Register embedded wallet metadata', 'session'),
+  endpoint('create_managed_user_wallet', 'POST', '/user-wallets/managed', ['wallets'], 'Create a managed signing wallet with a configured custody provider', 'session'),
 
   endpoint('list_organizations', 'GET', '/organizations', ['organizations'], 'List organizations for the current user', 'session'),
+  endpoint('organization_summary', 'GET', '/organizations/{organizationId}/summary', ['organizations'], 'Lightweight organization counts for shell navigation', 'session', { scope: 'organization:read' }),
   endpoint('create_organization', 'POST', '/organizations', ['organizations'], 'Create organization', 'session', {
     scope: 'organization:write',
     requestBody: { organizationName: 'string' },

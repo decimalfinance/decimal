@@ -252,9 +252,11 @@ export function AppSidebar({
   const activeContext =
     organizationContexts.find((ctx) => ctx.organization.organizationId === activeOrganizationId) ?? organizationContexts[0];
   const activeOrganization = activeContext?.organization;
+  const hasOrganization = organizationContexts.length > 0;
 
   const [wsMenuOpen, setWsMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [showOrganizationRequiredModal, setShowOrganizationRequiredModal] = useState(false);
   const wsRef = useOutsideClick<HTMLDivElement>(wsMenuOpen, () => setWsMenuOpen(false));
   const userRef = useOutsideClick<HTMLDivElement>(userMenuOpen, () => setUserMenuOpen(false));
   const { theme, setTheme } = useTheme();
@@ -496,7 +498,11 @@ export function AppSidebar({
                 className="ax-user-menu-item"
                 onClick={() => {
                   setUserMenuOpen(false);
-                  tour.start();
+                  if (hasOrganization) {
+                    tour.start();
+                    return;
+                  }
+                  setShowOrganizationRequiredModal(true);
                 }}
               >
                 {icons.tutorial}
@@ -519,6 +525,54 @@ export function AppSidebar({
           ) : null}
         </div>
       </div>
+      {showOrganizationRequiredModal ? (
+        <div className="modal-root" role="dialog" aria-modal="true" aria-labelledby="org-required-title">
+          <button
+            type="button"
+            className="modal-backdrop"
+            aria-label="Close"
+            onClick={() => setShowOrganizationRequiredModal(false)}
+          />
+          <section className="modal-dialog">
+            <header className="modal-header">
+              <div>
+                <h2 id="org-required-title">Create an organization first</h2>
+                <p className="modal-subtitle">
+                  The product tour walks through organization pages like payments, collections, wallets, and policy.
+                  Create an organization before starting it.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="modal-close"
+                aria-label="Close"
+                onClick={() => setShowOrganizationRequiredModal(false)}
+              >
+                ×
+              </button>
+            </header>
+            <footer className="modal-footer">
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() => setShowOrganizationRequiredModal(false)}
+              >
+                Not now
+              </button>
+              <button
+                type="button"
+                className="button button-primary"
+                onClick={() => {
+                  setShowOrganizationRequiredModal(false);
+                  navigate('/setup');
+                }}
+              >
+                Create organization
+              </button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
     </aside>
   );
 }

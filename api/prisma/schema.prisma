@@ -43,6 +43,8 @@ model User {
   email                      String                   @unique
   displayName                String                   @map("display_name")
   passwordHash               String?                  @map("password_hash")
+  googleSubject              String?                  @unique @map("google_subject")
+  avatarUrl                  String?                  @map("avatar_url")
   emailVerifiedAt            DateTime?                @map("email_verified_at") @db.Timestamptz(6)
   emailVerificationCodeHash  String?                  @map("email_verification_code_hash")
   emailVerificationExpiresAt DateTime?                @map("email_verification_expires_at") @db.Timestamptz(6)

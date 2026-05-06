@@ -28,6 +28,7 @@ import type {
   Counterparty,
   Destination,
   ExceptionItem,
+  ManagedWalletProvider,
   PaymentExecutionPacket,
   PaymentOrder,
   PaymentOrderState,
@@ -99,6 +100,59 @@ function queryKeys(organizationId?: string, paymentOrderId?: string) {
   };
 }
 
+type ManagedWalletProviderOption = {
+  id: ManagedWalletProvider;
+  name: string;
+  description: string;
+  capabilities: string[];
+  enabled: boolean;
+};
+
+const MANAGED_WALLET_PROVIDERS: ManagedWalletProviderOption[] = [
+  {
+    id: 'privy',
+    name: 'Privy',
+    description: 'Embedded Solana signing wallet managed through Privy.',
+    capabilities: ['Solana', 'Embedded', 'Transfers'],
+    enabled: true,
+  },
+  {
+    id: 'fireblocks',
+    name: 'Fireblocks',
+    description: 'Enterprise custody and policy workflow for larger treasury teams.',
+    capabilities: ['Custody', 'Policies', 'Enterprise'],
+    enabled: false,
+  },
+  {
+    id: 'coinbase_cdp',
+    name: 'Coinbase CDP',
+    description: 'Developer wallet infrastructure for programmatic wallet fleets.',
+    capabilities: ['Wallets', 'API', 'Compliance'],
+    enabled: false,
+  },
+  {
+    id: 'para',
+    name: 'Para',
+    description: 'Embedded wallet infrastructure for user-controlled wallets.',
+    capabilities: ['Embedded', 'Recovery', 'Apps'],
+    enabled: false,
+  },
+  {
+    id: 'turnkey',
+    name: 'Turnkey',
+    description: 'Policy-controlled wallet infrastructure for signing operations.',
+    capabilities: ['Policies', 'Signing', 'TEE'],
+    enabled: false,
+  },
+  {
+    id: 'dfns',
+    name: 'DFNS',
+    description: 'Institutional wallet infrastructure for regulated teams.',
+    capabilities: ['Custody', 'Controls', 'Audit'],
+    enabled: false,
+  },
+];
+
 function toAuthenticatedSession(result: { user: AuthenticatedSession['user']; organizations: AuthenticatedSession['organizations'] }): AuthenticatedSession {
   return {
     authenticated: true,
@@ -126,6 +180,7 @@ export function App() {
       <Route path="/landing" element={<LandingPageV2 />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
       <Route path="/verify-email" element={<RequireSession sessionQuery={sessionQuery} />} />
       <Route path="/*" element={<RequireSession sessionQuery={sessionQuery} />} />
       <Route path="*" element={<Navigate to="/" replace />} />
@@ -162,69 +217,19 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
     const match = location.pathname.match(/^\/organizations\/([^/]+)/);
     return match?.[1];
   }, [location.pathname]);
-  const sidebarOrdersQuery = useQuery({
-    queryKey: queryKeys(activeOrganizationId).paymentOrders,
-    queryFn: () => api.listPaymentOrders(activeOrganizationId!),
-    enabled: Boolean(activeOrganizationId),
-    // Keeps sidebar badges (approvals / execution queue) fresh without hammering the API.
-    refetchInterval: () =>
-      typeof document !== 'undefined' && document.hidden ? false : 15_000,
-  });
-  const approvalPendingCount = useMemo(
-    () => (sidebarOrdersQuery.data?.items ?? []).filter((order) => order.derivedState === 'pending_approval').length,
-    [sidebarOrdersQuery.data?.items],
-  );
-  const executionQueueCount = useMemo(
-    () => (sidebarOrdersQuery.data?.items ?? []).filter((order) => paymentExecutionBucket(order) !== null).length,
-    [sidebarOrdersQuery.data?.items],
-  );
-  const paymentsIncompleteCount = useMemo(
-    () =>
-      (sidebarOrdersQuery.data?.items ?? []).filter(
-        (order) => !['settled', 'closed', 'cancelled'].includes(order.derivedState),
-      ).length,
-    [sidebarOrdersQuery.data?.items],
-  );
-  const sidebarCollectionsQuery = useQuery({
-    queryKey: ['sidebar-collections', activeOrganizationId] as const,
-    queryFn: () => api.listCollections(activeOrganizationId!),
+  const organizationSummaryQuery = useQuery({
+    queryKey: ['organization-summary', activeOrganizationId] as const,
+    queryFn: () => api.getOrganizationSummary(activeOrganizationId!),
     enabled: Boolean(activeOrganizationId),
     refetchInterval: () =>
       typeof document !== 'undefined' && document.hidden ? false : 15_000,
   });
-  const collectionsOpenCount = useMemo(
-    () =>
-      (sidebarCollectionsQuery.data?.items ?? []).filter(
-        (c) => !['collected', 'closed', 'cancelled'].includes(c.derivedState),
-      ).length,
-    [sidebarCollectionsQuery.data?.items],
-  );
-  const sidebarPayersQuery = useQuery({
-    queryKey: ['sidebar-collection-sources', activeOrganizationId] as const,
-    queryFn: () => api.listCollectionSources(activeOrganizationId!),
-    enabled: Boolean(activeOrganizationId),
-    refetchInterval: () =>
-      typeof document !== 'undefined' && document.hidden ? false : 30_000,
-  });
-  const payersUnreviewedCount = useMemo(
-    () =>
-      (sidebarPayersQuery.data?.items ?? []).filter((s) => s.trustState === 'unreviewed').length,
-    [sidebarPayersQuery.data?.items],
-  );
-  const sidebarDestinationsQuery = useQuery({
-    queryKey: ['sidebar-destinations', activeOrganizationId] as const,
-    queryFn: () => api.listDestinations(activeOrganizationId!),
-    enabled: Boolean(activeOrganizationId),
-    refetchInterval: () =>
-      typeof document !== 'undefined' && document.hidden ? false : 30_000,
-  });
-  const destinationsUnreviewedCount = useMemo(
-    () =>
-      (sidebarDestinationsQuery.data?.items ?? []).filter(
-        (d) => d.trustState === 'unreviewed' && d.isActive,
-      ).length,
-    [sidebarDestinationsQuery.data?.items],
-  );
+  const approvalPendingCount = organizationSummaryQuery.data?.pendingApprovalCount ?? 0;
+  const executionQueueCount = organizationSummaryQuery.data?.executionQueueCount ?? 0;
+  const paymentsIncompleteCount = organizationSummaryQuery.data?.paymentsIncompleteCount ?? 0;
+  const collectionsOpenCount = organizationSummaryQuery.data?.collectionsOpenCount ?? 0;
+  const destinationsUnreviewedCount = organizationSummaryQuery.data?.destinationsUnreviewedCount ?? 0;
+  const payersUnreviewedCount = organizationSummaryQuery.data?.payersUnreviewedCount ?? 0;
 
   async function logout() {
     await queryClient.cancelQueries();
@@ -322,6 +327,96 @@ function AuthTabs({ active }: { active: 'login' | 'register' }) {
   );
 }
 
+function OAuthButton({ mode }: { mode: 'login' | 'register' }) {
+  const [isRedirecting, setIsRedirecting] = useState(false);
+
+  return (
+    <button
+      className="button button-secondary oauth-button"
+      disabled={isRedirecting}
+      type="button"
+      onClick={() => {
+        setIsRedirecting(true);
+        window.location.assign(api.getGoogleOAuthStartUrl('/setup'));
+      }}
+    >
+      <span className="oauth-button-mark" aria-hidden>
+        G
+      </span>
+      {isRedirecting
+        ? 'Opening Google...'
+        : mode === 'login'
+          ? 'Sign in with Google'
+          : 'Continue with Google'}
+    </button>
+  );
+}
+
+function AuthDivider() {
+  return (
+    <div className="auth-divider" role="presentation">
+      <span />
+      <em>or</em>
+      <span />
+    </div>
+  );
+}
+
+function OAuthCallbackPage() {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const token = fragment.get('session_token');
+    const returnTo = fragment.get('return_to') || '/setup';
+    const oauthError = fragment.get('error');
+    window.history.replaceState(null, document.title, '/oauth/callback');
+
+    if (oauthError) {
+      setError(`Google sign-in failed: ${oauthError}`);
+      return;
+    }
+    if (!token) {
+      setError('Google sign-in did not return a session.');
+      return;
+    }
+
+    api.setSessionToken(token);
+    void queryClient
+      .fetchQuery({ queryKey: queryKeys().session, queryFn: () => api.getSession() })
+      .then((session) => {
+        const firstOrganizationId = session.organizations[0]?.organizationId;
+        const safeReturnTo = returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '/setup';
+        navigate(firstOrganizationId && safeReturnTo === '/setup' ? `/organizations/${firstOrganizationId}` : safeReturnTo, {
+          replace: true,
+        });
+      })
+      .catch((err) => {
+        api.clearSessionToken();
+        setError(err instanceof Error ? err.message : 'Unable to finish Google sign-in.');
+      });
+  }, [navigate, queryClient]);
+
+  return (
+    <main className="login-shell">
+      <section className="login-panel">
+        <div className="panel-kicker">Google OAuth</div>
+        <h1 className="auth-title">{error ? 'Sign-in failed' : 'Finishing sign-in'}</h1>
+        <p className="muted-copy">
+          {error ?? 'Creating your Decimal session and loading your organizations.'}
+        </p>
+        {error ? (
+          <Link className="button button-primary" to="/login" replace>
+            Back to sign in
+          </Link>
+        ) : null}
+      </section>
+    </main>
+  );
+}
+
 function LoginPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -370,6 +465,8 @@ function LoginPage() {
     <main className="login-shell">
       <section className="login-panel">
         <AuthTabs active="login" />
+        <OAuthButton mode="login" />
+        <AuthDivider />
         <form className="login-form" onSubmit={handleSubmit}>
           <label>
             Email
@@ -462,6 +559,8 @@ function RegisterPage() {
     <main className="login-shell">
       <section className="login-panel">
         <AuthTabs active="register" />
+        <OAuthButton mode="register" />
+        <AuthDivider />
         <form className="login-form" onSubmit={handleSubmit}>
           <label>
             Email
@@ -704,6 +803,7 @@ function OrganizationWalletSetupPage({ session }: { session: AuthenticatedSessio
   });
   const [browserWallets, setBrowserWallets] = useState<BrowserWalletOption[]>(() => discoverSolanaWallets());
   const [selectedWalletId, setSelectedWalletId] = useState('');
+  const [selectedManagedProvider, setSelectedManagedProvider] = useState<ManagedWalletProviderOption | null>(null);
 
   useEffect(() => subscribeSolanaWallets(setBrowserWallets), []);
 
@@ -732,26 +832,26 @@ function OrganizationWalletSetupPage({ session }: { session: AuthenticatedSessio
     },
     onError: (err) => toastError(err instanceof Error ? err.message : 'Unable to connect wallet.'),
   });
-  const embeddedMutation = useMutation({
+  const managedWalletMutation = useMutation({
     mutationFn: (formData: FormData) => {
-      const walletAddress = getFormString(formData, 'walletAddress');
-      const providerWalletId = getOptionalFormString(formData, 'providerWalletId');
-      const label = getOptionalFormString(formData, 'label');
-      if (!walletAddress) {
-        throw new Error('Wallet address is required.');
+      if (!selectedManagedProvider) {
+        throw new Error('Select a wallet provider first.');
       }
-      return api.registerEmbeddedWallet({
-        walletAddress,
-        provider: 'privy',
-        providerWalletId: providerWalletId || undefined,
+      if (!selectedManagedProvider.enabled) {
+        throw new Error(`${selectedManagedProvider.name} is not enabled yet.`);
+      }
+      const label = getOptionalFormString(formData, 'label');
+      return api.createManagedWallet({
+        provider: selectedManagedProvider.id,
         label: label || undefined,
       });
     },
     onSuccess: async () => {
-      success('Embedded wallet registered.');
+      success('Managed wallet created.');
       await queryClient.invalidateQueries({ queryKey: ['user-wallets'] });
+      setSelectedManagedProvider(null);
     },
-    onError: (err) => toastError(err instanceof Error ? err.message : 'Unable to register embedded wallet.'),
+    onError: (err) => toastError(err instanceof Error ? err.message : 'Unable to create managed wallet.'),
   });
 
   if (!organizationId || !organization) {
@@ -773,7 +873,7 @@ function OrganizationWalletSetupPage({ session }: { session: AuthenticatedSessio
       </div>
       <div className="split-panels">
         <section className="panel">
-          <SectionHeader title="Connect browser wallet" description="Use Phantom, Solflare, Backpack, or another Solana wallet." />
+          <SectionHeader title="Connect existing wallet" description="Use Phantom, Solflare, Backpack, or another Solana wallet you already control." />
           <div className="form-stack">
             <label className="field">
               Browser wallet
@@ -797,30 +897,30 @@ function OrganizationWalletSetupPage({ session }: { session: AuthenticatedSessio
           </div>
         </section>
         <section className="panel">
-          <SectionHeader title="Register embedded wallet" description="Privy will create this in the real embedded-wallet flow." />
-          <form
-            className="form-stack"
-            onSubmit={(event) => {
-              event.preventDefault();
-              embeddedMutation.mutate(new FormData(event.currentTarget));
-            }}
-          >
-            <label className="field">
-              Wallet address
-              <input name="walletAddress" placeholder="Solana wallet address" autoComplete="off" />
-            </label>
-            <label className="field">
-              Privy wallet id
-              <input name="providerWalletId" placeholder="Optional" autoComplete="off" />
-            </label>
-            <label className="field">
-              Label
-              <input name="label" placeholder="Fuyo signing wallet" autoComplete="off" />
-            </label>
-            <button className="button button-secondary" disabled={embeddedMutation.isPending} type="submit">
-              {embeddedMutation.isPending ? 'Registering...' : 'Register embedded wallet'}
-            </button>
-          </form>
+          <SectionHeader title="Create managed wallet" description="Choose a custody provider. Decimal handles the wallet address and provider metadata." />
+          <div className="provider-grid">
+            {MANAGED_WALLET_PROVIDERS.map((provider) => (
+              <button
+                className="provider-card"
+                disabled={!provider.enabled}
+                key={provider.id}
+                onClick={() => setSelectedManagedProvider(provider)}
+                type="button"
+              >
+                <span className="provider-icon">{provider.name.slice(0, 1)}</span>
+                <span className="provider-card-main">
+                  <strong>{provider.name}</strong>
+                  <small>{provider.description}</small>
+                  <span className="provider-chip-row">
+                    {provider.capabilities.map((capability) => (
+                      <span className="provider-chip" key={capability}>{capability}</span>
+                    ))}
+                  </span>
+                </span>
+                {!provider.enabled ? <span className="provider-status">Soon</span> : null}
+              </button>
+            ))}
+          </div>
         </section>
       </div>
       <section className="panel panel-spaced">
@@ -832,13 +932,57 @@ function OrganizationWalletSetupPage({ session }: { session: AuthenticatedSessio
           </button>
         </div>
       </section>
+      <Modal
+        open={Boolean(selectedManagedProvider)}
+        title="New managed wallet"
+        onClose={() => setSelectedManagedProvider(null)}
+      >
+        {selectedManagedProvider ? (
+          <form
+            className="form-stack"
+            onSubmit={(event) => {
+              event.preventDefault();
+              managedWalletMutation.mutate(new FormData(event.currentTarget));
+            }}
+          >
+            <div className="provider-modal-summary">
+              <span className="provider-icon provider-icon-large">{selectedManagedProvider.name.slice(0, 1)}</span>
+              <div>
+                <strong>{selectedManagedProvider.name}</strong>
+                <p>{selectedManagedProvider.description}</p>
+                <span className="provider-chip-row">
+                  {selectedManagedProvider.capabilities.map((capability) => (
+                    <span className="provider-chip" key={capability}>{capability}</span>
+                  ))}
+                </span>
+              </div>
+            </div>
+            <label className="field">
+              Primary wallet label
+              <input
+                name="label"
+                placeholder={`${organization.organizationName} signing wallet`}
+                autoComplete="off"
+              />
+            </label>
+            <div className="modal-footer-inline">
+              <button className="button button-secondary" type="button" onClick={() => setSelectedManagedProvider(null)}>
+                Cancel
+              </button>
+              <button className="button button-primary" disabled={managedWalletMutation.isPending} type="submit">
+                {managedWalletMutation.isPending ? 'Creating...' : 'Create wallet'}
+              </button>
+            </div>
+          </form>
+        ) : null}
+      </Modal>
     </PageFrame>
   );
 }
 
 function WalletList({ wallets }: { wallets: UserWallet[] }) {
   if (!wallets.length) {
-    return <EmptyPanel title="No wallets yet" description="Connect a browser wallet or register an embedded wallet." />;
+    return <EmptyPanel title="No wallets yet" description="Connect an existing wallet or create a managed wallet." />;
   }
 
   return (

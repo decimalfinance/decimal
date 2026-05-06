@@ -6,6 +6,7 @@ type FileConfig = {
   host?: string;
   port?: number;
   publicApiUrl?: string | null;
+  publicFrontendUrl?: string | null;
   clickhouseUrl?: string;
   clickhouseDatabase?: string;
   corsOrigins?: string[];
@@ -21,6 +22,7 @@ type DecimalConfig = {
   host: string;
   port: number;
   publicApiUrl: string | null;
+  publicFrontendUrl: string | null;
   solanaRpcUrl: string;
   clickhouseUrl: string;
   clickhouseDatabase: string;
@@ -30,6 +32,13 @@ type DecimalConfig = {
   rateLimitEnabled: boolean;
   publicRateLimitWindowMs: number;
   publicRateLimitMax: number;
+  googleOAuthClientId: string;
+  googleOAuthClientSecret: string;
+  googleOAuthRedirectUri: string | null;
+  oauthStateSecret: string;
+  privyAppId: string;
+  privyAppSecret: string;
+  privyApiBaseUrl: string;
 };
 
 export const config: DecimalConfig = buildConfig();
@@ -46,6 +55,7 @@ function buildConfig(): DecimalConfig {
     host: fileConfig.host ?? '0.0.0.0',
     port: fileConfig.port ?? 3100,
     publicApiUrl: normalizeOptionalUrl(fileConfig.publicApiUrl),
+    publicFrontendUrl: normalizeOptionalUrl(fileConfig.publicFrontendUrl),
     solanaRpcUrl: process.env.SOLANA_RPC_URL ?? 'https://api.mainnet-beta.solana.com',
     clickhouseUrl: fileConfig.clickhouseUrl ?? 'http://127.0.0.1:8123',
     clickhouseDatabase: fileConfig.clickhouseDatabase ?? 'usdc_ops',
@@ -56,6 +66,13 @@ function buildConfig(): DecimalConfig {
       fileConfig.rateLimitEnabled ?? (nodeEnv === 'test' ? false : true),
     publicRateLimitWindowMs: fileConfig.publicRateLimitWindowMs ?? 60_000,
     publicRateLimitMax: fileConfig.publicRateLimitMax ?? 120,
+    googleOAuthClientId: (process.env.GOOGLE_OAUTH_CLIENT_ID ?? '').trim(),
+    googleOAuthClientSecret: (process.env.GOOGLE_OAUTH_CLIENT_SECRET ?? '').trim(),
+    googleOAuthRedirectUri: normalizeOptionalUrl(process.env.GOOGLE_OAUTH_REDIRECT_URI),
+    oauthStateSecret: (process.env.OAUTH_STATE_SECRET ?? controlPlaneServiceToken).trim(),
+    privyAppId: (process.env.PRIVY_APP_ID ?? '').trim(),
+    privyAppSecret: (process.env.PRIVY_APP_SECRET ?? '').trim(),
+    privyApiBaseUrl: normalizeOptionalUrl(process.env.PRIVY_API_BASE_URL) ?? 'https://api.privy.io',
   };
 
   validateConfig(nextConfig);
@@ -92,6 +109,25 @@ function normalizeOptionalUrl(value: string | null | undefined) {
 }
 
 function validateConfig(nextConfig: DecimalConfig) {
+  const hasPartialGoogleOAuthConfig =
+    Boolean(nextConfig.googleOAuthClientId) !== Boolean(nextConfig.googleOAuthClientSecret);
+  if (hasPartialGoogleOAuthConfig) {
+    throw new Error('GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET must be configured together.');
+  }
+
+  if (nextConfig.googleOAuthClientId && !nextConfig.oauthStateSecret) {
+    throw new Error('OAUTH_STATE_SECRET is required when Google OAuth is enabled.');
+  }
+
+  const hasPartialPrivyConfig = Boolean(nextConfig.privyAppId) !== Boolean(nextConfig.privyAppSecret);
+  if (hasPartialPrivyConfig) {
+    throw new Error('PRIVY_APP_ID and PRIVY_APP_SECRET must be configured together.');
+  }
+
+  if (nextConfig.privyApiBaseUrl.includes('/jwks') || nextConfig.privyApiBaseUrl.includes('/apps/')) {
+    throw new Error('PRIVY_API_BASE_URL must be the Privy REST API base URL, usually https://api.privy.io, not a JWKS endpoint.');
+  }
+
   if (!nextConfig.isProduction) {
     return;
   }
@@ -107,4 +143,9 @@ function validateConfig(nextConfig: DecimalConfig) {
   if (!nextConfig.publicApiUrl) {
     throw new Error('config/api.config.json must define publicApiUrl in production.');
   }
+
+  if (!nextConfig.publicFrontendUrl) {
+    throw new Error('config/api.config.json must define publicFrontendUrl in production.');
+  }
+
 }

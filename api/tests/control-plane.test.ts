@@ -184,6 +184,11 @@ test('session auth supports organization, address-book, and policy setup', async
   const inbox = await get(`/organizations/${organization.organizationId}/approval-inbox`, register.sessionToken);
   assert.deepEqual(inbox.items, []);
 
+  const summary = await get(`/organizations/${organization.organizationId}/summary`, register.sessionToken);
+  assert.equal(summary.paymentsIncompleteCount, 0);
+  assert.equal(summary.collectionsOpenCount, 0);
+  assert.equal(summary.destinationsUnreviewedCount, 0);
+
   const session = await get('/auth/session', register.sessionToken);
   assert.equal(session.authenticated, true);
   assert.equal(session.authType, 'user_session');
@@ -242,6 +247,21 @@ test('auth registration and login require the right password', async () => {
   assert.equal(login.user.email, 'auth@example.com');
 });
 
+test('google oauth start uses stable local redirect URI when configured', async () => {
+  const response = await fetch(`${baseUrl}/auth/google/start?returnTo=/setup&frontendOrigin=http://127.0.0.1:5174`, {
+    redirect: 'manual',
+  });
+  if (response.status === 501) {
+    assert.equal((await response.json()).code, 'google_oauth_not_configured');
+    return;
+  }
+  assert.equal(response.status, 302);
+  const location = response.headers.get('location');
+  assert.ok(location);
+  const redirect = new URL(location);
+  assert.equal(redirect.searchParams.get('redirect_uri'), 'http://127.0.0.1:3100/auth/google/callback');
+});
+
 test('email verification gates organization setup and wallet registration is user-scoped', async () => {
   const register = await post('/auth/register', {
     email: 'onboarding@example.com',
@@ -282,6 +302,16 @@ test('email verification gates organization setup and wallet registration is use
   const wallets = await get('/user-wallets', register.sessionToken);
   assert.equal(wallets.items.length, 1);
   assert.equal(wallets.items[0].userWalletId, embeddedWallet.userWalletId);
+
+  const unsupportedManagedWallet = await fetch(`${baseUrl}/user-wallets/managed`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...authHeaders(register.sessionToken),
+    },
+    body: JSON.stringify({ provider: 'fireblocks', label: 'Fireblocks signer' }),
+  });
+  assert.equal(unsupportedManagedWallet.status, 501);
 });
 
 test('service token protection only applies to internal routes', async () => {

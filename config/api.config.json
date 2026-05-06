@@ -2,6 +2,7 @@
   "host": "0.0.0.0",
   "port": 3100,
   "publicApiUrl": "https://api.decimal.finance",
+  "publicFrontendUrl": "https://decimal.finance",
   "clickhouseUrl": "http://127.0.0.1:8123",
   "clickhouseDatabase": "usdc_ops",
   "corsOrigins": [
