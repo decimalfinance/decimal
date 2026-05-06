@@ -50,7 +50,6 @@ import {
   orbTransactionUrl,
   shortenAddress,
   signAndSubmitPreparedPayment,
-  signWalletVerificationMessage,
   subscribeSolanaWallets,
   type BrowserWalletOption,
 } from './domain';
@@ -115,41 +114,6 @@ const MANAGED_WALLET_PROVIDERS: ManagedWalletProviderOption[] = [
     description: 'Embedded Solana signing wallet managed through Privy.',
     capabilities: ['Solana', 'Embedded', 'Transfers'],
     enabled: true,
-  },
-  {
-    id: 'fireblocks',
-    name: 'Fireblocks',
-    description: 'Enterprise custody and policy workflow for larger treasury teams.',
-    capabilities: ['Custody', 'Policies', 'Enterprise'],
-    enabled: false,
-  },
-  {
-    id: 'coinbase_cdp',
-    name: 'Coinbase CDP',
-    description: 'Developer wallet infrastructure for programmatic wallet fleets.',
-    capabilities: ['Wallets', 'API', 'Compliance'],
-    enabled: false,
-  },
-  {
-    id: 'para',
-    name: 'Para',
-    description: 'Embedded wallet infrastructure for user-controlled wallets.',
-    capabilities: ['Embedded', 'Recovery', 'Apps'],
-    enabled: false,
-  },
-  {
-    id: 'turnkey',
-    name: 'Turnkey',
-    description: 'Policy-controlled wallet infrastructure for signing operations.',
-    capabilities: ['Policies', 'Signing', 'TEE'],
-    enabled: false,
-  },
-  {
-    id: 'dfns',
-    name: 'DFNS',
-    description: 'Institutional wallet infrastructure for regulated teams.',
-    capabilities: ['Custody', 'Controls', 'Audit'],
-    enabled: false,
   },
 ];
 
@@ -801,57 +765,22 @@ function OrganizationWalletSetupPage({ session }: { session: AuthenticatedSessio
     queryKey: ['user-wallets'] as const,
     queryFn: () => api.listUserWallets(),
   });
-  const [browserWallets, setBrowserWallets] = useState<BrowserWalletOption[]>(() => discoverSolanaWallets());
-  const [selectedWalletId, setSelectedWalletId] = useState('');
-  const [selectedManagedProvider, setSelectedManagedProvider] = useState<ManagedWalletProviderOption | null>(null);
 
-  useEffect(() => subscribeSolanaWallets(setBrowserWallets), []);
+  const privyProvider = MANAGED_WALLET_PROVIDERS[0];
 
-  const connectExternalMutation = useMutation({
-    mutationFn: async () => {
-      const selected = browserWallets.find((wallet) => wallet.id === selectedWalletId);
-      if (!selected) {
-        throw new Error('Select a wallet first.');
-      }
-      if (!selected.address) {
-        throw new Error('Connect this wallet in the browser extension, then refresh the wallet list.');
-      }
-      const challenge = await api.createWalletChallenge({ walletAddress: selected.address });
-      const signed = await signWalletVerificationMessage(challenge.message, selected.id);
-      return api.connectExternalWallet({
-        walletAddress: signed.walletAddress,
-        nonce: challenge.nonce,
-        signedMessageBase64: signed.signedMessageBase64,
-        signatureBase64: signed.signatureBase64,
-        provider: selected.name,
-      });
-    },
-    onSuccess: async () => {
-      success('Wallet connected.');
-      await queryClient.invalidateQueries({ queryKey: ['user-wallets'] });
-    },
-    onError: (err) => toastError(err instanceof Error ? err.message : 'Unable to connect wallet.'),
-  });
   const managedWalletMutation = useMutation({
     mutationFn: (formData: FormData) => {
-      if (!selectedManagedProvider) {
-        throw new Error('Select a wallet provider first.');
-      }
-      if (!selectedManagedProvider.enabled) {
-        throw new Error(`${selectedManagedProvider.name} is not enabled yet.`);
-      }
       const label = getOptionalFormString(formData, 'label');
       return api.createManagedWallet({
-        provider: selectedManagedProvider.id,
+        provider: privyProvider.id,
         label: label || undefined,
       });
     },
     onSuccess: async () => {
-      success('Managed wallet created.');
+      success('Signing wallet created.');
       await queryClient.invalidateQueries({ queryKey: ['user-wallets'] });
-      setSelectedManagedProvider(null);
     },
-    onError: (err) => toastError(err instanceof Error ? err.message : 'Unable to create managed wallet.'),
+    onError: (err) => toastError(err instanceof Error ? err.message : 'Unable to create signing wallet.'),
   });
 
   if (!organizationId || !organization) {
@@ -864,65 +793,37 @@ function OrganizationWalletSetupPage({ session }: { session: AuthenticatedSessio
     <PageFrame
       eyebrow={organization.organizationName}
       title="Add your signing wallet"
-      description="This is your personal member wallet. Treasury setup comes next."
+      description="Decimal will create a Privy-managed Solana wallet that becomes your personal signer. Treasury setup comes next."
     >
-      <div className="metric-strip metric-strip-three">
-        <Metric label="Organization" value={organization.organizationName} />
-        <Metric label="Member wallets" value={String(wallets.length)} />
-        <Metric label="Next" value="Treasury setup" />
-      </div>
-      <div className="split-panels">
-        <section className="panel">
-          <SectionHeader title="Connect existing wallet" description="Use Phantom, Solflare, Backpack, or another Solana wallet you already control." />
-          <div className="form-stack">
-            <label className="field">
-              Browser wallet
-              <select value={selectedWalletId} onChange={(event) => setSelectedWalletId(event.target.value)}>
-                <option value="">Select wallet</option>
-                {browserWallets.map((wallet) => (
-                  <option key={wallet.id} value={wallet.id} disabled={!wallet.ready || !wallet.address}>
-                    {wallet.name}{wallet.address ? ` // ${shortenAddress(wallet.address)}` : ' // unlock first'}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              className="button button-primary"
-              disabled={connectExternalMutation.isPending || !selectedWalletId}
-              onClick={() => connectExternalMutation.mutate()}
-              type="button"
-            >
-              {connectExternalMutation.isPending ? 'Connecting...' : 'Connect wallet'}
-            </button>
-          </div>
-        </section>
-        <section className="panel">
-          <SectionHeader title="Create managed wallet" description="Choose a custody provider. Decimal handles the wallet address and provider metadata." />
-          <div className="provider-grid">
-            {MANAGED_WALLET_PROVIDERS.map((provider) => (
-              <button
-                className="provider-card"
-                disabled={!provider.enabled}
-                key={provider.id}
-                onClick={() => setSelectedManagedProvider(provider)}
-                type="button"
-              >
-                <span className="provider-icon">{provider.name.slice(0, 1)}</span>
-                <span className="provider-card-main">
-                  <strong>{provider.name}</strong>
-                  <small>{provider.description}</small>
-                  <span className="provider-chip-row">
-                    {provider.capabilities.map((capability) => (
-                      <span className="provider-chip" key={capability}>{capability}</span>
-                    ))}
-                  </span>
-                </span>
-                {!provider.enabled ? <span className="provider-status">Soon</span> : null}
-              </button>
-            ))}
-          </div>
-        </section>
-      </div>
+      <section className="panel">
+        <SectionHeader
+          title="Create signing wallet"
+          description="Embedded Solana wallet managed through Privy. Keys never leave the browser; Decimal stores only the public address and provider metadata."
+        />
+        <form
+          className="form-stack"
+          onSubmit={(event) => {
+            event.preventDefault();
+            managedWalletMutation.mutate(new FormData(event.currentTarget));
+          }}
+        >
+          <label className="field">
+            Wallet name
+            <input
+              name="label"
+              placeholder={`${organization.organizationName} signing wallet`}
+              autoComplete="off"
+            />
+          </label>
+          <button
+            className="button button-primary"
+            disabled={managedWalletMutation.isPending}
+            type="submit"
+          >
+            {managedWalletMutation.isPending ? 'Creating…' : 'Create signing wallet'}
+          </button>
+        </form>
+      </section>
       <section className="panel panel-spaced">
         <SectionHeader title="Your wallets" description="These wallets can later become Squads members or solo signers." />
         <WalletList wallets={wallets} />
@@ -932,57 +833,13 @@ function OrganizationWalletSetupPage({ session }: { session: AuthenticatedSessio
           </button>
         </div>
       </section>
-      <Modal
-        open={Boolean(selectedManagedProvider)}
-        title="New managed wallet"
-        onClose={() => setSelectedManagedProvider(null)}
-      >
-        {selectedManagedProvider ? (
-          <form
-            className="form-stack"
-            onSubmit={(event) => {
-              event.preventDefault();
-              managedWalletMutation.mutate(new FormData(event.currentTarget));
-            }}
-          >
-            <div className="provider-modal-summary">
-              <span className="provider-icon provider-icon-large">{selectedManagedProvider.name.slice(0, 1)}</span>
-              <div>
-                <strong>{selectedManagedProvider.name}</strong>
-                <p>{selectedManagedProvider.description}</p>
-                <span className="provider-chip-row">
-                  {selectedManagedProvider.capabilities.map((capability) => (
-                    <span className="provider-chip" key={capability}>{capability}</span>
-                  ))}
-                </span>
-              </div>
-            </div>
-            <label className="field">
-              Primary wallet label
-              <input
-                name="label"
-                placeholder={`${organization.organizationName} signing wallet`}
-                autoComplete="off"
-              />
-            </label>
-            <div className="modal-footer-inline">
-              <button className="button button-secondary" type="button" onClick={() => setSelectedManagedProvider(null)}>
-                Cancel
-              </button>
-              <button className="button button-primary" disabled={managedWalletMutation.isPending} type="submit">
-                {managedWalletMutation.isPending ? 'Creating...' : 'Create wallet'}
-              </button>
-            </div>
-          </form>
-        ) : null}
-      </Modal>
     </PageFrame>
   );
 }
 
 function WalletList({ wallets }: { wallets: UserWallet[] }) {
   if (!wallets.length) {
-    return <EmptyPanel title="No wallets yet" description="Connect an existing wallet or create a managed wallet." />;
+    return <EmptyPanel title="No wallets yet" description="Create your signing wallet above to get started." />;
   }
 
   return (

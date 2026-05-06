@@ -67,19 +67,34 @@ export function WalletsPage({ session }: { session: AuthenticatedSession }) {
   });
 
   const createMutation = useMutation({
-    mutationFn: (form: FormData) =>
-      api.createTreasuryWallet(organizationId!, {
-        address: String(form.get('address') ?? '').trim(),
-        displayName: String(form.get('displayName') ?? '').trim() || undefined,
-        notes: String(form.get('notes') ?? '').trim() || undefined,
-      }),
+    // Two-step: create a Privy-managed signing wallet, then register its
+    // address as a treasury wallet for this organization. Manual address
+    // entry is intentionally not exposed for now — re-add when external
+    // wallet imports are needed.
+    mutationFn: async (form: FormData) => {
+      const displayName = String(form.get('displayName') ?? '').trim();
+      const notes = String(form.get('notes') ?? '').trim();
+      if (!displayName) {
+        throw new Error('Wallet name is required.');
+      }
+      const managed = await api.createManagedWallet({
+        provider: 'privy',
+        label: displayName,
+      });
+      return api.createTreasuryWallet(organizationId!, {
+        address: managed.walletAddress,
+        displayName,
+        notes: notes || undefined,
+      });
+    },
     onSuccess: async () => {
-      success('Wallet saved.');
+      success('Wallet created.');
       setAddOpen(false);
       await queryClient.invalidateQueries({ queryKey: ['treasury-wallet-balances', organizationId] });
       await queryClient.invalidateQueries({ queryKey: ['addresses', organizationId] });
+      await queryClient.invalidateQueries({ queryKey: ['user-wallets'] });
     },
-    onError: (err) => toastError(err instanceof Error ? err.message : 'Unable to save wallet.'),
+    onError: (err) => toastError(err instanceof Error ? err.message : 'Unable to create wallet.'),
   });
 
   const rows = balancesQuery.data?.items ?? [];
@@ -285,9 +300,11 @@ function AddWalletDialog(props: {
     <div className="rd-dialog-backdrop" role="dialog" aria-modal="true" aria-labelledby="rd-add-wallet-title">
       <div className="rd-dialog" style={{ maxWidth: 480 }}>
         <h2 id="rd-add-wallet-title" className="rd-dialog-title">
-          Add wallet
+          Create wallet
         </h2>
-        <p className="rd-dialog-body">Only register wallets you control. These become source wallets for payments.</p>
+        <p className="rd-dialog-body">
+          Decimal will create a Privy-managed Solana wallet and register it as a treasury wallet for this organization. Keys never leave the browser.
+        </p>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -295,12 +312,8 @@ function AddWalletDialog(props: {
           }}
         >
           <label className="field">
-            Name
-            <input name="displayName" placeholder="Ops vault" autoComplete="off" />
-          </label>
-          <label className="field">
-            Solana address
-            <input name="address" required placeholder="Wallet address" autoComplete="off" />
+            Wallet name
+            <input name="displayName" required placeholder="Ops vault" autoComplete="off" />
           </label>
           <label className="field">
             Notes
@@ -311,7 +324,7 @@ function AddWalletDialog(props: {
               Cancel
             </button>
             <button type="submit" className="button button-primary" disabled={pending} aria-busy={pending}>
-              {pending ? 'Saving…' : 'Save wallet'}
+              {pending ? 'Creating…' : 'Create via Privy'}
             </button>
           </div>
         </form>
