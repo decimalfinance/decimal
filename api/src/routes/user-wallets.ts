@@ -1,4 +1,15 @@
-import { PublicKey, VersionedTransaction } from '@solana/web3.js';
+import {
+  PublicKey,
+  SystemProgram,
+  TransactionMessage,
+  VersionedTransaction,
+  type TransactionInstruction,
+} from '@solana/web3.js';
+import {
+  createAssociatedTokenAccountIdempotentInstruction,
+  createTransferCheckedInstruction,
+  TOKEN_PROGRAM_ID,
+} from '@solana/spl-token';
 import crypto from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
@@ -6,6 +17,12 @@ import { ApiError, badRequest, notFound } from '../api-errors.js';
 import { prisma } from '../prisma.js';
 import { createPrivySolanaWallet, signPrivySolanaTransaction } from '../privy-wallets.js';
 import { config } from '../config.js';
+import {
+  USDC_DECIMALS,
+  USDC_MINT,
+  deriveUsdcAtaForWallet,
+  getSolanaConnection,
+} from '../solana.js';
 
 export const userWalletsRouter = Router();
 
@@ -287,6 +304,153 @@ userWalletsRouter.post(
         walletAddress: wallet.walletAddress,
         signedTransactionBase64: signed.signedTransactionBase64,
         encoding: signed.encoding,
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+const transferOutSchema = z.object({
+  recipient: z.string().trim().min(32).max(64),
+  amountRaw: z.string().regex(/^\d+$/, 'amountRaw must be a positive integer string (raw base units)'),
+  asset: z.enum(['sol', 'usdc']),
+});
+
+// Drain / partial-transfer helper for personal Privy wallets. Builds the
+// appropriate Solana instruction(s), signs via the existing Privy
+// signing service, submits, and best-effort confirms. Used by the
+// Profile UI's "Transfer" affordance so users can recover funds they
+// sent to a Privy wallet for testing without needing the Privy SDK
+// client-side.
+//
+// SOL: SystemProgram.transfer with `amountRaw` as lamports.
+// USDC: idempotent ATA creation for the recipient (no-op if it exists)
+//   followed by createTransferChecked at USDC_DECIMALS. `amountRaw`
+//   is in raw base units (1 USDC = 1_000_000).
+//
+// Same wallet ownership + provider checks as sign-versioned-transaction.
+userWalletsRouter.post(
+  ['/personal-wallets/:userWalletId/transfer-out', '/user-wallets/:userWalletId/transfer-out'],
+  async (req, res, next) => {
+    try {
+      const { userWalletId } = userWalletParamsSchema.parse(req.params);
+      const input = transferOutSchema.parse(req.body);
+
+      const wallet = await prisma.personalWallet.findFirst({
+        where: { userWalletId, userId: req.auth!.userId, status: 'active' },
+      });
+      if (!wallet) {
+        throw notFound('Personal wallet not found');
+      }
+      if (
+        wallet.chain !== 'solana' ||
+        wallet.provider !== 'privy' ||
+        wallet.walletType !== 'privy_embedded' ||
+        !wallet.providerWalletId
+      ) {
+        throw new ApiError(
+          400,
+          'unsupported_wallet_signer',
+          'Only Privy embedded Solana wallets can sign through this endpoint.',
+        );
+      }
+
+      let recipientPubkey: PublicKey;
+      try {
+        recipientPubkey = new PublicKey(input.recipient);
+      } catch {
+        throw badRequest('recipient is not a valid Solana address.');
+      }
+      if (recipientPubkey.toBase58() === wallet.walletAddress) {
+        throw badRequest('Cannot transfer to the same wallet.');
+      }
+
+      const amountRaw = BigInt(input.amountRaw);
+      if (amountRaw <= 0n) {
+        throw badRequest('amountRaw must be greater than zero.');
+      }
+
+      const connection = getSolanaConnection();
+      const sourcePubkey = new PublicKey(wallet.walletAddress);
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+
+      let instructions: TransactionInstruction[];
+      if (input.asset === 'sol') {
+        instructions = [
+          SystemProgram.transfer({
+            fromPubkey: sourcePubkey,
+            toPubkey: recipientPubkey,
+            lamports: amountRaw,
+          }),
+        ];
+      } else {
+        const sourceAta = new PublicKey(deriveUsdcAtaForWallet(wallet.walletAddress));
+        const destinationAta = new PublicKey(deriveUsdcAtaForWallet(recipientPubkey.toBase58()));
+        instructions = [
+          createAssociatedTokenAccountIdempotentInstruction(
+            sourcePubkey,
+            destinationAta,
+            recipientPubkey,
+            USDC_MINT,
+          ),
+          createTransferCheckedInstruction(
+            sourceAta,
+            USDC_MINT,
+            destinationAta,
+            sourcePubkey,
+            amountRaw,
+            USDC_DECIMALS,
+            [],
+            TOKEN_PROGRAM_ID,
+          ),
+        ];
+      }
+
+      const message = new TransactionMessage({
+        payerKey: sourcePubkey,
+        recentBlockhash: blockhash,
+        instructions,
+      }).compileToV0Message();
+      const transaction = new VersionedTransaction(message);
+      const serializedTransactionBase64 = Buffer.from(transaction.serialize()).toString('base64');
+
+      const signed = await signPrivySolanaTransaction({
+        providerWalletId: wallet.providerWalletId,
+        serializedTransactionBase64,
+      });
+
+      const signedBytes = Buffer.from(signed.signedTransactionBase64, 'base64');
+      const signature = await connection.sendRawTransaction(signedBytes, {
+        skipPreflight: false,
+        preflightCommitment: 'confirmed',
+      });
+
+      // Best-effort confirmation. We don't surface a confirm failure as
+      // an error — the tx may still land within the blockhash window
+      // and the caller can poll the signature via an explorer if they
+      // care to wait. This keeps the API from hanging the UI on a
+      // confirmation race.
+      try {
+        await connection.confirmTransaction(
+          { signature, blockhash, lastValidBlockHeight },
+          'confirmed',
+        );
+      } catch {
+        // swallow — signature is what matters
+      }
+
+      await prisma.personalWallet.update({
+        where: { userWalletId: wallet.userWalletId },
+        data: { lastUsedAt: new Date() },
+      });
+
+      res.json({
+        signature,
+        asset: input.asset,
+        amountRaw: input.amountRaw,
+        recipient: recipientPubkey.toBase58(),
+        userWalletId: wallet.userWalletId,
       });
     } catch (error) {
       next(error);
