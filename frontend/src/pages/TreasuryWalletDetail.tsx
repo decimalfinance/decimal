@@ -15,6 +15,8 @@ import type {
 import { orbAccountUrl, shortenAddress } from '../domain';
 import { signAndSubmitIntent } from '../lib/squads-pipeline';
 import { useToast } from '../ui/Toast';
+import { ProposalsTable, type ProposalsTableBusy } from '../ui/ProposalsTable';
+import type { DecimalProposal } from '../types';
 
 const ALL_PERMISSIONS: SquadsPermission[] = ['initiate', 'vote', 'execute'];
 
@@ -98,7 +100,9 @@ export function TreasuryWalletDetailPage({ session }: { session: AuthenticatedSe
   const ownPersonalWalletsQuery = useQuery({
     queryKey: ['personal-wallets'] as const,
     queryFn: () => api.listPersonalWallets(),
-    enabled: Boolean(isSquads && isAdmin),
+    // Needed by both the admin-only AddMember flow AND any Squads voter who
+    // wants to approve / execute proposals from the inline section below.
+    enabled: Boolean(isSquads),
   });
   const ownPersonalWallets = useMemo(
     () =>
@@ -126,6 +130,91 @@ export function TreasuryWalletDetailPage({ session }: { session: AuthenticatedSe
   }, [detailQuery.data, session.user.userId]);
 
   const [openDialog, setOpenDialog] = useState<'add-member' | 'change-threshold' | null>(null);
+  const [proposalsBusy, setProposalsBusy] = useState<ProposalsTableBusy | null>(null);
+
+  // Inline proposals (this treasury only). Only fetch once we know the wallet
+  // is a Squads treasury; non-members get a 403 silently and the section
+  // stays hidden.
+  const treasuryProposalsQuery = useQuery({
+    queryKey: ['organization-proposals', organizationId, 'pending', treasuryWalletId] as const,
+    queryFn: () =>
+      api.listOrganizationProposals(organizationId!, {
+        status: 'pending',
+        treasuryWalletId: treasuryWalletId!,
+        limit: 25,
+      }),
+    enabled: Boolean(organizationId && treasuryWalletId && isSquads),
+    refetchInterval: 20_000,
+    retry: false,
+  });
+  const treasuryProposals = treasuryProposalsQuery.data?.items ?? [];
+
+  async function refreshProposals(decimalProposalId?: string) {
+    await queryClient.invalidateQueries({ queryKey: ['organization-proposals', organizationId] });
+    if (decimalProposalId) {
+      await queryClient.invalidateQueries({
+        queryKey: ['organization-proposal', organizationId, decimalProposalId],
+      });
+    }
+  }
+
+  const proposalApproveMutation = useMutation({
+    mutationFn: async (input: { proposal: DecimalProposal; signerWalletId: string }) => {
+      const intent = await api.createProposalApprovalIntent(
+        organizationId!,
+        input.proposal.decimalProposalId,
+        { memberPersonalWalletId: input.signerWalletId },
+      );
+      return signAndSubmitIntent({ intent, signerPersonalWalletId: input.signerWalletId });
+    },
+    onSuccess: async (_sig, vars) => {
+      success('Approval submitted.');
+      await refreshProposals(vars.proposal.decimalProposalId);
+    },
+    onError: (err) => {
+      toastError(err instanceof ApiError || err instanceof Error ? err.message : 'Approve failed.');
+    },
+    onSettled: () => setProposalsBusy(null),
+  });
+
+  const proposalExecuteMutation = useMutation({
+    mutationFn: async (input: { proposal: DecimalProposal; signerWalletId: string }) => {
+      const decimalProposalId = input.proposal.decimalProposalId;
+      const intent = await api.createProposalExecuteIntent(
+        organizationId!,
+        decimalProposalId,
+        { memberPersonalWalletId: input.signerWalletId },
+      );
+      const sig = await signAndSubmitIntent({
+        intent,
+        signerPersonalWalletId: input.signerWalletId,
+      });
+      try {
+        await api.confirmProposalExecution(organizationId!, decimalProposalId, { signature: sig });
+      } catch {
+        // ignore
+      }
+      if (input.proposal.proposalType === 'config_transaction') {
+        try {
+          await api.syncSquadsTreasuryMembers(organizationId!, treasuryWalletId!);
+        } catch {
+          // ignore
+        }
+      }
+      return { decimalProposalId, signature: sig };
+    },
+    onSuccess: async (result) => {
+      success('Proposal executed.');
+      await refreshProposals(result.decimalProposalId);
+      await queryClient.invalidateQueries({
+        queryKey: ['treasury-wallet-detail', organizationId, treasuryWalletId],
+      });
+    },
+    onError: (err) => {
+      toastError(err instanceof ApiError || err instanceof Error ? err.message : 'Execute failed.');
+    },
+    onSettled: () => setProposalsBusy(null),
+  });
 
   const syncMutation = useMutation({
     mutationFn: () => api.syncSquadsTreasuryMembers(organizationId!, treasuryWalletId!),
@@ -282,6 +371,52 @@ export function TreasuryWalletDetailPage({ session }: { session: AuthenticatedSe
         </section>
       ) : detail ? (
         <SquadsDetailContent detail={detail} wallet={wallet} />
+      ) : null}
+
+      {detail && isCurrentUserSquadsMember ? (
+        <section className="rd-section" style={{ marginTop: 24 }}>
+          <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 500 }}>Pending proposals</h2>
+            <Link
+              to={`/organizations/${organizationId}/proposals?treasuryWalletId=${treasuryWalletId}`}
+              style={{ fontSize: 13, color: 'var(--ax-accent)', textDecoration: 'none' }}
+            >
+              View all proposals →
+            </Link>
+          </header>
+          {treasuryProposalsQuery.isLoading ? (
+            <div className="rd-skeleton rd-skeleton-block" style={{ height: 80 }} />
+          ) : treasuryProposalsQuery.error ? (
+            <div className="rd-empty-cell" style={{ padding: '24px' }}>
+              <span style={{ fontSize: 13, color: 'var(--ax-text-muted)' }}>
+                Couldn't load proposals.
+              </span>
+            </div>
+          ) : treasuryProposals.length === 0 ? (
+            <div className="rd-empty-cell" style={{ padding: '24px' }}>
+              <span style={{ fontSize: 13, color: 'var(--ax-text-muted)' }}>
+                No pending proposals for this treasury.
+              </span>
+            </div>
+          ) : (
+            <ProposalsTable
+              proposals={treasuryProposals}
+              ownPersonalWallets={ownPersonalWallets}
+              currentUserId={session.user.userId}
+              organizationId={organizationId}
+              busy={proposalsBusy}
+              showTreasuryColumn={false}
+              onApprove={(proposal, signerWalletId) => {
+                setProposalsBusy({ decimalProposalId: proposal.decimalProposalId, action: 'approve' });
+                proposalApproveMutation.mutate({ proposal, signerWalletId });
+              }}
+              onExecute={(proposal, signerWalletId) => {
+                setProposalsBusy({ decimalProposalId: proposal.decimalProposalId, action: 'execute' });
+                proposalExecuteMutation.mutate({ proposal, signerWalletId });
+              }}
+            />
+          )}
+        </section>
       ) : null}
 
       {detail && openDialog === 'add-member' ? (

@@ -1,59 +1,39 @@
-import { useMemo, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../api';
 import type {
   AuthenticatedSession,
   DecimalProposal,
+  ProposalSemanticType,
   SquadsProposalListStatusFilter,
 } from '../types';
 import { signAndSubmitIntent } from '../lib/squads-pipeline';
 import { useToast } from '../ui/Toast';
-import { DecimalProposalCard } from '../ui/DecimalProposalCard';
+import { ProposalsTable, type ProposalsTableBusy } from '../ui/ProposalsTable';
 
-function CreateOption({
-  title,
-  body,
-  to,
-  cta,
-}: {
-  title: string;
-  body: string;
-  to: string;
-  cta: string;
-}) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <strong style={{ fontSize: 13 }}>{title}</strong>
-      <span style={{ fontSize: 12, color: 'var(--ax-text-muted)', lineHeight: 1.5 }}>{body}</span>
-      <Link
-        to={to}
-        style={{
-          fontSize: 12,
-          color: 'var(--ax-accent)',
-          textDecoration: 'none',
-          marginTop: 'auto',
-        }}
-      >
-        {cta} →
-      </Link>
-    </div>
-  );
-}
-
-type BusyKey = string;
+const SEMANTIC_FILTER_OPTIONS: Array<{
+  value: '' | ProposalSemanticType;
+  label: string;
+}> = [
+  { value: '', label: 'All types' },
+  { value: 'send_payment', label: 'Payment' },
+  { value: 'add_member', label: 'Add member' },
+  { value: 'change_threshold', label: 'Change threshold' },
+];
 
 export function OrganizationProposalsPage({ session }: { session: AuthenticatedSession }) {
   const { organizationId } = useParams<{ organizationId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { success, error: toastError } = useToast();
 
   const [statusFilter, setStatusFilter] = useState<SquadsProposalListStatusFilter>('pending');
-  const [busyKey, setBusyKey] = useState<BusyKey | null>(null);
-  const [busyAction, setBusyAction] = useState<'approve' | 'execute' | null>(null);
+  const [semanticFilter, setSemanticFilter] = useState<'' | ProposalSemanticType>('');
+  const [busy, setBusy] = useState<ProposalsTableBusy | null>(null);
 
-  const treasuryWalletFilter = searchParams.get('treasuryWalletId') ?? undefined;
+  const treasuryWalletFilter = searchParams.get('treasuryWalletId') ?? '';
 
   const ownPersonalWalletsQuery = useQuery({
     queryKey: ['personal-wallets'] as const,
@@ -68,6 +48,13 @@ export function OrganizationProposalsPage({ session }: { session: AuthenticatedS
     [ownPersonalWalletsQuery.data],
   );
 
+  const treasuriesQuery = useQuery({
+    queryKey: ['treasury-wallets', organizationId] as const,
+    queryFn: () => api.listTreasuryWallets(organizationId!),
+    enabled: Boolean(organizationId),
+  });
+  const treasuries = treasuriesQuery.data?.items ?? [];
+
   const proposalsQuery = useQuery({
     queryKey: [
       'organization-proposals',
@@ -78,11 +65,17 @@ export function OrganizationProposalsPage({ session }: { session: AuthenticatedS
     queryFn: () =>
       api.listOrganizationProposals(organizationId!, {
         status: statusFilter,
-        treasuryWalletId: treasuryWalletFilter,
+        treasuryWalletId: treasuryWalletFilter || undefined,
       }),
     enabled: Boolean(organizationId),
     refetchInterval: 20_000,
   });
+
+  const allItems = proposalsQuery.data?.items ?? [];
+  const items = useMemo(() => {
+    if (!semanticFilter) return allItems;
+    return allItems.filter((p) => p.semanticType === semanticFilter);
+  }, [allItems, semanticFilter]);
 
   async function refreshProposals(decimalProposalId?: string) {
     await queryClient.invalidateQueries({ queryKey: ['organization-proposals', organizationId] });
@@ -104,8 +97,6 @@ export function OrganizationProposalsPage({ session }: { session: AuthenticatedS
         intent,
         signerPersonalWalletId: input.signerWalletId,
       });
-      // Approval doesn't have a confirm-step yet on the backend; the next
-      // refresh will pull live status from chain.
       return { decimalProposalId: input.proposal.decimalProposalId, signature: sig };
     },
     onSuccess: async (result) => {
@@ -115,10 +106,7 @@ export function OrganizationProposalsPage({ session }: { session: AuthenticatedS
     onError: (err) => {
       toastError(err instanceof ApiError || err instanceof Error ? err.message : 'Approve failed.');
     },
-    onSettled: () => {
-      setBusyKey(null);
-      setBusyAction(null);
-    },
+    onSettled: () => setBusy(null),
   });
 
   const executeMutation = useMutation({
@@ -136,11 +124,8 @@ export function OrganizationProposalsPage({ session }: { session: AuthenticatedS
       try {
         await api.confirmProposalExecution(organizationId!, decimalProposalId, { signature: sig });
       } catch {
-        // Confirm failure is recoverable — local status will catch up via the
-        // 20s refetch or next approve/execute cycle.
+        // ignore — refetch will catch up
       }
-      // Sync Squads members for config_transactions so the local Decimal
-      // authorization table reflects the new on-chain config.
       if (input.proposal.proposalType === 'config_transaction' && input.proposal.treasuryWalletId) {
         try {
           await api.syncSquadsTreasuryMembers(organizationId!, input.proposal.treasuryWalletId);
@@ -160,11 +145,18 @@ export function OrganizationProposalsPage({ session }: { session: AuthenticatedS
     onError: (err) => {
       toastError(err instanceof ApiError || err instanceof Error ? err.message : 'Execute failed.');
     },
-    onSettled: () => {
-      setBusyKey(null);
-      setBusyAction(null);
-    },
+    onSettled: () => setBusy(null),
   });
+
+  function setTreasuryFilter(treasuryWalletId: string) {
+    const next = new URLSearchParams(searchParams);
+    if (treasuryWalletId) {
+      next.set('treasuryWalletId', treasuryWalletId);
+    } else {
+      next.delete('treasuryWalletId');
+    }
+    setSearchParams(next, { replace: true });
+  }
 
   if (!organizationId) {
     return (
@@ -177,8 +169,8 @@ export function OrganizationProposalsPage({ session }: { session: AuthenticatedS
     );
   }
 
-  const items = proposalsQuery.data?.items ?? [];
-  const treasuryFilterApplied = Boolean(treasuryWalletFilter);
+  const showTreasuryColumn = !treasuryWalletFilter;
+  const squadsTreasuries = treasuries.filter((t) => t.source === 'squads_v4' && t.isActive);
 
   return (
     <main className="page-frame">
@@ -200,90 +192,22 @@ export function OrganizationProposalsPage({ session }: { session: AuthenticatedS
           >
             {proposalsQuery.isFetching ? 'Refreshing…' : 'Refresh'}
           </button>
+          <NewProposalButton organizationId={organizationId} navigate={navigate} />
         </div>
       </header>
 
-      <section
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-          gap: 12,
-          marginBottom: 16,
-          padding: 14,
-          border: '1px dashed var(--ax-border)',
-          borderRadius: 12,
-          background: 'rgba(140, 200, 255, 0.04)',
-        }}
-      >
-        <div style={{ gridColumn: '1 / -1', fontSize: 12, color: 'var(--ax-text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>
-          Create a proposal
-        </div>
-        <CreateOption
-          title="Send a Squads payment"
-          body="Open a payment order whose source is a Squads treasury, then click 'Create Squads proposal'."
-          to={`/organizations/${organizationId}/payments`}
-          cta="Go to payments"
-        />
-        <CreateOption
-          title="Add a member"
-          body="From a Squads treasury's detail page, use '+ Add member'."
-          to={`/organizations/${organizationId}/wallets`}
-          cta="Go to treasury accounts"
-        />
-        <CreateOption
-          title="Change threshold"
-          body="From a Squads treasury's detail page, use 'Change threshold'."
-          to={`/organizations/${organizationId}/wallets`}
-          cta="Go to treasury accounts"
-        />
-      </section>
-
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-        {(['pending', 'all', 'closed'] as SquadsProposalListStatusFilter[]).map((filter) => {
-          const active = statusFilter === filter;
-          return (
-            <button
-              key={filter}
-              type="button"
-              onClick={() => setStatusFilter(filter)}
-              style={{
-                padding: '6px 14px',
-                fontSize: 13,
-                borderRadius: 999,
-                border: '1px solid var(--ax-border)',
-                background: active ? 'var(--ax-accent-dim)' : 'transparent',
-                color: active ? 'var(--ax-accent)' : 'var(--ax-text-muted)',
-                cursor: 'pointer',
-                textTransform: 'capitalize',
-              }}
-            >
-              {filter}
-            </button>
-          );
-        })}
-        {treasuryFilterApplied ? (
-          <button
-            type="button"
-            onClick={() => {
-              const next = new URLSearchParams(searchParams);
-              next.delete('treasuryWalletId');
-              setSearchParams(next, { replace: true });
-            }}
-            style={{
-              padding: '6px 14px',
-              fontSize: 12,
-              borderRadius: 999,
-              border: '1px dashed var(--ax-border)',
-              background: 'rgba(140, 200, 255, 0.08)',
-              color: 'var(--ax-text-muted)',
-              cursor: 'pointer',
-            }}
-            title="Clear treasury filter"
-          >
-            ✕ Treasury filter
-          </button>
-        ) : null}
-      </div>
+      <FilterRow
+        statusFilter={statusFilter}
+        onStatusFilterChange={setStatusFilter}
+        semanticFilter={semanticFilter}
+        onSemanticFilterChange={setSemanticFilter}
+        treasuries={squadsTreasuries.map((t) => ({
+          treasuryWalletId: t.treasuryWalletId,
+          displayName: t.displayName,
+        }))}
+        treasuryFilter={treasuryWalletFilter}
+        onTreasuryFilterChange={setTreasuryFilter}
+      />
 
       {proposalsQuery.isLoading ? (
         <section className="rd-section">
@@ -304,46 +228,266 @@ export function OrganizationProposalsPage({ session }: { session: AuthenticatedS
       ) : items.length === 0 ? (
         <section className="rd-section">
           <div className="rd-empty-cell" style={{ padding: '48px 24px' }}>
-            <strong>No {statusFilter === 'all' ? '' : statusFilter} proposals</strong>
+            <strong>No proposals match these filters</strong>
             <p style={{ margin: 0 }}>
               {statusFilter === 'pending'
                 ? "When a proposal needs your signature, it'll show up here."
-                : 'Nothing matches this filter.'}
+                : 'Try a different status or clear the filters.'}
             </p>
           </div>
         </section>
       ) : (
-        <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {items.map((proposal) => {
-            const key: BusyKey = proposal.decimalProposalId;
-            const treasuryLink = proposal.treasuryWalletId
-              ? `/organizations/${organizationId}/wallets/${proposal.treasuryWalletId}`
-              : null;
-            return (
-              <DecimalProposalCard
-                key={key}
-                proposal={proposal}
-                ownPersonalWallets={ownPersonalWallets}
-                currentUserId={session.user.userId}
-                busy={busyKey === key ? busyAction : null}
-                detailLinkTo={`/organizations/${organizationId}/proposals/${proposal.decimalProposalId}`}
-                treasuryLinkTo={treasuryLink}
-                showTreasuryLabel={!treasuryFilterApplied}
-                onApprove={(signerWalletId) => {
-                  setBusyKey(key);
-                  setBusyAction('approve');
-                  approveMutation.mutate({ proposal, signerWalletId });
-                }}
-                onExecute={(signerWalletId) => {
-                  setBusyKey(key);
-                  setBusyAction('execute');
-                  executeMutation.mutate({ proposal, signerWalletId });
-                }}
-              />
-            );
-          })}
-        </section>
+        <ProposalsTable
+          proposals={items}
+          ownPersonalWallets={ownPersonalWallets}
+          currentUserId={session.user.userId}
+          organizationId={organizationId}
+          busy={busy}
+          showTreasuryColumn={showTreasuryColumn}
+          onApprove={(proposal, signerWalletId) => {
+            setBusy({ decimalProposalId: proposal.decimalProposalId, action: 'approve' });
+            approveMutation.mutate({ proposal, signerWalletId });
+          }}
+          onExecute={(proposal, signerWalletId) => {
+            setBusy({ decimalProposalId: proposal.decimalProposalId, action: 'execute' });
+            executeMutation.mutate({ proposal, signerWalletId });
+          }}
+        />
       )}
     </main>
   );
 }
+
+function FilterRow({
+  statusFilter,
+  onStatusFilterChange,
+  semanticFilter,
+  onSemanticFilterChange,
+  treasuries,
+  treasuryFilter,
+  onTreasuryFilterChange,
+}: {
+  statusFilter: SquadsProposalListStatusFilter;
+  onStatusFilterChange: (next: SquadsProposalListStatusFilter) => void;
+  semanticFilter: '' | ProposalSemanticType;
+  onSemanticFilterChange: (next: '' | ProposalSemanticType) => void;
+  treasuries: Array<{ treasuryWalletId: string; displayName: string | null }>;
+  treasuryFilter: string;
+  onTreasuryFilterChange: (treasuryWalletId: string) => void;
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        gap: 12,
+        marginBottom: 16,
+        alignItems: 'center',
+        flexWrap: 'wrap',
+      }}
+    >
+      <div style={{ display: 'flex', gap: 6 }}>
+        {(['pending', 'all', 'closed'] as SquadsProposalListStatusFilter[]).map((filter) => {
+          const active = statusFilter === filter;
+          return (
+            <button
+              key={filter}
+              type="button"
+              onClick={() => onStatusFilterChange(filter)}
+              style={{
+                padding: '6px 14px',
+                fontSize: 13,
+                borderRadius: 999,
+                border: '1px solid var(--ax-border)',
+                background: active ? 'var(--ax-accent-dim)' : 'transparent',
+                color: active ? 'var(--ax-accent)' : 'var(--ax-text-muted)',
+                cursor: 'pointer',
+                textTransform: 'capitalize',
+              }}
+            >
+              {filter}
+            </button>
+          );
+        })}
+      </div>
+      <FilterSelect
+        label="Type"
+        value={semanticFilter}
+        onChange={(next) => onSemanticFilterChange(next as '' | ProposalSemanticType)}
+        options={SEMANTIC_FILTER_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+      />
+      <FilterSelect
+        label="Treasury"
+        value={treasuryFilter}
+        onChange={onTreasuryFilterChange}
+        options={[
+          { value: '', label: 'All treasuries' },
+          ...treasuries.map((t) => ({
+            value: t.treasuryWalletId,
+            label: t.displayName ?? 'Untitled treasury',
+          })),
+        ]}
+      />
+    </div>
+  );
+}
+
+function FilterSelect({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  options: Array<{ value: string; label: string }>;
+}) {
+  return (
+    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+      <span style={{ color: 'var(--ax-text-muted)' }}>{label}:</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          fontSize: 13,
+          padding: '5px 8px',
+          borderRadius: 6,
+          border: '1px solid var(--ax-border)',
+          background: 'transparent',
+          color: 'inherit',
+        }}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function NewProposalButton({
+  organizationId,
+  navigate,
+}: {
+  organizationId: string;
+  navigate: (path: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (!ref.current) return;
+      if (e.target instanceof Node && ref.current.contains(e.target)) return;
+      setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        className="button button-primary"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        + New proposal
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 6px)',
+            right: 0,
+            minWidth: 280,
+            padding: 6,
+            borderRadius: 10,
+            border: '1px solid var(--ax-border)',
+            background: 'var(--ax-surface-1)',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+            zIndex: 20,
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          <MenuItem
+            title="Send payment"
+            description="From an approved payment order whose source is a Squads treasury."
+            onClick={() => {
+              setOpen(false);
+              navigate(`/organizations/${organizationId}/payments`);
+            }}
+          />
+          <MenuItem
+            title="Add member"
+            description="Initiate from a Squads treasury detail page."
+            onClick={() => {
+              setOpen(false);
+              navigate(`/organizations/${organizationId}/wallets`);
+            }}
+          />
+          <MenuItem
+            title="Change threshold"
+            description="Initiate from a Squads treasury detail page."
+            onClick={() => {
+              setOpen(false);
+              navigate(`/organizations/${organizationId}/wallets`);
+            }}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function MenuItem({
+  title,
+  description,
+  onClick,
+}: {
+  title: string;
+  description: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      style={{
+        textAlign: 'left',
+        padding: '10px 12px',
+        background: 'transparent',
+        border: 'none',
+        borderRadius: 8,
+        cursor: 'pointer',
+        color: 'inherit',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 2,
+      }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--ax-surface-2)')}
+      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+    >
+      <strong style={{ fontSize: 13 }}>{title}</strong>
+      <span style={{ fontSize: 12, color: 'var(--ax-text-muted)', lineHeight: 1.4 }}>
+        {description}
+      </span>
+    </button>
+  );
+}
+
