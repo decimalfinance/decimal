@@ -14,6 +14,7 @@ model Organization {
   createdAt        DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
   memberships      OrganizationMembership[]
+  invites          OrganizationInvite[]
   walletAuthorizations OrganizationWalletAuthorization[]
   sessions         AuthSession[]
   counterparties   Counterparty[]
@@ -68,6 +69,8 @@ model User {
   paymentRunsCreated         PaymentRun[]             @relation("PaymentRunCreatedByUser")
   collectionRequestsCreated  CollectionRequest[]      @relation("CollectionRequestCreatedByUser")
   collectionRunsCreated      CollectionRun[]          @relation("CollectionRunCreatedByUser")
+  organizationInvitesSent    OrganizationInvite[]     @relation("OrganizationInviteInvitedBy")
+  organizationInvitesAccepted OrganizationInvite[]    @relation("OrganizationInviteAcceptedBy")
 
   @@map("users")
 }
@@ -130,6 +133,29 @@ model OrganizationMembership {
 
   @@unique([organizationId, userId])
   @@map("organization_memberships")
+}
+
+model OrganizationInvite {
+  organizationInviteId String        @id @default(dbgenerated("gen_random_uuid()")) @map("organization_invite_id") @db.Uuid
+  organizationId       String        @map("organization_id") @db.Uuid
+  invitedEmail         String        @map("invited_email")
+  role                 String        @default("member")
+  inviteTokenHash      String        @unique @map("invite_token_hash")
+  status               String        @default("pending")
+  invitedByUserId      String        @map("invited_by_user_id") @db.Uuid
+  acceptedByUserId     String?       @map("accepted_by_user_id") @db.Uuid
+  expiresAt            DateTime      @map("expires_at") @db.Timestamptz(6)
+  acceptedAt           DateTime?     @map("accepted_at") @db.Timestamptz(6)
+  revokedAt            DateTime?     @map("revoked_at") @db.Timestamptz(6)
+  createdAt            DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization         Organization  @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
+  invitedByUser        User          @relation("OrganizationInviteInvitedBy", fields: [invitedByUserId], references: [userId], onDelete: Cascade)
+  acceptedByUser       User?         @relation("OrganizationInviteAcceptedBy", fields: [acceptedByUserId], references: [userId], onDelete: SetNull)
+
+  @@index([organizationId, status, createdAt(sort: Desc)])
+  @@index([invitedEmail, status])
+  @@map("organization_invites")
 }
 
 model AuthSession {

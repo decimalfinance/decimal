@@ -98,6 +98,23 @@ CREATE TABLE IF NOT EXISTS organization_memberships
   UNIQUE (organization_id, user_id)
 );
 
+CREATE TABLE IF NOT EXISTS organization_invites
+(
+  organization_invite_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
+  invited_email TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'member',
+  invite_token_hash TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL DEFAULT 'pending',
+  invited_by_user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+  accepted_by_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  accepted_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS auth_sessions
 (
   auth_session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -812,6 +829,10 @@ DROP TABLE IF EXISTS global_entities CASCADE;
 DROP TABLE IF EXISTS address_labels CASCADE;
 CREATE INDEX IF NOT EXISTS idx_memberships_organization_id ON organization_memberships(organization_id);
 CREATE INDEX IF NOT EXISTS idx_memberships_user_id ON organization_memberships(user_id);
+CREATE INDEX IF NOT EXISTS idx_organization_invites_org_status_created_at
+  ON organization_invites(organization_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_organization_invites_email_status
+  ON organization_invites(invited_email, status);
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_id ON auth_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_organization_id ON auth_sessions(organization_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_subject ON users(google_subject) WHERE google_subject IS NOT NULL;
@@ -945,6 +966,11 @@ FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS trg_memberships_updated_at ON organization_memberships;
 CREATE TRIGGER trg_memberships_updated_at
 BEFORE UPDATE ON organization_memberships
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_organization_invites_updated_at ON organization_invites;
+CREATE TRIGGER trg_organization_invites_updated_at
+BEFORE UPDATE ON organization_invites
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_user_wallets_updated_at ON user_wallets;

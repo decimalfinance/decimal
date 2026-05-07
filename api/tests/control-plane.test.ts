@@ -17,6 +17,7 @@ TRUNCATE TABLE
   organization_wallet_authorizations,
   user_wallets,
   idempotency_records,
+  organization_invites,
   organization_memberships,
   approval_decisions,
   approval_policies,
@@ -201,6 +202,75 @@ test('session auth supports organization, address-book, and policy setup', async
   assert.equal(session.authenticated, true);
   assert.equal(session.authType, 'user_session');
   assert.equal(session.organizations.length, 1);
+});
+
+test('organization membership is invite-only and email-bound', async () => {
+  const owner = await post('/auth/register', {
+    email: 'invite-owner@example.com',
+    password: 'DemoPass123!',
+    displayName: 'Invite Owner',
+  });
+  await verifyRegisteredEmail(owner);
+  const organization = await post('/organizations', { organizationName: 'Invite Org' }, owner.sessionToken);
+
+  const directJoinUser = await post('/auth/register', {
+    email: 'direct-join@example.com',
+    password: 'DemoPass123!',
+    displayName: 'Direct Join',
+  });
+  await verifyRegisteredEmail(directJoinUser);
+  const blockedJoin = await fetch(`${baseUrl}/organizations/${organization.organizationId}/join`, {
+    method: 'POST',
+    headers: authHeaders(directJoinUser.sessionToken),
+  });
+  assert.equal(blockedJoin.status, 403);
+  assert.equal((await blockedJoin.json()).message, 'Organizations can only be joined through an invite link.');
+
+  const invite = await post(
+    `/organizations/${organization.organizationId}/invites`,
+    { email: 'new-member@example.com', role: 'admin' },
+    owner.sessionToken,
+  );
+  assert.equal(invite.invitedEmail, 'new-member@example.com');
+  assert.equal(invite.role, 'admin');
+  assert.equal(invite.status, 'pending');
+  assert.ok(invite.inviteToken);
+  assert.ok(invite.inviteLink.endsWith(`/invites/${invite.inviteToken}`));
+
+  const preview = await get(`/invites/${invite.inviteToken}`);
+  assert.equal(preview.organization.organizationId, organization.organizationId);
+  assert.equal(preview.invitedEmail, 'new-member@example.com');
+
+  const wrongUser = await post('/auth/register', {
+    email: 'wrong-member@example.com',
+    password: 'DemoPass123!',
+    displayName: 'Wrong Member',
+  });
+  await verifyRegisteredEmail(wrongUser);
+  const wrongAccept = await fetch(`${baseUrl}/invites/${invite.inviteToken}/accept`, {
+    method: 'POST',
+    headers: authHeaders(wrongUser.sessionToken),
+  });
+  assert.equal(wrongAccept.status, 403);
+
+  const invitedUser = await post('/auth/register', {
+    email: 'new-member@example.com',
+    password: 'DemoPass123!',
+    displayName: 'New Member',
+  });
+  await verifyRegisteredEmail(invitedUser);
+  const accepted = await post(`/invites/${invite.inviteToken}/accept`, {}, invitedUser.sessionToken);
+  assert.equal(accepted.organizationId, organization.organizationId);
+  assert.equal(accepted.role, 'admin');
+  assert.equal(accepted.invite.status, 'accepted');
+
+  const members = await get(`/organizations/${organization.organizationId}/members`, owner.sessionToken);
+  assert.equal(members.items.length, 2);
+  assert.ok(members.items.some((item: { user: { email: string }; role: string }) => item.user.email === 'new-member@example.com' && item.role === 'admin'));
+
+  const invites = await get(`/organizations/${organization.organizationId}/invites`, owner.sessionToken);
+  assert.equal(invites.items.length, 1);
+  assert.equal(invites.items[0].status, 'accepted');
 });
 
 test('auth registration and login require the right password', async () => {

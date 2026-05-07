@@ -27,6 +27,7 @@ export const API_ENDPOINTS = [
     query: { returnTo: 'relative path optional', frontendOrigin: 'allowed frontend origin optional' },
   }),
   endpoint('google_oauth_callback', 'GET', '/auth/google/callback', ['auth'], 'Complete Google OAuth sign-in', 'public'),
+  endpoint('preview_organization_invite', 'GET', '/invites/{inviteToken}', ['organization invites'], 'Preview an organization invite before accepting', 'public'),
   endpoint('session', 'GET', '/auth/session', ['auth'], 'Inspect current user session', 'session'),
   endpoint('verify_email', 'POST', '/auth/verify-email', ['auth'], 'Verify current user email with a code', 'session', {
     requestBody: { code: 'string' },
@@ -53,7 +54,15 @@ export const API_ENDPOINTS = [
     scope: 'organization:write',
     requestBody: { organizationName: 'string' },
   }),
-  endpoint('join_organization', 'POST', '/organizations/{organizationId}/join', ['organizations'], 'Join organization', 'session'),
+  endpoint('join_organization', 'POST', '/organizations/{organizationId}/join', ['organizations'], 'Deprecated: joining requires an invite link', 'session'),
+  endpoint('list_organization_members', 'GET', '/organizations/{organizationId}/members', ['organization invites'], 'List active organization members', 'session', { scope: 'organization:read' }),
+  endpoint('list_organization_invites', 'GET', '/organizations/{organizationId}/invites', ['organization invites'], 'List organization invites', 'session', { scope: 'organization:write' }),
+  endpoint('create_organization_invite', 'POST', '/organizations/{organizationId}/invites', ['organization invites'], 'Create an email-bound organization invite link', 'session', {
+    scope: 'organization:write',
+    requestBody: { email: 'string email', role: 'admin | member' },
+  }),
+  endpoint('revoke_organization_invite', 'POST', '/organizations/{organizationId}/invites/{organizationInviteId}/revoke', ['organization invites'], 'Revoke a pending organization invite', 'session', { scope: 'organization:write' }),
+  endpoint('accept_organization_invite', 'POST', '/invites/{inviteToken}/accept', ['organization invites'], 'Accept an organization invite for the signed-in user', 'session'),
 
   endpoint('list_treasury_wallets', 'GET', '/organizations/{organizationId}/treasury-wallets', ['address book'], 'List owned treasury wallets', 'session', { scope: 'organization:read' }),
   endpoint('list_treasury_wallet_balances', 'GET', '/organizations/{organizationId}/treasury-wallets/balances', ['address book'], 'List treasury wallets with live SOL/USDC balances', 'session', { scope: 'organization:read' }),
