@@ -1,4 +1,5 @@
 import type {
+  AcceptInviteResponse,
   ApprovalPolicy,
   AuthenticatedSession,
   CapabilitiesResponse,
@@ -15,8 +16,13 @@ import type {
   Destination,
   ExceptionItem,
   ExceptionNote,
+  CreateOrganizationInviteResponse,
   LoginResponse,
   ObservedTransfer,
+  OrganizationInvite,
+  OrganizationInviteRole,
+  OrganizationInviteStatus,
+  OrganizationMember,
   OrganizationMembership,
   OrganizationSummary,
   PaymentExecutionPreparation,
@@ -26,6 +32,7 @@ import type {
   PaymentRun,
   PaymentRunExecutionPreparation,
   PaymentRunImportResult,
+  PublicInvite,
   ReconciliationRow,
   Organization,
   ConfirmSquadsTreasuryRequest,
@@ -189,14 +196,54 @@ export const api = {
       body: JSON.stringify(input),
     });
   },
-  joinOrganization(organizationId: string) {
-    return request<OrganizationMembership>(`/organizations/${organizationId}/join`, {
-      method: 'POST',
-      body: JSON.stringify({}),
-    });
-  },
   getOrganizationSummary(organizationId: string) {
     return request<OrganizationSummary>(`/organizations/${organizationId}/summary`);
+  },
+  listOrganizationMembers(organizationId: string) {
+    return request<{ items: OrganizationMember[] }>(
+      `/organizations/${organizationId}/members`,
+    );
+  },
+  listOrganizationInvites(organizationId: string, status?: OrganizationInviteStatus) {
+    const query = status ? `?status=${encodeURIComponent(status)}` : '';
+    return request<{ items: OrganizationInvite[] }>(
+      `/organizations/${organizationId}/invites${query}`,
+    );
+  },
+  createOrganizationInvite(
+    organizationId: string,
+    input: { email: string; role: OrganizationInviteRole },
+  ) {
+    return request<CreateOrganizationInviteResponse>(
+      `/organizations/${organizationId}/invites`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+    );
+  },
+  revokeOrganizationInvite(organizationId: string, organizationInviteId: string) {
+    return request<OrganizationInvite>(
+      `/organizations/${organizationId}/invites/${organizationInviteId}/revoke`,
+      {
+        method: 'POST',
+        body: JSON.stringify({}),
+      },
+    );
+  },
+  previewInvite(inviteToken: string) {
+    return request<PublicInvite>(`/invites/${encodeURIComponent(inviteToken)}`, {
+      includeAuth: false,
+    });
+  },
+  acceptInvite(inviteToken: string) {
+    return request<AcceptInviteResponse>(
+      `/invites/${encodeURIComponent(inviteToken)}/accept`,
+      {
+        method: 'POST',
+        body: JSON.stringify({}),
+      },
+    );
   },
   // Personal wallets — user-owned signing wallets.
   // Backend accepts both /personal-wallets/* (preferred) and /user-wallets/*

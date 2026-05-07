@@ -38,6 +38,71 @@ export type OrganizationMember = {
   user: User;
 };
 
+export type OrganizationInviteRole = 'admin' | 'member';
+export type OrganizationInviteStatus = 'pending' | 'accepted' | 'revoked' | 'expired';
+
+export type OrganizationInvite = {
+  organizationInviteId: string;
+  organizationId: string;
+  invitedEmail: string;
+  role: OrganizationInviteRole;
+  status: OrganizationInviteStatus;
+  expiresAt: string;
+  acceptedAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  organization: {
+    organizationId: string;
+    organizationName: string;
+    status: string;
+  };
+  invitedByUser: {
+    userId: string;
+    email: string;
+    displayName: string;
+    avatarUrl: string | null;
+  };
+  acceptedByUser: {
+    userId: string;
+    email: string;
+    displayName: string;
+    avatarUrl: string | null;
+  } | null;
+};
+
+export type CreateOrganizationInviteResponse = OrganizationInvite & {
+  inviteToken: string;
+  inviteLink: string;
+};
+
+export type PublicInvite = {
+  organizationInviteId: string;
+  invitedEmail: string;
+  role: OrganizationInviteRole;
+  status: OrganizationInviteStatus;
+  expiresAt: string;
+  organization: {
+    organizationId: string;
+    organizationName: string;
+    status: string;
+  };
+  invitedByUser: {
+    userId: string;
+    email: string;
+    displayName: string;
+    avatarUrl: string | null;
+  };
+};
+
+export type AcceptInviteResponse = {
+  organizationId: string;
+  organizationName: string;
+  membershipId: string;
+  role: OrganizationInviteRole;
+  invite: OrganizationInvite;
+};
+
 export type AuthenticatedSession = {
   authenticated: true;
   user: User;

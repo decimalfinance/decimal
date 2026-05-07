@@ -21,6 +21,8 @@ import { ExecutionPage as ExecutionPageV2 } from './pages/Execution';
 import { SettlementPage as SettlementPageV2 } from './pages/Settlement';
 import { ApprovalsPage as ApprovalsPageV2 } from './pages/Approvals';
 import { LandingPage as LandingPageV2 } from './pages/Landing';
+import { MembersPage } from './pages/Members';
+import { InviteAcceptPage } from './pages/InviteAccept';
 import { useToast } from './ui/Toast';
 import type {
   ApprovalPolicy,
@@ -141,6 +143,7 @@ export function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
+      <Route path="/invites/:inviteToken" element={<InviteAcceptPage />} />
       <Route path="/verify-email" element={<RequireSession sessionQuery={sessionQuery} />} />
       <Route path="/*" element={<RequireSession sessionQuery={sessionQuery} />} />
       <Route path="*" element={<Navigate to="/" replace />} />
@@ -223,6 +226,7 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
           <Route path="/profile" element={<ProfilePage session={session} />} />
           <Route path="/organizations/:organizationId" element={<CommandCenterPageV2 session={session} />} />
           <Route path="/organizations/:organizationId/wallets" element={<WalletsPage session={session} />} />
+          <Route path="/organizations/:organizationId/members" element={<MembersPage session={session} />} />
           <Route path="/organizations/:organizationId/counterparties" element={<CounterpartiesPage session={session} />} />
           <Route path="/organizations/:organizationId/destinations" element={<DestinationsPage session={session} />} />
           <Route path="/organizations/:organizationId/registry" element={<AddressBookPage session={session} />} />
@@ -247,6 +251,14 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
     </div>
     </TourProvider>
   );
+}
+
+function readSafeReturnTo(search: string): string | null {
+  const params = new URLSearchParams(search);
+  const raw = params.get('returnTo');
+  if (!raw) return null;
+  if (!raw.startsWith('/') || raw.startsWith('//')) return null;
+  return raw;
 }
 
 function authErrorMessage(err: unknown, fallback: string): string {
@@ -379,6 +391,8 @@ function OAuthCallbackPage() {
 function LoginPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnTo = readSafeReturnTo(location.search);
   const [error, setError] = useState<string | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -394,7 +408,11 @@ function LoginPage() {
       api.setSessionToken(result.sessionToken);
       queryClient.setQueryData(queryKeys().session, toAuthenticatedSession(result));
       if (!result.user.emailVerifiedAt) {
-        navigate('/verify-email', { replace: true });
+        navigate(returnTo ? `/verify-email?returnTo=${encodeURIComponent(returnTo)}` : '/verify-email', { replace: true });
+        return;
+      }
+      if (returnTo) {
+        navigate(returnTo, { replace: true });
         return;
       }
       const firstOrganizationId = result.organizations[0]?.organizationId;
@@ -468,6 +486,8 @@ function LoginPage() {
 function RegisterPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnTo = readSafeReturnTo(location.search);
   const [error, setError] = useState<string | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -483,7 +503,7 @@ function RegisterPage() {
     onSuccess: (result) => {
       api.setSessionToken(result.sessionToken);
       queryClient.setQueryData(queryKeys().session, toAuthenticatedSession(result));
-      navigate('/verify-email', { replace: true });
+      navigate(returnTo ? `/verify-email?returnTo=${encodeURIComponent(returnTo)}` : '/verify-email', { replace: true });
     },
     onError: (nextError) => {
       setError(authErrorMessage(nextError, 'Unable to create account.'));
@@ -579,6 +599,8 @@ function RegisterPage() {
 function VerifyEmailPage({ session }: { session: AuthenticatedSession }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnTo = readSafeReturnTo(location.search);
   const [code, setCode] = useState('');
   const [demoCode, setDemoCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -586,6 +608,10 @@ function VerifyEmailPage({ session }: { session: AuthenticatedSession }) {
     mutationFn: () => api.verifyEmail({ code: code.trim() }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys().session });
+      if (returnTo) {
+        navigate(returnTo, { replace: true });
+        return;
+      }
       navigate(session.organizations[0] ? `/organizations/${session.organizations[0].organizationId}/wallets` : '/setup', { replace: true });
     },
     onError: (err) => setError(err instanceof Error ? err.message : 'Unable to verify email.'),
@@ -667,27 +693,11 @@ function SetupPage({ session }: { session: AuthenticatedSession }) {
     },
     onError: (err) => toastError(err instanceof Error ? err.message : 'Unable to create organization.'),
   });
-  const joinOrganizationMutation = useMutation({
-    mutationFn: async (formData: FormData) => {
-      const organizationId = String(formData.get('organizationId') ?? '').trim();
-      if (!organizationId) {
-        throw new Error('Organization id is required.');
-      }
-      return api.joinOrganization(organizationId);
-    },
-    onSuccess: async (organization) => {
-      success('Organization joined.');
-      await queryClient.invalidateQueries({ queryKey: queryKeys().session });
-      navigate(`/organizations/${organization.organizationId}/wallets`, { replace: true });
-    },
-    onError: (err) => toastError(err instanceof Error ? err.message : 'Unable to join organization.'),
-  });
-
   return (
     <PageFrame
       eyebrow="Setup"
-      title="Create or join an organization"
-      description="An organization is the team container for members, wallets, and future treasury controls."
+      title="Create your organization"
+      description="An organization is the team container for members, wallets, and future treasury controls. Joining an existing team requires an invite link from an admin."
     >
       <div className="split-panels">
       <section className="panel">
@@ -718,32 +728,13 @@ function SetupPage({ session }: { session: AuthenticatedSession }) {
         </form>
       </section>
       <section className="panel">
-        <SectionHeader title="Join organization" description="Use an organization id from a teammate." />
-        <form
-          className="form-stack"
-          onSubmit={(event) => {
-            event.preventDefault();
-            joinOrganizationMutation.mutate(new FormData(event.currentTarget));
-          }}
-        >
-          <label className="field">
-            Organization id
-            <input
-              name="organizationId"
-              placeholder="00000000-0000-0000-0000-000000000000"
-              required
-              autoComplete="off"
-            />
-          </label>
-          <button
-            className="button button-secondary"
-            disabled={joinOrganizationMutation.isPending}
-            type="submit"
-            aria-busy={joinOrganizationMutation.isPending}
-          >
-            {joinOrganizationMutation.isPending ? 'Joining...' : 'Join organization'}
-          </button>
-        </form>
+        <SectionHeader
+          title="Have an invite?"
+          description="Open the invite link your admin shared with you while signed in with the email it was sent to."
+        />
+        <p className="form-help">
+          Organizations are joined through invite links only. Ask your admin to send one if you need access.
+        </p>
       </section>
       </div>
     </PageFrame>

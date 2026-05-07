@@ -105,6 +105,14 @@ const icons = {
       <path d="M4 16.5a6 6 0 0 1 12 0" />
     </SvgIcon>
   ),
+  members: (
+    <SvgIcon>
+      <circle cx="7.5" cy="8" r="2.5" />
+      <circle cx="14" cy="8.5" r="2" />
+      <path d="M3 16.5a4.5 4.5 0 0 1 9 0" />
+      <path d="M12.5 16.5a4 4 0 0 1 5 0" />
+    </SvgIcon>
+  ),
   destinations: (
     <SvgIcon>
       <path d="M10 17.5s-5.5-4.5-5.5-9a5.5 5.5 0 0 1 11 0c0 4.5-5.5 9-5.5 9Z" />
@@ -372,6 +380,7 @@ export function AppSidebar({
             <div className="ax-nav-group">
               <div className="ax-nav-group-label">Registry</div>
               <NavLinkItem to={`${base}/wallets`} icon={icons.wallet} label="Treasury accounts" tourKey="wallets" />
+              <NavLinkItem to={`${base}/members`} icon={icons.members} label="Members" tourKey="members" />
               <NavLinkItem
                 to={`${base}/counterparties`}
                 icon={icons.counterparty}
