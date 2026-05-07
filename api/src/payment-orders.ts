@@ -1,6 +1,7 @@
 import type {
   Counterparty,
   Destination,
+  DecimalProposal,
   PaymentOrder,
   PaymentOrderEvent,
   PaymentRequest,
@@ -38,6 +39,7 @@ export type PaymentOrderWithRelations = PaymentOrder & {
       destination: (Destination & { counterparty: Counterparty | null }) | null;
     }
   >;
+  proposals?: DecimalProposal[];
   events?: PaymentOrderEvent[];
 };
 
@@ -960,7 +962,9 @@ async function buildPaymentOrderReadModel(order: PaymentOrderWithRelations) {
   const reconciliationDetail = primaryTransferRequest
     ? await getReconciliationDetail(order.organizationId, primaryTransferRequest.transferRequestId)
     : null;
-  const derivedState = derivePaymentOrderState(order, reconciliationDetail);
+  const latestSquadsPaymentProposal = getLatestSquadsPaymentProposal(order);
+  const squadsLifecycle = deriveSquadsPaymentLifecycle(latestSquadsPaymentProposal);
+  const derivedState = derivePaymentOrderState(order, reconciliationDetail, squadsLifecycle);
   const balanceWarning = deriveBalanceWarning(order);
 
   return {
@@ -998,6 +1002,9 @@ async function buildPaymentOrderReadModel(order: PaymentOrderWithRelations) {
       amountRaw: request.amountRaw.toString(),
       requestedAt: request.requestedAt,
     })),
+    squadsLifecycle,
+    squadsPaymentProposal: latestSquadsPaymentProposal ? serializePaymentOrderProposal(latestSquadsPaymentProposal) : null,
+    canCreateSquadsPaymentProposal: !latestSquadsPaymentProposal || isTerminalSquadsPaymentProposal(latestSquadsPaymentProposal),
     events: (order.events ?? []).map(serializePaymentOrderEvent),
     reconciliationDetail,
   };
@@ -1006,12 +1013,16 @@ async function buildPaymentOrderReadModel(order: PaymentOrderWithRelations) {
 function derivePaymentOrderState(
   order: PaymentOrderWithRelations,
   reconciliationDetail: Awaited<ReturnType<typeof getReconciliationDetail>> | null,
+  squadsLifecycle: ReturnType<typeof deriveSquadsPaymentLifecycle>,
 ): PaymentOrderState {
   if (order.state === 'cancelled' || order.state === 'closed') {
     return order.state;
   }
 
   if (!reconciliationDetail) {
+    if (squadsLifecycle) {
+      return squadsLifecycle.paymentState;
+    }
     return order.state as PaymentOrderState;
   }
 
@@ -1025,6 +1036,10 @@ function derivePaymentOrderState(
 
   if (reconciliationDetail.requestDisplayState === 'matched') {
     return 'settled';
+  }
+
+  if (squadsLifecycle) {
+    return squadsLifecycle.paymentState;
   }
 
   if (reconciliationDetail.latestExecution) {
@@ -1052,6 +1067,80 @@ function derivePaymentOrderState(
   }
 
   return order.state as PaymentOrderState;
+}
+
+function getLatestSquadsPaymentProposal(order: PaymentOrderWithRelations) {
+  return (order.proposals ?? [])
+    .filter((proposal) => proposal.provider === 'squads_v4' && proposal.semanticType === 'send_payment')
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0] ?? null;
+}
+
+function deriveSquadsPaymentLifecycle(proposal: DecimalProposal | null) {
+  if (!proposal) {
+    return null;
+  }
+
+  const localStatus = proposal.status;
+  const paymentState = mapSquadsProposalStatusToPaymentState(proposal);
+  return {
+    provider: proposal.provider,
+    decimalProposalId: proposal.decimalProposalId,
+    proposalStatus: localStatus,
+    paymentState,
+    hasSubmittedSignature: Boolean(proposal.submittedSignature?.trim()),
+    hasExecutedSignature: Boolean(proposal.executedSignature?.trim()),
+    submittedSignature: proposal.submittedSignature,
+    executedSignature: proposal.executedSignature,
+    submittedAt: proposal.submittedAt,
+    executedAt: proposal.executedAt,
+    transactionIndex: proposal.transactionIndex,
+    treasuryWalletId: proposal.treasuryWalletId,
+  };
+}
+
+function mapSquadsProposalStatusToPaymentState(proposal: DecimalProposal): PaymentOrderState {
+  if (proposal.executedSignature || proposal.status === 'executed') {
+    return 'proposal_executed';
+  }
+  if (proposal.status === 'approved') {
+    return 'proposal_approved';
+  }
+  if (proposal.submittedSignature || proposal.status === 'submitted' || proposal.status === 'active') {
+    return 'proposal_submitted';
+  }
+  if (proposal.status === 'rejected' || proposal.status === 'cancelled' || proposal.status === 'failed') {
+    return 'cancelled';
+  }
+  return 'proposal_prepared';
+}
+
+function isTerminalSquadsPaymentProposal(proposal: DecimalProposal) {
+  return ['rejected', 'cancelled', 'failed'].includes(proposal.status);
+}
+
+function serializePaymentOrderProposal(proposal: DecimalProposal) {
+  return {
+    decimalProposalId: proposal.decimalProposalId,
+    provider: proposal.provider,
+    proposalType: proposal.proposalType,
+    proposalCategory: proposal.proposalCategory,
+    semanticType: proposal.semanticType,
+    status: proposal.status,
+    submittedSignature: proposal.submittedSignature,
+    executedSignature: proposal.executedSignature,
+    submittedAt: proposal.submittedAt,
+    executedAt: proposal.executedAt,
+    squads: {
+      programId: proposal.squadsProgramId,
+      multisigPda: proposal.squadsMultisigPda,
+      proposalPda: proposal.squadsProposalPda,
+      transactionPda: proposal.squadsTransactionPda,
+      transactionIndex: proposal.transactionIndex,
+      vaultIndex: proposal.vaultIndex,
+    },
+    createdAt: proposal.createdAt,
+    updatedAt: proposal.updatedAt,
+  };
 }
 
 function deriveBalanceWarning(order: PaymentOrder) {
@@ -1229,6 +1318,13 @@ const paymentOrderInclude = {
           counterparty: true,
         },
       },
+    },
+    orderBy: { createdAt: 'desc' as const },
+  },
+  proposals: {
+    where: {
+      provider: 'squads_v4',
+      semanticType: 'send_payment',
     },
     orderBy: { createdAt: 'desc' as const },
   },

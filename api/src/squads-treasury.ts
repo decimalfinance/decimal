@@ -1,7 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import * as multisig from '@sqds/multisig';
 import { Keypair, PublicKey, TransactionMessage, VersionedTransaction, type AddressLookupTableAccount, type TransactionInstruction } from '@solana/web3.js';
-import { ApiError, badRequest, notFound } from './api-errors.js';
+import { ApiError, badRequest, conflict, notFound } from './api-errors.js';
 import { config } from './config.js';
 import { prisma } from './prisma.js';
 import { submitPaymentOrder } from './payment-orders.js';
@@ -16,6 +16,7 @@ import {
   USDC_DECIMALS,
   USDC_MINT,
 } from './solana.js';
+import { createTransferRequestEvent } from './transfer-request-events.js';
 
 const SQUADS_SOURCE = 'squads_v4';
 // Squads v4 uses the same program id on devnet and mainnet. The value remains
@@ -302,6 +303,16 @@ export async function createSquadsPaymentProposalIntent(
   if (paymentOrder.sourceTreasuryWalletId && paymentOrder.sourceTreasuryWalletId !== treasuryWalletId) {
     throw badRequest('Payment order is already assigned to a different source treasury.');
   }
+  const existingProposal = await findActiveSquadsPaymentProposal(organizationId, paymentOrder.paymentOrderId);
+  if (existingProposal) {
+    throw conflict('Payment order already has a Squads payment proposal.', {
+      decimalProposalId: existingProposal.decimalProposalId,
+      status: existingProposal.status,
+      transactionIndex: existingProposal.transactionIndex,
+      submittedSignature: existingProposal.submittedSignature,
+      executedSignature: existingProposal.executedSignature,
+    });
+  }
   if (!paymentOrder.sourceTreasuryWalletId) {
     await prisma.paymentOrder.update({
       where: { paymentOrderId: paymentOrder.paymentOrderId },
@@ -453,6 +464,15 @@ export async function createSquadsPaymentProposalIntent(
       transferRequestId: transferRequest.transferRequestId,
       autoApprove: input.autoApprove ?? true,
     },
+  });
+  await markPaymentOrderSquadsProposalPrepared({
+    paymentOrderId: paymentOrder.paymentOrderId,
+    organizationId,
+    actorUserId,
+    beforeState: paymentOrder.state,
+    transferRequestId: transferRequest.transferRequestId,
+    decimalProposalId: decimalProposal.decimalProposalId,
+    transactionIndex: response.intent.transactionIndex,
   });
 
   return {
@@ -709,14 +729,32 @@ export async function confirmDecimalProposalSubmission(
   input: ConfirmDecimalProposalSignatureInput,
 ) {
   await getDecimalProposal(organizationId, actorUserId, decimalProposalId);
-  const updated = await prisma.decimalProposal.update({
-    where: { decimalProposalId },
-    data: {
-      submittedSignature: input.signature.trim(),
-      submittedAt: new Date(),
-      status: 'submitted',
-    },
-    include: decimalProposalInclude,
+  const signature = input.signature.trim();
+  const updated = await prisma.$transaction(async (tx) => {
+    const current = await tx.decimalProposal.findFirstOrThrow({
+      where: { organizationId, decimalProposalId },
+    });
+    const row = await tx.decimalProposal.update({
+      where: { decimalProposalId },
+      data: {
+        submittedSignature: signature,
+        submittedAt: new Date(),
+        status: current.status === 'executed' ? 'executed' : 'submitted',
+      },
+      include: decimalProposalInclude,
+    });
+    if (current.semanticType === 'send_payment' && current.paymentOrderId) {
+      await markPaymentOrderSquadsProposalSubmitted(tx, {
+        organizationId,
+        actorUserId,
+        paymentOrderId: current.paymentOrderId,
+        decimalProposalId,
+        beforeState: null,
+        signature,
+        transactionIndex: current.transactionIndex,
+      });
+    }
+    return row;
   });
   return serializeDecimalProposal(updated);
 }
@@ -728,14 +766,32 @@ export async function confirmDecimalProposalExecution(
   input: ConfirmDecimalProposalSignatureInput,
 ) {
   await getDecimalProposal(organizationId, actorUserId, decimalProposalId);
-  const updated = await prisma.decimalProposal.update({
-    where: { decimalProposalId },
-    data: {
-      executedSignature: input.signature.trim(),
-      executedAt: new Date(),
-      status: 'executed',
-    },
-    include: decimalProposalInclude,
+  const signature = input.signature.trim();
+  const updated = await prisma.$transaction(async (tx) => {
+    const current = await tx.decimalProposal.findFirstOrThrow({
+      where: { organizationId, decimalProposalId },
+    });
+    const row = await tx.decimalProposal.update({
+      where: { decimalProposalId },
+      data: {
+        executedSignature: signature,
+        executedAt: new Date(),
+        status: 'executed',
+      },
+      include: decimalProposalInclude,
+    });
+    if (current.semanticType === 'send_payment' && current.paymentOrderId) {
+      await markPaymentOrderSquadsProposalExecuted(tx, {
+        organizationId,
+        actorUserId,
+        paymentOrderId: current.paymentOrderId,
+        decimalProposalId,
+        signature,
+        transactionIndex: current.transactionIndex,
+        metadataJson: current.metadataJson,
+      });
+    }
+    return row;
   });
   return serializeDecimalProposal(updated);
 }
@@ -1791,6 +1847,206 @@ async function loadPaymentOrderForSquadsProposal(organizationId: string, payment
     throw badRequest(`Payment order is ${paymentOrder.state}.`);
   }
   return paymentOrder;
+}
+
+async function findActiveSquadsPaymentProposal(organizationId: string, paymentOrderId: string) {
+  return prisma.decimalProposal.findFirst({
+    where: {
+      organizationId,
+      paymentOrderId,
+      provider: SQUADS_SOURCE,
+      semanticType: 'send_payment',
+      status: { notIn: ['rejected', 'cancelled', 'failed'] },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+}
+
+async function markPaymentOrderSquadsProposalPrepared(args: {
+  organizationId: string;
+  paymentOrderId: string;
+  actorUserId: string;
+  beforeState: string;
+  transferRequestId: string;
+  decimalProposalId: string;
+  transactionIndex: string;
+}) {
+  await prisma.$transaction(async (tx) => {
+    await tx.paymentOrder.update({
+      where: { paymentOrderId: args.paymentOrderId },
+      data: { state: 'proposal_prepared' },
+    });
+    await tx.paymentOrderEvent.create({
+      data: {
+        paymentOrderId: args.paymentOrderId,
+        organizationId: args.organizationId,
+        eventType: 'squads_payment_proposal_prepared',
+        actorType: 'user',
+        actorId: args.actorUserId,
+        beforeState: args.beforeState,
+        afterState: 'proposal_prepared',
+        linkedTransferRequestId: args.transferRequestId,
+        payloadJson: {
+          decimalProposalId: args.decimalProposalId,
+          transactionIndex: args.transactionIndex,
+          provider: SQUADS_SOURCE,
+        },
+      },
+    });
+  });
+}
+
+async function markPaymentOrderSquadsProposalSubmitted(
+  tx: Prisma.TransactionClient,
+  args: {
+    organizationId: string;
+    paymentOrderId: string;
+    actorUserId: string;
+    decimalProposalId: string;
+    beforeState: string | null;
+    signature: string;
+    transactionIndex: string | null;
+  },
+) {
+  const paymentOrder = await tx.paymentOrder.findFirst({
+    where: { organizationId: args.organizationId, paymentOrderId: args.paymentOrderId },
+    select: { state: true },
+  });
+  if (!paymentOrder) {
+    return;
+  }
+  await tx.paymentOrder.update({
+    where: { paymentOrderId: args.paymentOrderId },
+    data: { state: 'proposal_submitted' },
+  });
+  await tx.paymentOrderEvent.create({
+    data: {
+      paymentOrderId: args.paymentOrderId,
+      organizationId: args.organizationId,
+      eventType: 'squads_payment_proposal_submitted',
+      actorType: 'user',
+      actorId: args.actorUserId,
+      beforeState: args.beforeState ?? paymentOrder.state,
+      afterState: 'proposal_submitted',
+      linkedSignature: args.signature,
+      payloadJson: {
+        decimalProposalId: args.decimalProposalId,
+        transactionIndex: args.transactionIndex,
+        provider: SQUADS_SOURCE,
+      },
+    },
+  });
+}
+
+async function markPaymentOrderSquadsProposalExecuted(
+  tx: Prisma.TransactionClient,
+  args: {
+    organizationId: string;
+    paymentOrderId: string;
+    actorUserId: string;
+    decimalProposalId: string;
+    signature: string;
+    transactionIndex: string | null;
+    metadataJson: Prisma.JsonValue;
+  },
+) {
+  const paymentOrder = await tx.paymentOrder.findFirst({
+    where: { organizationId: args.organizationId, paymentOrderId: args.paymentOrderId },
+    select: { state: true },
+  });
+  if (!paymentOrder) {
+    return;
+  }
+
+  const transferRequestIdFromMetadata = isRecordLike(args.metadataJson) && typeof args.metadataJson.transferRequestId === 'string'
+    ? args.metadataJson.transferRequestId
+    : null;
+  const transferRequest = transferRequestIdFromMetadata
+    ? await tx.transferRequest.findFirst({
+        where: {
+          organizationId: args.organizationId,
+          paymentOrderId: args.paymentOrderId,
+          transferRequestId: transferRequestIdFromMetadata,
+        },
+      })
+    : await tx.transferRequest.findFirst({
+        where: { organizationId: args.organizationId, paymentOrderId: args.paymentOrderId },
+        orderBy: { requestedAt: 'desc' },
+      });
+
+  let executionRecordId: string | null = null;
+  if (transferRequest) {
+    await tx.transferRequest.update({
+      where: { transferRequestId: transferRequest.transferRequestId },
+      data: { status: 'submitted_onchain' },
+    });
+    const existingRecord = await tx.executionRecord.findFirst({
+      where: {
+        transferRequestId: transferRequest.transferRequestId,
+        submittedSignature: args.signature,
+      },
+    });
+    const executionRecord = existingRecord ?? await tx.executionRecord.create({
+      data: {
+        transferRequestId: transferRequest.transferRequestId,
+        organizationId: args.organizationId,
+        submittedSignature: args.signature,
+        executionSource: SQUADS_SOURCE,
+        executorUserId: args.actorUserId,
+        state: 'submitted_onchain',
+        submittedAt: new Date(),
+        metadataJson: {
+          paymentOrderId: args.paymentOrderId,
+          decimalProposalId: args.decimalProposalId,
+          transactionIndex: args.transactionIndex,
+          provider: SQUADS_SOURCE,
+        },
+      },
+    });
+    executionRecordId = executionRecord.executionRecordId;
+    await createTransferRequestEvent(tx, {
+      transferRequestId: transferRequest.transferRequestId,
+      organizationId: args.organizationId,
+      eventType: 'squads_payment_proposal_executed',
+      actorType: 'user',
+      actorId: args.actorUserId,
+      eventSource: 'user',
+      beforeState: transferRequest.status,
+      afterState: 'submitted_onchain',
+      linkedSignature: args.signature,
+      payloadJson: {
+        paymentOrderId: args.paymentOrderId,
+        decimalProposalId: args.decimalProposalId,
+        executionRecordId,
+        transactionIndex: args.transactionIndex,
+        provider: SQUADS_SOURCE,
+      },
+    });
+  }
+
+  await tx.paymentOrder.update({
+    where: { paymentOrderId: args.paymentOrderId },
+    data: { state: 'proposal_executed' },
+  });
+  await tx.paymentOrderEvent.create({
+    data: {
+      paymentOrderId: args.paymentOrderId,
+      organizationId: args.organizationId,
+      eventType: 'squads_payment_proposal_executed',
+      actorType: 'user',
+      actorId: args.actorUserId,
+      beforeState: paymentOrder.state,
+      afterState: 'proposal_executed',
+      linkedTransferRequestId: transferRequest?.transferRequestId ?? null,
+      linkedExecutionRecordId: executionRecordId,
+      linkedSignature: args.signature,
+      payloadJson: {
+        decimalProposalId: args.decimalProposalId,
+        transactionIndex: args.transactionIndex,
+        provider: SQUADS_SOURCE,
+      },
+    },
+  });
 }
 
 async function loadAndValidateMembers(

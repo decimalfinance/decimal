@@ -1030,6 +1030,29 @@ test('Squads vault payment proposals turn payment orders into executable treasur
   assert.equal(paymentProposal.decimalProposal.proposalType, 'vault_transaction');
   assert.equal(paymentProposal.decimalProposal.paymentOrderId, paymentOrder.paymentOrderId);
   assert.equal(paymentProposal.decimalProposal.semanticPayloadJson.amountRaw, '10000');
+  const preparedPaymentOrder = await get(
+    `/organizations/${organization.organizationId}/payment-orders/${paymentOrder.paymentOrderId}`,
+    register.sessionToken,
+  );
+  assert.equal(preparedPaymentOrder.derivedState, 'proposal_prepared');
+  assert.equal(preparedPaymentOrder.canCreateSquadsPaymentProposal, false);
+  assert.equal(preparedPaymentOrder.squadsPaymentProposal.decimalProposalId, paymentProposal.decimalProposal.decimalProposalId);
+
+  const duplicateProposalResponse = await fetch(
+    `${baseUrl}/organizations/${organization.organizationId}/treasury-wallets/${treasuryWallet.treasuryWalletId}/squads/vault-proposals/payment-intent`,
+    {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...authHeaders(register.sessionToken),
+      },
+      body: JSON.stringify({
+        paymentOrderId: paymentOrder.paymentOrderId,
+        creatorPersonalWalletId: signerWallet.userWalletId,
+      }),
+    },
+  );
+  assert.equal(duplicateProposalResponse.status, 409);
 
   proposalsByPda.set(paymentProposal.intent.proposalPda, {
     transactionIndex: { toString: () => '1' },
@@ -1054,6 +1077,26 @@ test('Squads vault payment proposals turn payment orders into executable treasur
     register.sessionToken,
   );
   assert.equal(confirmed.localStatus, 'submitted');
+  const submittedPaymentOrder = await get(
+    `/organizations/${organization.organizationId}/payment-orders/${paymentOrder.paymentOrderId}`,
+    register.sessionToken,
+  );
+  assert.equal(submittedPaymentOrder.derivedState, 'proposal_submitted');
+  assert.equal(submittedPaymentOrder.squadsLifecycle.submittedSignature, confirmed.submittedSignature);
+
+  const executed = await post(
+    `/organizations/${organization.organizationId}/proposals/${paymentProposal.decimalProposal.decimalProposalId}/confirm-execution`,
+    { signature: Keypair.generate().publicKey.toBase58() },
+    register.sessionToken,
+  );
+  assert.equal(executed.localStatus, 'executed');
+  const executedPaymentOrder = await get(
+    `/organizations/${organization.organizationId}/payment-orders/${paymentOrder.paymentOrderId}`,
+    register.sessionToken,
+  );
+  assert.equal(executedPaymentOrder.derivedState, 'proposal_executed');
+  assert.equal(executedPaymentOrder.squadsLifecycle.executedSignature, executed.executedSignature);
+  assert.equal(executedPaymentOrder.reconciliationDetail.latestExecution.submittedSignature, executed.executedSignature);
 });
 
 test('Privy personal wallet signing endpoint signs only transactions requiring that wallet', async () => {

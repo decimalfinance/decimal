@@ -734,9 +734,6 @@ ALTER TABLE execution_records
     )
   );
 
-ALTER TABLE payment_orders
-  DROP CONSTRAINT IF EXISTS chk_payment_orders_state;
-
 ALTER TABLE payment_runs
   DROP CONSTRAINT IF EXISTS chk_payment_runs_state;
 
@@ -747,6 +744,10 @@ ALTER TABLE payment_runs
       'pending_approval',
       'approved',
       'ready_for_execution',
+      'proposal_prepared',
+      'proposal_submitted',
+      'proposal_approved',
+      'proposal_executed',
       'execution_recorded',
       'submitted_onchain',
       'partially_settled',
@@ -767,6 +768,10 @@ ALTER TABLE payment_orders
       'pending_approval',
       'approved',
       'ready_for_execution',
+      'proposal_prepared',
+      'proposal_submitted',
+      'proposal_approved',
+      'proposal_executed',
       'execution_recorded',
       'partially_settled',
       'settled',
