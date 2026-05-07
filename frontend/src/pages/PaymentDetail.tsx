@@ -29,7 +29,7 @@ import type { UserWallet } from '../types';
 type StageState = 'complete' | 'current' | 'pending' | 'blocked';
 
 type LifecycleStage = {
-  id: 'request' | 'approval' | 'execution' | 'settlement' | 'proof';
+  id: 'request' | 'proposal' | 'approval' | 'execution' | 'settlement' | 'proof';
   label: string;
   sub: string;
   state: StageState;
@@ -63,15 +63,54 @@ function toneToPill(tone: 'success' | 'warning' | 'danger' | 'neutral'): 'succes
 }
 
 function buildLifecycle(order: PaymentOrder): LifecycleStage[] {
-  const s = order.derivedState;
+  const s = order.productLifecycle?.productState ?? order.derivedState;
   const blocked = s === 'exception' || s === 'partially_settled';
   const settled = s === 'settled' || s === 'closed';
   const cancelled = s === 'cancelled';
+  const squads = order.productLifecycle?.source === 'squads_v4';
 
-  const submitDone = s !== 'draft';
-  const approveDone = !['draft', 'pending_approval', 'cancelled'].includes(s);
-  const executionDone = ['execution_recorded', 'proposal_executed', 'partially_settled', 'settled', 'closed', 'exception'].includes(s);
+  const readyDone = s !== 'draft' && s !== 'cancelled';
+  const proposedDone = ['proposed', 'approved', 'executed', 'partially_settled', 'settled', 'closed', 'exception'].includes(s);
+  const approvalDone = ['approved', 'executed', 'partially_settled', 'settled', 'closed', 'exception'].includes(s);
+  const executionDone = ['execution_recorded', 'executed', 'proposal_executed', 'partially_settled', 'settled', 'closed', 'exception'].includes(s);
   const proofDone = settled;
+
+  if (squads) {
+    return [
+      {
+        id: 'request',
+        label: 'Requested',
+        sub: formatRelativeTime(order.createdAt),
+        state: 'complete',
+      },
+      {
+        id: 'proposal',
+        label: proposedDone ? 'Proposed' : 'Propose',
+        sub: cancelled ? 'Cancelled' : proposedDone ? 'On-chain' : readyDone ? 'Ready' : 'Not ready',
+        state: cancelled ? 'blocked' : proposedDone ? 'complete' : readyDone ? 'current' : 'pending',
+      },
+      {
+        id: 'approval',
+        label: approvalDone ? 'Approved' : 'Approve',
+        sub: approvalDone ? 'Threshold met' : proposedDone ? 'Voting' : 'Pending proposal',
+        state: cancelled || blocked ? 'blocked' : approvalDone ? 'complete' : proposedDone ? 'current' : 'pending',
+      },
+      {
+        id: 'execution',
+        label: executionDone ? 'Executed' : 'Execute',
+        sub: executionDone ? 'On-chain' : approvalDone ? 'Ready' : 'Pending approval',
+        state: blocked ? 'blocked' : executionDone ? 'complete' : approvalDone ? 'current' : 'pending',
+      },
+      {
+        id: 'settlement',
+        label: settled ? 'Settled' : 'Verify',
+        sub: blocked ? 'Needs review' : settled ? 'Matched' : executionDone ? 'Watching' : 'Pending execution',
+        state: blocked ? 'blocked' : settled ? 'complete' : executionDone ? 'current' : 'pending',
+      },
+    ];
+  }
+
+  const approveDone = !['draft', 'pending_approval', 'cancelled'].includes(s);
 
   return [
     {
@@ -128,22 +167,33 @@ function buildLifecycle(order: PaymentOrder): LifecycleStage[] {
 }
 
 function determineVariant(order: PaymentOrder): ActionVariant {
-  const s = order.derivedState;
+  const s = order.productLifecycle?.productState ?? order.derivedState;
   if (s === 'draft') return 'needs_submit';
   if (s === 'pending_approval') return 'needs_approval';
-  if (s === 'approved' || s === 'ready_for_execution') {
+  if (s === 'ready' || s === 'ready_for_execution') {
     // Squads-sourced payments need a multisig proposal, not a direct sign.
     return order.sourceTreasuryWallet?.source === 'squads_v4' && order.canCreateSquadsPaymentProposal !== false
       ? 'ready_to_propose'
       : 'ready_to_sign';
   }
-  if (s === 'proposal_prepared' || s === 'proposal_submitted' || s === 'proposal_approved') return 'proposal_in_progress';
-  if (s === 'proposal_executed') return 'in_flight';
-  if (s === 'execution_recorded') return 'in_flight';
+  if (s === 'proposed' || s === 'approved' || s === 'proposal_prepared' || s === 'proposal_submitted' || s === 'proposal_approved') return 'proposal_in_progress';
+  if (s === 'executed' || s === 'proposal_executed' || s === 'execution_recorded') return 'in_flight';
   if (s === 'settled' || s === 'closed') return 'settled';
   if (s === 'exception' || s === 'partially_settled') return 'exception';
   if (s === 'cancelled') return 'cancelled';
   return 'idle';
+}
+
+// Detects the backend's "transaction signature is not confirmed yet" 400
+// from verifyRpcSignatureConfirmed. Codex returns generic bad_request, so
+// we pattern-match on the message text. Used to keep the user on a retry
+// banner instead of forcing them to recreate a proposal that may have
+// already landed on chain.
+function isUnconfirmedSignatureError(err: unknown): boolean {
+  if (err instanceof ApiError && err.status === 400 && /not confirmed yet/i.test(err.message)) {
+    return true;
+  }
+  return false;
 }
 
 function downloadJson(filename: string, data: unknown) {
@@ -372,6 +422,14 @@ export function PaymentDetailPage() {
     },
   });
 
+  // When the proposal-creation tx is signed and submitted but the backend
+  // confirm-submission times out (RPC slow / not yet visible), we keep the
+  // signature + decimalProposalId in state so the user can retry just the
+  // confirm step instead of recreating the proposal.
+  const [pendingProposalConfirmation, setPendingProposalConfirmation] = useState<
+    { decimalProposalId: string; signature: string } | null
+  >(null);
+
   const createProposalMutation = useMutation({
     mutationFn: async () => {
       const order = orderQuery.data;
@@ -395,26 +453,58 @@ export function PaymentDetailPage() {
         signerPersonalWalletId: proposalCreatorWalletId,
       });
       const decimalProposalId = intent.decimalProposal?.decimalProposalId ?? null;
-      if (decimalProposalId) {
-        try {
-          await api.confirmProposalSubmission(organizationId!, decimalProposalId, { signature });
-        } catch {
-          // ignore — local status will catch up on refetch
-        }
+      if (!decimalProposalId) {
+        throw new Error('Backend did not return a decimal proposal id.');
       }
+      // Track sig + id BEFORE attempting confirm so retry-confirm has them
+      // available regardless of how confirm fails.
+      setPendingProposalConfirmation({ decimalProposalId, signature });
+      await api.confirmProposalSubmission(organizationId!, decimalProposalId, { signature });
       return { decimalProposalId, signature };
     },
     onSuccess: async (result) => {
+      setPendingProposalConfirmation(null);
       success('Squads proposal created.');
       await queryClient.invalidateQueries({ queryKey: ['payment-order', organizationId, paymentOrderId] });
       await queryClient.invalidateQueries({ queryKey: ['payment-orders', organizationId] });
       await queryClient.invalidateQueries({ queryKey: ['organization-proposals', organizationId] });
-      if (result.decimalProposalId) {
-        navigate(`/organizations/${organizationId}/proposals/${result.decimalProposalId}`);
-      }
+      navigate(`/organizations/${organizationId}/proposals/${result.decimalProposalId}`);
     },
     onError: (err) => {
+      // RPC confirm timed out but the tx may still be propagating — keep the
+      // pending state and surface a retry banner instead of a hard error.
+      if (isUnconfirmedSignatureError(err)) {
+        info('Transaction submitted. Confirmation pending — retry in a moment.');
+        return;
+      }
+      // Real failure — clear pending state so the create CTA returns.
+      setPendingProposalConfirmation(null);
       toastError(err instanceof Error ? err.message : 'Could not create Squads proposal.');
+    },
+  });
+
+  const retryProposalConfirmationMutation = useMutation({
+    mutationFn: async () => {
+      if (!pendingProposalConfirmation) throw new Error('No pending confirmation.');
+      await api.confirmProposalSubmission(organizationId!, pendingProposalConfirmation.decimalProposalId, {
+        signature: pendingProposalConfirmation.signature,
+      });
+      return pendingProposalConfirmation;
+    },
+    onSuccess: async (result) => {
+      setPendingProposalConfirmation(null);
+      success('Proposal confirmed.');
+      await queryClient.invalidateQueries({ queryKey: ['payment-order', organizationId, paymentOrderId] });
+      await queryClient.invalidateQueries({ queryKey: ['payment-orders', organizationId] });
+      await queryClient.invalidateQueries({ queryKey: ['organization-proposals', organizationId] });
+      navigate(`/organizations/${organizationId}/proposals/${result.decimalProposalId}`);
+    },
+    onError: (err) => {
+      if (isUnconfirmedSignatureError(err)) {
+        info('Still pending. Try again in a few seconds.');
+        return;
+      }
+      toastError(err instanceof Error ? err.message : 'Confirmation failed.');
     },
   });
 
@@ -548,6 +638,9 @@ export function PaymentDetailPage() {
           onSelectProposalCreator={setProposalCreatorWalletId}
           proposing={createProposalMutation.isPending}
           onCreateSquadsProposal={() => createProposalMutation.mutate()}
+          pendingProposalConfirmation={pendingProposalConfirmation}
+          retryingProposalConfirmation={retryProposalConfirmationMutation.isPending}
+          onRetryProposalConfirmation={() => retryProposalConfirmationMutation.mutate()}
           linkedProposal={linkedProposal}
           proposalPendingVoterWalletId={proposalPendingVoterWalletId}
           proposalExecuteWalletId={proposalExecuteWalletId}
@@ -798,6 +891,9 @@ function PrimaryAction(props: {
   onSelectProposalCreator: (id: string) => void;
   proposing: boolean;
   onCreateSquadsProposal: () => void;
+  pendingProposalConfirmation: { decimalProposalId: string; signature: string } | null;
+  retryingProposalConfirmation: boolean;
+  onRetryProposalConfirmation: () => void;
   linkedProposal: DecimalProposal | null;
   proposalPendingVoterWalletId: string | null;
   proposalExecuteWalletId: string | null;
@@ -830,6 +926,9 @@ function PrimaryAction(props: {
     onSelectProposalCreator,
     proposing,
     onCreateSquadsProposal,
+    pendingProposalConfirmation,
+    retryingProposalConfirmation,
+    onRetryProposalConfirmation,
     linkedProposal,
     proposalPendingVoterWalletId,
     proposalExecuteWalletId,
@@ -886,6 +985,37 @@ function PrimaryAction(props: {
   }
 
   if (variant === 'ready_to_propose') {
+    // If the create-proposal tx was signed and submitted but RPC hasn't seen
+    // the signature yet, show a retry-confirmation banner instead of the
+    // create form. Recreating the proposal would either land a duplicate or
+    // fail backend's 409 guard — neither is what the user wants.
+    if (pendingProposalConfirmation) {
+      return (
+        <div className="rd-primary" data-emphasis="action">
+          <p className="rd-primary-eyebrow">Awaiting · On-chain confirmation</p>
+          <h2 className="rd-primary-title">Transaction submitted — confirmation pending</h2>
+          <p className="rd-primary-body">
+            Your signature went through and the proposal transaction was submitted. Solana RPC hasn't reported it confirmed yet. Retry confirmation in a few seconds; do not recreate the proposal — it may already be on chain.
+          </p>
+          <p style={{ fontSize: 12, color: 'var(--ax-text-muted)', margin: '0 0 12px', fontFamily: 'monospace' }}>
+            sig {shortenAddress(pendingProposalConfirmation.signature, 6, 6)}
+          </p>
+          <div className="rd-actions">
+            <button
+              type="button"
+              className="rd-btn rd-btn-primary"
+              onClick={onRetryProposalConfirmation}
+              disabled={retryingProposalConfirmation}
+              aria-busy={retryingProposalConfirmation}
+            >
+              {retryingProposalConfirmation ? 'Retrying confirmation…' : 'Retry confirmation'}
+              {!retryingProposalConfirmation ? <span className="rd-btn-arrow" aria-hidden>→</span> : null}
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     const hasPersonalWallets = ownPersonalWallets.length > 0;
     return (
       <div className="rd-primary" data-emphasis="action">

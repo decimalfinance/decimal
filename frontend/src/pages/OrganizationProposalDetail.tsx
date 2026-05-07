@@ -27,7 +27,7 @@ export function OrganizationProposalDetailPage({ session }: { session: Authentic
   }>();
   const queryClient = useQueryClient();
   const { success, error: toastError } = useToast();
-  const [busyAction, setBusyAction] = useState<'approve' | 'execute' | null>(null);
+  const [busyAction, setBusyAction] = useState<'approve' | 'execute' | 'reject' | null>(null);
 
   const ownPersonalWalletsQuery = useQuery({
     queryKey: ['personal-wallets'] as const,
@@ -60,6 +60,25 @@ export function OrganizationProposalDetailPage({ session }: { session: Authentic
       queryKey: ['payment-orders', organizationId],
     });
   }
+
+  const rejectMutation = useMutation({
+    mutationFn: async (input: { proposal: DecimalProposal; signerWalletId: string }) => {
+      const intent = await api.createProposalRejectIntent(
+        organizationId!,
+        input.proposal.decimalProposalId,
+        { memberPersonalWalletId: input.signerWalletId },
+      );
+      return signAndSubmitIntent({ intent, signerPersonalWalletId: input.signerWalletId });
+    },
+    onSuccess: async () => {
+      success('Rejection submitted.');
+      await refreshAll();
+    },
+    onError: (err) => {
+      toastError(err instanceof ApiError || err instanceof Error ? err.message : 'Reject failed.');
+    },
+    onSettled: () => setBusyAction(null),
+  });
 
   const approveMutation = useMutation({
     mutationFn: async (input: { proposal: DecimalProposal; signerWalletId: string }) => {
@@ -236,6 +255,17 @@ export function OrganizationProposalDetailPage({ session }: { session: Authentic
             setBusyAction('approve');
             approveMutation.mutate({ proposal, signerWalletId });
           }}
+          onReject={(signerWalletId) => {
+            if (
+              !window.confirm(
+                'Reject this proposal? This casts an on-chain rejection vote and cannot be undone.',
+              )
+            ) {
+              return;
+            }
+            setBusyAction('reject');
+            rejectMutation.mutate({ proposal, signerWalletId });
+          }}
           onExecute={(signerWalletId) => {
             setBusyAction('execute');
             executeMutation.mutate({ proposal, signerWalletId });
@@ -252,13 +282,15 @@ function ProposalDetailBody({
   executeWallet,
   busy,
   onApprove,
+  onReject,
   onExecute,
 }: {
   proposal: DecimalProposal;
   pendingVoterWallet: { userWalletId: string; walletAddress: string } | null;
   executeWallet: { userWalletId: string; walletAddress: string } | null;
-  busy: 'approve' | 'execute' | null;
+  busy: 'approve' | 'execute' | 'reject' | null;
   onApprove: (signerWalletId: string) => void;
+  onReject: (signerWalletId: string) => void;
   onExecute: (signerWalletId: string) => void;
 }) {
   const isReadyToExecute = proposal.status === 'approved';
@@ -300,15 +332,30 @@ function ProposalDetailBody({
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {pendingVoterWallet ? (
-                <button
-                  type="button"
-                  className="button button-primary"
-                  onClick={() => onApprove(pendingVoterWallet.userWalletId)}
-                  disabled={busy !== null}
-                  aria-busy={busy === 'approve'}
-                >
-                  {busy === 'approve' ? 'Approving…' : 'Approve'}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="button button-primary"
+                    onClick={() => onApprove(pendingVoterWallet.userWalletId)}
+                    disabled={busy !== null}
+                    aria-busy={busy === 'approve'}
+                  >
+                    {busy === 'approve' ? 'Approving…' : 'Approve'}
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={() => onReject(pendingVoterWallet.userWalletId)}
+                    disabled={busy !== null}
+                    aria-busy={busy === 'reject'}
+                    style={{
+                      color: 'rgb(240, 130, 130)',
+                      borderColor: 'rgba(220, 80, 80, 0.45)',
+                    }}
+                  >
+                    {busy === 'reject' ? 'Rejecting…' : 'Reject'}
+                  </button>
+                </>
               ) : null}
               {isReadyToExecute && executeWallet ? (
                 <button
