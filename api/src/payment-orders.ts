@@ -965,6 +965,7 @@ async function buildPaymentOrderReadModel(order: PaymentOrderWithRelations) {
   const latestSquadsPaymentProposal = getLatestSquadsPaymentProposal(order);
   const squadsLifecycle = deriveSquadsPaymentLifecycle(latestSquadsPaymentProposal);
   const derivedState = derivePaymentOrderState(order, reconciliationDetail, squadsLifecycle);
+  const productLifecycle = derivePaymentProductLifecycle(order, derivedState, squadsLifecycle);
   const balanceWarning = deriveBalanceWarning(order);
 
   return {
@@ -985,6 +986,7 @@ async function buildPaymentOrderReadModel(order: PaymentOrderWithRelations) {
     dueAt: order.dueAt,
     state: order.state,
     derivedState,
+    productLifecycle,
     sourceBalanceSnapshotJson: order.sourceBalanceSnapshotJson,
     balanceWarning,
     metadataJson: order.metadataJson,
@@ -1039,7 +1041,11 @@ function derivePaymentOrderState(
   }
 
   if (squadsLifecycle) {
-    return squadsLifecycle.paymentState;
+    return squadsLifecycle.productState;
+  }
+
+  if (order.sourceTreasuryWallet?.source === 'squads_v4') {
+    return mapInternalPaymentStateToSquadsProductState(order.state);
   }
 
   if (reconciliationDetail.latestExecution) {
@@ -1069,6 +1075,25 @@ function derivePaymentOrderState(
   return order.state as PaymentOrderState;
 }
 
+function derivePaymentProductLifecycle(
+  order: PaymentOrderWithRelations,
+  derivedState: PaymentOrderState,
+  squadsLifecycle: ReturnType<typeof deriveSquadsPaymentLifecycle>,
+) {
+  const isSquadsPayment = order.sourceTreasuryWallet?.source === 'squads_v4' || Boolean(squadsLifecycle);
+  const productState = isSquadsPayment
+    ? (squadsLifecycle?.productState ?? mapInternalPaymentStateToSquadsProductState(order.state))
+    : derivedState;
+
+  return {
+    productState,
+    source: isSquadsPayment ? 'squads_v4' : 'legacy',
+    steps: isSquadsPayment
+      ? ['draft', 'ready', 'proposed', 'approved', 'executed', 'settled', 'proof']
+      : ['draft', 'approval', 'execution', 'settlement', 'proof'],
+  };
+}
+
 function getLatestSquadsPaymentProposal(order: PaymentOrderWithRelations) {
   return (order.proposals ?? [])
     .filter((proposal) => proposal.provider === 'squads_v4' && proposal.semanticType === 'send_payment')
@@ -1081,12 +1106,13 @@ function deriveSquadsPaymentLifecycle(proposal: DecimalProposal | null) {
   }
 
   const localStatus = proposal.status;
-  const paymentState = mapSquadsProposalStatusToPaymentState(proposal);
+  const productState = mapSquadsProposalStatusToPaymentState(proposal);
   return {
     provider: proposal.provider,
     decimalProposalId: proposal.decimalProposalId,
     proposalStatus: localStatus,
-    paymentState,
+    productState,
+    paymentState: productState,
     hasSubmittedSignature: Boolean(proposal.submittedSignature?.trim()),
     hasExecutedSignature: Boolean(proposal.executedSignature?.trim()),
     submittedSignature: proposal.submittedSignature,
@@ -1100,18 +1126,53 @@ function deriveSquadsPaymentLifecycle(proposal: DecimalProposal | null) {
 
 function mapSquadsProposalStatusToPaymentState(proposal: DecimalProposal): PaymentOrderState {
   if (proposal.executedSignature || proposal.status === 'executed') {
-    return 'proposal_executed';
+    return 'executed';
   }
   if (proposal.status === 'approved') {
-    return 'proposal_approved';
+    return 'approved';
   }
   if (proposal.submittedSignature || proposal.status === 'submitted' || proposal.status === 'active') {
-    return 'proposal_submitted';
+    return 'proposed';
   }
   if (proposal.status === 'rejected' || proposal.status === 'cancelled' || proposal.status === 'failed') {
     return 'cancelled';
   }
-  return 'proposal_prepared';
+  return 'ready';
+}
+
+function mapInternalPaymentStateToSquadsProductState(state: string): PaymentOrderState {
+  switch (state) {
+    case 'draft':
+      return 'draft';
+    // Decimal-side approval is a real pre-Squads gate — preserve it so
+    // the Approvals page (filtered on derivedState='pending_approval')
+    // and the PaymentDetail 'needs_approval' variant both fire. Without
+    // this case the default fall-through silently collapsed it to
+    // 'ready' and the approval step disappeared from the UI.
+    case 'pending_approval':
+      return 'pending_approval';
+    case 'approved':
+    case 'ready_for_execution':
+      return 'ready';
+    case 'cancelled':
+    case 'closed':
+      return state;
+    case 'settled':
+    case 'partially_settled':
+    case 'exception':
+      return state as PaymentOrderState;
+    case 'proposal_submitted':
+    case 'proposed':
+      return 'proposed';
+    case 'proposal_approved':
+      return 'approved';
+    case 'proposal_executed':
+    case 'execution_recorded':
+    case 'executed':
+      return 'executed';
+    default:
+      return 'ready';
+  }
 }
 
 function isTerminalSquadsPaymentProposal(proposal: DecimalProposal) {
