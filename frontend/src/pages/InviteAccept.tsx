@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../api';
-import { AuthDivider, OAuthButton } from '../App';
+import { AuthDivider, OAuthButton } from '../ui/AuthButtons';
 import type { AuthenticatedSession, PublicInvite, UserWallet } from '../types';
 
 export function InviteAcceptPage() {
@@ -199,6 +199,7 @@ function renderContent(args: {
   }
 
   if (status.kind === 'wrong-email') {
+    const returnPath = `/invites/${inviteToken ?? ''}`;
     return (
       <>
         <h1>Wrong email</h1>
@@ -207,24 +208,46 @@ function renderContent(args: {
           signed in as <strong>{status.current}</strong>. Sign out and sign back
           in with the invited email to accept.
         </p>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            className="button button-secondary"
-            onClick={async () => {
-              try {
-                await api.logout();
-              } catch {
-                // ignore
-              }
-              api.clearSessionToken();
-              const returnTo = encodeURIComponent(`/invites/${inviteToken ?? ''}`);
-              window.location.assign(`/login?returnTo=${returnTo}`);
-            }}
-          >
-            Sign out and switch accounts
-          </button>
-        </div>
+        <button
+          type="button"
+          className="button button-secondary"
+          style={{ marginBottom: 12 }}
+          onClick={async () => {
+            try {
+              await api.logout();
+            } catch {
+              // ignore
+            }
+            api.clearSessionToken();
+            window.location.assign(
+              `/login?returnTo=${encodeURIComponent(returnPath)}`,
+            );
+          }}
+        >
+          Sign out and switch accounts
+        </button>
+        <AuthDivider />
+        <p style={{ fontSize: 13, opacity: 0.75, margin: '0 0 12px' }}>
+          Or sign out and sign in with Google as <strong>{status.expected}</strong>:
+        </p>
+        <button
+          type="button"
+          className="button button-secondary oauth-button"
+          onClick={async () => {
+            try {
+              await api.logout();
+            } catch {
+              // ignore
+            }
+            api.clearSessionToken();
+            window.location.assign(api.getGoogleOAuthStartUrl(returnPath));
+          }}
+        >
+          <span className="oauth-button-mark" aria-hidden>
+            G
+          </span>
+          Sign in with Google
+        </button>
       </>
     );
   }
