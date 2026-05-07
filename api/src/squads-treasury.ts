@@ -320,11 +320,16 @@ export async function listSquadsConfigProposals(
 
   const statusFilter = input.status ?? 'pending';
   const limit = Math.min(Math.max(input.limit ?? 50, 1), 100);
-  const staleTransactionIndex = parseTransactionIndex(multisigAccount.staleTransactionIndex.toString());
   const currentTransactionIndex = parseTransactionIndex(multisigAccount.transactionIndex.toString());
   const items = [];
 
-  for (let index = currentTransactionIndex; index > staleTransactionIndex && items.length < limit; index -= 1n) {
+  // Walk every existing proposal index from newest to oldest. Squads bumps
+  // staleTransactionIndex to N after executing the config transaction at
+  // index N (to mark earlier *pending* proposals as no longer executable),
+  // so we must NOT stop at staleTransactionIndex — that would hide the
+  // executed proposal itself. staleTransactionIndex is still surfaced in
+  // each proposal's payload as informational metadata.
+  for (let index = currentTransactionIndex; index >= 1n && items.length < limit; index -= 1n) {
     const proposal = await loadSquadsConfigProposal(organizationId, treasuryWalletId, programId, multisigPda, multisigAccount, index);
     if (!proposal || !matchesProposalStatusFilter(proposal.status, statusFilter)) {
       continue;

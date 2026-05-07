@@ -839,6 +839,10 @@ test('Squads treasury creation prepares a signable transaction and persists the 
 
   onchainMultisig.threshold = 3;
   onchainMultisig.transactionIndex = { toString: () => '1' };
+  // Squads bumps staleTransactionIndex to the just-executed config tx index
+  // so any earlier *pending* proposals can no longer execute. The listing
+  // endpoint must still surface the executed proposal at this index.
+  onchainMultisig.staleTransactionIndex = { toString: () => '1' };
   onchainMultisig.members = [
     { key: publicKeyFromString(creatorWalletAddress), permissions: { mask: 7 } },
     { key: publicKeyFromString(approverWalletAddress), permissions: { mask: 2 } },
