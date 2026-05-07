@@ -129,12 +129,16 @@ export function solanaAccountUrl(address: string) {
   return explorerAccountUrl(address, getRuntimeSolanaNetwork());
 }
 
+// Solscan supports both mainnet and devnet via the `?cluster=devnet` query
+// param. Orb (orbmarkets.io) was nicer for mainnet but doesn't render devnet
+// state, which made every link broken in dev. Single explorer for both
+// clusters now.
 export function explorerTransactionUrl(signature: string, network: SolanaNetwork) {
-  const cluster = network === 'devnet' ? '&cluster=devnet' : '';
-  return `https://orbmarkets.io/tx/${signature}?tab=summary${cluster}`;
+  const cluster = network === 'devnet' ? '?cluster=devnet' : '';
+  return `https://solscan.io/tx/${signature}${cluster}`;
 }
 
 export function explorerAccountUrl(address: string, network: SolanaNetwork) {
-  const cluster = network === 'devnet' ? '&cluster=devnet' : '';
-  return `https://orbmarkets.io/address/${address}?tab=summary${cluster}`;
+  const cluster = network === 'devnet' ? '?cluster=devnet' : '';
+  return `https://solscan.io/account/${address}${cluster}`;
 }
