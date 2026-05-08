@@ -10,6 +10,7 @@ import {
   createSquadsConfigProposalApprovalIntent,
   createSquadsConfigProposalExecuteIntent,
   createSquadsPaymentProposalIntent,
+  createSquadsPaymentRunProposalIntent,
   createSquadsTreasuryIntent,
   getSquadsConfigProposal,
   getSquadsTreasuryDetail,
@@ -72,21 +73,24 @@ const createSquadsAddMemberProposalSchema = z.object({
   permissions: z.array(squadsPermissionSchema).min(1),
   newThreshold: z.number().int().min(1).max(65_535).optional(),
   memo: z.string().optional().nullable(),
-  autoApprove: z.boolean().optional(),
 });
 
 const createSquadsChangeThresholdProposalSchema = z.object({
   creatorPersonalWalletId: z.string().uuid(),
   newThreshold: z.number().int().min(1).max(65_535),
   memo: z.string().optional().nullable(),
-  autoApprove: z.boolean().optional(),
 });
 
 const createSquadsPaymentProposalSchema = z.object({
   paymentOrderId: z.string().uuid(),
   creatorPersonalWalletId: z.string().uuid(),
   memo: z.string().optional().nullable(),
-  autoApprove: z.boolean().optional(),
+});
+
+const createSquadsPaymentRunProposalSchema = z.object({
+  paymentRunId: z.string().uuid(),
+  creatorPersonalWalletId: z.string().uuid(),
+  memo: z.string().optional().nullable(),
 });
 
 const squadsConfigProposalParamsSchema = treasuryWalletParamsSchema.extend({
@@ -261,6 +265,16 @@ treasuryWalletsRouter.post(
     await assertOrganizationAccess(organizationId, req.auth!);
     const input = createSquadsPaymentProposalSchema.parse(req.body);
     sendCreated(res, await createSquadsPaymentProposalIntent(organizationId, treasuryWalletId, req.auth!.userId, input));
+  }),
+);
+
+treasuryWalletsRouter.post(
+  '/organizations/:organizationId/treasury-wallets/:treasuryWalletId/squads/vault-proposals/payment-run-intent',
+  asyncRoute(async (req, res) => {
+    const { organizationId, treasuryWalletId } = treasuryWalletParamsSchema.parse(req.params);
+    await assertOrganizationAccess(organizationId, req.auth!);
+    const input = createSquadsPaymentRunProposalSchema.parse(req.body);
+    sendCreated(res, await createSquadsPaymentRunProposalIntent(organizationId, treasuryWalletId, req.auth!.userId, input));
   }),
 );
 

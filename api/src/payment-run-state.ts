@@ -2,7 +2,10 @@ export const PAYMENT_RUN_STATES = [
   'draft',
   'pending_approval',
   'approved',
+  'ready',
+  'proposed',
   'ready_for_execution',
+  'executed',
   'execution_recorded',
   'submitted_onchain',
   'partially_settled',
@@ -43,6 +46,15 @@ export function derivePaymentRunStateFromRows(
   }
   if (storedState === 'submitted_onchain') {
     return 'submitted_onchain';
+  }
+  if (storedState === 'executed' || actionableOrders.some((order) => order.derivedState === 'executed')) {
+    return 'executed';
+  }
+  if (storedState === 'proposed' || actionableOrders.some((order) => order.derivedState === 'proposed')) {
+    return 'proposed';
+  }
+  if (storedState === 'ready' || actionableOrders.some((order) => order.derivedState === 'ready')) {
+    return 'ready';
   }
   if (actionableOrders.some((order) => order.derivedState === 'execution_recorded')) {
     return 'execution_recorded';

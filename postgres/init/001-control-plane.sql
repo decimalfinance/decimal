@@ -474,6 +474,7 @@ CREATE TABLE IF NOT EXISTS decimal_proposals
   organization_id UUID NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
   treasury_wallet_id UUID REFERENCES treasury_wallets(treasury_wallet_id) ON DELETE SET NULL,
   payment_order_id UUID REFERENCES payment_orders(payment_order_id) ON DELETE SET NULL,
+  payment_run_id UUID,
   provider TEXT NOT NULL DEFAULT 'squads_v4',
   proposal_type TEXT NOT NULL,
   proposal_category TEXT NOT NULL,
@@ -627,6 +628,9 @@ ALTER TABLE payment_runs
 ALTER TABLE payment_requests
   ADD COLUMN IF NOT EXISTS payment_run_id UUID;
 
+ALTER TABLE decimal_proposals
+  ADD COLUMN IF NOT EXISTS payment_run_id UUID;
+
 ALTER TABLE payment_orders
   DROP CONSTRAINT IF EXISTS payment_orders_payment_run_id_fkey;
 
@@ -639,6 +643,13 @@ ALTER TABLE payment_requests
 
 ALTER TABLE payment_requests
   ADD CONSTRAINT payment_requests_payment_run_id_fkey
+  FOREIGN KEY (payment_run_id) REFERENCES payment_runs(payment_run_id) ON DELETE SET NULL;
+
+ALTER TABLE decimal_proposals
+  DROP CONSTRAINT IF EXISTS decimal_proposals_payment_run_id_fkey;
+
+ALTER TABLE decimal_proposals
+  ADD CONSTRAINT decimal_proposals_payment_run_id_fkey
   FOREIGN KEY (payment_run_id) REFERENCES payment_runs(payment_run_id) ON DELETE SET NULL;
 
 ALTER TABLE payment_orders
@@ -743,12 +754,15 @@ ALTER TABLE payment_runs
       'draft',
       'pending_approval',
       'approved',
+      'ready',
+      'proposed',
       'ready_for_execution',
       'proposal_prepared',
       'proposal_submitted',
       'proposal_approved',
       'proposal_executed',
       'execution_recorded',
+      'executed',
       'submitted_onchain',
       'partially_settled',
       'settled',
@@ -767,12 +781,15 @@ ALTER TABLE payment_orders
       'draft',
       'pending_approval',
       'approved',
+      'ready',
+      'proposed',
       'ready_for_execution',
       'proposal_prepared',
       'proposal_submitted',
       'proposal_approved',
       'proposal_executed',
       'execution_recorded',
+      'executed',
       'partially_settled',
       'settled',
       'exception',
@@ -950,6 +967,8 @@ CREATE INDEX IF NOT EXISTS idx_decimal_proposals_treasury_created_at
   ON decimal_proposals(treasury_wallet_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_decimal_proposals_payment_order_created_at
   ON decimal_proposals(payment_order_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_decimal_proposals_payment_run_created_at
+  ON decimal_proposals(payment_run_id, created_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_unique_active_reference
   ON payment_orders(organization_id, destination_id, amount_raw, lower(coalesce(external_reference, invoice_number)))
   WHERE coalesce(external_reference, invoice_number) IS NOT NULL

@@ -761,7 +761,7 @@ test('Squads treasury creation prepares a signable transaction and persists the 
   proposalsByPda.set(addMemberIntent.intent.proposalPda, {
     transactionIndex: { toString: () => '1' },
     status: { __kind: 'Active' },
-    approved: [publicKeyFromString(creatorWalletAddress)],
+    approved: [],
     rejected: [],
     cancelled: [],
   });
@@ -787,11 +787,10 @@ test('Squads treasury creation prepares a signable transaction and persists the 
   assert.equal(pendingProposals.items.length, 1);
   assert.equal(pendingProposals.items[0].status, 'active');
   assert.equal(pendingProposals.items[0].transactionIndex, '1');
-  assert.equal(pendingProposals.items[0].approvals.length, 1);
-  assert.equal(pendingProposals.items[0].approvals[0].walletAddress, creatorWalletAddress);
+  assert.equal(pendingProposals.items[0].approvals.length, 0);
   assert.deepEqual(
     pendingProposals.items[0].pendingVoters.map((member: { walletAddress: string }) => member.walletAddress),
-    [approverWalletAddress],
+    [creatorWalletAddress, approverWalletAddress],
   );
 
   const singleProposal = await get(
@@ -806,7 +805,7 @@ test('Squads treasury creation prepares a signable transaction and persists the 
   );
   assert.equal(decimalProposals.items.length, 1);
   assert.equal(decimalProposals.items[0].decimalProposalId, addMemberIntent.decimalProposal.decimalProposalId);
-  assert.equal(decimalProposals.items[0].voting.approvals[0].walletAddress, creatorWalletAddress);
+  assert.equal(decimalProposals.items[0].voting.approvals.length, 0);
 
   const blockedNonMemberProposalRead = await fetch(
     `${baseUrl}/organizations/${organization.organizationId}/treasury-wallets/${treasuryWallet.treasuryWalletId}/squads/config-proposals`,
@@ -816,6 +815,22 @@ test('Squads treasury creation prepares a signable transaction and persists the 
   );
   assert.equal(blockedNonMemberProposalRead.status, 403);
   assert.equal((await blockedNonMemberProposalRead.json()).code, 'not_squads_member');
+
+  const creatorApprovalIntent = await post(
+    `/organizations/${organization.organizationId}/treasury-wallets/${treasuryWallet.treasuryWalletId}/squads/config-proposals/1/approve-intent`,
+    { memberPersonalWalletId: creatorWallet.userWalletId },
+    register.sessionToken,
+  );
+  assert.equal(creatorApprovalIntent.intent.kind, 'config_proposal_approval');
+  assert.equal(creatorApprovalIntent.intent.transactionIndex, '1');
+  assert.equal(creatorApprovalIntent.transaction.requiredSigner, creatorWalletAddress);
+  proposalsByPda.set(addMemberIntent.intent.proposalPda, {
+    transactionIndex: { toString: () => '1' },
+    status: { __kind: 'Active' },
+    approved: [publicKeyFromString(creatorWalletAddress)],
+    rejected: [],
+    cancelled: [],
+  });
 
   const approvalIntent = await post(
     `/organizations/${organization.organizationId}/treasury-wallets/${treasuryWallet.treasuryWalletId}/squads/config-proposals/1/approve-intent`,
@@ -1034,7 +1049,8 @@ test('Squads vault payment proposals turn payment orders into executable treasur
     `/organizations/${organization.organizationId}/payment-orders/${paymentOrder.paymentOrderId}`,
     register.sessionToken,
   );
-  assert.equal(preparedPaymentOrder.derivedState, 'proposal_prepared');
+  assert.equal(preparedPaymentOrder.derivedState, 'ready');
+  assert.equal(preparedPaymentOrder.productLifecycle.productState, 'ready');
   assert.equal(preparedPaymentOrder.canCreateSquadsPaymentProposal, false);
   assert.equal(preparedPaymentOrder.squadsPaymentProposal.decimalProposalId, paymentProposal.decimalProposal.decimalProposalId);
 
@@ -1056,8 +1072,8 @@ test('Squads vault payment proposals turn payment orders into executable treasur
 
   proposalsByPda.set(paymentProposal.intent.proposalPda, {
     transactionIndex: { toString: () => '1' },
-    status: { __kind: 'Approved' },
-    approved: [publicKeyFromString(signerWalletAddress)],
+    status: { __kind: 'Active' },
+    approved: [],
     rejected: [],
     cancelled: [],
   });
@@ -1068,8 +1084,28 @@ test('Squads vault payment proposals turn payment orders into executable treasur
     register.sessionToken,
   );
   assert.equal(proposals.items.length, 1);
-  assert.equal(proposals.items[0].status, 'approved');
-  assert.equal(proposals.items[0].voting.approvals[0].walletAddress, signerWalletAddress);
+  assert.equal(proposals.items[0].status, 'active');
+  assert.equal(proposals.items[0].voting.approvals.length, 0);
+  assert.deepEqual(
+    proposals.items[0].voting.pendingVoters.map((member: { walletAddress: string }) => member.walletAddress),
+    [signerWalletAddress],
+  );
+
+  const paymentApprovalIntent = await post(
+    `/organizations/${organization.organizationId}/proposals/${paymentProposal.decimalProposal.decimalProposalId}/approve-intent`,
+    { memberPersonalWalletId: signerWallet.userWalletId },
+    register.sessionToken,
+  );
+  assert.equal(paymentApprovalIntent.intent.kind, 'proposal_approval');
+  assert.equal(paymentApprovalIntent.transaction.requiredSigner, signerWalletAddress);
+
+  proposalsByPda.set(paymentProposal.intent.proposalPda, {
+    transactionIndex: { toString: () => '1' },
+    status: { __kind: 'Approved' },
+    approved: [publicKeyFromString(signerWalletAddress)],
+    rejected: [],
+    cancelled: [],
+  });
 
   const confirmed = await post(
     `/organizations/${organization.organizationId}/proposals/${paymentProposal.decimalProposal.decimalProposalId}/confirm-submission`,
@@ -1081,7 +1117,8 @@ test('Squads vault payment proposals turn payment orders into executable treasur
     `/organizations/${organization.organizationId}/payment-orders/${paymentOrder.paymentOrderId}`,
     register.sessionToken,
   );
-  assert.equal(submittedPaymentOrder.derivedState, 'proposal_submitted');
+  assert.equal(submittedPaymentOrder.derivedState, 'proposed');
+  assert.equal(submittedPaymentOrder.productLifecycle.productState, 'proposed');
   assert.equal(submittedPaymentOrder.squadsLifecycle.submittedSignature, confirmed.submittedSignature);
 
   const executed = await post(
@@ -1094,9 +1131,115 @@ test('Squads vault payment proposals turn payment orders into executable treasur
     `/organizations/${organization.organizationId}/payment-orders/${paymentOrder.paymentOrderId}`,
     register.sessionToken,
   );
-  assert.equal(executedPaymentOrder.derivedState, 'proposal_executed');
+  assert.equal(executedPaymentOrder.derivedState, 'executed');
+  assert.equal(executedPaymentOrder.productLifecycle.productState, 'executed');
   assert.equal(executedPaymentOrder.squadsLifecycle.executedSignature, executed.executedSignature);
   assert.equal(executedPaymentOrder.reconciliationDetail.latestExecution.submittedSignature, executed.executedSignature);
+
+  const runDestinationOne = Keypair.generate().publicKey.toBase58();
+  const runDestinationTwo = Keypair.generate().publicKey.toBase58();
+  await post(
+    `/organizations/${organization.organizationId}/destinations`,
+    {
+      walletAddress: runDestinationOne,
+      label: 'Batch Vendor A wallet',
+      counterpartyId: counterparty.counterpartyId,
+      trustState: 'trusted',
+    },
+    register.sessionToken,
+  );
+  await post(
+    `/organizations/${organization.organizationId}/destinations`,
+    {
+      walletAddress: runDestinationTwo,
+      label: 'Batch Vendor B wallet',
+      counterpartyId: counterparty.counterpartyId,
+      trustState: 'trusted',
+    },
+    register.sessionToken,
+  );
+  const importedRun = await post(
+    `/organizations/${organization.organizationId}/payment-runs/import-csv`,
+    {
+      runName: 'Payroll batch',
+      sourceTreasuryWalletId: treasuryWallet.treasuryWalletId,
+      submitOrderNow: true,
+      csv: [
+        'payee,destination,amount,reference,due_date',
+        `Batch Vendor A,${runDestinationOne},0.01,BATCH-1,2026-04-15`,
+        `Batch Vendor B,${runDestinationTwo},0.02,BATCH-2,2026-04-15`,
+      ].join('\n'),
+    },
+    register.sessionToken,
+  );
+  assert.equal(importedRun.paymentRun.paymentOrders.length, 2);
+
+  const runProposal = await post(
+    `/organizations/${organization.organizationId}/treasury-wallets/${treasuryWallet.treasuryWalletId}/squads/vault-proposals/payment-run-intent`,
+    {
+      paymentRunId: importedRun.paymentRun.paymentRunId,
+      creatorPersonalWalletId: signerWallet.userWalletId,
+      memo: 'Payroll batch proposal',
+    },
+    register.sessionToken,
+  );
+  assert.equal(runProposal.intent.kind, 'vault_payment_run_proposal_create');
+  assert.equal(runProposal.intent.proposalType, 'vault_transaction');
+  assert.equal(runProposal.intent.semanticType, 'send_payment_run');
+  assert.equal(runProposal.intent.transactionIndex, '2');
+  assert.equal(runProposal.intent.actions.length, 2);
+  assert.equal(runProposal.decimalProposal.paymentRunId, importedRun.paymentRun.paymentRunId);
+  assert.equal(runProposal.decimalProposal.paymentOrderId, null);
+  assert.equal(runProposal.decimalProposal.semanticPayloadJson.orderCount, 2);
+  assert.equal(runProposal.decimalProposal.semanticPayloadJson.totalAmountRaw, '30000');
+
+  const preparedRun = await get(
+    `/organizations/${organization.organizationId}/payment-runs/${importedRun.paymentRun.paymentRunId}`,
+    register.sessionToken,
+  );
+  assert.equal(preparedRun.derivedState, 'ready');
+  assert.equal(preparedRun.paymentOrders.every((order: { derivedState: string }) => order.derivedState === 'ready'), true);
+
+  proposalsByPda.set(runProposal.intent.proposalPda, {
+    transactionIndex: { toString: () => '2' },
+    status: { __kind: 'Approved' },
+    approved: [publicKeyFromString(signerWalletAddress)],
+    rejected: [],
+    cancelled: [],
+  });
+  onchainMultisig.transactionIndex = { toString: () => '2' };
+
+  const runSubmitted = await post(
+    `/organizations/${organization.organizationId}/proposals/${runProposal.decimalProposal.decimalProposalId}/confirm-submission`,
+    { signature: Keypair.generate().publicKey.toBase58() },
+    register.sessionToken,
+  );
+  assert.equal(runSubmitted.localStatus, 'submitted');
+  const submittedRun = await get(
+    `/organizations/${organization.organizationId}/payment-runs/${importedRun.paymentRun.paymentRunId}`,
+    register.sessionToken,
+  );
+  assert.equal(submittedRun.derivedState, 'proposed');
+  assert.equal(submittedRun.paymentOrders.every((order: { derivedState: string }) => order.derivedState === 'proposed'), true);
+
+  const runExecuted = await post(
+    `/organizations/${organization.organizationId}/proposals/${runProposal.decimalProposal.decimalProposalId}/confirm-execution`,
+    { signature: Keypair.generate().publicKey.toBase58() },
+    register.sessionToken,
+  );
+  assert.equal(runExecuted.localStatus, 'executed');
+  const executedRun = await get(
+    `/organizations/${organization.organizationId}/payment-runs/${importedRun.paymentRun.paymentRunId}`,
+    register.sessionToken,
+  );
+  assert.equal(executedRun.derivedState, 'executed');
+  assert.equal(executedRun.paymentOrders.every((order: { derivedState: string }) => order.derivedState === 'executed'), true);
+  assert.equal(
+    executedRun.paymentOrders.every((order: { reconciliationDetail: { latestExecution: { submittedSignature: string } | null } }) =>
+      order.reconciliationDetail.latestExecution?.submittedSignature === runExecuted.executedSignature,
+    ),
+    true,
+  );
 });
 
 test('Privy personal wallet signing endpoint signs only transactions requiring that wallet', async () => {

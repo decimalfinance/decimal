@@ -93,7 +93,11 @@ export const API_ENDPOINTS = [
   }),
   endpoint('create_squads_payment_proposal_intent', 'POST', '/organizations/{organizationId}/treasury-wallets/{treasuryWalletId}/squads/vault-proposals/payment-intent', ['treasury wallets', 'squads', 'proposals'], 'Prepare a signable Squads vault proposal that pays a Decimal payment order', 'session', {
     scope: 'execution:write',
-    requestBody: { paymentOrderId: 'uuid', creatorPersonalWalletId: 'uuid', memo: 'string optional', autoApprove: 'boolean optional' },
+    requestBody: { paymentOrderId: 'uuid', creatorPersonalWalletId: 'uuid', memo: 'string optional' },
+  }),
+  endpoint('create_squads_payment_run_proposal_intent', 'POST', '/organizations/{organizationId}/treasury-wallets/{treasuryWalletId}/squads/vault-proposals/payment-run-intent', ['treasury wallets', 'squads', 'payment runs', 'proposals'], 'Prepare one signable Squads vault proposal that pays every payable row in a Decimal payment run', 'session', {
+    scope: 'execution:write',
+    requestBody: { paymentRunId: 'uuid', creatorPersonalWalletId: 'uuid', memo: 'string optional' },
   }),
   endpoint('approve_squads_config_proposal_intent', 'POST', '/organizations/{organizationId}/treasury-wallets/{treasuryWalletId}/squads/config-proposals/{transactionIndex}/approve-intent', ['treasury wallets', 'squads'], 'Prepare a signable Squads proposal approval transaction', 'session', {
     scope: 'organization:write',
@@ -115,6 +119,10 @@ export const API_ENDPOINTS = [
     requestBody: { signature: 'string' },
   }),
   endpoint('approve_decimal_proposal_intent', 'POST', '/organizations/{organizationId}/proposals/{decimalProposalId}/approve-intent', ['proposals', 'squads'], 'Prepare a signable Squads approval transaction for a Decimal proposal', 'session', {
+    scope: 'execution:write',
+    requestBody: { memberPersonalWalletId: 'uuid', memo: 'string optional' },
+  }),
+  endpoint('reject_decimal_proposal_intent', 'POST', '/organizations/{organizationId}/proposals/{decimalProposalId}/reject-intent', ['proposals', 'squads'], 'Prepare a signable Squads rejection transaction for a Decimal proposal', 'session', {
     scope: 'execution:write',
     requestBody: { memberPersonalWalletId: 'uuid', memo: 'string optional' },
   }),

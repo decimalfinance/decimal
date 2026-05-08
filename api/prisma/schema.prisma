@@ -419,6 +419,7 @@ model DecimalProposal {
   organizationId         String          @map("organization_id") @db.Uuid
   treasuryWalletId       String?         @map("treasury_wallet_id") @db.Uuid
   paymentOrderId         String?         @map("payment_order_id") @db.Uuid
+  paymentRunId           String?         @map("payment_run_id") @db.Uuid
   provider               String          @default("squads_v4")
   proposalType           String          @map("proposal_type")
   proposalCategory       String          @map("proposal_category")
@@ -447,6 +448,7 @@ model DecimalProposal {
   organization           Organization    @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
   treasuryWallet         TreasuryWallet? @relation(fields: [treasuryWalletId], references: [treasuryWalletId], onDelete: SetNull)
   paymentOrder           PaymentOrder?   @relation(fields: [paymentOrderId], references: [paymentOrderId], onDelete: SetNull)
+  paymentRun             PaymentRun?     @relation(fields: [paymentRunId], references: [paymentRunId], onDelete: SetNull)
   createdByUser          User?           @relation("DecimalProposalCreatedByUser", fields: [createdByUserId], references: [userId], onDelete: SetNull)
 
   @@unique([organizationId, provider, squadsMultisigPda, transactionIndex])
@@ -454,6 +456,7 @@ model DecimalProposal {
   @@index([organizationId, proposalType, createdAt(sort: Desc)])
   @@index([treasuryWalletId, createdAt(sort: Desc)])
   @@index([paymentOrderId, createdAt(sort: Desc)])
+  @@index([paymentRunId, createdAt(sort: Desc)])
   @@map("decimal_proposals")
 }
 
@@ -504,6 +507,7 @@ model PaymentRun {
   createdByUser          User?            @relation("PaymentRunCreatedByUser", fields: [createdByUserId], references: [userId], onDelete: SetNull)
   paymentRequests        PaymentRequest[]
   paymentOrders          PaymentOrder[]
+  proposals              DecimalProposal[]
 
   @@index([organizationId, state, createdAt(sort: Desc)])
   @@index([sourceTreasuryWalletId, createdAt(sort: Desc)])

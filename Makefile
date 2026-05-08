@@ -5,7 +5,7 @@ PSQL_QUIET := PGOPTIONS='-c client_min_messages=warning' psql -v ON_ERROR_STOP=1
 
 .SILENT:
 
-.PHONY: infra-up infra-down dev devnet mainnet dev-api dev-frontend dev-worker tunnel prod-backend prod-backend-devnet prod-backend-mainnet _prod-backend-shared test test-api test-worker test-frontend sync-postgres-schema sync-clickhouse-schema reset-data reset-prod-data backup-db restore-db list-backups help
+.PHONY: infra-up infra-down dev devnet mainnet dev-api dev-frontend dev-worker dev-indexer tunnel prod-backend prod-backend-devnet prod-backend-mainnet _prod-backend-shared test test-api test-worker test-frontend sync-postgres-schema sync-clickhouse-schema reset-data reset-prod-data backup-db restore-db list-backups help
 
 NETWORK_SELECTOR := $(strip $(filter devnet mainnet,$(MAKECMDGOALS)))
 
@@ -35,7 +35,6 @@ reset-data:
 dev:
 	set -euo pipefail && \
 	if [[ -f api/.env ]]; then set -a && source api/.env && set +a; fi && \
-	if [[ -f yellowstone/.env ]]; then set -a && source yellowstone/.env && set +a; fi && \
 	NETWORK_SELECTOR="$(NETWORK_SELECTOR)" && \
 	if [[ "$${NETWORK_SELECTOR}" == "devnet" ]]; then \
 	  export SOLANA_NETWORK=devnet; \
@@ -45,36 +44,14 @@ dev:
 	fi && \
 	export DATABASE_URL="$${DATABASE_URL:-$(POSTGRES_URL)}" && \
 	export CONTROL_PLANE_API_URL="http://127.0.0.1:3100" && \
-	export CLICKHOUSE_URL="$${CLICKHOUSE_URL:-http://127.0.0.1:8123}" && \
 	$(MAKE) sync-postgres-schema && \
-	docker compose up -d clickhouse && \
-	docker compose exec -T clickhouse sh -lc 'clickhouse-client --multiquery < /docker-entrypoint-initdb.d/001-bootstrap.sql >/dev/null && clickhouse-client --multiquery < /docker-entrypoint-initdb.d/002-schema.sql >/dev/null' && \
-	for _ in {1..60}; do \
-	  if curl -fsS "$${CLICKHOUSE_URL}/ping" >/dev/null 2>&1; then \
-	    break; \
-	  fi; \
-	  sleep 1; \
-	done && \
 	(cd api && npm run prisma:generate >/dev/null) && \
 	typeset -a pids && \
 	(cd api && exec npm run dev) & \
 	pids+=($$!) && \
 	(cd frontend && exec npm run dev) & \
 	pids+=($$!) && \
-	if [[ "$${SOLANA_NETWORK:-mainnet}" == "devnet" ]]; then \
-	  echo "Skipping Yellowstone worker because SOLANA_NETWORK=devnet."; \
-	elif [[ -n "$${YELLOWSTONE_ENDPOINT:-}" ]]; then \
-	  for _ in {1..60}; do \
-	    if curl -fsS "$${CONTROL_PLANE_API_URL}/health" >/dev/null 2>&1 && curl -fsS "$${CLICKHOUSE_URL}/ping" >/dev/null 2>&1; then \
-	      break; \
-	    fi; \
-	    sleep 1; \
-	  done; \
-	  (cd yellowstone && exec cargo run) & \
-	  pids+=($$!); \
-	else \
-	  echo "Skipping Yellowstone worker because YELLOWSTONE_ENDPOINT is not set."; \
-	fi && \
+	echo "Yellowstone worker is detached from make dev. Run make dev-indexer when indexing is explicitly needed." && \
 	trap 'trap - INT TERM EXIT; for pid in "$${pids[@]:-}"; do kill -TERM "$$pid" 2>/dev/null || true; done; sleep 0.5; for pid in "$${pids[@]:-}"; do kill -KILL "$$pid" 2>/dev/null || true; done; wait "$${pids[@]}" 2>/dev/null || true; exit 130' INT TERM && \
 	trap 'for pid in "$${pids[@]:-}"; do kill -TERM "$$pid" 2>/dev/null || true; done; sleep 0.5; for pid in "$${pids[@]:-}"; do kill -KILL "$$pid" 2>/dev/null || true; done; wait "$${pids[@]}" 2>/dev/null || true' EXIT && \
 	wait "$${pids[@]}" || true
@@ -124,6 +101,11 @@ dev-worker:
 	set -euo pipefail && \
 	if [[ -f yellowstone/.env ]]; then set -a && source yellowstone/.env && set +a; fi && \
 	cd yellowstone && cargo run
+
+dev-indexer:
+	set -euo pipefail && \
+	$(MAKE) sync-clickhouse-schema && \
+	$(MAKE) dev-worker
 
 tunnel:
 	set -euo pipefail && \
@@ -230,10 +212,10 @@ list-backups:
 help:
 	@echo "Decimal Make targets:"
 	@echo ""
-	@echo "  Local dev (docker postgres + clickhouse, api + frontend + worker)"
-	@echo "    dev                Start everything locally in one terminal"
-	@echo "    dev devnet         Start local dev on devnet using SOLANA_DEVNET_RPC_URL; skips worker"
-	@echo "    dev mainnet        Start local dev on mainnet; starts worker if YELLOWSTONE_ENDPOINT is set"
+	@echo "  Local dev (docker postgres, api + frontend)"
+	@echo "    dev                Start core product locally in one terminal"
+	@echo "    dev devnet         Start local dev on devnet using SOLANA_DEVNET_RPC_URL"
+	@echo "    dev mainnet        Start local dev on mainnet"
 	@echo "    infra-up           Start local postgres + clickhouse only"
 	@echo "    infra-down         Stop local postgres + clickhouse"
 	@echo ""
@@ -241,6 +223,7 @@ help:
 	@echo "    dev-api            API only"
 	@echo "    dev-frontend       Vite frontend only"
 	@echo "    dev-worker         Yellowstone worker only"
+	@echo "    dev-indexer        ClickHouse schema + Yellowstone worker"
 	@echo "    tunnel             Cloudflare Tunnel (api.decimal.finance -> localhost:3100)"
 	@echo ""
 	@echo "  Production-backed runtime (local postgres + clickhouse + tunnel)"

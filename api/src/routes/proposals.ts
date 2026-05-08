@@ -6,6 +6,7 @@ import {
   confirmDecimalProposalSubmission,
   createDecimalProposalApprovalIntent,
   createDecimalProposalExecuteIntent,
+  createDecimalProposalRejectIntent,
   getDecimalProposal,
   listDecimalProposals,
 } from '../squads-treasury.js';
@@ -69,6 +70,13 @@ proposalsRouter.post('/organizations/:organizationId/proposals/:decimalProposalI
   const input = memberActionSchema.parse(req.body);
   await assertOrganizationAccess(organizationId, req.auth!);
   sendCreated(res, await createDecimalProposalApprovalIntent(organizationId, req.auth!.userId, decimalProposalId, input));
+}));
+
+proposalsRouter.post('/organizations/:organizationId/proposals/:decimalProposalId/reject-intent', asyncRoute(async (req, res) => {
+  const { organizationId, decimalProposalId } = proposalParamsSchema.parse(req.params);
+  const input = memberActionSchema.parse(req.body);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  sendCreated(res, await createDecimalProposalRejectIntent(organizationId, req.auth!.userId, decimalProposalId, input));
 }));
 
 proposalsRouter.post('/organizations/:organizationId/proposals/:decimalProposalId/execute-intent', asyncRoute(async (req, res) => {
