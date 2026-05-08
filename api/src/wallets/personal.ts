@@ -1,5 +1,5 @@
-import { ApiError } from './api-errors.js';
-import { config } from './config.js';
+import { ApiError } from '../infra/api-errors.js';
+import { config } from '../config.js';
 
 type PrivyWalletRuntime = {
   fetch: typeof fetch;

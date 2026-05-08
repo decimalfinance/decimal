@@ -1,6 +1,6 @@
-import { getPaymentOrderDetail, type PaymentOrderState } from './payment-orders.js';
-import { buildCanonicalDigest } from './proof-packet.js';
-import { getReconciliationExplanation } from './settlement-read-model.js';
+import { getPaymentOrderDetail, type PaymentOrderState } from './orders.js';
+import { buildCanonicalDigest } from '../proof-packet.js';
+import { getReconciliationExplanation } from '../transfer-requests/settlement-read-model.js';
 
 type PaymentOrderDetail = Awaited<ReturnType<typeof getPaymentOrderDetail>>;
 type LatestExecution = NonNullable<PaymentOrderDetail['reconciliationDetail']> extends { latestExecution: infer Latest }

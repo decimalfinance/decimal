@@ -1,5 +1,5 @@
 import { config } from './config.js';
-import { prisma } from './prisma.js';
+import { prisma } from './infra/prisma.js';
 import { createApp } from './app.js';
 import { USDC_MINT } from './solana.js';
 

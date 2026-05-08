@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { forbidden } from '../api-errors.js';
-import { assertOrganizationAccess } from '../organization-access.js';
-import { prisma } from '../prisma.js';
+import { forbidden } from '../infra/api-errors.js';
+import { assertOrganizationAccess } from '../auth/organization-access.js';
+import { prisma } from '../infra/prisma.js';
 
 export const organizationsRouter = Router();
 

@@ -1,5 +1,5 @@
 import type { Prisma } from '@prisma/client';
-import type { verifyUsdcSettlementFromSignature } from './solana.js';
+import type { verifyUsdcSettlementFromSignature } from '../solana.js';
 
 // Provider tag used wherever payment / proposal records record their on-
 // chain origin. Centralized here so both squads-treasury and the marker

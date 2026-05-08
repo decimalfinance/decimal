@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import crypto from 'node:crypto';
-import { prisma } from './prisma.js';
+import { prisma } from '../infra/prisma.js';
 
 export type UserSessionAuthContext = {
   authType: 'user_session';

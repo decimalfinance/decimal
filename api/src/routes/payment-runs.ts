@@ -10,11 +10,11 @@ import {
   listPaymentRuns,
   preparePaymentRunExecution,
   previewPaymentRunCsv,
-} from '../payment-runs.js';
-import { buildPaymentRunProofPacket } from '../payment-run-proof.js';
+} from '../payments/runs.js';
+import { buildPaymentRunProofPacket } from '../payments/run-proof.js';
 import { isSolanaSignatureLike } from '../solana.js';
-import { assertOrganizationAccess, assertOrganizationAdmin } from '../organization-access.js';
-import { asyncRoute, sendCreated, sendJson, sendList, unwrapItems } from '../route-helpers.js';
+import { assertOrganizationAccess, assertOrganizationAdmin } from '../auth/organization-access.js';
+import { asyncRoute, sendCreated, sendJson, sendList, unwrapItems } from '../infra/route-helpers.js';
 
 export const paymentRunsRouter = Router();
 

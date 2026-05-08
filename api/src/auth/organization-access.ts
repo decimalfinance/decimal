@@ -1,5 +1,5 @@
-import type { AuthContext } from './auth.js';
-import { prisma } from './prisma.js';
+import type { AuthContext } from './sessions.js';
+import { prisma } from '../infra/prisma.js';
 
 const ADMIN_ROLES = new Set(['owner', 'admin']);
 

@@ -11,10 +11,10 @@ import {
   listCollectionRuns,
   previewCollectionRequestsCsv,
   previewCollectionRunCsv,
-} from '../collections.js';
-import { buildCollectionProofPacket, buildCollectionRunProofPacket } from '../collection-proof.js';
-import { assertOrganizationAccess, assertOrganizationAdmin } from '../organization-access.js';
-import { asyncRoute, sendCreated, sendJson, sendList, unwrapItems } from '../route-helpers.js';
+} from '../collections/requests.js';
+import { buildCollectionProofPacket, buildCollectionRunProofPacket } from '../collections/proof.js';
+import { assertOrganizationAccess, assertOrganizationAdmin } from '../auth/organization-access.js';
+import { asyncRoute, sendCreated, sendJson, sendList, unwrapItems } from '../infra/route-helpers.js';
 
 export const collectionsRouter = Router();
 

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { assertOrganizationAccess } from '../organization-access.js';
+import { assertOrganizationAccess } from '../auth/organization-access.js';
 import {
   confirmDecimalProposalExecution,
   confirmDecimalProposalSubmission,
@@ -9,8 +9,8 @@ import {
   createDecimalProposalRejectIntent,
   getDecimalProposal,
   listDecimalProposals,
-} from '../squads-treasury.js';
-import { asyncRoute, sendCreated, sendJson, sendList, unwrapItems } from '../route-helpers.js';
+} from '../squads/treasury.js';
+import { asyncRoute, sendCreated, sendJson, sendList, unwrapItems } from '../infra/route-helpers.js';
 
 export const proposalsRouter = Router();
 

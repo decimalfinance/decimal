@@ -10,11 +10,11 @@ import type {
   User,
 } from '@prisma/client';
 import { createHash } from 'node:crypto';
-import { getReconciliationDetail } from './settlement-read-model.js';
-import { createTransferRequestEvent } from './transfer-request-events.js';
-import { prisma } from './prisma.js';
-import { deriveUsdcAtaForWallet, SOLANA_CHAIN, USDC_ASSET } from './solana.js';
-import { findOrCreateCollectionSourceForPayer, serializeCollectionSource } from './collection-sources.js';
+import { getReconciliationDetail } from '../transfer-requests/settlement-read-model.js';
+import { createTransferRequestEvent } from '../transfer-requests/events.js';
+import { prisma } from '../infra/prisma.js';
+import { deriveUsdcAtaForWallet, SOLANA_CHAIN, USDC_ASSET } from '../solana.js';
+import { findOrCreateCollectionSourceForPayer, serializeCollectionSource } from './sources.js';
 
 export const COLLECTION_REQUEST_STATES = [
   'open',

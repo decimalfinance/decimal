@@ -4,9 +4,9 @@ import {
   createCollectionSource,
   listCollectionSources,
   updateCollectionSource,
-} from '../collection-sources.js';
-import { asyncRoute, listQuerySchema, sendCreated, sendJson, sendList, unwrapItems } from '../route-helpers.js';
-import { assertOrganizationAccess, assertOrganizationAdmin } from '../organization-access.js';
+} from '../collections/sources.js';
+import { asyncRoute, listQuerySchema, sendCreated, sendJson, sendList, unwrapItems } from '../infra/route-helpers.js';
+import { assertOrganizationAccess, assertOrganizationAdmin } from '../auth/organization-access.js';
 
 export const collectionSourcesRouter = Router();
 

@@ -1,5 +1,5 @@
-import { API_ENDPOINTS, type ApiEndpoint } from './api-contract.js';
-import { config } from './config.js';
+import { API_ENDPOINTS, type ApiEndpoint } from '../api-contract.js';
+import { config } from '../config.js';
 
 export function buildOpenApiSpec() {
   const paths: Record<string, Record<string, unknown>> = {};

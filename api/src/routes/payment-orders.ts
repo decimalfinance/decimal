@@ -10,13 +10,13 @@ import {
   preparePaymentOrderExecution,
   updatePaymentOrder,
   submitPaymentOrder,
-} from '../payment-orders.js';
-import { buildPaymentOrderProofPacket } from '../payment-order-proof.js';
-import { isPaymentOrderState } from '../payment-order-state.js';
+} from '../payments/orders.js';
+import { buildPaymentOrderProofPacket } from '../payments/order-proof.js';
+import { isPaymentOrderState } from '../payments/order-state.js';
 import { isSolanaSignatureLike } from '../solana.js';
-import { assertOrganizationAccess, assertOrganizationAdmin } from '../organization-access.js';
-import { actorFromAuth } from '../actor.js';
-import { asyncRoute, sendCreated, sendJson, sendList, unwrapItems } from '../route-helpers.js';
+import { assertOrganizationAccess, assertOrganizationAdmin } from '../auth/organization-access.js';
+import { actorFromAuth } from '../auth/actor.js';
+import { asyncRoute, sendCreated, sendJson, sendList, unwrapItems } from '../infra/route-helpers.js';
 
 export const paymentOrdersRouter = Router();
 

@@ -1,5 +1,5 @@
 import type { NextFunction, Request, Response } from 'express';
-import { config } from './config.js';
+import { config } from '../config.js';
 
 type Bucket = {
   count: number;

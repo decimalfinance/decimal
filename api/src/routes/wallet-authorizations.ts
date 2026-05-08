@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
-import { badRequest, notFound } from '../api-errors.js';
-import { assertOrganizationAccess, assertOrganizationAdmin } from '../organization-access.js';
-import { prisma } from '../prisma.js';
-import { asyncRoute, sendCreated, sendJson, sendList } from '../route-helpers.js';
+import { badRequest, notFound } from '../infra/api-errors.js';
+import { assertOrganizationAccess, assertOrganizationAdmin } from '../auth/organization-access.js';
+import { prisma } from '../infra/prisma.js';
+import { asyncRoute, sendCreated, sendJson, sendList } from '../infra/route-helpers.js';
 
 export const walletAuthorizationsRouter = Router();
 

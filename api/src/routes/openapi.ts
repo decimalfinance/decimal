@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { buildOpenApiSpec } from '../openapi.js';
+import { buildOpenApiSpec } from '../infra/openapi.js';
 
 export const openApiRouter = Router();
 

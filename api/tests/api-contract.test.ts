@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { API_ENDPOINTS } from '../src/api-contract.js';
 import { DecimalClient } from '../src/decimal-client.js';
-import { buildOpenApiSpec } from '../src/openapi.js';
+import { buildOpenApiSpec } from '../src/infra/openapi.js';
 
 test('API contract has stable unique endpoint IDs and covers the backend surface', () => {
   const ids = API_ENDPOINTS.map((endpoint) => endpoint.id);

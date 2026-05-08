@@ -1,6 +1,6 @@
 import type { Prisma } from '@prisma/client';
-import { prisma } from './prisma.js';
-import { deriveUsdcAtaForWallet, SOLANA_CHAIN, USDC_ASSET } from './solana.js';
+import { prisma } from '../infra/prisma.js';
+import { deriveUsdcAtaForWallet, SOLANA_CHAIN, USDC_ASSET } from '../solana.js';
 
 export type CreateTreasuryWalletInput = {
   chain?: string;

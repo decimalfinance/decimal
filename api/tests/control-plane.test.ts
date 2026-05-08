@@ -5,10 +5,10 @@ import * as multisig from '@sqds/multisig';
 import { Keypair, PublicKey, TransactionInstruction, TransactionMessage, VersionedTransaction } from '@solana/web3.js';
 import { createApp } from '../src/app.js';
 import { config } from '../src/config.js';
-import { prisma } from '../src/prisma.js';
-import { setPrivyWalletRuntimeForTests } from '../src/privy-wallets.js';
-import { resetRateLimitBuckets } from '../src/rate-limit.js';
-import { setSquadsTreasuryRuntimeForTests } from '../src/squads-treasury.js';
+import { prisma } from '../src/infra/prisma.js';
+import { setPrivyWalletRuntimeForTests } from '../src/wallets/personal.js';
+import { resetRateLimitBuckets } from '../src/infra/rate-limit.js';
+import { setSquadsTreasuryRuntimeForTests } from '../src/squads/treasury.js';
 
 const TRUNCATE_SQL = `
 TRUNCATE TABLE

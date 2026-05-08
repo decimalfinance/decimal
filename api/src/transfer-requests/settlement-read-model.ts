@@ -10,7 +10,7 @@ import type {
   TreasuryWallet,
 } from '@prisma/client';
 import { serializeExecutionRecord } from './execution-records.js';
-import { prisma } from './prisma.js';
+import { prisma } from '../infra/prisma.js';
 import {
   deriveApprovalState,
   deriveExecutionState,
@@ -18,7 +18,7 @@ import {
   getAvailableOperatorTransitions,
   type RequestDisplayState,
   type RequestStatus,
-} from './transfer-request-lifecycle.js';
+} from './lifecycle.js';
 
 type TransferRequestWithRelations = TransferRequest & {
   sourceTreasuryWallet: TreasuryWallet | null;

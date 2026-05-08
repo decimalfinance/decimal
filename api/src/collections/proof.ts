@@ -1,6 +1,6 @@
-import { getCollectionRequestDetail, getCollectionRunDetail } from './collections.js';
-import { buildCanonicalDigest } from './proof-packet.js';
-import { getReconciliationExplanation } from './settlement-read-model.js';
+import { getCollectionRequestDetail, getCollectionRunDetail } from './requests.js';
+import { buildCanonicalDigest } from '../proof-packet.js';
+import { getReconciliationExplanation } from '../transfer-requests/settlement-read-model.js';
 
 type CollectionRequestDetail = Awaited<ReturnType<typeof getCollectionRequestDetail>>;
 type CollectionProofDetail = 'summary' | 'compact' | 'full';

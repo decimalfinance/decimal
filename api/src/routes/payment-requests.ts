@@ -9,9 +9,9 @@ import {
   listPaymentRequests,
   previewPaymentRequestsCsv,
   promotePaymentRequestToOrder,
-} from '../payment-requests.js';
-import { assertOrganizationAccess, assertOrganizationAdmin } from '../organization-access.js';
-import { asyncRoute, sendCreated, sendJson, sendList, unwrapItems } from '../route-helpers.js';
+} from '../payments/requests.js';
+import { assertOrganizationAccess, assertOrganizationAdmin } from '../auth/organization-access.js';
+import { asyncRoute, sendCreated, sendJson, sendList, unwrapItems } from '../infra/route-helpers.js';
 
 export const paymentRequestsRouter = Router();
 

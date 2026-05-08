@@ -5,8 +5,8 @@ import {
   canClosePaymentRun,
   derivePaymentRunStateFromRows,
   isPaymentRunState,
-} from '../src/payment-run-state.js';
-import { formatIsoDateTime, formatUsdcAmount, shortenAddress } from '../src/api-format.js';
+} from '../src/payments/run-state.js';
+import { formatIsoDateTime, formatUsdcAmount, shortenAddress } from '../src/infra/api-format.js';
 
 test('payment run state derivation is deterministic and terminal-aware', () => {
   assert.equal(isPaymentRunState('settled'), true);

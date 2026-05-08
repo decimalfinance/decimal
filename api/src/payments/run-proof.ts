@@ -1,6 +1,6 @@
-import { buildPaymentOrderProofPacket } from './payment-order-proof.js';
-import { getPaymentRunDetail } from './payment-runs.js';
-import { buildCanonicalDigest } from './proof-packet.js';
+import { buildPaymentOrderProofPacket } from './order-proof.js';
+import { getPaymentRunDetail } from './runs.js';
+import { buildCanonicalDigest } from '../proof-packet.js';
 
 type PaymentRunProofDetail = 'summary' | 'compact' | 'full';
 

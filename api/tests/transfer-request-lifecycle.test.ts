@@ -6,7 +6,7 @@ import {
   getAvailableUserTransitions,
   isRequestStatusTransitionAllowed,
   isUserRequestStatusTransitionAllowed,
-} from '../src/transfer-request-lifecycle.js';
+} from '../src/transfer-requests/lifecycle.js';
 
 test('request lifecycle exposes the allowed transition graph', () => {
   assert.equal(isRequestStatusTransitionAllowed('draft', 'submitted'), true);

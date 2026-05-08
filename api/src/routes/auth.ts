@@ -3,11 +3,11 @@ import type { Request, Response } from 'express';
 import type { JsonWebKey } from 'node:crypto';
 import crypto from 'node:crypto';
 import { z } from 'zod';
-import { ApiError, badRequest, conflict } from '../api-errors.js';
-import { hashPassword, verifyPassword } from '../auth-passwords.js';
-import { createSession, requireAuth } from '../auth.js';
+import { ApiError, badRequest, conflict } from '../infra/api-errors.js';
+import { hashPassword, verifyPassword } from '../auth/passwords.js';
+import { createSession, requireAuth } from '../auth/sessions.js';
 import { config } from '../config.js';
-import { prisma } from '../prisma.js';
+import { prisma } from '../infra/prisma.js';
 
 export const authRouter = Router();
 

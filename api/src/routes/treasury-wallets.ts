@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { assertOrganizationAccess, assertOrganizationAdmin } from '../organization-access.js';
+import { assertOrganizationAccess, assertOrganizationAdmin } from '../auth/organization-access.js';
 import { fetchWalletBalances, SOLANA_CHAIN, USDC_ASSET } from '../solana.js';
 import { getSolUsdPrice } from '../pricing.js';
 import {
@@ -18,9 +18,9 @@ import {
   listOrganizationSquadsProposals,
   listSquadsConfigProposals,
   syncSquadsTreasuryMembers,
-} from '../squads-treasury.js';
-import { createTreasuryWallet, listTreasuryWallets, updateTreasuryWallet } from '../treasury-wallets.js';
-import { asyncRoute, listQuerySchema, sendCreated, sendList, sendJson, unwrapItems } from '../route-helpers.js';
+} from '../squads/treasury.js';
+import { createTreasuryWallet, listTreasuryWallets, updateTreasuryWallet } from '../wallets/treasury.js';
+import { asyncRoute, listQuerySchema, sendCreated, sendList, sendJson, unwrapItems } from '../infra/route-helpers.js';
 
 export const treasuryWalletsRouter = Router();
 

@@ -4,7 +4,7 @@ import { after, before, beforeEach, test } from 'node:test';
 import { AddressInfo } from 'node:net';
 import { Keypair } from '@solana/web3.js';
 import { createApp } from '../src/app.js';
-import { prisma } from '../src/prisma.js';
+import { prisma } from '../src/infra/prisma.js';
 
 const TRUNCATE_SQL = `
 TRUNCATE TABLE

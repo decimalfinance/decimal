@@ -8,8 +8,8 @@ import {
   updateCounterparty,
   updateDestination,
 } from '../destinations.js';
-import { assertOrganizationAccess, assertOrganizationAdmin } from '../organization-access.js';
-import { asyncRoute, listQuerySchema, sendCreated, sendList, sendJson, unwrapItems } from '../route-helpers.js';
+import { assertOrganizationAccess, assertOrganizationAdmin } from '../auth/organization-access.js';
+import { asyncRoute, listQuerySchema, sendCreated, sendList, sendJson, unwrapItems } from '../infra/route-helpers.js';
 
 export const destinationsRouter = Router();
 

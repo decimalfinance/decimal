@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { prisma } from '../prisma.js';
-import { assertOrganizationAccess } from '../organization-access.js';
-import { listOrganizationAuditLog } from '../organization-audit-log.js';
+import { prisma } from '../infra/prisma.js';
+import { assertOrganizationAccess } from '../auth/organization-access.js';
+import { listOrganizationAuditLog } from '../audit/organization-audit-log.js';
 
 export const opsRouter = Router();
 

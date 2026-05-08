@@ -1,4 +1,4 @@
-import type { AuthContext } from './auth.js';
+import type { AuthContext } from './sessions.js';
 
 export type ActorContext = {
   actorUserId: string | null;

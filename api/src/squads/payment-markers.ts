@@ -1,13 +1,13 @@
 import type { Prisma } from '@prisma/client';
-import { prisma } from './prisma.js';
-import { createTransferRequestEvent } from './transfer-request-events.js';
+import { prisma } from '../infra/prisma.js';
+import { createTransferRequestEvent } from '../transfer-requests/events.js';
 import {
   SQUADS_SOURCE,
   type SquadsSettlementVerification,
   isRecordLike,
   mergeJsonObject,
   serializeSettlementVerification,
-} from './squads-shared.js';
+} from './shared.js';
 
 // Per-stage state writers triggered from the squads-treasury proposal
 // lifecycle. Pulled out of squads-treasury.ts so the file with the public

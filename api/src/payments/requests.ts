@@ -1,7 +1,7 @@
 import type { Counterparty, Destination, PaymentRequest, Prisma, User } from '@prisma/client';
-import { createPaymentOrder, getPaymentOrderDetail } from './payment-orders.js';
-import { prisma } from './prisma.js';
-import { deriveUsdcAtaForWallet, SOLANA_CHAIN, USDC_ASSET } from './solana.js';
+import { createPaymentOrder, getPaymentOrderDetail } from './orders.js';
+import { prisma } from '../infra/prisma.js';
+import { deriveUsdcAtaForWallet, SOLANA_CHAIN, USDC_ASSET } from '../solana.js';
 
 export const PAYMENT_REQUEST_STATES = [
   'submitted',

@@ -13,10 +13,10 @@ import {
 import crypto from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
-import { ApiError, badRequest, notFound } from '../api-errors.js';
-import { assertOrganizationAdmin } from '../organization-access.js';
-import { prisma } from '../prisma.js';
-import { createPrivySolanaWallet, deletePrivyWallet, signPrivySolanaTransaction } from '../privy-wallets.js';
+import { ApiError, badRequest, notFound } from '../infra/api-errors.js';
+import { assertOrganizationAdmin } from '../auth/organization-access.js';
+import { prisma } from '../infra/prisma.js';
+import { createPrivySolanaWallet, deletePrivyWallet, signPrivySolanaTransaction } from '../wallets/personal.js';
 import { config } from '../config.js';
 import {
   USDC_DECIMALS,

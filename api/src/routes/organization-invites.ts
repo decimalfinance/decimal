@@ -1,11 +1,11 @@
 import crypto from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
-import { badRequest, conflict, forbidden, notFound } from '../api-errors.js';
+import { badRequest, conflict, forbidden, notFound } from '../infra/api-errors.js';
 import { config } from '../config.js';
-import { assertOrganizationAdmin } from '../organization-access.js';
-import { prisma } from '../prisma.js';
-import { asyncRoute, sendCreated, sendJson, sendList } from '../route-helpers.js';
+import { assertOrganizationAdmin } from '../auth/organization-access.js';
+import { prisma } from '../infra/prisma.js';
+import { asyncRoute, sendCreated, sendJson, sendList } from '../infra/route-helpers.js';
 
 export const publicOrganizationInvitesRouter = Router();
 export const organizationInvitesRouter = Router();

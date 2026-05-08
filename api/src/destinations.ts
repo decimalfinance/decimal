@@ -1,5 +1,5 @@
 import type { Counterparty, Destination, Prisma } from '@prisma/client';
-import { prisma } from './prisma.js';
+import { prisma } from './infra/prisma.js';
 import { deriveUsdcAtaForWallet, SOLANA_CHAIN, USDC_ASSET } from './solana.js';
 
 export type CreateCounterpartyInput = {

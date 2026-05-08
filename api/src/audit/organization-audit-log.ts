@@ -1,4 +1,4 @@
-import { prisma } from './prisma.js';
+import { prisma } from '../infra/prisma.js';
 
 export type OrganizationAuditEntityType =
   | 'payment_order'

@@ -1,10 +1,10 @@
 import type { Prisma } from '@prisma/client';
 import * as multisig from '@sqds/multisig';
 import { Keypair, PublicKey, TransactionMessage, VersionedTransaction, type AddressLookupTableAccount, type TransactionInstruction } from '@solana/web3.js';
-import { ApiError, badRequest, conflict, notFound } from './api-errors.js';
-import { config } from './config.js';
-import { prisma } from './prisma.js';
-import { submitPaymentOrder } from './payment-orders.js';
+import { ApiError, badRequest, conflict, notFound } from '../infra/api-errors.js';
+import { config } from '../config.js';
+import { prisma } from '../infra/prisma.js';
+import { submitPaymentOrder } from '../payments/orders.js';
 import {
   buildDestinationAtaCreateInstruction,
   buildUsdcTransferTransactionInstructions,
@@ -19,7 +19,7 @@ import {
   verifyUsdcSettlementFromSignature,
   waitForSignatureVisible,
   type ExpectedUsdcSettlement,
-} from './solana.js';
+} from '../solana.js';
 import {
   markPaymentOrderSquadsProposalExecuted,
   markPaymentOrderSquadsProposalPrepared,
@@ -27,7 +27,7 @@ import {
   markPaymentRunSquadsProposalExecuted,
   markPaymentRunSquadsProposalPrepared,
   markPaymentRunSquadsProposalSubmitted,
-} from './squads-payment-markers.js';
+} from './payment-markers.js';
 import {
   SQUADS_SOURCE,
   type SquadsSettlementVerification,
@@ -35,7 +35,7 @@ import {
   isSettlementSettled,
   mergeJsonObject,
   serializeSettlementVerification,
-} from './squads-shared.js';
+} from './shared.js';
 
 const MAX_SQUADS_PAYMENT_RUN_TRANSFERS = 8;
 // Squads v4 uses the same program id on devnet and mainnet. The value remains
