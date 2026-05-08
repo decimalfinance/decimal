@@ -12,7 +12,6 @@ import {
   submitPaymentOrder,
 } from '../payment-orders.js';
 import { buildPaymentOrderProofPacket } from '../payment-order-proof.js';
-import { renderPaymentOrderProofMarkdown } from '../payment-proof-markdown.js';
 import { isPaymentOrderState } from '../payment-order-state.js';
 import { isSolanaSignatureLike } from '../solana.js';
 import { assertOrganizationAccess, assertOrganizationAdmin } from '../organization-access.js';
@@ -87,7 +86,7 @@ const attachSignatureSchema = z.object({
 );
 
 const proofQuerySchema = z.object({
-  format: z.enum(['json', 'markdown']).default('json'),
+  format: z.literal('json').default('json'),
 });
 
 paymentOrdersRouter.get('/organizations/:organizationId/payment-orders', asyncRoute(async (req, res) => {
@@ -274,13 +273,7 @@ paymentOrdersRouter.get(
       const query = proofQuerySchema.parse(req.query);
       await assertOrganizationAccess(organizationId, req.auth!);
       const proof = await buildPaymentOrderProofPacket(organizationId, paymentOrderId);
-      if (query.format === 'markdown') {
-        res.setHeader('content-type', 'text/markdown; charset=utf-8');
-        res.setHeader('content-disposition', `attachment; filename="payment-order-${paymentOrderId}-proof.md"`);
-        res.send(renderPaymentOrderProofMarkdown(proof));
-        return;
-      }
-
+      void query;
       sendJson(res, proof);
     } catch (error) {
       next(error);

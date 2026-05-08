@@ -13,7 +13,7 @@ import type {
 import { buildApprovalEvaluationSummary, getOrCreateOrganizationApprovalPolicy } from './approval-policy.js';
 import { serializeExecutionRecord } from './execution-records.js';
 import { prisma } from './prisma.js';
-import { getReconciliationDetail } from './reconciliation.js';
+import { getReconciliationDetail } from './settlement-read-model.js';
 import {
   buildUsdcTransferInstructions,
   deriveUsdcAtaForWallet,
@@ -1081,9 +1081,12 @@ function derivePaymentProductLifecycle(
   squadsLifecycle: ReturnType<typeof deriveSquadsPaymentLifecycle>,
 ) {
   const isSquadsPayment = order.sourceTreasuryWallet?.source === 'squads_v4' || Boolean(squadsLifecycle);
-  const productState = isSquadsPayment
+  const terminalSettlementState = ['settled', 'partially_settled', 'exception', 'closed', 'cancelled'].includes(derivedState)
+    ? derivedState
+    : null;
+  const productState = terminalSettlementState ?? (isSquadsPayment
     ? (squadsLifecycle?.productState ?? mapInternalPaymentStateToSquadsProductState(order.state))
-    : derivedState;
+    : derivedState);
 
   return {
     productState,
@@ -1475,7 +1478,7 @@ async function createPaymentOrderEvent(
     paymentOrderId: string;
     organizationId: string;
     eventType: string;
-    actorType: 'user' | 'system' | 'worker';
+    actorType: 'user' | 'system';
     actorId?: string | null;
     beforeState?: string | null;
     afterState?: string | null;

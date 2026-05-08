@@ -16,7 +16,9 @@ import {
   USDC_ASSET,
   USDC_DECIMALS,
   USDC_MINT,
+  verifyUsdcSettlementFromSignature,
   waitForSignatureVisible,
+  type ExpectedUsdcSettlement,
 } from './solana.js';
 import { createTransferRequestEvent } from './transfer-request-events.js';
 
@@ -1010,6 +1012,29 @@ export async function confirmDecimalProposalExecution(
   await getDecimalProposal(organizationId, actorUserId, decimalProposalId);
   const signature = input.signature.trim();
   await verifyRpcSignatureConfirmed(signature, 'proposal_execution');
+  const currentForSettlement = await prisma.decimalProposal.findFirstOrThrow({
+    where: { organizationId, decimalProposalId },
+  });
+
+  // Idempotency: if the proposal is already recorded as executed under a
+  // *different* signature, a duplicate Execute click landed two on-chain
+  // transactions. The first one wins (Squads enforces this on-chain too —
+  // the second submission would fail at the proposal-status check). Surface
+  // the conflict so the operator can investigate the rogue signature.
+  if (
+    currentForSettlement.executedSignature
+    && currentForSettlement.executedSignature !== signature
+  ) {
+    throw conflict('Proposal was already confirmed with a different signature.', {
+      decimalProposalId,
+      storedSignature: currentForSettlement.executedSignature,
+      providedSignature: signature,
+    });
+  }
+
+  const settlementVerification = await verifySquadsProposalSettlement(currentForSettlement, signature);
+  const settled = isSettlementSettled(settlementVerification);
+
   const updated = await prisma.$transaction(async (tx) => {
     const current = await tx.decimalProposal.findFirstOrThrow({
       where: { organizationId, decimalProposalId },
@@ -1018,8 +1043,14 @@ export async function confirmDecimalProposalExecution(
       where: { decimalProposalId },
       data: {
         executedSignature: signature,
-        executedAt: new Date(),
+        // Preserve the original execution timestamp on retries so the
+        // "executed at" surface in the UI doesn't drift each time we
+        // re-verify.
+        executedAt: current.executedAt ?? new Date(),
         status: 'executed',
+        metadataJson: mergeJsonObject(current.metadataJson, {
+          rpcSettlementVerification: serializeSettlementVerification(settlementVerification),
+        }),
       },
       include: decimalProposalInclude,
     });
@@ -1032,6 +1063,8 @@ export async function confirmDecimalProposalExecution(
         signature,
         transactionIndex: current.transactionIndex,
         metadataJson: current.metadataJson,
+        settlementVerification,
+        settled,
       });
     }
     if (current.semanticType === 'send_payment_run' && current.paymentRunId) {
@@ -1042,6 +1075,8 @@ export async function confirmDecimalProposalExecution(
         decimalProposalId,
         signature,
         transactionIndex: current.transactionIndex,
+        settlementVerification,
+        settled,
       });
     }
     return row;
@@ -1089,6 +1124,128 @@ export async function createDecimalProposalApprovalIntent(
     proposalCategory: proposal.proposalCategory,
     semanticType: 'approve_proposal',
     actions: [],
+  });
+}
+
+// Discriminated union returned by verifySquadsProposalSettlement. We never
+// throw from this helper — the caller decides what to persist for each
+// status. 'settled' = on-chain deltas match expectations. 'mismatch' = tx
+// confirmed but USDC deltas don't match (alarming, surface to user but still
+// persist signature). 'pending' = RPC hasn't yet indexed the parsed tx
+// (transient, retry later). 'not_applicable' = the proposal isn't a USDC
+// settlement (e.g. config_transaction).
+type SquadsSettlementVerification =
+  | {
+      status: 'settled';
+      signature: string;
+      checkedAt: string;
+      items: Awaited<ReturnType<typeof verifyUsdcSettlementFromSignature>>['items'];
+    }
+  | {
+      status: 'mismatch';
+      signature: string;
+      checkedAt: string;
+      items: Awaited<ReturnType<typeof verifyUsdcSettlementFromSignature>>['items'];
+    }
+  | {
+      status: 'pending';
+      signature: string;
+      checkedAt: string;
+      reason: string;
+    }
+  | { status: 'not_applicable' };
+
+async function verifySquadsProposalSettlement(
+  proposal: Prisma.DecimalProposalGetPayload<Record<string, never>>,
+  signature: string,
+): Promise<SquadsSettlementVerification> {
+  const expectedTransfers = extractExpectedUsdcSettlementTransfers(proposal.semanticType, proposal.semanticPayloadJson);
+  if (!expectedTransfers) {
+    return { status: 'not_applicable' };
+  }
+  try {
+    const verification = await verifyUsdcSettlementFromSignature({
+      signature,
+      expectedTransfers,
+    });
+    return {
+      status: verification.allSettled ? 'settled' : 'mismatch',
+      signature: verification.signature,
+      checkedAt: verification.checkedAt,
+      items: verification.items,
+    };
+  } catch (error) {
+    return {
+      status: 'pending',
+      signature,
+      checkedAt: new Date().toISOString(),
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function isSettlementSettled(verification: SquadsSettlementVerification) {
+  return verification.status === 'settled' || verification.status === 'not_applicable';
+}
+
+function serializeSettlementVerification(
+  verification: SquadsSettlementVerification,
+): Prisma.InputJsonValue {
+  return verification as unknown as Prisma.InputJsonValue;
+}
+
+function extractExpectedUsdcSettlementTransfers(
+  semanticType: string | null,
+  semanticPayloadJson: Prisma.JsonValue,
+): ExpectedUsdcSettlement[] | null {
+  if (semanticType !== 'send_payment' && semanticType !== 'send_payment_run') {
+    return null;
+  }
+  if (!isRecordLike(semanticPayloadJson)) {
+    throw badRequest('Payment proposal is missing semantic payload for settlement verification.');
+  }
+
+  if (semanticType === 'send_payment') {
+    const destinationWalletAddress = semanticPayloadJson.destinationWalletAddress;
+    const destinationTokenAccountAddress = semanticPayloadJson.destinationTokenAccountAddress;
+    const amountRaw = semanticPayloadJson.amountRaw;
+    if (
+      typeof destinationWalletAddress !== 'string'
+      || typeof destinationTokenAccountAddress !== 'string'
+      || (typeof amountRaw !== 'string' && typeof amountRaw !== 'number')
+    ) {
+      throw badRequest('Payment proposal semantic payload is incomplete for settlement verification.');
+    }
+    return [{
+      destinationWalletAddress,
+      destinationTokenAccountAddress,
+      amountRaw: String(amountRaw),
+    }];
+  }
+
+  const orders = semanticPayloadJson.orders;
+  if (!Array.isArray(orders) || !orders.length) {
+    throw badRequest('Payment run proposal semantic payload is missing order settlement expectations.');
+  }
+  return orders.map((item) => {
+    if (!isRecordLike(item)) {
+      throw badRequest('Payment run proposal contains an invalid order settlement expectation.');
+    }
+    const destinationWalletAddress = item.destinationWalletAddress;
+    const destinationTokenAccountAddress = item.destinationTokenAccountAddress;
+    const amountRaw = item.amountRaw;
+    if (
+      typeof destinationWalletAddress !== 'string'
+      || typeof destinationTokenAccountAddress !== 'string'
+      || (typeof amountRaw !== 'string' && typeof amountRaw !== 'number')
+    ) {
+      throw badRequest('Payment run proposal contains an incomplete order settlement expectation.');
+    }
+    return {
+      destinationWalletAddress,
+      destinationTokenAccountAddress,
+      amountRaw: String(amountRaw),
+    };
   });
 }
 
@@ -2430,6 +2587,13 @@ async function markPaymentRunSquadsProposalSubmitted(
   }
 }
 
+// Idempotent. Safe to call repeatedly with the same signature: each call
+// only writes for state transitions that haven't happened yet, so a retry
+// after a transient verification failure cleanly upgrades from
+// 'submitted_onchain' / 'executed' to 'matched' / 'settled' without
+// duplicating events. Two event types differentiate the transitions:
+//   squads_payment_proposal_executed → first time the proposal landed
+//   squads_payment_proposal_settled  → settlement verified after the fact
 async function markPaymentOrderSquadsProposalExecuted(
   tx: Prisma.TransactionClient,
   args: {
@@ -2440,6 +2604,8 @@ async function markPaymentOrderSquadsProposalExecuted(
     signature: string;
     transactionIndex: string | null;
     metadataJson: Prisma.JsonValue;
+    settlementVerification: SquadsSettlementVerification;
+    settled: boolean;
   },
 ) {
   const paymentOrder = await tx.paymentOrder.findFirst({
@@ -2466,81 +2632,132 @@ async function markPaymentOrderSquadsProposalExecuted(
         orderBy: { requestedAt: 'desc' },
       });
 
+  const targetTransferStatus = args.settled ? 'matched' : 'submitted_onchain';
+  const targetExecutionState = args.settled ? 'settled' : 'submitted_onchain';
+  const targetOrderState = args.settled ? 'settled' : 'executed';
+  const verificationJson = serializeSettlementVerification(args.settlementVerification);
+
   let executionRecordId: string | null = null;
   if (transferRequest) {
-    await tx.transferRequest.update({
-      where: { transferRequestId: transferRequest.transferRequestId },
-      data: { status: 'submitted_onchain' },
-    });
+    const previousTransferStatus = transferRequest.status;
+    if (previousTransferStatus !== targetTransferStatus) {
+      await tx.transferRequest.update({
+        where: { transferRequestId: transferRequest.transferRequestId },
+        data: { status: targetTransferStatus },
+      });
+    }
+
     const existingRecord = await tx.executionRecord.findFirst({
       where: {
         transferRequestId: transferRequest.transferRequestId,
         submittedSignature: args.signature,
       },
     });
-    const executionRecord = existingRecord ?? await tx.executionRecord.create({
-      data: {
+    if (!existingRecord) {
+      const created = await tx.executionRecord.create({
+        data: {
+          transferRequestId: transferRequest.transferRequestId,
+          organizationId: args.organizationId,
+          submittedSignature: args.signature,
+          executionSource: SQUADS_SOURCE,
+          executorUserId: args.actorUserId,
+          state: targetExecutionState,
+          submittedAt: new Date(),
+          metadataJson: {
+            paymentOrderId: args.paymentOrderId,
+            decimalProposalId: args.decimalProposalId,
+            transactionIndex: args.transactionIndex,
+            provider: SQUADS_SOURCE,
+            rpcSettlementVerification: verificationJson,
+          },
+        },
+      });
+      executionRecordId = created.executionRecordId;
+    } else {
+      executionRecordId = existingRecord.executionRecordId;
+      if (existingRecord.state !== targetExecutionState) {
+        await tx.executionRecord.update({
+          where: { executionRecordId: existingRecord.executionRecordId },
+          data: {
+            state: targetExecutionState,
+            metadataJson: mergeJsonObject(existingRecord.metadataJson, {
+              rpcSettlementVerification: verificationJson,
+            }),
+          },
+        });
+      } else {
+        // Same state, just refresh the verification payload so the latest
+        // checkedAt/reason is visible to the UI.
+        await tx.executionRecord.update({
+          where: { executionRecordId: existingRecord.executionRecordId },
+          data: {
+            metadataJson: mergeJsonObject(existingRecord.metadataJson, {
+              rpcSettlementVerification: verificationJson,
+            }),
+          },
+        });
+      }
+    }
+
+    if (previousTransferStatus !== targetTransferStatus) {
+      const upgradingToSettled = args.settled && previousTransferStatus !== 'matched';
+      await createTransferRequestEvent(tx, {
         transferRequestId: transferRequest.transferRequestId,
         organizationId: args.organizationId,
-        submittedSignature: args.signature,
-        executionSource: SQUADS_SOURCE,
-        executorUserId: args.actorUserId,
-        state: 'submitted_onchain',
-        submittedAt: new Date(),
-        metadataJson: {
+        eventType: upgradingToSettled && previousTransferStatus === 'submitted_onchain'
+          ? 'squads_payment_proposal_settled'
+          : 'squads_payment_proposal_executed',
+        actorType: 'user',
+        actorId: args.actorUserId,
+        eventSource: 'user',
+        beforeState: previousTransferStatus,
+        afterState: targetTransferStatus,
+        linkedSignature: args.signature,
+        payloadJson: {
           paymentOrderId: args.paymentOrderId,
+          decimalProposalId: args.decimalProposalId,
+          executionRecordId,
+          transactionIndex: args.transactionIndex,
+          provider: SQUADS_SOURCE,
+          rpcSettlementVerification: verificationJson,
+        },
+      });
+    }
+  }
+
+  if (paymentOrder.state !== targetOrderState) {
+    const previousOrderState = paymentOrder.state;
+    await tx.paymentOrder.update({
+      where: { paymentOrderId: args.paymentOrderId },
+      data: { state: targetOrderState },
+    });
+    const upgradingToSettled = args.settled && previousOrderState !== 'settled';
+    await tx.paymentOrderEvent.create({
+      data: {
+        paymentOrderId: args.paymentOrderId,
+        organizationId: args.organizationId,
+        eventType: upgradingToSettled && previousOrderState === 'executed'
+          ? 'squads_payment_proposal_settled'
+          : 'squads_payment_proposal_executed',
+        actorType: 'user',
+        actorId: args.actorUserId,
+        beforeState: previousOrderState,
+        afterState: targetOrderState,
+        linkedTransferRequestId: transferRequest?.transferRequestId ?? null,
+        linkedExecutionRecordId: executionRecordId,
+        linkedSignature: args.signature,
+        payloadJson: {
           decimalProposalId: args.decimalProposalId,
           transactionIndex: args.transactionIndex,
           provider: SQUADS_SOURCE,
+          rpcSettlementVerification: verificationJson,
         },
       },
     });
-    executionRecordId = executionRecord.executionRecordId;
-    await createTransferRequestEvent(tx, {
-      transferRequestId: transferRequest.transferRequestId,
-      organizationId: args.organizationId,
-      eventType: 'squads_payment_proposal_executed',
-      actorType: 'user',
-      actorId: args.actorUserId,
-      eventSource: 'user',
-      beforeState: transferRequest.status,
-      afterState: 'submitted_onchain',
-      linkedSignature: args.signature,
-      payloadJson: {
-        paymentOrderId: args.paymentOrderId,
-        decimalProposalId: args.decimalProposalId,
-        executionRecordId,
-        transactionIndex: args.transactionIndex,
-        provider: SQUADS_SOURCE,
-      },
-    });
   }
-
-  await tx.paymentOrder.update({
-    where: { paymentOrderId: args.paymentOrderId },
-    data: { state: 'executed' },
-  });
-  await tx.paymentOrderEvent.create({
-    data: {
-      paymentOrderId: args.paymentOrderId,
-      organizationId: args.organizationId,
-      eventType: 'squads_payment_proposal_executed',
-      actorType: 'user',
-      actorId: args.actorUserId,
-      beforeState: paymentOrder.state,
-      afterState: 'executed',
-      linkedTransferRequestId: transferRequest?.transferRequestId ?? null,
-      linkedExecutionRecordId: executionRecordId,
-      linkedSignature: args.signature,
-      payloadJson: {
-        decimalProposalId: args.decimalProposalId,
-        transactionIndex: args.transactionIndex,
-        provider: SQUADS_SOURCE,
-      },
-    },
-  });
 }
 
+// Idempotent. See markPaymentOrderSquadsProposalExecuted for the contract.
 async function markPaymentRunSquadsProposalExecuted(
   tx: Prisma.TransactionClient,
   args: {
@@ -2550,6 +2767,8 @@ async function markPaymentRunSquadsProposalExecuted(
     decimalProposalId: string;
     signature: string;
     transactionIndex: string | null;
+    settlementVerification: SquadsSettlementVerification;
+    settled: boolean;
   },
 ) {
   const paymentRun = await tx.paymentRun.findFirst({
@@ -2570,90 +2789,140 @@ async function markPaymentRunSquadsProposalExecuted(
     return;
   }
 
-  await tx.paymentRun.update({
-    where: { paymentRunId: args.paymentRunId },
-    data: { state: 'executed' },
-  });
+  const targetTransferStatus = args.settled ? 'matched' : 'submitted_onchain';
+  const targetExecutionState = args.settled ? 'settled' : 'submitted_onchain';
+  const targetOrderState = args.settled ? 'settled' : 'executed';
+  const targetRunState = args.settled ? 'settled' : 'executed';
+  const verificationJson = serializeSettlementVerification(args.settlementVerification);
+
+  if (paymentRun.state !== targetRunState) {
+    await tx.paymentRun.update({
+      where: { paymentRunId: args.paymentRunId },
+      data: { state: targetRunState },
+    });
+  }
 
   for (const order of paymentRun.paymentOrders) {
     const transferRequest = order.transferRequests[0] ?? null;
     let executionRecordId: string | null = null;
     if (transferRequest) {
-      const beforeStatus = transferRequest.status;
-      await tx.transferRequest.update({
-        where: { transferRequestId: transferRequest.transferRequestId },
-        data: { status: 'submitted_onchain' },
-      });
+      const previousTransferStatus = transferRequest.status;
+      if (previousTransferStatus !== targetTransferStatus) {
+        await tx.transferRequest.update({
+          where: { transferRequestId: transferRequest.transferRequestId },
+          data: { status: targetTransferStatus },
+        });
+      }
+
       const existingRecord = await tx.executionRecord.findFirst({
         where: {
           transferRequestId: transferRequest.transferRequestId,
           submittedSignature: args.signature,
         },
       });
-      const executionRecord = existingRecord ?? await tx.executionRecord.create({
-        data: {
+      if (!existingRecord) {
+        const created = await tx.executionRecord.create({
+          data: {
+            transferRequestId: transferRequest.transferRequestId,
+            organizationId: args.organizationId,
+            submittedSignature: args.signature,
+            executionSource: SQUADS_SOURCE,
+            executorUserId: args.actorUserId,
+            state: targetExecutionState,
+            submittedAt: new Date(),
+            metadataJson: {
+              paymentRunId: args.paymentRunId,
+              paymentOrderId: order.paymentOrderId,
+              decimalProposalId: args.decimalProposalId,
+              transactionIndex: args.transactionIndex,
+              provider: SQUADS_SOURCE,
+              rpcSettlementVerification: verificationJson,
+            },
+          },
+        });
+        executionRecordId = created.executionRecordId;
+      } else {
+        executionRecordId = existingRecord.executionRecordId;
+        if (existingRecord.state !== targetExecutionState) {
+          await tx.executionRecord.update({
+            where: { executionRecordId: existingRecord.executionRecordId },
+            data: {
+              state: targetExecutionState,
+              metadataJson: mergeJsonObject(existingRecord.metadataJson, {
+                rpcSettlementVerification: verificationJson,
+              }),
+            },
+          });
+        } else {
+          await tx.executionRecord.update({
+            where: { executionRecordId: existingRecord.executionRecordId },
+            data: {
+              metadataJson: mergeJsonObject(existingRecord.metadataJson, {
+                rpcSettlementVerification: verificationJson,
+              }),
+            },
+          });
+        }
+      }
+
+      if (previousTransferStatus !== targetTransferStatus) {
+        const upgradingToSettled = args.settled && previousTransferStatus === 'submitted_onchain';
+        await createTransferRequestEvent(tx, {
           transferRequestId: transferRequest.transferRequestId,
           organizationId: args.organizationId,
-          submittedSignature: args.signature,
-          executionSource: SQUADS_SOURCE,
-          executorUserId: args.actorUserId,
-          state: 'submitted_onchain',
-          submittedAt: new Date(),
-          metadataJson: {
+          eventType: upgradingToSettled
+            ? 'squads_payment_run_proposal_settled'
+            : 'squads_payment_run_proposal_executed',
+          actorType: 'user',
+          actorId: args.actorUserId,
+          eventSource: 'user',
+          beforeState: previousTransferStatus,
+          afterState: targetTransferStatus,
+          linkedSignature: args.signature,
+          payloadJson: {
             paymentRunId: args.paymentRunId,
             paymentOrderId: order.paymentOrderId,
             decimalProposalId: args.decimalProposalId,
+            executionRecordId,
             transactionIndex: args.transactionIndex,
             provider: SQUADS_SOURCE,
+            rpcSettlementVerification: verificationJson,
+          },
+        });
+      }
+    }
+
+    if (order.state !== targetOrderState) {
+      const previousOrderState = order.state;
+      await tx.paymentOrder.update({
+        where: { paymentOrderId: order.paymentOrderId },
+        data: { state: targetOrderState },
+      });
+      const upgradingToSettled = args.settled && previousOrderState === 'executed';
+      await tx.paymentOrderEvent.create({
+        data: {
+          paymentOrderId: order.paymentOrderId,
+          organizationId: args.organizationId,
+          eventType: upgradingToSettled
+            ? 'squads_payment_run_proposal_settled'
+            : 'squads_payment_run_proposal_executed',
+          actorType: 'user',
+          actorId: args.actorUserId,
+          beforeState: previousOrderState,
+          afterState: targetOrderState,
+          linkedTransferRequestId: transferRequest?.transferRequestId ?? null,
+          linkedExecutionRecordId: executionRecordId,
+          linkedSignature: args.signature,
+          payloadJson: {
+            paymentRunId: args.paymentRunId,
+            decimalProposalId: args.decimalProposalId,
+            transactionIndex: args.transactionIndex,
+            provider: SQUADS_SOURCE,
+            rpcSettlementVerification: verificationJson,
           },
         },
       });
-      executionRecordId = executionRecord.executionRecordId;
-      await createTransferRequestEvent(tx, {
-        transferRequestId: transferRequest.transferRequestId,
-        organizationId: args.organizationId,
-        eventType: 'squads_payment_run_proposal_executed',
-        actorType: 'user',
-        actorId: args.actorUserId,
-        eventSource: 'user',
-        beforeState: beforeStatus,
-        afterState: 'submitted_onchain',
-        linkedSignature: args.signature,
-        payloadJson: {
-          paymentRunId: args.paymentRunId,
-          paymentOrderId: order.paymentOrderId,
-          decimalProposalId: args.decimalProposalId,
-          executionRecordId,
-          transactionIndex: args.transactionIndex,
-          provider: SQUADS_SOURCE,
-        },
-      });
     }
-
-    await tx.paymentOrder.update({
-      where: { paymentOrderId: order.paymentOrderId },
-      data: { state: 'executed' },
-    });
-    await tx.paymentOrderEvent.create({
-      data: {
-        paymentOrderId: order.paymentOrderId,
-        organizationId: args.organizationId,
-        eventType: 'squads_payment_run_proposal_executed',
-        actorType: 'user',
-        actorId: args.actorUserId,
-        beforeState: order.state,
-        afterState: 'executed',
-        linkedTransferRequestId: transferRequest?.transferRequestId ?? null,
-        linkedExecutionRecordId: executionRecordId,
-        linkedSignature: args.signature,
-        payloadJson: {
-          paymentRunId: args.paymentRunId,
-          decimalProposalId: args.decimalProposalId,
-          transactionIndex: args.transactionIndex,
-          provider: SQUADS_SOURCE,
-        },
-      },
-    });
   }
 }
 
@@ -3170,6 +3439,14 @@ function mergeSquadsMetadata(value: unknown, nextSquads: Prisma.InputJsonObject)
       ...previousSquads,
       ...nextSquads,
     },
+  } satisfies Prisma.InputJsonObject;
+}
+
+function mergeJsonObject(value: unknown, next: Prisma.InputJsonObject): Prisma.InputJsonObject {
+  const base = isRecordLike(value) ? ({ ...value } as Prisma.InputJsonObject) : {};
+  return {
+    ...base,
+    ...next,
   } satisfies Prisma.InputJsonObject;
 }
 

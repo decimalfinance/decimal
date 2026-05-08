@@ -202,8 +202,6 @@ BEGIN
     'transfer_requests',
     'transfer_request_events',
     'transfer_request_notes',
-    'exception_notes',
-    'exception_states',
     'destinations',
     'collection_sources',
     'approval_policies',
@@ -314,40 +312,6 @@ CREATE TABLE IF NOT EXISTS transfer_request_notes
   body TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-CREATE TABLE IF NOT EXISTS exception_notes
-(
-  exception_note_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  organization_id UUID NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
-  exception_id UUID NOT NULL,
-  author_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
-  body TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS exception_states
-(
-  exception_state_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  organization_id UUID NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
-  exception_id UUID NOT NULL,
-  status TEXT NOT NULL,
-  updated_by_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
-  assigned_to_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
-  resolution_code TEXT,
-  severity TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (organization_id, exception_id)
-);
-
-ALTER TABLE exception_states
-  ADD COLUMN IF NOT EXISTS assigned_to_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL;
-
-ALTER TABLE exception_states
-  ADD COLUMN IF NOT EXISTS resolution_code TEXT;
-
-ALTER TABLE exception_states
-  ADD COLUMN IF NOT EXISTS severity TEXT;
 
 CREATE TABLE IF NOT EXISTS counterparties
 (
@@ -703,7 +667,7 @@ ALTER TABLE transfer_request_events
 
 ALTER TABLE transfer_request_events
   ADD CONSTRAINT chk_transfer_request_events_actor_type CHECK (
-    actor_type IN ('user', 'system', 'worker')
+    actor_type IN ('user', 'system')
   );
 
 ALTER TABLE transfer_request_events
@@ -711,7 +675,7 @@ ALTER TABLE transfer_request_events
 
 ALTER TABLE transfer_request_events
   ADD CONSTRAINT chk_transfer_request_events_event_source CHECK (
-    event_source IN ('user', 'system', 'worker')
+    event_source IN ('user', 'system')
   );
 
 ALTER TABLE approval_decisions
@@ -827,7 +791,7 @@ ALTER TABLE collection_request_events
 
 ALTER TABLE collection_request_events
   ADD CONSTRAINT chk_collection_request_events_actor_type CHECK (
-    actor_type IN ('user', 'system', 'worker')
+    actor_type IN ('user', 'system')
   );
 
 ALTER TABLE collection_sources
@@ -843,7 +807,7 @@ ALTER TABLE payment_order_events
 
 ALTER TABLE payment_order_events
   ADD CONSTRAINT chk_payment_order_events_actor_type CHECK (
-    actor_type IN ('user', 'system', 'worker', 'api_key')
+    actor_type IN ('user', 'system', 'api_key')
   );
 
 ALTER TABLE transfer_request_events
@@ -851,7 +815,7 @@ ALTER TABLE transfer_request_events
 
 ALTER TABLE transfer_request_events
   ADD CONSTRAINT chk_transfer_request_events_actor_type CHECK (
-    actor_type IN ('user', 'system', 'worker', 'api_key')
+    actor_type IN ('user', 'system', 'api_key')
   );
 
 ALTER TABLE transfer_request_events
@@ -859,7 +823,7 @@ ALTER TABLE transfer_request_events
 
 ALTER TABLE transfer_request_events
   ADD CONSTRAINT chk_transfer_request_events_event_source CHECK (
-    event_source IN ('user', 'system', 'worker', 'api_key')
+    event_source IN ('user', 'system', 'api_key')
   );
 
 ALTER TABLE approval_decisions
@@ -870,16 +834,10 @@ ALTER TABLE approval_decisions
     actor_type IN ('user', 'system', 'api_key')
   );
 
-ALTER TABLE exception_states
-  DROP CONSTRAINT IF EXISTS chk_exception_states_status;
-
-ALTER TABLE exception_states
-  ADD CONSTRAINT chk_exception_states_status CHECK (
-    status IN ('open', 'reviewed', 'expected', 'dismissed', 'reopened')
-  );
-
 DROP TABLE IF EXISTS workspace_objects CASCADE;
 DROP TABLE IF EXISTS workspace_labels CASCADE;
+DROP TABLE IF EXISTS exception_notes CASCADE;
+DROP TABLE IF EXISTS exception_states CASCADE;
 DROP TABLE IF EXISTS global_entity_addresses CASCADE;
 DROP TABLE IF EXISTS global_entities CASCADE;
 DROP TABLE IF EXISTS address_labels CASCADE;
@@ -1011,14 +969,6 @@ CREATE INDEX IF NOT EXISTS idx_transfer_request_notes_request_created_at
   ON transfer_request_notes(transfer_request_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_transfer_request_notes_org_created_at
   ON transfer_request_notes(organization_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_exception_notes_exception_created_at
-  ON exception_notes(exception_id, created_at ASC);
-CREATE INDEX IF NOT EXISTS idx_exception_notes_org_created_at
-  ON exception_notes(organization_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_exception_states_org_exception
-  ON exception_states(organization_id, exception_id);
-CREATE INDEX IF NOT EXISTS idx_exception_states_org_status_updated_at
-  ON exception_states(organization_id, status, updated_at DESC);
 DROP TRIGGER IF EXISTS trg_organizations_updated_at ON organizations;
 CREATE TRIGGER trg_organizations_updated_at
 BEFORE UPDATE ON organizations
@@ -1117,9 +1067,4 @@ FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS trg_collection_requests_updated_at ON collection_requests;
 CREATE TRIGGER trg_collection_requests_updated_at
 BEFORE UPDATE ON collection_requests
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-
-DROP TRIGGER IF EXISTS trg_exception_states_updated_at ON exception_states;
-CREATE TRIGGER trg_exception_states_updated_at
-BEFORE UPDATE ON exception_states
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();

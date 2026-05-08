@@ -11,16 +11,11 @@ Rules:
 Files:
 
 - `api.config.json`
-  - API host/port, public URL, CORS, ClickHouse location, rate-limit settings
-- `worker.config.json`
-  - Yellowstone endpoint, ClickHouse location, control-plane API URL
+  - API host/port, public URL, CORS, rate-limit settings
 - `frontend.public.json`
   - frontend API base URL and browser RPC URL
 
 Secrets that must **not** go here:
 
 - `DATABASE_URL`
-- `CONTROL_PLANE_SERVICE_TOKEN`
-- `YELLOWSTONE_TOKEN`
 - private backend `SOLANA_RPC_URL`
-- `CLICKHOUSE_PASSWORD`

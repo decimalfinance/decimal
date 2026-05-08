@@ -10,11 +10,8 @@ import { config } from './config.js';
 import { approvalsRouter } from './routes/approvals.js';
 import { destinationsRouter } from './routes/destinations.js';
 import { authRouter } from './routes/auth.js';
-import { eventsRouter } from './routes/events.js';
 import { healthRouter } from './routes/health.js';
 import { idempotencyMiddleware } from './idempotency.js';
-import { internalRouter } from './routes/internal.js';
-import { notifyMatchingIndexChanged, shouldInvalidateMatchingIndex } from './matching-index-events.js';
 import { openApiRouter } from './routes/openapi.js';
 import { organizationsRouter } from './routes/organizations.js';
 import { organizationInvitesRouter, publicOrganizationInvitesRouter } from './routes/organization-invites.js';
@@ -75,25 +72,11 @@ export function createApp() {
   app.use(publicRateLimitMiddleware());
   app.use(express.json());
 
-  app.use((req, res, next) => {
-    const shouldInvalidate = shouldInvalidateMatchingIndex(req.method, req.path);
-    if (shouldInvalidate) {
-      res.on('finish', () => {
-        if (res.statusCode >= 200 && res.statusCode < 400) {
-          notifyMatchingIndexChanged(`${req.method} ${req.path}`);
-        }
-      });
-    }
-
-    next();
-  });
-
   app.use(healthRouter);
   app.use(capabilitiesRouter);
   app.use(openApiRouter);
   app.use(authRouter);
   app.use(publicOrganizationInvitesRouter);
-  app.use(internalRouter);
   app.use(requireAuth());
   app.use(idempotencyMiddleware());
   app.use(userWalletsRouter);
@@ -110,7 +93,6 @@ export function createApp() {
   app.use(paymentOrdersRouter);
   app.use(proposalsRouter);
   app.use(collectionsRouter);
-  app.use(eventsRouter);
 
   app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     if (error instanceof ZodError) {

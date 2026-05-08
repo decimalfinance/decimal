@@ -16,7 +16,6 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
     },
     auth: {
       user: 'Authorization: Bearer <sessionToken>',
-      internalWorker: 'x-service-token: <CONTROL_PLANE_SERVICE_TOKEN>',
     },
     apiSurface: {
       style: 'resource-oriented-json',
@@ -35,31 +34,31 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
     workflows: [
       {
         id: 'single_payment',
-        summary: 'Create one payment request, promote or create a payment order, submit it, prepare execution, attach signature, reconcile, then export proof.',
+        summary: 'Create one payment request, promote or create a payment order, create a Squads proposal, execute it, verify settlement by RPC, then export proof.',
         steps: [
           'POST /organizations/:organizationId/payment-requests',
           'POST /organizations/:organizationId/payment-requests/:paymentRequestId/promote',
-          'POST /organizations/:organizationId/payment-orders/:paymentOrderId/submit',
-          'POST /organizations/:organizationId/payment-orders/:paymentOrderId/prepare-execution',
-          'POST /organizations/:organizationId/payment-orders/:paymentOrderId/attach-signature',
-          'GET /organizations/:organizationId/payment-orders/:paymentOrderId/proof?format=markdown',
+          'POST /organizations/:organizationId/treasury-wallets/:treasuryWalletId/squads/vault-proposals/payment-intent',
+          'POST /organizations/:organizationId/proposals/:decimalProposalId/confirm-submission',
+          'POST /organizations/:organizationId/proposals/:decimalProposalId/confirm-execution',
+          'GET /organizations/:organizationId/payment-orders/:paymentOrderId/proof',
         ],
       },
       {
         id: 'csv_to_payment_run',
-        summary: 'Preview CSV rows, import a payment run, prepare one batch USDC transaction, attach signature, reconcile, then export proof.',
+        summary: 'Preview CSV rows, import a payment run, create one Squads proposal for the batch, execute it, verify settlement by RPC, then export proof.',
         steps: [
           'POST /organizations/:organizationId/payment-runs/import-csv/preview',
           'POST /organizations/:organizationId/payment-runs/import-csv',
-          'POST /organizations/:organizationId/payment-runs/:paymentRunId/prepare-execution',
-          'POST /organizations/:organizationId/payment-runs/:paymentRunId/attach-signature',
-          'POST /organizations/:organizationId/payment-runs/:paymentRunId/close',
-          'GET /organizations/:organizationId/payment-runs/:paymentRunId/proof?format=markdown',
+          'POST /organizations/:organizationId/treasury-wallets/:treasuryWalletId/squads/vault-proposals/payment-run-intent',
+          'POST /organizations/:organizationId/proposals/:decimalProposalId/confirm-submission',
+          'POST /organizations/:organizationId/proposals/:decimalProposalId/confirm-execution',
+          'GET /organizations/:organizationId/payment-runs/:paymentRunId/proof',
         ],
       },
       {
         id: 'collections',
-        summary: 'Create expected inbound collections or import a receivables CSV, then let the existing onchain reconciliation layer prove what was collected.',
+        summary: 'Create expected inbound collections or import a receivables CSV. Collections are currently intent records; automatic inbound chain watching is intentionally detached from the lean MVP.',
         steps: [
           'POST /organizations/:organizationId/collections',
           'POST /organizations/:organizationId/collection-runs/import-csv/preview',
@@ -68,17 +67,6 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
           'GET /organizations/:organizationId/collection-runs/:collectionRunId',
           'GET /organizations/:organizationId/collections/:collectionRequestId/proof',
           'GET /organizations/:organizationId/collection-runs/:collectionRunId/proof',
-        ],
-      },
-      {
-        id: 'exception_ops',
-        summary: 'List reconciliation exceptions, inspect context, update metadata, add notes, and resolve or reopen.',
-        steps: [
-          'GET /organizations/:organizationId/exceptions',
-          'GET /organizations/:organizationId/exceptions/:exceptionId',
-          'PATCH /organizations/:organizationId/exceptions/:exceptionId',
-          'POST /organizations/:organizationId/exceptions/:exceptionId/notes',
-          'POST /organizations/:organizationId/exceptions/:exceptionId/actions',
         ],
       },
     ],
@@ -168,11 +156,6 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
       {
         group: 'verification_and_proof',
         routes: [
-          'GET /organizations/:organizationId/reconciliation',
-          'GET /organizations/:organizationId/reconciliation-queue/:transferRequestId',
-          'GET /organizations/:organizationId/reconciliation-queue/:transferRequestId/explain',
-          'POST /organizations/:organizationId/reconciliation-queue/:transferRequestId/refresh',
-          'GET /organizations/:organizationId/transfers',
           'GET /organizations/:organizationId/payment-orders/:paymentOrderId/proof',
           'GET /organizations/:organizationId/payment-runs/:paymentRunId/proof',
           'GET /organizations/:organizationId/collections',
@@ -185,21 +168,12 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
           'GET /organizations/:organizationId/ops-health',
         ],
       },
-      {
-        group: 'worker_internal',
-        routes: [
-          'GET /internal/organizations',
-          'GET /internal/organizations/:organizationId/matching-context',
-          'GET /internal/matching-index',
-          'GET /internal/matching-index/events',
-        ],
-      },
     ],
     safetyNotes: [
       'The API never accepts or stores private keys.',
-      'Prepared execution packets require an external signer or wallet adapter to add a recent blockhash, sign, and submit.',
-      'Submitted signatures are validated for Solana base58 signature shape before being stored as execution evidence.',
-      'Internal worker routes require CONTROL_PLANE_SERVICE_TOKEN in production.',
+      'Prepared Squads transactions are signed by user-controlled personal wallets through the wallet/Privy flow.',
+      'Submitted signatures are verified by Solana RPC before being stored as proposal evidence.',
+      'Payment settlement is verified from RPC transaction token-account deltas.',
     ],
   });
 });

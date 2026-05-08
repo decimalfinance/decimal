@@ -28,8 +28,6 @@ model Organization {
   executionRecords ExecutionRecord[]
   transferRequestEvents TransferRequestEvent[]
   transferRequestNotes TransferRequestNote[]
-  exceptionNotes ExceptionNote[]
-  exceptionStates ExceptionState[]
   paymentRuns PaymentRun[]
   paymentOrders PaymentOrder[]
   paymentOrderEvents PaymentOrderEvent[]
@@ -60,9 +58,6 @@ model User {
   walletChallenges           WalletChallenge[]
   transferRequestsRequested  TransferRequest[]        @relation("TransferRequestRequestedByUser")
   transferRequestNotes       TransferRequestNote[]
-  exceptionNotes             ExceptionNote[]
-  exceptionStatesUpdated     ExceptionState[]
-  exceptionStatesAssigned    ExceptionState[]         @relation("ExceptionStateAssignee")
   approvalDecisions          ApprovalDecision[]
   executionRecords           ExecutionRecord[]        @relation("ExecutionRecordExecutorUser")
   paymentOrdersCreated       PaymentOrder[]           @relation("PaymentOrderCreatedByUser")
@@ -196,7 +191,6 @@ model IdempotencyRecord {
 }
 
 // TreasuryWallet — wallets the organization owns. The source side of every payment.
-// Only these are monitored by the Yellowstone worker.
 // Counterparty addresses (who we pay) live on the Destination row directly and
 // are NOT tracked here.
 model TreasuryWallet {
@@ -708,39 +702,4 @@ model TransferRequestNote {
   @@index([transferRequestId, createdAt(sort: Asc)])
   @@index([organizationId, createdAt(sort: Desc)])
   @@map("transfer_request_notes")
-}
-
-model ExceptionNote {
-  exceptionNoteId String    @id @default(dbgenerated("gen_random_uuid()")) @map("exception_note_id") @db.Uuid
-  organizationId     String    @map("organization_id") @db.Uuid
-  exceptionId     String    @map("exception_id") @db.Uuid
-  authorUserId    String?   @map("author_user_id") @db.Uuid
-  body            String
-  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  organization           Organization @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
-  authorUser      User?     @relation(fields: [authorUserId], references: [userId], onDelete: SetNull)
-
-  @@index([exceptionId, createdAt(sort: Asc)])
-  @@index([organizationId, createdAt(sort: Desc)])
-  @@map("exception_notes")
-}
-
-model ExceptionState {
-  exceptionStateId String    @id @default(dbgenerated("gen_random_uuid()")) @map("exception_state_id") @db.Uuid
-  organizationId      String    @map("organization_id") @db.Uuid
-  exceptionId      String    @map("exception_id") @db.Uuid
-  status           String
-  updatedByUserId  String?   @map("updated_by_user_id") @db.Uuid
-  assignedToUserId String?   @map("assigned_to_user_id") @db.Uuid
-  resolutionCode   String?   @map("resolution_code")
-  severity         String?   @map("severity")
-  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization           Organization @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
-  updatedByUser    User?     @relation(fields: [updatedByUserId], references: [userId], onDelete: SetNull)
-  assignedToUser   User?     @relation("ExceptionStateAssignee", fields: [assignedToUserId], references: [userId], onDelete: SetNull)
-
-  @@unique([organizationId, exceptionId])
-  @@index([organizationId, status, updatedAt(sort: Desc)])
-  @@map("exception_states")
 }

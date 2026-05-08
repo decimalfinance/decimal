@@ -1,6 +1,6 @@
 import { getCollectionRequestDetail, getCollectionRunDetail } from './collections.js';
 import { buildCanonicalDigest } from './proof-packet.js';
-import { getReconciliationExplanation } from './reconciliation.js';
+import { getReconciliationExplanation } from './settlement-read-model.js';
 
 type CollectionRequestDetail = Awaited<ReturnType<typeof getCollectionRequestDetail>>;
 type CollectionProofDetail = 'summary' | 'compact' | 'full';
@@ -212,10 +212,7 @@ function deriveSourceReview(detail: CollectionRequestDetail) {
     ?? detail.payerWalletAddress
     ?? null;
   const expectedTrustState = detail.collectionSource?.trustState ?? (expectedSourceWallet ? 'unreviewed' : null);
-  const observedSourceWallet =
-    detail.reconciliationDetail?.linkedObservedPayment?.sourceWallet
-    ?? detail.reconciliationDetail?.linkedObservedTransfers.find((transfer) => transfer.sourceWallet)?.sourceWallet
-    ?? null;
+  const observedSourceWallet = null;
 
   if (!expectedSourceWallet) {
     return {

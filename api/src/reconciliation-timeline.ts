@@ -1,4 +1,4 @@
-import type { Prisma, TransferRequestEvent, TransferRequestNote, User } from '@prisma/client';
+import type { TransferRequestEvent, TransferRequestNote, User } from '@prisma/client';
 
 type UserRef = Pick<User, 'userId' | 'email' | 'displayName'>;
 
@@ -40,29 +40,6 @@ export function serializeTransferRequestNote(
   return {
     transferRequestNoteId: note.transferRequestNoteId,
     transferRequestId: note.transferRequestId,
-    organizationId: note.organizationId,
-    body: note.body,
-    createdAt: note.createdAt,
-    authorUser: serializeUserRef(note.authorUser),
-  };
-}
-
-export function serializeExceptionNote(
-  note: Prisma.ExceptionNoteGetPayload<{
-    include: {
-      authorUser: {
-        select: {
-          userId: true;
-          email: true;
-          displayName: true;
-        };
-      };
-    };
-  }>,
-) {
-  return {
-    exceptionNoteId: note.exceptionNoteId,
-    exceptionId: note.exceptionId,
     organizationId: note.organizationId,
     body: note.body,
     createdAt: note.createdAt,
@@ -120,7 +97,7 @@ export function buildTimeline(args: {
   executionRecords: TimelineExecutionRecord[];
   observedExecutionTransaction: TimelineObservedTransaction | null;
   match: TimelineMatch | null;
-  exceptions: Array<TimelineException & { notes?: ReturnType<typeof serializeExceptionNote>[] }>;
+  exceptions: TimelineException[];
 }) {
   const items = [
     ...args.events.map((event) => ({
@@ -192,7 +169,6 @@ export function buildTimeline(args: {
       explanation: exception.explanation,
       linkedSignature: exception.signature,
       linkedTransferIds: exception.observedTransferId ? [exception.observedTransferId] : [],
-      notes: exception.notes ?? [],
     })),
   ];
 

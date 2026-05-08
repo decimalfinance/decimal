@@ -4,8 +4,7 @@ export type OrganizationAuditEntityType =
   | 'payment_order'
   | 'transfer_request'
   | 'approval'
-  | 'execution'
-  | 'exception';
+  | 'execution';
 
 type AuditItem = {
   auditId: string;
@@ -34,7 +33,6 @@ export async function listOrganizationAuditLog(args: {
     transferRequestEvents,
     approvalDecisions,
     executionRecords,
-    exceptionNotes,
   ] = await Promise.all([
     !args.entityType || args.entityType === 'payment_order'
       ? prisma.paymentOrderEvent.findMany({
@@ -71,22 +69,6 @@ export async function listOrganizationAuditLog(args: {
           where: { organizationId: args.organizationId },
           include: {
             executorUser: {
-              select: {
-                userId: true,
-                email: true,
-                displayName: true,
-              },
-            },
-          },
-          orderBy: { createdAt: 'desc' },
-          take: limit,
-        })
-      : [],
-    !args.entityType || args.entityType === 'exception'
-      ? prisma.exceptionNote.findMany({
-          where: { organizationId: args.organizationId },
-          include: {
-            authorUser: {
               select: {
                 userId: true,
                 email: true,
@@ -178,23 +160,6 @@ export async function listOrganizationAuditLog(args: {
         metadataJson: record.metadataJson,
       },
       createdAt: record.createdAt,
-    })),
-    ...exceptionNotes.map((note) => ({
-      auditId: `exception_note:${note.exceptionNoteId}`,
-      organizationId: note.organizationId,
-      entityType: 'exception' as const,
-      entityId: note.exceptionId,
-      eventType: 'exception_note_created',
-      actorType: note.authorUserId ? 'user' : 'system',
-      actorId: note.authorUserId,
-      actorUser: note.authorUser,
-      beforeState: null,
-      afterState: null,
-      linkedSignature: null,
-      payloadJson: {
-        body: note.body,
-      },
-      createdAt: note.createdAt,
     })),
   ];
 

@@ -6,7 +6,7 @@ import {
   normalizeApprovalPolicyRule,
   serializeApprovalPolicy,
 } from '../approval-policy.js';
-import { listApprovalInbox } from '../reconciliation.js';
+import { listApprovalInbox } from '../settlement-read-model.js';
 import { prisma } from '../prisma.js';
 import { createTransferRequestEvent } from '../transfer-request-events.js';
 import { assertOrganizationAccess, assertOrganizationAdmin } from '../organization-access.js';

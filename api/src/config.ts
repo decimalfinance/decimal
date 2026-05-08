@@ -7,8 +7,6 @@ type FileConfig = {
   port?: number;
   publicApiUrl?: string | null;
   publicFrontendUrl?: string | null;
-  clickhouseUrl?: string;
-  clickhouseDatabase?: string;
   corsOrigins?: string[];
   trustProxy?: boolean;
   rateLimitEnabled?: boolean;
@@ -45,11 +43,8 @@ type DecimalConfig = {
    * endpoint is preferred. Defaults to https://api.devnet.solana.com.
    */
   solanaAirdropRpcUrl: string;
-  clickhouseUrl: string;
-  clickhouseDatabase: string;
   corsOrigins: string[];
   trustProxy: boolean;
-  controlPlaneServiceToken: string;
   rateLimitEnabled: boolean;
   publicRateLimitWindowMs: number;
   publicRateLimitMax: number;
@@ -74,7 +69,6 @@ function buildConfig(): DecimalConfig {
   const nodeEnv = process.env.NODE_ENV ?? 'development';
   const isProduction = nodeEnv === 'production';
   const fileConfig = loadApiFileConfig();
-  const controlPlaneServiceToken = (process.env.CONTROL_PLANE_SERVICE_TOKEN ?? '').trim();
   const solanaNetwork = getSolanaNetwork();
   const solanaRpcUrl = (process.env.SOLANA_RPC_URL?.trim() || defaultSolanaRpcUrl(solanaNetwork));
   const solanaDevnetRpcUrl = (process.env.SOLANA_DEVNET_RPC_URL?.trim() || 'https://api.devnet.solana.com');
@@ -91,11 +85,8 @@ function buildConfig(): DecimalConfig {
     solanaRpcUrl,
     solanaDevnetRpcUrl,
     solanaAirdropRpcUrl,
-    clickhouseUrl: fileConfig.clickhouseUrl ?? 'http://127.0.0.1:8123',
-    clickhouseDatabase: fileConfig.clickhouseDatabase ?? 'usdc_ops',
     corsOrigins: normalizeStringArray(fileConfig.corsOrigins),
     trustProxy: fileConfig.trustProxy ?? false,
-    controlPlaneServiceToken,
     rateLimitEnabled:
       fileConfig.rateLimitEnabled ?? (nodeEnv === 'test' ? false : true),
     publicRateLimitWindowMs: fileConfig.publicRateLimitWindowMs ?? 60_000,
@@ -103,7 +94,7 @@ function buildConfig(): DecimalConfig {
     googleOAuthClientId: (process.env.GOOGLE_OAUTH_CLIENT_ID ?? '').trim(),
     googleOAuthClientSecret: (process.env.GOOGLE_OAUTH_CLIENT_SECRET ?? '').trim(),
     googleOAuthRedirectUri: normalizeOptionalUrl(process.env.GOOGLE_OAUTH_REDIRECT_URI),
-    oauthStateSecret: (process.env.OAUTH_STATE_SECRET ?? controlPlaneServiceToken).trim(),
+    oauthStateSecret: (process.env.OAUTH_STATE_SECRET ?? '').trim(),
     privyAppId: (process.env.PRIVY_APP_ID ?? '').trim(),
     privyAppSecret: (process.env.PRIVY_APP_SECRET ?? '').trim(),
     privyApiBaseUrl: normalizeOptionalUrl(process.env.PRIVY_API_BASE_URL) ?? 'https://api.privy.io',
@@ -199,10 +190,6 @@ function validateConfig(nextConfig: DecimalConfig) {
 
   if (nextConfig.corsOrigins.length === 0) {
     throw new Error('config/api.config.json must define at least one CORS origin in production.');
-  }
-
-  if (!nextConfig.controlPlaneServiceToken) {
-    throw new Error('CONTROL_PLANE_SERVICE_TOKEN is required in production.');
   }
 
   if (!nextConfig.publicApiUrl) {

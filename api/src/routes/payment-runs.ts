@@ -12,7 +12,6 @@ import {
   previewPaymentRunCsv,
 } from '../payment-runs.js';
 import { buildPaymentRunProofPacket } from '../payment-run-proof.js';
-import { renderPaymentRunProofMarkdown } from '../payment-proof-markdown.js';
 import { isSolanaSignatureLike } from '../solana.js';
 import { assertOrganizationAccess, assertOrganizationAdmin } from '../organization-access.js';
 import { asyncRoute, sendCreated, sendJson, sendList, unwrapItems } from '../route-helpers.js';
@@ -29,7 +28,7 @@ const paymentRunParamsSchema = organizationParamsSchema.extend({
 
 const paymentRunProofQuerySchema = z.object({
   detail: z.enum(['summary', 'compact', 'full']).default('summary'),
-  format: z.enum(['json', 'markdown']).default('json'),
+  format: z.literal('json').default('json'),
 });
 
 const importPaymentRunCsvSchema = z.object({
@@ -142,11 +141,5 @@ paymentRunsRouter.get('/organizations/:organizationId/payment-runs/:paymentRunId
     const query = paymentRunProofQuerySchema.parse(req.query);
     await assertOrganizationAccess(organizationId, req.auth!);
     const proof = await buildPaymentRunProofPacket(organizationId, paymentRunId, { detail: query.detail });
-    if (query.format === 'markdown') {
-      res.setHeader('content-type', 'text/markdown; charset=utf-8');
-      res.setHeader('content-disposition', `attachment; filename="payment-run-${paymentRunId}-proof.md"`);
-      res.send(renderPaymentRunProofMarkdown(proof));
-      return;
-    }
     sendJson(res, proof);
 }));

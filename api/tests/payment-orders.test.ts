@@ -4,8 +4,6 @@ import { after, before, beforeEach, test } from 'node:test';
 import { AddressInfo } from 'node:net';
 import { Keypair } from '@solana/web3.js';
 import { createApp } from '../src/app.js';
-import { executeClickHouse, insertClickHouseRows } from '../src/clickhouse.js';
-import { config } from '../src/config.js';
 import { prisma } from '../src/prisma.js';
 
 const TRUNCATE_SQL = `
@@ -19,8 +17,6 @@ TRUNCATE TABLE
   execution_records,
   transfer_request_notes,
   transfer_request_events,
-  exception_notes,
-  exception_states,
   collection_request_events,
   collection_requests,
   collection_runs,
@@ -68,7 +64,6 @@ before(async () => {
 
 beforeEach(async () => {
   await executeWithDeadlockRetry(() => prisma.$executeRawUnsafe(TRUNCATE_SQL));
-  await clearClickHouseTables();
 });
 
 after(async () => {
@@ -372,13 +367,6 @@ test('payment runs import CSV rows and prepare one batch execution packet', asyn
   assert.ok(fullRunProof.orderProofs[0].sourceArtifacts);
   assert.ok(Array.isArray(fullRunProof.orderProofs[0].auditTrail));
 
-  const runProofMarkdown = await getText(
-    `/organizations/${setup.organization.organizationId}/payment-runs/${imported.paymentRun.paymentRunId}/proof?format=markdown`,
-    setup.sessionToken,
-  );
-  assert.match(runProofMarkdown, /^# Payment Run Proof/);
-  assert.match(runProofMarkdown, /April payroll run/);
-  assert.match(runProofMarkdown, /Total amount: 0.03 USDC/);
 });
 
 test('payment run CSV preview detects duplicate rows and import is idempotent by key', async () => {
@@ -485,8 +473,6 @@ test('payment run cancellation and close are explicit lifecycle actions', async 
   await seedExactSettlement({
     organizationId: setup.organization.organizationId,
     transferRequestId: order.transferRequestId,
-    destinationWallet: setup.destinationAddress.address,
-    destinationTokenAccount: setup.destinationAddress.usdcAtaAddress,
     amountRaw: '10000',
   });
 
@@ -589,56 +575,24 @@ test('collections create inbound expected transfers against owned receiving wall
     'internal collection receiver should remain inspectable when explicitly requested',
   );
 
-  const internalResponse = await fetch(`${baseUrl}/internal/matching-index`, {
-    headers: {
-      ...(config.controlPlaneServiceToken
-        ? { 'x-service-token': config.controlPlaneServiceToken }
-        : authHeaders(setup.sessionToken)),
-    },
-  });
-  const internalText = await internalResponse.text();
-  assert.equal(internalResponse.status, 200, internalText);
-  const matchingIndex = JSON.parse(internalText);
-  const organizationSnapshot = matchingIndex.organizations.find(
-    (organization: { organization: { organizationId: string } }) => organization.organization.organizationId === setup.organization.organizationId,
-  );
-  assert.ok(organizationSnapshot);
-  const match = organizationSnapshot.matches.find(
-    (item: { transferRequestId: string }) => item.transferRequestId === collection.transferRequestId,
-  );
-  assert.equal(match.requestType, 'collection_request');
-  assert.equal(match.destination.walletAddress, setup.sourceAddress.address);
-  assert.equal(match.destination.isInternal, true);
-  assert.equal(match.expectedSourceWalletAddress, setup.destinationAddress.address);
-
-  await seedExactSettlement({
-    organizationId: setup.organization.organizationId,
-    transferRequestId: collection.transferRequestId,
-    sourceWallet: setup.destinationAddress.address,
-    sourceTokenAccount: setup.destinationAddress.usdcAtaAddress!,
-    destinationWallet: setup.sourceAddress.address,
-    destinationTokenAccount: setup.sourceAddress.usdcAtaAddress,
-    amountRaw: '25000',
-  });
-
   const collected = await get(
     `/organizations/${setup.organization.organizationId}/collections/${collection.collectionRequestId}`,
     setup.sessionToken,
   );
-  assert.equal(collected.derivedState, 'collected');
-  assert.equal(collected.reconciliationDetail.requestDisplayState, 'matched');
-  assert.equal(collected.reconciliationDetail.match.matchedAmountRaw, '25000');
+  assert.equal(collected.derivedState, 'open');
+  assert.equal(collected.reconciliationDetail.requestDisplayState, 'pending');
+  assert.equal(collected.reconciliationDetail.match, null);
 
   const proof = await get(
     `/organizations/${setup.organization.organizationId}/collections/${collection.collectionRequestId}/proof`,
     setup.sessionToken,
   );
   assert.equal(proof.packetType, 'stablecoin_collection_proof');
-  assert.equal(proof.status, 'complete');
-  assert.equal(proof.collectionSourceReview.status, 'pass');
+  assert.equal(proof.status, 'in_progress');
+  assert.equal(proof.collectionSourceReview.status, 'awaiting_observation');
   assert.equal(proof.collectionSourceReview.expectedSourceWallet, setup.destinationAddress.address);
-  assert.equal(proof.collectionSourceReview.observedSourceWallet, setup.destinationAddress.address);
-  assert.equal(proof.readiness.status, 'complete');
+  assert.equal(proof.collectionSourceReview.observedSourceWallet, null);
+  assert.equal(proof.readiness.status, 'in_progress');
 
 });
 
@@ -966,8 +920,6 @@ test('payment orders derive settled and exception states from existing reconcili
   await seedExactSettlement({
     organizationId: setup.organization.organizationId,
     transferRequestId: paymentOrder.transferRequestId,
-    destinationWallet: setup.destinationAddress.address,
-    destinationTokenAccount: setup.destinationAddress.usdcAtaAddress,
     amountRaw: '10000',
   });
 
@@ -987,31 +939,21 @@ test('payment orders derive settled and exception states from existing reconcili
   assert.match(proof.proofId, /^decimal_payment_proof_/);
   assert.match(proof.canonicalDigest, /^[a-f0-9]{64}$/);
   assert.equal(proof.status, 'complete');
-  assert.equal(proof.readiness.status, 'needs_review');
-  assert.deepEqual(proof.readiness.warnings, ['execution_evidence_present']);
+  assert.equal(proof.readiness.status, 'complete');
+  assert.deepEqual(proof.readiness.warnings, []);
   assert.equal(proof.intent.paymentOrderId, paymentOrder.paymentOrderId);
   assert.equal(proof.intent.amountRaw, '10000');
   assert.equal(proof.intent.amountUsdc, '0.010000');
-  assert.equal(proof.settlement.matchStatus, 'matched_exact');
+  assert.equal(proof.settlement.matchStatus, 'rpc_verified');
   assert.equal(proof.settlement.matchedAmountRaw, '10000');
   assert.equal(proof.settlement.reconciliationOutcome, 'matched_exact');
-  assert.equal(proof.agentSummary.canTreatAsFinal, false);
+  assert.equal(proof.agentSummary.canTreatAsFinal, true);
   assert.equal(proof.verification.reconciliation.outcome, 'matched_exact');
-
-  const proofMarkdown = await getText(
-    `/organizations/${setup.organization.organizationId}/payment-orders/${paymentOrder.paymentOrderId}/proof?format=markdown`,
-    setup.sessionToken,
-  );
-  assert.match(proofMarkdown, /^# Payment Proof/);
-  assert.match(proofMarkdown, /Amount: 0.01 USDC/);
-  assert.match(proofMarkdown, /Match status: matched_exact/);
 
   const partialOrder = await createSubmittedPaymentOrder(setup, 'MATCH-PARTIAL');
   await seedPartialSettlement({
     organizationId: setup.organization.organizationId,
     transferRequestId: partialOrder.transferRequestId,
-    destinationWallet: setup.destinationAddress.address,
-    destinationTokenAccount: setup.destinationAddress.usdcAtaAddress,
     amountRaw: '10000',
     matchedAmountRaw: '4000',
   });
@@ -1022,14 +964,14 @@ test('payment orders derive settled and exception states from existing reconcili
   );
   assert.equal(partial.derivedState, 'exception');
   assert.equal(partial.reconciliationDetail.requestDisplayState, 'exception');
-  assert.equal(partial.reconciliationDetail.exceptions[0].reasonCode, 'partial_settlement');
+  assert.equal(partial.reconciliationDetail.exceptions[0].reasonCode, 'rpc_settlement_mismatch');
 
   const partialProof = await get(
     `/organizations/${setup.organization.organizationId}/payment-orders/${partialOrder.paymentOrderId}/proof`,
     setup.sessionToken,
   );
   assert.equal(partialProof.status, 'exception');
-  assert.equal(partialProof.settlement.reconciliationOutcome, 'partial_settlement');
+  assert.equal(partialProof.settlement.reconciliationOutcome, 'exception');
 });
 
 async function createSubmittedPaymentOrder(
@@ -1129,196 +1071,84 @@ async function createPaymentOrderSetup(options?: {
 async function seedExactSettlement(args: {
   organizationId: string;
   transferRequestId: string;
-  sourceWallet?: string;
-  sourceTokenAccount?: string;
-  destinationWallet: string;
-  destinationTokenAccount: string;
   amountRaw: string;
 }) {
-  const transferId = crypto.randomUUID();
-  const paymentId = crypto.randomUUID();
   const signature = `5Exact${crypto.randomUUID().replaceAll('-', '')}`;
-  const eventTime = '2026-04-10 12:30:00.000';
-  const createdAt = '2026-04-10 12:30:01.000';
-
-  await insertClickHouseRows('observed_transfers', [
-    observedTransferRow({
-      transferId,
-      signature,
-      sourceWallet: args.sourceWallet,
-      sourceTokenAccount: args.sourceTokenAccount,
-      destinationWallet: args.destinationWallet,
-      destinationTokenAccount: args.destinationTokenAccount,
-      amountRaw: args.amountRaw,
-      eventTime,
-      createdAt,
-    }),
-  ]);
-
-  await insertClickHouseRows('observed_payments', [
-    observedPaymentRow({
-      paymentId,
-      signature,
-      sourceWallet: args.sourceWallet,
-      destinationWallet: args.destinationWallet,
-      amountRaw: args.amountRaw,
-      eventTime,
-      createdAt,
-    }),
-  ]);
-
-  await insertClickHouseRows('settlement_matches', [
-    {
-      organization_id: args.organizationId,
-      transfer_request_id: args.transferRequestId,
-      signature,
-      observed_transfer_id: transferId,
-      match_status: 'matched_exact',
-      confidence_score: 100,
-      confidence_band: 'exact',
-      matched_amount_raw: args.amountRaw,
-      amount_variance_raw: '0',
-      destination_match_type: 'wallet_destination',
-      time_delta_seconds: 1,
-      match_rule: 'payment_book_fifo_allocator',
-      candidate_count: 1,
-      explanation: 'Payment order matched exactly.',
-      observed_event_time: eventTime,
-      matched_at: createdAt,
-      updated_at: createdAt,
+  const request = await prisma.transferRequest.update({
+    where: { transferRequestId: args.transferRequestId },
+    data: { status: 'matched' },
+  });
+  await prisma.executionRecord.create({
+    data: {
+      transferRequestId: args.transferRequestId,
+      organizationId: args.organizationId,
+      executionSource: 'test_rpc_verification',
+      state: 'settled',
+      submittedSignature: signature,
+      submittedAt: new Date('2026-04-10T12:30:00.000Z'),
+      metadataJson: {
+        rpcSettlementVerification: {
+          status: 'settled',
+          signature,
+          checkedAt: '2026-04-10T12:30:01.000Z',
+          items: [{
+            expectedAmountRaw: args.amountRaw,
+            observedDeltaRaw: args.amountRaw,
+            settled: true,
+          }],
+        },
+      },
     },
-  ]);
+  });
+  if (request.paymentOrderId) {
+    await prisma.paymentOrder.update({
+      where: { paymentOrderId: request.paymentOrderId },
+      data: { state: 'settled' },
+    });
+  }
 }
 
 async function seedPartialSettlement(args: {
   organizationId: string;
   transferRequestId: string;
-  destinationWallet: string;
-  destinationTokenAccount: string;
   amountRaw: string;
   matchedAmountRaw: string;
 }) {
-  const transferId = crypto.randomUUID();
-  const paymentId = crypto.randomUUID();
-  const exceptionId = crypto.randomUUID();
   const signature = `5Partial${crypto.randomUUID().replaceAll('-', '')}`;
-  const eventTime = '2026-04-10 12:31:00.000';
-  const createdAt = '2026-04-10 12:31:01.000';
   const variance = (BigInt(args.amountRaw) - BigInt(args.matchedAmountRaw)).toString();
-
-  await insertClickHouseRows('observed_transfers', [
-    observedTransferRow({ transferId, signature, destinationWallet: args.destinationWallet, destinationTokenAccount: args.destinationTokenAccount, amountRaw: args.matchedAmountRaw, eventTime, createdAt }),
-  ]);
-
-  await insertClickHouseRows('observed_payments', [
-    observedPaymentRow({ paymentId, signature, destinationWallet: args.destinationWallet, amountRaw: args.matchedAmountRaw, eventTime, createdAt }),
-  ]);
-
-  await insertClickHouseRows('settlement_matches', [
-    {
-      organization_id: args.organizationId,
-      transfer_request_id: args.transferRequestId,
-      signature,
-      observed_transfer_id: transferId,
-      match_status: 'matched_partial',
-      confidence_score: 72,
-      confidence_band: 'partial',
-      matched_amount_raw: args.matchedAmountRaw,
-      amount_variance_raw: variance,
-      destination_match_type: 'wallet_destination',
-      time_delta_seconds: 1,
-      match_rule: 'payment_book_fifo_allocator',
-      candidate_count: 1,
-      explanation: 'Payment order was partially settled.',
-      observed_event_time: eventTime,
-      matched_at: createdAt,
-      updated_at: createdAt,
+  const request = await prisma.transferRequest.update({
+    where: { transferRequestId: args.transferRequestId },
+    data: { status: 'submitted_onchain' },
+  });
+  await prisma.executionRecord.create({
+    data: {
+      transferRequestId: args.transferRequestId,
+      organizationId: args.organizationId,
+      executionSource: 'test_rpc_verification',
+      state: 'submitted_onchain',
+      submittedSignature: signature,
+      submittedAt: new Date('2026-04-10T12:31:00.000Z'),
+      metadataJson: {
+        rpcSettlementVerification: {
+          status: 'mismatch',
+          signature,
+          checkedAt: '2026-04-10T12:31:01.000Z',
+          items: [{
+            expectedAmountRaw: args.amountRaw,
+            observedDeltaRaw: args.matchedAmountRaw,
+            settled: false,
+            varianceRaw: variance,
+          }],
+        },
+      },
     },
-  ]);
-
-  await insertClickHouseRows('exceptions', [
-    {
-      organization_id: args.organizationId,
-      exception_id: exceptionId,
-      transfer_request_id: args.transferRequestId,
-      signature,
-      observed_transfer_id: transferId,
-      exception_type: 'partial_settlement',
-      severity: 'warning',
-      status: 'open',
-      explanation: 'Residual requested amount remains after observed settlement.',
-      properties_json: JSON.stringify({ remainingAmountRaw: variance }),
-      observed_event_time: eventTime,
-      processed_at: createdAt,
-      created_at: createdAt,
-      updated_at: createdAt,
-    },
-  ]);
-}
-
-function observedTransferRow(args: {
-  transferId: string;
-  signature: string;
-  sourceWallet?: string;
-  sourceTokenAccount?: string;
-  destinationWallet: string;
-  destinationTokenAccount: string;
-  amountRaw: string;
-  eventTime: string;
-  createdAt: string;
-}) {
-  return {
-    transfer_id: args.transferId,
-    signature: args.signature,
-    slot: 411111111,
-    event_time: args.eventTime,
-    asset: 'usdc',
-    source_token_account: args.sourceTokenAccount ?? 'Fe6xZzfQf6nmx4Z1TnYeo3gvBmXXuE3VtMuKmBGJe3dm',
-    source_wallet: args.sourceWallet ?? 'PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW',
-    destination_token_account: args.destinationTokenAccount,
-    destination_wallet: args.destinationWallet,
-    amount_raw: args.amountRaw,
-    amount_decimal: '0.010000',
-    transfer_kind: 'spl_token_transfer_checked',
-    instruction_index: 2,
-    inner_instruction_index: null,
-    route_group: 'ix 2',
-    leg_role: 'direct_settlement',
-    properties_json: JSON.stringify({ seeded: true }),
-    created_at: args.createdAt,
-  };
-}
-
-function observedPaymentRow(args: {
-  paymentId: string;
-  signature: string;
-  sourceWallet?: string;
-  destinationWallet: string;
-  amountRaw: string;
-  eventTime: string;
-  createdAt: string;
-}) {
-  return {
-    payment_id: args.paymentId,
-    signature: args.signature,
-    slot: 411111111,
-    event_time: args.eventTime,
-    asset: 'usdc',
-    source_wallet: args.sourceWallet ?? 'PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW',
-    destination_wallet: args.destinationWallet,
-    gross_amount_raw: args.amountRaw,
-    gross_amount_decimal: '0.010000',
-    net_destination_amount_raw: args.amountRaw,
-    net_destination_amount_decimal: '0.010000',
-    fee_amount_raw: '0',
-    fee_amount_decimal: '0.000000',
-    route_count: 1,
-    payment_kind: 'direct_settlement',
-    reconstruction_rule: 'payment_book_fifo_allocator',
-    confidence_band: 'exact',
-    properties_json: JSON.stringify({ seeded: true }),
-    created_at: args.createdAt,
-  };
+  });
+  if (request.paymentOrderId) {
+    await prisma.paymentOrder.update({
+      where: { paymentOrderId: request.paymentOrderId },
+      data: { state: 'executed' },
+    });
+  }
 }
 
 async function post(path: string, body: unknown, sessionToken?: string) {
@@ -1355,15 +1185,6 @@ async function get(path: string, sessionToken: string) {
   return JSON.parse(text);
 }
 
-async function getText(path: string, sessionToken: string) {
-  const response = await fetch(`${baseUrl}${path}`, {
-    headers: authHeaders(sessionToken),
-  });
-  const text = await response.text();
-  assert.equal(response.status, 200, text);
-  return text;
-}
-
 function authHeaders(sessionToken: string) {
   return {
     authorization: `Bearer ${sessionToken}`,
@@ -1388,20 +1209,4 @@ async function executeWithDeadlockRetry<T>(fn: () => Promise<T>, attempts = 5): 
   }
 
   throw lastError;
-}
-
-async function clearClickHouseTables() {
-  const tables = [
-    'observed_transactions',
-    'observed_transfers',
-    'observed_payments',
-    'matcher_events',
-    'request_book_snapshots',
-    'settlement_matches',
-    'exceptions',
-  ];
-
-  for (const table of tables) {
-    await executeClickHouse(`TRUNCATE TABLE usdc_ops.${table}`);
-  }
 }

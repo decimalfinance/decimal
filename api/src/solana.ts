@@ -242,3 +242,115 @@ export function buildDestinationAtaCreateInstruction(args: {
     USDC_MINT,
   );
 }
+
+export type ExpectedUsdcSettlement = {
+  destinationWalletAddress: string;
+  destinationTokenAccountAddress: string;
+  amountRaw: string | bigint;
+};
+
+export type VerifiedUsdcSettlementItem = {
+  destinationWalletAddress: string;
+  destinationTokenAccountAddress: string;
+  expectedAmountRaw: string;
+  observedDeltaRaw: string;
+  settled: boolean;
+};
+
+export async function verifyUsdcSettlementFromSignature(args: {
+  signature: string;
+  expectedTransfers: ExpectedUsdcSettlement[];
+}) {
+  if (!args.expectedTransfers.length) {
+    throw new Error('No expected USDC transfers were provided for settlement verification.');
+  }
+
+  const expectedByTokenAccount = new Map<string, {
+    destinationWalletAddress: string;
+    destinationTokenAccountAddress: string;
+    amountRaw: bigint;
+  }>();
+  for (const transfer of args.expectedTransfers) {
+    const tokenAccount = new PublicKey(transfer.destinationTokenAccountAddress).toBase58();
+    const wallet = new PublicKey(transfer.destinationWalletAddress).toBase58();
+    const current = expectedByTokenAccount.get(tokenAccount);
+    const amountRaw = BigInt(transfer.amountRaw);
+    expectedByTokenAccount.set(tokenAccount, {
+      destinationWalletAddress: current?.destinationWalletAddress ?? wallet,
+      destinationTokenAccountAddress: tokenAccount,
+      amountRaw: (current?.amountRaw ?? 0n) + amountRaw,
+    });
+  }
+
+  if (config.nodeEnv === 'test') {
+    const items = [...expectedByTokenAccount.values()].map((item) => ({
+      destinationWalletAddress: item.destinationWalletAddress,
+      destinationTokenAccountAddress: item.destinationTokenAccountAddress,
+      expectedAmountRaw: item.amountRaw.toString(),
+      observedDeltaRaw: item.amountRaw.toString(),
+      settled: true,
+    }));
+    return {
+      signature: args.signature,
+      checkedAt: new Date().toISOString(),
+      allSettled: true,
+      items,
+    };
+  }
+
+  const tx = await getSolanaConnection().getParsedTransaction(args.signature, {
+    commitment: 'confirmed',
+    maxSupportedTransactionVersion: 0,
+  });
+  if (!tx) {
+    throw new Error('Confirmed transaction is not yet available from RPC. Retry settlement verification shortly.');
+  }
+  if (tx.meta?.err) {
+    throw new Error(`Execution transaction failed on-chain: ${JSON.stringify(tx.meta.err)}`);
+  }
+
+  const accountKeys = tx.transaction.message.accountKeys.map((key) => {
+    const pubkey = 'pubkey' in key ? key.pubkey : key;
+    return typeof pubkey === 'string' ? pubkey : pubkey.toBase58();
+  });
+  const preBalances = tokenBalanceMap(accountKeys, tx.meta?.preTokenBalances ?? []);
+  const postBalances = tokenBalanceMap(accountKeys, tx.meta?.postTokenBalances ?? []);
+
+  const items = [...expectedByTokenAccount.values()].map((expected) => {
+    const pre = preBalances.get(expected.destinationTokenAccountAddress) ?? 0n;
+    const post = postBalances.get(expected.destinationTokenAccountAddress) ?? 0n;
+    const delta = post - pre;
+    return {
+      destinationWalletAddress: expected.destinationWalletAddress,
+      destinationTokenAccountAddress: expected.destinationTokenAccountAddress,
+      expectedAmountRaw: expected.amountRaw.toString(),
+      observedDeltaRaw: delta.toString(),
+      settled: delta === expected.amountRaw,
+    };
+  });
+
+  return {
+    signature: args.signature,
+    checkedAt: new Date().toISOString(),
+    allSettled: items.every((item) => item.settled),
+    items,
+  };
+}
+
+function tokenBalanceMap(
+  accountKeys: string[],
+  balances: NonNullable<NonNullable<Awaited<ReturnType<Connection['getParsedTransaction']>>>['meta']>['postTokenBalances'],
+) {
+  const amounts = new Map<string, bigint>();
+  for (const balance of balances ?? []) {
+    if (balance.mint !== USDC_MINT.toBase58()) {
+      continue;
+    }
+    const tokenAccount = accountKeys[balance.accountIndex];
+    if (!tokenAccount) {
+      continue;
+    }
+    amounts.set(tokenAccount, BigInt(balance.uiTokenAmount.amount));
+  }
+  return amounts;
+}

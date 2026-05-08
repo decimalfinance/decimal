@@ -10,7 +10,7 @@ import type {
   User,
 } from '@prisma/client';
 import { createHash } from 'node:crypto';
-import { getReconciliationDetail } from './reconciliation.js';
+import { getReconciliationDetail } from './settlement-read-model.js';
 import { createTransferRequestEvent } from './transfer-request-events.js';
 import { prisma } from './prisma.js';
 import { deriveUsdcAtaForWallet, SOLANA_CHAIN, USDC_ASSET } from './solana.js';

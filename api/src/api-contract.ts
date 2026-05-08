@@ -6,7 +6,7 @@ export type ApiEndpoint = {
   path: string;
   tags: string[];
   summary: string;
-  auth: 'public' | 'session' | 'service_token';
+  auth: 'public' | 'session';
   scope?: string;
   requestBody?: Record<string, unknown>;
   query?: Record<string, unknown>;
@@ -184,7 +184,7 @@ export const API_ENDPOINTS = [
   endpoint('attach_payment_run_signature', 'POST', '/organizations/{organizationId}/payment-runs/{paymentRunId}/attach-signature', ['payment runs'], 'Attach submitted batch signature', 'session', { scope: 'execution:write' }),
   endpoint('payment_run_proof', 'GET', '/organizations/{organizationId}/payment-runs/{paymentRunId}/proof', ['proof'], 'Export payment run proof', 'session', {
     scope: 'proofs:read',
-    query: { detail: 'summary | compact | full', format: 'json | markdown' },
+    query: { detail: 'summary | compact | full' },
   }),
 
   endpoint('list_collections', 'GET', '/organizations/{organizationId}/collections', ['collections'], 'List expected inbound collections', 'session', { scope: 'organization:read' }),
@@ -214,35 +214,19 @@ export const API_ENDPOINTS = [
   endpoint('create_payment_order', 'POST', '/organizations/{organizationId}/payment-orders', ['payment orders'], 'Create payment order', 'session', { scope: 'payments:write' }),
   endpoint('get_payment_order', 'GET', '/organizations/{organizationId}/payment-orders/{paymentOrderId}', ['payment orders'], 'Get payment order detail', 'session', { scope: 'organization:read' }),
   endpoint('update_payment_order', 'PATCH', '/organizations/{organizationId}/payment-orders/{paymentOrderId}', ['payment orders'], 'Update payment order', 'session', { scope: 'payments:write' }),
-  endpoint('submit_payment_order', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/submit', ['payment orders'], 'Submit payment order into approval/reconciliation workflow', 'session', { scope: 'payments:write' }),
+  endpoint('submit_payment_order', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/submit', ['payment orders'], 'Submit payment order into the approval workflow', 'session', { scope: 'payments:write' }),
   endpoint('cancel_payment_order', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/cancel', ['payment orders'], 'Cancel payment order', 'session', { scope: 'payments:write' }),
   endpoint('prepare_payment_order_execution', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/prepare-execution', ['payment orders'], 'Prepare signer-ready Solana transfer packet', 'session', { scope: 'execution:write' }),
   endpoint('create_payment_order_execution', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/create-execution', ['payment orders'], 'Record external execution handoff', 'session', { scope: 'execution:write' }),
   endpoint('attach_payment_order_signature', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/attach-signature', ['payment orders'], 'Attach submitted execution signature', 'session', { scope: 'execution:write' }),
   endpoint('payment_order_proof', 'GET', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/proof', ['proof'], 'Export payment order proof', 'session', {
     scope: 'proofs:read',
-    query: { format: 'json | markdown' },
+    query: { format: 'json' },
   }),
-  endpoint('list_transfers', 'GET', '/organizations/{organizationId}/transfers', ['reconciliation'], 'List observed transfers for watched wallets', 'session', { scope: 'reconciliation:read' }),
-  endpoint('list_reconciliation', 'GET', '/organizations/{organizationId}/reconciliation', ['reconciliation'], 'List reconciliation queue', 'session', { scope: 'reconciliation:read' }),
-  endpoint('list_reconciliation_queue', 'GET', '/organizations/{organizationId}/reconciliation-queue', ['reconciliation'], 'List reconciliation queue', 'session', { scope: 'reconciliation:read' }),
-  endpoint('get_reconciliation_detail', 'GET', '/organizations/{organizationId}/reconciliation-queue/{transferRequestId}', ['reconciliation'], 'Get reconciliation detail', 'session', { scope: 'reconciliation:read' }),
-  endpoint('explain_reconciliation', 'GET', '/organizations/{organizationId}/reconciliation-queue/{transferRequestId}/explain', ['reconciliation'], 'Explain reconciliation decision', 'session', { scope: 'reconciliation:read' }),
-  endpoint('refresh_reconciliation', 'POST', '/organizations/{organizationId}/reconciliation-queue/{transferRequestId}/refresh', ['reconciliation'], 'Preview reconciliation refresh', 'session', { scope: 'reconciliation:read' }),
-  endpoint('list_exceptions', 'GET', '/organizations/{organizationId}/exceptions', ['exceptions'], 'List reconciliation exceptions', 'session', { scope: 'reconciliation:read' }),
-  endpoint('update_exception', 'PATCH', '/organizations/{organizationId}/exceptions/{exceptionId}', ['exceptions'], 'Update exception metadata', 'session', { scope: 'exceptions:write' }),
-  endpoint('get_exception', 'GET', '/organizations/{organizationId}/exceptions/{exceptionId}', ['exceptions'], 'Get exception detail', 'session', { scope: 'reconciliation:read' }),
-  endpoint('exception_action', 'POST', '/organizations/{organizationId}/exceptions/{exceptionId}/actions', ['exceptions'], 'Apply exception action', 'session', { scope: 'exceptions:write' }),
-  endpoint('exception_note', 'POST', '/organizations/{organizationId}/exceptions/{exceptionId}/notes', ['exceptions'], 'Add exception note', 'session', { scope: 'exceptions:write' }),
 
   endpoint('members', 'GET', '/organizations/{organizationId}/members', ['ops'], 'List organization organization members', 'session', { scope: 'organization:read' }),
   endpoint('audit_log', 'GET', '/organizations/{organizationId}/audit-log', ['ops'], 'Organization audit log', 'session', { scope: 'proofs:read' }),
-  endpoint('ops_health', 'GET', '/organizations/{organizationId}/ops-health', ['ops'], 'Organization ops health metrics', 'session', { scope: 'reconciliation:read' }),
-
-  endpoint('internal_organizations', 'GET', '/internal/organizations', ['internal'], 'Worker organization snapshot', 'service_token'),
-  endpoint('internal_matching_context', 'GET', '/internal/organizations/{organizationId}/matching-context', ['internal'], 'Worker matching context', 'service_token'),
-  endpoint('internal_matching_index', 'GET', '/internal/matching-index', ['internal'], 'Worker matching index snapshot', 'service_token'),
-  endpoint('internal_matching_index_events', 'GET', '/internal/matching-index/events', ['internal'], 'Worker matching index SSE', 'service_token'),
+  endpoint('ops_health', 'GET', '/organizations/{organizationId}/ops-health', ['ops'], 'Organization Postgres/RPC product health metrics', 'session', { scope: 'organization:read' }),
 ] as const satisfies readonly ApiEndpoint[];
 
 export type ApiEndpointId = (typeof API_ENDPOINTS)[number]['id'];

@@ -2,9 +2,8 @@
 #
 # Truncate every application table in:
 #   - the Postgres database from DATABASE_URL in api/.env (local docker by default)
-#   - the local ClickHouse usdc_ops database
 #
-# DESTRUCTIVE. Wipes users, workspaces, payments, collections, proofs, everything.
+# DESTRUCTIVE. Wipes users, organizations, wallets, payments, collections, proofs, everything.
 
 set -euo pipefail
 
@@ -25,8 +24,6 @@ if [[ -z "${DATABASE_URL:-}" ]]; then
   exit 1
 fi
 
-CLICKHOUSE_URL=${CLICKHOUSE_URL:-http://127.0.0.1:8123}
-
 # Parse DATABASE_URL into psql-friendly PG* env vars.
 eval "$(node -e '
 const u = new URL(process.env.DATABASE_URL);
@@ -44,7 +41,6 @@ if (ssl) console.log(`export PGSSLMODE=${q(ssl)}`);
 if [[ "${SKIP_CONFIRM:-0}" != "1" ]]; then
   echo "About to TRUNCATE every application table in:"
   echo "  Postgres : $PGHOST:$PGPORT/$PGDATABASE (as $PGUSER)"
-  echo "  ClickHouse: $CLICKHOUSE_URL (database usdc_ops)"
   printf "Type 'yes' to proceed: "
   read -r confirm
   if [[ "$confirm" != "yes" ]]; then
@@ -62,21 +58,5 @@ if [[ -n "$TABLES" && "$TABLES" != " " ]]; then
 else
   echo "No public tables found."
 fi
-
-echo "=== Resetting ClickHouse at $CLICKHOUSE_URL ==="
-tables=(
-  exceptions
-  matcher_events
-  observed_payments
-  observed_transactions
-  observed_transfers
-  raw_observations
-  request_book_snapshots
-  settlement_matches
-)
-for t in "${tables[@]}"; do
-  curl -sS --fail --data "TRUNCATE TABLE IF EXISTS usdc_ops.$t" "$CLICKHOUSE_URL/" >/dev/null
-done
-echo "Truncated ${#tables[@]} ClickHouse tables."
 
 echo "Done."

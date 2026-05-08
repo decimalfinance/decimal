@@ -15,7 +15,7 @@ export function buildOpenApiSpec() {
     info: {
       title: 'Decimal API',
       version: '0.1.0',
-      description: 'API-first stablecoin payment control, reconciliation, execution handoff, and proof surface.',
+      description: 'API-first stablecoin payment control, Squads execution, RPC verification, and proof surface.',
     },
     servers: [
       config.publicApiUrl
@@ -39,12 +39,6 @@ export function buildOpenApiSpec() {
           type: 'http',
           scheme: 'bearer',
           description: 'User session bearer token returned by /auth/login.',
-        },
-        serviceToken: {
-          type: 'apiKey',
-          in: 'header',
-          name: 'x-service-token',
-          description: 'Internal worker service token.',
         },
       },
       schemas: {
@@ -78,7 +72,6 @@ function buildOperation(endpoint: ApiEndpoint) {
     summary: endpoint.summary,
     description: [
       endpoint.scope ? `Required capability: \`${endpoint.scope}\`.` : null,
-      endpoint.auth === 'service_token' ? 'Internal worker endpoint protected by service token.' : null,
       endpoint.auth === 'public' ? 'Public endpoint.' : null,
     ].filter(Boolean).join('\n\n') || undefined,
     security: securityFor(endpoint),
@@ -114,9 +107,6 @@ function buildOperation(endpoint: ApiEndpoint) {
 function securityFor(endpoint: ApiEndpoint) {
   if (endpoint.auth === 'public') {
     return [];
-  }
-  if (endpoint.auth === 'service_token') {
-    return [{ serviceToken: [] }];
   }
   return [{ bearerAuth: [] }];
 }
@@ -168,9 +158,6 @@ function response(description: string) {
         schema: { $ref: '#/components/schemas/GenericObject' },
       },
       'text/csv': {
-        schema: { type: 'string' },
-      },
-      'text/markdown': {
         schema: { type: 'string' },
       },
     },

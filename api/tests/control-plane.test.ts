@@ -5,7 +5,6 @@ import * as multisig from '@sqds/multisig';
 import { Keypair, PublicKey, TransactionInstruction, TransactionMessage, VersionedTransaction } from '@solana/web3.js';
 import { createApp } from '../src/app.js';
 import { config } from '../src/config.js';
-import { executeClickHouse } from '../src/clickhouse.js';
 import { prisma } from '../src/prisma.js';
 import { setPrivyWalletRuntimeForTests } from '../src/privy-wallets.js';
 import { resetRateLimitBuckets } from '../src/rate-limit.js';
@@ -25,8 +24,6 @@ TRUNCATE TABLE
   execution_records,
   transfer_request_notes,
   transfer_request_events,
-  exception_notes,
-  exception_states,
   collection_request_events,
   collection_requests,
   collection_runs,
@@ -79,7 +76,6 @@ beforeEach(async () => {
   setSquadsTreasuryRuntimeForTests(null);
   setPrivyWalletRuntimeForTests(null);
   await executeWithDeadlockRetry(() => prisma.$executeRawUnsafe(TRUNCATE_SQL));
-  await clearClickHouseTables();
 });
 
 after(async () => {
@@ -1131,10 +1127,12 @@ test('Squads vault payment proposals turn payment orders into executable treasur
     `/organizations/${organization.organizationId}/payment-orders/${paymentOrder.paymentOrderId}`,
     register.sessionToken,
   );
-  assert.equal(executedPaymentOrder.derivedState, 'executed');
-  assert.equal(executedPaymentOrder.productLifecycle.productState, 'executed');
+  assert.equal(executedPaymentOrder.derivedState, 'settled');
+  assert.equal(executedPaymentOrder.productLifecycle.productState, 'settled');
   assert.equal(executedPaymentOrder.squadsLifecycle.executedSignature, executed.executedSignature);
   assert.equal(executedPaymentOrder.reconciliationDetail.latestExecution.submittedSignature, executed.executedSignature);
+  assert.equal(executedPaymentOrder.reconciliationDetail.latestExecution.state, 'settled');
+  assert.equal(executedPaymentOrder.reconciliationDetail.requestDisplayState, 'matched');
 
   const runDestinationOne = Keypair.generate().publicKey.toBase58();
   const runDestinationTwo = Keypair.generate().publicKey.toBase58();
@@ -1232,11 +1230,13 @@ test('Squads vault payment proposals turn payment orders into executable treasur
     `/organizations/${organization.organizationId}/payment-runs/${importedRun.paymentRun.paymentRunId}`,
     register.sessionToken,
   );
-  assert.equal(executedRun.derivedState, 'executed');
-  assert.equal(executedRun.paymentOrders.every((order: { derivedState: string }) => order.derivedState === 'executed'), true);
+  assert.equal(executedRun.derivedState, 'settled');
+  assert.equal(executedRun.paymentOrders.every((order: { derivedState: string }) => order.derivedState === 'settled'), true);
   assert.equal(
-    executedRun.paymentOrders.every((order: { reconciliationDetail: { latestExecution: { submittedSignature: string } | null } }) =>
-      order.reconciliationDetail.latestExecution?.submittedSignature === runExecuted.executedSignature,
+    executedRun.paymentOrders.every((order: { reconciliationDetail: { latestExecution: { submittedSignature: string; state: string } | null; requestDisplayState: string } }) =>
+      order.reconciliationDetail.latestExecution?.submittedSignature === runExecuted.executedSignature
+      && order.reconciliationDetail.latestExecution.state === 'settled'
+      && order.reconciliationDetail.requestDisplayState === 'matched',
     ),
     true,
   );
@@ -1321,36 +1321,6 @@ test('Privy personal wallet signing endpoint signs only transactions requiring t
   }
 });
 
-test('service token protection only applies to internal routes', async () => {
-  const originalServiceToken = config.controlPlaneServiceToken;
-  const originalNodeEnv = config.nodeEnv;
-
-  try {
-    config.controlPlaneServiceToken = 'service-token-check';
-    config.nodeEnv = 'production';
-
-    const register = await post('/auth/register', {
-      email: 'service-token-check@example.com',
-      password: 'DemoPass123!',
-      displayName: 'Service Token Check',
-    });
-    assert.equal(register.status, 'authenticated');
-    await verifyRegisteredEmail(register);
-
-    const organizations = await get('/organizations', register.sessionToken);
-    assert.deepEqual(organizations.items, []);
-
-    const internalResponse = await fetch(`${baseUrl}/internal/matching-index`, {
-      headers: authHeaders(register.sessionToken),
-    });
-    assert.equal(internalResponse.status, 401);
-    assert.equal((await internalResponse.json()).message, 'Internal service token required');
-  } finally {
-    config.controlPlaneServiceToken = originalServiceToken;
-    config.nodeEnv = originalNodeEnv;
-  }
-});
-
 async function get(path: string, token?: string) {
   const response = await fetch(`${baseUrl}${path}`, {
     headers: token ? authHeaders(token) : undefined,
@@ -1408,20 +1378,6 @@ function buildSquadsCreateLikeTransactionBase64(requiredSigner: string) {
     instructions: [instruction],
   }).compileToV0Message();
   return Buffer.from(new VersionedTransaction(message).serialize()).toString('base64');
-}
-
-async function clearClickHouseTables() {
-  for (const table of [
-    'exceptions',
-    'settlement_matches',
-    'request_book_snapshots',
-    'matcher_events',
-    'observed_payments',
-    'observed_transfers',
-    'observed_transactions',
-  ]) {
-    await executeClickHouse(`TRUNCATE TABLE IF EXISTS usdc_ops.${table}`);
-  }
 }
 
 async function executeWithDeadlockRetry<T>(operation: () => Promise<T>, attempts = 3): Promise<T> {
