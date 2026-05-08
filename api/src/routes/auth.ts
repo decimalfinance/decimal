@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { ApiError, badRequest, conflict } from '../infra/api-errors.js';
 import { hashPassword, verifyPassword } from '../auth/passwords.js';
 import { createSession, requireAuth } from '../auth/sessions.js';
+import { isEmailDeliveryConfigured, sendVerificationEmail } from '../auth/email.js';
 import { config } from '../config.js';
 import { prisma } from '../infra/prisma.js';
 
@@ -90,7 +91,7 @@ authRouter.post('/auth/register', async (req, res, next) => {
     });
 
     let user;
-    let devEmailVerificationCode: string | null = null;
+    let plaintextCode: string | null = null;
 
     if (existing) {
       if (existing.passwordHash) {
@@ -105,14 +106,13 @@ authRouter.post('/auth/register', async (req, res, next) => {
         },
       });
     } else {
-      const verificationCode = generateVerificationCode();
-      devEmailVerificationCode = verificationCode;
+      plaintextCode = generateVerificationCode();
       user = await prisma.user.create({
         data: {
           email,
           passwordHash,
           displayName,
-          ...emailVerificationFieldsForCode(verificationCode),
+          ...emailVerificationFieldsForCode(plaintextCode),
         },
       });
     }
@@ -120,12 +120,19 @@ authRouter.post('/auth/register', async (req, res, next) => {
     const session = await createSession(user.userId);
     const organizations = await listUserOrganizations(user.userId);
 
+    const delivery = await deliverVerificationCode({
+      toEmail: user.email,
+      displayName: user.displayName,
+      code: plaintextCode,
+    });
+
     res.status(201).json({
       status: 'authenticated',
       sessionToken: session.sessionToken,
       user: serializeUser(user),
       organizations,
-      devEmailVerificationCode,
+      emailDelivered: delivery.emailDelivered,
+      devEmailVerificationCode: delivery.devEmailVerificationCode,
     });
   } catch (error) {
     next(error);
@@ -240,6 +247,7 @@ authRouter.post('/auth/login', async (req, res, next) => {
       sessionToken: session.sessionToken,
       user: serializeUser(user),
       organizations,
+      emailDelivered: false,
       devEmailVerificationCode: null,
     });
   } catch (error) {
@@ -292,7 +300,7 @@ authRouter.post('/auth/resend-verification', requireAuth(), async (req, res, nex
       where: { userId: req.auth!.userId },
     });
     if (user.emailVerifiedAt) {
-      res.json({ user: serializeUser(user), devEmailVerificationCode: null });
+      res.json({ user: serializeUser(user), emailDelivered: false, devEmailVerificationCode: null });
       return;
     }
 
@@ -302,9 +310,16 @@ authRouter.post('/auth/resend-verification', requireAuth(), async (req, res, nex
       data: emailVerificationFieldsForCode(code),
     });
 
+    const delivery = await deliverVerificationCode({
+      toEmail: updated.email,
+      displayName: updated.displayName,
+      code,
+    });
+
     res.json({
       user: serializeUser(updated),
-      devEmailVerificationCode: code,
+      emailDelivered: delivery.emailDelivered,
+      devEmailVerificationCode: delivery.devEmailVerificationCode,
     });
   } catch (error) {
     next(error);
@@ -378,6 +393,32 @@ function defaultDisplayName(email: string) {
 
 function invalidCredentialsError() {
   return new ApiError(401, 'invalid_credentials', 'Invalid email or password.');
+}
+
+async function deliverVerificationCode({
+  toEmail,
+  displayName,
+  code,
+}: {
+  toEmail: string;
+  displayName: string | null;
+  code: string | null;
+}): Promise<{ emailDelivered: boolean; devEmailVerificationCode: string | null }> {
+  if (!code) {
+    return { emailDelivered: false, devEmailVerificationCode: null };
+  }
+
+  if (!isEmailDeliveryConfigured()) {
+    return { emailDelivered: false, devEmailVerificationCode: code };
+  }
+
+  try {
+    await sendVerificationEmail({ toEmail, displayName, code });
+    return { emailDelivered: true, devEmailVerificationCode: null };
+  } catch (error) {
+    console.error('[auth] verification email send failed', { toEmail, error });
+    return { emailDelivered: false, devEmailVerificationCode: null };
+  }
 }
 
 function emailVerificationFieldsForCode(code: string) {

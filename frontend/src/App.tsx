@@ -548,7 +548,8 @@ function VerifyEmailPage({ session }: { session: AuthenticatedSession }) {
   const location = useLocation();
   const returnTo = readSafeReturnTo(location.search);
   const [code, setCode] = useState('');
-  const [demoCode, setDemoCode] = useState<string | null>(null);
+  const [devCode, setDevCode] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const verifyMutation = useMutation({
     mutationFn: () => api.verifyEmail({ code: code.trim() }),
@@ -565,7 +566,14 @@ function VerifyEmailPage({ session }: { session: AuthenticatedSession }) {
   const resendMutation = useMutation({
     mutationFn: () => api.resendVerification(),
     onSuccess: (result) => {
-      setDemoCode(result.devEmailVerificationCode ?? null);
+      setDevCode(result.devEmailVerificationCode ?? null);
+      if (result.emailDelivered) {
+        setStatusMessage(`Code sent to ${session.user.email}. Check your inbox.`);
+      } else if (result.devEmailVerificationCode) {
+        setStatusMessage(null);
+      } else {
+        setStatusMessage('Could not send the email. Try again in a moment.');
+      }
       setError(null);
     },
     onError: (err) => setError(err instanceof Error ? err.message : 'Unable to send verification code.'),
@@ -601,9 +609,10 @@ function VerifyEmailPage({ session }: { session: AuthenticatedSession }) {
           </button>
         </form>
         <button className="button button-secondary" disabled={resendMutation.isPending} onClick={() => resendMutation.mutate()} type="button">
-          {resendMutation.isPending ? 'Sending...' : 'Send demo code'}
+          {resendMutation.isPending ? 'Sending...' : 'Resend code'}
         </button>
-        {demoCode ? <p className="muted-copy">Demo code: <strong>{demoCode}</strong></p> : null}
+        {statusMessage ? <p className="muted-copy">{statusMessage}</p> : null}
+        {devCode ? <p className="muted-copy">Dev code (no email provider configured): <strong>{devCode}</strong></p> : null}
         {error ? <p className="form-error">{error}</p> : null}
       </section>
     </main>

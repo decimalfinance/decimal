@@ -190,13 +190,14 @@ export const api = {
     });
   },
   resendVerification() {
-    return request<{ user: AuthenticatedSession['user']; devEmailVerificationCode: string | null }>(
-      '/auth/resend-verification',
-      {
-        method: 'POST',
-        body: JSON.stringify({}),
-      },
-    );
+    return request<{
+      user: AuthenticatedSession['user'];
+      emailDelivered: boolean;
+      devEmailVerificationCode: string | null;
+    }>('/auth/resend-verification', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
   },
   logout() {
     return request<void>('/auth/logout', {

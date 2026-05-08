@@ -114,6 +114,7 @@ export type LoginResponse = {
   sessionToken: string;
   user: User;
   organizations: OrganizationMembership[];
+  emailDelivered?: boolean;
   devEmailVerificationCode?: string | null;
 };
 

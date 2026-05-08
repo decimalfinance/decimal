@@ -55,6 +55,9 @@ type DecimalConfig = {
   privyAppId: string;
   privyAppSecret: string;
   privyApiBaseUrl: string;
+  resendApiKey: string;
+  resendFromEmail: string;
+  resendFromName: string;
   squadsProgramId: string;
   squadsDefaultVaultIndex: number;
   squadsDefaultTimelockSeconds: number;
@@ -98,6 +101,9 @@ function buildConfig(): DecimalConfig {
     privyAppId: (process.env.PRIVY_APP_ID ?? '').trim(),
     privyAppSecret: (process.env.PRIVY_APP_SECRET ?? '').trim(),
     privyApiBaseUrl: normalizeOptionalUrl(process.env.PRIVY_API_BASE_URL) ?? 'https://api.privy.io',
+    resendApiKey: (process.env.RESEND_API_KEY ?? '').trim(),
+    resendFromEmail: (process.env.RESEND_FROM_EMAIL ?? '').trim(),
+    resendFromName: (process.env.RESEND_FROM_NAME ?? 'Decimal').trim(),
     squadsProgramId:
       (process.env.SQUADS_V4_PROGRAM_ID ?? fileConfig.squadsProgramId ?? 'SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf').trim(),
     squadsDefaultVaultIndex: Number(process.env.SQUADS_DEFAULT_VAULT_INDEX ?? fileConfig.squadsDefaultVaultIndex ?? 0),
@@ -166,6 +172,11 @@ function validateConfig(nextConfig: DecimalConfig) {
   const hasPartialPrivyConfig = Boolean(nextConfig.privyAppId) !== Boolean(nextConfig.privyAppSecret);
   if (hasPartialPrivyConfig) {
     throw new Error('PRIVY_APP_ID and PRIVY_APP_SECRET must be configured together.');
+  }
+
+  const hasPartialResendConfig = Boolean(nextConfig.resendApiKey) !== Boolean(nextConfig.resendFromEmail);
+  if (hasPartialResendConfig) {
+    throw new Error('RESEND_API_KEY and RESEND_FROM_EMAIL must be configured together.');
   }
 
   if (nextConfig.privyApiBaseUrl.includes('/jwks') || nextConfig.privyApiBaseUrl.includes('/apps/')) {
