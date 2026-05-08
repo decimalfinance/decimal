@@ -33,7 +33,7 @@ import {
 } from '../lib/settlement';
 import { useSquadsProposalActions } from '../lib/squads-actions';
 import { buildSquadsPaymentLifecycle } from '../lib/lifecycle';
-import { DetailEntry, DetailPageSkeleton, DetailPageState } from '../ui-primitives';
+import { DetailEntry, DetailPageSkeleton, DetailPageState, RdPageHeader, RdPrimaryCard } from '../ui-primitives';
 import { LifecycleRail, type LifecycleStage, type StageState } from '../ui/LifecycleRail';
 import { SettlementBanner } from '../ui/SettlementBanner';
 import { useToast } from '../ui/Toast';
@@ -456,11 +456,11 @@ export function PaymentDetailPage() {
           <span>Payments</span>
         </Link>
 
-        <header className="rd-header">
-          <div>
-            <p className="rd-eyebrow">Payment</p>
-            <h1 className="rd-title">{recipientName}</h1>
-            <p className="rd-meta">
+        <RdPageHeader
+          eyebrow="Payment"
+          title={recipientName}
+          meta={
+            <>
               <span className="rd-mono">{amountLabel}</span>
               <span className="rd-meta-sep">·</span>
               <a
@@ -479,15 +479,15 @@ export function PaymentDetailPage() {
               ) : null}
               <span className="rd-meta-sep">·</span>
               <span>Created {formatRelativeTime(order.createdAt)}</span>
-            </p>
-          </div>
-          <div className="rd-header-side">
+            </>
+          }
+          side={
             <span className="rd-pill" data-tone={toneToPill(statusTone)}>
               <span className="rd-pill-dot" aria-hidden />
               {displayPaymentStatus(order.derivedState)}
             </span>
-          </div>
-        </header>
+          }
+        />
 
         <LifecycleRail stages={lifecycle} ariaLabel="Payment lifecycle" />
 
@@ -767,12 +767,12 @@ function PrimaryAction(props: {
 
   if (variant === 'needs_submit') {
     return (
-      <div className="rd-primary" data-emphasis="action">
-        <p className="rd-primary-eyebrow">Next step · Submit</p>
-        <h2 className="rd-primary-title">Ready to submit</h2>
-        <p className="rd-primary-body">
-          Submit this payment to advance it to execution. The Squads multisig flow handles the on-chain approval.
-        </p>
+      <RdPrimaryCard
+        emphasis="action"
+        eyebrow="Next step · Submit"
+        title="Ready to submit"
+        body="Submit this payment to advance it to execution. The Squads multisig flow handles the on-chain approval."
+      >
         <div className="rd-actions">
           <button
             type="button"
@@ -784,7 +784,7 @@ function PrimaryAction(props: {
             {submitting ? 'Submitting…' : 'Submit for approval'}
           </button>
         </div>
-      </div>
+      </RdPrimaryCard>
     );
   }
 
@@ -795,12 +795,12 @@ function PrimaryAction(props: {
     // fail backend's 409 guard — neither is what the user wants.
     if (pendingProposalConfirmation) {
       return (
-        <div className="rd-primary" data-emphasis="action">
-          <p className="rd-primary-eyebrow">Awaiting · On-chain confirmation</p>
-          <h2 className="rd-primary-title">Transaction submitted — confirmation pending</h2>
-          <p className="rd-primary-body">
-            Your signature went through and the proposal transaction was submitted. Solana RPC hasn't reported it confirmed yet. Retry confirmation in a few seconds; do not recreate the proposal — it may already be on chain.
-          </p>
+        <RdPrimaryCard
+          emphasis="action"
+          eyebrow="Awaiting · On-chain confirmation"
+          title="Transaction submitted — confirmation pending"
+          body="Your signature went through and the proposal transaction was submitted. Solana RPC hasn't reported it confirmed yet. Retry confirmation in a few seconds; do not recreate the proposal — it may already be on chain."
+        >
           <p style={{ fontSize: 12, color: 'var(--ax-text-muted)', margin: '0 0 12px', fontFamily: 'monospace' }}>
             sig {shortenAddress(pendingProposalConfirmation.signature, 6, 6)}
           </p>
@@ -816,20 +816,22 @@ function PrimaryAction(props: {
               {!retryingProposalConfirmation ? <span className="rd-btn-arrow" aria-hidden>→</span> : null}
             </button>
           </div>
-        </div>
+        </RdPrimaryCard>
       );
     }
 
     const hasPersonalWallets = ownPersonalWallets.length > 0;
     return (
-      <div className="rd-primary" data-emphasis="action">
-        <p className="rd-primary-eyebrow">Next step · Squads proposal</p>
-        <h2 className="rd-primary-title">
-          <span className="rd-mono">{amountLabel}</span> ready for multisig
-        </h2>
-        <p className="rd-primary-body">
-          The source treasury is a Squads multisig. Create a payment proposal that other signers can approve before the vault releases funds.
-        </p>
+      <RdPrimaryCard
+        emphasis="action"
+        eyebrow="Next step · Squads proposal"
+        title={
+          <>
+            <span className="rd-mono">{amountLabel}</span> ready for multisig
+          </>
+        }
+        body="The source treasury is a Squads multisig. Create a payment proposal that other signers can approve before the vault releases funds."
+      >
         <div className="rd-primary-grid">
           <label className="rd-field">
             <span className="rd-field-label">Initiating wallet</span>
@@ -867,7 +869,7 @@ function PrimaryAction(props: {
             {!proposing ? <span className="rd-btn-arrow" aria-hidden>→</span> : null}
           </button>
         </div>
-      </div>
+      </RdPrimaryCard>
     );
   }
 
@@ -897,17 +899,18 @@ function PrimaryAction(props: {
       : `/organizations/${order.organizationId}/proposals`;
 
     return (
-      <div className="rd-primary" data-emphasis={isApproved && proposalExecuteWalletId ? 'action' : undefined}>
-        <p className="rd-primary-eyebrow">{eyebrow}</p>
-        <h2 className="rd-primary-title">{title}</h2>
-        <p className="rd-primary-body">
-          {isExecuted
+      <RdPrimaryCard
+        emphasis={isApproved && proposalExecuteWalletId ? 'action' : undefined}
+        eyebrow={eyebrow}
+        title={title}
+        body={
+          isExecuted
             ? 'The on-chain execution landed. Decimal marks this payment settled after RPC verifies the expected USDC destination delta.'
             : isApproved
               ? 'A Squads member with execute permission needs to submit the execute transaction.'
-              : 'Each voter signs independently — no shared blockhash, no rush.'}
-        </p>
-
+              : 'Each voter signs independently — no shared blockhash, no rush.'
+        }
+      >
         {voting ? (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '12px 0' }}>
             {voting.approvals.map((d) => (
@@ -984,19 +987,23 @@ function PrimaryAction(props: {
             <span className="rd-btn-arrow" aria-hidden>→</span>
           </Link>
         </div>
-      </div>
+      </RdPrimaryCard>
     );
   }
 
   if (variant === 'ready_to_sign') {
     const hasWallets = wallets.length > 0;
     return (
-      <div className="rd-primary" data-emphasis="action">
-        <p className="rd-primary-eyebrow">Next step · Sign and execute</p>
-        <h2 className="rd-primary-title">
-          <span className="rd-mono">{amountLabel}</span> ready to sign
-        </h2>
-        <p className="rd-primary-body">One signature submits this payment on-chain.</p>
+      <RdPrimaryCard
+        emphasis="action"
+        eyebrow="Next step · Sign and execute"
+        title={
+          <>
+            <span className="rd-mono">{amountLabel}</span> ready to sign
+          </>
+        }
+        body="One signature submits this payment on-chain."
+      >
         <div className="rd-primary-grid">
           <label className="rd-field">
             <span className="rd-field-label">Source wallet</span>
@@ -1047,19 +1054,17 @@ function PrimaryAction(props: {
             {!signing ? <span className="rd-btn-arrow" aria-hidden>→</span> : null}
           </button>
         </div>
-      </div>
+      </RdPrimaryCard>
     );
   }
 
   if (variant === 'in_flight') {
     return (
-      <div className="rd-primary">
-        <p className="rd-primary-eyebrow">Executed · Verify settlement</p>
-        <h2 className="rd-primary-title">Signed, watching on-chain match</h2>
-        <p className="rd-primary-body">
-          The worker is reconstructing USDC transfers and matching this signature to the expected
-          settlement.
-        </p>
+      <RdPrimaryCard
+        eyebrow="Executed · Verify settlement"
+        title="Signed, watching on-chain match"
+        body="The worker is reconstructing USDC transfers and matching this signature to the expected settlement."
+      >
         {submittedSignature ? (
           <a
             href={orbTransactionUrl(submittedSignature)}
@@ -1070,18 +1075,17 @@ function PrimaryAction(props: {
             <span>{shortenAddress(submittedSignature, 8, 8)}</span>
           </a>
         ) : null}
-      </div>
+      </RdPrimaryCard>
     );
   }
 
   if (variant === 'settled') {
     return (
-      <div className="rd-primary">
-        <p className="rd-primary-eyebrow">Complete · Settled</p>
-        <h2 className="rd-primary-title">Matched on-chain · proof ready</h2>
-        <p className="rd-primary-body">
-          This payment was requested, approved, signed, observed, and matched against intent.
-        </p>
+      <RdPrimaryCard
+        eyebrow="Complete · Settled"
+        title="Matched on-chain · proof ready"
+        body="This payment was requested, approved, signed, observed, and matched against intent."
+      >
         <div className="rd-actions">
           <button
             type="button"
@@ -1093,38 +1097,36 @@ function PrimaryAction(props: {
             {exporting ? 'Exporting…' : 'Download proof (JSON)'}
           </button>
         </div>
-      </div>
+      </RdPrimaryCard>
     );
   }
 
   if (variant === 'exception') {
     return (
-      <div className="rd-primary" data-emphasis="blocked">
-        <p className="rd-primary-eyebrow">Attention needed</p>
-        <h2 className="rd-primary-title">Settlement didn't match expected</h2>
-        <p className="rd-primary-body">
-          The observed transfer did not fully match this payment. Check the timeline for the exception
-          detail.
-        </p>
-      </div>
+      <RdPrimaryCard
+        emphasis="blocked"
+        eyebrow="Attention needed"
+        title="Settlement didn't match expected"
+        body="The observed transfer did not fully match this payment. Check the timeline for the exception detail."
+      />
     );
   }
 
   if (variant === 'cancelled') {
     return (
-      <div className="rd-primary">
-        <p className="rd-primary-eyebrow">Cancelled</p>
-        <h2 className="rd-primary-title">This payment was cancelled</h2>
-        <p className="rd-primary-body">It will not be executed. Kept here for audit.</p>
-      </div>
+      <RdPrimaryCard
+        eyebrow="Cancelled"
+        title="This payment was cancelled"
+        body="It will not be executed. Kept here for audit."
+      />
     );
   }
 
   return (
-    <div className="rd-primary">
-      <p className="rd-primary-eyebrow">No action</p>
-      <h2 className="rd-primary-title">Nothing to do right now</h2>
-      <p className="rd-primary-body">Check back as state changes.</p>
-    </div>
+    <RdPrimaryCard
+      eyebrow="No action"
+      title="Nothing to do right now"
+      body="Check back as state changes."
+    />
   );
 }

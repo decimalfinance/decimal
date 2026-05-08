@@ -209,6 +209,61 @@ export function DataTableShell({
   return <div className={className ? `data-table ${className}` : 'data-table'}>{children}</div>;
 }
 
+// Primary-action card frame on rd-styled detail pages. Each lifecycle
+// variant ('needs_submit', 'ready_to_propose', 'ready_to_sign',
+// 'proposal_in_progress', 'in_flight', 'settled', 'exception',
+// 'cancelled') uses the same eyebrow/title/body shell with variant-
+// specific copy and (optionally) action buttons or richer content as
+// children.
+export function RdPrimaryCard({
+  emphasis,
+  eyebrow,
+  title,
+  body,
+  children,
+}: {
+  emphasis?: 'action' | 'blocked' | 'waiting' | 'warning' | 'success' | 'muted';
+  eyebrow: string;
+  title: ReactNode;
+  body?: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="rd-primary" data-emphasis={emphasis}>
+      <p className="rd-primary-eyebrow">{eyebrow}</p>
+      <h2 className="rd-primary-title">{title}</h2>
+      {body ? <p className="rd-primary-body">{body}</p> : null}
+      {children}
+    </div>
+  );
+}
+
+// Header chrome for rd-styled detail pages (PaymentDetail, PaymentRunDetail,
+// CollectionDetail): eyebrow + title + per-page meta line on the left, an
+// optional side slot (status pill, actions, etc) on the right.
+export function RdPageHeader({
+  eyebrow,
+  title,
+  meta,
+  side,
+}: {
+  eyebrow: string;
+  title: ReactNode;
+  meta?: ReactNode;
+  side?: ReactNode;
+}) {
+  return (
+    <header className="rd-header">
+      <div>
+        <p className="rd-eyebrow">{eyebrow}</p>
+        <h1 className="rd-title">{title}</h1>
+        {meta ? <p className="rd-meta">{meta}</p> : null}
+      </div>
+      {side ? <div className="rd-header-side">{side}</div> : null}
+    </header>
+  );
+}
+
 // Vertical "label · value" pair used in detail-page metric grids. The label
 // is small uppercase muted; the value is normal-size body. Used by treasury,
 // proposal, and payment detail pages.

@@ -21,7 +21,7 @@ import {
   toneToPill,
 } from '../status-labels';
 import { useToast } from '../ui/Toast';
-import { DetailEntry } from '../ui-primitives';
+import { DetailEntry, RdPageHeader, RdPrimaryCard } from '../ui-primitives';
 import { LifecycleRail, type LifecycleStage, type StageState } from '../ui/LifecycleRail';
 
 function buildLifecycle(collection: CollectionRequest): LifecycleStage[] {
@@ -206,11 +206,11 @@ export function CollectionDetailPage() {
           <span>Collections</span>
         </Link>
 
-        <header className="rd-header">
-          <div>
-            <p className="rd-eyebrow">Collection</p>
-            <h1 className="rd-title">{payerName}</h1>
-            <p className="rd-meta">
+        <RdPageHeader
+          eyebrow="Collection"
+          title={payerName}
+          meta={
+            <>
               <span className="rd-mono">{amountLabel}</span>
               {collection.externalReference ? (
                 <>
@@ -220,29 +220,31 @@ export function CollectionDetailPage() {
               ) : null}
               <span className="rd-meta-sep">·</span>
               <span>Created {formatRelativeTime(collection.createdAt)}</span>
-            </p>
-          </div>
-          <div className="rd-header-side">
-            <span className="rd-pill" data-tone={toneToPill(statusTone)}>
-              <span className="rd-pill-dot" aria-hidden />
-              {displayCollectionStatus(collection.derivedState)}
-            </span>
-            <button
-              type="button"
-              className="rd-btn rd-btn-secondary"
-              onClick={() => proofDownloadMutation.mutate()}
-              disabled={!isSettled || proofDownloadMutation.isPending}
-              aria-busy={proofDownloadMutation.isPending}
-              title={
-                isSettled
-                  ? undefined
-                  : 'Proof is available once the collection is settled on-chain.'
-              }
-            >
-              {proofDownloadMutation.isPending ? 'Exporting…' : 'Export proof'}
-            </button>
-          </div>
-        </header>
+            </>
+          }
+          side={
+            <>
+              <span className="rd-pill" data-tone={toneToPill(statusTone)}>
+                <span className="rd-pill-dot" aria-hidden />
+                {displayCollectionStatus(collection.derivedState)}
+              </span>
+              <button
+                type="button"
+                className="rd-btn rd-btn-secondary"
+                onClick={() => proofDownloadMutation.mutate()}
+                disabled={!isSettled || proofDownloadMutation.isPending}
+                aria-busy={proofDownloadMutation.isPending}
+                title={
+                  isSettled
+                    ? undefined
+                    : 'Proof is available once the collection is settled on-chain.'
+                }
+              >
+                {proofDownloadMutation.isPending ? 'Exporting…' : 'Export proof'}
+              </button>
+            </>
+          }
+        />
 
         <LifecycleRail stages={lifecycle} ariaLabel="Collection lifecycle" />
 
@@ -511,15 +513,16 @@ function PrimaryAction({
 
   if (s === 'open') {
     return (
-      <div className="rd-primary" data-emphasis="waiting">
-        <p className="rd-primary-eyebrow">Awaiting payment</p>
-        <h2 className="rd-primary-title">
-          Watching for <span className="rd-mono">{amountLabel}</span>
-        </h2>
-        <p className="rd-primary-body">
-          Share the receiver ({receiverLine}) with the payer. Decimal matches the transfer the
-          moment it lands on-chain — typically within seconds of inclusion.
-        </p>
+      <RdPrimaryCard
+        emphasis="waiting"
+        eyebrow="Awaiting payment"
+        title={
+          <>
+            Watching for <span className="rd-mono">{amountLabel}</span>
+          </>
+        }
+        body={`Share the receiver (${receiverLine}) with the payer. Decimal matches the transfer the moment it lands on-chain — typically within seconds of inclusion.`}
+      >
         {canCancel ? (
           <div className="rd-actions">
             <button
@@ -533,59 +536,55 @@ function PrimaryAction({
             </button>
           </div>
         ) : null}
-      </div>
+      </RdPrimaryCard>
     );
   }
 
   if (s === 'partially_collected') {
     return (
-      <div className="rd-primary" data-emphasis="warning">
-        <p className="rd-primary-eyebrow">Partial settlement</p>
-        <h2 className="rd-primary-title">Some of the expected amount arrived</h2>
-        <p className="rd-primary-body">
-          A transfer landed on the receiver wallet but the amount didn&apos;t match the expected
-          total. Review the timeline to reconcile.
-        </p>
-      </div>
+      <RdPrimaryCard
+        emphasis="warning"
+        eyebrow="Partial settlement"
+        title="Some of the expected amount arrived"
+        body="A transfer landed on the receiver wallet but the amount didn't match the expected total. Review the timeline to reconcile."
+      />
     );
   }
 
   if (s === 'exception') {
     return (
-      <div className="rd-primary" data-emphasis="warning">
-        <p className="rd-primary-eyebrow">Needs review</p>
-        <h2 className="rd-primary-title">Exception raised</h2>
-        <p className="rd-primary-body">
-          Something doesn&apos;t add up — variance, duplicate, or late settlement. Check the
-          exceptions queue for details.
-        </p>
-      </div>
+      <RdPrimaryCard
+        emphasis="warning"
+        eyebrow="Needs review"
+        title="Exception raised"
+        body="Something doesn't add up — variance, duplicate, or late settlement. Check the exceptions queue for details."
+      />
     );
   }
 
   if (s === 'collected' || s === 'closed') {
     return (
-      <div className="rd-primary" data-emphasis="success">
-        <p className="rd-primary-eyebrow">Collected</p>
-        <h2 className="rd-primary-title">
-          <span className="rd-mono">{amountLabel}</span> received
-        </h2>
-        <p className="rd-primary-body">
-          Transfer observed on-chain and matched to this collection.
-        </p>
-      </div>
+      <RdPrimaryCard
+        emphasis="success"
+        eyebrow="Collected"
+        title={
+          <>
+            <span className="rd-mono">{amountLabel}</span> received
+        </>
+        }
+        body="Transfer observed on-chain and matched to this collection."
+      />
     );
   }
 
   if (s === 'cancelled') {
     return (
-      <div className="rd-primary" data-emphasis="muted">
-        <p className="rd-primary-eyebrow">Cancelled</p>
-        <h2 className="rd-primary-title">This collection was cancelled</h2>
-        <p className="rd-primary-body">
-          Any transfer arriving now is no longer tied to this expectation.
-        </p>
-      </div>
+      <RdPrimaryCard
+        emphasis="muted"
+        eyebrow="Cancelled"
+        title="This collection was cancelled"
+        body="Any transfer arriving now is no longer tied to this expectation."
+      />
     );
   }
 
