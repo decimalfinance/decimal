@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api';
 import type { CollectionRequest, CollectionRequestEvent } from '../types';
 import {
+  assetSymbol,
   formatRawUsdcCompact,
   formatRelativeTime,
   formatTimestamp,
@@ -19,19 +20,8 @@ import {
   statusToneForCollection,
 } from '../status-labels';
 import { useToast } from '../ui/Toast';
-
-type StageState = 'complete' | 'current' | 'pending' | 'blocked';
-
-type LifecycleStage = {
-  id: 'request' | 'awaiting' | 'settlement';
-  label: string;
-  sub: string;
-  state: StageState;
-};
-
-function assetSymbol(asset: string | undefined): string {
-  return (asset ?? 'usdc').toUpperCase();
-}
+import { DetailEntry } from '../ui-primitives';
+import { LifecycleRail, type LifecycleStage, type StageState } from '../ui/LifecycleRail';
 
 function toneToPill(
   tone: 'success' | 'warning' | 'danger' | 'neutral',
@@ -265,7 +255,7 @@ export function CollectionDetailPage() {
           </div>
         </header>
 
-        <LifecycleRail stages={lifecycle} />
+        <LifecycleRail stages={lifecycle} ariaLabel="Collection lifecycle" />
 
         <PrimaryAction
           collection={collection}
@@ -613,38 +603,6 @@ function PrimaryAction({
   return null;
 }
 
-function LifecycleRail({ stages }: { stages: LifecycleStage[] }) {
-  return (
-    <div
-      className="rd-rail"
-      role="list"
-      aria-label="Collection lifecycle"
-      style={{ gridTemplateColumns: `repeat(${stages.length}, 1fr)` }}
-    >
-      {stages.map((stage) => (
-        <div key={stage.id} className="rd-rail-step" data-state={stage.state} role="listitem">
-          <div className="rd-rail-marker-row">
-            <span className="rd-rail-dot" aria-hidden />
-            <span className="rd-rail-line" aria-hidden />
-          </div>
-          <span className="rd-rail-label">{stage.label}</span>
-          <span className="rd-rail-sub">{stage.sub}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function DetailEntry({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div>
-      <dt className="rd-metric-label" style={{ marginBottom: 6 }}>
-        {label}
-      </dt>
-      <dd style={{ margin: 0, fontSize: 13, color: 'var(--ax-text)' }}>{children}</dd>
-    </div>
-  );
-}
 
 function TimelineRow({
   title,

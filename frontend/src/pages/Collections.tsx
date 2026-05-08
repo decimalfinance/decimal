@@ -10,7 +10,7 @@ import type {
   Counterparty,
   TreasuryWallet,
 } from '../types';
-import { formatRawUsdcCompact, formatRelativeTime, shortenAddress } from '../domain';
+import { assetSymbol, formatRawUsdcCompact, formatRelativeTime, shortenAddress, walletLabel } from '../domain';
 import { parseCsvPreview } from '../csv-parse';
 import {
   collectionRunProgressLine,
@@ -54,17 +54,6 @@ type UnifiedRow =
       createdAt: string;
       to: string;
     };
-
-function assetSymbol(asset: string | undefined): string {
-  return (asset ?? 'usdc').toUpperCase();
-}
-
-function walletLabel(wallet: TreasuryWallet): string {
-  if (wallet.displayName && wallet.displayName.trim().length) {
-    return `${wallet.displayName} · ${shortenAddress(wallet.address, 4, 4)}`;
-  }
-  return shortenAddress(wallet.address, 4, 4);
-}
 
 function receiverLabel(wallet: TreasuryWallet | null): string {
   if (!wallet) return '—';

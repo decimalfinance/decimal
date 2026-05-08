@@ -2,7 +2,7 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { api } from '../api';
 import type { CollectionRequest, CollectionRunSummary } from '../types';
-import { formatRawUsdcCompact, formatRelativeTime, shortenAddress } from '../domain';
+import { assetSymbol, formatRawUsdcCompact, formatRelativeTime, shortenAddress } from '../domain';
 import {
   collectionRunProgressLine,
   displayCollectionStatus,
@@ -20,10 +20,6 @@ function toneToPill(
       : tone === 'warning'
         ? 'warning'
         : 'info';
-}
-
-function assetSymbol(asset: string | undefined): string {
-  return (asset ?? 'usdc').toUpperCase();
 }
 
 function payerLabel(collection: CollectionRequest): string {

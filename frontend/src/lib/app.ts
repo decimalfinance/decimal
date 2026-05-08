@@ -1,5 +1,6 @@
 import type { SolanaNetwork } from '../solana-network';
 import { getRuntimeSolanaNetwork } from '../solana-network';
+import type { TreasuryWallet } from '../types';
 
 export function formatRawUsdc(amountRaw: string) {
   const negative = amountRaw.startsWith('-');
@@ -141,4 +142,33 @@ export function explorerTransactionUrl(signature: string, network: SolanaNetwork
 export function explorerAccountUrl(address: string, network: SolanaNetwork) {
   const cluster = network === 'devnet' ? '?cluster=devnet' : '';
   return `https://solscan.io/account/${address}${cluster}`;
+}
+
+// Page-level helpers. App.tsx has its own variants with different fallback
+// semantics (no "USDC" default, nullable address inputs). Keeping these
+// separate so we don't change App.tsx behaviour by mistake.
+
+export function assetSymbol(asset: string | undefined): string {
+  return (asset ?? 'usdc').toUpperCase();
+}
+
+export function walletLabel(address: TreasuryWallet): string {
+  if (address.displayName && address.displayName.trim().length) {
+    return `${address.displayName} · ${shortenAddress(address.address, 4, 4)}`;
+  }
+  return shortenAddress(address.address, 4, 4);
+}
+
+// Trigger a download of `data` as `${filename}` in the user's browser.
+// Used by proof-export buttons across detail pages.
+export function downloadJson(filename: string, data: unknown) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }

@@ -10,9 +10,11 @@ import type {
   TreasuryWallet,
 } from '../types';
 import {
+  assetSymbol,
   formatRawUsdcCompact,
   formatRelativeTime,
   shortenAddress,
+  walletLabel,
 } from '../domain';
 import { parseCsvPreview } from '../csv-parse';
 import {
@@ -55,17 +57,6 @@ type UnifiedRow =
       createdAt: string;
       to: string;
     };
-
-function assetSymbol(asset: string | undefined): string {
-  return (asset ?? 'usdc').toUpperCase();
-}
-
-function walletLabel(address: TreasuryWallet): string {
-  if (address.displayName && address.displayName.trim().length) {
-    return `${address.displayName} · ${shortenAddress(address.address, 4, 4)}`;
-  }
-  return shortenAddress(address.address, 4, 4);
-}
 
 function sourceLabel(wallet: TreasuryWallet | null): string {
   if (!wallet) return '—';

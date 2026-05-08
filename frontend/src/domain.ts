@@ -1,5 +1,7 @@
 export {
+  assetSymbol,
   computeWalletUsdValue,
+  downloadJson,
   formatRawUsdcCompact,
   formatRelativeTime,
   formatTimestamp,
@@ -10,6 +12,7 @@ export {
   orbTransactionUrl,
   shortenAddress,
   solanaAccountUrl,
+  walletLabel,
 } from './lib/app';
 export {
   discoverSolanaWallets,

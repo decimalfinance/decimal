@@ -14,6 +14,7 @@ import type {
 } from '../types';
 import { orbAccountUrl, shortenAddress } from '../domain';
 import { signAndSubmitIntent } from '../lib/squads-pipeline';
+import { InfoRow } from '../ui-primitives';
 import { useToast } from '../ui/Toast';
 import { ProposalsTable, type ProposalsTableBusy } from '../ui/ProposalsTable';
 import type { DecimalProposal } from '../types';
@@ -657,17 +658,6 @@ function CapabilityPill({ ok, label }: { ok: boolean; label: string }) {
       <span className="rd-pill-dot" />
       {label}: {ok ? 'yes' : 'no'}
     </span>
-  );
-}
-
-function InfoRow({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', opacity: 0.6 }}>
-        {label}
-      </span>
-      <span style={{ fontSize: 14 }}>{children}</span>
-    </div>
   );
 }
 
