@@ -447,7 +447,6 @@ export function PaymentDetailPage() {
         {
           paymentOrderId: order.paymentOrderId,
           creatorPersonalWalletId: proposalCreatorWalletId,
-          autoApprove: true,
         },
       );
       const signature = await signAndSubmitIntent({

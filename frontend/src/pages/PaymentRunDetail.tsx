@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '../api';
+import { api, ApiError } from '../api';
 import type {
+  DecimalProposal,
   PaymentOrder,
   PaymentRun,
   PaymentRunExecutionPreparation,
   TreasuryWallet,
+  UserWallet,
 } from '../types';
+import { signAndSubmitIntent } from '../lib/squads-pipeline';
 import {
   discoverSolanaWallets,
   formatRawUsdcCompact,
@@ -36,6 +39,8 @@ type PrimaryActionVariant =
   | 'loading'
   | 'needs_approval'
   | 'ready_to_sign'
+  | 'ready_to_propose'
+  | 'proposal_in_progress'
   | 'signing'
   | 'in_flight'
   | 'exception'
@@ -168,6 +173,13 @@ function buildLifecycle(run: PaymentRun, orders: PaymentOrder[]): LifecycleStage
   ];
 }
 
+function isUnconfirmedSignatureError(err: unknown): boolean {
+  if (err instanceof ApiError && err.status === 400 && /not confirmed yet/i.test(err.message)) {
+    return true;
+  }
+  return false;
+}
+
 function determinePrimaryVariant(run: PaymentRun, runOrders: PaymentOrder[]): PrimaryActionVariant {
   if (!runOrders.length) return 'empty';
   if (run.derivedState === 'settled' || run.derivedState === 'closed') return 'settled';
@@ -178,6 +190,19 @@ function determinePrimaryVariant(run: PaymentRun, runOrders: PaymentOrder[]): Pr
     (o) => o.derivedState === 'draft' || o.derivedState === 'pending_approval',
   );
   if (needsApproval) return 'needs_approval';
+
+  const isSquadsSource = run.sourceTreasuryWallet?.source === 'squads_v4';
+
+  // Squads-source runs hit a multisig proposal lifecycle instead of the
+  // direct-sign batch packet. The run's derivedState advances:
+  //   ready -> proposed -> executed.
+  if (isSquadsSource) {
+    if (run.derivedState === 'proposed') return 'proposal_in_progress';
+    if (run.derivedState === 'executed') return 'in_flight';
+    if (run.derivedState === 'ready' || run.derivedState === 'ready_for_execution') {
+      return 'ready_to_propose';
+    }
+  }
 
   const inFlight = runOrders.some((o) => o.derivedState === 'execution_recorded');
   if (inFlight) return 'in_flight';
@@ -359,6 +384,143 @@ export function PaymentRunDetailPage() {
     },
     onError: (err) => toastError(err instanceof Error ? err.message : 'Could not export proof.'),
   });
+
+  // -- Squads batch proposal flow ---------------------------------------------
+  const isSquadsSourceRun = runQuery.data?.sourceTreasuryWallet?.source === 'squads_v4';
+
+  const ownPersonalWalletsQuery = useQuery({
+    queryKey: ['personal-wallets'] as const,
+    queryFn: () => api.listPersonalWallets(),
+    enabled: Boolean(organizationId && isSquadsSourceRun),
+  });
+  const ownPersonalWallets: UserWallet[] = useMemo(
+    () =>
+      (ownPersonalWalletsQuery.data?.items ?? []).filter(
+        (w) => w.status === 'active' && w.chain === 'solana',
+      ),
+    [ownPersonalWalletsQuery.data],
+  );
+
+  const [runProposalCreatorWalletId, setRunProposalCreatorWalletId] = useState('');
+  useEffect(() => {
+    if (!runProposalCreatorWalletId && ownPersonalWallets.length > 0) {
+      setRunProposalCreatorWalletId(ownPersonalWallets[0]!.userWalletId);
+    }
+  }, [ownPersonalWallets, runProposalCreatorWalletId]);
+
+  // Find the active Decimal proposal for this run (if any). Backend has no
+  // paymentRunId filter on the proposals listing, so we fetch by treasury and
+  // filter client-side.
+  const linkedProposalQuery = useQuery({
+    queryKey: ['organization-proposals', organizationId, 'linked-run', paymentRunId] as const,
+    queryFn: () =>
+      api.listOrganizationProposals(organizationId!, {
+        status: 'all',
+        treasuryWalletId: runQuery.data!.sourceTreasuryWalletId!,
+        limit: 50,
+      }),
+    enabled: Boolean(
+      organizationId
+        && paymentRunId
+        && isSquadsSourceRun
+        && runQuery.data?.sourceTreasuryWalletId,
+    ),
+    refetchInterval: 15_000,
+  });
+  const linkedRunProposal: DecimalProposal | null = useMemo(() => {
+    const items = linkedProposalQuery.data?.items ?? [];
+    // Pick the most recent non-closed proposal whose paymentRunId matches.
+    const candidates = items
+      .filter((p) => p.paymentRunId === paymentRunId && p.semanticType === 'send_payment_run')
+      .filter((p) => !['executed', 'cancelled', 'rejected'].includes(p.status));
+    if (candidates.length > 0) return candidates[0]!;
+    // Fall back to the most recent closed one (so executed runs still link to
+    // their proposal).
+    return items.find((p) => p.paymentRunId === paymentRunId && p.semanticType === 'send_payment_run') ?? null;
+  }, [linkedProposalQuery.data, paymentRunId]);
+
+  const [pendingRunProposalConfirmation, setPendingRunProposalConfirmation] = useState<
+    { decimalProposalId: string; signature: string } | null
+  >(null);
+
+  const createRunProposalMutation = useMutation({
+    mutationFn: async () => {
+      if (!runQuery.data?.sourceTreasuryWalletId) {
+        throw new Error('No source treasury on this run.');
+      }
+      if (!runProposalCreatorWalletId) {
+        throw new Error('Pick a personal wallet to initiate the proposal.');
+      }
+      const intent = await api.createSquadsPaymentRunProposalIntent(
+        organizationId!,
+        runQuery.data.sourceTreasuryWalletId,
+        {
+          paymentRunId: paymentRunId!,
+          creatorPersonalWalletId: runProposalCreatorWalletId,
+        },
+      );
+      const signature = await signAndSubmitIntent({
+        intent,
+        signerPersonalWalletId: runProposalCreatorWalletId,
+      });
+      const decimalProposalId = intent.decimalProposal?.decimalProposalId ?? null;
+      if (!decimalProposalId) {
+        throw new Error('Backend did not return a decimal proposal id.');
+      }
+      setPendingRunProposalConfirmation({ decimalProposalId, signature });
+      await api.confirmProposalSubmission(organizationId!, decimalProposalId, { signature });
+      return { decimalProposalId, signature };
+    },
+    onSuccess: async (result) => {
+      setPendingRunProposalConfirmation(null);
+      success('Squads batch proposal created.');
+      await queryClient.invalidateQueries({ queryKey: ['payment-run', organizationId, paymentRunId] });
+      await queryClient.invalidateQueries({ queryKey: ['payment-orders', organizationId] });
+      await queryClient.invalidateQueries({ queryKey: ['organization-proposals', organizationId] });
+      navigate(`/organizations/${organizationId}/proposals/${result.decimalProposalId}`);
+    },
+    onError: (err) => {
+      // 409 means a proposal already exists — refetch and let the
+      // proposal_in_progress variant take over instead of toasting an error.
+      if (err instanceof ApiError && err.status === 409) {
+        queryClient.invalidateQueries({ queryKey: ['organization-proposals', organizationId] });
+        queryClient.invalidateQueries({ queryKey: ['payment-run', organizationId, paymentRunId] });
+        info('A proposal already exists for this run.');
+        return;
+      }
+      if (isUnconfirmedSignatureError(err)) {
+        info('Transaction submitted. Confirmation pending — retry in a moment.');
+        return;
+      }
+      setPendingRunProposalConfirmation(null);
+      toastError(err instanceof Error ? err.message : 'Could not create batch proposal.');
+    },
+  });
+
+  const retryRunProposalConfirmationMutation = useMutation({
+    mutationFn: async () => {
+      if (!pendingRunProposalConfirmation) throw new Error('No pending confirmation.');
+      await api.confirmProposalSubmission(organizationId!, pendingRunProposalConfirmation.decimalProposalId, {
+        signature: pendingRunProposalConfirmation.signature,
+      });
+      return pendingRunProposalConfirmation;
+    },
+    onSuccess: async (result) => {
+      setPendingRunProposalConfirmation(null);
+      success('Proposal confirmed.');
+      await queryClient.invalidateQueries({ queryKey: ['payment-run', organizationId, paymentRunId] });
+      await queryClient.invalidateQueries({ queryKey: ['organization-proposals', organizationId] });
+      navigate(`/organizations/${organizationId}/proposals/${result.decimalProposalId}`);
+    },
+    onError: (err) => {
+      if (isUnconfirmedSignatureError(err)) {
+        info('Still pending. Try again in a few seconds.');
+        return;
+      }
+      toastError(err instanceof Error ? err.message : 'Confirmation failed.');
+    },
+  });
+  // ----------------------------------------------------------------------------
 
   const deleteMutation = useMutation({
     mutationFn: () => api.deletePaymentRun(organizationId!, paymentRunId!),
@@ -549,6 +711,16 @@ export function PaymentRunDetailPage() {
           onReviewIndividually={() => routeForReviewMutation.mutate()}
           onSign={() => signMutation.mutate()}
           onExportProof={() => proofMutation.mutate()}
+          ownPersonalWallets={ownPersonalWallets}
+          runProposalCreatorWalletId={runProposalCreatorWalletId}
+          onSelectRunProposalCreator={setRunProposalCreatorWalletId}
+          proposing={createRunProposalMutation.isPending}
+          onCreateRunProposal={() => createRunProposalMutation.mutate()}
+          pendingRunProposalConfirmation={pendingRunProposalConfirmation}
+          retryingRunProposalConfirmation={retryRunProposalConfirmationMutation.isPending}
+          onRetryRunProposalConfirmation={() => retryRunProposalConfirmationMutation.mutate()}
+          linkedRunProposal={linkedRunProposal}
+          organizationId={organizationId!}
         />
 
         <section className="rd-section">
@@ -626,6 +798,16 @@ function PrimaryActionCard(props: {
   onReviewIndividually: () => void;
   onSign: () => void;
   onExportProof: () => void;
+  ownPersonalWallets: UserWallet[];
+  runProposalCreatorWalletId: string;
+  onSelectRunProposalCreator: (id: string) => void;
+  proposing: boolean;
+  onCreateRunProposal: () => void;
+  pendingRunProposalConfirmation: { decimalProposalId: string; signature: string } | null;
+  retryingRunProposalConfirmation: boolean;
+  onRetryRunProposalConfirmation: () => void;
+  linkedRunProposal: DecimalProposal | null;
+  organizationId: string;
 }) {
   const {
     variant,
@@ -649,6 +831,16 @@ function PrimaryActionCard(props: {
     onReviewIndividually,
     onSign,
     onExportProof,
+    ownPersonalWallets,
+    runProposalCreatorWalletId,
+    onSelectRunProposalCreator,
+    proposing,
+    onCreateRunProposal,
+    pendingRunProposalConfirmation,
+    retryingRunProposalConfirmation,
+    onRetryRunProposalConfirmation,
+    linkedRunProposal,
+    organizationId,
   } = props;
 
   if (variant === 'needs_approval') {
@@ -682,6 +874,121 @@ function PrimaryActionCard(props: {
             {routing ? 'Preparing…' : 'Review individually'}
             {!routing ? <span className="rd-btn-arrow" aria-hidden>→</span> : null}
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (variant === 'ready_to_propose') {
+    if (pendingRunProposalConfirmation) {
+      return (
+        <div className="rd-primary" data-emphasis="action">
+          <p className="rd-primary-eyebrow">Awaiting · On-chain confirmation</p>
+          <h2 className="rd-primary-title">Batch proposal submitted — confirmation pending</h2>
+          <p className="rd-primary-body">
+            Your signature went through and the batch proposal transaction was submitted. Solana RPC hasn't reported it confirmed yet. Retry confirmation in a few seconds; do not recreate the proposal — it may already be on chain.
+          </p>
+          <p style={{ fontSize: 12, color: 'var(--ax-text-muted)', margin: '0 0 12px', fontFamily: 'monospace' }}>
+            sig {shortenAddress(pendingRunProposalConfirmation.signature, 6, 6)}
+          </p>
+          <div className="rd-actions">
+            <button
+              type="button"
+              className="rd-btn rd-btn-primary"
+              onClick={onRetryRunProposalConfirmation}
+              disabled={retryingRunProposalConfirmation}
+              aria-busy={retryingRunProposalConfirmation}
+            >
+              {retryingRunProposalConfirmation ? 'Retrying confirmation…' : 'Retry confirmation'}
+              {!retryingRunProposalConfirmation ? <span className="rd-btn-arrow" aria-hidden>→</span> : null}
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    const hasPersonalWallets = ownPersonalWallets.length > 0;
+    return (
+      <div className="rd-primary" data-emphasis="action">
+        <p className="rd-primary-eyebrow">Next step · Squads batch proposal</p>
+        <h2 className="rd-primary-title">
+          {readyToSignCount} payment{readyToSignCount === 1 ? '' : 's'} ready · {readyToSignAmount}
+        </h2>
+        <p className="rd-primary-body">
+          The source treasury is a Squads multisig. Bundle every row in this run into a single batch proposal that signers approve once before any USDC moves.
+        </p>
+        <div className="rd-primary-grid">
+          <label className="rd-field">
+            <span className="rd-field-label">Initiating wallet</span>
+            {hasPersonalWallets ? (
+              <select
+                className="rd-select"
+                value={runProposalCreatorWalletId}
+                onChange={(e) => onSelectRunProposalCreator(e.target.value)}
+              >
+                {ownPersonalWallets.map((w) => (
+                  <option key={w.userWalletId} value={w.userWalletId}>
+                    {(w.label ?? 'Untitled')} · {shortenAddress(w.walletAddress, 4, 4)}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="rd-field-label" style={{ color: 'var(--ax-warning)' }}>
+                Create a personal wallet on /profile first.
+              </span>
+            )}
+          </label>
+        </div>
+        <p style={{ fontSize: 12, color: 'var(--ax-text-muted)', margin: '0 0 12px' }}>
+          Must be one of your personal wallets that's an on-chain Squads member with the <strong>Initiate</strong> permission. Backend caps batches at 8 rows.
+        </p>
+        <div className="rd-actions">
+          <button
+            type="button"
+            className="rd-btn rd-btn-primary"
+            onClick={onCreateRunProposal}
+            disabled={proposing || !hasPersonalWallets || !runProposalCreatorWalletId}
+            aria-busy={proposing}
+          >
+            {proposing ? 'Creating proposal…' : 'Create batch proposal'}
+            {!proposing ? <span className="rd-btn-arrow" aria-hidden>→</span> : null}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (variant === 'proposal_in_progress') {
+    const proposal = linkedRunProposal;
+    const status = proposal?.status ?? 'active';
+    const voting = proposal?.voting ?? null;
+    const approvalCount = voting?.approvals.length ?? 0;
+    const threshold = voting?.threshold ?? 0;
+    const pendingVoters = voting?.pendingVoters.length ?? 0;
+    const isApproved = status === 'approved';
+    const detailHref = proposal
+      ? `/organizations/${organizationId}/proposals/${proposal.decimalProposalId}`
+      : `/organizations/${organizationId}/proposals`;
+    return (
+      <div className="rd-primary" data-emphasis={isApproved ? 'action' : undefined}>
+        <p className="rd-primary-eyebrow">
+          {isApproved ? 'Next step · Execute batch' : 'Next step · Squads voting'}
+        </p>
+        <h2 className="rd-primary-title">
+          {isApproved
+            ? `Threshold met (${approvalCount} of ${threshold}) — ready to execute`
+            : `${approvalCount} of ${threshold} approvals · ${pendingVoters} awaiting`}
+        </h2>
+        <p className="rd-primary-body">
+          {isApproved
+            ? 'Open the proposal to execute the batch with a Squads member that holds the Execute permission.'
+            : 'This run is bundled into one Squads vault proposal. Voters sign approvals independently.'}
+        </p>
+        <div className="rd-actions">
+          <Link className="rd-btn rd-btn-primary" to={detailHref}>
+            Open proposal
+            <span className="rd-btn-arrow" aria-hidden>→</span>
+          </Link>
         </div>
       </div>
     );

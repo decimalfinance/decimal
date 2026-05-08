@@ -380,6 +380,8 @@ function ProposalDetailBody({
 
       {proposal.semanticType === 'send_payment' ? (
         <PaymentSummary proposal={proposal} />
+      ) : proposal.semanticType === 'send_payment_run' ? (
+        <PaymentRunSummary proposal={proposal} />
       ) : (
         <SemanticSummary proposal={proposal} />
       )}
@@ -535,6 +537,129 @@ function PaymentSummary({ proposal }: { proposal: DecimalProposal }) {
         {payload?.memo ? <InfoRow label="Memo">{payload.memo}</InfoRow> : null}
       </div>
     </section>
+  );
+}
+
+function PaymentRunSummary({ proposal }: { proposal: DecimalProposal }) {
+  const payload = proposal.semanticPayloadJson as {
+    paymentRunId?: string;
+    runName?: string;
+    sourceWalletAddress?: string;
+    sourceTokenAccountAddress?: string;
+    totalAmountRaw?: string;
+    orderCount?: number;
+    asset?: string;
+    orders?: Array<{
+      index: number;
+      paymentOrderId: string;
+      destinationId: string;
+      destinationWalletAddress: string;
+      destinationTokenAccountAddress: string;
+      amountRaw: string;
+      asset: string;
+      reference: string | null;
+      memo: string | null;
+    }>;
+  };
+  const orders = payload?.orders ?? [];
+  const totalDecimals = 6; // USDC for now
+  const symbol = (payload?.asset ?? 'usdc').toUpperCase();
+
+  return (
+    <>
+      <section className="rd-section" style={{ marginTop: 16 }}>
+        <header style={{ marginBottom: 12 }}>
+          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 500 }}>Batch summary</h2>
+        </header>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+            gap: '14px 24px',
+          }}
+        >
+          {payload?.runName ? (
+            <InfoRow label="Run">
+              {payload.paymentRunId ? (
+                <Link
+                  to={`/organizations/${proposal.organizationId}/runs/${payload.paymentRunId}`}
+                  style={{ color: 'inherit', textDecoration: 'underline', textDecorationColor: 'rgba(255,255,255,0.25)' }}
+                >
+                  {payload.runName}
+                </Link>
+              ) : (
+                payload.runName
+              )}
+            </InfoRow>
+          ) : null}
+          {payload?.totalAmountRaw ? (
+            <InfoRow label="Total amount">
+              <span>
+                {formatRawAmount(payload.totalAmountRaw, totalDecimals)} {symbol}
+              </span>
+            </InfoRow>
+          ) : null}
+          <InfoRow label="Rows">{payload?.orderCount ?? orders.length}</InfoRow>
+          {payload?.sourceWalletAddress ? (
+            <InfoRow label="Source vault">
+              <ChainLink address={payload.sourceWalletAddress} />
+            </InfoRow>
+          ) : null}
+        </div>
+      </section>
+      {orders.length > 0 ? (
+        <section className="rd-section" style={{ marginTop: 16 }}>
+          <header style={{ marginBottom: 12 }}>
+            <h2 style={{ margin: 0, fontSize: 16, fontWeight: 500 }}>Rows ({orders.length})</h2>
+          </header>
+          <div className="rd-table-shell">
+            <table className="rd-table">
+              <thead>
+                <tr>
+                  <th style={{ width: 40 }}>#</th>
+                  <th>Destination</th>
+                  <th className="rd-num">Amount</th>
+                  <th>Reference</th>
+                </tr>
+              </thead>
+              <tbody>
+                {orders.map((row) => (
+                  <tr
+                    key={row.paymentOrderId}
+                    onClick={() => {
+                      window.location.href = `/organizations/${proposal.organizationId}/payments/${row.paymentOrderId}`;
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <td style={{ color: 'var(--ax-text-muted)', fontSize: 12 }}>{row.index + 1}</td>
+                    <td>
+                      <a
+                        href={orbAccountUrl(row.destinationWalletAddress)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rd-addr-link"
+                        title={row.destinationWalletAddress}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {shortenAddress(row.destinationWalletAddress, 4, 4)}
+                      </a>
+                    </td>
+                    <td className="rd-num">
+                      {formatRawAmount(row.amountRaw, totalDecimals)} {row.asset.toUpperCase()}
+                    </td>
+                    <td>
+                      <span style={{ fontSize: 12, color: 'var(--ax-text-muted)' }}>
+                        {row.reference ?? row.memo ?? '—'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+    </>
   );
 }
 

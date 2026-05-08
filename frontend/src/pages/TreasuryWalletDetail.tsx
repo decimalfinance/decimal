@@ -833,11 +833,6 @@ function AddMemberDialog(props: {
     () => ownWalletsThatAreMembers(ownPersonalWallets, detail, 'initiate'),
     [ownPersonalWallets, detail],
   );
-  const eligibleExecutors = useMemo(
-    () => ownWalletsThatAreMembers(ownPersonalWallets, detail, 'execute'),
-    [ownPersonalWallets, detail],
-  );
-
   const [newMemberWalletId, setNewMemberWalletId] = useState('');
   const [permissions, setPermissions] = useState<SquadsPermission[]>([...ALL_PERMISSIONS]);
   const [adjustThreshold, setAdjustThreshold] = useState(false);
@@ -880,7 +875,6 @@ function AddMemberDialog(props: {
           newMemberPersonalWalletId: newMemberWalletId,
           permissions,
           newThreshold: adjustThreshold ? newThreshold : undefined,
-          autoApprove: true,
         },
       );
       const sig = await signAndSubmitIntent({
@@ -899,41 +893,8 @@ function AddMemberDialog(props: {
           // ignore — local status will catch up on refresh
         }
       }
-      // After create+autoApprove: if the multisig was 1-of-1, the proposal
-      // already meets the threshold (creator just approved). Otherwise, more
-      // signers need to approve before it can execute.
-      if (detail.squads.threshold <= 1) {
-        // Auto-execute. Pick an executor — fall back to creator if creator
-        // also has execute permission.
-        const executorWalletId =
-          eligibleExecutors.find((w) => w.userWalletId === creatorWalletId)?.userWalletId
-          ?? eligibleExecutors[0]?.userWalletId
-          ?? creatorWalletId;
-        setState((s) => ({ ...s, phase: 'executing', createSignature: sig }));
-        const execIntent = await api.createSquadsConfigProposalExecuteIntent(
-          organizationId,
-          treasuryWalletId,
-          intent.intent.transactionIndex,
-          { memberPersonalWalletId: executorWalletId },
-        );
-        const execSig = await signAndSubmitIntent({
-          intent: execIntent,
-          signerPersonalWalletId: executorWalletId,
-        });
-        if (decimalProposalId) {
-          try {
-            await api.confirmProposalExecution(organizationId, decimalProposalId, { signature: execSig });
-          } catch {
-            // ignore
-          }
-        }
-        setState((s) => ({ ...s, phase: 'syncing', executeSignature: execSig }));
-        await api.syncSquadsTreasuryMembers(organizationId, treasuryWalletId);
-        setState((s) => ({ ...s, phase: 'done' }));
-        await onConfirmed();
-      } else {
-        setState((s) => ({ ...s, phase: 'awaiting-approvals', createSignature: sig }));
-      }
+      setState((s) => ({ ...s, phase: 'awaiting-approvals', createSignature: sig }));
+      await onConfirmed();
     } catch (err) {
       const msg = err instanceof ApiError || err instanceof Error
         ? err.message
@@ -1204,11 +1165,6 @@ function ChangeThresholdDialog(props: {
     () => ownWalletsThatAreMembers(ownPersonalWallets, detail, 'initiate'),
     [ownPersonalWallets, detail],
   );
-  const eligibleExecutors = useMemo(
-    () => ownWalletsThatAreMembers(ownPersonalWallets, detail, 'execute'),
-    [ownPersonalWallets, detail],
-  );
-
   const voterCount = detail.squads.members.filter((m) => m.permissions.includes('vote')).length;
 
   const [newThreshold, setNewThreshold] = useState<number>(detail.squads.threshold);
@@ -1244,7 +1200,6 @@ function ChangeThresholdDialog(props: {
         {
           creatorPersonalWalletId: creatorWalletId,
           newThreshold,
-          autoApprove: true,
         },
       );
       const sig = await signAndSubmitIntent({
@@ -1259,36 +1214,8 @@ function ChangeThresholdDialog(props: {
           // ignore — local status will catch up on refresh
         }
       }
-      if (detail.squads.threshold <= 1) {
-        const executorWalletId =
-          eligibleExecutors.find((w) => w.userWalletId === creatorWalletId)?.userWalletId
-          ?? eligibleExecutors[0]?.userWalletId
-          ?? creatorWalletId;
-        setState((s) => ({ ...s, phase: 'executing', createSignature: sig }));
-        const execIntent = await api.createSquadsConfigProposalExecuteIntent(
-          organizationId,
-          treasuryWalletId,
-          intent.intent.transactionIndex,
-          { memberPersonalWalletId: executorWalletId },
-        );
-        const execSig = await signAndSubmitIntent({
-          intent: execIntent,
-          signerPersonalWalletId: executorWalletId,
-        });
-        if (decimalProposalId) {
-          try {
-            await api.confirmProposalExecution(organizationId, decimalProposalId, { signature: execSig });
-          } catch {
-            // ignore
-          }
-        }
-        setState((s) => ({ ...s, phase: 'syncing', executeSignature: execSig }));
-        await api.syncSquadsTreasuryMembers(organizationId, treasuryWalletId);
-        setState((s) => ({ ...s, phase: 'done' }));
-        await onConfirmed();
-      } else {
-        setState((s) => ({ ...s, phase: 'awaiting-approvals', createSignature: sig }));
-      }
+      setState((s) => ({ ...s, phase: 'awaiting-approvals', createSignature: sig }));
+      await onConfirmed();
     } catch (err) {
       const msg = err instanceof ApiError || err instanceof Error
         ? err.message

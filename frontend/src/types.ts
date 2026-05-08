@@ -493,6 +493,9 @@ export type DecimalProposal = {
   organizationId: string;
   treasuryWalletId: string | null;
   paymentOrderId: string | null;
+  // Set when this proposal batches a whole payment run rather than a
+  // single order. Mutually exclusive with paymentOrderId in practice.
+  paymentRunId?: string | null;
   provider: SquadsTreasuryProvider;
   proposalType: 'config_transaction' | 'vault_transaction' | string;
   proposalCategory: 'configuration' | 'execution' | string;
@@ -576,11 +579,16 @@ export type DecimalProposalIntentResponse = {
   decimalProposal?: DecimalProposal;
 };
 
+export type CreateSquadsPaymentRunProposalRequest = {
+  paymentRunId: string;
+  creatorPersonalWalletId: string;
+  memo?: string | null;
+};
+
 export type CreateSquadsPaymentProposalRequest = {
   paymentOrderId: string;
   creatorPersonalWalletId: string;
   memo?: string | null;
-  autoApprove?: boolean;
 };
 
 export type DecimalProposalApproveRequest = {
@@ -646,14 +654,12 @@ export type CreateSquadsAddMemberProposalRequest = {
   permissions: SquadsPermission[];
   newThreshold?: number;
   memo?: string | null;
-  autoApprove?: boolean;
 };
 
 export type CreateSquadsChangeThresholdProposalRequest = {
   creatorPersonalWalletId: string;
   newThreshold: number;
   memo?: string | null;
-  autoApprove?: boolean;
 };
 
 export type SquadsConfigProposalApproveRequest = {
@@ -935,12 +941,15 @@ export type PaymentOrderState =
   | 'draft'
   | 'pending_approval'
   | 'approved'
+  | 'ready'
+  | 'proposed'
   | 'ready_for_execution'
   | 'proposal_prepared'
   | 'proposal_submitted'
   | 'proposal_approved'
   | 'proposal_executed'
   | 'execution_recorded'
+  | 'executed'
   | 'partially_settled'
   | 'settled'
   | 'exception'
@@ -1123,6 +1132,11 @@ export type PaymentOrder = {
   dueAt: string | null;
   state: PaymentOrderState;
   derivedState: PaymentOrderState;
+  productLifecycle: {
+    productState: PaymentOrderState;
+    source: 'squads_v4' | 'legacy' | string;
+    steps: string[];
+  };
   sourceBalanceSnapshotJson: Record<string, unknown>;
   balanceWarning: {
     status: 'unknown' | 'sufficient' | 'insufficient';
@@ -1148,6 +1162,7 @@ export type PaymentOrder = {
     provider: string;
     decimalProposalId: string;
     proposalStatus: string;
+    productState: PaymentOrderState;
     paymentState: PaymentOrderState;
     hasSubmittedSignature: boolean;
     hasExecutedSignature: boolean;

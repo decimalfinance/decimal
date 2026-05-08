@@ -41,6 +41,7 @@ import type {
   CreateSquadsAddMemberProposalRequest,
   CreateSquadsChangeThresholdProposalRequest,
   CreateSquadsPaymentProposalRequest,
+  CreateSquadsPaymentRunProposalRequest,
   DecimalProposal,
   DecimalProposalApproveRequest,
   DecimalProposalExecuteRequest,
@@ -746,6 +747,16 @@ export const api = {
       { method: 'POST', body: JSON.stringify(input) },
     );
   },
+  createProposalRejectIntent(
+    organizationId: string,
+    decimalProposalId: string,
+    input: DecimalProposalApproveRequest,
+  ) {
+    return request<DecimalProposalIntentResponse>(
+      `/organizations/${organizationId}/proposals/${decimalProposalId}/reject-intent`,
+      { method: 'POST', body: JSON.stringify(input) },
+    );
+  },
   createProposalExecuteIntent(
     organizationId: string,
     decimalProposalId: string,
@@ -763,6 +774,22 @@ export const api = {
   ) {
     return request<DecimalProposalIntentResponse>(
       `/organizations/${organizationId}/treasury-wallets/${treasuryWalletId}/squads/vault-proposals/payment-intent`,
+      { method: 'POST', body: JSON.stringify(input) },
+    );
+  },
+  // Batch variant: one Squads vault proposal containing every USDC transfer
+  // in a payment run. Backend caps batches at 8 rows and rejects if any
+  // row still needs Decimal-side approval (returns 400) or if the run
+  // already has an active proposal (returns 409 with the existing
+  // decimalProposalId in the error payload — frontend should route there
+  // instead of treating it as failure).
+  createSquadsPaymentRunProposalIntent(
+    organizationId: string,
+    treasuryWalletId: string,
+    input: CreateSquadsPaymentRunProposalRequest,
+  ) {
+    return request<DecimalProposalIntentResponse>(
+      `/organizations/${organizationId}/treasury-wallets/${treasuryWalletId}/squads/vault-proposals/payment-run-intent`,
       { method: 'POST', body: JSON.stringify(input) },
     );
   },
