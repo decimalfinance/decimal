@@ -29,7 +29,21 @@ import { useToast } from '../ui/Toast';
 type StageState = 'complete' | 'current' | 'pending' | 'blocked';
 
 type LifecycleStage = {
-  id: 'imported' | 'reviewed' | 'approved' | 'executed' | 'settled' | 'proven';
+  id:
+    | 'imported'
+    | 'reviewed'
+    | 'approved'
+    | 'executed'
+    | 'settled'
+    | 'proven'
+    // Squads-source runs use a different lifecycle: Requested · Propose ·
+    // Approve · Execute · Verify (no separate proof stage — settlement
+    // verification covers it).
+    | 'request'
+    | 'proposal'
+    | 'approval'
+    | 'execute'
+    | 'verify';
   label: string;
   sub: string;
   state: StageState;
@@ -76,6 +90,102 @@ function buildLifecycle(run: PaymentRun, orders: PaymentOrder[]): LifecycleStage
   const state = run.derivedState;
   const blocked = state === 'exception' || state === 'partially_settled';
   const settled = state === 'settled' || state === 'closed';
+  const cancelled = state === 'cancelled';
+
+  // Squads-source runs flow through the multisig lifecycle, not the legacy
+  // direct-sign + Yellowstone matcher path. Render a 5-stage rail that
+  // mirrors the single-payment lifecycle on PaymentDetail:
+  // Requested · Propose · Approve · Execute · Verify
+  if (run.sourceTreasuryWallet?.source === 'squads_v4') {
+    const proposedDone = ['proposed', 'approved', 'executed', 'submitted_onchain', 'partially_settled', 'settled', 'closed', 'exception'].includes(state);
+    const approvalDone = ['approved', 'executed', 'submitted_onchain', 'partially_settled', 'settled', 'closed', 'exception'].includes(state);
+    const executionDone = ['executed', 'execution_recorded', 'submitted_onchain', 'partially_settled', 'settled', 'closed', 'exception'].includes(state);
+
+    const isReady = state === 'ready' || state === 'ready_for_execution';
+    const stillNeedsDecimalApproval = state === 'pending_approval' || state === 'draft';
+
+    return [
+      {
+        id: 'request',
+        label: 'Requested',
+        sub: `${t.orderCount} payment${t.orderCount === 1 ? '' : 's'}`,
+        state: 'complete',
+      },
+      {
+        id: 'proposal',
+        label: proposedDone ? 'Proposed' : 'Propose',
+        sub: cancelled
+          ? 'Cancelled'
+          : proposedDone
+            ? 'On-chain'
+            : isReady
+              ? 'Ready'
+              : stillNeedsDecimalApproval
+                ? 'Pending approval'
+                : 'Pending',
+        state: cancelled
+          ? 'blocked'
+          : proposedDone
+            ? 'complete'
+            : isReady
+              ? 'current'
+              : 'pending',
+      },
+      {
+        id: 'approval',
+        label: approvalDone ? 'Approved' : 'Approve',
+        sub: approvalDone
+          ? 'Threshold met'
+          : proposedDone
+            ? 'Voting'
+            : 'Pending proposal',
+        state: cancelled || blocked
+          ? 'blocked'
+          : approvalDone
+            ? 'complete'
+            : proposedDone
+              ? 'current'
+              : 'pending',
+      },
+      {
+        id: 'execute',
+        label: executionDone ? 'Executed' : 'Execute',
+        sub: blocked
+          ? 'Blocked'
+          : executionDone
+            ? 'On-chain'
+            : approvalDone
+              ? 'Ready'
+              : 'Pending approval',
+        state: blocked
+          ? 'blocked'
+          : executionDone
+            ? 'complete'
+            : approvalDone
+              ? 'current'
+              : 'pending',
+      },
+      {
+        id: 'verify',
+        label: settled ? 'Settled' : 'Verify',
+        sub: blocked
+          ? 'Needs review'
+          : settled
+            ? `${t.settledCount} of ${Math.max(t.actionableCount, 1)} matched`
+            : executionDone
+              ? 'Watching'
+              : 'Pending execution',
+        state: blocked
+          ? 'blocked'
+          : settled
+            ? 'complete'
+            : executionDone
+              ? 'current'
+              : 'pending',
+      },
+    ];
+  }
+
   const anySubmitted = orders.some((o) => {
     if (['execution_recorded', 'partially_settled', 'settled', 'closed', 'exception'].includes(o.derivedState)) {
       return true;
