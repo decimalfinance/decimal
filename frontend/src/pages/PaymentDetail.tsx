@@ -23,6 +23,7 @@ import {
 } from '../domain';
 import { displayPaymentStatus, statusToneForPayment } from '../status-labels';
 import { signAndSubmitIntent } from '../lib/squads-pipeline';
+import { readSettlementVerificationStatus } from '../lib/settlement';
 import { useToast } from '../ui/Toast';
 import type { UserWallet } from '../types';
 
@@ -62,9 +63,12 @@ function toneToPill(tone: 'success' | 'warning' | 'danger' | 'neutral'): 'succes
   return tone === 'success' ? 'success' : tone === 'danger' ? 'danger' : tone === 'warning' ? 'warning' : 'info';
 }
 
-function buildLifecycle(order: PaymentOrder): LifecycleStage[] {
+function buildLifecycle(
+  order: PaymentOrder,
+  settlementVerification: ReturnType<typeof readSettlementVerificationStatus>,
+): LifecycleStage[] {
   const s = order.productLifecycle?.productState ?? order.derivedState;
-  const blocked = s === 'exception' || s === 'partially_settled';
+  const blocked = s === 'exception' || s === 'partially_settled' || settlementVerification === 'mismatch';
   const settled = s === 'settled' || s === 'closed';
   const cancelled = s === 'cancelled';
   const squads = order.productLifecycle?.source === 'squads_v4';
@@ -74,6 +78,9 @@ function buildLifecycle(order: PaymentOrder): LifecycleStage[] {
   const approvalDone = ['approved', 'executed', 'partially_settled', 'settled', 'closed', 'exception'].includes(s);
   const executionDone = ['execution_recorded', 'executed', 'proposal_executed', 'partially_settled', 'settled', 'closed', 'exception'].includes(s);
   const proofDone = settled;
+
+  const verifyingNow = executionDone && !settled && settlementVerification === 'pending';
+  const verifyMismatch = settlementVerification === 'mismatch';
 
   if (squads) {
     return [
@@ -99,13 +106,27 @@ function buildLifecycle(order: PaymentOrder): LifecycleStage[] {
         id: 'execution',
         label: executionDone ? 'Executed' : 'Execute',
         sub: executionDone ? 'On-chain' : approvalDone ? 'Ready' : 'Pending approval',
-        state: blocked ? 'blocked' : executionDone ? 'complete' : approvalDone ? 'current' : 'pending',
+        state: blocked && !verifyMismatch ? 'blocked' : executionDone ? 'complete' : approvalDone ? 'current' : 'pending',
       },
       {
         id: 'settlement',
-        label: settled ? 'Settled' : 'Verify',
-        sub: blocked ? 'Needs review' : settled ? 'Matched' : executionDone ? 'Watching' : 'Pending execution',
-        state: blocked ? 'blocked' : settled ? 'complete' : executionDone ? 'current' : 'pending',
+        label: verifyMismatch ? 'Mismatch' : settled ? 'Settled' : 'Verify',
+        sub: verifyMismatch
+          ? 'Settlement deltas did not match'
+          : settled
+            ? 'Matched'
+            : verifyingNow
+              ? 'Verifying on RPC…'
+              : executionDone
+                ? 'Verification pending'
+                : 'Pending execution',
+        state: verifyMismatch
+          ? 'blocked'
+          : settled
+            ? 'complete'
+            : executionDone
+              ? 'current'
+              : 'pending',
       },
     ];
   }
@@ -153,9 +174,19 @@ function buildLifecycle(order: PaymentOrder): LifecycleStage[] {
     },
     {
       id: 'settlement',
-      label: settled ? 'Settled' : 'Settle',
-      sub: blocked ? 'Needs review' : settled ? 'Matched' : executionDone ? 'Watching' : 'Pending',
-      state: blocked ? 'blocked' : settled ? 'complete' : executionDone ? 'current' : 'pending',
+      label: verifyMismatch ? 'Mismatch' : settled ? 'Settled' : 'Settle',
+      sub: verifyMismatch
+        ? 'Settlement deltas did not match'
+        : blocked
+          ? 'Needs review'
+          : settled
+            ? 'Matched'
+            : verifyingNow
+              ? 'Verifying on RPC…'
+              : executionDone
+                ? 'Verification pending'
+                : 'Pending',
+      state: verifyMismatch ? 'blocked' : blocked ? 'blocked' : settled ? 'complete' : executionDone ? 'current' : 'pending',
     },
     {
       id: 'proof',
@@ -184,16 +215,15 @@ function determineVariant(order: PaymentOrder): ActionVariant {
   return 'idle';
 }
 
-// Detects the backend's "transaction signature is not confirmed yet" 400
-// from verifyRpcSignatureConfirmed. Codex returns generic bad_request, so
-// we pattern-match on the message text. Used to keep the user on a retry
-// banner instead of forcing them to recreate a proposal that may have
-// already landed on chain.
+// Detects the backend's retryable confirmation errors:
+//   - "Transaction signature is not confirmed yet." (verifyRpcSignatureConfirmed)
+//   - "Execution transaction was confirmed, but USDC settlement could not be
+//      verified from RPC yet." (verifySquadsProposalSettlement, transient)
+// Both cases mean the on-chain side may already have happened — the user
+// should stay on a retry banner rather than recreate the proposal.
 function isUnconfirmedSignatureError(err: unknown): boolean {
-  if (err instanceof ApiError && err.status === 400 && /not confirmed yet/i.test(err.message)) {
-    return true;
-  }
-  return false;
+  if (!(err instanceof ApiError) || err.status !== 400) return false;
+  return /(not confirmed yet|could not be verified from RPC yet)/i.test(err.message);
 }
 
 function downloadJson(filename: string, data: unknown) {
@@ -406,11 +436,12 @@ export function PaymentDetailPage() {
         intent,
         signerPersonalWalletId: signerWalletId,
       });
-      try {
-        await api.confirmProposalExecution(organizationId!, linkedProposal.decimalProposalId, { signature: sig });
-      } catch {
-        // ignore — refetch will catch up
-      }
+      // confirm-execution may throw a retryable 400 ("not confirmed yet" or
+      // "could not be verified from RPC yet") — surface that to the user as
+      // a "verification pending" notice rather than swallowing. The backend
+      // stores the signature on the proposal regardless, so the auto-retry
+      // effect below will re-run verification once RPC catches up.
+      await api.confirmProposalExecution(organizationId!, linkedProposal.decimalProposalId, { signature: sig });
       return sig;
     },
     onSuccess: async () => {
@@ -419,10 +450,55 @@ export function PaymentDetailPage() {
       await queryClient.invalidateQueries({ queryKey: ['payment-orders', organizationId] });
       await queryClient.invalidateQueries({ queryKey: ['organization-proposals', organizationId] });
     },
-    onError: (err) => {
+    onError: async (err) => {
+      if (isUnconfirmedSignatureError(err)) {
+        info('Execution submitted. Verification pending — will retry automatically.');
+        // Refetch so the proposal's executedSignature shows up and the
+        // pending-verification effect can take over.
+        await queryClient.invalidateQueries({ queryKey: ['payment-order', organizationId, paymentOrderId] });
+        await queryClient.invalidateQueries({ queryKey: ['organization-proposals', organizationId] });
+        return;
+      }
       toastError(err instanceof ApiError || err instanceof Error ? err.message : 'Execute failed.');
     },
   });
+
+  // Auto-retry settlement verification while the proposal is executed but
+  // the backend hasn't yet been able to verify USDC settlement (RPC lag on
+  // getParsedTransaction). confirm-execution is idempotent for the same
+  // signature: it only re-runs verification and upgrades downstream state if
+  // verification now passes.
+  const verificationStatus = readSettlementVerificationStatus(linkedProposal);
+  useEffect(() => {
+    if (!organizationId) return;
+    if (!linkedProposal?.decimalProposalId) return;
+    if (!linkedProposal.executedSignature) return;
+    if (verificationStatus !== 'pending') return;
+    let cancelled = false;
+    const handle = window.setTimeout(async () => {
+      if (cancelled) return;
+      try {
+        await api.confirmProposalExecution(organizationId, linkedProposal.decimalProposalId, {
+          signature: linkedProposal.executedSignature!,
+        });
+        await queryClient.invalidateQueries({ queryKey: ['payment-order', organizationId, paymentOrderId] });
+        await queryClient.invalidateQueries({ queryKey: ['organization-proposals', organizationId] });
+      } catch {
+        // Stay on pending; the next render schedules another retry.
+      }
+    }, 6_000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [
+    organizationId,
+    paymentOrderId,
+    linkedProposal?.decimalProposalId,
+    linkedProposal?.executedSignature,
+    verificationStatus,
+    queryClient,
+  ]);
 
   // When the proposal-creation tx is signed and submitted but the backend
   // confirm-submission times out (RPC slow / not yet visible), we keep the
@@ -560,7 +636,7 @@ export function PaymentDetailPage() {
   const order = orderQuery.data;
   const recipientName = order.counterparty?.displayName ?? order.destination.label;
   const amountLabel = `${formatRawUsdcCompact(order.amountRaw)} ${assetSymbol(order.asset)}`;
-  const lifecycle = buildLifecycle(order);
+  const lifecycle = buildLifecycle(order, verificationStatus);
   const variant = determineVariant(order);
   const statusTone = statusToneForPayment(order.derivedState);
   const latestExec = order.reconciliationDetail?.latestExecution ?? null;
@@ -1078,14 +1154,14 @@ function PrimaryAction(props: {
     const isApproved = status === 'approved';
     const isExecuted = status === 'executed';
     const eyebrow = isExecuted
-      ? 'Watching · Settlement'
+      ? 'Executed · Verify settlement'
       : isApproved
         ? 'Next step · Execute proposal'
         : proposalPendingVoterWalletId
           ? 'Next step · Your approval'
           : 'Next step · Awaiting voters';
     const title = isExecuted
-      ? 'Proposal executed — watching for on-chain match'
+      ? 'Proposal executed — settlement verification pending'
       : isApproved
         ? `Threshold met (${approvalCount} of ${threshold}) — ready to execute`
         : `${approvalCount} of ${threshold} approvals · ${pendingCount} awaiting`;
@@ -1099,7 +1175,7 @@ function PrimaryAction(props: {
         <h2 className="rd-primary-title">{title}</h2>
         <p className="rd-primary-body">
           {isExecuted
-            ? 'The on-chain transfer landed. Reconciliation will mark this payment settled once the worker observes the matched transfer.'
+            ? 'The on-chain execution landed. Decimal marks this payment settled after RPC verifies the expected USDC destination delta.'
             : isApproved
               ? 'A Squads member with execute permission needs to submit the execute transaction.'
               : 'Each voter signs independently — no shared blockhash, no rush.'}
@@ -1251,7 +1327,7 @@ function PrimaryAction(props: {
   if (variant === 'in_flight') {
     return (
       <div className="rd-primary">
-        <p className="rd-primary-eyebrow">Watching · Settlement</p>
+        <p className="rd-primary-eyebrow">Executed · Verify settlement</p>
         <h2 className="rd-primary-title">Signed, watching on-chain match</h2>
         <p className="rd-primary-body">
           The worker is reconstructing USDC transfers and matching this signature to the expected

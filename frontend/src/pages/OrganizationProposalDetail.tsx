@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../api';
@@ -9,6 +9,7 @@ import type {
   SquadsProposalPendingVoter,
 } from '../types';
 import { signAndSubmitIntent } from '../lib/squads-pipeline';
+import { readSettlementVerificationStatus } from '../lib/settlement';
 import { orbAccountUrl, shortenAddress } from '../domain';
 import { useToast } from '../ui/Toast';
 import {
@@ -26,8 +27,17 @@ export function OrganizationProposalDetailPage({ session }: { session: Authentic
     decimalProposalId: string;
   }>();
   const queryClient = useQueryClient();
-  const { success, error: toastError } = useToast();
+  const { success, error: toastError, info } = useToast();
   const [busyAction, setBusyAction] = useState<'approve' | 'execute' | 'reject' | null>(null);
+
+  // Same retryable-confirmation surface as PaymentDetail/PaymentRunDetail.
+  // 400s from confirm-execution that match this regex mean the on-chain
+  // execution likely landed but RPC hasn't yet caught up; we treat them
+  // as a soft retryable state instead of a hard failure.
+  function isRetryableConfirmationError(err: unknown): boolean {
+    if (!(err instanceof ApiError) || err.status !== 400) return false;
+    return /(not confirmed yet|could not be verified from RPC yet)/i.test(err.message);
+  }
 
   const ownPersonalWalletsQuery = useQuery({
     queryKey: ['personal-wallets'] as const,
@@ -110,18 +120,20 @@ export function OrganizationProposalDetailPage({ session }: { session: Authentic
         intent,
         signerPersonalWalletId: input.signerWalletId,
       });
-      try {
-        await api.confirmProposalExecution(organizationId!, input.proposal.decimalProposalId, {
-          signature: sig,
-        });
-      } catch {
-        // ignore — local status will catch up via refetch
-      }
+      // Backend persists the signature whether or not settlement verification
+      // succeeds, so the auto-retry effect below can re-run verification on
+      // refresh without us needing to keep the signature in component state.
+      // We still call confirm-execution here to drive the immediate state
+      // transition; retryable errors get surfaced as an info toast instead of
+      // being swallowed.
+      await api.confirmProposalExecution(organizationId!, input.proposal.decimalProposalId, {
+        signature: sig,
+      });
       if (input.proposal.proposalType === 'config_transaction' && input.proposal.treasuryWalletId) {
         try {
           await api.syncSquadsTreasuryMembers(organizationId!, input.proposal.treasuryWalletId);
         } catch {
-          // ignore
+          // sync is best-effort — surfacing this to the user adds noise
         }
       }
       return sig;
@@ -133,11 +145,52 @@ export function OrganizationProposalDetailPage({ session }: { session: Authentic
         queryKey: ['treasury-wallet-detail', organizationId],
       });
     },
-    onError: (err) => {
+    onError: async (err) => {
+      if (isRetryableConfirmationError(err)) {
+        info('Execution submitted. Verification pending — will retry automatically.');
+        await refreshAll();
+        return;
+      }
       toastError(err instanceof ApiError || err instanceof Error ? err.message : 'Execute failed.');
     },
     onSettled: () => setBusyAction(null),
   });
+
+  // Auto-retry settlement verification while the proposal has an executed
+  // signature stored but RPC settlement could not yet be verified. Idempotent
+  // on the backend.
+  const proposalForVerify = proposalQuery.data ?? null;
+  const verificationStatus = readSettlementVerificationStatus(proposalForVerify);
+  useEffect(() => {
+    if (!organizationId) return;
+    if (!proposalForVerify?.decimalProposalId) return;
+    if (!proposalForVerify.executedSignature) return;
+    if (verificationStatus !== 'pending') return;
+    let cancelled = false;
+    const handle = window.setTimeout(async () => {
+      if (cancelled) return;
+      try {
+        await api.confirmProposalExecution(organizationId, proposalForVerify.decimalProposalId, {
+          signature: proposalForVerify.executedSignature!,
+        });
+        await refreshAll();
+      } catch {
+        // Stay pending — next render schedules another retry.
+      }
+    }, 6_000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+    // refreshAll closes over organizationId/decimalProposalId/queryClient,
+    // all of which are already in the dep set or stable, so it's safe to omit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    organizationId,
+    proposalForVerify?.decimalProposalId,
+    proposalForVerify?.executedSignature,
+    verificationStatus,
+  ]);
 
   if (!organizationId || !decimalProposalId) {
     return (
@@ -378,6 +431,8 @@ function ProposalDetailBody({
         </section>
       ) : null}
 
+      <SettlementVerificationBanner proposal={proposal} />
+
       {proposal.semanticType === 'send_payment' ? (
         <PaymentSummary proposal={proposal} />
       ) : proposal.semanticType === 'send_payment_run' ? (
@@ -474,6 +529,71 @@ function ProposalDetailBody({
       </section>
     </>
   );
+}
+
+function SettlementVerificationBanner({ proposal }: { proposal: DecimalProposal }) {
+  const isPayment = proposal.semanticType === 'send_payment' || proposal.semanticType === 'send_payment_run';
+  const status = readSettlementVerificationStatus(proposal);
+  // Don't render anything before execution lands or for non-payment proposals.
+  if (!isPayment) return null;
+  if (!proposal.executedSignature) return null;
+  if (status === 'settled' || status === null) return null;
+
+  if (status === 'pending') {
+    return (
+      <section
+        className="rd-section"
+        style={{
+          marginTop: 16,
+          padding: 14,
+          border: '1px solid rgba(220, 180, 80, 0.45)',
+          background: 'rgba(220, 180, 80, 0.08)',
+          borderRadius: 12,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          flexWrap: 'wrap',
+        }}
+      >
+        <span aria-hidden style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 999, background: 'rgb(220, 180, 80)' }} />
+        <div>
+          <strong style={{ fontSize: 13 }}>Settlement verification pending</strong>
+          <div style={{ fontSize: 12, color: 'var(--ax-text-muted)', marginTop: 4 }}>
+            On-chain execution landed but RPC hasn't returned the parsed transaction yet. Verifying USDC deltas will retry automatically.
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (status === 'mismatch') {
+    return (
+      <section
+        className="rd-section"
+        style={{
+          marginTop: 16,
+          padding: 14,
+          border: '1px solid rgba(220, 80, 80, 0.45)',
+          background: 'rgba(220, 80, 80, 0.08)',
+          borderRadius: 12,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          flexWrap: 'wrap',
+        }}
+      >
+        <span aria-hidden style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 999, background: 'rgb(240, 90, 90)' }} />
+        <div>
+          <strong style={{ fontSize: 13 }}>Settlement deltas did not match</strong>
+          <div style={{ fontSize: 12, color: 'var(--ax-text-muted)', marginTop: 4 }}>
+            The execution transaction landed but the observed USDC transfers don't match what this proposal expected. Investigate before treating these payments as settled.
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  return null;
 }
 
 function PaymentSummary({ proposal }: { proposal: DecimalProposal }) {

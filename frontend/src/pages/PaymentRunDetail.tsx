@@ -11,6 +11,7 @@ import type {
   UserWallet,
 } from '../types';
 import { signAndSubmitIntent } from '../lib/squads-pipeline';
+import { readSettlementVerificationStatus } from '../lib/settlement';
 import {
   discoverSolanaWallets,
   formatRawUsdcCompact,
@@ -85,10 +86,14 @@ function walletLabel(address: TreasuryWallet): string {
   return shortenAddress(address.address, 4, 4);
 }
 
-function buildLifecycle(run: PaymentRun, orders: PaymentOrder[]): LifecycleStage[] {
+function buildLifecycle(
+  run: PaymentRun,
+  orders: PaymentOrder[],
+  settlementVerification: ReturnType<typeof readSettlementVerificationStatus>,
+): LifecycleStage[] {
   const t = run.totals;
   const state = run.derivedState;
-  const blocked = state === 'exception' || state === 'partially_settled';
+  const blocked = state === 'exception' || state === 'partially_settled' || settlementVerification === 'mismatch';
   const settled = state === 'settled' || state === 'closed';
   const cancelled = state === 'cancelled';
 
@@ -100,6 +105,9 @@ function buildLifecycle(run: PaymentRun, orders: PaymentOrder[]): LifecycleStage
     const proposedDone = ['proposed', 'approved', 'executed', 'submitted_onchain', 'partially_settled', 'settled', 'closed', 'exception'].includes(state);
     const approvalDone = ['approved', 'executed', 'submitted_onchain', 'partially_settled', 'settled', 'closed', 'exception'].includes(state);
     const executionDone = ['executed', 'execution_recorded', 'submitted_onchain', 'partially_settled', 'settled', 'closed', 'exception'].includes(state);
+
+    const verifyingNow = executionDone && !settled && settlementVerification === 'pending';
+    const verifyMismatch = settlementVerification === 'mismatch';
 
     const isReady = state === 'ready' || state === 'ready_for_execution';
     const stillNeedsDecimalApproval = state === 'pending_approval' || state === 'draft';
@@ -150,14 +158,14 @@ function buildLifecycle(run: PaymentRun, orders: PaymentOrder[]): LifecycleStage
       {
         id: 'execute',
         label: executionDone ? 'Executed' : 'Execute',
-        sub: blocked
+        sub: blocked && !verifyMismatch
           ? 'Blocked'
           : executionDone
             ? 'On-chain'
             : approvalDone
               ? 'Ready'
               : 'Pending approval',
-        state: blocked
+        state: blocked && !verifyMismatch
           ? 'blocked'
           : executionDone
             ? 'complete'
@@ -167,21 +175,27 @@ function buildLifecycle(run: PaymentRun, orders: PaymentOrder[]): LifecycleStage
       },
       {
         id: 'verify',
-        label: settled ? 'Settled' : 'Verify',
-        sub: blocked
-          ? 'Needs review'
-          : settled
-            ? `${t.settledCount} of ${Math.max(t.actionableCount, 1)} matched`
-            : executionDone
-              ? 'Watching'
-              : 'Pending execution',
-        state: blocked
+        label: verifyMismatch ? 'Mismatch' : settled ? 'Settled' : 'Verify',
+        sub: verifyMismatch
+          ? 'Settlement deltas did not match'
+          : blocked
+            ? 'Needs review'
+            : settled
+              ? `${t.settledCount} of ${Math.max(t.actionableCount, 1)} matched`
+              : verifyingNow
+                ? 'Verifying on RPC…'
+                : executionDone
+                  ? 'Verification pending'
+                  : 'Pending execution',
+        state: verifyMismatch
           ? 'blocked'
-          : settled
-            ? 'complete'
-            : executionDone
-              ? 'current'
-              : 'pending',
+          : blocked
+            ? 'blocked'
+            : settled
+              ? 'complete'
+              : executionDone
+                ? 'current'
+                : 'pending',
       },
     ];
   }
@@ -283,11 +297,10 @@ function buildLifecycle(run: PaymentRun, orders: PaymentOrder[]): LifecycleStage
   ];
 }
 
+// See PaymentDetail.tsx — same retryable-confirmation surface.
 function isUnconfirmedSignatureError(err: unknown): boolean {
-  if (err instanceof ApiError && err.status === 400 && /not confirmed yet/i.test(err.message)) {
-    return true;
-  }
-  return false;
+  if (!(err instanceof ApiError) || err.status !== 400) return false;
+  return /(not confirmed yet|could not be verified from RPC yet)/i.test(err.message);
 }
 
 function determinePrimaryVariant(run: PaymentRun, runOrders: PaymentOrder[]): PrimaryActionVariant {
@@ -630,6 +643,44 @@ export function PaymentRunDetailPage() {
       toastError(err instanceof Error ? err.message : 'Confirmation failed.');
     },
   });
+
+  // Auto-retry settlement verification on the linked run proposal while the
+  // backend has the executed signature stored but RPC hasn't yet allowed the
+  // settlement-deltas check to succeed. confirm-execution is idempotent for
+  // the same signature.
+  const linkedRunVerificationStatus = readSettlementVerificationStatus(linkedRunProposal);
+  useEffect(() => {
+    if (!organizationId) return;
+    if (!linkedRunProposal?.decimalProposalId) return;
+    if (!linkedRunProposal.executedSignature) return;
+    if (linkedRunVerificationStatus !== 'pending') return;
+    let cancelled = false;
+    const handle = window.setTimeout(async () => {
+      if (cancelled) return;
+      try {
+        await api.confirmProposalExecution(organizationId, linkedRunProposal.decimalProposalId, {
+          signature: linkedRunProposal.executedSignature!,
+        });
+        await queryClient.invalidateQueries({ queryKey: ['payment-run', organizationId, paymentRunId] });
+        await queryClient.invalidateQueries({
+          queryKey: ['organization-proposals', organizationId, 'linked-run', paymentRunId],
+        });
+      } catch {
+        // Stay on pending; the next render schedules another retry.
+      }
+    }, 6_000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [
+    organizationId,
+    paymentRunId,
+    linkedRunProposal?.decimalProposalId,
+    linkedRunProposal?.executedSignature,
+    linkedRunVerificationStatus,
+    queryClient,
+  ]);
   // ----------------------------------------------------------------------------
 
   const deleteMutation = useMutation({
@@ -694,7 +745,7 @@ export function PaymentRunDetailPage() {
 
   const run = runQuery.data;
   const runOrders = run.paymentOrders ?? [];
-  const lifecycle = buildLifecycle(run, runOrders);
+  const lifecycle = buildLifecycle(run, runOrders, linkedRunVerificationStatus);
   const variant = determinePrimaryVariant(run, runOrders);
   const totalAmount = `${formatRawUsdcCompact(run.totals.totalAmountRaw)} ${assetSymbol(runOrders[0]?.asset)}`;
   const statusTone = statusToneForPayment(run.derivedState);
@@ -1179,7 +1230,7 @@ function PrimaryActionCard(props: {
   if (variant === 'in_flight') {
     return (
       <div className="rd-primary">
-        <p className="rd-primary-eyebrow">Watching · Settlement in flight</p>
+        <p className="rd-primary-eyebrow">Executed · Verify settlement</p>
         <h2 className="rd-primary-title">
           <span className="rd-mono">{settledCount}</span> of{' '}
           <span className="rd-mono">{run.totals.actionableCount}</span> matched on-chain
