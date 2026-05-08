@@ -13,22 +13,11 @@ import {
   collectionSourceTrustTone,
   displayCollectionSourceName,
   displayCollectionSourceTrust,
+  toneToPill,
 } from '../status-labels';
 import { useToast } from '../ui/Toast';
 
 type TrustFilter = 'all' | CollectionSourceTrustState;
-
-function toneToPill(
-  tone: 'success' | 'warning' | 'danger' | 'neutral',
-): 'success' | 'warning' | 'danger' | 'info' {
-  return tone === 'success'
-    ? 'success'
-    : tone === 'danger'
-      ? 'danger'
-      : tone === 'warning'
-        ? 'warning'
-        : 'info';
-}
 
 export function CollectionSourcesPage({ session: _session }: { session: AuthenticatedSession }) {
   const { organizationId } = useParams<{ organizationId: string }>();

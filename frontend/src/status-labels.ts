@@ -184,6 +184,20 @@ export function humanizeExceptionReason(code: string): string {
   return code.replaceAll('_', ' ');
 }
 
+// Maps the 4-tone palette used by status labels to the 4-tone palette used
+// by the rd-pill UI primitive. 'neutral' becomes 'info' on the pill side.
+export function toneToPill(
+  tone: 'success' | 'warning' | 'danger' | 'neutral',
+): 'success' | 'warning' | 'danger' | 'info' {
+  return tone === 'success'
+    ? 'success'
+    : tone === 'danger'
+      ? 'danger'
+      : tone === 'warning'
+        ? 'warning'
+        : 'info';
+}
+
 export function isPaymentOrderState(s: string): boolean {
   return (
     s === 'draft' ||

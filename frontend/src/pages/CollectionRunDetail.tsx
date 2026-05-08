@@ -7,20 +7,9 @@ import {
   collectionRunProgressLine,
   displayCollectionStatus,
   statusToneForCollection,
+  toneToPill,
 } from '../status-labels';
 import { useToast } from '../ui/Toast';
-
-function toneToPill(
-  tone: 'success' | 'warning' | 'danger' | 'neutral',
-): 'success' | 'warning' | 'danger' | 'info' {
-  return tone === 'success'
-    ? 'success'
-    : tone === 'danger'
-      ? 'danger'
-      : tone === 'warning'
-        ? 'warning'
-        : 'info';
-}
 
 function payerLabel(collection: CollectionRequest): string {
   if (collection.counterparty?.displayName) return collection.counterparty.displayName;

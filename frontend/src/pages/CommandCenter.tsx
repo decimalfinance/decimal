@@ -11,12 +11,8 @@ import {
   formatUsd,
   shortenAddress,
 } from '../domain';
-import { displayPaymentStatus, displayRunStatus, statusToneForPayment } from '../status-labels';
+import { displayPaymentStatus, displayRunStatus, statusToneForPayment, toneToPill } from '../status-labels';
 import { useTour } from '../Tour';
-
-function toneToPill(tone: 'success' | 'warning' | 'danger' | 'neutral'): 'success' | 'warning' | 'danger' | 'info' {
-  return tone === 'success' ? 'success' : tone === 'danger' ? 'danger' : tone === 'warning' ? 'warning' : 'info';
-}
 
 function sourceLabel(wallet: TreasuryWallet | null): string {
   if (!wallet) return '—';

@@ -771,14 +771,6 @@ export type ExecutionRecord = {
   executorUser: User | null;
 };
 
-export type ObservedExecutionTransaction = {
-  signature: string;
-  slot: number;
-  eventTime: string;
-  status: string;
-  createdAt: string;
-};
-
 export type TransferRequestEvent = {
   transferRequestEventId: string;
   transferRequestId: string;
@@ -803,28 +795,6 @@ export type TransferRequestNote = {
   body: string;
   createdAt: string;
   authorUser: User | null;
-};
-
-export type ObservedTransfer = {
-  transferId: string;
-  signature: string;
-  slot: number;
-  eventTime: string;
-  asset: string;
-  sourceTokenAccount: string | null;
-  sourceWallet: string | null;
-  destinationTokenAccount: string;
-  destinationWallet: string | null;
-  amountRaw: string;
-  amountDecimal: string;
-  transferKind: string;
-  instructionIndex: number | null;
-  innerInstructionIndex: number | null;
-  routeGroup: string;
-  legRole: string;
-  propertiesJson: Record<string, unknown> | string | null;
-  createdAt: string;
-  chainToWriteMs: number;
 };
 
 export type ReconciliationRow = {
@@ -1370,30 +1340,6 @@ export type CollectionRunImportResult = {
 };
 
 
-export type ObservedPayment = {
-  paymentId: string;
-  signature: string;
-  slot: number;
-  eventTime: string;
-  asset: string;
-  sourceWallet: string | null;
-  destinationWallet: string | null;
-  grossAmountRaw: string;
-  grossAmountDecimal: string;
-  netDestinationAmountRaw: string;
-  netDestinationAmountDecimal: string;
-  feeAmountRaw: string;
-  feeAmountDecimal: string;
-  routeCount: number;
-  paymentKind: string;
-  reconstructionRule: string;
-  confidenceBand: string;
-  propertiesJson: Record<string, unknown> | string | null;
-  createdAt: string;
-  recipientRole?: 'expected_destination' | 'known_fee_recipient' | 'other_destination';
-  destinationLabel?: string | null;
-};
-
 export type ReconciliationTimelineItem =
   | {
       timelineType: 'request_event';
@@ -1459,31 +1405,7 @@ export type ReconciliationTimelineItem =
     };
 
 export type ReconciliationDetail = ReconciliationRow & {
-  observedExecutionTransaction: ObservedExecutionTransaction | null;
-  linkedObservedTransfers: ObservedTransfer[];
-  linkedObservedPayment: ObservedPayment | null;
-  relatedObservedPayments: ObservedPayment[];
   events: TransferRequestEvent[];
   notes: TransferRequestNote[];
-  timeline: ReconciliationTimelineItem[];
   availableTransitions: string[];
-};
-
-export type OpsHealth = {
-  postgres: string;
-  workerStatus: 'healthy' | 'degraded' | 'stale' | 'offline';
-  latestSlot: number | null;
-  latestEventTime: string | null;
-  latestWorkerReceivedAt: string | null;
-  latestTxWriteAt: string | null;
-  latestMatchAt: string | null;
-  workerFreshnessMs: number | null;
-  observedTransactionCount: number;
-  matchCount: number;
-  openExceptionCount: number;
-  latencies: {
-    yellowstoneToWorkerMs: { p50: number | null; p95: number | null };
-    chainToWriteMs: { p50: number | null; p95: number | null };
-    chainToMatchMs: { p50: number | null; p95: number | null };
-  };
 };

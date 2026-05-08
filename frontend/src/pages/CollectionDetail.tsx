@@ -18,22 +18,11 @@ import {
   displayCollectionSourceTrust,
   displayCollectionStatus,
   statusToneForCollection,
+  toneToPill,
 } from '../status-labels';
 import { useToast } from '../ui/Toast';
 import { DetailEntry } from '../ui-primitives';
 import { LifecycleRail, type LifecycleStage, type StageState } from '../ui/LifecycleRail';
-
-function toneToPill(
-  tone: 'success' | 'warning' | 'danger' | 'neutral',
-): 'success' | 'warning' | 'danger' | 'info' {
-  return tone === 'success'
-    ? 'success'
-    : tone === 'danger'
-      ? 'danger'
-      : tone === 'warning'
-        ? 'warning'
-        : 'info';
-}
 
 function buildLifecycle(collection: CollectionRequest): LifecycleStage[] {
   const s = collection.derivedState;

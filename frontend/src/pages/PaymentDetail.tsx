@@ -24,7 +24,7 @@ import {
   walletLabel,
   type BrowserWalletOption,
 } from '../domain';
-import { displayPaymentStatus, statusToneForPayment } from '../status-labels';
+import { displayPaymentStatus, statusToneForPayment, toneToPill } from '../status-labels';
 import { signAndSubmitIntent } from '../lib/squads-pipeline';
 import {
   isRetryableConfirmationError,
@@ -49,10 +49,6 @@ type ActionVariant =
   | 'exception'
   | 'cancelled'
   | 'idle';
-
-function toneToPill(tone: 'success' | 'warning' | 'danger' | 'neutral'): 'success' | 'warning' | 'danger' | 'info' {
-  return tone === 'success' ? 'success' : tone === 'danger' ? 'danger' : tone === 'warning' ? 'warning' : 'info';
-}
 
 function buildLifecycle(
   order: PaymentOrder,

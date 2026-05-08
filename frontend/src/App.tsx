@@ -34,9 +34,6 @@ import type {
   PaymentRequest,
   PaymentRun,
   PaymentRunExecutionPreparation,
-  ReconciliationRow,
-  ReconciliationTimelineItem,
-  ObservedTransfer,
   TreasuryWallet,
   Organization,
   UserWallet,
@@ -94,8 +91,6 @@ function queryKeys(organizationId?: string, paymentOrderId?: string) {
     paymentRun: ['payment-run', organizationId, paymentOrderId] as const,
     paymentOrders: ['payment-orders', organizationId] as const,
     paymentOrder: ['payment-order', organizationId, paymentOrderId] as const,
-    approvalPolicy: ['approval-policy', organizationId] as const,
-    exceptions: ['exceptions', organizationId] as const,
   };
 }
 
@@ -3157,36 +3152,6 @@ function getPreparedPacket(order: PaymentOrder | undefined): PaymentExecutionPac
 
 function isPaymentExecutionPacket(value: unknown): value is PaymentExecutionPacket {
   return Boolean(value && typeof value === 'object' && 'kind' in value && 'instructions' in value);
-}
-
-function timelineLabel(item: ReconciliationTimelineItem) {
-  switch (item.timelineType) {
-    case 'request_event':
-      return {
-        type: item.eventType.replaceAll('_', ' '),
-        description: item.afterState ? `${item.beforeState ?? 'created'} -> ${item.afterState}` : 'Request event recorded.',
-        createdAt: item.createdAt,
-      };
-    case 'request_note':
-      return { type: 'note', description: item.body, createdAt: item.createdAt };
-    case 'approval_decision':
-      return { type: item.action.replaceAll('_', ' '), description: item.comment ?? 'Approval decision recorded.', createdAt: item.createdAt };
-    case 'execution_record':
-      return { type: 'execution', description: `${item.executionSource} / ${item.state}`, createdAt: item.createdAt };
-    case 'observed_execution':
-      return { type: 'observed execution', description: `${item.status} at slot ${item.slot}`, createdAt: item.createdAt };
-    case 'match_result':
-      return { type: item.matchStatus.replaceAll('_', ' '), description: item.explanation, createdAt: item.createdAt };
-    case 'exception':
-      return { type: item.reasonCode.replaceAll('_', ' '), description: item.explanation, createdAt: item.createdAt };
-  }
-
-  const fallback = item as unknown as { timelineType?: string; createdAt: string };
-  return {
-    type: String(fallback.timelineType ?? 'timeline_event').replaceAll('_', ' '),
-    description: 'Timeline event recorded.',
-    createdAt: fallback.createdAt,
-  };
 }
 
 function downloadJson(fileName: string, payload: unknown) {

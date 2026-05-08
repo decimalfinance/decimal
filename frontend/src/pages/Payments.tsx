@@ -22,6 +22,7 @@ import {
   displayRunStatus,
   hasRealDestinationName,
   statusToneForPayment,
+  toneToPill,
 } from '../status-labels';
 import { useToast } from '../ui/Toast';
 
@@ -62,10 +63,6 @@ function sourceLabel(wallet: TreasuryWallet | null): string {
   if (!wallet) return '—';
   if (wallet.displayName && wallet.displayName.trim().length) return wallet.displayName;
   return shortenAddress(wallet.address, 4, 4);
-}
-
-function toneToPill(tone: 'success' | 'warning' | 'danger' | 'neutral'): 'success' | 'warning' | 'danger' | 'info' {
-  return tone === 'success' ? 'success' : tone === 'danger' ? 'danger' : tone === 'warning' ? 'warning' : 'info';
 }
 
 function usdcToRaw(value: string): string {

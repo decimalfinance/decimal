@@ -15,7 +15,6 @@ import type {
   Destination,
   CreateOrganizationInviteResponse,
   LoginResponse,
-  ObservedTransfer,
   OrganizationInvite,
   OrganizationInviteRole,
   OrganizationInviteStatus,
@@ -30,7 +29,6 @@ import type {
   PaymentRunExecutionPreparation,
   PaymentRunImportResult,
   PublicInvite,
-  ReconciliationRow,
   Organization,
   ConfirmSquadsTreasuryRequest,
   CreateSquadsTreasuryIntentRequest,
@@ -791,16 +789,6 @@ export const api = {
     );
   },
 
-  listTransfers(organizationId: string) {
-    return request<{ servedAt: string; items: ObservedTransfer[] }>(
-      `/organizations/${organizationId}/transfers?limit=100`,
-    );
-  },
-  listReconciliation(organizationId: string) {
-    return request<{ servedAt: string; items: ReconciliationRow[] }>(
-      `/organizations/${organizationId}/reconciliation?limit=100`,
-    );
-  },
   listPaymentOrders(organizationId: string, state?: PaymentOrder['state']) {
     const params = new URLSearchParams({ limit: '100' });
     if (state) {

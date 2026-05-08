@@ -35,18 +35,6 @@ const DEFAULT_STEPS: TourStep[] = [
       'Inbound USDC. Tell Decimal a payment is expected from a counterparty; when it lands on-chain we match it and emit a proof.',
   },
   {
-    key: 'policy',
-    title: 'Policy',
-    body:
-      'Your approval rules. Define trust thresholds, per-counterparty limits, and who needs manual review before money moves.',
-  },
-  {
-    key: 'proofs',
-    title: 'Proofs',
-    body:
-      'Signed proof packets for every settled payment and collection. Export JSON for audit and bookkeeping hand-off.',
-  },
-  {
     key: 'wallets',
     title: 'Wallets',
     body:
