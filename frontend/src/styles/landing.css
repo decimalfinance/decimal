@@ -294,17 +294,19 @@ html body {
   position: relative;
   aspect-ratio: 1 / 1;
   width: 100%;
-  max-width: 400px;
+  max-width: 560px;
   justify-self: end;
+  display: grid;
+  place-items: center;
 }
 @media (max-width: 1080px) {
-  .hero-visual { justify-self: center; max-width: 320px; }
+  .hero-visual { justify-self: center; max-width: 420px; }
 }
 .orb-stage {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  width: 64%;
+  aspect-ratio: 1 / 1;
   perspective: 900px;
-  cursor: grab;
   display: grid;
   place-items: center;
   isolation: isolate;
