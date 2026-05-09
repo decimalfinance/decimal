@@ -662,7 +662,7 @@ function SquadsLogo() {
 }
 
 function PrivyLogo() {
-  return <img src="/privy.svg" alt="" className="bo-mark-img" />;
+  return <img src="/privy-black.svg" alt="" className="bo-mark-img" />;
 }
 
 function USDCLogo() {
