@@ -32,7 +32,6 @@ import type {
   PaymentOrderState,
   PaymentRequest,
   PaymentRun,
-  PaymentRunExecutionPreparation,
   TreasuryWallet,
   Organization,
   UserWallet,

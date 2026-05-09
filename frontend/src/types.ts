@@ -1031,12 +1031,6 @@ export type PaymentRunImportResult = {
   importResult: PaymentRequestsCsvImportResult;
 };
 
-export type PaymentRunExecutionPreparation = {
-  executionRecords: ExecutionRecord[];
-  executionPacket: PaymentExecutionPacket;
-  paymentRun: PaymentRun;
-};
-
 export type PaymentOrder = {
   paymentOrderId: string;
   organizationId: string;

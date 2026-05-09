@@ -26,7 +26,6 @@ import type {
   PaymentProofPacket,
   PaymentRequest,
   PaymentRun,
-  PaymentRunExecutionPreparation,
   PaymentRunImportResult,
   PublicInvite,
   Organization,
@@ -879,37 +878,6 @@ export const api = {
       {
         method: 'POST',
         body: JSON.stringify(input ?? {}),
-      },
-    );
-  },
-  preparePaymentRunExecution(
-    organizationId: string,
-    paymentRunId: string,
-    input?: {
-      sourceTreasuryWalletId?: string;
-    },
-  ) {
-    return request<PaymentRunExecutionPreparation>(
-      `/organizations/${organizationId}/payment-runs/${paymentRunId}/prepare-execution`,
-      {
-        method: 'POST',
-        body: JSON.stringify(input ?? {}),
-      },
-    );
-  },
-  attachPaymentRunSignature(
-    organizationId: string,
-    paymentRunId: string,
-    input: {
-      submittedSignature: string;
-      submittedAt?: string;
-    },
-  ) {
-    return request<{ executionRecords: unknown[]; paymentRun: PaymentRun }>(
-      `/organizations/${organizationId}/payment-runs/${paymentRunId}/attach-signature`,
-      {
-        method: 'POST',
-        body: JSON.stringify(input),
       },
     );
   },

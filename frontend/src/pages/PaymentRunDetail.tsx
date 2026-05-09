@@ -6,7 +6,6 @@ import type {
   DecimalProposal,
   PaymentOrder,
   PaymentRun,
-  PaymentRunExecutionPreparation,
   TreasuryWallet,
   UserWallet,
 } from '../types';
@@ -18,18 +17,14 @@ import {
 } from '../lib/settlement';
 import {
   assetSymbol,
-  discoverSolanaWallets,
   downloadJson,
   formatRawUsdcCompact,
   formatRelativeTime,
   formatTimestamp,
   orbTransactionUrl,
   shortenAddress,
-  signAndSubmitPreparedPayment,
   orbAccountUrl,
-  subscribeSolanaWallets,
   walletLabel,
-  type BrowserWalletOption,
 } from '../domain';
 import { displayPaymentStatus, displayRunStatus, statusToneForPayment } from '../status-labels';
 import { buildSquadsPaymentLifecycle } from '../lib/lifecycle';
@@ -40,10 +35,9 @@ import { useToast } from '../ui/Toast';
 type PrimaryActionVariant =
   | 'loading'
   | 'needs_submit'
-  | 'ready_to_sign'
+  | 'needs_treasury_wallet'
   | 'ready_to_propose'
   | 'proposal_in_progress'
-  | 'signing'
   | 'in_flight'
   | 'exception'
   | 'settled'
@@ -71,7 +65,11 @@ function buildLifecycle(
   });
 }
 
-function determinePrimaryVariant(run: PaymentRun, runOrders: PaymentOrder[]): PrimaryActionVariant {
+function determinePrimaryVariant(
+  run: PaymentRun,
+  runOrders: PaymentOrder[],
+  squadsTreasuryCount: number,
+): PrimaryActionVariant {
   if (!runOrders.length) return 'empty';
   if (run.derivedState === 'settled' || run.derivedState === 'closed') return 'settled';
   if (run.derivedState === 'exception' || run.derivedState === 'partially_settled') return 'exception';
@@ -80,26 +78,13 @@ function determinePrimaryVariant(run: PaymentRun, runOrders: PaymentOrder[]): Pr
   const hasDrafts = runOrders.some((o) => o.derivedState === 'draft');
   if (hasDrafts) return 'needs_submit';
 
-  const isSquadsSource = run.sourceTreasuryWallet?.source === 'squads_v4';
+  if (run.derivedState === 'proposed') return 'proposal_in_progress';
+  if (run.derivedState === 'executed') return 'in_flight';
+  if (runOrders.some((o) => o.derivedState === 'execution_recorded')) return 'in_flight';
 
-  // Squads-source runs hit a multisig proposal lifecycle instead of the
-  // direct-sign batch packet. The run's derivedState advances:
-  //   ready -> proposed -> executed.
-  if (isSquadsSource) {
-    if (run.derivedState === 'proposed') return 'proposal_in_progress';
-    if (run.derivedState === 'executed') return 'in_flight';
-    if (run.derivedState === 'ready' || run.derivedState === 'ready_for_execution') {
-      return 'ready_to_propose';
-    }
+  if (run.derivedState === 'ready' || run.derivedState === 'ready_for_execution') {
+    return squadsTreasuryCount === 0 ? 'needs_treasury_wallet' : 'ready_to_propose';
   }
-
-  const inFlight = runOrders.some((o) => o.derivedState === 'execution_recorded');
-  if (inFlight) return 'in_flight';
-
-  const readyToSign = runOrders.some((o) =>
-    ['approved', 'ready_for_execution'].includes(o.derivedState),
-  );
-  if (readyToSign) return 'ready_to_sign';
 
   return 'empty';
 }
@@ -128,15 +113,9 @@ export function PaymentRunDetailPage() {
   const queryClient = useQueryClient();
 
   const { success, error: toastError, info } = useToast();
-  const [prepared, setPrepared] = useState<PaymentRunExecutionPreparation | null>(null);
-  const [selectedSourceAddressId, setSelectedSourceAddressId] = useState('');
-  const [selectedWalletId, setSelectedWalletId] = useState<string | undefined>();
-  const [wallets, setWallets] = useState<BrowserWalletOption[]>(() => discoverSolanaWallets());
+  const [selectedSourceTreasuryWalletId, setSelectedSourceTreasuryWalletId] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-
-  useEffect(() => subscribeSolanaWallets(setWallets), []);
-  useEffect(() => setPrepared(null), [selectedSourceAddressId]);
 
   const addressesQuery = useQuery({
     queryKey: ['addresses', organizationId] as const,
@@ -157,11 +136,17 @@ export function PaymentRunDetailPage() {
     },
   });
 
-  const sourceAddresses = addressesQuery.data?.items ?? [];
-  const effectiveSourceAddressId =
-    selectedSourceAddressId
+  // Filter to Squads-source treasury wallets — direct-sign treasuries can no
+  // longer execute batches; everything goes through the multisig proposal.
+  const squadsTreasuryWallets = useMemo(
+    () => (addressesQuery.data?.items ?? []).filter((w) => w.source === 'squads_v4' && w.isActive),
+    [addressesQuery.data],
+  );
+
+  const effectiveSourceTreasuryWalletId =
+    selectedSourceTreasuryWalletId
     || runQuery.data?.sourceTreasuryWalletId
-    || sourceAddresses[0]?.treasuryWalletId
+    || squadsTreasuryWallets[0]?.treasuryWalletId
     || '';
 
   // Submit all draft orders so the run can advance to "ready" and the user
@@ -225,47 +210,6 @@ export function PaymentRunDetailPage() {
     onError: (err) => toastError(err instanceof Error ? err.message : 'Could not cancel payment.'),
   });
 
-  const signMutation = useMutation({
-    mutationFn: async () => {
-      if (!effectiveSourceAddressId) throw new Error('Choose a source wallet before signing.');
-      const sourceAddressRow = sourceAddresses.find((r) => r.treasuryWalletId === effectiveSourceAddressId);
-      if (!sourceAddressRow?.address) {
-        throw new Error('Source wallet is still loading. Wait a moment and retry.');
-      }
-      let preparation = prepared;
-      const sourceMismatch =
-        !preparation
-        || preparation.paymentRun.sourceTreasuryWalletId !== effectiveSourceAddressId
-        || preparation.executionPacket.signerWallet !== sourceAddressRow.address;
-      if (sourceMismatch) {
-        preparation = await api.preparePaymentRunExecution(organizationId!, paymentRunId!, {
-          sourceTreasuryWalletId: effectiveSourceAddressId,
-        });
-        setPrepared(preparation);
-      }
-      if (!preparation) throw new Error('Could not prepare the execution packet. Try again.');
-      const signature = await signAndSubmitPreparedPayment(preparation.executionPacket, selectedWalletId);
-      await api.attachPaymentRunSignature(organizationId!, paymentRunId!, {
-        submittedSignature: signature,
-        submittedAt: new Date().toISOString(),
-      });
-      return signature;
-    },
-    onSuccess: async (signature) => {
-      success(`Signed and submitted · ${shortenAddress(signature, 8, 8)}`);
-      await queryClient.invalidateQueries({ queryKey: ['payment-run', organizationId, paymentRunId] });
-      await queryClient.invalidateQueries({ queryKey: ['payment-orders', organizationId] });
-    },
-    onError: (err) => {
-      const message = err instanceof Error ? err.message : 'Could not sign the batch.';
-      if (/user|reject|cancel/i.test(message)) {
-        info('Signing cancelled. Ready to retry.');
-      } else {
-        toastError(message);
-      }
-    },
-  });
-
   const proofMutation = useMutation({
     mutationFn: () => api.getPaymentRunProof(organizationId!, paymentRunId!),
     onSuccess: (proof) => {
@@ -276,12 +220,10 @@ export function PaymentRunDetailPage() {
   });
 
   // -- Squads batch proposal flow ---------------------------------------------
-  const isSquadsSourceRun = runQuery.data?.sourceTreasuryWallet?.source === 'squads_v4';
-
   const ownPersonalWalletsQuery = useQuery({
     queryKey: ['personal-wallets'] as const,
     queryFn: () => api.listPersonalWallets(),
-    enabled: Boolean(organizationId && isSquadsSourceRun),
+    enabled: Boolean(organizationId),
   });
   const ownPersonalWallets: UserWallet[] = useMemo(
     () =>
@@ -300,7 +242,8 @@ export function PaymentRunDetailPage() {
 
   // Find the active Decimal proposal for this run (if any). Backend has no
   // paymentRunId filter on the proposals listing, so we fetch by treasury and
-  // filter client-side.
+  // filter client-side. Only enabled once the run has a source treasury
+  // committed (which happens as a side effect of proposal creation).
   const linkedProposalQuery = useQuery({
     queryKey: ['organization-proposals', organizationId, 'linked-run', paymentRunId] as const,
     queryFn: () =>
@@ -309,12 +252,7 @@ export function PaymentRunDetailPage() {
         treasuryWalletId: runQuery.data!.sourceTreasuryWalletId!,
         limit: 50,
       }),
-    enabled: Boolean(
-      organizationId
-        && paymentRunId
-        && isSquadsSourceRun
-        && runQuery.data?.sourceTreasuryWalletId,
-    ),
+    enabled: Boolean(organizationId && paymentRunId && runQuery.data?.sourceTreasuryWalletId),
     refetchInterval: 15_000,
   });
   const linkedRunProposal: DecimalProposal | null = useMemo(() => {
@@ -335,15 +273,15 @@ export function PaymentRunDetailPage() {
 
   const createRunProposalMutation = useMutation({
     mutationFn: async () => {
-      if (!runQuery.data?.sourceTreasuryWalletId) {
-        throw new Error('No source treasury on this run.');
+      if (!effectiveSourceTreasuryWalletId) {
+        throw new Error('Pick a Squads treasury to source this batch from.');
       }
       if (!runProposalCreatorWalletId) {
         throw new Error('Pick a personal wallet to initiate the proposal.');
       }
       const intent = await api.createSquadsPaymentRunProposalIntent(
         organizationId!,
-        runQuery.data.sourceTreasuryWalletId,
+        effectiveSourceTreasuryWalletId,
         {
           paymentRunId: paymentRunId!,
           creatorPersonalWalletId: runProposalCreatorWalletId,
@@ -471,7 +409,7 @@ export function PaymentRunDetailPage() {
   const run = runQuery.data;
   const runOrders = run.paymentOrders ?? [];
   const lifecycle = buildLifecycle(run, linkedRunVerificationStatus);
-  const variant = determinePrimaryVariant(run, runOrders);
+  const variant = determinePrimaryVariant(run, runOrders, squadsTreasuryWallets.length);
   const totalAmount = `${formatRawUsdcCompact(run.totals.totalAmountRaw)} ${assetSymbol(runOrders[0]?.asset)}`;
   const statusTone = statusToneForPayment(run.derivedState);
   const statusTonePill: 'success' | 'warning' | 'danger' | 'info' =
@@ -583,19 +521,14 @@ export function PaymentRunDetailPage() {
           pendingCount={pendingCount}
           readyToSignCount={readyToSignCount}
           readyToSignAmount={`${formatRawUsdcCompact(readyToSignAmountRaw.toString())} USDC`}
-          sourceAddresses={sourceAddresses}
-          effectiveSourceAddressId={effectiveSourceAddressId}
-          onSelectSource={setSelectedSourceAddressId}
-          wallets={wallets}
-          selectedWalletId={selectedWalletId}
-          onSelectWallet={setSelectedWalletId}
+          squadsTreasuryWallets={squadsTreasuryWallets}
+          effectiveSourceTreasuryWalletId={effectiveSourceTreasuryWalletId}
+          onSelectSourceTreasury={setSelectedSourceTreasuryWalletId}
           submittedSignatures={submittedSignatures}
           settledCount={settledCount}
           submittingDrafts={submitDraftsMutation.isPending}
-          signing={signMutation.isPending}
           exporting={proofMutation.isPending}
           onSubmitDrafts={() => submitDraftsMutation.mutate()}
-          onSign={() => signMutation.mutate()}
           onExportProof={() => proofMutation.mutate()}
           ownPersonalWallets={ownPersonalWallets}
           runProposalCreatorWalletId={runProposalCreatorWalletId}
@@ -661,19 +594,14 @@ function PrimaryActionCard(props: {
   pendingCount: number;
   readyToSignCount: number;
   readyToSignAmount: string;
-  sourceAddresses: TreasuryWallet[];
-  effectiveSourceAddressId: string;
-  onSelectSource: (id: string) => void;
-  wallets: BrowserWalletOption[];
-  selectedWalletId: string | undefined;
-  onSelectWallet: (id: string | undefined) => void;
+  squadsTreasuryWallets: TreasuryWallet[];
+  effectiveSourceTreasuryWalletId: string;
+  onSelectSourceTreasury: (id: string) => void;
   submittedSignatures: string[];
   settledCount: number;
   submittingDrafts: boolean;
-  signing: boolean;
   exporting: boolean;
   onSubmitDrafts: () => void;
-  onSign: () => void;
   onExportProof: () => void;
   ownPersonalWallets: UserWallet[];
   runProposalCreatorWalletId: string;
@@ -692,19 +620,14 @@ function PrimaryActionCard(props: {
     pendingCount,
     readyToSignCount,
     readyToSignAmount,
-    sourceAddresses,
-    effectiveSourceAddressId,
-    onSelectSource,
-    wallets,
-    selectedWalletId,
-    onSelectWallet,
+    squadsTreasuryWallets,
+    effectiveSourceTreasuryWalletId,
+    onSelectSourceTreasury,
     submittedSignatures,
     settledCount,
     submittingDrafts,
-    signing,
     exporting,
     onSubmitDrafts,
-    onSign,
     onExportProof,
     ownPersonalWallets,
     runProposalCreatorWalletId,
@@ -770,14 +693,30 @@ function PrimaryActionCard(props: {
     }
 
     const hasPersonalWallets = ownPersonalWallets.length > 0;
+    const sourceLocked = Boolean(run.sourceTreasuryWalletId);
     return (
       <RdPrimaryCard
         emphasis="action"
         eyebrow="Next step · Squads batch proposal"
         title={`${readyToSignCount} payment${readyToSignCount === 1 ? '' : 's'} ready · ${readyToSignAmount}`}
-        body="The source treasury is a Squads multisig. Bundle every row in this run into a single batch proposal that signers approve once before any USDC moves."
+        body="Pick a Squads multisig to fund this batch from. Creating the proposal locks that treasury to the run; signers then approve once before any USDC moves."
       >
         <div className="rd-primary-grid">
+          <label className="rd-field">
+            <span className="rd-field-label">Source treasury (Squads multisig)</span>
+            <select
+              className="rd-select"
+              value={effectiveSourceTreasuryWalletId}
+              onChange={(e) => onSelectSourceTreasury(e.target.value)}
+              disabled={sourceLocked}
+            >
+              {squadsTreasuryWallets.map((w) => (
+                <option key={w.treasuryWalletId} value={w.treasuryWalletId}>
+                  {walletLabel(w)}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="rd-field">
             <span className="rd-field-label">Initiating wallet</span>
             {hasPersonalWallets ? (
@@ -800,19 +739,45 @@ function PrimaryActionCard(props: {
           </label>
         </div>
         <p style={{ fontSize: 12, color: 'var(--ax-text-muted)', margin: '0 0 12px' }}>
-          Must be one of your personal wallets that's an on-chain Squads member with the <strong>Initiate</strong> permission. Backend caps batches at 8 rows.
+          Initiating wallet must be a Squads member of the chosen treasury with the <strong>Initiate</strong> permission. Backend caps batches at 8 rows.
         </p>
         <div className="rd-actions">
           <button
             type="button"
             className="rd-btn rd-btn-primary"
             onClick={onCreateRunProposal}
-            disabled={proposing || !hasPersonalWallets || !runProposalCreatorWalletId}
+            disabled={
+              proposing
+                || !hasPersonalWallets
+                || !runProposalCreatorWalletId
+                || !effectiveSourceTreasuryWalletId
+            }
             aria-busy={proposing}
           >
             {proposing ? 'Creating proposal…' : 'Create batch proposal'}
             {!proposing ? <span className="rd-btn-arrow" aria-hidden>→</span> : null}
           </button>
+        </div>
+      </RdPrimaryCard>
+    );
+  }
+
+  if (variant === 'needs_treasury_wallet') {
+    return (
+      <RdPrimaryCard
+        emphasis="action"
+        eyebrow="Next step · Add a Squads treasury"
+        title="No Squads multisig connected"
+        body="Batch payouts execute through a Squads multisig. Connect or create one in Treasury accounts before proposing this batch."
+      >
+        <div className="rd-actions">
+          <Link
+            className="rd-btn rd-btn-primary"
+            to={`/organizations/${organizationId}/treasury-accounts`}
+          >
+            Open Treasury accounts
+            <span className="rd-btn-arrow" aria-hidden>→</span>
+          </Link>
         </div>
       </RdPrimaryCard>
     );
@@ -849,80 +814,6 @@ function PrimaryActionCard(props: {
             Open proposal
             <span className="rd-btn-arrow" aria-hidden>→</span>
           </Link>
-        </div>
-      </RdPrimaryCard>
-    );
-  }
-
-  if (variant === 'ready_to_sign') {
-    const selectedWallet = wallets.find((w) => w.id === selectedWalletId);
-    const hasWallets = wallets.length > 0;
-    return (
-      <RdPrimaryCard
-        emphasis="action"
-        eyebrow="Next step · Sign and execute"
-        title={
-          <>
-            <span className="rd-mono">{readyToSignAmount}</span> across {readyToSignCount} payment
-            {readyToSignCount === 1 ? '' : 's'}
-          </>
-        }
-        body="One signature submits the full batch. Each payment reconciles independently on-chain."
-      >
-        <div className="rd-primary-grid">
-          <label className="rd-field">
-            <span className="rd-field-label">Source wallet</span>
-            {sourceAddresses.length ? (
-              <select
-                className="rd-select"
-                value={effectiveSourceAddressId}
-                onChange={(e) => onSelectSource(e.target.value)}
-              >
-                {sourceAddresses.map((address) => (
-                  <option key={address.treasuryWalletId} value={address.treasuryWalletId}>
-                    {walletLabel(address)}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <span className="rd-field-label" style={{ color: 'var(--ax-warning)' }}>
-                Add a wallet in Address book first.
-              </span>
-            )}
-          </label>
-          <label className="rd-field">
-            <span className="rd-field-label">Signing wallet</span>
-            <select
-              className="rd-select"
-              value={selectedWalletId ?? ''}
-              onChange={(e) => onSelectWallet(e.target.value || undefined)}
-              disabled={!hasWallets}
-            >
-              <option value="">{hasWallets ? 'Auto-detect' : 'No wallet detected'}</option>
-              {wallets.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <div className="rd-actions">
-          <button
-            type="button"
-            className="rd-btn rd-btn-primary"
-            onClick={onSign}
-            disabled={signing || !effectiveSourceAddressId || readyToSignCount === 0}
-            aria-busy={signing}
-          >
-            {signing ? 'Waiting for signature…' : `Sign and submit (${readyToSignCount})`}
-            {!signing ? <span className="rd-btn-arrow" aria-hidden>→</span> : null}
-          </button>
-          {selectedWallet ? (
-            <span style={{ fontSize: 12, color: 'var(--ax-text-muted)' }}>
-              Using {selectedWallet.name}
-            </span>
-          ) : null}
         </div>
       </RdPrimaryCard>
     );
