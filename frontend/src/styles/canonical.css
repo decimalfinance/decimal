@@ -316,7 +316,7 @@ input[type='checkbox']:checked::after {
 }
 
 .provider-icon-logo[data-provider='privy'] {
-  background-image: url('/Privy-square-coral.svg');
+  background-image: url('/privy.svg');
 }
 
 .provider-card-main {

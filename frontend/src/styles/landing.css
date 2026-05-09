@@ -729,6 +729,13 @@ html body {
   border-radius: 9px;
   flex-shrink: 0;
 }
+.bo-mark-img {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  flex-shrink: 0;
+  display: block;
+}
 .bo-blurb { color: var(--ink-2); font-size: 14.5px; max-width: 32ch; }
 .bo-tag {
   font-family: 'JetBrains Mono', monospace;

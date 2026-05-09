@@ -658,69 +658,19 @@ function BuiltOnCell({
 }
 
 function SquadsLogo() {
-  return (
-    <span className="bo-mark" style={{ background: '#0a0a0a' }}>
-      <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true">
-        <path d="M6 6h9v9H6z" fill="#fff" />
-        <path d="M17 6h9v9h-9z" fill="#a78bfa" />
-        <path d="M6 17h9v9H6z" fill="#a78bfa" />
-        <path d="M17 17h9v9h-9z" fill="#fff" />
-      </svg>
-    </span>
-  );
+  return <img src="/squads.svg" alt="" className="bo-mark-img" />;
 }
 
 function PrivyLogo() {
-  return (
-    <span className="bo-mark" style={{ background: '#0a0a0a' }}>
-      <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true">
-        <path
-          d="M9 6h9a6 6 0 0 1 0 12h-3v8H9V6z M15 11.2v1.6h2.6a.8.8 0 0 0 0-1.6H15z"
-          fill="#9bff85"
-        />
-      </svg>
-    </span>
-  );
+  return <img src="/privy.svg" alt="" className="bo-mark-img" />;
 }
 
 function USDCLogo() {
-  return (
-    <span className="bo-mark" style={{ background: '#2775CA' }}>
-      <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true">
-        <circle cx="16" cy="16" r="13" fill="none" stroke="#fff" strokeWidth="1.6" />
-        <text
-          x="16"
-          y="21"
-          textAnchor="middle"
-          fontFamily="'Bricolage Grotesque', sans-serif"
-          fontWeight="700"
-          fontSize="15"
-          fill="#fff"
-        >
-          $
-        </text>
-        <path d="M16 4v3 M16 25v3" stroke="#fff" strokeWidth="1.4" />
-      </svg>
-    </span>
-  );
+  return <img src="/usdc.svg" alt="" className="bo-mark-img" />;
 }
 
 function SolanaLogo() {
-  return (
-    <span className="bo-mark" style={{ background: '#0a0a0a' }}>
-      <svg width="22" height="18" viewBox="0 0 32 26" aria-hidden="true">
-        <defs>
-          <linearGradient id="decimal-sol-grad" x1="0" x2="1" y1="0" y2="1">
-            <stop offset="0" stopColor="#9945FF" />
-            <stop offset="1" stopColor="#14F195" />
-          </linearGradient>
-        </defs>
-        <path d="M7 2h22l-4 4H3z" fill="url(#decimal-sol-grad)" />
-        <path d="M3 11h22l4 4H7z" fill="url(#decimal-sol-grad)" />
-        <path d="M7 20h22l-4 4H3z" fill="url(#decimal-sol-grad)" />
-      </svg>
-    </span>
-  );
+  return <img src="/solana.svg" alt="" className="bo-mark-img" />;
 }
 
 /* ───────────────── Why Decimal ───────────────── */
