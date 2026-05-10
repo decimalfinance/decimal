@@ -144,6 +144,19 @@
   border-color: transparent;
 }
 
+/* Small modifier — for secondary status badges that sit alongside the
+ * primary pill (e.g. trust state under a payment-order status). */
+.rd-pill-sm {
+  padding: 2px 7px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.rd-pill-sm .rd-pill-dot {
+  width: 4px;
+  height: 4px;
+}
+
 /* ── Overflow menu trigger ─────────────────────────────── */
 
 .rd-overflow {
@@ -456,6 +469,67 @@
   font-family: var(--ax-font-mono);
   font-size: 14px;
   line-height: 1;
+}
+
+/* Small modifier — for inline row actions and dense action clusters
+ * that need to fit within table cells without inflating row height. */
+.rd-btn-sm {
+  padding: 6px 10px;
+  min-height: 32px;
+  font-size: 12px;
+  gap: 6px;
+}
+.rd-btn-sm .rd-btn-arrow {
+  font-size: 12px;
+}
+
+/* ── Helper text + utility primitives ──────────────────── */
+
+/* Small muted explanation text — used under inputs, beside actions,
+ * and as inline hints inside cards. Replaces the repeating inline
+ * `{fontSize: 12, color: var(--ax-text-muted)}`. */
+.rd-hint {
+  font-size: 12px;
+  color: var(--ax-text-muted);
+  line-height: 1.5;
+}
+.rd-hint[data-mono='true'] {
+  font-family: var(--ax-font-mono);
+}
+
+/* Em-dash placeholder for empty cells. Replaces the repeating inline
+ * `{color: var(--ax-text-faint)}`. */
+.rd-empty-mark {
+  color: var(--ax-text-faint);
+}
+.rd-empty-mark[data-mono='true'] {
+  font-family: var(--ax-font-mono);
+  font-size: 12px;
+}
+
+/* Horizontal cluster of items with consistent gap — common around
+ * row-level action buttons. */
+.rd-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+/* Vertical stack with consistent small gap — common when a primary
+ * pill stacks above a secondary pill (status + trust state). */
+.rd-stack-y {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+/* Source / treasury wallet label inside table cells. */
+.rd-source-label {
+  font-size: 13px;
+  color: var(--ax-text-secondary);
 }
 
 /* ── Notice / inline message ───────────────────────────── */

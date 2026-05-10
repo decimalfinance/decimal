@@ -335,7 +335,7 @@ export function PaymentsPage({ session }: { session: AuthenticatedSession }) {
                           {row.counterpartyName}
                         </span>
                       ) : (
-                        <span style={{ color: 'var(--ax-text-faint)', fontSize: 12 }}>—</span>
+                        <span className="rd-empty-mark" data-mono="true">—</span>
                       )}
                     </td>
                     <td>
@@ -353,9 +353,9 @@ export function PaymentsPage({ session }: { session: AuthenticatedSession }) {
                     </td>
                     <td>
                       {row.source === '—' ? (
-                        <span style={{ color: 'var(--ax-text-faint)' }}>—</span>
+                        <span className="rd-empty-mark">—</span>
                       ) : (
-                        <span style={{ fontSize: 13, color: 'var(--ax-text-secondary)' }}>{row.source}</span>
+                        <span className="rd-source-label">{row.source}</span>
                       )}
                     </td>
                     <td className="rd-num">{row.amountLabel}</td>
@@ -852,7 +852,7 @@ function UploadDocumentDialog(props: {
         </label>
 
         {file ? (
-          <p style={{ fontSize: 12, color: 'var(--ax-text-muted)', margin: '8px 0 0' }}>
+          <p className="rd-hint" style={{ margin: '8px 0 0' }}>
             <span className="rd-mono">{file.name}</span> · {(file.size / 1024).toFixed(0)} KB
           </p>
         ) : null}
@@ -873,7 +873,7 @@ function UploadDocumentDialog(props: {
         </div>
 
         {uploadMutation.isPending ? (
-          <p style={{ fontSize: 12, color: 'var(--ax-text-muted)', margin: '12px 0 0' }}>
+          <p className="rd-hint" style={{ margin: '12px 0 0' }}>
             Vision model is reading the document — usually 5-15 seconds.
           </p>
         ) : null}

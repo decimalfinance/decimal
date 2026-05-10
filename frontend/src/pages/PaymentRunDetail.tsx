@@ -673,7 +673,7 @@ function PrimaryActionCard(props: {
           title="Batch proposal submitted — confirmation pending"
           body="Your signature went through and the batch proposal transaction was submitted. Solana RPC hasn't reported it confirmed yet. Retry confirmation in a few seconds; do not recreate the proposal — it may already be on chain."
         >
-          <p style={{ fontSize: 12, color: 'var(--ax-text-muted)', margin: '0 0 12px', fontFamily: 'monospace' }}>
+          <p className="rd-hint" data-mono="true" style={{ margin: '0 0 12px' }}>
             sig {shortenAddress(pendingRunProposalConfirmation.signature, 6, 6)}
           </p>
           <div className="rd-actions">
@@ -738,7 +738,7 @@ function PrimaryActionCard(props: {
             )}
           </label>
         </div>
-        <p style={{ fontSize: 12, color: 'var(--ax-text-muted)', margin: '0 0 12px' }}>
+        <p className="rd-hint" style={{ margin: '0 0 12px' }}>
           Initiating wallet must be a Squads member of the chosen treasury with the <strong>Initiate</strong> permission. Backend caps batches at 8 rows.
         </p>
         <div className="rd-actions">
@@ -992,13 +992,13 @@ function RecipientsTable({
                   </span>
                 </td>
                 <td>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+                  <div className="rd-stack-y">
                     <span className="rd-pill" data-tone={pillTone}>
                       <span className="rd-pill-dot" aria-hidden />
                       {displayPaymentStatus(order.derivedState)}
                     </span>
                     {isDraft ? (
-                      <span className="rd-pill" data-tone={trustTone} style={{ fontSize: 10 }}>
+                      <span className="rd-pill rd-pill-sm" data-tone={trustTone}>
                         {trustState}
                       </span>
                     ) : null}
@@ -1017,18 +1017,17 @@ function RecipientsTable({
                       <ExternalIcon />
                     </a>
                   ) : (
-                    <span style={{ color: 'var(--ax-text-faint)', fontFamily: 'var(--ax-font-mono)', fontSize: 12 }}>
+                    <span className="rd-empty-mark" data-mono="true">
                       —
                     </span>
                   )}
                 </td>
                 <td>
-                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                  <div className="rd-row-actions">
                     {isDraft && trustState !== 'trusted' ? (
                       <button
                         type="button"
-                        className="rd-btn rd-btn-primary"
-                        style={{ minHeight: 32, padding: '6px 10px', fontSize: 12 }}
+                        className="rd-btn rd-btn-sm rd-btn-primary"
                         disabled={rowBusy}
                         aria-busy={approving}
                         onClick={() => onApproveDestination(order.destination.destinationId, order.paymentOrderId)}
@@ -1039,8 +1038,7 @@ function RecipientsTable({
                     {isDraft ? (
                       <button
                         type="button"
-                        className="rd-btn rd-btn-secondary"
-                        style={{ minHeight: 32, padding: '6px 10px', fontSize: 12 }}
+                        className="rd-btn rd-btn-sm rd-btn-secondary"
                         disabled={rowBusy}
                         aria-busy={cancelling}
                         onClick={() => onCancelOrder(order.paymentOrderId)}
@@ -1050,8 +1048,7 @@ function RecipientsTable({
                     ) : null}
                     <Link
                       to={`/organizations/${organizationId}/payments/${rid(order.paymentOrderId)}`}
-                      className="rd-btn rd-btn-ghost"
-                      style={{ minHeight: 32, padding: '6px 10px', fontSize: 12 }}
+                      className="rd-btn rd-btn-sm rd-btn-ghost"
                     >
                       Details
                       <span className="rd-btn-arrow" aria-hidden>
