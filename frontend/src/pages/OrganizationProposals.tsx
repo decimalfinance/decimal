@@ -32,6 +32,7 @@ export function OrganizationProposalsPage({ session }: { session: AuthenticatedS
 
   const [statusFilter, setStatusFilter] = useState<SquadsProposalListStatusFilter>('pending');
   const [semanticFilter, setSemanticFilter] = useState<'' | ProposalSemanticType>('');
+  const [search, setSearch] = useState('');
   const [busy, setBusy] = useState<ProposalsTableBusy | null>(null);
 
   const treasuryWalletFilter = searchParams.get('treasuryWalletId') ?? '';
@@ -74,9 +75,29 @@ export function OrganizationProposalsPage({ session }: { session: AuthenticatedS
 
   const allItems = proposalsQuery.data?.items ?? [];
   const items = useMemo(() => {
-    if (!semanticFilter) return allItems;
-    return allItems.filter((p) => p.semanticType === semanticFilter);
-  }, [allItems, semanticFilter]);
+    let out = allItems;
+    if (semanticFilter) out = out.filter((p) => p.semanticType === semanticFilter);
+    const q = search.trim().toLowerCase();
+    if (q) {
+      const treasuryNameById = new Map(
+        treasuries.map((t) => [t.treasuryWalletId, (t.displayName ?? '').toLowerCase()]),
+      );
+      out = out.filter((p) =>
+        [
+          p.decimalProposalId,
+          p.semanticType ?? '',
+          p.paymentOrderId ?? '',
+          p.paymentRunId ?? '',
+          p.creatorWalletAddress ?? '',
+          p.treasuryWalletId ? (treasuryNameById.get(p.treasuryWalletId) ?? '') : '',
+        ]
+          .join(' ')
+          .toLowerCase()
+          .includes(q),
+      );
+    }
+    return out;
+  }, [allItems, semanticFilter, search, treasuries]);
 
   async function refreshProposals(decimalProposalId?: string) {
     await queryClient.invalidateQueries({ queryKey: ['organization-proposals', organizationId] });
@@ -199,6 +220,8 @@ export function OrganizationProposalsPage({ session }: { session: AuthenticatedS
       </header>
 
       <FilterRow
+        search={search}
+        onSearchChange={setSearch}
         statusFilter={statusFilter}
         onStatusFilterChange={setStatusFilter}
         semanticFilter={semanticFilter}
@@ -209,6 +232,7 @@ export function OrganizationProposalsPage({ session }: { session: AuthenticatedS
         }))}
         treasuryFilter={treasuryWalletFilter}
         onTreasuryFilterChange={setTreasuryFilter}
+        rightMeta={`${items.length} of ${allItems.length}`}
       />
 
       {proposalsQuery.isLoading ? (
@@ -255,6 +279,8 @@ export function OrganizationProposalsPage({ session }: { session: AuthenticatedS
 }
 
 function FilterRow({
+  search,
+  onSearchChange,
   statusFilter,
   onStatusFilterChange,
   semanticFilter,
@@ -262,7 +288,10 @@ function FilterRow({
   treasuries,
   treasuryFilter,
   onTreasuryFilterChange,
+  rightMeta,
 }: {
+  search: string;
+  onSearchChange: (next: string) => void;
   statusFilter: SquadsProposalListStatusFilter;
   onStatusFilterChange: (next: SquadsProposalListStatusFilter) => void;
   semanticFilter: '' | ProposalSemanticType;
@@ -270,6 +299,7 @@ function FilterRow({
   treasuries: Array<{ treasuryWalletId: string; displayName: string | null }>;
   treasuryFilter: string;
   onTreasuryFilterChange: (treasuryWalletId: string) => void;
+  rightMeta: string;
 }) {
   const tabs = (['pending', 'all', 'closed'] as SquadsProposalListStatusFilter[]).map((id) => ({
     id,
@@ -297,7 +327,19 @@ function FilterRow({
       ],
     },
   ];
-  return <RdFilterBar tabs={tabs} selects={selects} />;
+  return (
+    <RdFilterBar
+      search={{
+        value: search,
+        onChange: onSearchChange,
+        placeholder: 'Search proposal id, treasury, payment run',
+        ariaLabel: 'Search proposals',
+      }}
+      tabs={tabs}
+      selects={selects}
+      rightMeta={rightMeta}
+    />
+  );
 }
 
 function NewProposalButton({
