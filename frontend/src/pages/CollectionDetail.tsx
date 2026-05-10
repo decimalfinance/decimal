@@ -13,9 +13,9 @@ import {
   shortenAddress,
 } from '../domain';
 import {
-  collectionSourceTrustTone,
-  displayCollectionSourceName,
-  displayCollectionSourceTrust,
+  walletTrustTone,
+  displayWalletLabel,
+  displayWalletTrust,
   displayCollectionStatus,
   statusToneForCollection,
   toneToPill,
@@ -179,7 +179,7 @@ export function CollectionDetailPage() {
   const statusTone = statusToneForCollection(collection.derivedState);
   const amountLabel = `${formatRawUsdcCompact(collection.amountRaw)} ${assetSymbol(collection.asset)}`;
   const payerName = collection.counterpartyWallet
-    ? displayCollectionSourceName(
+    ? displayWalletLabel(
         collection.counterpartyWallet.label,
         collection.counterpartyWallet.walletAddress,
       )
@@ -284,7 +284,7 @@ export function CollectionDetailPage() {
                 {collection.counterpartyWallet ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     <Link
-                      to={`/organizations/${organizationId}/payers`}
+                      to={`/organizations/${organizationId}/counterparties`}
                       className="rd-addr-link"
                       style={{ fontSize: 13 }}
                     >
@@ -294,12 +294,12 @@ export function CollectionDetailPage() {
                       <span
                         className="rd-pill"
                         data-tone={toneToPill(
-                          collectionSourceTrustTone(collection.counterpartyWallet.trustState),
+                          walletTrustTone(collection.counterpartyWallet.trustState),
                         )}
                         style={{ fontSize: 11 }}
                       >
                         <span className="rd-pill-dot" aria-hidden />
-                        {displayCollectionSourceTrust(collection.counterpartyWallet.trustState)}
+                        {displayWalletTrust(collection.counterpartyWallet.trustState)}
                       </span>
                       <a
                         href={orbAccountUrl(collection.counterpartyWallet.walletAddress)}

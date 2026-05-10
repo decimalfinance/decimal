@@ -57,6 +57,18 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
         ],
       },
       {
+        id: 'document_to_payment_run',
+        summary: 'Import a PDF/image invoice into extracted payment rows, review the resulting payment run, create one Squads proposal, execute it, verify settlement by RPC, then export proof.',
+        steps: [
+          'POST /organizations/:organizationId/payment-runs/from-document',
+          'GET /organizations/:organizationId/payment-runs/:paymentRunId',
+          'POST /organizations/:organizationId/treasury-wallets/:treasuryWalletId/squads/vault-proposals/payment-run-intent',
+          'POST /organizations/:organizationId/proposals/:decimalProposalId/confirm-submission',
+          'POST /organizations/:organizationId/proposals/:decimalProposalId/confirm-execution',
+          'GET /organizations/:organizationId/payment-runs/:paymentRunId/proof',
+        ],
+      },
+      {
         id: 'collections',
         summary: 'Create expected inbound collections or import a receivables CSV. Collections are currently intent records; automatic inbound chain watching is intentionally detached from the lean MVP.',
         steps: [
@@ -128,6 +140,7 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
           'POST /organizations/:organizationId/payment-requests/import-csv',
           'POST /organizations/:organizationId/payment-runs/import-csv/preview',
           'POST /organizations/:organizationId/payment-runs/import-csv',
+          'POST /organizations/:organizationId/payment-runs/from-document',
           'POST /organizations/:organizationId/collections',
           'POST /organizations/:organizationId/collections/import-csv/preview',
           'POST /organizations/:organizationId/collection-runs/import-csv/preview',

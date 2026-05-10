@@ -178,8 +178,7 @@ export function AppSidebar({
   activeOrganizationId,
   paymentsIncompleteCount,
   collectionsOpenCount,
-  destinationsUnreviewedCount,
-  payersUnreviewedCount,
+  unreviewedWalletsCount,
   onOrganizationSwitch,
   onLogout,
 }: {
@@ -188,8 +187,7 @@ export function AppSidebar({
   activeOrganizationId?: string;
   paymentsIncompleteCount?: number;
   collectionsOpenCount?: number;
-  destinationsUnreviewedCount?: number;
-  payersUnreviewedCount?: number;
+  unreviewedWalletsCount?: number;
   onOrganizationSwitch: (organizationId: string) => void;
   onLogout: () => void;
 }) {
@@ -322,7 +320,7 @@ export function AppSidebar({
                 to={`${base}/counterparties`}
                 icon={icons.counterparty}
                 label="Address book"
-                badge={(destinationsUnreviewedCount ?? 0) + (payersUnreviewedCount ?? 0)}
+                badge={unreviewedWalletsCount}
               />
             </div>
 

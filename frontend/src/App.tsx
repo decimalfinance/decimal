@@ -23,8 +23,6 @@ import { AuthDivider, OAuthButton } from './ui/AuthButtons';
 import { useToast } from './ui/Toast';
 import type {
   AuthenticatedSession,
-  Counterparty,
-  CounterpartyWallet,
   PaymentOrder,
   PaymentOrderState,
   PaymentRequest,
@@ -61,12 +59,10 @@ import {
   paymentExecutionBucket,
   statusToneForPayment,
   toneForGenericState,
-  trustDisplay,
 } from './status-labels';
 import {
   Collapsible,
   DataTableShell,
-  Drawer,
   EmptyPanel,
   Modal,
   PanelHeader,
@@ -78,7 +74,7 @@ function queryKeys(organizationId?: string, paymentOrderId?: string) {
     session: ['session'] as const,
     addresses: ['addresses', organizationId] as const,
     counterparties: ['counterparties', organizationId] as const,
-    destinations: ['destinations', organizationId] as const,
+    counterpartyWallets: ['counterparty-wallets', organizationId] as const,
     paymentRequests: ['payment-requests', organizationId] as const,
     paymentRuns: ['payment-runs', organizationId] as const,
     paymentRun: ['payment-run', organizationId, paymentOrderId] as const,
@@ -174,8 +170,12 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
   });
   const paymentsIncompleteCount = organizationSummaryQuery.data?.paymentsIncompleteCount ?? 0;
   const collectionsOpenCount = organizationSummaryQuery.data?.collectionsOpenCount ?? 0;
-  const destinationsUnreviewedCount = organizationSummaryQuery.data?.destinationsUnreviewedCount ?? 0;
-  const payersUnreviewedCount = organizationSummaryQuery.data?.payersUnreviewedCount ?? 0;
+  // Destination and CollectionSource are now one CounterpartyWallet entity. The
+  // backend still emits both legacy fields with the same total — read either.
+  const unreviewedWalletsCount =
+    organizationSummaryQuery.data?.destinationsUnreviewedCount ??
+    organizationSummaryQuery.data?.payersUnreviewedCount ??
+    0;
 
   async function logout() {
     await queryClient.cancelQueries();
@@ -194,8 +194,7 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
         activeOrganizationId={activeOrganizationId}
         paymentsIncompleteCount={paymentsIncompleteCount}
         collectionsOpenCount={collectionsOpenCount}
-        destinationsUnreviewedCount={destinationsUnreviewedCount}
-        payersUnreviewedCount={payersUnreviewedCount}
+        unreviewedWalletsCount={unreviewedWalletsCount}
         onOrganizationSwitch={(organizationId) => navigate(`/organizations/${organizationId}`)}
         onLogout={logout}
       />
@@ -212,7 +211,6 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
           <Route path="/organizations/:organizationId/members" element={<MembersPage session={session} />} />
           <Route path="/organizations/:organizationId/counterparties" element={<CounterpartiesPage session={session} />} />
           <Route path="/organizations/:organizationId/destinations" element={<Navigate to="counterparties" replace />} />
-          <Route path="/organizations/:organizationId/registry" element={<AddressBookPage session={session} />} />
           <Route path="/organizations/:organizationId/requests" element={<PaymentRequestsPage session={session} />} />
           <Route path="/organizations/:organizationId/runs" element={<PaymentsPageV2 session={session} />} />
           <Route path="/organizations/:organizationId/runs/:paymentRunId" element={<PaymentRunDetailPageV2 />} />
@@ -1782,7 +1780,7 @@ function PaymentRequestsPage({ session }: { session: AuthenticatedSession }) {
     enabled: Boolean(organizationId),
   });
   const destinationsQuery = useQuery({
-    queryKey: queryKeys(organizationId).destinations,
+    queryKey: queryKeys(organizationId).counterpartyWallets,
     queryFn: () => api.listCounterpartyWallets(organizationId!),
     enabled: Boolean(organizationId),
   });
@@ -1902,269 +1900,6 @@ function PaymentRequestsPage({ session }: { session: AuthenticatedSession }) {
   );
 }
 
-function AddressBookPage({ session }: { session: AuthenticatedSession }) {
-  const { organizationId } = useParams<{ organizationId: string }>();
-  const queryClient = useQueryClient();
-  const { success, error: toastError } = useToast();
-  const organization = findOrganization(session, organizationId);
-  const walletsQuery = useQuery({
-    queryKey: queryKeys(organizationId).addresses,
-    queryFn: () => api.listTreasuryWallets(organizationId!),
-    enabled: Boolean(organizationId),
-  });
-  const counterpartiesQuery = useQuery({
-    queryKey: queryKeys(organizationId).counterparties,
-    queryFn: () => api.listCounterparties(organizationId!),
-    enabled: Boolean(organizationId),
-  });
-  const destinationsQuery = useQuery({
-    queryKey: queryKeys(organizationId).destinations,
-    queryFn: () => api.listCounterpartyWallets(organizationId!),
-    enabled: Boolean(organizationId),
-  });
-
-  async function invalidateRegistry() {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: queryKeys(organizationId).addresses }),
-      queryClient.invalidateQueries({ queryKey: queryKeys(organizationId).counterparties }),
-      queryClient.invalidateQueries({ queryKey: queryKeys(organizationId).destinations }),
-    ]);
-  }
-
-  const createTreasuryWalletMutation = useMutation({
-    mutationFn: async (formData: FormData) => {
-      return api.createTreasuryWallet(organizationId!, {
-        displayName: getOptionalFormString(formData, 'displayName') ?? undefined,
-        address: getFormString(formData, 'address'),
-        notes: getOptionalFormString(formData, 'notes') ?? undefined,
-      });
-    },
-    onSuccess: async () => {
-      success('Wallet saved.');
-      await invalidateRegistry();
-    },
-    onError: (err) => toastError(err instanceof Error ? err.message : 'Unable to save wallet.'),
-  });
-  const createCounterpartyMutation = useMutation({
-    mutationFn: async (formData: FormData) => {
-      return api.createCounterparty(organizationId!, {
-        displayName: getFormString(formData, 'displayName'),
-        category: getOptionalFormString(formData, 'category') ?? undefined,
-      });
-    },
-    onSuccess: async () => {
-      success('Counterparty saved.');
-      await invalidateRegistry();
-    },
-    onError: (err) => toastError(err instanceof Error ? err.message : 'Unable to save counterparty.'),
-  });
-  const createDestinationMutation = useMutation({
-    mutationFn: async (formData: FormData) => {
-      return api.createCounterpartyWallet(organizationId!, {
-        walletAddress: getFormString(formData, 'walletAddress'),
-        counterpartyId: getOptionalFormString(formData, 'counterpartyId') ?? undefined,
-        label: getFormString(formData, 'label'),
-        trustState: getFormString(formData, 'trustState') as CounterpartyWallet['trustState'],
-        notes: getOptionalFormString(formData, 'notes') ?? undefined,
-      });
-    },
-    onSuccess: async () => {
-      success('Destination saved.');
-      await invalidateRegistry();
-    },
-    onError: (err) => toastError(err instanceof Error ? err.message : 'Unable to save destination.'),
-  });
-
-  const [registryDrawer, setRegistryDrawer] = useState<{ title: string; body: ReactNode } | null>(null);
-  const [addWalletOpen, setAddWalletOpen] = useState(false);
-  const [addDestinationOpen, setAddDestinationOpen] = useState(false);
-  const [addCounterpartyOpen, setAddCounterpartyOpen] = useState(false);
-
-  if (!organizationId || !organization) {
-    return <ScreenState title="Organization unavailable" description="Choose a organization from the sidebar." />;
-  }
-
-  const wallets = walletsQuery.data?.items ?? [];
-  const counterparties = counterpartiesQuery.data?.items ?? [];
-  const destinations = destinationsQuery.data?.items ?? [];
-
-  return (
-    <PageFrame
-      eyebrow="Address book"
-      title="Wallets and destinations"
-      description="Your treasury wallets on the left. Counterparty destinations you pay on the right. Two independent lists — no cross-link."
-    >
-      <Drawer open={Boolean(registryDrawer)} title={registryDrawer?.title ?? ''} onClose={() => setRegistryDrawer(null)}>
-        {registryDrawer?.body}
-      </Drawer>
-      <Modal open={addWalletOpen} title="Add wallet" onClose={() => setAddWalletOpen(false)}>
-        <form
-          className="form-stack"
-          onSubmit={(event) => {
-            event.preventDefault();
-            createTreasuryWalletMutation.mutate(new FormData(event.currentTarget), {
-              onSuccess: () => setAddWalletOpen(false),
-            });
-          }}
-        >
-          <label className="field">Name<input name="displayName" placeholder="Ops vault" autoComplete="off" /></label>
-          <label className="field">Solana address<input name="address" required placeholder="Wallet address" autoComplete="off" /></label>
-          <label className="field">Notes<input name="notes" placeholder="Optional context" autoComplete="off" /></label>
-          <button className="button button-primary" disabled={createTreasuryWalletMutation.isPending} type="submit">
-            {createTreasuryWalletMutation.isPending ? 'Saving…' : 'Save wallet'}
-          </button>
-        </form>
-      </Modal>
-      <Modal open={addDestinationOpen} title="Add destination" onClose={() => setAddDestinationOpen(false)}>
-        <form
-          className="form-stack"
-          onSubmit={(event) => {
-            event.preventDefault();
-            createDestinationMutation.mutate(new FormData(event.currentTarget), {
-              onSuccess: () => setAddDestinationOpen(false),
-            });
-          }}
-        >
-          <label className="field">Label<input name="label" required placeholder="Acme payout wallet" autoComplete="off" /></label>
-          <label className="field">Solana address<input name="walletAddress" required placeholder="Counterparty wallet address" autoComplete="off" /></label>
-          <label className="field">
-            Counterparty (optional)
-            <select name="counterpartyId" defaultValue="">
-              <option value="">Unassigned</option>
-              {counterparties.map((counterparty) => <option key={counterparty.counterpartyId} value={counterparty.counterpartyId}>{counterparty.displayName}</option>)}
-            </select>
-          </label>
-          <label className="field">
-            Trust state
-            <select name="trustState" defaultValue="unreviewed">
-              <option value="unreviewed">Unreviewed</option>
-              <option value="trusted">Trusted</option>
-              <option value="restricted">Restricted</option>
-              <option value="blocked">Blocked</option>
-            </select>
-          </label>
-          <label className="field">Notes<input name="notes" placeholder="Optional context" autoComplete="off" /></label>
-          <button className="button button-primary" disabled={createDestinationMutation.isPending} type="submit">
-            {createDestinationMutation.isPending ? 'Saving…' : 'Save destination'}
-          </button>
-        </form>
-      </Modal>
-      <Modal open={addCounterpartyOpen} title="Add counterparty" onClose={() => setAddCounterpartyOpen(false)}>
-        <form
-          className="form-stack"
-          onSubmit={(event) => {
-            event.preventDefault();
-            createCounterpartyMutation.mutate(new FormData(event.currentTarget), {
-              onSuccess: () => setAddCounterpartyOpen(false),
-            });
-          }}
-        >
-          <label className="field">Name<input name="displayName" required placeholder="Acme Corp" autoComplete="organization" /></label>
-          <label className="field">Category<input name="category" placeholder="vendor, contractor, internal" autoComplete="off" /></label>
-          <button className="button button-primary" disabled={createCounterpartyMutation.isPending} type="submit">
-            {createCounterpartyMutation.isPending ? 'Saving…' : 'Save counterparty'}
-          </button>
-        </form>
-      </Modal>
-
-      <div className="split-panels">
-        <section className="panel">
-          <SectionHeader
-            title={`Your wallets [${wallets.length}]`}
-            description="Treasury wallets you own and sign with. Monitored on-chain."
-          />
-          <div className="action-cluster" style={{ marginBottom: 14 }}>
-            <button className="button button-primary" type="button" onClick={() => setAddWalletOpen(true)}>+ Add wallet</button>
-          </div>
-          {wallets.length ? (
-            <WalletsTable
-              addresses={wallets}
-              destinations={destinations}
-              onSelect={(wallet) =>
-                setRegistryDrawer({
-                  title: walletLabel(wallet) ?? shortenAddress(wallet.address),
-                  body: (
-                    <InfoGrid
-                      items={[
-                        ['Name', walletLabel(wallet) ?? 'N/A'],
-                        ['Address', <AddressLink key="a" value={wallet.address} />],
-                        ['USDC ATA', wallet.usdcAtaAddress ? <AddressLink key="ata" value={wallet.usdcAtaAddress} /> : 'N/A'],
-                        ['Asset scope', wallet.assetScope],
-                        ['Status', wallet.isActive ? 'Active' : 'Inactive'],
-                        ['Notes', wallet.notes ?? 'N/A'],
-                      ]}
-                    />
-                  ),
-                })
-              }
-            />
-          ) : (
-            <div className="empty-state">
-              <strong>No wallets yet</strong>
-              <p>Add a treasury wallet to start receiving or sending payments.</p>
-            </div>
-          )}
-        </section>
-
-        <section className="panel">
-          <SectionHeader
-            title={`Destinations [${destinations.length}]`}
-            description="Counterparty payout endpoints. Not monitored directly; matched via signatures when you pay them."
-          />
-          <div className="action-cluster" style={{ marginBottom: 14 }}>
-            <button className="button button-primary" type="button" onClick={() => setAddDestinationOpen(true)}>+ Add destination</button>
-          </div>
-          {destinations.length ? (
-            <DestinationsTable
-              destinations={destinations}
-              onSelect={(destination) =>
-                setRegistryDrawer({
-                  title: destination.label,
-                  body: (
-                    <InfoGrid
-                      items={[
-                        ['Label', destination.label],
-                        ['Wallet', <AddressLink key="w" value={destination.walletAddress} />],
-                        ['Trust', trustDisplay(destination.trustState)],
-                        ['Scope', destination.isInternal ? 'Internal' : 'External'],
-                        ['Counterparty', destination.counterparty?.displayName ?? 'N/A'],
-                        ['Status', destination.isActive ? 'Active' : 'Inactive'],
-                        ['Notes', destination.notes ?? 'N/A'],
-                      ]}
-                    />
-                  ),
-                })
-              }
-            />
-          ) : (
-            <div className="empty-state">
-              <strong>No destinations yet</strong>
-              <p>Add a counterparty's Solana address as a payout destination.</p>
-            </div>
-          )}
-        </section>
-      </div>
-
-      <section className="panel panel-spaced">
-        <SectionHeader
-          title={`Counterparties [${counterparties.length}]`}
-          description="Business entities behind your destinations. Optional — you can pay destinations without assigning a counterparty."
-        />
-        <div className="action-cluster" style={{ marginBottom: 14 }}>
-          <button className="button button-primary" type="button" onClick={() => setAddCounterpartyOpen(true)}>+ Add counterparty</button>
-        </div>
-        {counterparties.length ? (
-          <CounterpartiesTable counterparties={counterparties} destinations={destinations} />
-        ) : (
-          <div className="empty-state">
-            <strong>No counterparties yet</strong>
-            <p>Tag a destination with a counterparty to track who you're paying.</p>
-          </div>
-        )}
-      </section>
-    </PageFrame>
-  );
-}
 
 
 function PaymentRequestsTable({
@@ -2218,102 +1953,6 @@ function PaymentRequestsTable({
   );
 }
 
-
-function DestinationsTable({
-  destinations,
-  onSelect,
-}: {
-  destinations: CounterpartyWallet[];
-  onSelect?: (destination: CounterpartyWallet) => void;
-}) {
-  if (!destinations.length) return <EmptyState title="No destinations yet" description="Create wallets first, then turn them into destinations." />;
-  return (
-    <DataTableShell>
-      <div className="data-table-row data-table-head data-table-row-destinations">
-        <span>Destination</span><span>Wallet</span><span>Owner</span><span>Trust</span><span>Scope</span><span>Status</span>
-      </div>
-      {destinations.map((destination) => (
-        <div
-          className={`data-table-row data-table-row-destinations${onSelect ? ' data-table-row-clickable' : ''}`}
-          key={destination.counterpartyWalletId}
-          onClick={() => onSelect?.(destination)}
-          onKeyDown={(event) => {
-            if (onSelect && (event.key === 'Enter' || event.key === ' ')) {
-              event.preventDefault();
-              onSelect(destination);
-            }
-          }}
-          role={onSelect ? 'button' : undefined}
-          tabIndex={onSelect ? 0 : undefined}
-        >
-          <span><strong>{destination.label}</strong><small>{destination.walletType}</small></span>
-          <span><AddressLink value={destination.walletAddress} /></span>
-          <span>{destination.counterparty?.displayName ?? 'Unassigned'}</span>
-          <span><StatusBadge tone={toneForGenericState(destination.trustState)}>{trustDisplay(destination.trustState)}</StatusBadge></span>
-          <span>{destination.isInternal ? 'internal' : 'external'}</span>
-          <span>{destination.isActive ? 'active' : 'inactive'}</span>
-        </div>
-      ))}
-    </DataTableShell>
-  );
-}
-
-function WalletsTable({
-  addresses,
-  destinations,
-  onSelect,
-}: {
-  addresses: TreasuryWallet[];
-  destinations: CounterpartyWallet[];
-  onSelect?: (address: TreasuryWallet) => void;
-}) {
-  if (!addresses.length) return <EmptyState title="No wallets saved" description="Save a wallet to watch, source, or destination-match USDC payments." />;
-  return (
-    <DataTableShell>
-      <div className="data-table-row data-table-head data-table-row-wallets"><span>Name</span><span>Address</span><span>Destination</span><span>Status</span></div>
-      {addresses.map((address) => {
-        const destination = destinations.find((item) => item.walletAddress === address.address);
-        return (
-          <div
-            className={`data-table-row data-table-row-wallets${onSelect ? ' data-table-row-clickable' : ''}`}
-            key={address.treasuryWalletId}
-            onClick={() => onSelect?.(address)}
-            onKeyDown={(event) => {
-              if (onSelect && (event.key === 'Enter' || event.key === ' ')) {
-                event.preventDefault();
-                onSelect(address);
-              }
-            }}
-            role={onSelect ? 'button' : undefined}
-            tabIndex={onSelect ? 0 : undefined}
-          >
-            <span><strong>{walletLabel(address)}</strong></span>
-            <span onClick={(e) => e.stopPropagation()}><AddressLink value={address.address} /></span>
-            <span>{destination?.label ?? 'Unlinked'}</span>
-            <span>{address.isActive ? 'active' : 'inactive'}</span>
-          </div>
-        );
-      })}
-    </DataTableShell>
-  );
-}
-
-function CounterpartiesTable({ counterparties, destinations }: { counterparties: Counterparty[]; destinations: CounterpartyWallet[] }) {
-  if (!counterparties.length) return <EmptyState title="No counterparties yet" description="Counterparties are optional business owners behind destinations." />;
-  return (
-    <DataTableShell>
-      <div className="data-table-row data-table-head data-table-row-counterparties"><span>Name</span><span>Destinations</span><span>Category</span><span>Status</span></div>
-      {counterparties.map((counterparty) => (
-        <div className="data-table-row data-table-row-counterparties" key={counterparty.counterpartyId}>
-          <span><strong>{counterparty.displayName}</strong></span>
-          <span>{destinations.filter((destination) => destination.counterpartyId === counterparty.counterpartyId).length}</span>
-          <span>{counterparty.category}</span>
-          <span>{counterparty.status}</span>
-        </div>
-      ))}
-    </DataTableShell>
-  );
-}
 
 function WalletPicker({
   wallets,
@@ -2413,19 +2052,6 @@ function InlineProgressTracker({ state }: { state: string }) {
         />
       ))}
     </span>
-  );
-}
-
-function InfoGrid({ items }: { items: Array<[string, React.ReactNode]> }) {
-  return (
-    <dl className="info-grid">
-      {items.map(([label, value]) => (
-        <div key={label}>
-          <dt>{label}</dt>
-          <dd>{value}</dd>
-        </div>
-      ))}
-    </dl>
   );
 }
 

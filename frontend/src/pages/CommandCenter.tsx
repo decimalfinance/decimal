@@ -74,7 +74,7 @@ export function CommandCenterPage({ session }: { session: AuthenticatedSession }
     refetchInterval: 15_000,
   });
   const destinationsQuery = useQuery({
-    queryKey: ['destinations', organizationId] as const,
+    queryKey: ['counterparty-wallets', organizationId] as const,
     queryFn: () => api.listCounterpartyWallets(organizationId!),
     enabled: Boolean(organizationId),
     refetchInterval: 30_000,

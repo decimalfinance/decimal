@@ -161,6 +161,10 @@ export const API_ENDPOINTS = [
     scope: 'payments:write',
     requestBody: { csv: 'string', runName: 'string optional', importKey: 'string optional' },
   }),
+  endpoint('import_payment_run_document', 'POST', '/organizations/{organizationId}/payment-runs/from-document', ['payment runs', 'inputs'], 'Import a PDF or image invoice into a draft payment run', 'session', {
+    scope: 'payments:write',
+    requestBody: { filename: 'string', mimeType: 'string', dataBase64: 'string base64', runName: 'string optional', sourceTreasuryWalletId: 'uuid optional' },
+  }),
   endpoint('preview_payment_run_csv', 'POST', '/organizations/{organizationId}/payment-runs/import-csv/preview', ['payment runs'], 'Preview payment run CSV import without side effects', 'session', { scope: 'organization:read' }),
   endpoint('get_payment_run', 'GET', '/organizations/{organizationId}/payment-runs/{paymentRunId}', ['payment runs'], 'Get payment run detail', 'session', { scope: 'organization:read' }),
   endpoint('delete_payment_run', 'DELETE', '/organizations/{organizationId}/payment-runs/{paymentRunId}', ['payment runs'], 'Delete payment run', 'session', { scope: 'payments:write' }),

@@ -194,7 +194,7 @@ export function PaymentRunDetailPage() {
     onSuccess: async () => {
       success('Destination approved.');
       await queryClient.invalidateQueries({ queryKey: ['payment-run', organizationId, paymentRunId] });
-      await queryClient.invalidateQueries({ queryKey: ['destinations', organizationId] });
+      await queryClient.invalidateQueries({ queryKey: ['counterparty-wallets', organizationId] });
     },
     onError: (err) => toastError(err instanceof Error ? err.message : 'Could not approve destination.'),
   });

@@ -186,9 +186,9 @@ model IdempotencyRecord {
   @@map("idempotency_records")
 }
 
-// TreasuryWallet — wallets the organization owns. The source side of every payment.
-// Counterparty addresses (who we pay) live on the Destination row directly and
-// are NOT tracked here.
+// TreasuryWallet — wallets the organization owns. The source side of every
+// outbound payment and the receiving side of expected collections. External
+// counterparties live in CounterpartyWallet, not here.
 model TreasuryWallet {
   treasuryWalletId         String            @id @default(dbgenerated("gen_random_uuid()")) @map("treasury_wallet_id") @db.Uuid
   organizationId              String            @map("organization_id") @db.Uuid

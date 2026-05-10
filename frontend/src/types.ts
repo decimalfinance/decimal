@@ -26,6 +26,10 @@ export type OrganizationSummary = {
   executionQueueCount: number;
   paymentsIncompleteCount: number;
   collectionsOpenCount: number;
+  // Backend currently returns the same total under both legacy field names
+  // (`destinationsUnreviewedCount` / `payersUnreviewedCount`) — Destination and
+  // CollectionSource are now unified into CounterpartyWallet, so the frontend
+  // reads either and treats them as one count of unreviewed address-book entries.
   destinationsUnreviewedCount: number;
   payersUnreviewedCount: number;
   generatedAt: string;
@@ -1221,9 +1225,10 @@ export type CollectionRequestState =
   | 'closed'
   | 'cancelled';
 
-// Backwards-compat alias retained for the few status-label call sites that
-// still take a CollectionSourceTrustState. The unified wallet model uses
-// the same trust-state vocabulary, so this just points at the new type.
+// Alias kept solely for the CollectionSourceReview proof-packet type below,
+// which mirrors a backend payload that still uses the legacy name. Unified
+// wallet model uses the same trust-state vocabulary, so this just points at
+// the new type.
 export type CollectionSourceTrustState = CounterpartyWalletTrustState;
 
 export type CollectionRequestEvent = {

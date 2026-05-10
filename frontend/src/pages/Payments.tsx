@@ -20,7 +20,7 @@ import { parseCsvPreview } from '../csv-parse';
 import {
   displayPaymentStatus,
   displayRunStatus,
-  hasRealDestinationName,
+  hasRealWalletLabel,
   statusToneForPayment,
   toneToPill,
 } from '../status-labels';
@@ -102,7 +102,7 @@ export function PaymentsPage({ session }: { session: AuthenticatedSession }) {
     enabled: Boolean(organizationId),
   });
   const destinationsQuery = useQuery({
-    queryKey: ['destinations', organizationId] as const,
+    queryKey: ['counterparty-wallets', organizationId] as const,
     queryFn: () => api.listCounterpartyWallets(organizationId!),
     enabled: Boolean(organizationId),
   });
@@ -133,7 +133,7 @@ export function PaymentsPage({ session }: { session: AuthenticatedSession }) {
         name: o.counterpartyWallet.label,
         counterpartyName: o.counterparty?.displayName ?? null,
         destination: o.counterpartyWallet.walletAddress,
-        destinationLabel: hasRealDestinationName(o.counterpartyWallet.label, o.counterpartyWallet.walletAddress)
+        destinationLabel: hasRealWalletLabel(o.counterpartyWallet.label, o.counterpartyWallet.walletAddress)
           ? o.counterpartyWallet.label
           : null,
         source: sourceLabel(o.sourceTreasuryWallet),

@@ -8,21 +8,21 @@ import type {
   CollectionRunSummary,
   Counterparty,
   CounterpartyWallet,
+  CounterpartyWalletTrustState,
   TreasuryWallet,
 } from '../types';
 import { assetSymbol, formatRawUsdcCompact, formatRelativeTime, shortenAddress, walletLabel } from '../domain';
 import { parseCsvPreview } from '../csv-parse';
 import {
   collectionRunProgressLine,
-  displayCollectionSourceName,
-  displayCollectionSourceTrust,
+  displayWalletLabel,
+  displayWalletTrust,
   displayCollectionStatus,
   statusToneForCollection,
   toneToPill,
 } from '../status-labels';
 import { useToast } from '../ui/Toast';
 import { RdFilterBar } from '../ui-primitives';
-import { AddCollectionSourceDialog } from './CollectionSources';
 
 type UnifiedRow =
   | {
@@ -65,7 +65,7 @@ function receiverLabel(wallet: TreasuryWallet | null): string {
 
 function payerLabel(collection: CollectionRequest): string {
   if (collection.counterpartyWallet) {
-    return displayCollectionSourceName(
+    return displayWalletLabel(
       collection.counterpartyWallet.label,
       collection.counterpartyWallet.walletAddress,
     );
@@ -114,7 +114,7 @@ export function CollectionsPage({ session: _session }: { session: AuthenticatedS
     enabled: Boolean(organizationId),
   });
   const collectionSourcesQuery = useQuery({
-    queryKey: ['collection-sources', organizationId] as const,
+    queryKey: ['counterparty-wallets', organizationId] as const,
     queryFn: () => api.listCounterpartyWallets(organizationId!),
     enabled: Boolean(organizationId),
   });
@@ -417,7 +417,7 @@ export function CollectionsPage({ session: _session }: { session: AuthenticatedS
             success('Collection created. Waiting for payer.');
             await queryClient.invalidateQueries({ queryKey: ['collections', organizationId] });
             await queryClient.invalidateQueries({
-              queryKey: ['collection-sources', organizationId],
+              queryKey: ['counterparty-wallets', organizationId],
             });
           }}
           onError={(message) => toastError(message)}
@@ -607,7 +607,7 @@ function CreateCollectionDialog(props: {
                       <option value="">Select a known payer source</option>
                       {activeSources.map((s) => (
                         <option key={s.counterpartyWalletId} value={s.counterpartyWalletId}>
-                          {s.label} · {displayCollectionSourceTrust(s.trustState)} ·{' '}
+                          {s.label} · {displayWalletTrust(s.trustState)} ·{' '}
                           {shortenAddress(s.walletAddress, 4, 4)}
                         </option>
                       ))}
@@ -692,8 +692,8 @@ function CreateCollectionDialog(props: {
                     color: 'var(--ax-text-muted)',
                   }}
                 >
-                  Unknown addresses are saved as an <em>unreviewed</em> payer source you can trust
-                  later from the Payers page.
+                  Unknown addresses are saved as an <em>unreviewed</em> payer wallet you can trust
+                  later from the address book.
                 </p>
               ) : null}
             </div>
@@ -740,15 +740,15 @@ function CreateCollectionDialog(props: {
         </form>
       </div>
       {addSourceOpen ? (
-        <AddCollectionSourceDialog
+        <AddWalletDialog
           organizationId={organizationId}
           counterparties={counterparties}
           onClose={() => setAddSourceOpen(false)}
           onSuccess={() => {
             setAddSourceOpen(false);
-            success('Payer source saved.');
+            success('Wallet saved.');
             queryClient.invalidateQueries({
-              queryKey: ['collection-sources', organizationId],
+              queryKey: ['counterparty-wallets', organizationId],
             });
           }}
           onError={(message) => onError(message)}
@@ -962,6 +962,128 @@ function ImportCollectionCsvDialog(props: {
             </div>
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+// Inline "add an address-book wallet" dialog used by CreateCollectionDialog so
+// users can save a new payer wallet without leaving the new-collection flow.
+// The same shape lives on the Counterparties (address book) page; this is a
+// lighter affordance scoped to the collection-create modal.
+function AddWalletDialog(props: {
+  organizationId: string;
+  counterparties: Counterparty[];
+  onClose: () => void;
+  onSuccess: () => void;
+  onError: (message: string) => void;
+}) {
+  const { organizationId, counterparties, onClose, onSuccess, onError } = props;
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const mutation = useMutation({
+    mutationFn: (form: FormData) =>
+      api.createCounterpartyWallet(organizationId, {
+        label: String(form.get('label') ?? '').trim(),
+        walletAddress: String(form.get('walletAddress') ?? '').trim(),
+        trustState: String(form.get('trustState') ?? 'unreviewed') as CounterpartyWalletTrustState,
+        counterpartyId: String(form.get('counterpartyId') ?? '').trim() || undefined,
+        notes: String(form.get('notes') ?? '').trim() || undefined,
+      }),
+    onSuccess: () => onSuccess(),
+    onError: (err) => onError(err instanceof Error ? err.message : 'Unable to save wallet.'),
+  });
+
+  return (
+    <div
+      className="rd-dialog-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="rd-add-wallet-title"
+    >
+      <div className="rd-dialog" style={{ maxWidth: 520 }}>
+        <h2 id="rd-add-wallet-title" className="rd-dialog-title">
+          Add wallet
+        </h2>
+        <p className="rd-dialog-body">A Solana wallet you transact with — saved to the address book.</p>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            mutation.mutate(new FormData(e.currentTarget));
+          }}
+        >
+          <div className="rd-form-grid">
+            <label className="rd-field" style={{ gridColumn: '1 / -1' }}>
+              <span className="rd-field-label">Label</span>
+              <input
+                name="label"
+                required
+                placeholder="Acme Corp — ops wallet"
+                className="rd-input"
+                autoComplete="off"
+              />
+            </label>
+            <label className="rd-field" style={{ gridColumn: '1 / -1' }}>
+              <span className="rd-field-label">Wallet address</span>
+              <input
+                name="walletAddress"
+                required
+                placeholder="Solana address"
+                className="rd-input"
+                autoComplete="off"
+              />
+            </label>
+            <label className="rd-field">
+              <span className="rd-field-label">Trust state</span>
+              <select name="trustState" className="rd-select" defaultValue="unreviewed">
+                <option value="unreviewed">Unreviewed</option>
+                <option value="trusted">Trusted</option>
+                <option value="restricted">Restricted</option>
+                <option value="blocked">Blocked</option>
+              </select>
+            </label>
+            <label className="rd-field">
+              <span className="rd-field-label">Counterparty (optional)</span>
+              <select name="counterpartyId" className="rd-select" defaultValue="">
+                <option value="">—</option>
+                {counterparties.map((c) => (
+                  <option key={c.counterpartyId} value={c.counterpartyId}>
+                    {c.displayName}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="rd-field" style={{ gridColumn: '1 / -1' }}>
+              <span className="rd-field-label">Notes (optional)</span>
+              <input
+                name="notes"
+                placeholder="Verified via signed email on 2026-04-22"
+                className="rd-input"
+                autoComplete="off"
+              />
+            </label>
+          </div>
+          <div className="rd-dialog-actions" style={{ marginTop: 24 }}>
+            <button type="button" className="button button-secondary" onClick={onClose}>
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="button button-primary"
+              disabled={mutation.isPending}
+              aria-busy={mutation.isPending}
+            >
+              {mutation.isPending ? 'Saving…' : 'Save wallet'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
