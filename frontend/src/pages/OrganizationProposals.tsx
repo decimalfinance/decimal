@@ -99,6 +99,17 @@ export function OrganizationProposalsPage({ session }: { session: AuthenticatedS
     return out;
   }, [allItems, semanticFilter, search, treasuries]);
 
+  // Metrics summarize the currently-loaded proposal universe (the
+  // status filter scope). On the All tab they cover everything; on
+  // Pending they cover active+approved; on Closed they cover
+  // executed+cancelled+rejected.
+  const awaitingVotes = allItems.filter((p) => p.status === 'active').length;
+  const readyToExecute = allItems.filter((p) => p.status === 'approved').length;
+  const executed = allItems.filter((p) => p.status === 'executed').length;
+  const closedUnsuccess = allItems.filter(
+    (p) => p.status === 'cancelled' || p.status === 'rejected',
+  ).length;
+
   async function refreshProposals(decimalProposalId?: string) {
     await queryClient.invalidateQueries({ queryKey: ['organization-proposals', organizationId] });
     await queryClient.invalidateQueries({ queryKey: ['payment-orders', organizationId] });
@@ -218,6 +229,33 @@ export function OrganizationProposalsPage({ session }: { session: AuthenticatedS
           <NewProposalButton organizationId={organizationId} navigate={navigate} />
         </div>
       </header>
+
+      <div className="rd-metrics">
+        <div className="rd-metric">
+          <span className="rd-metric-label">Awaiting votes</span>
+          <span className="rd-metric-value" data-tone={awaitingVotes > 0 ? 'warning' : undefined}>
+            {awaitingVotes}
+          </span>
+        </div>
+        <div className="rd-metric">
+          <span className="rd-metric-label">Ready to execute</span>
+          <span className="rd-metric-value" data-tone={readyToExecute > 0 ? 'warning' : undefined}>
+            {readyToExecute}
+          </span>
+        </div>
+        <div className="rd-metric">
+          <span className="rd-metric-label">Executed</span>
+          <span className="rd-metric-value" data-tone="success">
+            {executed}
+          </span>
+        </div>
+        <div className="rd-metric">
+          <span className="rd-metric-label">Closed unsuccessful</span>
+          <span className="rd-metric-value" data-tone={closedUnsuccess > 0 ? 'danger' : undefined}>
+            {closedUnsuccess}
+          </span>
+        </div>
+      </div>
 
       <FilterRow
         search={search}
