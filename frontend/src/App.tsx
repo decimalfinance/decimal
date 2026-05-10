@@ -555,7 +555,7 @@ function VerifyEmailPage({ session }: { session: AuthenticatedSession }) {
         navigate(returnTo, { replace: true });
         return;
       }
-      navigate(session.organizations[0] ? `/organizations/${session.organizations[0].organizationId}/wallets` : '/setup', { replace: true });
+      navigate(session.organizations[0] ? `/organizations/${session.organizations[0].organizationId}` : '/setup', { replace: true });
     },
     onError: (err) => setError(err instanceof Error ? err.message : 'Unable to verify email.'),
   });
@@ -619,7 +619,12 @@ function HomeRedirect({ session }: { session: AuthenticatedSession }) {
   const [first] = getOrganizations(session);
   if (!first) {
     const firstOrganization = session.organizations[0];
-    return <Navigate to={firstOrganization ? `/organizations/${firstOrganization.organizationId}/wallets` : '/setup'} replace />;
+    return (
+      <Navigate
+        to={firstOrganization ? `/organizations/${firstOrganization.organizationId}` : '/setup'}
+        replace
+      />
+    );
   }
 
   return <Navigate to={`/organizations/${first.organization.organizationId}`} replace />;
@@ -640,7 +645,7 @@ function SetupPage({ session }: { session: AuthenticatedSession }) {
     onSuccess: async (organization) => {
       success('Organization created.');
       await queryClient.invalidateQueries({ queryKey: queryKeys().session });
-      navigate(`/organizations/${organization.organizationId}/wallets`, { replace: true });
+      navigate(`/organizations/${organization.organizationId}`, { replace: true });
     },
     onError: (err) => toastError(err instanceof Error ? err.message : 'Unable to create organization.'),
   });
