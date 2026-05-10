@@ -14,7 +14,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -90,6 +90,7 @@ const ExtractedRowsSchema = z.object({
 export type ExtractedRow = z.infer<typeof ExtractedRowSchema>;
 
 const SUPPORTED_IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif']);
+const MAX_DOCUMENT_PAGES = 10;
 
 export function isDocumentExtractionConfigured() {
   return Boolean(config.openRouterApiKey);
@@ -99,14 +100,27 @@ export async function extractPaymentRowsFromDocument(args: {
   fileBytes: Buffer;
   filename: string;
   mimeType: string;
-}): Promise<{ rows: ExtractedRow[]; modelLatencyMs: number }> {
+}): Promise<{ rows: ExtractedRow[]; modelLatencyMs: number; pageCount: number }> {
   if (!isDocumentExtractionConfigured()) {
     throw new Error('OPEN_ROUTER_API_KEY is not configured on the server.');
   }
 
   const ext = inferExtension(args.filename, args.mimeType);
-  const { imageBytes, imageMime } = await ensureImage(args.fileBytes, ext);
-  const dataUrl = `data:${imageMime};base64,${imageBytes.toString('base64')}`;
+  const pages = await renderToImages(args.fileBytes, ext);
+  if (pages.length > MAX_DOCUMENT_PAGES) {
+    throw new Error(
+      `Document has ${pages.length} pages; the extractor caps at ${MAX_DOCUMENT_PAGES}. ` +
+        `Split the PDF and upload in chunks.`,
+    );
+  }
+
+  // Send every rendered page as its own image content block so the
+  // model sees the entire document (multi-invoice PDFs have one
+  // invoice per page). Order matters — keep page 1 first.
+  const imageBlocks = pages.map(({ bytes, mime }) => ({
+    type: 'image_url' as const,
+    image_url: { url: `data:${mime};base64,${bytes.toString('base64')}` },
+  }));
 
   const t0 = Date.now();
   const response = await fetch(OPENROUTER_BASE_URL, {
@@ -124,10 +138,10 @@ export async function extractPaymentRowsFromDocument(args: {
         {
           role: 'user',
           content: [
-            { type: 'image_url', image_url: { url: dataUrl } },
+            ...imageBlocks,
             {
               type: 'text',
-              text: 'Extract every payment in this document. Return ONLY the JSON object.',
+              text: `Extract every payment across all ${pages.length} page(s) of this document. Return ONLY the JSON object.`,
             },
           ],
         },
@@ -159,34 +173,74 @@ export async function extractPaymentRowsFromDocument(args: {
   if (!parsed.success) {
     throw new Error(`Extracted rows failed schema validation: ${parsed.error.message}`);
   }
-  return { rows: parsed.data.rows, modelLatencyMs: latencyMs };
+  return { rows: parsed.data.rows, modelLatencyMs: latencyMs, pageCount: pages.length };
 }
 
-async function ensureImage(fileBytes: Buffer, ext: string): Promise<{ imageBytes: Buffer; imageMime: string }> {
+type RenderedPage = { bytes: Buffer; mime: string };
+
+async function renderToImages(fileBytes: Buffer, ext: string): Promise<RenderedPage[]> {
   if (SUPPORTED_IMAGE_EXTS.has(ext)) {
-    return { imageBytes: fileBytes, imageMime: imageMimeFromExt(ext) };
+    return [{ bytes: fileBytes, mime: imageMimeFromExt(ext) }];
   }
   if (ext !== 'pdf') {
     throw new Error(`Unsupported file type: .${ext}. Supported: PDF, PNG, JPG, JPEG, WEBP, GIF.`);
   }
 
   if (process.platform !== 'darwin') {
-    throw new Error('PDF extraction currently requires macOS sips. Convert to PNG client-side first.');
+    throw new Error('PDF extraction currently requires macOS. Convert to PNG client-side first.');
   }
 
-  // sips needs filesystem paths; write the input + read the output via a
-  // temp dir we clean up on the way out.
   const dir = await mkdtemp(join(tmpdir(), 'doc2prop-'));
   try {
     const inPath = join(dir, 'input.pdf');
-    const outPath = join(dir, 'input.png');
     await writeFile(inPath, fileBytes);
-    await execFileAsync('sips', ['-s', 'format', 'png', inPath, '--out', outPath]);
-    const imageBytes = await readFile(outPath);
-    return { imageBytes, imageMime: 'image/png' };
+
+    // Try poppler's pdftoppm first — renders every page. Falls back to
+    // sips (page 1 only) if poppler isn't installed; user can run
+    // `brew install poppler` to enable multi-page extraction.
+    const popplerPages = await tryPdftoppm(inPath, dir);
+    if (popplerPages !== null) return popplerPages;
+
+    console.warn(
+      '[doc-extract] pdftoppm not found — only the first PDF page will be extracted. ' +
+        'Install poppler for multi-page support: brew install poppler',
+    );
+    const sipsOut = join(dir, 'input.png');
+    await execFileAsync('sips', ['-s', 'format', 'png', inPath, '--out', sipsOut]);
+    return [{ bytes: await readFile(sipsOut), mime: 'image/png' }];
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+}
+
+async function tryPdftoppm(inPath: string, dir: string): Promise<RenderedPage[] | null> {
+  const prefix = join(dir, 'page');
+  try {
+    // -r 150 = 150 dpi (good readability without bloating tokens)
+    // -png   = output PNG
+    // Output files: page-1.png, page-2.png, ... (or page-01.png if it
+    // pads). We sort by the numeric suffix to keep order stable.
+    await execFileAsync('pdftoppm', ['-png', '-r', '150', inPath, prefix]);
+  } catch (err: unknown) {
+    const code = (err as { code?: string }).code;
+    if (code === 'ENOENT') return null;
+    throw err;
+  }
+  const files = (await readdir(dir))
+    .filter((f) => f.startsWith('page-') && f.endsWith('.png'))
+    .sort((a, b) => extractPageIndex(a) - extractPageIndex(b));
+  if (files.length === 0) return null;
+  return Promise.all(
+    files.map(async (f) => ({
+      bytes: await readFile(join(dir, f)),
+      mime: 'image/png',
+    })),
+  );
+}
+
+function extractPageIndex(filename: string): number {
+  const match = filename.match(/page-(\d+)\.png$/);
+  return match ? Number(match[1]) : 0;
 }
 
 function inferExtension(filename: string, mimeType: string): string {
