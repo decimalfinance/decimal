@@ -1037,6 +1037,7 @@ export type PaymentRunDocumentExtractedRow = {
   currency: string;
   reference: string | null;
   due_date: string | null;
+  wallet_address: string | null;
   notes: string | null;
 };
 
@@ -1045,7 +1046,7 @@ export type PaymentRunDocumentSkippedRow = {
   amount: number;
   currency: string;
   reference: string | null;
-  reason: 'no_destination_match' | 'unsupported_currency';
+  reason: 'no_destination_or_wallet' | 'unsupported_currency';
 };
 
 export type PaymentRunDocumentImportResult = PaymentRunImportResult & {

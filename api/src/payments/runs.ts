@@ -215,7 +215,7 @@ export type DocumentImportSkippedRow = {
   amount: number;
   currency: string;
   reference: string | null;
-  reason: 'no_destination_match' | 'unsupported_currency';
+  reason: 'no_destination_or_wallet' | 'unsupported_currency';
 };
 
 /**
@@ -266,28 +266,42 @@ export async function importPaymentRunFromDocument(args: {
       });
       continue;
     }
+    // Prefer the registry-matched destination — that wallet has been
+    // verified out-of-band. Fall back to the wallet printed on the
+    // invoice if the vendor is new; the existing CSV import flow will
+    // auto-create that destination as `unreviewed`, and the per-row
+    // Approve button on the run page is the trust gate.
     const destination = matchDestination(destinations, row.counterparty);
-    if (!destination) {
-      skipped.push({
-        counterparty: row.counterparty,
-        amount: row.amount,
-        currency: row.currency,
-        reference: row.reference,
-        reason: 'no_destination_match',
+    if (destination) {
+      matched.push({
+        row,
+        destinationLabel: destination.label,
+        walletAddress: destination.walletAddress,
       });
       continue;
     }
-    matched.push({
-      row,
-      destinationLabel: destination.label,
-      walletAddress: destination.walletAddress,
+    if (row.wallet_address && row.wallet_address.trim().length > 0) {
+      matched.push({
+        row,
+        destinationLabel: row.counterparty,
+        walletAddress: row.wallet_address.trim(),
+      });
+      continue;
+    }
+    skipped.push({
+      counterparty: row.counterparty,
+      amount: row.amount,
+      currency: row.currency,
+      reference: row.reference,
+      reason: 'no_destination_or_wallet',
     });
   }
 
   if (matched.length === 0) {
     throw new Error(
-      `Extracted ${extraction.rows.length} row(s) but none matched a destination in your registry. ` +
-        `Add destinations for: ${skipped.map((s) => s.counterparty).join(', ')}`,
+      `Extracted ${extraction.rows.length} row(s) but none could be routed. ` +
+        `Either add destinations for these vendors, or include a Solana wallet on the invoice: ` +
+        skipped.map((s) => s.counterparty).join(', '),
     );
   }
 

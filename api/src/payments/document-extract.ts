@@ -45,6 +45,7 @@ OUTPUT FORMAT — return ONLY a JSON object with this exact shape, nothing else 
       "currency": "string — e.g. USD, EUR, USDC",
       "reference": "string or null — invoice number / reference id",
       "due_date": "string YYYY-MM-DD or null",
+      "wallet_address": "string or null — Solana wallet address (base58, 32-44 chars) if printed on the invoice, else null",
       "notes": "string or null — operator-relevant note like 'partial payment'"
     }
   ]
@@ -66,9 +67,11 @@ CRITICAL RULES:
 
 3. **Multiple separate invoices in one document = one row per invoice.** A multi-page PDF with 3 distinct invoices from 3 vendors emits 3 rows.
 
-4. Be faithful. Never invent fields. Use null if missing.
+4. **wallet_address: only emit a Solana wallet address if it is printed on the invoice itself** (in a "Remit to:" / "Pay to wallet:" / "Solana address:" footer, or similar). Solana addresses are 32-44 base58 characters (no zero, capital O, capital I, lowercase L). If you can't see one, return null — never guess. Do NOT extract bank account numbers or IBANs as wallet addresses.
 
-5. Return ONLY the JSON object. No prose, no explanation, no markdown.`;
+5. Be faithful. Never invent fields. Use null if missing.
+
+6. Return ONLY the JSON object. No prose, no explanation, no markdown.`;
 
 const ExtractedRowSchema = z.object({
   counterparty: z.string().min(1),
@@ -76,6 +79,7 @@ const ExtractedRowSchema = z.object({
   currency: z.string().min(1),
   reference: z.string().nullable(),
   due_date: z.string().nullable(),
+  wallet_address: z.string().nullable(),
   notes: z.string().nullable(),
 });
 

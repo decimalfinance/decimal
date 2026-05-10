@@ -825,8 +825,9 @@ function UploadDocumentDialog(props: {
           Upload invoice
         </h2>
         <p className="rd-dialog-body">
-          Drop a PDF, PNG, or JPG. We'll extract every payment in it and match each vendor to your destination registry.
-          Rows whose vendor isn't in your registry will be skipped — add them in <strong>Destinations</strong> first if needed.
+          Drop a PDF, PNG, or JPG. We'll extract every payment in it. Vendors already in your registry use their stored
+          wallet (most secure). New vendors with a Solana wallet printed on the invoice get a <strong>draft destination
+          marked unreviewed</strong> — review and approve them on the run page before submitting.
         </p>
 
         <label className="rd-field" style={{ marginBottom: 16 }}>
