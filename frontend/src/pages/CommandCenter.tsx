@@ -80,6 +80,24 @@ export function CommandCenterPage({ session }: { session: AuthenticatedSession }
     refetchInterval: 30_000,
   });
 
+  // Onboarding-checklist data. Fetched on Overview only; keeps cache
+  // separate from the other pages that read these.
+  const personalWalletsQuery = useQuery({
+    queryKey: ['personal-wallets'] as const,
+    queryFn: () => api.listPersonalWallets(),
+    enabled: Boolean(organizationId),
+  });
+  const treasuryWalletsQuery = useQuery({
+    queryKey: ['treasury-wallets', organizationId] as const,
+    queryFn: () => api.listTreasuryWallets(organizationId!),
+    enabled: Boolean(organizationId),
+  });
+  const membersQuery = useQuery({
+    queryKey: ['organization-members', organizationId] as const,
+    queryFn: () => api.listOrganizationMembers(organizationId!),
+    enabled: Boolean(organizationId),
+  });
+
   if (!organizationId) {
     return (
       <main className="page-frame">
@@ -119,6 +137,27 @@ export function CommandCenterPage({ session }: { session: AuthenticatedSession }
       acc + computeWalletUsdValue({ usdcRaw: row.usdcRaw, solLamports: row.solLamports, solUsdPrice }),
     0,
   );
+
+  // Onboarding-checklist state. The whole section unmounts as soon as
+  // a Squads multisig exists for this org — that's the bootstrap done.
+  const personalWallets = personalWalletsQuery.data?.items ?? [];
+  const treasuryWallets = treasuryWalletsQuery.data?.items ?? [];
+  const members = membersQuery.data?.items ?? [];
+  const hasPersonalWallet = personalWallets.some(
+    (w) => w.status === 'active' && w.chain === 'solana',
+  );
+  const hasInvitedTeammate = members.length > 1;
+  const hasMultisig = treasuryWallets.some(
+    (w) => w.source === 'squads_v4' && w.isActive,
+  );
+  // Wait for at least one of the queries to actually return — otherwise
+  // we'd flash the checklist on first paint for orgs that already have
+  // a multisig.
+  const onboardingDataLoaded =
+    !personalWalletsQuery.isLoading
+    && !treasuryWalletsQuery.isLoading
+    && !membersQuery.isLoading;
+  const showOnboarding = onboardingDataLoaded && !hasMultisig;
 
   const standaloneOrders = orders.filter((o) => !o.paymentRunId);
   const awaitingApproval = orders.filter((o) =>
@@ -178,6 +217,14 @@ export function CommandCenterPage({ session }: { session: AuthenticatedSession }
         </div>
       </header>
 
+      {showOnboarding ? (
+        <OnboardingChecklist
+          organizationId={organizationId}
+          hasPersonalWallet={hasPersonalWallet}
+          hasInvitedTeammate={hasInvitedTeammate}
+          memberCount={members.length}
+        />
+      ) : null}
 
         <div className="rd-section-head" style={{ marginBottom: 14 }}>
           <div>
@@ -381,6 +428,95 @@ function RefreshIcon({ spinning }: { spinning?: boolean }) {
       <path d="M17 3v4.5h-4.5" />
       <path d="M17 10a7 7 0 0 1-12 5L2.5 12.5" />
       <path d="M3 17v-4.5h4.5" />
+    </svg>
+  );
+}
+
+function OnboardingChecklist({
+  organizationId,
+  hasPersonalWallet,
+  hasInvitedTeammate,
+  memberCount,
+}: {
+  organizationId: string;
+  hasPersonalWallet: boolean;
+  hasInvitedTeammate: boolean;
+  memberCount: number;
+}) {
+  const items: Array<{
+    id: string;
+    label: string;
+    description: string;
+    checked: boolean;
+    cta: { label: string; to: string };
+  }> = [
+    {
+      id: 'personal-wallet',
+      label: 'Create your personal wallet',
+      description: hasPersonalWallet
+        ? 'Personal wallet ready.'
+        : 'You sign Squads transactions from your personal wallet. Create one in your profile.',
+      checked: hasPersonalWallet,
+      cta: { label: 'Open profile', to: '/profile' },
+    },
+    {
+      id: 'members',
+      label: 'Invite teammates',
+      description: hasInvitedTeammate
+        ? `${memberCount} member${memberCount === 1 ? '' : 's'} in this organization.`
+        : "Optional — invite anyone who'll co-sign treasury transactions. Skip if you're working solo.",
+      checked: hasInvitedTeammate,
+      cta: { label: 'Invite members', to: `/organizations/${organizationId}/members` },
+    },
+    {
+      id: 'multisig',
+      label: 'Create a Squads multisig',
+      description: 'The treasury that holds your USDC and signs every payout. This unlocks the rest of the product.',
+      checked: false, // when true the whole section unmounts in the parent
+      cta: { label: 'Open Treasury accounts', to: `/organizations/${organizationId}/wallets` },
+    },
+  ];
+  const completedCount = items.filter((i) => i.checked).length;
+  return (
+    <section className="rd-onboarding">
+      <header className="rd-onboarding-head">
+        <div>
+          <h2 className="rd-onboarding-title">Get started</h2>
+          <p className="rd-onboarding-sub">
+            Three steps to set up your treasury. This panel disappears once your multisig is live.
+          </p>
+        </div>
+        <span className="rd-onboarding-progress">
+          {completedCount} of {items.length}
+        </span>
+      </header>
+      <ol className="rd-onboarding-list">
+        {items.map((item, idx) => (
+          <li key={item.id} className="rd-onboarding-item" data-checked={item.checked}>
+            <span className="rd-onboarding-marker" aria-hidden>
+              {item.checked ? <CheckIcon /> : <span className="rd-onboarding-marker-num">{idx + 1}</span>}
+            </span>
+            <div className="rd-onboarding-body">
+              <div className="rd-onboarding-label">{item.label}</div>
+              <div className="rd-onboarding-desc">{item.description}</div>
+            </div>
+            {item.checked ? null : (
+              <Link to={item.cta.to} className="rd-btn rd-btn-sm rd-btn-secondary">
+                {item.cta.label}
+                <span className="rd-btn-arrow" aria-hidden>→</span>
+              </Link>
+            )}
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M3.5 8.5 6.5 11.5 12.5 5" />
     </svg>
   );
 }

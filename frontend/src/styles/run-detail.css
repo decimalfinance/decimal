@@ -532,6 +532,125 @@
   color: var(--ax-text-secondary);
 }
 
+/* ── Onboarding checklist (Overview page only) ─────────── */
+/* Shown until the org has a Squads multisig — then unmounts. */
+
+.rd-onboarding {
+  margin-bottom: 28px;
+  padding: 20px 22px;
+  background: var(--ax-surface-1);
+  border: 1px solid var(--ax-border);
+  border-radius: var(--ax-r-md);
+}
+
+.rd-onboarding-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.rd-onboarding-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ax-text);
+  margin: 0 0 2px 0;
+  letter-spacing: -0.01em;
+}
+
+.rd-onboarding-sub {
+  font-size: 13px;
+  color: var(--ax-text-muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.rd-onboarding-progress {
+  flex-shrink: 0;
+  font-family: var(--ax-font-mono);
+  font-size: 12px;
+  color: var(--ax-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.rd-onboarding-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rd-onboarding-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  background: var(--ax-surface-2);
+  border: 1px solid var(--ax-border);
+  border-radius: var(--ax-r-sm);
+  transition: background var(--ax-dur-micro) var(--ax-ease-out),
+    border-color var(--ax-dur-micro) var(--ax-ease-out);
+}
+.rd-onboarding-item[data-checked='true'] {
+  background: var(--ax-surface-1);
+  border-color: var(--ax-border);
+}
+
+.rd-onboarding-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--ax-surface-1);
+  border: 1px solid var(--ax-border-strong);
+  color: var(--ax-text-muted);
+  flex-shrink: 0;
+}
+.rd-onboarding-item[data-checked='true'] .rd-onboarding-marker {
+  background: var(--ax-accent-dim);
+  border-color: transparent;
+  color: var(--ax-accent);
+}
+.rd-onboarding-marker svg {
+  width: 14px;
+  height: 14px;
+}
+
+.rd-onboarding-marker-num {
+  font-family: var(--ax-font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ax-text-secondary);
+}
+
+.rd-onboarding-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rd-onboarding-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ax-text);
+}
+.rd-onboarding-item[data-checked='true'] .rd-onboarding-label {
+  color: var(--ax-text-secondary);
+}
+
+.rd-onboarding-desc {
+  font-size: 12px;
+  color: var(--ax-text-muted);
+  line-height: 1.5;
+}
+
 /* ── Notice / inline message ───────────────────────────── */
 
 .rd-notice {
