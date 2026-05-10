@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router';
 import type { AuthenticatedSession, OrganizationMembership } from './api';
-import { useTour } from './Tour';
 
 type OrganizationContext = {
   organization: OrganizationMembership;
@@ -128,13 +127,6 @@ const icons = {
       <path d="M10 4v12M4 10h12" />
     </SvgIcon>
   ),
-  tutorial: (
-    <SvgIcon className="ax-user-menu-icon">
-      <circle cx="10" cy="10" r="7" />
-      <path d="M7.5 7.5a2.5 2.5 0 1 1 3.5 2.3c-.8.3-1 .8-1 1.5v.2" />
-      <circle cx="10" cy="14.5" r="0.6" fill="currentColor" />
-    </SvgIcon>
-  ),
 };
 
 function initialsFromEmail(email: string) {
@@ -215,17 +207,12 @@ export function AppSidebar({
   onLogout: () => void;
 }) {
   const navigate = useNavigate();
-  const tour = useTour();
   const activeContext =
     organizationContexts.find((ctx) => ctx.organization.organizationId === activeOrganizationId) ?? organizationContexts[0];
   const activeOrganization = activeContext?.organization;
-  const hasOrganization = organizationContexts.length > 0;
 
   const [wsMenuOpen, setWsMenuOpen] = useState(false);
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [showOrganizationRequiredModal, setShowOrganizationRequiredModal] = useState(false);
   const wsRef = useOutsideClick<HTMLDivElement>(wsMenuOpen, () => setWsMenuOpen(false));
-  const userRef = useOutsideClick<HTMLDivElement>(userMenuOpen, () => setUserMenuOpen(false));
   const { theme, setTheme } = useTheme();
 
   const base = activeOrganization ? `/organizations/${activeOrganization.organizationId}` : null;
@@ -320,52 +307,46 @@ export function AppSidebar({
           <>
             <div className="ax-nav-group">
               <div className="ax-nav-group-label">Operations</div>
-              <NavLinkItem to={base} end icon={icons.overview} label="Overview" tourKey="overview" />
+              <NavLinkItem to={base} end icon={icons.overview} label="Overview" />
               <NavLinkItem
                 to={`${base}/proposals`}
                 icon={icons.proposals}
                 label="Proposals"
-                tourKey="proposals"
               />
               <NavLinkItem
                 to={`${base}/payments`}
                 icon={icons.payments}
                 label="Payments"
                 badge={paymentsIncompleteCount}
-                tourKey="payments"
               />
               <NavLinkItem
                 to={`${base}/collections`}
                 icon={icons.collections}
                 label="Collections"
                 badge={collectionsOpenCount}
-                tourKey="collections"
               />
             </div>
 
             <div className="ax-nav-group">
               <div className="ax-nav-group-label">Registry</div>
-              <NavLinkItem to={`${base}/wallets`} icon={icons.wallet} label="Treasury accounts" tourKey="wallets" />
-              <NavLinkItem to={`${base}/members`} icon={icons.members} label="Members" tourKey="members" />
+              <NavLinkItem to={`${base}/wallets`} icon={icons.wallet} label="Treasury accounts" />
+              <NavLinkItem to={`${base}/members`} icon={icons.members} label="Members" />
               <NavLinkItem
                 to={`${base}/counterparties`}
                 icon={icons.counterparty}
                 label="Counterparties"
-                tourKey="counterparties"
               />
               <NavLinkItem
                 to={`${base}/destinations`}
                 icon={icons.destinations}
                 label="Destinations"
                 badge={destinationsUnreviewedCount}
-                tourKey="destinations"
               />
               <NavLinkItem
                 to={`${base}/payers`}
                 icon={icons.payers}
                 label="Payers"
                 badge={payersUnreviewedCount}
-                tourKey="payers"
               />
             </div>
 
@@ -399,119 +380,37 @@ export function AppSidebar({
           </button>
         </div>
 
-        <div className="ax-user-menu" ref={userRef}>
+        <div className="ax-user-card">
+          <span className="ax-user-avatar" aria-hidden>
+            {initialsFromEmail(session.user.email)}
+          </span>
+          <span className="ax-user-text">
+            <div className="ax-user-email" title={session.user.email}>
+              {session.user.email}
+            </div>
+            <div className="ax-user-sub">{session.user.displayName || 'Signed in'}</div>
+          </span>
+        </div>
+        <div className="ax-user-actions">
           <button
             type="button"
-            className="ax-user-button"
-            aria-haspopup="menu"
-            aria-expanded={userMenuOpen}
-            onClick={() => setUserMenuOpen((v) => !v)}
+            className="ax-user-action"
+            onClick={() => navigate('/profile')}
           >
-            <span className="ax-user-avatar" aria-hidden>
-              {initialsFromEmail(session.user.email)}
-            </span>
-            <span className="ax-user-text">
-              <div className="ax-user-email" title={session.user.email}>
-                {session.user.email}
-              </div>
-              <div className="ax-user-sub">{session.user.displayName || 'Signed in'}</div>
-            </span>
+            {icons.user}
+            <span>Profile</span>
           </button>
-          {userMenuOpen ? (
-            <div className="ax-user-menu-dropdown" role="menu">
-              <button
-                type="button"
-                role="menuitem"
-                className="ax-user-menu-item"
-                onClick={() => {
-                  setUserMenuOpen(false);
-                  navigate('/profile');
-                }}
-              >
-                {icons.user}
-                <span>Profile</span>
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className="ax-user-menu-item"
-                onClick={() => {
-                  setUserMenuOpen(false);
-                  if (hasOrganization) {
-                    tour.start();
-                    return;
-                  }
-                  setShowOrganizationRequiredModal(true);
-                }}
-              >
-                {icons.tutorial}
-                <span>Show tutorial</span>
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className="ax-user-menu-item"
-                data-tone="danger"
-                onClick={() => {
-                  setUserMenuOpen(false);
-                  onLogout();
-                }}
-              >
-                {icons.logout}
-                <span>Sign out</span>
-              </button>
-            </div>
-          ) : null}
+          <button
+            type="button"
+            className="ax-user-action"
+            data-tone="danger"
+            onClick={onLogout}
+          >
+            {icons.logout}
+            <span>Sign out</span>
+          </button>
         </div>
       </div>
-      {showOrganizationRequiredModal ? (
-        <div className="modal-root" role="dialog" aria-modal="true" aria-labelledby="org-required-title">
-          <button
-            type="button"
-            className="modal-backdrop"
-            aria-label="Close"
-            onClick={() => setShowOrganizationRequiredModal(false)}
-          />
-          <section className="modal-dialog">
-            <header className="modal-header">
-              <div>
-                <h2 id="org-required-title">Create an organization first</h2>
-                <p className="modal-subtitle">
-                  The product tour walks through organization pages like payments, collections, wallets, and policy.
-                  Create an organization before starting it.
-                </p>
-              </div>
-              <button
-                type="button"
-                className="modal-close"
-                aria-label="Close"
-                onClick={() => setShowOrganizationRequiredModal(false)}
-              >
-                ×
-              </button>
-            </header>
-            <footer className="modal-footer">
-              <button
-                type="button"
-                className="button button-secondary"
-                onClick={() => setShowOrganizationRequiredModal(false)}
-              >
-                Not now
-              </button>
-              <button
-                type="button"
-                className="button button-primary"
-                onClick={() => {
-                  setShowOrganizationRequiredModal(false);
-                  navigate('/setup');
-                }}
-              >
-                Create organization
-              </button>
-            </footer>
-          </section>
-        </div>
-      ) : null}
     </aside>
   );
 }
@@ -522,21 +421,18 @@ function NavLinkItem({
   icon,
   label,
   badge,
-  tourKey,
 }: {
   to: string;
   end?: boolean;
   icon: ReactNode;
   label: string;
   badge?: number;
-  tourKey?: string;
 }) {
   return (
     <NavLink
       to={to}
       end={end}
       className={({ isActive }) => `ax-nav-link${isActive ? ' ax-nav-link-active' : ''}`}
-      data-tour-key={tourKey}
     >
       <span className="ax-nav-link-icon">{icon}</span>
       <span className="ax-nav-link-label">{label}</span>

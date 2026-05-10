@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api';
@@ -12,7 +12,6 @@ import {
   shortenAddress,
 } from '../domain';
 import { displayPaymentStatus, displayRunStatus, statusToneForPayment, toneToPill } from '../status-labels';
-import { useTour } from '../Tour';
 
 function sourceLabel(wallet: TreasuryWallet | null): string {
   if (!wallet) return '—';
@@ -168,26 +167,6 @@ export function CommandCenterPage({ session }: { session: AuthenticatedSession }
   }, [standaloneOrders, runs, organizationId]);
 
   const hasData = orders.length > 0 || runs.length > 0;
-  const destinationCount = destinationsQuery.data?.items.length ?? 0;
-  const walletCount = balances.length;
-  const isBrandNew =
-    !balancesQuery.isLoading
-    && !ordersQuery.isLoading
-    && !runsQuery.isLoading
-    && !destinationsQuery.isLoading
-    && walletCount === 0
-    && destinationCount === 0
-    && !hasData;
-
-  const tour = useTour();
-  const tourStart = tour.start;
-  const tourIsDismissed = tour.isDismissed;
-  const tourIsOpen = tour.isOpen;
-  useEffect(() => {
-    if (isBrandNew && !tourIsDismissed && !tourIsOpen) {
-      tourStart();
-    }
-  }, [isBrandNew, tourIsDismissed, tourIsOpen, tourStart]);
 
   return (
     <main className="page-frame">
