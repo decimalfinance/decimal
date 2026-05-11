@@ -26,7 +26,7 @@ import {
   toneToPill,
 } from '../status-labels';
 import { useToast } from '../ui/Toast';
-import { RdFilterBar } from '../ui-primitives';
+import { EmptyIcon, RdEmptyState, RdFilterBar } from '../ui-primitives';
 
 type UnifiedRow =
   | {
@@ -290,13 +290,21 @@ export function PaymentsPage({ session }: { session: AuthenticatedSession }) {
                 </tr>
               ) : filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="rd-empty-cell">
-                    <strong>{rows.length === 0 ? 'No payments yet' : 'Nothing matches that filter'}</strong>
-                    <p style={{ margin: 0 }}>
-                      {rows.length === 0
-                        ? 'Create a single payment or import a CSV batch to get started.'
-                        : 'Clear the search or change the filter to see more.'}
-                    </p>
+                  <td colSpan={8} style={{ padding: 0 }}>
+                    {rows.length === 0 ? (
+                      <RdEmptyState
+                        icon={<EmptyIcon kind="receipt" />}
+                        title="No payments yet"
+                        description="Drop a vendor invoice and we'll extract every payment in it, or upload a CSV batch."
+                        primary={{ label: 'Upload invoice', onClick: () => setUploadDocOpen(true) }}
+                        secondary={{ label: 'New payment', onClick: () => setCreateOpen(true) }}
+                      />
+                    ) : (
+                      <RdEmptyState
+                        title="Nothing matches that filter"
+                        description="Clear the search or change the filter to see more."
+                      />
+                    )}
                   </td>
                 </tr>
               ) : (

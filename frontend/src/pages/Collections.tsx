@@ -22,7 +22,7 @@ import {
   toneToPill,
 } from '../status-labels';
 import { useToast } from '../ui/Toast';
-import { RdFilterBar } from '../ui-primitives';
+import { EmptyIcon, RdEmptyState, RdFilterBar } from '../ui-primitives';
 
 type UnifiedRow =
   | {
@@ -297,15 +297,21 @@ export function CollectionsPage({ session: _session }: { session: AuthenticatedS
               </tr>
             ) : filteredRows.length === 0 ? (
               <tr>
-                <td colSpan={8} className="rd-empty-cell">
-                  <strong>
-                    {rows.length === 0 ? 'No collections yet' : 'Nothing matches that filter'}
-                  </strong>
-                  <p style={{ margin: 0 }}>
-                    {rows.length === 0
-                      ? 'Create a single expected payment or import a CSV batch to get started.'
-                      : 'Clear the search or change the filter to see more.'}
-                  </p>
+                <td colSpan={8} style={{ padding: 0 }}>
+                  {rows.length === 0 ? (
+                    <RdEmptyState
+                      icon={<EmptyIcon kind="inbox" />}
+                      title="No collections yet"
+                      description="Track money you're owed. Import a CSV of expected payments or create one manually."
+                      primary={{ label: 'Import CSV', onClick: () => setImportOpen(true) }}
+                      secondary={{ label: 'New collection', onClick: () => setCreateOpen(true) }}
+                    />
+                  ) : (
+                    <RdEmptyState
+                      title="Nothing matches that filter"
+                      description="Clear the search or change the filter to see more."
+                    />
+                  )}
                 </td>
               </tr>
             ) : (

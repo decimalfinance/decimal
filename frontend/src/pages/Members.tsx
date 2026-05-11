@@ -9,6 +9,7 @@ import type {
 } from '../types';
 import { formatRelativeTime, formatTimestamp } from '../domain';
 import { useToast } from '../ui/Toast';
+import { EmptyIcon, RdEmptyState } from '../ui-primitives';
 
 export function MembersPage({ session }: { session: AuthenticatedSession }) {
   const { organizationId } = useParams<{ organizationId: string }>();
@@ -121,14 +122,16 @@ export function MembersPage({ session }: { session: AuthenticatedSession }) {
               <div className="rd-skeleton rd-skeleton-block" style={{ height: 56 }} />
             </div>
           ) : members.length === 0 ? (
-            <div className="rd-empty-cell" style={{ padding: '64px 24px' }}>
-              <strong>No members yet</strong>
-              <p style={{ margin: 0 }}>
-                {isAdmin
+            <RdEmptyState
+              icon={<EmptyIcon kind="users" />}
+              title="No members yet"
+              description={
+                isAdmin
                   ? 'Invite teammates to collaborate on this organization.'
-                  : 'Ask an admin to invite teammates.'}
-              </p>
-            </div>
+                  : 'Ask an admin to invite teammates.'
+              }
+              primary={isAdmin ? { label: 'Invite teammate', onClick: () => setInviteOpen(true) } : undefined}
+            />
           ) : (
             <table className="rd-table">
               <thead>
