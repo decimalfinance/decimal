@@ -168,7 +168,7 @@ function GoogleG() {
 function Marquee() {
   const items = [
     { num: '~412 ms', lab: 'Settlement on Solana' },
-    { num: '$0.0008', lab: 'Avg fee per payout' },
+    { num: 'AI', lab: 'Invoice extraction' },
     { num: 'm-of-n', lab: 'Threshold · you choose' },
     { num: 'USDC', lab: 'One dollar, always' },
     { num: 'Squads', lab: 'Multisig program' },
