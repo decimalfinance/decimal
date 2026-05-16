@@ -52,3 +52,12 @@ research/spike-doc-to-proposal/samples/*.png
 # Local test invoices for the doc-to-proposal flow
 batch_payment.pdf
 single_payment.pdf
+
+deliverables
+
+# Local scratch artifacts
+db-queries.txt
+fuyofulo logo.jpg
+harkirat singh.jpg
+toly pfp.jpeg
+

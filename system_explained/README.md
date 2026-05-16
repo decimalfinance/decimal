@@ -12,6 +12,7 @@ Read these files in order:
 3. [03 Payment Lifecycle](./03-payment-lifecycle.md)
 4. [04 Data Model](./04-data-model.md)
 5. [05 Operating Guide](./05-operating-guide.md)
+6. [06 Squads v4 Capability Map](./06-squads-v4-capability-map.md)
 
 ## Source Of Truth
 
