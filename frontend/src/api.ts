@@ -32,10 +32,11 @@ import type {
   PaymentExecutionPreparation,
   PaymentOrder,
   PaymentProofPacket,
-  PaymentRequest,
-  PaymentRun,
-  PaymentRunDocumentImportResult,
-  PaymentRunImportResult,
+  BatchCsvUploadResult,
+  BatchCsvPreviewResult,
+  InvoiceUploadResult,
+  PaymentOrderAgentAdvanceResult,
+  PaymentOrderClearReviewResult,
   PublicInvite,
   Organization,
   ConfirmSquadsTreasuryRequest,
@@ -44,8 +45,7 @@ import type {
   CreateSquadsAddMemberProposalRequest,
   CreateSquadsChangeThresholdProposalRequest,
   CreateSquadsPaymentProposalRequest,
-  CreateSquadsPaymentRunProposalRequest,
-  DocumentImportProgressEvent,
+  CreateSquadsBatchedPaymentProposalRequest,
   DecimalProposal,
   DecimalProposalApproveRequest,
   DecimalProposalExecuteRequest,
@@ -152,100 +152,6 @@ async function download(path: string, fallbackFileName = 'export.csv') {
   anchor.click();
   anchor.remove();
   window.URL.revokeObjectURL(url);
-}
-
-// SSE consumer over fetch (we can't use EventSource because we need to
-// POST a JSON body and forward the bearer token). Parses one event per
-// blank-line-terminated frame; named events come back as either
-// `stage` (forwarded to onStage), `result` (resolves the promise), or
-// `error` (rejects with the message). Connection-level failures and
-// HTTP errors reject as well.
-async function streamSse<TResult, TStage>(args: {
-  path: string;
-  body: unknown;
-  onStage: (event: TStage) => void;
-  signal?: AbortSignal;
-}): Promise<TResult> {
-  const response = await fetch(`${API_BASE_URL}${args.path}`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      accept: 'text/event-stream',
-      ...(sessionToken ? { authorization: `Bearer ${sessionToken}` } : {}),
-    },
-    body: JSON.stringify(args.body),
-    signal: args.signal,
-  });
-
-  if (!response.ok) {
-    let message = `${response.status} ${response.statusText}`;
-    try {
-      const body = await response.json();
-      if (body?.message) message = body.message;
-    } catch {
-      // keep default
-    }
-    if (response.status === 401) clearSessionToken();
-    throw new ApiError(message, response.status, null);
-  }
-  if (!response.body) {
-    throw new Error('Streaming response has no body.');
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder('utf-8');
-  let buffer = '';
-  let result: TResult | undefined;
-  let resultReceived = false;
-  let errorMessage: string | null = null;
-
-  // SSE frames are separated by a blank line. Each frame may have
-  // multiple `event:` / `data:` lines but our backend only emits one of
-  // each per frame.
-  while (true) {
-    const { value, done } = await reader.read();
-    if (value) buffer += decoder.decode(value, { stream: true });
-    if (done) break;
-
-    let blankIdx = buffer.indexOf('\n\n');
-    while (blankIdx !== -1) {
-      const frame = buffer.slice(0, blankIdx);
-      buffer = buffer.slice(blankIdx + 2);
-      blankIdx = buffer.indexOf('\n\n');
-
-      let eventName = 'message';
-      let dataLine = '';
-      for (const rawLine of frame.split('\n')) {
-        const line = rawLine.replace(/\r$/, '');
-        if (line.startsWith('event:')) eventName = line.slice(6).trim();
-        else if (line.startsWith('data:')) dataLine = line.slice(5).trim();
-      }
-      if (!dataLine) continue;
-
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(dataLine);
-      } catch {
-        continue;
-      }
-
-      if (eventName === 'stage') {
-        args.onStage(parsed as TStage);
-      } else if (eventName === 'result') {
-        result = parsed as TResult;
-        resultReceived = true;
-      } else if (eventName === 'error') {
-        const msg = (parsed as { message?: string })?.message;
-        errorMessage = msg || 'Streaming import failed.';
-      }
-    }
-  }
-
-  if (errorMessage) throw new Error(errorMessage);
-  if (!resultReceived || result === undefined) {
-    throw new Error('Streaming import ended without a result event.');
-  }
-  return result;
 }
 
 export const api = {
@@ -886,147 +792,80 @@ export const api = {
       { method: 'POST', body: JSON.stringify(input) },
     );
   },
-  // Batch variant: one Squads vault proposal containing every USDC transfer
-  // in a payment run. Backend caps batches at 8 rows and rejects if any
-  // row still needs Decimal-side approval (returns 400) or if the run
-  // already has an active proposal (returns 409 with the existing
-  // decimalProposalId in the error payload — frontend should route there
-  // instead of treating it as failure).
-  createSquadsPaymentRunProposalIntent(
+  // Batch variant: one Squads vault proposal that bundles up to 8 USDC
+  // transfers (passed as paymentOrderIds). Optional inputBatchId tags the
+  // proposal with the originating CSV batch. Backend rejects if any order
+  // still needs Decimal-side approval (400) or if any of them already has
+  // an active proposal (409 with the existing decimalProposalId in the
+  // error payload).
+  createSquadsBatchedPaymentProposalIntent(
     organizationId: string,
     treasuryWalletId: string,
-    input: CreateSquadsPaymentRunProposalRequest,
+    input: CreateSquadsBatchedPaymentProposalRequest,
   ) {
     return request<DecimalProposalIntentResponse>(
-      `/organizations/${organizationId}/treasury-wallets/${treasuryWalletId}/squads/vault-proposals/payment-run-intent`,
+      `/organizations/${organizationId}/treasury-wallets/${treasuryWalletId}/squads/vault-proposals/payment-batch-intent`,
       { method: 'POST', body: JSON.stringify(input) },
     );
   },
 
-  listPaymentOrders(organizationId: string, state?: PaymentOrder['state']) {
+  listPaymentOrders(
+    organizationId: string,
+    options?: { state?: PaymentOrder['state']; inputBatchId?: string },
+  ) {
     const params = new URLSearchParams({ limit: '100' });
-    if (state) {
-      params.set('state', state);
-    }
+    if (options?.state) params.set('state', options.state);
+    if (options?.inputBatchId) params.set('inputBatchId', options.inputBatchId);
     return request<{ servedAt: string; items: PaymentOrder[] }>(
       `/organizations/${organizationId}/payment-orders?${params.toString()}`,
     );
   },
-  listPaymentRequests(organizationId: string, state?: PaymentRequest['state']) {
-    const params = new URLSearchParams({ limit: '100' });
-    if (state) {
-      params.set('state', state);
-    }
-    return request<{ servedAt: string; items: PaymentRequest[] }>(
-      `/organizations/${organizationId}/payment-requests?${params.toString()}`,
-    );
-  },
-  listPaymentRuns(organizationId: string) {
-    return request<{ servedAt: string; items: PaymentRun[] }>(`/organizations/${organizationId}/payment-runs`);
-  },
-  getPaymentRunDetail(organizationId: string, paymentRunId: string) {
-    return request<PaymentRun>(`/organizations/${organizationId}/payment-runs/${paymentRunId}`);
-  },
-  resolvePaymentRunDocumentRow(
-    organizationId: string,
-    paymentRunId: string,
-    input: {
-      rowIndex: number;
-      counterpartyWalletId?: string | null;
-      walletAddress?: string | null;
-      label?: string | null;
-      trustState?: 'unreviewed' | 'trusted';
-    },
-  ) {
-    return request<{
-      paymentRun: PaymentRun;
-      paymentRequest: PaymentRequest;
-      resolvedRow: Record<string, unknown>;
-    }>(`/organizations/${organizationId}/payment-runs/${paymentRunId}/resolve-document-row`, {
-      method: 'POST',
-      body: JSON.stringify(input),
-    });
-  },
-  deletePaymentRun(organizationId: string, paymentRunId: string) {
-    return request<Record<string, unknown>>(`/organizations/${organizationId}/payment-runs/${paymentRunId}`, {
-      method: 'DELETE',
-    });
-  },
-  importPaymentRunCsv(
-    organizationId: string,
-    input: {
-      csv: string;
-      runName?: string;
-      sourceTreasuryWalletId?: string;
-    },
-  ) {
-    return request<PaymentRunImportResult>(`/organizations/${organizationId}/payment-runs/import-csv`, {
-      method: 'POST',
-      body: JSON.stringify(input),
-    });
-  },
-  importPaymentRunFromDocument(
-    organizationId: string,
-    input: {
-      filename: string;
-      mimeType: string;
-      dataBase64: string;
-      runName?: string;
-      sourceTreasuryWalletId?: string;
-    },
-  ) {
-    return request<PaymentRunDocumentImportResult>(
-      `/organizations/${organizationId}/payment-runs/from-document`,
-      { method: 'POST', body: JSON.stringify(input) },
-    );
-  },
-  // Streaming variant — same payload, but the backend writes one SSE
-  // event per real milestone (received → rendering → extracting →
-  // matching → creating → done) and the final event carries the same
-  // result the non-streaming route returns. We use fetch + body reader
-  // (not EventSource) so we can POST a JSON body and forward auth.
-  // Returns a promise that resolves to the import result, and fires
-  // onStage for each progress event.
-  importPaymentRunFromDocumentStream(
-    organizationId: string,
-    input: {
-      filename: string;
-      mimeType: string;
-      dataBase64: string;
-      runName?: string;
-      sourceTreasuryWalletId?: string;
-    },
-    callbacks: {
-      onStage: (event: DocumentImportProgressEvent) => void;
-      signal?: AbortSignal;
-    },
-  ): Promise<PaymentRunDocumentImportResult> {
-    return streamSse<PaymentRunDocumentImportResult, DocumentImportProgressEvent>({
-      path: `/organizations/${organizationId}/payment-runs/from-document/stream`,
-      body: input,
-      onStage: callbacks.onStage,
-      signal: callbacks.signal,
-    });
-  },
-  createPaymentRequest(
+  // Manual single-payment intake. Creates a PaymentOrder directly and
+  // (with submitNow) runs the agent-advance step in the same call so the
+  // proposal gets created on chain without a second round-trip.
+  createPaymentOrder(
     organizationId: string,
     input: {
       counterpartyWalletId: string;
       amountRaw: string;
       asset?: string;
-      reason: string;
+      memo?: string;
       externalReference?: string;
+      invoiceNumber?: string;
+      attachmentUrl?: string;
       dueAt?: string;
-      metadataJson?: Record<string, unknown>;
-      createOrderNow?: boolean;
       sourceTreasuryWalletId?: string;
-      submitOrderNow?: boolean;
+      metadataJson?: Record<string, unknown>;
+      submitNow?: boolean;
     },
   ) {
-    return request<PaymentRequest>(`/organizations/${organizationId}/payment-requests`, {
-      method: 'POST',
-      body: JSON.stringify(input),
-    });
+    return request<PaymentOrder & { automation?: PaymentOrderAgentAdvanceResult }>(
+      `/organizations/${organizationId}/payment-orders`,
+      { method: 'POST', body: JSON.stringify(input) },
+    );
+  },
+  // Bulk-create N PaymentOrders from a CSV string. Each row becomes a
+  // PaymentOrder tagged with the same inputBatchId. With autoAdvance the
+  // agent immediately tries to submit a Squads proposal per clean row.
+  uploadBatchCsv(
+    organizationId: string,
+    input: {
+      csv: string;
+      sourceTreasuryWalletId?: string;
+      batchLabel?: string;
+      autoAdvance?: boolean;
+    },
+  ) {
+    return request<BatchCsvUploadResult>(
+      `/organizations/${organizationId}/payment-orders/batch-csv`,
+      { method: 'POST', body: JSON.stringify(input) },
+    );
+  },
+  previewBatchCsv(organizationId: string, csv: string) {
+    return request<BatchCsvPreviewResult>(
+      `/organizations/${organizationId}/payment-orders/batch-csv/preview`,
+      { method: 'POST', body: JSON.stringify({ csv }) },
+    );
   },
   getPaymentOrderDetail(organizationId: string, paymentOrderId: string) {
     return request<PaymentOrder>(`/organizations/${organizationId}/payment-orders/${paymentOrderId}`);
@@ -1043,6 +882,58 @@ export const api = {
       body: JSON.stringify({}),
     });
   },
+  // Agent-aware invoice upload. Creates payment orders from the document and,
+  // when autoAdvance is true (default), asks the Decimal org agent to create
+  // and submit Squads proposals for any rows that are proposal-ready. Risky
+  // rows come back as needs_review and the user clears them via
+  // clearPaymentOrderReview.
+  uploadInvoice(
+    organizationId: string,
+    input: {
+      filename: string;
+      mimeType: string;
+      dataBase64: string;
+      sourceTreasuryWalletId?: string | null;
+      autoAdvance?: boolean;
+    },
+  ) {
+    return request<InvoiceUploadResult>(
+      `/organizations/${organizationId}/invoices/upload`,
+      { method: 'POST', body: JSON.stringify(input) },
+    );
+  },
+  // Clear a needs_review payment order. With autoAdvance the backend will
+  // also kick the agent to create and submit the Squads proposal in the
+  // same call, returning the result in `automation`.
+  clearPaymentOrderReview(
+    organizationId: string,
+    paymentOrderId: string,
+    input?: {
+      reviewNote?: string | null;
+      trustCounterpartyWallet?: boolean;
+      submitAfterClear?: boolean;
+      autoAdvance?: boolean;
+    },
+  ) {
+    return request<PaymentOrderClearReviewResult>(
+      `/organizations/${organizationId}/payment-orders/${paymentOrderId}/clear-review`,
+      { method: 'POST', body: JSON.stringify(input ?? {}) },
+    );
+  },
+  // Idempotent retry. Safe to call repeatedly — if a proposal already exists
+  // the backend returns already_has_proposal without creating a duplicate.
+  advancePaymentOrder(
+    organizationId: string,
+    paymentOrderId: string,
+    input?: {
+      sourceTreasuryWalletId?: string | null;
+    },
+  ) {
+    return request<PaymentOrderAgentAdvanceResult>(
+      `/organizations/${organizationId}/payment-orders/${paymentOrderId}/agent/advance`,
+      { method: 'POST', body: JSON.stringify(input ?? {}) },
+    );
+  },
   preparePaymentOrderExecution(
     organizationId: string,
     paymentOrderId: string,
@@ -1057,9 +948,6 @@ export const api = {
         body: JSON.stringify(input ?? {}),
       },
     );
-  },
-  getPaymentRunProof(organizationId: string, paymentRunId: string) {
-    return request<Record<string, unknown>>(`/organizations/${organizationId}/payment-runs/${paymentRunId}/proof`);
   },
   attachPaymentOrderSignature(
     organizationId: string,
