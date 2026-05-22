@@ -533,10 +533,10 @@ export type DecimalProposal = {
   decimalProposalId: string;
   organizationId: string;
   treasuryWalletId: string | null;
+  // For single-payment proposals. Batched proposals (one on-chain tx
+  // covering N orders) leave this null and carry the paymentOrderIds
+  // inside semanticPayloadJson instead.
   paymentOrderId: string | null;
-  // Set when this proposal batches a whole payment run rather than a
-  // single order. Mutually exclusive with paymentOrderId in practice.
-  paymentRunId?: string | null;
   provider: SquadsTreasuryProvider;
   proposalType: 'config_transaction' | 'vault_transaction' | string;
   proposalCategory: 'configuration' | 'execution' | string;
@@ -620,8 +620,9 @@ export type DecimalProposalIntentResponse = {
   decimalProposal?: DecimalProposal;
 };
 
-export type CreateSquadsPaymentRunProposalRequest = {
-  paymentRunId: string;
+export type CreateSquadsBatchedPaymentProposalRequest = {
+  paymentOrderIds: string[];
+  inputBatchId?: string | null;
   creatorPersonalWalletId: string;
   memo?: string | null;
 };
@@ -902,28 +903,15 @@ export type ReconciliationRow = {
   exceptions: Array<Record<string, unknown>>;
 };
 
+// Backend collapsed the lifecycle to six canonical stages. Substates that
+// matter (vote counts, on-chain submission/execution) live on the related
+// DecimalProposal/ExecutionRecord, not on the order itself.
 export type PaymentOrderState =
-  // Agent flagged the invoice during AP intake — needs a human decision
-  // before any on-chain activity. Backend adds this once the AP intake agent
-  // is wired into the api. Both names are accepted; backend may pick one.
   | 'needs_review'
-  | 'agent_flagged'
   | 'draft'
-  | 'pending_approval'
-  | 'approved'
-  | 'ready'
   | 'proposed'
-  | 'ready_for_execution'
-  | 'proposal_prepared'
-  | 'proposal_submitted'
-  | 'proposal_approved'
-  | 'proposal_executed'
-  | 'execution_recorded'
   | 'executed'
-  | 'partially_settled'
   | 'settled'
-  | 'exception'
-  | 'closed'
   | 'cancelled';
 
 export type PaymentOrderEvent = {
@@ -942,34 +930,6 @@ export type PaymentOrderEvent = {
   createdAt: string;
 };
 
-export type PaymentRequestState = 'submitted' | 'converted_to_order' | 'cancelled';
-
-export type PaymentRequest = {
-  paymentRequestId: string;
-  organizationId: string;
-  paymentRunId: string | null;
-  counterpartyWalletId: string;
-  counterpartyId: string | null;
-  requestedByUserId: string | null;
-  amountRaw: string;
-  asset: string;
-  reason: string;
-  externalReference: string | null;
-  dueAt: string | null;
-  state: PaymentRequestState;
-  metadataJson: Record<string, unknown>;
-  createdAt: string;
-  updatedAt: string;
-  counterpartyWallet: CounterpartyWallet;
-  counterparty: Counterparty | null;
-  requestedByUser: User | null;
-  paymentOrder: {
-    paymentOrderId: string;
-    state: PaymentOrderState;
-    createdAt: string;
-  } | null;
-};
-
 export type PreparedSolanaInstruction = {
   programId: string;
   keys: Array<{
@@ -985,9 +945,9 @@ export type PaymentExecutionPacket = {
   version: number;
   network: string;
   paymentOrderId?: string;
-  paymentRunId?: string;
-  runName?: string;
   paymentOrderIds?: string[];
+  inputBatchId?: string;
+  inputBatchLabel?: string;
   transferRequestId?: string;
   transferRequestIds?: string[];
   executionRecordId?: string;
@@ -1045,86 +1005,50 @@ export type PaymentExecutionPreparation = {
   paymentOrder: PaymentOrder;
 };
 
-export type PaymentRun = {
-  paymentRunId: string;
-  organizationId: string;
-  sourceTreasuryWalletId: string | null;
-  runName: string;
-  inputSource: string;
-  state: string;
-  derivedState: string;
-  metadataJson: Record<string, unknown>;
-  createdByUserId: string | null;
-  createdAt: string;
-  updatedAt: string;
-  sourceTreasuryWallet: TreasuryWallet | null;
-  createdByUser: User | null;
-  totals: {
-    orderCount: number;
-    actionableCount: number;
-    cancelledCount: number;
-    totalAmountRaw: string;
-    settledCount: number;
-    exceptionCount: number;
-    pendingApprovalCount: number;
-    approvedCount: number;
-    readyCount: number;
-  };
-  paymentOrders?: PaymentOrder[];
+// CSV intake (bulk-create N PaymentOrders directly). Replaces the old
+// PaymentRun/PaymentRequest two-step flow. Same response shape as the
+// invoice upload endpoint so the UI can reuse the result panel.
+export type BatchCsvImportedRow = {
+  rowNumber: number;
+  status: 'imported';
+  inputBatchId: string;
+  inputBatchLabel: string;
+  decision: 'drafted' | 'needs_review';
+  counterpartyWallet: CounterpartyWallet;
+  paymentOrder: PaymentOrder;
 };
 
-export type PaymentRunImportResult = {
-  paymentRun: PaymentRun;
-  importResult: PaymentRequestsCsvImportResult;
+export type BatchCsvFailedRow = {
+  rowNumber: number;
+  status: 'failed';
+  error: string;
 };
 
-export type PaymentRunDocumentExtractedRow = {
-  counterparty: string;
-  amount: number;
-  currency: string;
-  reference: string | null;
-  due_date: string | null;
-  wallet_address: string | null;
-  notes: string | null;
+export type BatchCsvUploadResult = {
+  inputSource: 'csv_import';
+  inputBatchId: string;
+  inputBatchLabel: string;
+  imported: number;
+  failed: number;
+  paymentOrders: BatchCsvImportedRow[];
+  items: Array<BatchCsvImportedRow | BatchCsvFailedRow>;
+  automation: PaymentOrderAgentAdvanceResult[];
 };
 
-export type PaymentRunDocumentSkippedRow = {
-  rowIndex: number;
-  counterparty: string;
-  amount: number;
-  currency: string;
-  reference: string | null;
-  walletAddress?: string | null;
-  reason: 'no_destination_or_wallet' | 'unsupported_currency' | 'invalid_wallet_address';
-  message?: string;
+export type BatchCsvPreviewResult = {
+  totalRows: number;
+  ready: number;
+  warnings: number;
+  failed: number;
+  canImport: boolean;
+  items: Array<Record<string, unknown>>;
 };
-
-export type PaymentRunDocumentImportResult = PaymentRunImportResult & {
-  extractedRows: PaymentRunDocumentExtractedRow[];
-  skippedRows: PaymentRunDocumentSkippedRow[];
-  modelLatencyMs: number;
-  documentImportReview?: {
-    status: string;
-    reason: string;
-    message: string;
-  };
-};
-
-// Server-sent progress events from POST /payment-runs/from-document/stream.
-// Mirrors the backend's DocumentImportProgressEvent union one-for-one.
-export type DocumentImportProgressEvent =
-  | { stage: 'received'; message: string; bytes: number }
-  | { stage: 'rendering'; message: string }
-  | { stage: 'extracting'; message: string; pageCount: number }
-  | { stage: 'matching'; message: string; extractedCount: number; modelLatencyMs: number }
-  | { stage: 'creating'; message: string; matchedCount: number; skippedCount: number }
-  | { stage: 'done'; message: string };
 
 export type PaymentOrder = {
   paymentOrderId: string;
   organizationId: string;
-  paymentRequestId: string | null;
-  paymentRunId: string | null;
+  inputBatchId: string | null;
+  inputBatchLabel: string | null;
   counterpartyWalletId: string;
   counterpartyId: string | null;
   sourceTreasuryWalletId: string | null;
@@ -1157,7 +1081,6 @@ export type PaymentOrder = {
   counterparty: Counterparty | null;
   sourceTreasuryWallet: TreasuryWallet | null;
   createdByUser: User | null;
-  paymentRequest: Omit<PaymentRequest, 'counterpartyWallet' | 'counterparty' | 'paymentOrder'> | null;
   transferRequests: Array<{
     transferRequestId: string;
     status: string;
@@ -1183,17 +1106,6 @@ export type PaymentOrder = {
   canCreateSquadsPaymentProposal: boolean;
   events: PaymentOrderEvent[];
   reconciliationDetail: ReconciliationDetail | null;
-};
-
-export type PaymentRequestsCsvImportResult = {
-  imported: number;
-  failed: number;
-  items: Array<{
-    rowNumber: number;
-    status: 'imported' | 'failed';
-    error?: string;
-    paymentRequest?: PaymentRequest;
-  }>;
 };
 
 export type PaymentProofPacket = {
@@ -1651,4 +1563,95 @@ export type SpendingLimitPolicyIntentResponse = {
 export type ReplaceSpendingLimitPolicyIntentResponse = SpendingLimitPolicyIntentResponse & {
   originalSpendingLimitPolicy: SpendingLimitPolicy;
   replacementSpendingLimitPolicy: SpendingLimitPolicy;
+};
+
+// ─── Agent-aware invoice intake + advance ──────────────────────────────────
+// Per-row outcome from POST /invoices/upload (and /clear-review,
+// /agent/advance). Mirrors PaymentOrderAgentAdvanceResult in the backend.
+// `proposal_submitted` is the success case where the org agent signed and
+// submitted a Squads payment proposal. All other statuses carry a `reason`
+// the UI can render so the user knows what to do next.
+export type PaymentOrderAgentAdvanceResult =
+  | {
+      status: 'proposal_submitted';
+      paymentOrderId: string;
+      treasuryWalletId: string;
+      decimalProposalId: string;
+      submittedSignature: string;
+      reason: null;
+      decimalProposal: unknown;
+    }
+  | {
+      status:
+        | 'already_has_proposal'
+        | 'needs_review'
+        | 'needs_source_treasury'
+        | 'unsupported_source_treasury'
+        | 'not_applicable'
+        | 'blocked'
+        | 'failed';
+      paymentOrderId: string;
+      treasuryWalletId: string | null;
+      decimalProposalId?: string | null;
+      submittedSignature?: string | null;
+      reason: string;
+      details?: unknown;
+    };
+
+export type InvoiceIntakeCreatedRow = {
+  rowIndex: number;
+  decision: 'drafted' | 'needs_review' | string;
+  triggeredRules: Array<{ rule: string } & Record<string, unknown>>;
+  paymentOrder: PaymentOrder;
+};
+
+export type InvoiceIntakeSkippedRow = {
+  counterparty: string;
+  amount: number;
+  currency: string;
+  reference: string | null;
+  walletAddress?: string | null;
+  reason:
+    | 'no_destination_or_wallet'
+    | 'unsupported_currency'
+    | 'blocked_counterparty'
+    | 'invalid_amount'
+    | 'invalid_wallet_address'
+    | 'creation_failed';
+  message: string;
+};
+
+// Lightweight type for the raw rows the vision LLM returns. The full
+// invoice extraction shape lives in source_invoice on each row, but the
+// top-level "extractedRows" field is informational metadata.
+export type ExtractedInvoiceRow = {
+  counterparty: string;
+  amount: number;
+  currency: string;
+  reference: string | null;
+  due_date: string | null;
+  wallet_address: string | null;
+  notes: string | null;
+};
+
+export type InvoiceUploadResult = {
+  inputSource: 'invoice_upload';
+  filename: string;
+  modelLatencyMs: number;
+  pageCount: number;
+  extractedRows: ExtractedInvoiceRow[];
+  createdCount: number;
+  skippedCount: number;
+  primaryPaymentOrder: PaymentOrder | null;
+  paymentOrders: InvoiceIntakeCreatedRow[];
+  skippedRows: InvoiceIntakeSkippedRow[];
+  automation: PaymentOrderAgentAdvanceResult[];
+};
+
+// Response shape from POST /payment-orders/:id/clear-review when
+// autoAdvance is true. It is a PaymentOrder detail with an extra
+// `automation` field describing what the agent did (or null if
+// autoAdvance was false).
+export type PaymentOrderClearReviewResult = PaymentOrder & {
+  automation: PaymentOrderAgentAdvanceResult | null;
 };
