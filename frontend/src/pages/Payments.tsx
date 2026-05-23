@@ -4,10 +4,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api';
 import type {
   AuthenticatedSession,
+  BatchCsvUploadResult,
   CounterpartyWallet,
-  DocumentImportProgressEvent,
+  InvoiceIntakeSkippedRow,
+  InvoiceUploadResult,
   PaymentOrder,
-  PaymentRun,
+  PaymentOrderAgentAdvanceResult,
   TreasuryWallet,
 } from '../types';
 import {
@@ -20,7 +22,6 @@ import {
 import { parseCsvPreview } from '../csv-parse';
 import {
   displayPaymentStatus,
-  displayRunStatus,
   hasRealWalletLabel,
   statusToneForPayment,
   toneToPill,
@@ -28,38 +29,41 @@ import {
 import { useToast } from '../ui/Toast';
 import { EmptyIcon, RdEmptyState, RdFilterBar } from '../ui-primitives';
 
-type UnifiedRow =
-  | {
-      kind: 'single';
-      id: string;
-      name: string;
-      counterpartyName: string | null;
-      destination: string;
-      destinationLabel: string | null;
-      source: string;
-      amountLabel: string;
-      state: string;
-      tone: 'success' | 'warning' | 'danger' | 'neutral';
-      origin: 'single';
-      createdAt: string;
-      to: string;
-    }
-  | {
-      kind: 'run';
-      id: string;
-      name: string;
-      counterpartyName: string | null;
-      destination: string;
-      destinationLabel: string | null;
-      source: string;
-      amountLabel: string;
-      state: string;
-      tone: 'success' | 'warning' | 'danger' | 'neutral';
-      origin: 'run';
-      originLabel: string;
-      createdAt: string;
-      to: string;
-    };
+// Every row is a PaymentOrder now. Batched orders carry an inputBatchLabel
+// rendered as a small chip, but they live in the same list as standalone
+// payments — no separate "run" entity to model in the UI.
+type UnifiedRow = {
+  kind: 'single';
+  id: string;
+  name: string;
+  counterpartyName: string | null;
+  destination: string;
+  destinationLabel: string | null;
+  source: string;
+  amountLabel: string;
+  state: string;
+  tone: 'success' | 'warning' | 'danger' | 'neutral';
+  // True when the row needs a human's eyes: agent flagged the invoice,
+  // or the destination wallet isn't trusted. Drives both the "Needs
+  // review" filter and the metric.
+  needsReview: boolean;
+  // 'batch' iff the order entered via a CSV batch (carries originLabel).
+  // 'single' otherwise (invoice upload or manual entry).
+  origin: 'single' | 'batch';
+  originLabel?: string;
+  createdAt: string;
+  to: string;
+};
+
+// "Needs review" is true if the agent flagged the payment OR the destination
+// wallet isn't yet trusted (the orange UNREVIEWED chip in the table). We
+// surface both under one filter so the user has a single "what needs my eyes"
+// view.
+function orderNeedsReview(order: PaymentOrder): boolean {
+  if (order.derivedState === 'needs_review') return true;
+  if (order.counterpartyWallet?.trustState && order.counterpartyWallet.trustState !== 'trusted') return true;
+  return false;
+}
 
 function sourceLabel(wallet: TreasuryWallet | null): string {
   if (!wallet) return '—';
@@ -91,12 +95,6 @@ export function PaymentsPage({ session }: { session: AuthenticatedSession }) {
     enabled: Boolean(organizationId),
     refetchInterval: 10_000,
   });
-  const paymentRunsQuery = useQuery({
-    queryKey: ['payment-runs', organizationId] as const,
-    queryFn: () => api.listPaymentRuns(organizationId!),
-    enabled: Boolean(organizationId),
-    refetchInterval: 10_000,
-  });
   const addressesQuery = useQuery({
     queryKey: ['addresses', organizationId] as const,
     queryFn: () => api.listTreasuryWallets(organizationId!),
@@ -120,50 +118,31 @@ export function PaymentsPage({ session }: { session: AuthenticatedSession }) {
   }
 
   const orders = paymentOrdersQuery.data?.items ?? [];
-  const runs = paymentRunsQuery.data?.items ?? [];
   const addresses = addressesQuery.data?.items ?? [];
   const destinations = destinationsQuery.data?.items ?? [];
 
-  const standaloneOrders = orders.filter((o) => !o.paymentRunId);
-
   const rows = useMemo<UnifiedRow[]>(() => {
-    const list: UnifiedRow[] = [
-      ...standaloneOrders.map<UnifiedRow>((o) => ({
-        kind: 'single',
-        id: o.paymentOrderId,
-        name: o.counterpartyWallet.label,
-        counterpartyName: o.counterparty?.displayName ?? null,
-        destination: o.counterpartyWallet.walletAddress,
-        destinationLabel: hasRealWalletLabel(o.counterpartyWallet.label, o.counterpartyWallet.walletAddress)
-          ? o.counterpartyWallet.label
-          : null,
-        source: sourceLabel(o.sourceTreasuryWallet),
-        amountLabel: `${formatRawUsdcCompact(o.amountRaw)} ${assetSymbol(o.asset)}`,
-        state: displayPaymentStatus(o.derivedState),
-        tone: statusToneForPayment(o.derivedState),
-        origin: 'single',
-        createdAt: o.createdAt,
-        to: `/organizations/${organizationId}/payments/${o.paymentOrderId}`,
-      })),
-      ...runs.map<UnifiedRow>((r) => ({
-        kind: 'run',
-        id: r.paymentRunId,
-        name: r.runName,
-        counterpartyName: null,
-        destination: `${r.totals.orderCount} destination${r.totals.orderCount === 1 ? '' : 's'}`,
-        destinationLabel: null,
-        source: sourceLabel(r.sourceTreasuryWallet),
-        amountLabel: `${formatRawUsdcCompact(r.totals.totalAmountRaw)} USDC`,
-        state: displayRunStatus(r.derivedState),
-        tone: statusToneForPayment(r.derivedState),
-        origin: 'run',
-        originLabel: `Batch · ${r.totals.orderCount} rows`,
-        createdAt: r.createdAt,
-        to: `/organizations/${organizationId}/runs/${r.paymentRunId}`,
-      })),
-    ];
+    const list: UnifiedRow[] = orders.map<UnifiedRow>((o) => ({
+      kind: 'single',
+      id: o.paymentOrderId,
+      name: o.counterpartyWallet.label,
+      counterpartyName: o.counterparty?.displayName ?? null,
+      destination: o.counterpartyWallet.walletAddress,
+      destinationLabel: hasRealWalletLabel(o.counterpartyWallet.label, o.counterpartyWallet.walletAddress)
+        ? o.counterpartyWallet.label
+        : null,
+      source: sourceLabel(o.sourceTreasuryWallet),
+      amountLabel: `${formatRawUsdcCompact(o.amountRaw)} ${assetSymbol(o.asset)}`,
+      state: displayPaymentStatus(o.derivedState),
+      tone: statusToneForPayment(o.derivedState),
+      needsReview: orderNeedsReview(o),
+      origin: o.inputBatchLabel ? 'batch' : 'single',
+      originLabel: o.inputBatchLabel ?? undefined,
+      createdAt: o.createdAt,
+      to: `/organizations/${organizationId}/payments/${o.paymentOrderId}`,
+    }));
     return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [standaloneOrders, runs, organizationId]);
+  }, [orders, organizationId]);
 
   const filteredRows = useMemo(() => {
     let out = rows;
@@ -172,7 +151,7 @@ export function PaymentsPage({ session }: { session: AuthenticatedSession }) {
     } else if (filter === 'settled') {
       out = out.filter((r) => r.tone === 'success');
     } else if (filter === 'needs_review') {
-      out = out.filter((r) => r.tone === 'danger');
+      out = out.filter((r) => r.needsReview);
     }
     const q = search.trim().toLowerCase();
     if (q) {
@@ -188,14 +167,12 @@ export function PaymentsPage({ session }: { session: AuthenticatedSession }) {
 
   // Metrics: count actual payments (orders), not batches. A run is a grouping,
   // not a payment — counting both double-counts the same transfer.
-  const awaiting = orders.filter((o) => ['draft', 'pending_approval'].includes(o.derivedState)).length;
-  const readyToSign = orders.filter((o) =>
-    ['approved', 'ready_for_execution'].includes(o.derivedState),
-  ).length;
-  const settled = orders.filter((o) => ['settled', 'closed'].includes(o.derivedState)).length;
-  const needsReview = orders.filter((o) => ['exception', 'partially_settled'].includes(o.derivedState)).length;
+  const awaiting = orders.filter((o) => o.derivedState === 'draft').length;
+  const readyToSign = orders.filter((o) => o.derivedState === 'proposed').length;
+  const settled = orders.filter((o) => o.derivedState === 'settled').length;
+  const needsReview = orders.filter(orderNeedsReview).length;
 
-  const isLoading = paymentOrdersQuery.isLoading || paymentRunsQuery.isLoading;
+  const isLoading = paymentOrdersQuery.isLoading;
 
   return (
     <main className="page-frame">
@@ -351,8 +328,8 @@ export function PaymentsPage({ session }: { session: AuthenticatedSession }) {
                     </td>
                     <td className="rd-num">{row.amountLabel}</td>
                     <td>
-                      <span className="rd-origin" data-kind={row.kind === 'run' ? 'run' : undefined}>
-                        {row.kind === 'run' ? row.originLabel : 'Single'}
+                      <span className="rd-origin" data-kind={row.origin === 'batch' ? 'run' : undefined}>
+                        {row.origin === 'batch' ? row.originLabel ?? 'Batch' : 'Single'}
                       </span>
                     </td>
                     <td>
@@ -407,17 +384,19 @@ export function PaymentsPage({ session }: { session: AuthenticatedSession }) {
         <UploadDocumentDialog
           organizationId={organizationId}
           onClose={() => setUploadDocOpen(false)}
-          onSuccess={async (name, rows, skipped) => {
-            setUploadDocOpen(false);
-            const skippedNote = skipped.length
-              ? ` ${skipped.length} row(s) skipped — no destination match for ${skipped
-                  .slice(0, 2)
-                  .map((s) => `"${s.counterparty}"`)
-                  .join(', ')}${skipped.length > 2 ? ` and ${skipped.length - 2} more` : ''}.`
-              : '';
-            success(`Imported "${name}" with ${rows} row(s).${skippedNote}`);
+          onSuccess={async (result) => {
+            // We leave the dialog open so the user can see the per-row
+            // outcomes (auto-submitted, needs review, failed, etc.) and act
+            // on each. Just refresh background data here.
             await queryClient.invalidateQueries({ queryKey: ['payment-runs', organizationId] });
             await queryClient.invalidateQueries({ queryKey: ['payment-orders', organizationId] });
+            const submitted = result.automation.filter((a) => a.status === 'proposal_submitted').length;
+            const review = result.paymentOrders.filter((p) => p.decision === 'needs_review').length;
+            const parts: string[] = [];
+            if (submitted > 0) parts.push(`${submitted} auto-submitted`);
+            if (review > 0) parts.push(`${review} needs review`);
+            if (result.skippedCount > 0) parts.push(`${result.skippedCount} skipped`);
+            success(parts.length ? `Invoice processed — ${parts.join(', ')}.` : 'Invoice processed.');
           }}
           onError={(message) => toastError(message)}
         />
@@ -451,14 +430,15 @@ function CreatePaymentDialog(props: {
       if (!counterpartyWalletId || !amount || !reason) {
         throw new Error('Destination, amount, and reason are required.');
       }
-      return api.createPaymentRequest(organizationId, {
+      // Create the PaymentOrder directly and ask the agent to advance it
+      // (submitNow=true triggers the proposal-creation step server-side).
+      return api.createPaymentOrder(organizationId, {
         counterpartyWalletId,
         amountRaw: usdcToRaw(amount),
-        reason,
+        memo: reason,
         externalReference: String(form.get('externalReference') ?? '') || undefined,
         sourceTreasuryWalletId: String(form.get('sourceTreasuryWalletId') ?? '') || undefined,
-        createOrderNow: true,
-        submitOrderNow: true,
+        submitNow: true,
       });
     },
     onSuccess: () => onSuccess(),
@@ -593,25 +573,20 @@ function ImportCsvDialog(props: {
   const preview = useMemo(() => parseCsvPreview(csvText, 10), [csvText]);
 
   const importMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (): Promise<BatchCsvUploadResult> => {
       const csv = csvText.trim();
       if (!csv) throw new Error('Paste at least one CSV row.');
-      const result = await api.importPaymentRunCsv(organizationId, {
+      const result = await api.uploadBatchCsv(organizationId, {
         csv,
-        runName: runName.trim() || undefined,
+        batchLabel: runName.trim() || undefined,
         sourceTreasuryWalletId: sourceAddressId || undefined,
+        autoAdvance: true,
       });
-      if (result.importResult.imported === 0) {
-        const existingName = result.paymentRun?.runName;
-        if (existingName) {
-          throw new Error(
-            `This CSV was already imported as "${existingName}". Nothing to do — open that batch instead of re-importing.`,
-          );
-        }
-        const failedDetail = result.importResult.items
-          .filter((item) => item.status === 'failed')
+      if (result.imported === 0) {
+        const failedDetail = result.items
+          .filter((item): item is Extract<typeof item, { status: 'failed' }> => item.status === 'failed')
           .slice(0, 3)
-          .map((item) => `row ${item.rowNumber}: ${item.error ?? 'invalid row'}`)
+          .map((item) => `row ${item.rowNumber}: ${item.error}`)
           .join(' · ');
         throw new Error(
           failedDetail
@@ -622,7 +597,7 @@ function ImportCsvDialog(props: {
       return result;
     },
     onSuccess: (result) => {
-      onSuccess(result.paymentRun.runName, result.importResult.imported);
+      onSuccess(result.inputBatchLabel, result.imported);
     },
     onError: (err) => onError(err instanceof Error ? err.message : 'CSV import failed.'),
   });
@@ -765,65 +740,18 @@ function ImportCsvDialog(props: {
   );
 }
 
-// The five user-visible steps. The backend emits six stages (the 6th is
-// `done`, which just finalizes the last step). We collapse `received`
-// and `rendering` into a single "Reading file" step because they
-// usually fire back-to-back and the distinction isn't meaningful.
-const UPLOAD_STEPS: { key: UploadStepKey; label: string }[] = [
-  { key: 'reading', label: 'Reading file' },
-  { key: 'extracting', label: 'Extracting invoices with AI' },
-  { key: 'matching', label: 'Matching to your address book' },
-  { key: 'creating', label: 'Creating draft batch' },
-];
-type UploadStepKey = 'reading' | 'extracting' | 'matching' | 'creating';
-type StepStatus = 'pending' | 'active' | 'done';
-
-function stageToStepIndex(stage: DocumentImportProgressEvent['stage']): number {
-  switch (stage) {
-    case 'received':
-    case 'rendering':
-      return 0;
-    case 'extracting':
-      return 1;
-    case 'matching':
-      return 2;
-    case 'creating':
-      return 3;
-    case 'done':
-      return UPLOAD_STEPS.length;
-  }
-}
-
 function UploadDocumentDialog(props: {
   organizationId: string;
   onClose: () => void;
-  onSuccess: (
-    runName: string,
-    importedRows: number,
-    skippedRows: { counterparty: string; reason: string }[],
-  ) => void;
+  onSuccess: (result: InvoiceUploadResult) => void;
   onError: (message: string) => void;
 }) {
   const { organizationId, onClose, onSuccess, onError } = props;
   const [file, setFile] = useState<File | null>(null);
-  const [runName, setRunName] = useState('');
   const [isDragging, setIsDragging] = useState(false);
-  const [progressEvents, setProgressEvents] = useState<DocumentImportProgressEvent[]>([]);
-  const [streamError, setStreamError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
-
-  // Latest event per stage — used to render sub-text on each step row.
-  const latestByStage = useMemo(() => {
-    const map = new Map<DocumentImportProgressEvent['stage'], DocumentImportProgressEvent>();
-    for (const e of progressEvents) map.set(e.stage, e);
-    return map;
-  }, [progressEvents]);
-
-  const currentStepIndex = useMemo(() => {
-    if (progressEvents.length === 0) return -1;
-    const last = progressEvents[progressEvents.length - 1]!;
-    return stageToStepIndex(last.stage);
-  }, [progressEvents]);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<InvoiceUploadResult | null>(null);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -836,39 +764,25 @@ function UploadDocumentDialog(props: {
   const start = async () => {
     if (!file) return;
     setRunning(true);
-    setStreamError(null);
-    setProgressEvents([]);
+    setError(null);
+    setResult(null);
     try {
       const dataBase64 = await fileToBase64(file);
-      const result = await api.importPaymentRunFromDocumentStream(
-        organizationId,
-        {
-          filename: file.name,
-          mimeType: file.type || guessMimeFromFilename(file.name),
-          dataBase64,
-          runName: runName.trim() || undefined,
-        },
-        {
-          onStage: (event) => setProgressEvents((prev) => [...prev, event]),
-        },
-      );
-      onSuccess(
-        result.paymentRun.runName,
-        result.importResult.imported,
-        result.skippedRows.map((s) => ({ counterparty: s.counterparty, reason: s.reason })),
-      );
+      const out = await api.uploadInvoice(organizationId, {
+        filename: file.name,
+        mimeType: file.type || guessMimeFromFilename(file.name),
+        dataBase64,
+        autoAdvance: true,
+      });
+      setResult(out);
+      onSuccess(out);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Document import failed.';
-      setStreamError(message);
+      const message = err instanceof Error ? err.message : 'Invoice upload failed.';
+      setError(message);
       onError(message);
     } finally {
       setRunning(false);
     }
-  };
-
-  const reset = () => {
-    setStreamError(null);
-    setProgressEvents([]);
   };
 
   const onDrop = (e: React.DragEvent) => {
@@ -878,30 +792,25 @@ function UploadDocumentDialog(props: {
     if (dropped) setFile(dropped);
   };
 
+  const reset = () => {
+    setError(null);
+    setResult(null);
+    setFile(null);
+  };
+
   return (
     <div className="rd-dialog-backdrop" role="dialog" aria-modal="true" aria-labelledby="rd-upload-doc-title">
-      <div className="rd-dialog" style={{ maxWidth: 560 }}>
-        <h2 id="rd-upload-doc-title" className="rd-dialog-title">
+      <div className="rd-dialog upload-dialog" style={{ maxWidth: result ? 640 : 480 }}>
+        <h2 id="rd-upload-doc-title" className="rd-dialog-title" style={{ marginBottom: 4 }}>
           Upload invoice
         </h2>
-        <p className="rd-dialog-body">
-          Drop a PDF or image. We'll extract every payment in it. Vendors already in your address book use
-          their stored wallet. New vendors with a Solana wallet printed on the invoice land in your address
-          book as <strong>unreviewed</strong> — approve them on the batch page before submitting.
-        </p>
 
-        {!running && progressEvents.length === 0 && !streamError ? (
+        {/* Pre-run: dropzone + Process button */}
+        {!running && !result && !error ? (
           <>
-            <label className="rd-field" style={{ marginBottom: 16 }}>
-              <span className="rd-field-label">Batch name</span>
-              <input
-                value={runName}
-                onChange={(e) => setRunName(e.target.value)}
-                placeholder="April vendor invoices"
-                className="rd-input"
-              />
-            </label>
-
+            <p className="rd-dialog-body" style={{ margin: '0 0 20px' }}>
+              Drop a PDF or image. The agent extracts, drafts, and auto-submits proposal-ready rows.
+            </p>
             <div
               onDragOver={(e) => {
                 e.preventDefault();
@@ -909,15 +818,9 @@ function UploadDocumentDialog(props: {
               }}
               onDragLeave={() => setIsDragging(false)}
               onDrop={onDrop}
-              style={{
-                border: `1px dashed ${isDragging ? 'var(--ax-accent)' : 'var(--ax-border-strong)'}`,
-                background: isDragging ? 'var(--ax-surface-2)' : 'var(--ax-surface-2)',
-                borderRadius: 8,
-                padding: 24,
-                textAlign: 'center',
-                cursor: 'pointer',
-                transition: 'border-color 120ms ease',
-              }}
+              className="upload-dropzone"
+              data-dragging={isDragging || undefined}
+              data-has-file={file ? true : undefined}
               onClick={() => document.getElementById('rd-upload-doc-input')?.click()}
               role="button"
               tabIndex={0}
@@ -930,27 +833,19 @@ function UploadDocumentDialog(props: {
                 style={{ display: 'none' }}
               />
               {file ? (
-                <div>
-                  <div style={{ fontSize: 14, color: 'var(--ax-text)' }}>
-                    <span className="rd-mono">{file.name}</span>
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--ax-text-muted)', marginTop: 4 }}>
-                    {(file.size / 1024).toFixed(0)} KB · click to choose a different file
-                  </div>
+                <div className="upload-dropzone-file">
+                  <span className="upload-dropzone-filename">{file.name}</span>
+                  <span className="upload-dropzone-meta">{(file.size / 1024).toFixed(0)} KB</span>
                 </div>
               ) : (
-                <div>
-                  <div style={{ fontSize: 14, color: 'var(--ax-text)' }}>
-                    Drop a file here or click to browse
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--ax-text-muted)', marginTop: 4 }}>
-                    PDF, PNG, JPG, WebP — up to 10 pages
-                  </div>
+                <div className="upload-dropzone-empty">
+                  <div className="upload-dropzone-primary">Drop a file or click to browse</div>
+                  <div className="upload-dropzone-meta">PDF, PNG, JPG · up to 10 pages</div>
                 </div>
               )}
             </div>
 
-            <div className="rd-dialog-actions" style={{ marginTop: 24 }}>
+            <div className="rd-dialog-actions" style={{ marginTop: 20 }}>
               <button type="button" className="rd-btn rd-btn-secondary" onClick={onClose}>
                 Cancel
               </button>
@@ -960,170 +855,266 @@ function UploadDocumentDialog(props: {
                 disabled={!file}
                 onClick={start}
               >
-                Extract & create batch
+                Process invoice
               </button>
             </div>
           </>
         ) : null}
 
-        {running || progressEvents.length > 0 || streamError ? (
-          <div style={{ marginTop: 8 }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {UPLOAD_STEPS.map((step, idx) => {
-                const status: StepStatus =
-                  streamError && currentStepIndex === idx
-                    ? 'active'
-                    : currentStepIndex > idx
-                      ? 'done'
-                      : currentStepIndex === idx
-                        ? 'active'
-                        : 'pending';
-                return (
-                  <UploadStepRow
-                    key={step.key}
-                    label={step.label}
-                    status={status}
-                    detail={describeStep(step.key, latestByStage)}
-                    error={streamError && currentStepIndex === idx ? streamError : null}
-                  />
-                );
-              })}
+        {/* During run: simple spinner. The /invoices/upload endpoint is
+            synchronous, no SSE — usually 5-15s with gpt-4.1-mini. */}
+        {running ? (
+          <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, padding: '32px 0' }}>
+            <span
+              aria-label="processing"
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: '50%',
+                border: '3px solid var(--ax-accent)',
+                borderTopColor: 'transparent',
+                animation: 'rd-spin 0.8s linear infinite',
+              }}
+            />
+            <div style={{ fontSize: 14, color: 'var(--ax-text-secondary)' }}>
+              Reading the invoice, drafting payments, and asking the agent to submit proposals…
             </div>
-
-            {streamError ? (
-              <div className="rd-dialog-actions" style={{ marginTop: 24 }}>
-                <button type="button" className="rd-btn rd-btn-secondary" onClick={onClose}>
-                  Close
-                </button>
-                <button type="button" className="rd-btn rd-btn-primary" onClick={() => { reset(); start(); }}>
-                  Retry
-                </button>
+            {file ? (
+              <div style={{ fontSize: 12, color: 'var(--ax-text-muted)' }}>
+                {file.name} · {(file.size / 1024).toFixed(0)} KB
               </div>
-            ) : !running && currentStepIndex >= UPLOAD_STEPS.length ? (
-              <p className="rd-hint" style={{ margin: '16px 0 0' }}>
-                Done — opening batch…
-              </p>
             ) : null}
           </div>
         ) : null}
-      </div>
-    </div>
-  );
-}
 
-function UploadStepRow(props: {
-  label: string;
-  status: StepStatus;
-  detail: string | null;
-  error: string | null;
-}) {
-  const { label, status, detail, error } = props;
-  return (
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-      <StepIndicator status={status} hasError={Boolean(error)} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div
-          style={{
-            fontSize: 13,
-            color: status === 'pending' ? 'var(--ax-text-muted)' : 'var(--ax-text)',
-            fontWeight: status === 'active' ? 500 : 400,
-          }}
-        >
-          {label}
-        </div>
-        {error ? (
-          <div style={{ fontSize: 12, color: 'var(--ax-danger)', marginTop: 2 }}>{error}</div>
-        ) : detail ? (
-          <div style={{ fontSize: 12, color: 'var(--ax-text-muted)', marginTop: 2 }}>{detail}</div>
+        {/* Hard error during the call */}
+        {error && !result ? (
+          <div style={{ marginTop: 20 }}>
+            <div className="rd-callout" data-tone="danger" style={{ marginBottom: 14 }}>
+              <strong>Couldn't process the invoice.</strong>
+              <div style={{ marginTop: 4, fontSize: 13 }}>{error}</div>
+            </div>
+            <div className="rd-dialog-actions">
+              <button type="button" className="rd-btn rd-btn-secondary" onClick={onClose}>Close</button>
+              <button type="button" className="rd-btn rd-btn-primary" onClick={() => { setError(null); start(); }}>Retry</button>
+            </div>
+          </div>
+        ) : null}
+
+        {/* Results: per-row outcomes from the automation array */}
+        {result ? (
+          <UploadResultPanel
+            organizationId={organizationId}
+            result={result}
+            onClose={onClose}
+            onUploadAnother={reset}
+          />
         ) : null}
       </div>
     </div>
   );
 }
 
-function StepIndicator(props: { status: StepStatus; hasError: boolean }) {
-  const { status, hasError } = props;
-  const size = 18;
-  const baseStyle: React.CSSProperties = {
-    width: size,
-    height: size,
-    borderRadius: '50%',
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: 11,
-    flexShrink: 0,
-    marginTop: 1,
-  };
-  if (hasError) {
-    return (
-      <span style={{ ...baseStyle, background: 'var(--ax-danger)', color: '#fff' }} aria-label="failed">
-        !
-      </span>
-    );
-  }
-  if (status === 'done') {
-    return (
-      <span style={{ ...baseStyle, background: 'var(--ax-accent)', color: '#fff' }} aria-label="done">
-        ✓
-      </span>
-    );
-  }
-  if (status === 'active') {
-    return (
-      <span
-        style={{
-          ...baseStyle,
-          border: '2px solid var(--ax-accent)',
-          borderTopColor: 'transparent',
-          animation: 'rd-spin 0.8s linear infinite',
-        }}
-        aria-label="in progress"
-      />
-    );
-  }
+// Renders the per-row outcomes from an /invoices/upload response.
+// One row per created payment order, plus a section for rows that
+// couldn't even become payment orders (skipped). Each row carries an
+// action — open the payment detail, retry the agent advance, etc.
+function UploadResultPanel(props: {
+  organizationId: string;
+  result: InvoiceUploadResult;
+  onClose: () => void;
+  onUploadAnother: () => void;
+}) {
+  const { organizationId, result, onClose, onUploadAnother } = props;
+  const automationByOrderId = useMemo(() => {
+    const map = new Map<string, PaymentOrderAgentAdvanceResult>();
+    for (const a of result.automation) map.set(a.paymentOrderId, a);
+    return map;
+  }, [result.automation]);
+
+  const submittedCount = result.automation.filter((a) => a.status === 'proposal_submitted').length;
+  const reviewCount = result.paymentOrders.filter((p) => p.decision === 'needs_review').length;
+
   return (
-    <span
-      style={{ ...baseStyle, border: '1px solid var(--ax-border-strong)', background: 'transparent' }}
-      aria-label="pending"
-    />
+    <div style={{ marginTop: 16 }}>
+      <div style={{ fontSize: 13, color: 'var(--ax-text-secondary)', marginBottom: 12 }}>
+        {result.createdCount} payment order{result.createdCount === 1 ? '' : 's'} created
+        {submittedCount > 0 ? ` · ${submittedCount} auto-submitted` : null}
+        {reviewCount > 0 ? ` · ${reviewCount} needs review` : null}
+        {result.skippedCount > 0 ? ` · ${result.skippedCount} skipped` : null}
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+        {result.paymentOrders.map(({ paymentOrder }) => (
+          <UploadResultRow
+            key={paymentOrder.paymentOrderId}
+            organizationId={organizationId}
+            order={paymentOrder}
+            initialAutomation={automationByOrderId.get(paymentOrder.paymentOrderId) ?? null}
+          />
+        ))}
+        {result.skippedRows.map((row, i) => (
+          <SkippedRowDisplay key={`skipped-${i}`} row={row} />
+        ))}
+      </div>
+
+      <div className="rd-dialog-actions">
+        <button type="button" className="rd-btn rd-btn-secondary" onClick={onUploadAnother}>
+          Upload another
+        </button>
+        <button type="button" className="rd-btn rd-btn-primary" onClick={onClose}>
+          Close
+        </button>
+      </div>
+    </div>
   );
 }
 
-function describeStep(
-  key: UploadStepKey,
-  latest: Map<DocumentImportProgressEvent['stage'], DocumentImportProgressEvent>,
-): string | null {
-  if (key === 'reading') {
-    const received = latest.get('received');
-    if (received && received.stage === 'received') {
-      return `${(received.bytes / 1024).toFixed(0)} KB`;
+function UploadResultRow(props: {
+  organizationId: string;
+  order: PaymentOrder;
+  initialAutomation: PaymentOrderAgentAdvanceResult | null;
+}) {
+  const { organizationId, order, initialAutomation } = props;
+  const [automation, setAutomation] = useState<PaymentOrderAgentAdvanceResult | null>(initialAutomation);
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
+
+  const retry = async () => {
+    setRetrying(true);
+    setRetryError(null);
+    try {
+      const next = await api.advancePaymentOrder(organizationId, order.paymentOrderId);
+      setAutomation(next);
+    } catch (err) {
+      setRetryError(err instanceof Error ? err.message : 'Retry failed.');
+    } finally {
+      setRetrying(false);
     }
-    return null;
+  };
+
+  const counterpartyLabel = order.counterpartyWallet?.label
+    ?? order.counterpartyWallet?.counterparty?.displayName
+    ?? '—';
+  const amountLabel = formatRawUsdcCompact(order.amountRaw);
+  const reference = order.externalReference || order.invoiceNumber || null;
+
+  const status = automation?.status ?? 'not_applicable';
+  const tone = statusToneForAutomation(status);
+  const statusLabel = labelForAutomationStatus(status);
+  const showRetry = status === 'failed' || status === 'blocked' || status === 'needs_source_treasury' || status === 'unsupported_source_treasury';
+
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr auto',
+        gap: 12,
+        alignItems: 'center',
+        padding: '12px 14px',
+        background: 'var(--ax-bg-elevated, #f6f6f6)',
+        borderRadius: 10,
+      }}
+    >
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--ax-text)' }}>
+          {counterpartyLabel} <span style={{ color: 'var(--ax-text-muted)', fontWeight: 400 }}>· {amountLabel}{reference ? ` · ${reference}` : ''}</span>
+        </div>
+        <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className="rd-pill" data-tone={tone}>
+            <span className="rd-pill-dot" aria-hidden />
+            {statusLabel}
+          </span>
+          {automation?.reason && status !== 'proposal_submitted' ? (
+            <span style={{ fontSize: 12, color: 'var(--ax-text-muted)' }}>{automation.reason}</span>
+          ) : null}
+          {retryError ? (
+            <span style={{ fontSize: 12, color: 'var(--ax-danger)' }}>{retryError}</span>
+          ) : null}
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        {showRetry ? (
+          <button
+            type="button"
+            className="rd-btn rd-btn-secondary"
+            onClick={retry}
+            disabled={retrying}
+            style={{ padding: '6px 12px', fontSize: 13 }}
+          >
+            {retrying ? 'Retrying…' : 'Retry'}
+          </button>
+        ) : null}
+        <Link
+          to={`/organizations/${organizationId}/payments/${order.paymentOrderId}`}
+          className="rd-btn rd-btn-secondary"
+          style={{ padding: '6px 12px', fontSize: 13, textDecoration: 'none' }}
+        >
+          {status === 'needs_review' ? 'Review' : 'Open'}
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+function SkippedRowDisplay(props: { row: InvoiceIntakeSkippedRow }) {
+  const { row } = props;
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr',
+        gap: 4,
+        padding: '12px 14px',
+        background: 'var(--ax-bg-elevated, #f6f6f6)',
+        borderRadius: 10,
+        opacity: 0.85,
+      }}
+    >
+      <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--ax-text)' }}>
+        {row.counterparty} <span style={{ color: 'var(--ax-text-muted)', fontWeight: 400 }}>· {row.amount} {row.currency}{row.reference ? ` · ${row.reference}` : ''}</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span className="rd-pill" data-tone="danger">
+          <span className="rd-pill-dot" aria-hidden />
+          Skipped
+        </span>
+        <span style={{ fontSize: 12, color: 'var(--ax-text-muted)' }}>{row.message}</span>
+      </div>
+    </div>
+  );
+}
+
+function statusToneForAutomation(status: PaymentOrderAgentAdvanceResult['status']): 'success' | 'warning' | 'danger' | 'neutral' {
+  switch (status) {
+    case 'proposal_submitted':
+    case 'already_has_proposal':
+      return 'success';
+    case 'needs_review':
+    case 'needs_source_treasury':
+    case 'unsupported_source_treasury':
+      return 'warning';
+    case 'failed':
+    case 'blocked':
+      return 'danger';
+    case 'not_applicable':
+    default:
+      return 'neutral';
   }
-  if (key === 'extracting') {
-    const ev = latest.get('extracting');
-    if (ev && ev.stage === 'extracting') {
-      return `${ev.pageCount} page${ev.pageCount === 1 ? '' : 's'} — usually 10–30s`;
-    }
-    return null;
+}
+
+function labelForAutomationStatus(status: PaymentOrderAgentAdvanceResult['status']): string {
+  switch (status) {
+    case 'proposal_submitted': return 'Auto-submitted for voting';
+    case 'already_has_proposal': return 'Has proposal';
+    case 'needs_review': return 'Needs review';
+    case 'needs_source_treasury': return 'Needs treasury';
+    case 'unsupported_source_treasury': return 'Treasury unsupported';
+    case 'failed': return 'Failed';
+    case 'blocked': return 'Blocked';
+    case 'not_applicable': return 'Pending';
+    default: return status;
   }
-  if (key === 'matching') {
-    const ev = latest.get('matching');
-    if (ev && ev.stage === 'matching') {
-      return `${ev.extractedCount} row${ev.extractedCount === 1 ? '' : 's'} extracted in ${(ev.modelLatencyMs / 1000).toFixed(1)}s`;
-    }
-    return null;
-  }
-  if (key === 'creating') {
-    const ev = latest.get('creating');
-    if (ev && ev.stage === 'creating') {
-      const skip = ev.skippedCount > 0 ? `, ${ev.skippedCount} skipped` : '';
-      return `${ev.matchedCount} matched${skip}`;
-    }
-    return null;
-  }
-  return null;
 }
 
 function fileToBase64(file: File): Promise<string> {
