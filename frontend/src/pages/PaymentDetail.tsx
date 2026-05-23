@@ -38,6 +38,7 @@ import { useToast } from '../ui/Toast';
 import type { UserWallet } from '../types';
 
 type ActionVariant =
+  | 'needs_review'
   | 'needs_submit'
   | 'ready_to_sign'
   | 'ready_to_propose'
@@ -63,17 +64,24 @@ function buildLifecycle(
 
 function determineVariant(order: PaymentOrder): ActionVariant {
   const s = order.productLifecycle?.productState ?? order.derivedState;
-  if (s === 'draft') return 'needs_submit';
-  if (s === 'ready' || s === 'ready_for_execution') {
-    // Squads-sourced payments need a multisig proposal, not a direct sign.
+  // needs_review: agent flagged the invoice, no proposal yet. Approve clears
+  //   the flag and (with autoAdvance) asks the agent to submit the proposal.
+  // draft: cleared but no proposal yet. If the source is a Squads vault and
+  //   no proposal is in flight, the user can create one manually; otherwise
+  //   "submit" routes through clear-review (which is a no-op for draft).
+  // proposed: a Squads proposal exists; the substate (collecting votes /
+  //   executing) is tracked on the proposal, not the order.
+  // executed: on-chain transfer landed, settlement verification in flight.
+  // settled: counterparty wallet confirmed receipt.
+  if (s === 'needs_review') return 'needs_review';
+  if (s === 'draft') {
     return order.sourceTreasuryWallet?.source === 'squads_v4' && order.canCreateSquadsPaymentProposal !== false
       ? 'ready_to_propose'
-      : 'ready_to_sign';
+      : 'needs_submit';
   }
-  if (s === 'proposed' || s === 'approved' || s === 'proposal_prepared' || s === 'proposal_submitted' || s === 'proposal_approved') return 'proposal_in_progress';
-  if (s === 'executed' || s === 'proposal_executed' || s === 'execution_recorded') return 'in_flight';
-  if (s === 'settled' || s === 'closed') return 'settled';
-  if (s === 'exception' || s === 'partially_settled') return 'exception';
+  if (s === 'proposed') return 'proposal_in_progress';
+  if (s === 'executed') return 'in_flight';
+  if (s === 'settled') return 'settled';
   if (s === 'cancelled') return 'cancelled';
   return 'idle';
 }
@@ -99,7 +107,7 @@ export function PaymentDetailPage() {
     refetchInterval: (query) => {
       if (typeof document !== 'undefined' && document.hidden) return false;
       const s = query.state.data?.derivedState;
-      if (s === 'settled' || s === 'closed' || s === 'cancelled') return false;
+      if (s === 'settled' || s === 'cancelled') return false;
       return 5_000;
     },
   });
@@ -177,6 +185,37 @@ export function PaymentDetailPage() {
       navigate(`/organizations/${organizationId}/payments`);
     },
     onError: (err) => toastError(err instanceof Error ? err.message : 'Could not cancel.'),
+  });
+
+  // "Approve & continue" on a needs_review order. Clears the AP-intake
+  // flag, trusts the counterparty wallet, submits internally, and (with
+  // autoAdvance) asks the agent to create the Squads proposal in the
+  // same call. We translate the agent's per-row outcome into a toast so
+  // the user knows what actually happened on chain.
+  const clearReviewMutation = useMutation({
+    mutationFn: () =>
+      api.clearPaymentOrderReview(organizationId!, paymentOrderId!, {
+        autoAdvance: true,
+        submitAfterClear: true,
+        trustCounterpartyWallet: true,
+      }),
+    onSuccess: async (result) => {
+      const automation = result.automation;
+      if (automation?.status === 'proposal_submitted') {
+        success('Approved. Agent submitted the proposal on chain.');
+      } else if (automation?.status === 'already_has_proposal') {
+        success('Approved. Proposal was already on chain.');
+      } else if (automation?.status === 'needs_source_treasury' || automation?.status === 'unsupported_source_treasury') {
+        info('Approved. Pick a treasury to fund this payment from.');
+      } else if (automation?.status === 'failed' || automation?.status === 'blocked') {
+        toastError(`Approved internally, but agent couldn't submit: ${automation.reason}`);
+      } else {
+        success('Approved.');
+      }
+      await queryClient.invalidateQueries({ queryKey: ['payment-order', organizationId, paymentOrderId] });
+      await queryClient.invalidateQueries({ queryKey: ['payment-orders', organizationId] });
+    },
+    onError: (err) => toastError(err instanceof Error ? err.message : 'Could not approve.'),
   });
 
   // Personal wallets needed when the source is a Squads vault — we use one
@@ -417,10 +456,12 @@ export function PaymentDetailPage() {
           selectedWalletId={selectedWalletId}
           onSelectWallet={setSelectedWalletId}
           submitting={submitMutation.isPending}
+          approvingReview={clearReviewMutation.isPending}
           signing={signMutation.isPending}
           exporting={proofMutation.isPending}
           cancelling={cancelMutation.isPending}
           onSubmit={() => submitMutation.mutate()}
+          onApproveReview={() => clearReviewMutation.mutate()}
           onSign={() => signMutation.mutate()}
           onExportProof={() => proofMutation.mutate()}
           onCancel={() => cancelMutation.mutate()}
@@ -597,10 +638,12 @@ function PrimaryAction(props: {
   selectedWalletId: string | undefined;
   onSelectWallet: (id: string | undefined) => void;
   submitting: boolean;
+  approvingReview: boolean;
   signing: boolean;
   exporting: boolean;
   cancelling: boolean;
   onSubmit: () => void;
+  onApproveReview: () => void;
   onSign: () => void;
   onExportProof: () => void;
   onCancel: () => void;
@@ -632,9 +675,11 @@ function PrimaryAction(props: {
     selectedWalletId,
     onSelectWallet,
     submitting,
+    approvingReview,
     signing,
     exporting,
     onSubmit,
+    onApproveReview,
     onSign,
     onExportProof,
     ownPersonalWallets,
@@ -654,13 +699,48 @@ function PrimaryAction(props: {
     onExecuteProposal,
   } = props;
 
+  if (variant === 'needs_review') {
+    // Agent flagged this invoice during AP intake. The user decides whether to
+    // proceed (which creates the on-chain proposal) or reject (which closes
+    // the payment without any chain activity). No multisig signing yet — that
+    // happens after Approve advances the payment to `ready_to_propose`.
+    return (
+      <RdPrimaryCard
+        emphasis="action"
+        eyebrow="Needs your review"
+        title="Decide whether to proceed"
+        body="Agent flagged this invoice. Approve to send it on chain, or reject to close it."
+      >
+        <div className="rd-actions">
+          <button
+            type="button"
+            className="rd-btn rd-btn-primary"
+            onClick={onApproveReview}
+            disabled={approvingReview}
+            aria-busy={approvingReview}
+          >
+            {approvingReview ? 'Approving…' : 'Approve & continue'}
+          </button>
+          <button
+            type="button"
+            className="rd-btn rd-btn-secondary"
+            onClick={props.onCancel}
+            disabled={props.cancelling}
+          >
+            {props.cancelling ? 'Rejecting…' : 'Reject'}
+          </button>
+        </div>
+      </RdPrimaryCard>
+    );
+  }
+
   if (variant === 'needs_submit') {
     return (
       <RdPrimaryCard
         emphasis="action"
-        eyebrow="Next step · Submit"
+        eyebrow="Submit"
         title="Ready to submit"
-        body="Submit this payment to advance it to execution. The Squads multisig flow handles the on-chain approval."
+        body="Advance this payment to signing."
       >
         <div className="rd-actions">
           <button
@@ -686,9 +766,9 @@ function PrimaryAction(props: {
       return (
         <RdPrimaryCard
           emphasis="action"
-          eyebrow="Awaiting · On-chain confirmation"
-          title="Transaction submitted — confirmation pending"
-          body="Your signature went through and the proposal transaction was submitted. Solana RPC hasn't reported it confirmed yet. Retry confirmation in a few seconds; do not recreate the proposal — it may already be on chain."
+          eyebrow="Awaiting confirmation"
+          title="Submitted on chain"
+          body="Don't recreate — your signature is in flight. Retry confirmation in a few seconds."
         >
           <p style={{ fontSize: 12, color: 'var(--ax-text-muted)', margin: '0 0 12px', display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ fontFamily: 'monospace' }}>sig</span>
@@ -714,13 +794,13 @@ function PrimaryAction(props: {
     return (
       <RdPrimaryCard
         emphasis="action"
-        eyebrow="Next step · Squads proposal"
+        eyebrow="Create proposal"
         title={
           <>
             <span className="rd-mono">{amountLabel}</span> ready for multisig
           </>
         }
-        body="The source treasury is a Squads multisig. Create a payment proposal that other signers can approve before the vault releases funds."
+        body="Pick the wallet that will initiate signing."
       >
         <div className="rd-primary-grid">
           <label className="rd-field">
@@ -773,17 +853,17 @@ function PrimaryAction(props: {
     const isApproved = status === 'approved';
     const isExecuted = status === 'executed';
     const eyebrow = isExecuted
-      ? 'Executed · Verify settlement'
+      ? 'Settling'
       : isApproved
-        ? 'Next step · Execute proposal'
+        ? 'Send'
         : proposalPendingVoterWalletId
-          ? 'Next step · Your approval'
-          : 'Next step · Awaiting voters';
+          ? 'Your turn to sign'
+          : 'Signing';
     const title = isExecuted
-      ? 'Proposal executed — settlement verification pending'
+      ? 'Sent on chain — verifying'
       : isApproved
-        ? `Threshold met (${approvalCount} of ${threshold}) — ready to execute`
-        : `${approvalCount} of ${threshold} approvals · ${pendingCount} awaiting`;
+        ? `Threshold met — ready to send`
+        : `${approvalCount} of ${threshold} signed · ${pendingCount} pending`;
     const detailHref = proposal
       ? `/organizations/${order.organizationId}/proposals/${proposal.decimalProposalId}`
       : `/organizations/${order.organizationId}/proposals`;
@@ -795,10 +875,10 @@ function PrimaryAction(props: {
         title={title}
         body={
           isExecuted
-            ? 'The on-chain execution landed. Decimal marks this payment settled after RPC verifies the expected USDC destination delta.'
+            ? 'Verifying the transfer landed.'
             : isApproved
-              ? 'A Squads member with execute permission needs to submit the execute transaction.'
-              : 'Each voter signs independently — no shared blockhash, no rush.'
+              ? 'A member with execute permission needs to send it.'
+              : 'Voters sign on their own time.'
         }
       >
         {voting ? (
@@ -893,13 +973,13 @@ function PrimaryAction(props: {
     return (
       <RdPrimaryCard
         emphasis="action"
-        eyebrow="Next step · Sign and execute"
+        eyebrow="Sign and send"
         title={
           <>
             <span className="rd-mono">{amountLabel}</span> ready to sign
           </>
         }
-        body="One signature submits this payment on-chain."
+        body="One signature sends this payment."
       >
         <div className="rd-primary-grid">
           <label className="rd-field">
@@ -958,9 +1038,9 @@ function PrimaryAction(props: {
   if (variant === 'in_flight') {
     return (
       <RdPrimaryCard
-        eyebrow="Executed · Verify settlement"
-        title="Signed, watching on-chain match"
-        body="The worker is reconstructing USDC transfers and matching this signature to the expected settlement."
+        eyebrow="Settling"
+        title="Sent on chain — verifying"
+        body="Confirming the transfer landed. This refreshes automatically."
       >
         {submittedSignature ? (
           <ChainLink signature={submittedSignature} prefix={8} suffix={8} />
@@ -972,9 +1052,9 @@ function PrimaryAction(props: {
   if (variant === 'settled') {
     return (
       <RdPrimaryCard
-        eyebrow="Complete · Settled"
-        title="Matched on-chain · proof ready"
-        body="This payment was requested, approved, signed, observed, and matched against intent."
+        eyebrow="Settled"
+        title="Settled · proof ready"
+        body="The payment landed and matched intent."
       >
         <div className="rd-actions">
           <button
