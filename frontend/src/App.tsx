@@ -4,8 +4,8 @@ import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } fr
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AppSidebar } from './Sidebar';
 import { api, ApiError } from './api';
-import { PaymentRunDetailPage as PaymentRunDetailPageV2 } from './pages/PaymentRunDetail';
-import { CommandCenterPage as CommandCenterPageV2 } from './pages/CommandCenter';
+import { InboxPage } from './pages/Inbox';
+import { ProposalRedirectPage } from './pages/ProposalRedirect';
 import { PaymentsPage as PaymentsPageV2 } from './pages/Payments';
 import { PaymentDetailPage as PaymentDetailPageV2 } from './pages/PaymentDetail';
 import { CollectionsPage } from './pages/Collections';
@@ -25,8 +25,6 @@ import type {
   AuthenticatedSession,
   PaymentOrder,
   PaymentOrderState,
-  PaymentRequest,
-  PaymentRun,
   TreasuryWallet,
   Organization,
   UserWallet,
@@ -45,16 +43,10 @@ import { setRuntimeSolanaConfig } from './solana-network';
 import { parseCsvPreview } from './csv-parse';
 import { ProofJsonView } from './proof-json-view';
 import {
-  displayPaymentRequestState,
   displayPaymentStatus,
   displayReconciliationState,
-  displayRunStatus,
-  EXECUTION_BUCKETS,
-  executionBucketTitle,
-  type ExecutionBucket,
   humanizeExceptionReason,
   isPaymentOrderState,
-  paymentExecutionBucket,
   statusToneForPayment,
   toneForGenericState,
 } from './status-labels';
@@ -176,6 +168,24 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
     organizationSummaryQuery.data?.payersUnreviewedCount ??
     0;
 
+  // Treasury gate: payments / collections / overview are useless without a
+  // treasury to send money from. When the active org has no treasury, replace
+  // the page content with a full-page setup CTA. We don't gate /wallets,
+  // /members, /counterparties, /profile, or /setup — those work standalone.
+  const treasuryWalletsQuery = useQuery({
+    queryKey: ['treasury-wallets', activeOrganizationId] as const,
+    queryFn: () => api.listTreasuryWallets(activeOrganizationId!),
+    enabled: Boolean(activeOrganizationId),
+  });
+  const treasuryCheckResolved =
+    treasuryWalletsQuery.isSuccess || treasuryWalletsQuery.isError;
+  const hasTreasury = (treasuryWalletsQuery.data?.items?.length ?? 0) > 0;
+  const shouldShowTreasuryGate =
+    Boolean(activeOrganizationId) &&
+    treasuryCheckResolved &&
+    !hasTreasury &&
+    pathRequiresTreasury(location.pathname);
+
   async function logout() {
     await queryClient.cancelQueries();
     await api.logout().catch(() => undefined);
@@ -198,21 +208,22 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
         onLogout={logout}
       />
       <main className="main-surface">
+        {shouldShowTreasuryGate ? (
+          <TreasurySetupGate organizationId={activeOrganizationId!} />
+        ) : (
         <Routes>
           <Route path="/" element={<HomeRedirect session={session} />} />
           <Route path="/setup" element={<SetupPage session={session} />} />
           <Route path="/profile" element={<ProfilePage session={session} />} />
-          <Route path="/organizations/:organizationId" element={<CommandCenterPageV2 session={session} />} />
+          <Route path="/organizations/:organizationId" element={<InboxPage session={session} />} />
           <Route path="/organizations/:organizationId/wallets" element={<WalletsPage session={session} />} />
           <Route path="/organizations/:organizationId/wallets/:treasuryWalletId" element={<TreasuryWalletDetailPage session={session} />} />
           <Route path="/organizations/:organizationId/proposals" element={<OrganizationProposalsPage session={session} />} />
-          <Route path="/organizations/:organizationId/proposals/:decimalProposalId" element={<OrganizationProposalDetailPage session={session} />} />
+          <Route path="/organizations/:organizationId/proposals/:decimalProposalId" element={<ProposalRedirectPage />} />
+          <Route path="/organizations/:organizationId/proposals/:decimalProposalId/legacy" element={<OrganizationProposalDetailPage session={session} />} />
           <Route path="/organizations/:organizationId/members" element={<MembersPage session={session} />} />
           <Route path="/organizations/:organizationId/counterparties" element={<CounterpartiesPage session={session} />} />
           <Route path="/organizations/:organizationId/destinations" element={<Navigate to="counterparties" replace />} />
-          <Route path="/organizations/:organizationId/requests" element={<PaymentRequestsPage session={session} />} />
-          <Route path="/organizations/:organizationId/runs" element={<PaymentsPageV2 session={session} />} />
-          <Route path="/organizations/:organizationId/runs/:paymentRunId" element={<PaymentRunDetailPageV2 />} />
           <Route path="/organizations/:organizationId/payments" element={<PaymentsPageV2 session={session} />} />
           <Route path="/organizations/:organizationId/payments/:paymentOrderId" element={<PaymentDetailPageV2 />} />
           <Route path="/organizations/:organizationId/collections" element={<CollectionsPage session={session} />} />
@@ -220,7 +231,77 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
           <Route path="/organizations/:organizationId/collection-runs/:collectionRunId" element={<CollectionRunDetailPage />} />
           <Route path="/organizations/:organizationId/payers" element={<Navigate to="../counterparties" replace />} />
         </Routes>
+        )}
       </main>
+    </div>
+  );
+}
+
+// Pages that need a treasury to function. Treasury setup itself, members,
+// address book, and profile remain accessible because they don't require
+// money movement.
+const TREASURY_GATED_ROUTE_PATTERNS = [
+  /^\/organizations\/[^/]+$/, // overview / inbox
+  /^\/organizations\/[^/]+\/payments(\/.*)?$/,
+  /^\/organizations\/[^/]+\/collections(\/.*)?$/,
+  /^\/organizations\/[^/]+\/collection-runs(\/.*)?$/,
+  /^\/organizations\/[^/]+\/proposals(\/.*)?$/,
+];
+
+function pathRequiresTreasury(pathname: string): boolean {
+  return TREASURY_GATED_ROUTE_PATTERNS.some((r) => r.test(pathname));
+}
+
+function TreasurySetupGate({ organizationId }: { organizationId: string }) {
+  return (
+    <div className="treasury-gate">
+      <div className="treasury-gate-card">
+        <div className="treasury-gate-intro">
+          <div className="treasury-gate-icon" aria-hidden>
+            <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="8" y="14" width="32" height="24" rx="3" />
+              <path d="M8 20h32" />
+              <path d="M14 28h6" />
+              <path d="M24 28h10" />
+              <path d="M14 32h20" />
+              <path d="M16 14V10a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v4" />
+            </svg>
+          </div>
+          <h1 className="treasury-gate-title">Get started</h1>
+          <p className="treasury-gate-body">
+            Two quick steps and you'll be ready to process your first invoice.
+          </p>
+        </div>
+
+        <ol className="treasury-gate-steps">
+          <li className="treasury-gate-step">
+            <span className="treasury-gate-step-num">1</span>
+            <div className="treasury-gate-step-body">
+              <div className="treasury-gate-step-title">Invite team members</div>
+              <div className="treasury-gate-step-sub">The people who'll approve payments before they go out.</div>
+            </div>
+            <Link
+              to={`/organizations/${organizationId}/members`}
+              className="button button-primary treasury-gate-step-cta"
+            >
+              Invite
+            </Link>
+          </li>
+          <li className="treasury-gate-step">
+            <span className="treasury-gate-step-num">2</span>
+            <div className="treasury-gate-step-body">
+              <div className="treasury-gate-step-title">Create a programmable treasury</div>
+              <div className="treasury-gate-step-sub">A secure account that holds funds for vendor payments.</div>
+            </div>
+            <Link
+              to={`/organizations/${organizationId}/wallets`}
+              className="button button-primary treasury-gate-step-cta"
+            >
+              Create
+            </Link>
+          </li>
+        </ol>
+      </div>
     </div>
   );
 }
@@ -633,60 +714,79 @@ function SetupPage({ session }: { session: AuthenticatedSession }) {
     mutationFn: async (formData: FormData) => {
       const organizationName = String(formData.get('organizationName') ?? '').trim();
       if (!organizationName) {
-        throw new Error('Organization name is required.');
+        throw new Error('Company name is required.');
       }
       return api.createOrganization({ organizationName });
     },
     onSuccess: async (organization) => {
-      success('Organization created.');
+      // Backend auto-provisions the owner's personal wallet + a default
+      // automation agent + the agent's wallet on org creation. Happy path
+      // is silent — only surface a warning if provisioning didn't complete.
+      const personalStatus = organization.provisioning?.personalWallet?.status;
+      const agentStatus = organization.provisioning?.defaultAgent?.status;
+      const setupIncomplete =
+        personalStatus === 'failed' ||
+        personalStatus === 'skipped' ||
+        agentStatus === 'failed' ||
+        agentStatus === 'skipped';
+      if (setupIncomplete) {
+        toastError(
+          'Workspace created, but background setup is incomplete. You can retry from settings.',
+        );
+      } else {
+        success('Welcome to Decimal.');
+      }
       await queryClient.invalidateQueries({ queryKey: queryKeys().session });
       navigate(`/organizations/${organization.organizationId}`, { replace: true });
     },
-    onError: (err) => toastError(err instanceof Error ? err.message : 'Unable to create organization.'),
+    onError: (err) => toastError(err instanceof Error ? err.message : 'Unable to set up workspace.'),
   });
   return (
     <PageFrame
-      eyebrow="Setup"
-      title="Create your organization"
-      description="An organization is the team container for members, wallets, and future treasury controls. Joining an existing team requires an invite link from an admin."
+      eyebrow="Welcome"
+      title="Name your company"
+      description="This is what teammates and vendors will see. You can change it later in settings."
     >
       <div className="split-panels">
-      <section className="panel">
-        <SectionHeader title="Create organization" description="Start a new team space." />
-        <form
-          className="form-stack"
-          onSubmit={(event) => {
-            event.preventDefault();
-            createOrganizationMutation.mutate(new FormData(event.currentTarget));
-          }}
-        >
-          <label className="field">
-            Organization name
-            <input
-              name="organizationName"
-              placeholder="Decimal Labs"
-              autoComplete="organization"
-            />
-          </label>
-          <button
-            className="button button-primary"
-            disabled={createOrganizationMutation.isPending}
-            type="submit"
-            aria-busy={createOrganizationMutation.isPending}
+        <section className="panel">
+          <form
+            className="form-stack"
+            onSubmit={(event) => {
+              event.preventDefault();
+              createOrganizationMutation.mutate(new FormData(event.currentTarget));
+            }}
           >
-            {createOrganizationMutation.isPending ? 'Creating...' : 'Create organization'}
-          </button>
-        </form>
-      </section>
-      <section className="panel">
-        <SectionHeader
-          title="Have an invite?"
-          description="Open the invite link your admin shared with you while signed in with the email it was sent to."
-        />
-        <p className="form-help">
-          Organizations are joined through invite links only. Ask your admin to send one if you need access.
-        </p>
-      </section>
+            <label className="field">
+              Company name
+              <input
+                name="organizationName"
+                placeholder="Acme Corp"
+                autoComplete="organization"
+                autoFocus
+              />
+            </label>
+            <button
+              className="button button-primary"
+              disabled={createOrganizationMutation.isPending}
+              type="submit"
+              aria-busy={createOrganizationMutation.isPending}
+            >
+              {createOrganizationMutation.isPending ? 'Setting up your workspace…' : 'Continue'}
+            </button>
+            <p className="form-help">
+              We'll set up your workspace in the background. You can invite teammates after.
+            </p>
+          </form>
+        </section>
+        <section className="panel">
+          <SectionHeader
+            title="Have an invite?"
+            description="Open the link your admin sent while signed in with the email it was sent to."
+          />
+          <p className="form-help">
+            Invites are accepted by opening the link directly — there's nothing to enter here.
+          </p>
+        </section>
       </div>
     </PageFrame>
   );
@@ -1751,196 +1851,6 @@ function DeletePersonalWalletDialog(props: {
         </div>
       </div>
     </div>
-  );
-}
-
-function PaymentRequestsPage({ session }: { session: AuthenticatedSession }) {
-  const { organizationId } = useParams<{ organizationId: string }>();
-  const queryClient = useQueryClient();
-  const [message, setMessage] = useState<string | null>(null);
-  const [requestModalOpen, setRequestModalOpen] = useState(false);
-  const organization = findOrganization(session, organizationId);
-  const requestsQuery = useQuery({
-    queryKey: queryKeys(organizationId).paymentRequests,
-    queryFn: () => api.listPaymentRequests(organizationId!),
-    enabled: Boolean(organizationId),
-  });
-  const ordersQuery = useQuery({
-    queryKey: queryKeys(organizationId).paymentOrders,
-    queryFn: () => api.listPaymentOrders(organizationId!),
-    enabled: Boolean(organizationId),
-  });
-  const destinationsQuery = useQuery({
-    queryKey: queryKeys(organizationId).counterpartyWallets,
-    queryFn: () => api.listCounterpartyWallets(organizationId!),
-    enabled: Boolean(organizationId),
-  });
-  const addressesQuery = useQuery({
-    queryKey: queryKeys(organizationId).addresses,
-    queryFn: () => api.listTreasuryWallets(organizationId!),
-    enabled: Boolean(organizationId),
-  });
-  const createRequestMutation = useMutation({
-    mutationFn: async (formData: FormData) => {
-      const counterpartyWalletId = getFormString(formData, 'counterpartyWalletId');
-      const amount = getFormString(formData, 'amount');
-      const reason = getFormString(formData, 'reason');
-      if (!counterpartyWalletId || !amount || !reason) {
-        throw new Error('Destination, amount, and reason are required.');
-      }
-      return api.createPaymentRequest(organizationId!, {
-        counterpartyWalletId,
-        amountRaw: usdcToRaw(amount),
-        reason,
-        externalReference: getOptionalFormString(formData, 'externalReference') ?? undefined,
-        dueAt: normalizeDateInput(getOptionalFormString(formData, 'dueAt')),
-        createOrderNow: true,
-        sourceTreasuryWalletId: getOptionalFormString(formData, 'sourceTreasuryWalletId') ?? undefined,
-        submitOrderNow: formData.get('submitOrderNow') === 'on',
-      });
-    },
-    onSuccess: async () => {
-      setMessage('Payment request created.');
-      setRequestModalOpen(false);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys(organizationId).paymentRequests }),
-        queryClient.invalidateQueries({ queryKey: queryKeys(organizationId).paymentOrders }),
-      ]);
-    },
-    onError: (error) => setMessage(error instanceof Error ? error.message : 'Unable to create request.'),
-  });
-
-  if (!organizationId || !organization) {
-    return <ScreenState title="Organization unavailable" description="Choose a organization from the sidebar." />;
-  }
-
-  const requests = requestsQuery.data?.items ?? [];
-  const ordersByRequest = new Map((ordersQuery.data?.items ?? []).map((order) => [order.paymentRequestId, order]));
-  const destinations = destinationsQuery.data?.items ?? [];
-  const addresses = addressesQuery.data?.items ?? [];
-
-  return (
-    <PageFrame
-      eyebrow="Intake"
-      title="Payment requests"
-      description="Create the human-facing input object, then let the order workflow handle approval, execution, settlement, and proof."
-      action={(
-        <div className="action-cluster">
-          <button className="button button-primary" type="button" onClick={() => setRequestModalOpen(true)}>+ New payment request</button>
-          <Link className="button button-secondary" to={`/organizations/${organizationId}/runs`}>Import CSV batch</Link>
-        </div>
-      )}
-    >
-      <section className="panel">
-        <SectionHeader title={`Requests [${requests.length}]`} description="Manual requests and imported rows become controlled payment orders." />
-        <PaymentRequestsTable organizationId={organizationId} requests={requests} ordersByRequest={ordersByRequest} />
-      </section>
-      {message ? <div className="notice panel-spaced">{message}</div> : null}
-      <Modal open={requestModalOpen} onClose={() => setRequestModalOpen(false)} title="New payment request">
-        <form
-          className="form-stack"
-          onSubmit={(event) => {
-            event.preventDefault();
-            createRequestMutation.mutate(new FormData(event.currentTarget));
-          }}
-        >
-          <label className="field">
-            Destination
-            <select name="counterpartyWalletId" required defaultValue="">
-              <option value="" disabled>Select destination</option>
-              {destinations.filter((destination) => destination.isActive).map((destination) => (
-                <option key={destination.counterpartyWalletId} value={destination.counterpartyWalletId}>{destination.label} / {destination.trustState}</option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            Source wallet
-            <select name="sourceTreasuryWalletId" defaultValue="">
-              <option value="">Optional until execution</option>
-              {addresses.filter((address) => address.isActive).map((address) => (
-                <option key={address.treasuryWalletId} value={address.treasuryWalletId}>{walletLabel(address)}</option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            Amount
-            <input name="amount" placeholder="0.01" required />
-          </label>
-          <label className="field">
-            Reason
-            <input name="reason" placeholder="Pay Acme Corp for INV-1001" required />
-          </label>
-          <label className="field">
-            Reference
-            <input name="externalReference" placeholder="INV-1001" />
-          </label>
-          <label className="field">
-            Due date
-            <input name="dueAt" type="date" />
-          </label>
-          <label className="field checkbox-field">
-            <input name="submitOrderNow" type="checkbox" />
-            Submit into approval now
-          </label>
-          <button className="button button-primary" disabled={createRequestMutation.isPending || !destinations.length} type="submit">
-            {createRequestMutation.isPending ? 'Creating...' : 'Create request'}
-          </button>
-        </form>
-      </Modal>
-    </PageFrame>
-  );
-}
-
-
-
-function PaymentRequestsTable({
-  organizationId,
-  requests,
-  ordersByRequest,
-}: {
-  organizationId: string;
-  requests: PaymentRequest[];
-  ordersByRequest: Map<string | null, PaymentOrder>;
-}) {
-  if (!requests.length) {
-    return <EmptyState title="No payment requests yet" description="Create a manual request or import a CSV batch." />;
-  }
-  return (
-    <DataTableShell>
-      <div className="data-table-row data-table-head data-table-row-requests">
-        <span>Recipient</span><span>Destination</span><span>Amount</span><span>Reference</span><span>State</span><span>Progress</span><span>Created</span>
-      </div>
-      {requests.map((request) => {
-        const order = ordersByRequest.get(request.paymentRequestId);
-        const content = (
-          <>
-            <span><strong>{request.reason}</strong><small>{shortenAddress(request.paymentRequestId, 8, 6)}</small></span>
-            <span>{request.counterpartyWallet.label}</span>
-            <span>{formatRawUsdcCompact(request.amountRaw)} {assetSymbol(request.asset)}</span>
-            <span>{request.externalReference ?? 'N/A'}</span>
-            <span>
-              <StatusBadge
-                tone={order?.derivedState ? statusToneForPayment(order.derivedState) : toneForGenericState(request.state)}
-              >
-                {order?.derivedState ? displayPaymentStatus(order.derivedState) : displayPaymentRequestState(request.state)}
-              </StatusBadge>
-            </span>
-            <span>
-              <InlineProgressTracker state={order?.derivedState ?? request.state} />
-            </span>
-            <span className="cell-due-compact">{formatDateCompact(request.createdAt)}</span>
-          </>
-        );
-        if (order) {
-          return (
-            <Link className="data-table-row data-table-link data-table-row-requests" key={request.paymentRequestId} to={`/organizations/${organizationId}/payments/${order.paymentOrderId}`}>
-              {content}
-            </Link>
-          );
-        }
-        return <div className="data-table-row data-table-row-requests" key={request.paymentRequestId}>{content}</div>;
-      })}
-    </DataTableShell>
   );
 }
 
