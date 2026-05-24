@@ -68,6 +68,7 @@ export async function buildCollectionProofPacket(organizationId: string, collect
       } : null,
     },
     payerReview: sourceReview,
+    collectionSourceReview: sourceReview,
     settlement: {
       state: reconciliation?.requestDisplayState ?? null,
       matchStatus: match?.matchStatus ?? null,

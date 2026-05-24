@@ -616,6 +616,7 @@ async function serializeCollectionRequest(request: CollectionRequestWithRelation
     organizationId: request.organizationId,
     collectionRunId: request.collectionRunId,
     receivingTreasuryWalletId: request.receivingTreasuryWalletId,
+    collectionSourceId: request.counterpartyWalletId,
     counterpartyWalletId: request.counterpartyWalletId,
     counterpartyId: request.counterpartyId,
     transferRequestId: request.transferRequestId,
@@ -633,12 +634,14 @@ async function serializeCollectionRequest(request: CollectionRequestWithRelation
     updatedAt: request.updatedAt,
     collectionRun: request.collectionRun,
     receivingTreasuryWallet: serializeTreasuryWallet(request.receivingTreasuryWallet),
+    collectionSource: request.counterpartyWallet ? serializeCounterpartyWallet(request.counterpartyWallet) : null,
     counterpartyWallet: request.counterpartyWallet ? serializeCounterpartyWallet(request.counterpartyWallet) : null,
     counterparty: request.counterparty ? serializeCounterparty(request.counterparty) : null,
     transferRequest: request.transferRequest
       ? {
           ...request.transferRequest,
           amountRaw: request.transferRequest.amountRaw.toString(),
+          destinationId: request.transferRequest.counterpartyWalletId,
         }
       : null,
     createdByUser: serializeUserRef(request.createdByUser),

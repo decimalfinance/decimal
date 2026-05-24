@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import {
+  createCollectionSourceWallet,
   createCounterparty,
   createCounterpartyWallet,
   listCounterparties,
@@ -64,6 +65,7 @@ const createCounterpartyWalletSchema = z.object({
   walletAddress: z.string().trim().min(1),
   tokenAccountAddress: z.string().trim().min(1).optional(),
   walletType: z.string().trim().min(1).max(100).default('wallet'),
+  destinationType: z.string().trim().min(1).max(100).optional(),
   trustState: z.enum(['unreviewed', 'trusted', 'restricted', 'blocked']).default('unreviewed'),
   label: z.string().trim().min(1).max(200),
   notes: z.string().trim().min(1).max(5000).optional(),
@@ -77,6 +79,7 @@ const updateCounterpartyWalletSchema = z.object({
   walletAddress: z.string().trim().min(1).optional(),
   tokenAccountAddress: z.string().trim().min(1).nullable().optional(),
   walletType: z.string().trim().min(1).max(100).optional(),
+  destinationType: z.string().trim().min(1).max(100).optional(),
   trustState: z.enum(['unreviewed', 'trusted', 'restricted', 'blocked']).optional(),
   label: z.string().trim().min(1).max(200).optional(),
   notes: z.string().trim().max(5000).nullable().optional(),
@@ -89,6 +92,7 @@ const updateCounterpartyWalletSchema = z.object({
     || value.tokenAccountAddress !== undefined
     || value.walletType !== undefined
     || value.trustState !== undefined
+    || value.destinationType !== undefined
     || value.label !== undefined
     || value.notes !== undefined
     || value.isInternal !== undefined
@@ -124,16 +128,66 @@ counterpartyWalletsRouter.get('/organizations/:organizationId/counterparty-walle
   sendList(res, unwrapItems(await listCounterpartyWallets(organizationId, query)), { limit: query.limit });
 }));
 
+counterpartyWalletsRouter.get('/organizations/:organizationId/destinations', asyncRoute(async (req, res) => {
+  const { organizationId } = organizationParamsSchema.parse(req.params);
+  const query = listAddressBookQuerySchema.parse(req.query);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  sendList(res, unwrapItems(await listCounterpartyWallets(organizationId, { ...query, view: 'destinations' })), { limit: query.limit });
+}));
+
+counterpartyWalletsRouter.get('/organizations/:organizationId/collection-sources', asyncRoute(async (req, res) => {
+  const { organizationId } = organizationParamsSchema.parse(req.params);
+  const query = listAddressBookQuerySchema.parse(req.query);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  sendList(res, unwrapItems(await listCounterpartyWallets(organizationId, { ...query, view: 'collection_sources' })), { limit: query.limit });
+}));
+
 counterpartyWalletsRouter.post('/organizations/:organizationId/counterparty-wallets', asyncRoute(async (req, res) => {
   const { organizationId } = organizationParamsSchema.parse(req.params);
   await assertOrganizationAdmin(organizationId, req.auth!);
   const input = createCounterpartyWalletSchema.parse(req.body);
-  sendCreated(res, await createCounterpartyWallet(organizationId, input));
+  sendCreated(res, await createCounterpartyWallet(organizationId, {
+    ...input,
+    walletType: input.destinationType ?? input.walletType,
+  }));
+}));
+
+counterpartyWalletsRouter.post('/organizations/:organizationId/destinations', asyncRoute(async (req, res) => {
+  const { organizationId } = organizationParamsSchema.parse(req.params);
+  await assertOrganizationAdmin(organizationId, req.auth!);
+  const input = createCounterpartyWalletSchema.parse(req.body);
+  sendCreated(res, await createCounterpartyWallet(organizationId, {
+    ...input,
+    walletType: input.destinationType ?? input.walletType,
+  }));
+}));
+
+counterpartyWalletsRouter.post('/organizations/:organizationId/collection-sources', asyncRoute(async (req, res) => {
+  const { organizationId } = organizationParamsSchema.parse(req.params);
+  await assertOrganizationAdmin(organizationId, req.auth!);
+  const input = createCounterpartyWalletSchema.parse(req.body);
+  sendCreated(res, await createCollectionSourceWallet(organizationId, {
+    ...input,
+    walletType: input.destinationType ?? (input.walletType === 'wallet' ? 'payer_wallet' : input.walletType),
+  }));
 }));
 
 counterpartyWalletsRouter.patch('/organizations/:organizationId/counterparty-wallets/:counterpartyWalletId', asyncRoute(async (req, res) => {
   const { organizationId, counterpartyWalletId } = counterpartyWalletParamsSchema.parse(req.params);
   await assertOrganizationAdmin(organizationId, req.auth!);
   const input = updateCounterpartyWalletSchema.parse(req.body);
-  sendJson(res, await updateCounterpartyWallet(organizationId, counterpartyWalletId, input));
+  sendJson(res, await updateCounterpartyWallet(organizationId, counterpartyWalletId, {
+    ...input,
+    walletType: input.destinationType ?? input.walletType,
+  }));
+}));
+
+counterpartyWalletsRouter.patch('/organizations/:organizationId/destinations/:counterpartyWalletId', asyncRoute(async (req, res) => {
+  const { organizationId, counterpartyWalletId } = counterpartyWalletParamsSchema.parse(req.params);
+  await assertOrganizationAdmin(organizationId, req.auth!);
+  const input = updateCounterpartyWalletSchema.parse(req.body);
+  sendJson(res, await updateCounterpartyWallet(organizationId, counterpartyWalletId, {
+    ...input,
+    walletType: input.destinationType ?? input.walletType,
+  }));
 }));
