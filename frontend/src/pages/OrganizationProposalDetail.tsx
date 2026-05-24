@@ -436,8 +436,9 @@ function PaymentSummary({ proposal }: { proposal: DecimalProposal }) {
 
 function PaymentRunSummary({ proposal }: { proposal: DecimalProposal }) {
   const payload = proposal.semanticPayloadJson as {
-    paymentRunId?: string;
-    runName?: string;
+    inputBatchId?: string;
+    inputBatchLabel?: string;
+    paymentOrderIds?: string[];
     sourceWalletAddress?: string;
     sourceTokenAccountAddress?: string;
     totalAmountRaw?: string;
@@ -472,19 +473,8 @@ function PaymentRunSummary({ proposal }: { proposal: DecimalProposal }) {
             gap: '14px 24px',
           }}
         >
-          {payload?.runName ? (
-            <InfoRow label="Run">
-              {payload.paymentRunId ? (
-                <Link
-                  to={`/organizations/${proposal.organizationId}/runs/${payload.paymentRunId}`}
-                  style={{ color: 'inherit', textDecoration: 'underline', textDecorationColor: 'rgba(255,255,255,0.25)' }}
-                >
-                  {payload.runName}
-                </Link>
-              ) : (
-                payload.runName
-              )}
-            </InfoRow>
+          {payload?.inputBatchLabel ? (
+            <InfoRow label="Batch">{payload.inputBatchLabel}</InfoRow>
           ) : null}
           {payload?.totalAmountRaw ? (
             <InfoRow label="Total amount">

@@ -87,7 +87,6 @@ export function OrganizationProposalsPage({ session }: { session: AuthenticatedS
           p.decimalProposalId,
           p.semanticType ?? '',
           p.paymentOrderId ?? '',
-          p.paymentRunId ?? '',
           p.creatorWalletAddress ?? '',
           p.treasuryWalletId ? (treasuryNameById.get(p.treasuryWalletId) ?? '') : '',
         ]
