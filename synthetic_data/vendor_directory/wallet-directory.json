@@ -64,7 +64,7 @@
       ],
       "category": "operations",
       "email": "accounts@bangaloreops.example",
-      "walletAddress": "GHqSstHfHHRPAcKAFp1WeXobLw2RnaZpHd8u5V2BuNmv",
+      "walletAddress": "GHqSstHfHHRPAcKAFp1WeXobLw2RnaZpHd8u5V2BuNmv", 
       "trustState": "trusted",
       "historicalAverageUsd": 2100
     },

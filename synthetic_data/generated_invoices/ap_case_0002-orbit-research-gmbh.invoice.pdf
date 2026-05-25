@@ -18,7 +18,7 @@ endobj
 << /Type /Font /Subtype /Type1 /BaseFont /Courier >>
 endobj
 7 0 obj
-<< /Length 2917 >>
+<< /Length 2918 >>
 stream
 0 g BT /F2 24 Tf 1 0 0 1 52 783.89 Tm (INVOICE) Tj ET 0 g
 0.35 g BT /F1 10 Tf 1 0 0 1 52 757.89 Tm (Synthetic AP dataset invoice) Tj ET 0 g
@@ -62,10 +62,10 @@ stream
 0 g BT /F1 11 Tf 1 0 0 1 485 341.89 Tm ($0.00) Tj ET 0 g
 0 g BT /F2 12 Tf 1 0 0 1 370 311.89 Tm (Total due) Tj ET 0 g
 0 g BT /F2 14 Tf 1 0 0 1 475 311.89 Tm ($740.02) Tj ET 0 g
-0.9 G 52 99.89 491 92 re S 0 G
+0.9 G 52 83.89 491 108 re S 0 G
 0.45 g BT /F2 9 Tf 1 0 0 1 74 163.89 Tm (PAY TO USDC WALLET) Tj ET 0 g
-0 g BT /F3 11 Tf 1 0 0 1 74 139.89 Tm (G6sfXj8JEC3Heng46LWau8uwA5kUZPasQy1WAuLqu1YN) Tj ET 0 g
-0.38 g BT /F1 9 Tf 1 0 0 1 74 115.89 Tm (Expected policy: draft) Tj ET 0 g
+0 g BT /F3 16 Tf 1 0 0 1 74 135.89 Tm (G6sfXj8JEC3Heng46LWau8uwA5kUZPasQy1WAuLqu1YN) Tj ET 0 g
+0.38 g BT /F1 9 Tf 1 0 0 1 74 109.89 Tm (Expected policy: draft) Tj ET 0 g
 0.5 g BT /F1 8 Tf 1 0 0 1 52 39.89 Tm (Generated from synthetic_data/ap_cases.jsonl for Decimal local testing.) Tj ET 0 g
 endstream
 endobj
@@ -82,5 +82,5 @@ xref
 trailer
 << /Size 8 /Root 1 0 R >>
 startxref
-3449
+3450
 %%EOF

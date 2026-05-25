@@ -142,10 +142,10 @@ function renderInvoicePdf(row) {
   c.text(475, y + 74, 14, money(invoice.amount, invoice.currency), 'F2');
 
   const payTop = Math.max(y + 122, 650);
-  c.roundedBox(52, payTop, 491, 92);
+  c.roundedBox(52, payTop, 491, 108);
   c.text(74, payTop + 28, 9, 'PAY TO USDC WALLET', 'F2', 0.45);
-  c.text(74, payTop + 52, 11, invoice.walletAddress ?? 'No wallet printed on invoice', 'F3');
-  c.text(74, payTop + 76, 9, `Expected policy: ${row.expected.policy.expectedDecision}`, 'F1', 0.38);
+  c.text(74, payTop + 56, 16, invoice.walletAddress ?? 'No wallet printed on invoice', 'F3');
+  c.text(74, payTop + 82, 9, `Expected policy: ${row.expected.policy.expectedDecision}`, 'F1', 0.38);
 
   c.text(52, 802, 8, 'Generated from synthetic_data/ap_cases.jsonl for Decimal local testing.', 'F1', 0.5);
 
