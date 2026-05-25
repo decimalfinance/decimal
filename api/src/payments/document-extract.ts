@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
+import { PublicKey } from '@solana/web3.js';
 import { config } from '../config.js';
 import { logger } from '../infra/logger.js';
 
@@ -186,6 +187,88 @@ export async function extractPaymentRowsFromDocument(args: {
       `Do NOT skip the first page. Return ONLY the JSON object with invoices for every payable invoice found.`,
   });
 
+  const firstAttempt = await runExtractionLlm({ userContent });
+  let invoices = firstAttempt.invoices;
+  let totalLatencyMs = firstAttempt.latencyMs;
+  let retryAttempted = false;
+
+  // The vision model occasionally returns wallet addresses that contain
+  // characters not in the base58 alphabet (0/O/I/l) despite being told
+  // about it in the system prompt. When that happens, retry once with
+  // explicit, per-vendor feedback before falling through to the human
+  // review UI.
+  const invalidWallets = collectInvalidWallets(invoices);
+  if (invalidWallets.length > 0) {
+    retryAttempted = true;
+    logger.warn('document_extract.invalid_wallet_first_attempt', {
+      pageCount: pages.length,
+      invalidWallets,
+    });
+    const correction = buildWalletRetryCorrection(invalidWallets);
+    const secondAttempt = await runExtractionLlm({
+      userContent,
+      retryCorrection: correction,
+    });
+    totalLatencyMs += secondAttempt.latencyMs;
+
+    // If the second pass still returned invalid wallets, scrub them to
+    // null so downstream code routes to "no wallet, human review needed"
+    // instead of carrying forward a known-bad address.
+    invoices = scrubInvalidWallets(secondAttempt.invoices);
+
+    const stillInvalid = collectInvalidWallets(secondAttempt.invoices);
+    logger.info('document_extract.invalid_wallet_retry_result', {
+      pageCount: pages.length,
+      stillInvalidCount: stillInvalid.length,
+      scrubbedToNull: stillInvalid.map((w) => w.vendorName),
+    });
+  }
+
+  const rowsRaw = invoices.map(invoiceToPaymentRow);
+  const parsedRows = ExtractedRowsSchema.safeParse({ rows: rowsRaw });
+  if (!parsedRows.success) {
+    throw new Error(`Extracted payment rows failed schema validation: ${parsedRows.error.message}`);
+  }
+
+  logger.info('document_extract.completed', {
+    pageCount: pages.length,
+    rowCount: parsedRows.data.rows.length,
+    latencyMs: totalLatencyMs,
+    retryAttempted,
+    model: firstAttempt.model ?? config.openAiModel,
+    rows: parsedRows.data.rows.map((row) => ({
+      counterparty: row.counterparty,
+      amount: row.amount,
+      currency: row.currency,
+      reference: row.reference,
+      hasWalletAddress: Boolean(row.wallet_address),
+    })),
+  });
+
+  return { rows: parsedRows.data.rows, modelLatencyMs: totalLatencyMs, pageCount: pages.length };
+}
+
+type ExtractionUserContent = Array<
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }
+>;
+
+async function runExtractionLlm(args: {
+  userContent: ExtractionUserContent;
+  retryCorrection?: string;
+}): Promise<{
+  invoices: z.infer<typeof ExtractedInvoiceSchema>[];
+  latencyMs: number;
+  model: string | undefined;
+}> {
+  const messages: Array<{ role: string; content: ExtractionUserContent | string }> = [
+    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'user', content: args.userContent },
+  ];
+  if (args.retryCorrection) {
+    messages.push({ role: 'user', content: args.retryCorrection });
+  }
+
   const t0 = Date.now();
   const response = await fetch(OPENAI_CHAT_COMPLETIONS_URL, {
     method: 'POST',
@@ -201,10 +284,7 @@ export async function extractPaymentRowsFromDocument(args: {
       max_tokens: 4096,
       temperature: 0,
       response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: userContent },
-      ],
+      messages,
     }),
   });
   const latencyMs = Date.now() - t0;
@@ -248,27 +328,68 @@ export async function extractPaymentRowsFromDocument(args: {
     throw new Error(`Extracted invoices failed schema validation: ${parsedInvoices.error.message}`);
   }
 
-  const rowsRaw = parsedInvoices.data.invoices.map(invoiceToPaymentRow);
-  const parsedRows = ExtractedRowsSchema.safeParse({ rows: rowsRaw });
-  if (!parsedRows.success) {
-    throw new Error(`Extracted payment rows failed schema validation: ${parsedRows.error.message}`);
+  return { invoices: parsedInvoices.data.invoices, latencyMs, model: body.model };
+}
+
+type InvalidWalletReport = { vendorName: string; walletAddress: string };
+
+function collectInvalidWallets(
+  invoices: z.infer<typeof ExtractedInvoiceSchema>[],
+): InvalidWalletReport[] {
+  const out: InvalidWalletReport[] = [];
+  for (const invoice of invoices) {
+    const wallet = invoice.walletAddress?.trim();
+    if (wallet && !isExtractedWalletValid(wallet)) {
+      out.push({ vendorName: invoice.vendorName, walletAddress: wallet });
+    }
   }
+  return out;
+}
 
-  logger.info('document_extract.completed', {
-    pageCount: pages.length,
-    rowCount: parsedRows.data.rows.length,
-    latencyMs,
-    model: body.model ?? config.openAiModel,
-    rows: parsedRows.data.rows.map((row) => ({
-      counterparty: row.counterparty,
-      amount: row.amount,
-      currency: row.currency,
-      reference: row.reference,
-      hasWalletAddress: Boolean(row.wallet_address),
-    })),
+function scrubInvalidWallets(
+  invoices: z.infer<typeof ExtractedInvoiceSchema>[],
+): z.infer<typeof ExtractedInvoiceSchema>[] {
+  return invoices.map((invoice) => {
+    const wallet = invoice.walletAddress?.trim();
+    if (wallet && !isExtractedWalletValid(wallet)) {
+      return {
+        ...invoice,
+        walletAddress: null,
+        confidence: {
+          ...invoice.confidence,
+          overall: Math.min(invoice.confidence.overall, 0.3),
+        },
+      };
+    }
+    return invoice;
   });
+}
 
-  return { rows: parsedRows.data.rows, modelLatencyMs: latencyMs, pageCount: pages.length };
+function buildWalletRetryCorrection(invalid: InvalidWalletReport[]): string {
+  const lines = invalid
+    .map(
+      (w, i) =>
+        `${i + 1}. Vendor "${w.vendorName}" — you returned "${w.walletAddress}", which is NOT valid base58.`,
+    )
+    .join('\n');
+  return (
+    `Your previous response contained invalid Solana wallet address(es):\n\n${lines}\n\n` +
+    `Solana base58 NEVER contains the characters 0 (zero), O (capital o), I (capital i), or l (lowercase L). ` +
+    `These look almost identical to 1 (one) and 0/o in many fonts, which causes OCR errors. ` +
+    `Re-examine each invoice's wallet line carefully, character by character, paying special attention to ` +
+    `digit/letter confusions. If you cannot determine a character with certainty, return walletAddress: null ` +
+    `and lower confidence.overall for that invoice. Do NOT guess or "repair" addresses. ` +
+    `Return the complete corrected JSON object with all invoices.`
+  );
+}
+
+function isExtractedWalletValid(value: string): boolean {
+  try {
+    const key = new PublicKey(value);
+    return key.toBase58().length >= 32 && key.toBase58().length <= 44;
+  } catch {
+    return false;
+  }
 }
 
 function invoiceToPaymentRow(invoice: z.infer<typeof ExtractedInvoiceSchema>): ExtractedRow {
@@ -323,11 +444,12 @@ async function renderToImages(fileBytes: Buffer, ext: string): Promise<RenderedP
 async function tryPdftoppm(inPath: string, dir: string): Promise<RenderedPage[] | null> {
   const prefix = join(dir, 'page');
   try {
-    // -r 150 = 150 dpi (good readability without bloating tokens)
+    // -r 220 = 220 dpi (higher fidelity for OCR-sensitive content like
+    // base58 wallet addresses where 1/l/I and 0/O confusion is common).
     // -png   = output PNG
     // Output files: page-1.png, page-2.png, ... (or page-01.png if it
     // pads). We sort by the numeric suffix to keep order stable.
-    await execFileAsync('pdftoppm', ['-png', '-r', '150', inPath, prefix]);
+    await execFileAsync('pdftoppm', ['-png', '-r', '220', inPath, prefix]);
   } catch (err: unknown) {
     const code = (err as { code?: string }).code;
     if (code === 'ENOENT') return null;
