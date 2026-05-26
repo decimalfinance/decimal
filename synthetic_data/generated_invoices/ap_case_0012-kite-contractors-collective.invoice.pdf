@@ -1,0 +1,82 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 4 0 R /F2 5 0 R /F3 6 0 R >> >> /Contents 7 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+6 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>
+endobj
+7 0 obj
+<< /Length 2702 >>
+stream
+0 g BT /F2 24 Tf 1 0 0 1 52 783.89 Tm (INVOICE) Tj ET 0 g
+0.35 g BT /F1 10 Tf 1 0 0 1 52 757.89 Tm (Synthetic AP dataset invoice) Tj ET 0 g
+0 g BT /F3 11 Tf 1 0 0 1 390 783.89 Tm (Case: ap_case_0012) Tj ET 0 g
+0.45 g BT /F1 10 Tf 1 0 0 1 390 765.89 Tm (Scenario: clean_trusted_invoice) Tj ET 0 g
+0.82 G 52 733.89 m 543 733.89 l S 0 G
+0.45 g BT /F2 9 Tf 1 0 0 1 52 703.89 Tm (FROM) Tj ET 0 g
+0 g BT /F2 17 Tf 1 0 0 1 52 681.89 Tm (Kite Contractors Collective) Tj ET 0 g
+0.35 g BT /F1 10 Tf 1 0 0 1 52 659.89 Tm (pay@kitecontractors.example) Tj ET 0 g
+0.45 g BT /F2 9 Tf 1 0 0 1 340 703.89 Tm (BILL TO) Tj ET 0 g
+0 g BT /F2 16 Tf 1 0 0 1 340 681.89 Tm (Decimal Finance Ops) Tj ET 0 g
+0.35 g BT /F1 10 Tf 1 0 0 1 340 659.89 Tm (accounts payable) Tj ET 0 g
+0.9 G 52 535.89 491 86 re S 0 G
+0.45 g BT /F2 8 Tf 1 0 0 1 74 595.89 Tm (INVOICE NUMBER) Tj ET 0 g
+0 g BT /F1 12 Tf 1 0 0 1 74 578.89 Tm (FCT-2026-1011) Tj ET 0 g
+0.45 g BT /F2 8 Tf 1 0 0 1 312 595.89 Tm (INVOICE DATE) Tj ET 0 g
+0 g BT /F1 12 Tf 1 0 0 1 312 578.89 Tm (2026-05-12) Tj ET 0 g
+0.45 g BT /F2 8 Tf 1 0 0 1 74 559.89 Tm (DUE DATE) Tj ET 0 g
+0 g BT /F1 12 Tf 1 0 0 1 74 542.89 Tm (2026-06-26) Tj ET 0 g
+0.45 g BT /F2 8 Tf 1 0 0 1 312 559.89 Tm (TERMS) Tj ET 0 g
+0 g BT /F1 12 Tf 1 0 0 1 312 542.89 Tm (Net 45) Tj ET 0 g
+0.45 g BT /F2 10 Tf 1 0 0 1 52 517.89 Tm (LINE ITEMS) Tj ET 0 g
+0.78 G 52 491.89 m 543 491.89 l S 0 G
+0.45 g BT /F2 9 Tf 1 0 0 1 62 471.89 Tm (Description) Tj ET 0 g
+0.45 g BT /F2 9 Tf 1 0 0 1 355 471.89 Tm (Qty) Tj ET 0 g
+0.45 g BT /F2 9 Tf 1 0 0 1 405 471.89 Tm (Unit) Tj ET 0 g
+0.45 g BT /F2 9 Tf 1 0 0 1 495 471.89 Tm (Total) Tj ET 0 g
+0.88 G 52 457.89 m 543 457.89 l S 0 G
+0 g BT /F1 11 Tf 1 0 0 1 62 433.89 Tm (Implementation services) Tj ET 0 g
+0 g BT /F1 11 Tf 1 0 0 1 358 433.89 Tm (1) Tj ET 0 g
+0 g BT /F1 11 Tf 1 0 0 1 398 433.89 Tm ($1,058.56) Tj ET 0 g
+0 g BT /F1 11 Tf 1 0 0 1 488 433.89 Tm ($1,058.56) Tj ET 0 g
+0.88 G 52 417.89 m 543 417.89 l S 0 G
+0.35 g BT /F1 10 Tf 1 0 0 1 370 389.89 Tm (Subtotal) Tj ET 0 g
+0 g BT /F1 11 Tf 1 0 0 1 485 389.89 Tm ($1,058.56) Tj ET 0 g
+0.35 g BT /F1 10 Tf 1 0 0 1 370 365.89 Tm (Tax) Tj ET 0 g
+0 g BT /F1 11 Tf 1 0 0 1 485 365.89 Tm ($0.00) Tj ET 0 g
+0 g BT /F2 12 Tf 1 0 0 1 370 335.89 Tm (Total due) Tj ET 0 g
+0 g BT /F2 14 Tf 1 0 0 1 475 335.89 Tm ($1,058.56) Tj ET 0 g
+0.9 G 52 99.89 491 92 re S 0 G
+0.45 g BT /F2 9 Tf 1 0 0 1 74 163.89 Tm (PAY TO USDC WALLET) Tj ET 0 g
+0 g BT /F3 11 Tf 1 0 0 1 74 139.89 Tm (Hp3uPqn3DCP4pZ4BL8N89Tn1j6sfNi7zkq8d94w8deAt) Tj ET 0 g
+0.38 g BT /F1 9 Tf 1 0 0 1 74 115.89 Tm (Expected policy: draft) Tj ET 0 g
+0.5 g BT /F1 8 Tf 1 0 0 1 52 39.89 Tm (Generated from synthetic_data/ap_cases.jsonl for Decimal local testing.) Tj ET 0 g
+endstream
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000267 00000 n 
+0000000337 00000 n 
+0000000412 00000 n 
+0000000480 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R >>
+startxref
+3234
+%%EOF
