@@ -197,7 +197,7 @@ export function WalletsPage({ session: _session }: { session: AuthenticatedSessi
             className="button button-primary"
             onClick={() => setCreateSquadsOpen(true)}
           >
-            + Create Squads treasury
+            + Create treasury
           </button>
         </div>
       </header>
@@ -232,9 +232,9 @@ export function WalletsPage({ session: _session }: { session: AuthenticatedSessi
           ) : rows.length === 0 ? (
             <RdEmptyState
               icon={<EmptyIcon kind="wallet" />}
-              title="Add an organization treasury account"
-              description="This is the wallet Decimal monitors and reconciles. Personal signing wallets live on your profile."
-              primary={{ label: 'Create Squads treasury', onClick: () => setCreateSquadsOpen(true) }}
+              title="Set up your first treasury"
+              description="Treasuries hold funds and define who can approve payments from them."
+              primary={{ label: 'Create treasury', onClick: () => setCreateSquadsOpen(true) }}
               secondary={{ label: 'Add existing address', onClick: () => setAddOpen(true) }}
             />
           ) : (
@@ -663,10 +663,10 @@ function CreateSquadsTreasuryDialog(props: {
     return (
       <DialogShell labelledBy="rd-squads-empty-title" onClose={onClose}>
         <h2 id="rd-squads-empty-title" className="rd-dialog-title">
-          Create your signing wallet first
+          Your account needs a moment
         </h2>
         <p className="rd-dialog-body">
-          A Squads treasury needs at least one personal wallet as a member. Create a Privy signing wallet on your profile, then come back here.
+          We're still setting up your signing wallet. Refresh in a few seconds and try again.
         </p>
         <div className="rd-dialog-actions" style={{ marginTop: 20 }}>
           <button type="button" className="button button-secondary" onClick={onClose}>
@@ -697,72 +697,61 @@ function CreateSquadsTreasuryDialog(props: {
       {step === 'config' ? (
         <>
           <h2 id="rd-squads-title" className="rd-dialog-title">
-            Create Squads treasury
+            Create treasury
           </h2>
-          <p className="rd-dialog-body">
-            An organization treasury controlled by a Squads multisig. Pick the signers, their permissions, and how many votes are needed to execute payments.
-          </p>
           <form
             onSubmit={(e) => {
               e.preventDefault();
               intentMutation.mutate();
             }}
           >
-            <SquadsConfigSection title="Basics">
-              <label className="field">
-                Treasury name
-                <input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Ops treasury"
-                  autoComplete="off"
-                  autoFocus
-                />
-              </label>
-              <label className="field">
-                Your signing wallet
+            <label className="field" style={{ marginBottom: 24 }}>
+              Treasury name
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Ops treasury"
+                autoComplete="off"
+                autoFocus
+                required
+              />
+            </label>
+
+            {/* Show signing wallet picker only if the user has more than one
+                personal wallet. The common case is exactly one (auto-provisioned
+                Privy wallet) and exposing it just adds blockchain noise. */}
+            {personalWallets.length > 1 ? (
+              <label className="field" style={{ marginBottom: 24 }}>
+                Sign as
                 <select
                   value={creatorWalletId}
                   onChange={(e) => setCreatorWalletId(e.target.value)}
                   required
-                  disabled={personalWallets.length <= 1}
                 >
-                  {personalWallets.length === 0 ? <option value="">Loading…</option> : null}
                   {personalWallets.map((w) => (
                     <option key={w.userWalletId} value={w.userWalletId}>
-                      {(w.label ?? 'Untitled')} · {shortenAddress(w.walletAddress, 4, 4)}
+                      {w.label ?? 'Personal wallet'}
                     </option>
                   ))}
                 </select>
-                <p
-                  style={{
-                    fontSize: 12,
-                    color: 'var(--ax-text-muted)',
-                    margin: '4px 0 0',
-                  }}
-                >
-                  Signs the create transaction on chain. Auto-included as a member.
-                </p>
               </label>
-            </SquadsConfigSection>
+            ) : null}
 
-            <SquadsConfigSection
-              title="Members"
-              hint="Personal wallets that will sign Squads proposals. Toggle each permission per member."
-            >
+            <SquadsConfigSection title="Members">
               {orgWalletsQuery.isLoading ? (
                 <div className="rd-skeleton rd-skeleton-block" style={{ height: 120 }} />
               ) : orgWallets.length === 0 ? (
                 <div
                   style={{
-                    padding: 12,
+                    padding: 14,
                     border: '1px dashed var(--ax-border)',
-                    borderRadius: 6,
+                    borderRadius: 8,
                     fontSize: 13,
                     color: 'var(--ax-text-muted)',
+                    lineHeight: 1.55,
                   }}
                 >
-                  No active personal wallets among org members. Ask teammates to create a personal wallet on /profile.
+                  No teammates are ready to approve yet. Invite them first — they'll need to set up their account before they can be added here.
                 </div>
               ) : (
                 <div
@@ -772,7 +761,7 @@ function CreateSquadsTreasuryDialog(props: {
                     border: '1px solid var(--ax-border)',
                     borderRadius: 8,
                     overflow: 'hidden',
-                    maxHeight: 280,
+                    maxHeight: 320,
                     overflowY: 'auto',
                   }}
                 >
@@ -807,6 +796,9 @@ function CreateSquadsTreasuryDialog(props: {
                             const next = current.includes(perm)
                               ? current.filter((p) => p !== perm)
                               : [...current, perm];
+                            // Removing the last permission deselects the
+                            // member entirely (except for the creator, who
+                            // must keep at least one).
                             if (next.length === 0) {
                               if (isCreator) return prev;
                               const { [wallet.userWalletId]: _omit, ...rest } = prev;
@@ -818,29 +810,25 @@ function CreateSquadsTreasuryDialog(props: {
                       />
                     );
                   })}
+
+                  {/* AI agent at the end — backend auto-includes it with
+                      initiate-only. Locked, can't be toggled. */}
+                  <AgentApproverRow />
                 </div>
               )}
             </SquadsConfigSection>
 
-            <SquadsConfigSection title="Approval threshold">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <input
-                  type="number"
-                  min={1}
-                  max={Math.max(1, voterCount)}
-                  value={threshold}
-                  onChange={(e) => setThreshold(Math.max(1, Number(e.target.value) || 1))}
-                  style={{ width: 80 }}
-                />
-                <span style={{ fontSize: 13, color: 'var(--ax-text-muted)' }}>
-                  of {voterCount} voting member{voterCount === 1 ? '' : 's'} must approve before a proposal can execute.
-                </span>
-              </div>
-              {voterCount === 0 ? (
-                <p style={{ fontSize: 12, color: 'var(--ax-warning)', margin: '8px 0 0' }}>
-                  At least one member needs the Vote permission.
-                </p>
-              ) : null}
+            <SquadsConfigSection title="Approvals required">
+              <ThresholdSelector
+                value={threshold}
+                max={voterCount}
+                onChange={setThreshold}
+              />
+              <p style={{ fontSize: 13, color: 'var(--ax-text-muted)', margin: '10px 0 0' }}>
+                {voterCount === 0
+                  ? 'Pick at least one approver above.'
+                  : `${threshold} of ${voterCount} approver${voterCount === 1 ? '' : 's'} needed to send a payment.`}
+              </p>
             </SquadsConfigSection>
 
             <div className="rd-dialog-actions" style={{ marginTop: 20 }}>
@@ -852,6 +840,7 @@ function CreateSquadsTreasuryDialog(props: {
                 className="button button-primary"
                 disabled={
                   !creatorWalletId
+                  || !name.trim()
                   || intentMutation.isPending
                   || voterCount === 0
                   || threshold < 1
@@ -859,7 +848,7 @@ function CreateSquadsTreasuryDialog(props: {
                 }
                 aria-busy={intentMutation.isPending}
               >
-                {intentMutation.isPending ? 'Preparing…' : 'Prepare transaction'}
+                {intentMutation.isPending ? 'Loading…' : 'Continue'}
               </button>
             </div>
           </form>
@@ -867,50 +856,60 @@ function CreateSquadsTreasuryDialog(props: {
       ) : step === 'review' && intent && tx ? (
         <>
           <h2 id="rd-squads-title" className="rd-dialog-title">
-            Review Squads treasury
+            Review treasury
           </h2>
           <p className="rd-dialog-body">
-            Verify the prepared multisig before signing. Decimal will persist the vault PDA as the treasury address and the multisig PDA as the source reference.
+            Looks good? Confirm to create it.
           </p>
-          <div className="rd-form-grid" style={{ gap: 12 }}>
-            <SquadsReviewRow label="Treasury name" value={intent.displayName || '(unnamed)'} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <SquadsReviewRow label="Name" value={intent.displayName} />
             <SquadsReviewRow
-              label="Threshold"
-              value={`${intent.threshold} of ${intent.members.length}`}
-            />
-            <SquadsReviewRow
-              label="Required signer"
-              value={
-                <span style={{ fontFamily: 'monospace' }}>
-                  {shortenAddress(tx.requiredSigner, 6, 6)}
-                  {requiredSignerWallet ? (
-                    <span style={{ color: 'var(--ax-text-muted)', marginLeft: 8 }}>
-                      ({requiredSignerWallet.label ?? 'this wallet'})
-                    </span>
-                  ) : null}
-                </span>
-              }
-            />
-            <SquadsReviewRow
-              label="Multisig address"
-              value={<span style={{ fontFamily: 'monospace' }}>{shortenAddress(intent.multisigPda, 6, 6)}</span>}
-            />
-            <SquadsReviewRow
-              label="Treasury vault"
-              value={<span style={{ fontFamily: 'monospace' }}>{shortenAddress(intent.vaultPda, 6, 6)}</span>}
+              label="Approvals required"
+              value={(() => {
+                // Threshold denominator counts only members who can actually
+                // vote. The Decimal agent has initiate-only permission, so it
+                // wouldn't be eligible to satisfy the threshold even if it
+                // were on the multisig.
+                const votingCount = intent.members.filter((m) =>
+                  m.permissions.includes('vote'),
+                ).length;
+                return `${intent.threshold} of ${votingCount}`;
+              })()}
             />
             <SquadsReviewRow
               label="Members"
               value={
-                <ul style={{ margin: 0, paddingLeft: 16, lineHeight: 1.6 }}>
-                  {intent.members.map((m) => (
-                    <li key={m.personalWalletId} style={{ fontSize: 13 }}>
-                      <span style={{ fontFamily: 'monospace' }}>{shortenAddress(m.walletAddress, 4, 4)}</span>
-                      <span style={{ color: 'var(--ax-text-muted)', marginLeft: 8 }}>
-                        {m.permissions.join(' · ')}
-                      </span>
-                    </li>
-                  ))}
+                <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {intent.members.map((m) => {
+                    const wallet = orgWallets.find((w) => w.userWalletId === m.personalWalletId);
+                    const isAgent = !wallet && m.permissions.length === 1 && m.permissions[0] === 'initiate';
+                    const name = isAgent
+                      ? 'Decimal agent'
+                      : (wallet?.user.displayName || wallet?.user.email || 'Team member');
+                    return (
+                      <li
+                        key={m.personalWalletId}
+                        style={{
+                          fontSize: 13,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 12,
+                        }}
+                      >
+                        <span>{name}</span>
+                        <span className="approver-perms">
+                          {(['Initiate', 'Vote', 'Execute'] as const).map((label) => (
+                            <PermissionPill
+                              key={label}
+                              label={label}
+                              active={m.permissions.includes(label.toLowerCase() as 'initiate' | 'vote' | 'execute')}
+                            />
+                          ))}
+                        </span>
+                      </li>
+                    );
+                  })}
                 </ul>
               }
             />
@@ -920,17 +919,17 @@ function CreateSquadsTreasuryDialog(props: {
               Back
             </button>
             <button type="button" className="button button-primary" onClick={() => setStep('sign')}>
-              Sign and create
+              Create treasury
             </button>
           </div>
         </>
       ) : step === 'sign' && intent && tx ? (
         <>
           <h2 id="rd-squads-title" className="rd-dialog-title">
-            Sign and confirm
+            Creating your treasury
           </h2>
           <p className="rd-dialog-body">
-            Decimal will sign with your Privy-backed personal wallet, submit to chain, and persist the new treasury record. Don't close this window.
+            This takes a few seconds. Don't close this window.
           </p>
 
           <div style={{ marginBottom: 12 }}>
@@ -950,21 +949,11 @@ function CreateSquadsTreasuryDialog(props: {
               }}
             >
               <strong style={{ display: 'block', marginBottom: 4, color: 'var(--ax-danger)' }}>
-                {phase === 'submitted-pending-confirm' ? 'Transaction landed but confirmation failed' : 'Squads creation failed'}
+                {phase === 'submitted-pending-confirm' ? 'Almost there — confirmation pending' : 'Something went wrong'}
               </strong>
               <span style={{ color: 'var(--ax-text-muted)' }}>{phaseError}</span>
-              {phase === 'submitted-pending-confirm' && submittedSignature ? (
-                <div style={{ marginTop: 8, fontSize: 12, fontFamily: 'monospace', color: 'var(--ax-text-muted)' }}>
-                  signature: {shortenAddress(submittedSignature, 8, 8)}
-                </div>
-              ) : null}
             </div>
           ) : null}
-
-          <div style={{ fontSize: 12, color: 'var(--ax-text-muted)', fontFamily: 'monospace' }}>
-            createKey: {shortenAddress(intent.createKey, 6, 6)} · multisig:{' '}
-            {shortenAddress(intent.multisigPda, 6, 6)} · vault: {shortenAddress(intent.vaultPda, 6, 6)}
-          </div>
 
           <div className="rd-dialog-actions" style={{ marginTop: 20 }}>
             <button
@@ -983,9 +972,9 @@ function CreateSquadsTreasuryDialog(props: {
               aria-busy={phase === 'signing' || phase === 'submitting' || phase === 'confirming-onchain' || phase === 'persisting'}
             >
               {phase === 'idle' || phase === 'error'
-                ? 'Sign and create'
+                ? 'Create treasury'
                 : phase === 'submitted-pending-confirm'
-                  ? 'Retry confirmation'
+                  ? 'Retry'
                   : 'Working…'}
             </button>
           </div>
@@ -1028,10 +1017,10 @@ type SquadsPhase =
 
 function SquadsPhaseList({ phase }: { phase: SquadsPhase }) {
   const steps: Array<{ key: SquadsPhase; label: string }> = [
-    { key: 'signing', label: 'Sign with Privy wallet' },
-    { key: 'submitting', label: 'Submit to Solana' },
-    { key: 'confirming-onchain', label: 'Confirm on-chain' },
-    { key: 'persisting', label: 'Persist treasury record' },
+    { key: 'signing', label: 'Signing' },
+    { key: 'submitting', label: 'Sending' },
+    { key: 'confirming-onchain', label: 'Confirming' },
+    { key: 'persisting', label: 'Saving treasury' },
   ];
   const order: SquadsPhase[] = ['idle', 'signing', 'submitting', 'confirming-onchain', 'persisting'];
   const currentIndex = order.indexOf(phase);
@@ -1142,81 +1131,142 @@ function SquadsMemberRow({
 }) {
   const displayName = wallet.user.displayName || wallet.user.email;
   const subtle = wallet.user.displayName ? wallet.user.email : null;
-  const role = wallet.membership?.role ?? 'member';
 
   return (
     <div
+      className="approver-row"
       style={{
-        display: 'grid',
-        gridTemplateColumns: 'auto 1fr auto',
-        alignItems: 'center',
-        gap: 12,
-        padding: '10px 12px',
         borderTop: first ? 'none' : '1px solid var(--ax-border)',
         background: selected ? 'var(--ax-surface-1)' : 'transparent',
-        opacity: selected ? 1 : 0.78,
       }}
     >
-      <label
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 8,
-          cursor: isCreator ? 'not-allowed' : 'pointer',
-        }}
-        title={isCreator ? 'Creator wallet is required as a member.' : 'Include as Squads member'}
-      >
-        <input
-          type="checkbox"
-          checked={selected}
-          disabled={isCreator}
-          onChange={onToggleSelected}
-        />
-      </label>
-      <div style={{ minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ fontWeight: 500 }}>{displayName}</span>
-          {isCreator ? (
-            <span className="rd-pill rd-pill-info" style={{ fontSize: 10 }}>
-              You · creator
-            </span>
-          ) : null}
-          <span className="rd-pill rd-pill-info" style={{ fontSize: 10 }}>{role}</span>
+      <CustomCheckbox
+        checked={selected}
+        disabled={isCreator}
+        onChange={onToggleSelected}
+        title={isCreator ? "You're always a member as the creator." : undefined}
+      />
+      <div className="approver-row-body">
+        <div className="approver-row-name">
+          <span>{displayName}</span>
+          {isCreator ? <span className="rd-pill rd-pill-info approver-row-tag">You</span> : null}
         </div>
-        {subtle ? (
-          <div style={{ fontSize: 11, color: 'var(--ax-text-muted)' }}>{subtle}</div>
-        ) : null}
-        <div style={{ fontSize: 11, color: 'var(--ax-text-muted)', fontFamily: 'monospace', marginTop: 2 }}>
-          {wallet.label ? `${wallet.label} · ` : ''}{shortenAddress(wallet.walletAddress, 4, 4)}
+        {subtle ? <div className="approver-row-sub">{subtle}</div> : null}
+      </div>
+      <div className="approver-perms">
+        {(['initiate', 'vote', 'execute'] as const).map((perm) => (
+          <PermissionPill
+            key={perm}
+            label={perm[0]!.toUpperCase() + perm.slice(1)}
+            active={permissions.includes(perm)}
+            onClick={selected ? () => onTogglePermission(perm) : undefined}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AgentApproverRow() {
+  return (
+    <div
+      className="approver-row approver-row-agent"
+      style={{ borderTop: '1px solid var(--ax-border)' }}
+    >
+      {/* Empty checkbox slot — keeps the row aligned with the human rows
+          above but communicates "you can't toggle this off". */}
+      <span aria-hidden style={{ width: 18 }} />
+      <div className="approver-row-body">
+        <div className="approver-row-name">
+          <span>Decimal agent</span>
         </div>
       </div>
-      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-        {ALL_SQUADS_PERMISSIONS.map((perm) => {
-          const active = permissions.includes(perm);
-          const disabled = !selected;
-          return (
-            <button
-              key={perm}
-              type="button"
-              onClick={() => onTogglePermission(perm)}
-              disabled={disabled}
-              title={`Toggle ${SQUADS_PERMISSION_LABEL[perm]} permission`}
-              style={{
-                fontSize: 11,
-                padding: '3px 9px',
-                borderRadius: 999,
-                border: '1px solid var(--ax-border)',
-                background: active ? 'var(--ax-accent-dim)' : 'transparent',
-                color: active ? 'var(--ax-accent)' : 'var(--ax-text-muted)',
-                cursor: disabled ? 'not-allowed' : 'pointer',
-                opacity: disabled ? 0.5 : 1,
-              }}
-            >
-              {SQUADS_PERMISSION_LABEL[perm]}
-            </button>
-          );
-        })}
+      <div className="approver-perms">
+        <PermissionPill label="Initiate" active />
       </div>
+    </div>
+  );
+}
+
+function PermissionPill({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick?: () => void;
+}) {
+  const className = `permission-pill${active ? ' permission-pill-active' : ''}${onClick ? ' permission-pill-clickable' : ''}`;
+  if (!onClick) {
+    return <span className={className}>{label}</span>;
+  }
+  return (
+    <button type="button" className={className} onClick={onClick}>
+      {label}
+    </button>
+  );
+}
+
+function CustomCheckbox({
+  checked,
+  disabled,
+  onChange,
+  title,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  onChange: () => void;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={onChange}
+      title={title}
+      className={`custom-checkbox${checked ? ' custom-checkbox-checked' : ''}${disabled ? ' custom-checkbox-disabled' : ''}`}
+    >
+      {checked ? (
+        <svg viewBox="0 0 16 16" aria-hidden>
+          <path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      ) : null}
+    </button>
+  );
+}
+
+function ThresholdSelector({
+  value,
+  max,
+  onChange,
+}: {
+  value: number;
+  max: number;
+  onChange: (n: number) => void;
+}) {
+  const safeMax = Math.max(1, max);
+  const options = Array.from({ length: safeMax }, (_, i) => i + 1);
+  return (
+    <div className="threshold-segmented" role="radiogroup" aria-label="Approvals required">
+      {options.map((n) => {
+        const selected = n === value;
+        return (
+          <button
+            key={n}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            className={`threshold-btn${selected ? ' threshold-btn-selected' : ''}`}
+            onClick={() => onChange(n)}
+            disabled={max === 0}
+          >
+            {n}
+          </button>
+        );
+      })}
     </div>
   );
 }
