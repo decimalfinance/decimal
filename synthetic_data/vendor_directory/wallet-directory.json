@@ -1,0 +1,1138 @@
+{
+  "version": 1,
+  "network": "solana-devnet",
+  "generatedAt": "2026-05-25T11:41:31.302Z",
+  "privateRegistryPath": "api/.secrets/synthetic-wallet-directory.private.json",
+  "organization": {
+    "organizationId": "org_synth_decimal_001",
+    "name": "Synthetic Decimal AP Org",
+    "homeCurrency": "USD"
+  },
+  "treasury": {
+    "treasuryWalletId": "treasury_synth_ops",
+    "label": "Ops Treasury",
+    "network": "solana-devnet",
+    "asset": "USDC",
+    "address": "GkL1NLSgRvCFgFehtuEcWJiuLGydHW22i6VKmvbAfM1z"
+  },
+  "knownVendors": [
+    {
+      "counterpartyId": "cpty_acme_logistics",
+      "displayName": "Acme Logistics LLC",
+      "aliases": [
+        "Acme Logistics",
+        "ACME LOGISTICS LLC"
+      ],
+      "category": "logistics",
+      "email": "ap@acmelogistics.example",
+      "walletAddress": "7wH5XbbgnHacmBbPhShymAWVoJvQ8YJA9Q2QimSCiZsb",
+      "trustState": "trusted",
+      "historicalAverageUsd": 450
+    },
+    {
+      "counterpartyId": "cpty_fuyo_design",
+      "displayName": "Fuyo Design Studio",
+      "aliases": [
+        "Fuyo Design Studio",
+        "FUYO DESIGN STUDIO"
+      ],
+      "category": "design",
+      "email": "billing@fuyodesign.example",
+      "walletAddress": "Am2hTrWEwNDcUF7Cd6rSBsxzaMwUTwrmrCAsy466TkSo",
+      "trustState": "trusted",
+      "historicalAverageUsd": 800
+    },
+    {
+      "counterpartyId": "cpty_madrid_consulting",
+      "displayName": "Madrid Consulting SL",
+      "aliases": [
+        "Madrid Consulting",
+        "MADRID CONSULTING SL"
+      ],
+      "category": "consulting",
+      "email": "finance@madridconsulting.example",
+      "walletAddress": "8biPhuExBZnjgdDwyd2G37CRr6ezUojhkoRoU71D4F5d",
+      "trustState": "trusted",
+      "historicalAverageUsd": 1250
+    },
+    {
+      "counterpartyId": "cpty_bangalore_ops",
+      "displayName": "Bangalore Ops Pvt Ltd",
+      "aliases": [
+        "Bangalore Ops",
+        "BANGALORE OPS PVT LTD"
+      ],
+      "category": "operations",
+      "email": "accounts@bangaloreops.example",
+      "walletAddress": "GHqSstHfHHRPAcKAFp1WeXobLw2RnaZpHd8u5V2BuNmv",
+      "trustState": "trusted",
+      "historicalAverageUsd": 2100
+    },
+    {
+      "counterpartyId": "cpty_singapore_cloud",
+      "displayName": "Singapore Cloud Pte Ltd",
+      "aliases": [
+        "Singapore Cloud",
+        "SINGAPORE CLOUD PTE LTD"
+      ],
+      "category": "infrastructure",
+      "email": "billing@sgcloud.example",
+      "walletAddress": "DxnwDCRfGDosn6HSG7WhYRYqdnXRJeB4uLmCrzFhYLLS",
+      "trustState": "trusted",
+      "historicalAverageUsd": 3200
+    },
+    {
+      "counterpartyId": "cpty_delta_security",
+      "displayName": "Delta Security Audit Co",
+      "aliases": [
+        "Delta Security Audit",
+        "DELTA SECURITY AUDIT CO"
+      ],
+      "category": "security",
+      "email": "invoices@deltasecurity.example",
+      "walletAddress": "D15sTSw8tuS6JNJ6saGjr5GBguWLHDMARvniFoxV9PFa",
+      "trustState": "trusted",
+      "historicalAverageUsd": 5000
+    },
+    {
+      "counterpartyId": "cpty_lumen_legal",
+      "displayName": "Lumen Legal LLP",
+      "aliases": [
+        "Lumen Legal",
+        "LUMEN LEGAL LLP"
+      ],
+      "category": "legal",
+      "email": "billing@lumenlegal.example",
+      "walletAddress": "Avb23iQqnzACFuYtpwwewSmrM1hfxzYWXgoR8U52TsHg",
+      "trustState": "trusted",
+      "historicalAverageUsd": 7500
+    },
+    {
+      "counterpartyId": "cpty_nova_content",
+      "displayName": "Nova Content House",
+      "aliases": [
+        "Nova Content House",
+        "NOVA CONTENT HOUSE"
+      ],
+      "category": "marketing",
+      "email": "accounts@novacontent.example",
+      "walletAddress": "FaxMQ9XmZsn6puoPe9RbDpHpEkUSGxtGnVZuybdeg3z1",
+      "trustState": "trusted",
+      "historicalAverageUsd": 450
+    },
+    {
+      "counterpartyId": "cpty_orbit_research",
+      "displayName": "Orbit Research GmbH",
+      "aliases": [
+        "Orbit Research",
+        "ORBIT RESEARCH GMBH"
+      ],
+      "category": "research",
+      "email": "ap@orbitresearch.example",
+      "walletAddress": "G6sfXj8JEC3Heng46LWau8uwA5kUZPasQy1WAuLqu1YN",
+      "trustState": "trusted",
+      "historicalAverageUsd": 800
+    },
+    {
+      "counterpartyId": "cpty_kite_contractors",
+      "displayName": "Kite Contractors Collective",
+      "aliases": [
+        "Kite Contractors Collective",
+        "KITE CONTRACTORS COLLECTIVE"
+      ],
+      "category": "contractors",
+      "email": "pay@kitecontractors.example",
+      "walletAddress": "Hp3uPqn3DCP4pZ4BL8N89Tn1j6sfNi7zkq8d94w8deAt",
+      "trustState": "trusted",
+      "historicalAverageUsd": 1250
+    },
+    {
+      "counterpartyId": "cpty_redwood_tax",
+      "displayName": "Redwood Tax Advisors",
+      "aliases": [
+        "Redwood Tax Advisors",
+        "REDWOOD TAX ADVISORS"
+      ],
+      "category": "tax",
+      "email": "billing@redwoodtax.example",
+      "walletAddress": "2SXsZrjwMWSkoWSZ8tDWSzWSyiuPU2mRSxGqBTuSFqP5",
+      "trustState": "trusted",
+      "historicalAverageUsd": 2100
+    },
+    {
+      "counterpartyId": "cpty_zenith_cloud",
+      "displayName": "Zenith Cloud Services",
+      "aliases": [
+        "Zenith Cloud Services",
+        "ZENITH CLOUD SERVICES"
+      ],
+      "category": "infrastructure",
+      "email": "ar@zenithcloud.example",
+      "walletAddress": "5QZbpZ2vCobocKrptJFLFCVoHGfRwPq82Y2yRhyfv8UB",
+      "trustState": "trusted",
+      "historicalAverageUsd": 3200
+    },
+    {
+      "counterpartyId": "cpty_helios_media",
+      "displayName": "Helios Media Labs",
+      "aliases": [
+        "Helios Media Labs",
+        "HELIOS MEDIA LABS"
+      ],
+      "category": "marketing",
+      "email": "billing@heliosmedia.example",
+      "walletAddress": "DWatJwjRqHZyGHXBACEuRxTQLF9cGMuS8irZdD8C8Pj",
+      "trustState": "unreviewed",
+      "historicalAverageUsd": 5000
+    },
+    {
+      "counterpartyId": "cpty_cobalt_labs",
+      "displayName": "Cobalt Labs",
+      "aliases": [
+        "Cobalt Labs",
+        "COBALT LABS"
+      ],
+      "category": "engineering",
+      "email": "ops@cobaltlabs.example",
+      "walletAddress": "FYPyG5XDLtyn8AHT9hJ9PU2sW7Z9K9QWvr1iZsdySzGk",
+      "trustState": "unreviewed",
+      "historicalAverageUsd": 7500
+    },
+    {
+      "counterpartyId": "cpty_northstar_events",
+      "displayName": "Northstar Events",
+      "aliases": [
+        "Northstar Events",
+        "NORTHSTAR EVENTS"
+      ],
+      "category": "events",
+      "email": "finance@northstarevents.example",
+      "walletAddress": "2nDioCPaZVohrsz6JfLPq3DEHHUpD8twq72MWbJW8xWD",
+      "trustState": "restricted",
+      "historicalAverageUsd": 450
+    },
+    {
+      "counterpartyId": "cpty_legacy_vendor",
+      "displayName": "Legacy Vendor Inc",
+      "aliases": [
+        "Legacy Vendor",
+        "LEGACY VENDOR INC"
+      ],
+      "category": "legacy",
+      "email": "billing@legacyvendor.example",
+      "walletAddress": "Byhiz7i82JqCg8uUVdHvjhoEYxifR12obhQiE6iz3gv9",
+      "trustState": "blocked",
+      "historicalAverageUsd": 800
+    }
+  ],
+  "newVendorWalletPool": [
+    {
+      "syntheticVendorId": "new_vendor_0001",
+      "displayName": "Atlas Services 1",
+      "category": "services",
+      "email": "billing1@newvendor.example",
+      "walletAddress": "EkjEqM3UAV8Twx1o1uMYmQ6ZnwmFrvJtVzYoiQxY5JSx",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0002",
+      "displayName": "Brightline Services 2",
+      "category": "services",
+      "email": "billing2@newvendor.example",
+      "walletAddress": "SrM7WxqFQuf5Q3LTGfNcqzif35pdcw9urJQVfFRanHk",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0003",
+      "displayName": "Canyon Services 3",
+      "category": "services",
+      "email": "billing3@newvendor.example",
+      "walletAddress": "Cxoja9jGZYn2YPie5ToCZWHQ1t62RPvyJUgQPkYivhzk",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0004",
+      "displayName": "Nimbus Services 4",
+      "category": "services",
+      "email": "billing4@newvendor.example",
+      "walletAddress": "7YzZQDMk4SuexrAEKVpQCPPMUoxUj8WMAQnNCZDiDBqR",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0005",
+      "displayName": "Vector Services 5",
+      "category": "services",
+      "email": "billing5@newvendor.example",
+      "walletAddress": "4VABRR8E6QjaKs99QiTtvaquMJciQjs6LQF27e45TYok",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0006",
+      "displayName": "Prairie Services 6",
+      "category": "services",
+      "email": "billing6@newvendor.example",
+      "walletAddress": "B5XDEHNT4ZX2aFeuUGe4xjZVt8CLRWH3BvuGn2tUywzp",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0007",
+      "displayName": "Harbor Services 7",
+      "category": "services",
+      "email": "billing7@newvendor.example",
+      "walletAddress": "Fz98jBLQu4ybHKtHiBFvLqbCwGUgpciWakgaQ3DKTjJo",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0008",
+      "displayName": "Keystone Services 8",
+      "category": "services",
+      "email": "billing8@newvendor.example",
+      "walletAddress": "AuuQEyNhNSvfBdykovnJRkKYpWbMzRdrXV5hfzF7xcVA",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0009",
+      "displayName": "Atlas Labs 9",
+      "category": "labs",
+      "email": "billing9@newvendor.example",
+      "walletAddress": "r7LpGGAHqAevQLmi5ZTUXAKWfAy976dWBw6tFSHybCY",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0010",
+      "displayName": "Brightline Labs 10",
+      "category": "labs",
+      "email": "billing10@newvendor.example",
+      "walletAddress": "5DAB1JwvMgAHegk8uB3Xoqa293c3SaMTD3zpQBrhXAcp",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0011",
+      "displayName": "Canyon Labs 11",
+      "category": "labs",
+      "email": "billing11@newvendor.example",
+      "walletAddress": "759Rtq5TTV9mPDeBKrnCVYxHvcsb6DuAzMRxQTTm7EYN",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0012",
+      "displayName": "Nimbus Labs 12",
+      "category": "labs",
+      "email": "billing12@newvendor.example",
+      "walletAddress": "BLDV7g45ijr6ik2yc3N79U2qz9hqhmUn9H3zvg6Ytsu",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0013",
+      "displayName": "Vector Labs 13",
+      "category": "labs",
+      "email": "billing13@newvendor.example",
+      "walletAddress": "B7tzStgYgT49EznmvBPkZKrHU3eqqdbQLZWmdakKScXx",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0014",
+      "displayName": "Prairie Labs 14",
+      "category": "labs",
+      "email": "billing14@newvendor.example",
+      "walletAddress": "HUGBuotfN8nDJ6ccLaDmMBwsUKV3ENQ395QQJKq6BbTM",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0015",
+      "displayName": "Harbor Labs 15",
+      "category": "labs",
+      "email": "billing15@newvendor.example",
+      "walletAddress": "B1Sy2UMhnSdoCXZ3MhsvfPfKvj9nQ9KSccVtxbMYpY5t",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0016",
+      "displayName": "Keystone Labs 16",
+      "category": "labs",
+      "email": "billing16@newvendor.example",
+      "walletAddress": "DPEqFo4DuiZXudMdrvQCagAZKEi3zRvxr6S4Sx1YVwv6",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0017",
+      "displayName": "Atlas Consulting 17",
+      "category": "consulting",
+      "email": "billing17@newvendor.example",
+      "walletAddress": "EZ2qibS2TmaS8fCAxQJEFpK2qg1WgP1CN3W836obyPE9",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0018",
+      "displayName": "Brightline Consulting 18",
+      "category": "consulting",
+      "email": "billing18@newvendor.example",
+      "walletAddress": "yRrM9pHppqrwwbLbAWUi6thaX9x5juY2wBFwARuwAK9",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0019",
+      "displayName": "Canyon Consulting 19",
+      "category": "consulting",
+      "email": "billing19@newvendor.example",
+      "walletAddress": "BNGqeM6SUCRVhN9cEcGPAXQs2W6zzQxWVNrAYRFeBojm",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0020",
+      "displayName": "Nimbus Consulting 20",
+      "category": "consulting",
+      "email": "billing20@newvendor.example",
+      "walletAddress": "6GtUCTGZYXGeJTvpysQge5nJTvK7gWYfYN5o6DEC8Zw2",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0021",
+      "displayName": "Vector Consulting 21",
+      "category": "consulting",
+      "email": "billing21@newvendor.example",
+      "walletAddress": "3T6FRMQuCnrsc2bf27o51pjwZgVv4pMsEGuaHuoPYcNc",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0022",
+      "displayName": "Prairie Consulting 22",
+      "category": "consulting",
+      "email": "billing22@newvendor.example",
+      "walletAddress": "6qZw3re5MyxEyBbQwqxkXXynNuBm2HQgTweGorR648zb",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0023",
+      "displayName": "Harbor Consulting 23",
+      "category": "consulting",
+      "email": "billing23@newvendor.example",
+      "walletAddress": "EyVdCRNX1mfjzDZUWhhp3S7tfHaT8yfHZGGnbxma67Kh",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0024",
+      "displayName": "Keystone Consulting 24",
+      "category": "consulting",
+      "email": "billing24@newvendor.example",
+      "walletAddress": "FrL2U4sqJ89qdpb2m3qkHboHKkxV4MnC9LMyD43SpZXZ",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0025",
+      "displayName": "Atlas Studio 25",
+      "category": "studio",
+      "email": "billing25@newvendor.example",
+      "walletAddress": "DRA7LC62uXPWDL5TuPRtrxmaDJ31ZDxxKX2jx2KB3EzK",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0026",
+      "displayName": "Brightline Studio 26",
+      "category": "studio",
+      "email": "billing26@newvendor.example",
+      "walletAddress": "8tzV8p1W6qEjtjmcHAUszoDVjyucJG73ZTvoCygq5mgY",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0027",
+      "displayName": "Canyon Studio 27",
+      "category": "studio",
+      "email": "billing27@newvendor.example",
+      "walletAddress": "2GrcwuUaDdmSNczALoyMxhjs5NgmuUqjk63QTDNgmBWn",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0028",
+      "displayName": "Nimbus Studio 28",
+      "category": "studio",
+      "email": "billing28@newvendor.example",
+      "walletAddress": "w2bBacymWMzCv5P6i2TFMdLucviqPo2LKqidotovxki",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0029",
+      "displayName": "Vector Studio 29",
+      "category": "studio",
+      "email": "billing29@newvendor.example",
+      "walletAddress": "AbhrDKzo2Hvs6pcxxppTFHSqNZEJYTKB2yQAjJgQqCn9",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0030",
+      "displayName": "Prairie Studio 30",
+      "category": "studio",
+      "email": "billing30@newvendor.example",
+      "walletAddress": "4Fn7WUKL9az1oqgNcye8YYVRSfkkj3bRt3vtTNJ4cFqs",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0031",
+      "displayName": "Harbor Studio 31",
+      "category": "studio",
+      "email": "billing31@newvendor.example",
+      "walletAddress": "8YjZSX1o4MQsXSP6W1XBZVvQHCCpAALjgZKiiBJ17DVp",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0032",
+      "displayName": "Keystone Studio 32",
+      "category": "studio",
+      "email": "billing32@newvendor.example",
+      "walletAddress": "3dR3ivgvGpE2eB6jUqfpMpzCTYF5hsWQx1P1vtDf2gGt",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0033",
+      "displayName": "Atlas Ops 33",
+      "category": "ops",
+      "email": "billing33@newvendor.example",
+      "walletAddress": "AiFyj3qr5296gVb2jDKnKRBQroMT1W1ymjDXSGt4TvAq",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0034",
+      "displayName": "Brightline Ops 34",
+      "category": "ops",
+      "email": "billing34@newvendor.example",
+      "walletAddress": "GjgVzqdsn6KiRsoMHMrg1ynLz5K4f9RPVmfEbD1XXQqf",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0035",
+      "displayName": "Canyon Ops 35",
+      "category": "ops",
+      "email": "billing35@newvendor.example",
+      "walletAddress": "HVmmDpQfLmbKcYJ2EipijBbkJCEtp99ogik6pdG2ggoY",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0036",
+      "displayName": "Nimbus Ops 36",
+      "category": "ops",
+      "email": "billing36@newvendor.example",
+      "walletAddress": "A6mRYwxeTEXnzZvPqKesSinkLFVudjCHJvRQbx3HfuZo",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0037",
+      "displayName": "Vector Ops 37",
+      "category": "ops",
+      "email": "billing37@newvendor.example",
+      "walletAddress": "Bid7w1NTmCHCTXfj153fPUCQ1nFGPqsCfpbguwqupwEn",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0038",
+      "displayName": "Prairie Ops 38",
+      "category": "ops",
+      "email": "billing38@newvendor.example",
+      "walletAddress": "FYpeEKznH4kRth66D9jhMqmwmRPL3he8SoA4FSJG2cG2",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0039",
+      "displayName": "Harbor Ops 39",
+      "category": "ops",
+      "email": "billing39@newvendor.example",
+      "walletAddress": "AR9Vddf2SLEffynDwq1yem1g4CxKkGGGhLnq3mnQKP1N",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0040",
+      "displayName": "Keystone Ops 40",
+      "category": "ops",
+      "email": "billing40@newvendor.example",
+      "walletAddress": "2Jzb2oDfpD9hbK6dmoKXLuAwptXKQozh6ULFuVjhUEbN",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0041",
+      "displayName": "Atlas Research 41",
+      "category": "research",
+      "email": "billing41@newvendor.example",
+      "walletAddress": "7dgzA3pfD3LJxfP57tJHnkoTxKXcrhGcELzeCn55gGZD",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0042",
+      "displayName": "Brightline Research 42",
+      "category": "research",
+      "email": "billing42@newvendor.example",
+      "walletAddress": "7SE5maafLi4vSVm6MPRrzHPCsiTcUgWsr8TkAapkGqGQ",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0043",
+      "displayName": "Canyon Research 43",
+      "category": "research",
+      "email": "billing43@newvendor.example",
+      "walletAddress": "4hnCkTycf1JkMnHFUCtj3ERoGTBWQTr1EM3qC5D6UydQ",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0044",
+      "displayName": "Nimbus Research 44",
+      "category": "research",
+      "email": "billing44@newvendor.example",
+      "walletAddress": "3V4FQDXgkcqUaqKa9d9N79b1DuvnuiVQXFsePmcjYdmN",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0045",
+      "displayName": "Vector Research 45",
+      "category": "research",
+      "email": "billing45@newvendor.example",
+      "walletAddress": "3XayEJyfKSVmQLGJpEXasRXXqzy1cKocviM7qLj5c9c8",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0046",
+      "displayName": "Prairie Research 46",
+      "category": "research",
+      "email": "billing46@newvendor.example",
+      "walletAddress": "EcLXBbs5YDfabKpTiYcB72Gpt3oooAZBM8A64qEexyWA",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0047",
+      "displayName": "Harbor Research 47",
+      "category": "research",
+      "email": "billing47@newvendor.example",
+      "walletAddress": "HStuiHRS3jGCSW7aFUuZj5qunJVzmRZe9tcEUtYoTu2n",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0048",
+      "displayName": "Keystone Research 48",
+      "category": "research",
+      "email": "billing48@newvendor.example",
+      "walletAddress": "8yGJdprVuLonZgvmPkdwDawdZBCo9JXp75nvG8WxxZ7g",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0049",
+      "displayName": "Atlas Security 49",
+      "category": "security",
+      "email": "billing49@newvendor.example",
+      "walletAddress": "2as6oZbPgcBaS4DCYaJro2c6A2MujL361C4eYeBQCrYG",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0050",
+      "displayName": "Brightline Security 50",
+      "category": "security",
+      "email": "billing50@newvendor.example",
+      "walletAddress": "CpVrUGehgzpqCPQkWuzmorijVAqsrAc2JNipALAGbftE",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0051",
+      "displayName": "Canyon Security 51",
+      "category": "security",
+      "email": "billing51@newvendor.example",
+      "walletAddress": "HBuT5LkZNqEsSxNKY1zndK9BoGzvBpNu4cyG8ekuUGXL",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0052",
+      "displayName": "Nimbus Security 52",
+      "category": "security",
+      "email": "billing52@newvendor.example",
+      "walletAddress": "DWXAysxXgnxoVEwrBsRctLz3pujxV3HjMKCKiVcbNy9J",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0053",
+      "displayName": "Vector Security 53",
+      "category": "security",
+      "email": "billing53@newvendor.example",
+      "walletAddress": "24HSNo5r2oqYR1qELriqBKk386w1QC7hYqfCEDXrmLpH",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0054",
+      "displayName": "Prairie Security 54",
+      "category": "security",
+      "email": "billing54@newvendor.example",
+      "walletAddress": "wkzLSai7Si6ch2z95FRgMzTDsQbCxgbtsQy7mtoAC6g",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0055",
+      "displayName": "Harbor Security 55",
+      "category": "security",
+      "email": "billing55@newvendor.example",
+      "walletAddress": "3VerogXdD5MkDLE1YDtbfcsNDjyyAYazhgqsEtKti7kd",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0056",
+      "displayName": "Keystone Security 56",
+      "category": "security",
+      "email": "billing56@newvendor.example",
+      "walletAddress": "5JTekX6G9JgXMGArJiGLDUr5b3A3HXz1P12jySgqR4ix",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0057",
+      "displayName": "Atlas Media 57",
+      "category": "media",
+      "email": "billing57@newvendor.example",
+      "walletAddress": "BAyyDmW791rt8WNovixH9AX5EP59Js8zaAk9xKCXAkpM",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0058",
+      "displayName": "Brightline Media 58",
+      "category": "media",
+      "email": "billing58@newvendor.example",
+      "walletAddress": "4GDDfuN6rADJDfgxphn1UTC8v4CK9wPzRf2rAAo9Pa5Q",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0059",
+      "displayName": "Canyon Media 59",
+      "category": "media",
+      "email": "billing59@newvendor.example",
+      "walletAddress": "4GmrkuhQC3G5zV2x4RSinB4qEuz1Yod85zME8D2gN1SC",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0060",
+      "displayName": "Nimbus Media 60",
+      "category": "media",
+      "email": "billing60@newvendor.example",
+      "walletAddress": "7YKeE3wYt1CccPaNjqbesZJYkrTVxYTzqLtW5xPj5L3W",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0061",
+      "displayName": "Vector Media 61",
+      "category": "media",
+      "email": "billing61@newvendor.example",
+      "walletAddress": "827pT7PbtGXwaGxwyrENRELcgVN35rasB3tSKajPKGNy",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0062",
+      "displayName": "Prairie Media 62",
+      "category": "media",
+      "email": "billing62@newvendor.example",
+      "walletAddress": "AsvdMunx4whYbfKjtZUZZF8z2RXAWyAimUDBv1u9u78r",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0063",
+      "displayName": "Harbor Media 63",
+      "category": "media",
+      "email": "billing63@newvendor.example",
+      "walletAddress": "7mMtsh26RQoq5qBsq2APjsqMRh3nBUoVoFsoiRbMQid5",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0064",
+      "displayName": "Keystone Media 64",
+      "category": "media",
+      "email": "billing64@newvendor.example",
+      "walletAddress": "5oQ1NrUyQ9mHCTLdKpqdTH4M9k5AVFRfMJpruukKGJsE",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0065",
+      "displayName": "Atlas Services 65",
+      "category": "services",
+      "email": "billing65@newvendor.example",
+      "walletAddress": "GB2FcYkRhNSTAPG69vYdTpPkEfb9JJAdvTGcDGN2yVQh",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0066",
+      "displayName": "Brightline Services 66",
+      "category": "services",
+      "email": "billing66@newvendor.example",
+      "walletAddress": "9iKFyaRX4PWpJVH41BLKbXgLxKPn5DZYmctR6pFa7BzK",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0067",
+      "displayName": "Canyon Services 67",
+      "category": "services",
+      "email": "billing67@newvendor.example",
+      "walletAddress": "CAfn3qtGM4CmvjWnvnN9fa1WcVzvhDBuKuVKBvyzrV8D",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0068",
+      "displayName": "Nimbus Services 68",
+      "category": "services",
+      "email": "billing68@newvendor.example",
+      "walletAddress": "4ZWqqjSATyzF5j5zvNF4iW2VBQUXFseVuQFYKZ9rKrrJ",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0069",
+      "displayName": "Vector Services 69",
+      "category": "services",
+      "email": "billing69@newvendor.example",
+      "walletAddress": "9apWoTcCeSmpuowx6zfhzy2TRyD9nu1wsDHfYWEfMFjH",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0070",
+      "displayName": "Prairie Services 70",
+      "category": "services",
+      "email": "billing70@newvendor.example",
+      "walletAddress": "DF6ei6BWbHM7XKsmPi4oztz5TUGoBjxNNDfxCoiG29Xq",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0071",
+      "displayName": "Harbor Services 71",
+      "category": "services",
+      "email": "billing71@newvendor.example",
+      "walletAddress": "31VNUDzJAREBFvA1G3NazQrXeDwnrAQ9gGXRWZ9jG7B1",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0072",
+      "displayName": "Keystone Services 72",
+      "category": "services",
+      "email": "billing72@newvendor.example",
+      "walletAddress": "3sRd7Du7EPrtSnKDQZZoyeMb4rj9EoRoRZTYdUmuoFdd",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0073",
+      "displayName": "Atlas Labs 73",
+      "category": "labs",
+      "email": "billing73@newvendor.example",
+      "walletAddress": "6kmCy2FrCfTfXZdMTwW1ciyZoXdNfTknjwagzLvCRWEh",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0074",
+      "displayName": "Brightline Labs 74",
+      "category": "labs",
+      "email": "billing74@newvendor.example",
+      "walletAddress": "37zADLZrp39Nok3zRfc7ExH27eZdVBMBN85YDLgNtnVE",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0075",
+      "displayName": "Canyon Labs 75",
+      "category": "labs",
+      "email": "billing75@newvendor.example",
+      "walletAddress": "BZuAba5SArVsXJFMRbAv4fTdjJ8qRMqaF6Ri6YUJQMfr",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0076",
+      "displayName": "Nimbus Labs 76",
+      "category": "labs",
+      "email": "billing76@newvendor.example",
+      "walletAddress": "2oTK3edZAfuVdSaTdnAeAxaJRSCtsPikGHLMDJT6sLYP",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0077",
+      "displayName": "Vector Labs 77",
+      "category": "labs",
+      "email": "billing77@newvendor.example",
+      "walletAddress": "AdtjwRpM9fecMEnP5TPT3ct8GPkrMhgCpuvWqBLC7j6a",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0078",
+      "displayName": "Prairie Labs 78",
+      "category": "labs",
+      "email": "billing78@newvendor.example",
+      "walletAddress": "Gyazx5ntxVDSnndCFm3xZwV5BQhwhcAhGRDHi91CJim9",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0079",
+      "displayName": "Harbor Labs 79",
+      "category": "labs",
+      "email": "billing79@newvendor.example",
+      "walletAddress": "62aU52MjAywSLEMoU7JXB1sasBo7zwDcdTkF8ZBA9XUh",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticVendorId": "new_vendor_0080",
+      "displayName": "Keystone Labs 80",
+      "category": "labs",
+      "email": "billing80@newvendor.example",
+      "walletAddress": "EdWGe8u18je6PqQaQZYztwF1BfzPvRKjB3D847y4pLrd",
+      "trustState": "unreviewed"
+    }
+  ],
+  "changedWalletPool": [
+    {
+      "syntheticWalletId": "wallet_change_0001",
+      "walletAddress": "2AghNeKZ7HEkURrYC3zPyudx9sxp8hosxbPE3m7JgMtp",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0002",
+      "walletAddress": "AnfAtKH6bjS5r6P9aAU2fXr42VH7Z3xVM6ie2o8XrcSx",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0003",
+      "walletAddress": "HfdrR96iJWTsqbcK7DwBdxoRJb9kBGKMq1siwGJkgZDa",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0004",
+      "walletAddress": "AZXUkp2AoFg7KwT5FLB9L4r6qqyeYXK9KyXCf99jzYUy",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0005",
+      "walletAddress": "2qJUSUWKQKKX2UQVui3jf8Piv8ebbr586t5FHBevUrx3",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0006",
+      "walletAddress": "DnGeYYYtygQ6vHNfDYxTS2JrBqtjZkvXGcUkqDvhjiFJ",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0007",
+      "walletAddress": "3QZUjAH1HzozeHyLA37ugn8GHCWFTetuoPEtsfSdmDLN",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0008",
+      "walletAddress": "o5qsPMHk9ATYGHpacQYUzVyYqtDXwdZ8KMFmzhFaTqY",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0009",
+      "walletAddress": "4swxrgf7g8Lyns138XmX9z2mxnNTMeHZErDujBBma7xd",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0010",
+      "walletAddress": "2BYCCyiSa5weKeBWUxKgcvykRSqTKMDw7m73MEVaTS3u",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0011",
+      "walletAddress": "A1jzoUJ7JTLNCpQjmthx586u8rn6oeWaubsWHrjxSrKu",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0012",
+      "walletAddress": "57avvCytd2UDUzUDmf9NQFFxB2uQoYmkDuJPZkgCvhoX",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0013",
+      "walletAddress": "677fDgmtLThN9t9oYzFc8xx7dq7kyCUWsj2qMQMhnxvC",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0014",
+      "walletAddress": "DjXGo1q8mbzP4BsoXjfDGAhn754fFAXb9XUnRo1b76ka",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0015",
+      "walletAddress": "2W4LPvpAiDbsDDfpkA2ijzfj9ZacyPzMVX1Q3qBbQqwv",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0016",
+      "walletAddress": "8PdxzVC7R8HHfT6XhdpY6upJ4Y1xVEkSkkzQqBArsPv5",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0017",
+      "walletAddress": "HSunFekHpSrF5q1kqo7G7TRebffCp4ggZ26iT7PSvC7j",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0018",
+      "walletAddress": "3FwJfDm5dFYsN76rwDrFLzDfWvasuYwF8aauJYoTzrWs",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0019",
+      "walletAddress": "7TZLnL5wbXw1c2QwcFupC9XwjJUxbNAbTefHPH4P9KAJ",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0020",
+      "walletAddress": "EFxYD2K2HCJRcE9kUcBseSYKF7MLbSEq87n7XDy3UHy1",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0021",
+      "walletAddress": "9PJtKBTEWNR9SLHms3ypAdtZzS3u3w8WazUZk9zdkQdx",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0022",
+      "walletAddress": "3B8QgAHLCFLe5QAnn9WEepZWvF4AbfqeHfjbFLWCJFx2",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0023",
+      "walletAddress": "FMk4s2DaRftRWg3euq6oXX2nkRah4vWDnzmjQgTrdzKs",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0024",
+      "walletAddress": "Hue7EoQhmTiahbfzj9Rm6psXsmHEWx1WNoq7h1fyqvbJ",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0025",
+      "walletAddress": "2oWsqnBJKvszzTMLRW2kAsh7jaLYwvVgofevKUGAbNj2",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0026",
+      "walletAddress": "EAQAvXQoGBNFTnmjv2wpkHuVQDsFREg7pVrxYX7GwLzT",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0027",
+      "walletAddress": "7BmLEjQFAmQARAy6gcs4DmNNJavNgzbYzJfmepLtHkPf",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0028",
+      "walletAddress": "BkwEQSoioAyLn8KGsRLL3NPDXim5Ny56C3PaopfiXRkZ",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0029",
+      "walletAddress": "EwpBwBjNQv4AG2SYMrHKcZEwxZPAtExL45pAv3RhGueK",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0030",
+      "walletAddress": "8eovyqshLs5bYKYEpnvHfWdrrhZrjHYxuMrYBzSKKw9A",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0031",
+      "walletAddress": "9L22PyF4GeMnr3FZibZdMxBa2du4Dz3eR6gg3BwBLHFx",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0032",
+      "walletAddress": "AUSMJG3k3BNxmDMHaeZkfat3BRvHVqggVawz6g9Bznc9",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0033",
+      "walletAddress": "5P93QnSBzsFgqfBh3C5fhbR58JqmZQcQg8vnga8sosJx",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0034",
+      "walletAddress": "6cEM5VuDEKA5zqewmGHkvbR77Rkp4NQ2jcZx97HLWCvE",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0035",
+      "walletAddress": "ADhELyuDQykypMeGHNYUzvjEdYoitLLkvTbwspauriZm",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0036",
+      "walletAddress": "2WuPN4eCkgVSGrfP2Yj8aBVCWkQsbCGcTZoDsmJKm9GY",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0037",
+      "walletAddress": "43Wy3kkqsfDueXzxMWtycPu8UE9hRUcVkfGBjem4yBZM",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0038",
+      "walletAddress": "2eetXZJjxD9UQCpnKton5kWvtqoNdkyd1W76GHqRVDoY",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0039",
+      "walletAddress": "4eu9dzVEj5fCiFernnymMWkxTCGbYLEedBoMVAQZQCN7",
+      "trustState": "unreviewed"
+    },
+    {
+      "syntheticWalletId": "wallet_change_0040",
+      "walletAddress": "DKm8K5VvmYdpevjBbDHx6QxnoQWvktnhP7w7MG9WAWBF",
+      "trustState": "unreviewed"
+    }
+  ],
+  "attackerWalletPool": [
+    {
+      "syntheticWalletId": "attacker_0001",
+      "walletAddress": "J9fCF9YrFy1WxnR4iJopFW8aJFgiZos3Z5pdpetcjsdD"
+    },
+    {
+      "syntheticWalletId": "attacker_0002",
+      "walletAddress": "AzXDyPtyzEP6t4Csr6By6Y3FCwdAya9SeCxrikLEhXyJ"
+    },
+    {
+      "syntheticWalletId": "attacker_0003",
+      "walletAddress": "GshMySFnL5D4CrKd7bQxxayUHLgVZUfGzJquPxgq79A"
+    },
+    {
+      "syntheticWalletId": "attacker_0004",
+      "walletAddress": "HpMUJVyXYCjz3BpgwdDc2k7ed6TeXtyvSWv5QeyAXYSH"
+    },
+    {
+      "syntheticWalletId": "attacker_0005",
+      "walletAddress": "VyjL3SYi7BWM8DiDuoEbdgmLQTb3AhcdaUcFyZ1wL47"
+    },
+    {
+      "syntheticWalletId": "attacker_0006",
+      "walletAddress": "DHSfVdvhmf3BSoTFwinf7v7aEeoAcrtDBfEMzameP5n2"
+    },
+    {
+      "syntheticWalletId": "attacker_0007",
+      "walletAddress": "Fcr7z3zS1H8QSQNCwxc4ZMemBWkiXPJDHYAfpj9eNbbi"
+    },
+    {
+      "syntheticWalletId": "attacker_0008",
+      "walletAddress": "8EpCyBE7teGgL7NdZMQxGy8XDHyM8Zv3TXK4fhnzv9H9"
+    },
+    {
+      "syntheticWalletId": "attacker_0009",
+      "walletAddress": "3Zyupy12bqifFJ9rVhubEtKRfRq3JGiN93u4V2y5KPeU"
+    },
+    {
+      "syntheticWalletId": "attacker_0010",
+      "walletAddress": "AYTMHfsnLYVQb5ujdmNNijwQ9k3cqjjqimXNbhyny1J1"
+    },
+    {
+      "syntheticWalletId": "attacker_0011",
+      "walletAddress": "EhDBJNWqkreJya8ZAz1iBhgMyMWbicCm4eJ2anT21ym1"
+    },
+    {
+      "syntheticWalletId": "attacker_0012",
+      "walletAddress": "ospFUG2xh4bTA6iSEFCaKWXicX78DHfwZxsYjEW6khu"
+    },
+    {
+      "syntheticWalletId": "attacker_0013",
+      "walletAddress": "HNNB12CQww3gYmy3dX5N22nZaaiPSRVF7oiLPZHjmtwz"
+    },
+    {
+      "syntheticWalletId": "attacker_0014",
+      "walletAddress": "FV9pmdHfW2sHbLH6QPPiywpB5ZDYGHQVcB38m7RcoBHW"
+    },
+    {
+      "syntheticWalletId": "attacker_0015",
+      "walletAddress": "BoS9igYi78PiTbaDZiqxLqmZjufMLeJ9YFnmynV7LtHi"
+    },
+    {
+      "syntheticWalletId": "attacker_0016",
+      "walletAddress": "5b1soasfTTuxCUbLaaSH3gMMyxFqqQUFrNnre9j68kqQ"
+    }
+  ]
+}
