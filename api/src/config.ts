@@ -12,6 +12,7 @@ type FileConfig = {
   rateLimitEnabled?: boolean;
   publicRateLimitWindowMs?: number;
   publicRateLimitMax?: number;
+  logLevel?: LogLevel;
   squadsProgramId?: string;
   squadsDefaultVaultIndex?: number;
   squadsDefaultTimelockSeconds?: number;
@@ -21,6 +22,9 @@ type FileConfig = {
   gridAppId?: string | null;
   gridTimeoutMs?: number;
   gridRetryAttempts?: number;
+  autoProvisionWallets?: boolean;
+  devnetAutoFundWallets?: boolean;
+  openAiModel?: string;
 };
 
 type DecimalConfig = {
@@ -53,6 +57,7 @@ type DecimalConfig = {
   rateLimitEnabled: boolean;
   publicRateLimitWindowMs: number;
   publicRateLimitMax: number;
+  logLevel: LogLevel;
   googleOAuthClientId: string;
   googleOAuthClientSecret: string;
   googleOAuthRedirectUri: string | null;
@@ -64,12 +69,12 @@ type DecimalConfig = {
   resendFromEmail: string;
   resendFromName: string;
   /**
-   * OpenRouter API key for the doc-to-proposal pipeline (invoice PDFs/
-   * images → structured payment rows via a free vision model). If
-   * unset, the from-document endpoint returns a clear error rather
-   * than failing silently.
+   * OpenAI configuration for the doc-to-proposal pipeline (invoice PDFs/
+   * images → structured payment rows). If the key is unset, document
+   * intake returns a clear configuration error instead of failing later.
    */
-  openRouterApiKey: string;
+  openAiApiKey: string;
+  openAiModel: string;
   squadsProgramId: string;
   squadsDefaultVaultIndex: number;
   squadsDefaultTimelockSeconds: number;
@@ -80,10 +85,15 @@ type DecimalConfig = {
   gridAppId: string | null;
   gridTimeoutMs: number;
   gridRetryAttempts: number;
+  autoProvisionWallets: boolean;
+  devnetAutoFundWallets: boolean;
+  devnetFunderKeypairPath: string;
+  devnetAutoFundLamports: number;
 };
 
 export type SolanaNetwork = 'devnet' | 'mainnet';
 export type GridEnvironment = 'sandbox' | 'production';
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'silent';
 
 export const config: DecimalConfig = buildConfig();
 
@@ -113,6 +123,7 @@ function buildConfig(): DecimalConfig {
       fileConfig.rateLimitEnabled ?? (nodeEnv === 'test' ? false : true),
     publicRateLimitWindowMs: fileConfig.publicRateLimitWindowMs ?? 60_000,
     publicRateLimitMax: fileConfig.publicRateLimitMax ?? 120,
+    logLevel: getLogLevel(process.env.LOG_LEVEL ?? process.env.DECIMAL_LOG_LEVEL ?? fileConfig.logLevel ?? (nodeEnv === 'test' ? 'silent' : 'info')),
     googleOAuthClientId: (process.env.GOOGLE_OAUTH_CLIENT_ID ?? '').trim(),
     googleOAuthClientSecret: (process.env.GOOGLE_OAUTH_CLIENT_SECRET ?? '').trim(),
     googleOAuthRedirectUri: normalizeOptionalUrl(process.env.GOOGLE_OAUTH_REDIRECT_URI),
@@ -123,7 +134,8 @@ function buildConfig(): DecimalConfig {
     resendApiKey: (process.env.RESEND_API_KEY ?? '').trim(),
     resendFromEmail: (process.env.RESEND_FROM_EMAIL ?? '').trim(),
     resendFromName: (process.env.RESEND_FROM_NAME ?? 'Decimal').trim(),
-    openRouterApiKey: (process.env.OPEN_ROUTER_API_KEY ?? process.env.OPENROUTER_API_KEY ?? '').trim(),
+    openAiApiKey: (process.env.OPENAI_API_KEY ?? '').trim(),
+    openAiModel: (process.env.OPENAI_MODEL ?? fileConfig.openAiModel ?? 'gpt-4o-mini').trim(),
     squadsProgramId:
       (process.env.SQUADS_V4_PROGRAM_ID ?? fileConfig.squadsProgramId ?? 'SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf').trim(),
     squadsDefaultVaultIndex: Number(process.env.SQUADS_DEFAULT_VAULT_INDEX ?? fileConfig.squadsDefaultVaultIndex ?? 0),
@@ -137,6 +149,18 @@ function buildConfig(): DecimalConfig {
     gridAppId: normalizeOptionalText(process.env.GRID_APP_ID ?? fileConfig.gridAppId),
     gridTimeoutMs: Number(process.env.GRID_TIMEOUT_MS ?? fileConfig.gridTimeoutMs ?? 15_000),
     gridRetryAttempts: Number(process.env.GRID_RETRY_ATTEMPTS ?? fileConfig.gridRetryAttempts ?? 2),
+    autoProvisionWallets: getBooleanConfig(
+      process.env.AUTO_PROVISION_WALLETS,
+      fileConfig.autoProvisionWallets ?? (nodeEnv !== 'test' && Boolean(process.env.PRIVY_APP_ID && process.env.PRIVY_APP_SECRET)),
+    ),
+    devnetAutoFundWallets: nodeEnv === 'test'
+      ? false
+      : getBooleanConfig(
+          process.env.DEVNET_AUTO_FUND_WALLETS,
+          fileConfig.devnetAutoFundWallets ?? false,
+        ),
+    devnetFunderKeypairPath: (process.env.DEVNET_FUNDER_KEYPAIR_PATH ?? '').trim(),
+    devnetAutoFundLamports: Number(process.env.DEVNET_AUTO_FUND_LAMPORTS ?? 5_000_000),
   };
 
   validateConfig(nextConfig);
@@ -161,6 +185,14 @@ function getGridEnvironment(value: string): GridEnvironment {
     throw new Error(`Invalid GRID_ENVIRONMENT="${value}". Use 'sandbox' or 'production'.`);
   }
   return normalized;
+}
+
+function getLogLevel(value: string): LogLevel {
+  const normalized = value.trim().toLowerCase();
+  if (['debug', 'info', 'warn', 'error', 'silent'].includes(normalized)) {
+    return normalized as LogLevel;
+  }
+  throw new Error(`Invalid LOG_LEVEL="${value}". Use debug, info, warn, error, or silent.`);
 }
 
 function loadApiFileConfig(): FileConfig {
@@ -208,9 +240,29 @@ function validateConfig(nextConfig: DecimalConfig) {
     throw new Error('PRIVY_APP_ID and PRIVY_APP_SECRET must be configured together.');
   }
 
+  if (nextConfig.autoProvisionWallets && (!nextConfig.privyAppId || !nextConfig.privyAppSecret)) {
+    throw new Error('AUTO_PROVISION_WALLETS requires PRIVY_APP_ID and PRIVY_APP_SECRET.');
+  }
+
+  if (nextConfig.devnetAutoFundWallets) {
+    if (nextConfig.solanaNetwork !== 'devnet') {
+      throw new Error('DEVNET_AUTO_FUND_WALLETS can only be enabled when SOLANA_NETWORK=devnet.');
+    }
+    if (!nextConfig.devnetFunderKeypairPath) {
+      throw new Error('DEVNET_AUTO_FUND_WALLETS requires DEVNET_FUNDER_KEYPAIR_PATH.');
+    }
+    if (!Number.isInteger(nextConfig.devnetAutoFundLamports) || nextConfig.devnetAutoFundLamports < 0) {
+      throw new Error('DEVNET_AUTO_FUND_LAMPORTS must be a non-negative integer.');
+    }
+  }
+
   const hasPartialResendConfig = Boolean(nextConfig.resendApiKey) !== Boolean(nextConfig.resendFromEmail);
   if (hasPartialResendConfig) {
     throw new Error('RESEND_API_KEY and RESEND_FROM_EMAIL must be configured together.');
+  }
+
+  if (nextConfig.openAiApiKey && !nextConfig.openAiModel) {
+    throw new Error('OPENAI_MODEL is required when OPENAI_API_KEY is configured.');
   }
 
   if (nextConfig.privyApiBaseUrl.includes('/jwks') || nextConfig.privyApiBaseUrl.includes('/apps/')) {
@@ -253,6 +305,20 @@ function validateConfig(nextConfig: DecimalConfig) {
     throw new Error('config/api.config.json must define publicFrontendUrl in production.');
   }
 
+}
+
+function getBooleanConfig(raw: string | undefined, fallback: boolean) {
+  if (raw === undefined) {
+    return fallback;
+  }
+  const normalized = raw.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+    return true;
+  }
+  if (['0', 'false', 'no', 'off'].includes(normalized)) {
+    return false;
+  }
+  throw new Error(`Invalid boolean config value "${raw}". Use true or false.`);
 }
 
 function normalizeOptionalText(value: string | null | undefined) {
