@@ -2,14 +2,17 @@ import express from 'express';
 import crypto from 'node:crypto';
 import { ZodError } from 'zod';
 import { mapKnownError, normalizeErrorCode } from './infra/api-errors.js';
+import { errorToLogFields, logger, requestLoggerMiddleware } from './infra/logger.js';
 import { requireAuth } from './auth/sessions.js';
 import { capabilitiesRouter } from './routes/capabilities.js';
 import { collectionsRouter } from './routes/collections.js';
 import { config } from './config.js';
 import { counterpartyWalletsRouter } from './routes/counterparty-wallets.js';
 import { authRouter } from './routes/auth.js';
+import { automationAgentsRouter } from './routes/automation-agents.js';
 import { healthRouter } from './routes/health.js';
 import { idempotencyMiddleware } from './infra/idempotency.js';
+import { invoicesRouter } from './routes/invoices.js';
 import { openApiRouter } from './routes/openapi.js';
 import { organizationsRouter } from './routes/organizations.js';
 import { organizationInvitesRouter, publicOrganizationInvitesRouter } from './routes/organization-invites.js';
@@ -33,6 +36,7 @@ export function createApp() {
     res.setHeader('x-request-id', requestId);
     next();
   });
+  app.use(requestLoggerMiddleware());
 
   app.use((req, res, next) => {
     const origin = req.header('origin');
@@ -81,25 +85,28 @@ export function createApp() {
   app.use(requireAuth());
   app.use(idempotencyMiddleware());
   app.use(userWalletsRouter);
+  app.use(automationAgentsRouter);
   app.use(organizationsRouter);
   app.use(organizationInvitesRouter);
   app.use(opsRouter);
   app.use(treasuryWalletsRouter);
   app.use(walletAuthorizationsRouter);
   app.use(counterpartyWalletsRouter);
+  app.use(invoicesRouter);
   app.use(paymentRequestsRouter);
   app.use(paymentRunsRouter);
   app.use(paymentOrdersRouter);
   app.use(proposalsRouter);
   app.use(collectionsRouter);
 
-  app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  app.use((error: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
     if (error instanceof ZodError) {
+      logRequestError(error, req, 400, 'validation_error');
       res.status(400).json({
         error: 'ValidationError',
         code: 'validation_error',
         message: 'Request validation failed',
-        requestId: _req.requestId,
+        requestId: req.requestId,
         issues: error.issues.map((issue) => ({
           path: issue.path.join('.'),
           code: issue.code,
@@ -111,31 +118,34 @@ export function createApp() {
 
     const mappedError = mapKnownError(error);
     if (mappedError) {
+      logRequestError(error, req, mappedError.statusCode, mappedError.code);
       res.status(mappedError.statusCode).json({
         error: mappedError.name,
         code: mappedError.code,
         message: mappedError.message,
-        requestId: _req.requestId,
+        requestId: req.requestId,
         ...(mappedError.details === undefined ? {} : { details: mappedError.details }),
       });
       return;
     }
 
     if (error instanceof Error) {
+      logRequestError(error, req, 400, normalizeErrorCode(error.name));
       res.status(400).json({
         error: error.name,
         code: normalizeErrorCode(error.name),
         message: error.message,
-        requestId: _req.requestId,
+        requestId: req.requestId,
       });
       return;
     }
 
+    logRequestError(error, req, 500, 'internal_server_error');
     res.status(500).json({
       error: 'InternalServerError',
       code: 'internal_server_error',
       message: 'Unexpected error',
-      requestId: _req.requestId,
+      requestId: req.requestId,
     });
   });
 
@@ -169,4 +179,17 @@ declare global {
 function normalizeRequestId(value?: string | null) {
   const trimmed = value?.trim();
   return trimmed && /^[a-zA-Z0-9._:-]{1,120}$/.test(trimmed) ? trimmed : null;
+}
+
+function logRequestError(error: unknown, req: express.Request, statusCode: number, code: string) {
+  const level = statusCode >= 500 ? 'error' : 'warn';
+  logger[level]('http.request.failed', {
+    requestId: req.requestId,
+    method: req.method,
+    path: req.path,
+    statusCode,
+    code,
+    userId: req.auth?.userId ?? null,
+    ...errorToLogFields(error, { includeStack: statusCode >= 500 }),
+  });
 }
