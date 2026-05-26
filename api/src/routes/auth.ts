@@ -8,6 +8,7 @@ import { hashPassword, verifyPassword } from '../auth/passwords.js';
 import { createSession, requireAuth } from '../auth/sessions.js';
 import { isEmailDeliveryConfigured, sendVerificationEmail } from '../auth/email.js';
 import { config } from '../config.js';
+import { errorToLogFields, logger } from '../infra/logger.js';
 import { prisma } from '../infra/prisma.js';
 
 export const authRouter = Router();
@@ -408,7 +409,7 @@ async function deliverVerificationCode({
     return { emailDelivered: false, devEmailVerificationCode: null };
   }
 
-  if (!isEmailDeliveryConfigured()) {
+  if (config.nodeEnv === 'test' || !isEmailDeliveryConfigured()) {
     return { emailDelivered: false, devEmailVerificationCode: code };
   }
 
@@ -416,7 +417,10 @@ async function deliverVerificationCode({
     await sendVerificationEmail({ toEmail, displayName, code });
     return { emailDelivered: true, devEmailVerificationCode: null };
   } catch (error) {
-    console.error('[auth] verification email send failed', { toEmail, error });
+    logger.error('auth.verification_email_failed', {
+      toEmail,
+      ...errorToLogFields(error),
+    });
     return { emailDelivered: false, devEmailVerificationCode: null };
   }
 }

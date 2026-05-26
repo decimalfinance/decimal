@@ -2,21 +2,28 @@ import { config } from './config.js';
 import { prisma } from './infra/prisma.js';
 import { createApp } from './app.js';
 import { USDC_MINT } from './solana.js';
+import { errorToLogFields, logger } from './infra/logger.js';
 
 async function main() {
   await prisma.$connect();
   const app = createApp();
 
   const server = app.listen(config.port, config.host, () => {
-    console.log(`api listening on http://${config.host}:${config.port}`);
-    console.log(`solana network = ${config.solanaNetwork}`);
-    console.log(`solana rpc     = ${config.solanaRpcUrl}`);
-    console.log(`usdc mint      = ${USDC_MINT.toBase58()}`);
+    logger.info('api.started', {
+      host: config.host,
+      port: config.port,
+      solanaNetwork: config.solanaNetwork,
+      solanaRpcUrl: config.solanaRpcUrl,
+      usdcMint: USDC_MINT.toBase58(),
+      logLevel: config.logLevel,
+    });
   });
 
   const shutdown = async () => {
+    logger.info('api.shutdown.started');
     server.close(async () => {
       await prisma.$disconnect();
+      logger.info('api.shutdown.completed');
       process.exit(0);
     });
   };
@@ -26,7 +33,7 @@ async function main() {
 }
 
 main().catch(async (error) => {
-  console.error(error);
+  logger.error('api.startup.failed', errorToLogFields(error));
   await prisma.$disconnect();
   process.exit(1);
 });
