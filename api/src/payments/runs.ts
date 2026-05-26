@@ -1,4 +1,5 @@
 import type {
+  Counterparty,
   CounterpartyWallet,
   PaymentRun,
   Prisma,
@@ -10,7 +11,7 @@ import { createHash } from 'node:crypto';
 import { serializeExecutionRecord } from '../transfer-requests/execution-records.js';
 import { extractPaymentRowsFromDocument, type ExtractedRow } from './document-extract.js';
 import { listPaymentOrders, submitPaymentOrder } from './orders.js';
-import { importPaymentRequestsFromCsv, previewPaymentRequestsCsv } from './requests.js';
+import { createPaymentRequest, importPaymentRequestsFromCsv, previewPaymentRequestsCsv } from './requests.js';
 import {
   canCancelPaymentRun,
   canClosePaymentRun,
@@ -26,6 +27,20 @@ import {
 import { getPrimaryTransferRequest } from '../transfer-requests/helpers.js';
 
 const MAX_BATCH_TRANSFERS_PER_TRANSACTION = 8;
+
+type PaymentRunDocumentRuntime = {
+  extractRowsFromDocument: typeof extractPaymentRowsFromDocument;
+};
+
+const defaultDocumentRuntime: PaymentRunDocumentRuntime = {
+  extractRowsFromDocument: extractPaymentRowsFromDocument,
+};
+
+let documentRuntime: PaymentRunDocumentRuntime = defaultDocumentRuntime;
+
+export function setPaymentRunDocumentRuntimeForTests(nextRuntime: Partial<PaymentRunDocumentRuntime> | null) {
+  documentRuntime = nextRuntime ? { ...defaultDocumentRuntime, ...nextRuntime } : defaultDocumentRuntime;
+}
 
 type PaymentRunWithRelations = PaymentRun & {
   sourceTreasuryWallet: TreasuryWallet | null;
@@ -127,6 +142,7 @@ export async function importPaymentRunFromCsv(args: {
   runName?: string | null;
   sourceTreasuryWalletId?: string | null;
   importKey?: string | null;
+  submitOrderNow?: boolean;
 }) {
   const csvFingerprint = buildCsvFingerprint(args.csv);
   const importKey = normalizeOptionalText(args.importKey);
@@ -176,16 +192,12 @@ export async function importPaymentRunFromCsv(args: {
     },
   });
 
-  // CSV-imported destinations land as `unreviewed`, so submitting orders here
-  // would always trip the trust gate in submitPaymentOrder. Leave the orders
-  // in `draft` and let the operator review destinations + submit the batch
-  // from the run detail page.
   const importResult = await importPaymentRequestsFromCsv({
     organizationId: args.organizationId,
     actorUserId: args.actorUserId,
     csv: args.csv,
     createOrderNow: true,
-    submitOrderNow: false,
+    submitOrderNow: args.submitOrderNow ?? false,
     sourceTreasuryWalletId: args.sourceTreasuryWalletId,
     paymentRunId: run.paymentRunId,
   });
@@ -211,11 +223,14 @@ export async function importPaymentRunFromCsv(args: {
 }
 
 export type DocumentImportSkippedRow = {
+  rowIndex: number;
   counterparty: string;
   amount: number;
   currency: string;
   reference: string | null;
-  reason: 'no_destination_or_wallet' | 'unsupported_currency';
+  walletAddress?: string | null;
+  reason: 'no_destination_or_wallet' | 'unsupported_currency' | 'invalid_wallet_address';
+  message?: string;
 };
 
 /**
@@ -260,7 +275,7 @@ export async function importPaymentRunFromDocument(args: {
   emit({ stage: 'received', message: 'Document received', bytes: args.fileBytes.length });
   emit({ stage: 'rendering', message: 'Rendering document pages' });
 
-  const extraction = await extractPaymentRowsFromDocument({
+  const extraction = await documentRuntime.extractRowsFromDocument({
     fileBytes: args.fileBytes,
     filename: args.filename,
     mimeType: args.mimeType,
@@ -295,14 +310,16 @@ export async function importPaymentRunFromDocument(args: {
   const matched: Array<{ row: ExtractedRow; destinationLabel: string; walletAddress: string }> = [];
   const skipped: DocumentImportSkippedRow[] = [];
 
-  for (const row of extraction.rows) {
+  for (const [rowIndex, row] of extraction.rows.entries()) {
     if (!isUsdLikeCurrency(row.currency)) {
       skipped.push({
+        rowIndex,
         counterparty: row.counterparty,
         amount: row.amount,
         currency: row.currency,
         reference: row.reference,
         reason: 'unsupported_currency',
+        message: `Currency ${row.currency} is not supported for USDC payment runs.`,
       });
       continue;
     }
@@ -320,29 +337,85 @@ export async function importPaymentRunFromDocument(args: {
       });
       continue;
     }
-    if (row.wallet_address && row.wallet_address.trim().length > 0) {
+    const extractedWalletAddress = normalizeOptionalText(row.wallet_address);
+    if (extractedWalletAddress) {
+      if (!isValidSolanaWalletAddress(extractedWalletAddress)) {
+        skipped.push({
+          rowIndex,
+          counterparty: row.counterparty,
+          amount: row.amount,
+          currency: row.currency,
+          reference: row.reference,
+          walletAddress: extractedWalletAddress,
+          reason: 'invalid_wallet_address',
+          message:
+            `Extracted wallet "${extractedWalletAddress}" is not a valid Solana base58 address. ` +
+            `This is usually OCR ambiguity; review the invoice or add the counterparty wallet manually.`,
+        });
+        continue;
+      }
       matched.push({
         row,
         destinationLabel: row.counterparty,
-        walletAddress: row.wallet_address.trim(),
+        walletAddress: extractedWalletAddress,
       });
       continue;
     }
     skipped.push({
+      rowIndex,
       counterparty: row.counterparty,
       amount: row.amount,
       currency: row.currency,
       reference: row.reference,
       reason: 'no_destination_or_wallet',
+      message: 'No matching counterparty wallet was found and the invoice did not include a usable Solana wallet address.',
     });
   }
 
   if (matched.length === 0) {
-    throw new Error(
-      `Extracted ${extraction.rows.length} row(s) but none could be routed. ` +
-        `Either add counterparty wallets for these vendors, or include a Solana wallet on the invoice: ` +
-        skipped.map((s) => s.counterparty).join(', '),
-    );
+    emit({
+      stage: 'creating',
+      message: 'Creating review record for unrouted document rows',
+      matchedCount: 0,
+      skippedCount: skipped.length,
+    });
+    const reviewRun = await createUnroutedDocumentImportRun({
+      organizationId: args.organizationId,
+      actorUserId: args.actorUserId,
+      sourceTreasuryWalletId: args.sourceTreasuryWalletId,
+      runName: normalizeOptionalText(args.runName) ?? deriveRunNameFromExtraction(extraction.rows, args.filename),
+      filename: args.filename,
+      mimeType: args.mimeType,
+      extraction,
+      skippedRows: skipped,
+    });
+
+    emit({ stage: 'done', message: 'Document needs routing review' });
+
+    return {
+      paymentRun: reviewRun,
+      importResult: {
+        idempotentReplay: false,
+        imported: 0,
+        failed: skipped.length,
+        items: skipped.map((row) => ({
+          rowNumber: row.rowIndex + 1,
+          status: 'failed',
+          error: row.message ?? row.reason,
+          counterparty: row.counterparty,
+          amount: row.amount,
+          reference: row.reference,
+        })),
+      },
+      extractedRows: extraction.rows,
+      skippedRows: skipped,
+      modelLatencyMs: extraction.modelLatencyMs,
+      documentImportReview: {
+        status: 'needs_routing',
+        reason: 'no_routable_rows',
+        message: 'No extracted rows could be routed to a verified counterparty wallet.',
+      },
+    };
   }
 
   emit({
@@ -373,11 +446,336 @@ export async function importPaymentRunFromDocument(args: {
   };
 }
 
+export async function resolvePaymentRunDocumentRow(args: {
+  organizationId: string;
+  paymentRunId: string;
+  actorUserId: string;
+  rowIndex: number;
+  counterpartyWalletId?: string | null;
+  walletAddress?: string | null;
+  label?: string | null;
+  trustState?: 'unreviewed' | 'trusted';
+}) {
+  const run = await prisma.paymentRun.findFirstOrThrow({
+    where: {
+      organizationId: args.organizationId,
+      paymentRunId: args.paymentRunId,
+    },
+  });
+  const importReview = getDocumentImportReview(run.metadataJson);
+  if (!importReview) {
+    throw new Error('This payment run does not have document routing review data.');
+  }
+
+  const row = importReview.extractedRows[args.rowIndex];
+  if (!row) {
+    throw new Error(`No extracted row exists at index ${args.rowIndex}.`);
+  }
+  if (!isUsdLikeCurrency(row.currency)) {
+    throw new Error(`Currency ${row.currency} is not supported for USDC payout creation yet.`);
+  }
+  if (importReview.resolvedRows.some((resolved) => resolved.rowIndex === args.rowIndex)) {
+    throw new Error(`Extracted row ${args.rowIndex + 1} has already been resolved.`);
+  }
+
+  const counterpartyWallet = await resolveDocumentImportCounterpartyWallet({
+    organizationId: args.organizationId,
+    row,
+    counterpartyWalletId: args.counterpartyWalletId,
+    walletAddress: args.walletAddress,
+    label: args.label,
+    trustState: args.trustState ?? 'unreviewed',
+  });
+
+  const paymentRequest = await createPaymentRequest({
+    organizationId: args.organizationId,
+    actorUserId: args.actorUserId,
+    paymentRunId: args.paymentRunId,
+    counterpartyWalletId: counterpartyWallet.counterpartyWalletId,
+    amountRaw: parseDocumentRowAmountToRaw(row.amount),
+    asset: 'usdc',
+    reason: row.notes ?? `Pay ${row.counterparty}`,
+    externalReference: row.reference,
+    dueAt: parseOptionalDate(row.due_date),
+    createOrderNow: true,
+    submitOrderNow: false,
+    sourceTreasuryWalletId: run.sourceTreasuryWalletId,
+    metadataJson: {
+      inputSource: 'document_import_routing_review',
+      paymentRunId: args.paymentRunId,
+      invoiceNumber: row.reference,
+      extractedRowIndex: args.rowIndex,
+      extractedRow: row as Prisma.InputJsonValue,
+    },
+  });
+
+  const nextResolvedRows = [
+    ...importReview.resolvedRows,
+    {
+      rowIndex: args.rowIndex,
+      resolvedAt: new Date().toISOString(),
+      resolvedByUserId: args.actorUserId,
+      counterpartyWalletId: counterpartyWallet.counterpartyWalletId,
+      paymentRequestId: paymentRequest.paymentRequestId,
+      paymentOrderId: paymentRequest.paymentOrder?.paymentOrderId ?? null,
+    },
+  ];
+  const nextSkippedRows = importReview.skippedRows.filter((skipped) => skipped.rowIndex !== args.rowIndex);
+
+  await prisma.paymentRun.update({
+    where: { paymentRunId: args.paymentRunId },
+    data: {
+      state: nextSkippedRows.length > 0 ? run.state : 'draft',
+      metadataJson: {
+        ...(isRecordLike(run.metadataJson) ? run.metadataJson : {}),
+        importReview: {
+          ...importReview.raw,
+          status: nextSkippedRows.length > 0 ? 'needs_routing' : 'resolved',
+          skippedRows: nextSkippedRows,
+          resolvedRows: nextResolvedRows,
+        },
+      } as Prisma.InputJsonValue,
+    },
+  });
+
+  return {
+    paymentRun: await getPaymentRunDetail(args.organizationId, args.paymentRunId),
+    paymentRequest,
+    resolvedRow: nextResolvedRows[nextResolvedRows.length - 1],
+  };
+}
+
+async function createUnroutedDocumentImportRun(args: {
+  organizationId: string;
+  actorUserId: string;
+  sourceTreasuryWalletId?: string | null;
+  runName: string;
+  filename: string;
+  mimeType: string;
+  extraction: { rows: ExtractedRow[]; modelLatencyMs: number; pageCount: number };
+  skippedRows: DocumentImportSkippedRow[];
+}) {
+  const run = await prisma.paymentRun.create({
+    data: {
+      organizationId: args.organizationId,
+      sourceTreasuryWalletId: args.sourceTreasuryWalletId ?? null,
+      runName: args.runName,
+      inputSource: 'document_import',
+      state: 'exception',
+      metadataJson: {
+        inputSource: 'document_import',
+        importReview: {
+          status: 'needs_routing',
+          reason: 'no_routable_rows',
+          skippedRows: args.skippedRows,
+          resolvedRows: [],
+          extractedRows: args.extraction.rows,
+          sourceDocument: {
+            filename: args.filename,
+            mimeType: args.mimeType,
+            pageCount: args.extraction.pageCount,
+            modelLatencyMs: args.extraction.modelLatencyMs,
+          },
+        },
+      },
+      createdByUserId: args.actorUserId,
+    },
+  });
+
+  return getPaymentRunDetail(args.organizationId, run.paymentRunId);
+}
+
+async function resolveDocumentImportCounterpartyWallet(args: {
+  organizationId: string;
+  row: ExtractedRow;
+  counterpartyWalletId?: string | null;
+  walletAddress?: string | null;
+  label?: string | null;
+  trustState: 'unreviewed' | 'trusted';
+}): Promise<CounterpartyWallet & { counterparty: Counterparty | null }> {
+  const counterpartyWalletId = normalizeOptionalText(args.counterpartyWalletId);
+  if (counterpartyWalletId) {
+    const wallet = await prisma.counterpartyWallet.findFirst({
+      where: {
+        organizationId: args.organizationId,
+        counterpartyWalletId,
+        isActive: true,
+      },
+      include: { counterparty: true },
+    });
+    if (!wallet) {
+      throw new Error('Counterparty wallet not found for this organization.');
+    }
+    return wallet;
+  }
+
+  const walletAddress = normalizeOptionalText(args.walletAddress);
+  if (!walletAddress) {
+    throw new Error('Provide a counterparty wallet or a corrected Solana wallet address.');
+  }
+
+  let tokenAccountAddress: string;
+  try {
+    tokenAccountAddress = deriveUsdcAtaForWallet(walletAddress);
+  } catch {
+    throw new Error(`"${walletAddress}" is not a valid Solana wallet address.`);
+  }
+
+  const existing = await prisma.counterpartyWallet.findUnique({
+    where: {
+      organizationId_walletAddress: {
+        organizationId: args.organizationId,
+        walletAddress,
+      },
+    },
+    include: { counterparty: true },
+  });
+  if (existing) {
+    return existing;
+  }
+
+  const label = normalizeOptionalText(args.label) ?? normalizeOptionalText(args.row.counterparty) ?? shortenAddress(walletAddress);
+  const counterparty = await findOrCreateCounterpartyByName(args.organizationId, label);
+  return prisma.counterpartyWallet.create({
+    data: {
+      organizationId: args.organizationId,
+      counterpartyId: counterparty.counterpartyId,
+      chain: 'solana',
+      asset: 'usdc',
+      walletAddress,
+      tokenAccountAddress,
+      walletType: 'invoice_imported',
+      trustState: args.trustState,
+      label,
+      notes: 'Created while resolving an OCR document-import routing review.',
+      isInternal: false,
+      isActive: true,
+      metadataJson: {
+        inputSource: 'document_import_routing_review',
+        counterpartyName: args.row.counterparty,
+        extractedWalletAddress: args.row.wallet_address,
+      },
+    },
+    include: { counterparty: true },
+  });
+}
+
+async function findOrCreateCounterpartyByName(organizationId: string, displayName: string) {
+  const existing = await prisma.counterparty.findFirst({
+    where: {
+      organizationId,
+      displayName: { equals: displayName, mode: 'insensitive' },
+    },
+  });
+  if (existing) return existing;
+
+  return prisma.counterparty.create({
+    data: {
+      organizationId,
+      displayName,
+      category: 'vendor',
+      metadataJson: {
+        inputSource: 'document_import_routing_review',
+      },
+    },
+  });
+}
+
+function getDocumentImportReview(metadataJson: Prisma.JsonValue) {
+  if (!isRecordLike(metadataJson) || !isRecordLike(metadataJson.importReview)) {
+    return null;
+  }
+  const raw = metadataJson.importReview;
+  const extractedRows = Array.isArray(raw.extractedRows) ? raw.extractedRows.filter(isExtractedRowLike) : [];
+  const skippedRows = Array.isArray(raw.skippedRows)
+    ? raw.skippedRows
+      .map((row, index) => normalizeDocumentImportSkippedRow(row, index))
+      .filter((row): row is DocumentImportSkippedRow => Boolean(row))
+    : [];
+  const resolvedRows = Array.isArray(raw.resolvedRows) ? raw.resolvedRows.filter(isResolvedDocumentRowLike) : [];
+  return { raw, extractedRows, skippedRows, resolvedRows };
+}
+
+function isExtractedRowLike(value: unknown): value is ExtractedRow {
+  if (!isRecordLike(value)) return false;
+  return typeof value.counterparty === 'string'
+    && typeof value.amount === 'number'
+    && typeof value.currency === 'string'
+    && (typeof value.reference === 'string' || value.reference === null)
+    && (typeof value.due_date === 'string' || value.due_date === null)
+    && (typeof value.wallet_address === 'string' || value.wallet_address === null)
+    && (typeof value.notes === 'string' || value.notes === null);
+}
+
+function normalizeDocumentImportSkippedRow(value: unknown, fallbackRowIndex: number): DocumentImportSkippedRow | null {
+  if (!isRecordLike(value)) return null;
+  if (
+    typeof value.counterparty !== 'string'
+    || typeof value.amount !== 'number'
+    || typeof value.currency !== 'string'
+    || !(typeof value.reference === 'string' || value.reference === null)
+    || typeof value.reason !== 'string'
+  ) {
+    return null;
+  }
+  const rowIndex = typeof value.rowIndex === 'number' ? value.rowIndex : fallbackRowIndex;
+  return {
+    rowIndex,
+    counterparty: value.counterparty,
+    amount: value.amount,
+    currency: value.currency,
+    reference: value.reference,
+    walletAddress: typeof value.walletAddress === 'string' ? value.walletAddress : null,
+    reason: value.reason as DocumentImportSkippedRow['reason'],
+    message: typeof value.message === 'string' ? value.message : undefined,
+  };
+}
+
+function isResolvedDocumentRowLike(value: unknown): value is {
+  rowIndex: number;
+  resolvedAt: string;
+  resolvedByUserId: string;
+  counterpartyWalletId: string;
+  paymentRequestId: string;
+  paymentOrderId: string | null;
+} {
+  return isRecordLike(value)
+    && typeof value.rowIndex === 'number'
+    && typeof value.resolvedAt === 'string'
+    && typeof value.resolvedByUserId === 'string'
+    && typeof value.counterpartyWalletId === 'string'
+    && typeof value.paymentRequestId === 'string'
+    && (typeof value.paymentOrderId === 'string' || value.paymentOrderId === null);
+}
+
+function parseDocumentRowAmountToRaw(amount: number) {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new RangeError('Amount must be positive.');
+  }
+  return BigInt(Math.round(amount * 10 ** USDC_DECIMALS));
+}
+
+function parseOptionalDate(value: string | null | undefined) {
+  const normalized = normalizeOptionalText(value);
+  if (!normalized) return null;
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function isUsdLikeCurrency(currency: string): boolean {
   const normalized = currency.trim().toUpperCase();
   // We pay in USDC; treat USD as a stand-in (the human readable amount
   // matches 1:1 in the demo path). A future iteration can do FX.
   return normalized === 'USDC' || normalized === 'USD' || normalized === '$';
+}
+
+function isValidSolanaWalletAddress(value: string): boolean {
+  try {
+    deriveUsdcAtaForWallet(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function matchCounterpartyWallet(
@@ -427,6 +825,21 @@ function deriveRunNameFromDocument(
   // non-empty here, but keep a safe fallback.
   const stem = filename.replace(/\.[^.]+$/, '').trim();
   return stem || `Document import ${new Date().toISOString().slice(0, 10)}`;
+}
+
+function deriveRunNameFromExtraction(rows: ExtractedRow[], filename: string): string {
+  const vendors = rows
+    .map((row) => row.counterparty.trim())
+    .filter((vendor) => vendor.length > 0);
+  if (vendors.length > 0) {
+    const uniqueVendors = Array.from(new Set(vendors));
+    if (uniqueVendors.length === 1) {
+      return `${truncateVendorName(uniqueVendors[0]!)} review`;
+    }
+    return `${truncateVendorName(uniqueVendors[0]!)} + ${uniqueVendors.length - 1} review`;
+  }
+  const stem = filename.replace(/\.[^.]+$/, '').trim();
+  return stem ? `${stem} review` : `Document review ${new Date().toISOString().slice(0, 10)}`;
 }
 
 function truncateVendorName(name: string): string {
@@ -1237,6 +1650,10 @@ function serializeTreasuryWallet(address: TreasuryWallet) {
 function normalizeOptionalText(value: string | null | undefined) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
+}
+
+function shortenAddress(value: string) {
+  return value.length <= 12 ? value : `${value.slice(0, 6)}...${value.slice(-4)}`;
 }
 
 function buildCsvFingerprint(csv: string) {
