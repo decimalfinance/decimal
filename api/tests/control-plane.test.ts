@@ -6,15 +6,22 @@ import { Keypair, PublicKey, TransactionInstruction, TransactionMessage, Version
 import { createApp } from '../src/app.js';
 import { config } from '../src/config.js';
 import { prisma } from '../src/infra/prisma.js';
+import { USDC_MINT } from '../src/solana.js';
 import { setPrivyWalletRuntimeForTests } from '../src/wallets/personal.js';
 import { resetRateLimitBuckets } from '../src/infra/rate-limit.js';
 import { setSquadsTreasuryRuntimeForTests } from '../src/squads/treasury.js';
+import { setSpendingLimitExecutionRuntimeForTests } from '../src/agents/spending-limit-execution.js';
 
 const TRUNCATE_SQL = `
 TRUNCATE TABLE
   auth_sessions,
   wallet_challenges,
   organization_wallet_authorizations,
+  spending_limit_executions,
+  spending_limit_policy_destinations,
+  spending_limit_policies,
+  agent_wallets,
+  automation_agents,
   user_wallets,
   idempotency_records,
   organization_invites,
@@ -25,14 +32,12 @@ TRUNCATE TABLE
   collection_request_events,
   collection_requests,
   collection_runs,
-  collection_sources,
   payment_runs,
   payment_order_events,
   decimal_proposals,
   payment_orders,
   payment_requests,
   transfer_requests,
-  destinations,
   counterparties,
   treasury_wallets,
   
@@ -71,7 +76,9 @@ before(async () => {
 beforeEach(async () => {
   resetRateLimitBuckets();
   config.rateLimitEnabled = false;
+  config.autoProvisionWallets = false;
   setSquadsTreasuryRuntimeForTests(null);
+  setSpendingLimitExecutionRuntimeForTests(null);
   setPrivyWalletRuntimeForTests(null);
   await executeWithDeadlockRetry(() => prisma.$executeRawUnsafe(TRUNCATE_SQL));
 });
@@ -261,6 +268,91 @@ test('organization membership is invite-only and email-bound', async () => {
   const invites = await get(`/organizations/${organization.organizationId}/invites`, owner.sessionToken);
   assert.equal(invites.items.length, 1);
   assert.equal(invites.items[0].status, 'accepted');
+});
+
+test('organization onboarding automatically provisions personal and agent wallets when enabled', async () => {
+  const originalPrivyAppId = config.privyAppId;
+  const originalPrivyAppSecret = config.privyAppSecret;
+  const originalAutoProvisionWallets = config.autoProvisionWallets;
+  const ownerWalletAddress = Keypair.generate().publicKey.toBase58();
+  const agentWalletAddress = Keypair.generate().publicKey.toBase58();
+  const inviteeWalletAddress = Keypair.generate().publicKey.toBase58();
+  const createdAddresses = [ownerWalletAddress, agentWalletAddress, inviteeWalletAddress];
+  const createRequests: Array<{ external_id?: string; display_name?: string }> = [];
+
+  try {
+    config.privyAppId = 'test-privy-app';
+    config.privyAppSecret = 'test-privy-secret';
+    config.autoProvisionWallets = true;
+    setPrivyWalletRuntimeForTests({
+      fetch: async (url, init) => {
+        assert.equal(String(url).endsWith('/v1/wallets'), true);
+        assert.equal(init?.method, 'POST');
+        const body = JSON.parse(String(init?.body ?? '{}')) as { external_id?: string; display_name?: string };
+        createRequests.push(body);
+        return Response.json({
+          id: `privy-onboarding-${createRequests.length}`,
+          address: createdAddresses[createRequests.length - 1],
+          chain_type: 'solana',
+          external_id: body.external_id,
+          display_name: body.display_name,
+          created_at: '2026-05-24T00:00:00.000Z',
+        });
+      },
+    });
+
+    const owner = await post('/auth/register', {
+      email: 'auto-wallet-owner@example.com',
+      password: 'DemoPass123!',
+      displayName: 'Auto Wallet Owner',
+    });
+    await verifyRegisteredEmail(owner);
+    const organization = await post('/organizations', { organizationName: 'Auto Wallet Org' }, owner.sessionToken);
+    assert.equal(organization.provisioning.personalWallet.status, 'created');
+    assert.equal(organization.provisioning.personalWallet.wallet.walletAddress, ownerWalletAddress);
+    assert.equal(organization.provisioning.defaultAgent.status, 'created');
+    assert.equal(organization.provisioning.defaultAgent.wallet.walletAddress, agentWalletAddress);
+
+    const ownerWallets = await get('/personal-wallets', owner.sessionToken);
+    assert.equal(ownerWallets.items.length, 1);
+    assert.equal(ownerWallets.items[0].walletAddress, ownerWalletAddress);
+    assert.equal(ownerWallets.items[0].provider, 'privy');
+
+    const agents = await get(`/organizations/${organization.organizationId}/automation-agents`, owner.sessionToken);
+    assert.equal(agents.items.length, 1);
+    assert.equal(agents.items[0].agentType, 'decimal_operations');
+    assert.equal(agents.items[0].wallets.length, 1);
+    assert.equal(agents.items[0].wallets[0].walletAddress, agentWalletAddress);
+
+    const invite = await post(
+      `/organizations/${organization.organizationId}/invites`,
+      { email: 'auto-wallet-member@example.com', role: 'member' },
+      owner.sessionToken,
+    );
+    const invitedUser = await post('/auth/register', {
+      email: 'auto-wallet-member@example.com',
+      password: 'DemoPass123!',
+      displayName: 'Auto Wallet Member',
+    });
+    await verifyRegisteredEmail(invitedUser);
+    const accepted = await post(`/invites/${invite.inviteToken}/accept`, {}, invitedUser.sessionToken);
+    assert.equal(accepted.provisioning.personalWallet.status, 'created');
+    assert.equal(accepted.provisioning.personalWallet.wallet.walletAddress, inviteeWalletAddress);
+
+    const inviteeWallets = await get('/personal-wallets', invitedUser.sessionToken);
+    assert.equal(inviteeWallets.items.length, 1);
+    assert.equal(inviteeWallets.items[0].walletAddress, inviteeWalletAddress);
+
+    assert.equal(createRequests.length, 3);
+    assert.ok(createRequests[0]?.external_id?.startsWith('decimal-user-'));
+    assert.ok(createRequests[1]?.external_id?.startsWith('decimal-agent-'));
+    assert.ok(createRequests[2]?.external_id?.startsWith('decimal-user-'));
+  } finally {
+    config.privyAppId = originalPrivyAppId;
+    config.privyAppSecret = originalPrivyAppSecret;
+    config.autoProvisionWallets = originalAutoProvisionWallets;
+    setPrivyWalletRuntimeForTests(null);
+  }
 });
 
 test('auth registration and login require the right password', async () => {
@@ -547,6 +639,7 @@ test('Squads treasury creation prepares a signable transaction and persists the 
 
   const creatorWalletAddress = Keypair.generate().publicKey.toBase58();
   const approverWalletAddress = Keypair.generate().publicKey.toBase58();
+  const agentWalletAddress = Keypair.generate().publicKey.toBase58();
   const creatorWallet = await post(
     '/personal-wallets/embedded',
     {
@@ -567,6 +660,28 @@ test('Squads treasury creation prepares a signable transaction and persists the 
     },
     approver.sessionToken,
   );
+  const automationAgent = await prisma.automationAgent.create({
+    data: {
+      organizationId: organization.organizationId,
+      name: 'Decimal operations agent',
+      agentType: 'decimal_operations',
+      metadataJson: { systemManaged: true },
+    },
+  });
+  const agentWallet = await prisma.agentWallet.create({
+    data: {
+      organizationId: organization.organizationId,
+      automationAgentId: automationAgent.automationAgentId,
+      chain: 'solana',
+      walletAddress: agentWalletAddress,
+      walletType: 'privy_embedded',
+      provider: 'privy',
+      providerWalletId: 'privy-squads-default-agent',
+      label: 'Decimal operations agent wallet',
+      status: 'active',
+      verifiedAt: new Date(),
+    },
+  });
 
   let onchainMultisig: {
     createKey: PublicKey;
@@ -624,7 +739,12 @@ test('Squads treasury creation prepares a signable transaction and persists the 
 
   assert.equal(intent.intent.provider, 'squads_v4');
   assert.equal(intent.intent.threshold, 2);
-  assert.equal(intent.intent.members.length, 2);
+  assert.equal(intent.intent.members.length, 3);
+  assert.equal(intent.intent.defaultAgentIncluded, true);
+  const intentAgentMember = intent.intent.members.find((member: { walletAddress: string }) => member.walletAddress === agentWalletAddress);
+  assert.equal(intentAgentMember.memberType, 'agent');
+  assert.equal(intentAgentMember.agentWalletId, agentWallet.agentWalletId);
+  assert.deepEqual(intentAgentMember.permissions, ['initiate']);
   assert.equal(intent.transaction.encoding, 'base64');
   assert.equal(intent.transaction.requiredSigner, creatorWalletAddress);
   assert.ok(Buffer.from(intent.transaction.serializedTransaction, 'base64').length > 0);
@@ -643,6 +763,7 @@ test('Squads treasury creation prepares a signable transaction and persists the 
   onchainMultisig.members = [
     { key: publicKeyFromString(creatorWalletAddress), permissions: { mask: 7 } },
     { key: publicKeyFromString(approverWalletAddress), permissions: { mask: 2 } },
+    { key: publicKeyFromString(agentWalletAddress), permissions: { mask: 1 } },
   ];
 
   const treasuryWallet = await post(
@@ -661,7 +782,7 @@ test('Squads treasury creation prepares a signable transaction and persists the 
   assert.equal(treasuryWallet.sourceRef, intent.intent.multisigPda);
   assert.equal(treasuryWallet.address, intent.intent.vaultPda);
   assert.equal(treasuryWallet.propertiesJson.squads.threshold, 2);
-  assert.equal(treasuryWallet.propertiesJson.squads.members.length, 2);
+  assert.equal(treasuryWallet.propertiesJson.squads.members.length, 3);
 
   const authorizations = await get(
     `/organizations/${organization.organizationId}/wallet-authorizations?treasuryWalletId=${treasuryWallet.treasuryWalletId}`,
@@ -690,7 +811,7 @@ test('Squads treasury creation prepares a signable transaction and persists the 
   assert.equal(detail.squads.provider, 'squads_v4');
   assert.equal(detail.squads.isAutonomous, true);
   assert.equal(detail.squads.threshold, 2);
-  assert.equal(detail.squads.members.length, 2);
+  assert.equal(detail.squads.members.length, 3);
   assert.equal(detail.squads.capabilities.canInitiate, true);
   assert.equal(detail.squads.capabilities.canVote, true);
   assert.equal(detail.squads.capabilities.canExecute, true);
@@ -699,6 +820,11 @@ test('Squads treasury creation prepares a signable transaction and persists the 
   assert.equal(creatorDetail.personalWallet.userWalletId, creatorWallet.userWalletId);
   assert.equal(creatorDetail.organizationMembership.user.email, 'squads-treasury@example.com');
   assert.equal(creatorDetail.localAuthorization.role, 'squads_member');
+  const agentDetail = detail.squads.members.find((member: { walletAddress: string }) => member.walletAddress === agentWalletAddress);
+  assert.equal(agentDetail.linkStatus, 'linked');
+  assert.equal(agentDetail.agentWallet.agentWalletId, agentWallet.agentWalletId);
+  assert.equal(agentDetail.automationAgent.agentType, 'decimal_operations');
+  assert.deepEqual(agentDetail.permissions, ['initiate']);
 
   const invitedMember = await post('/auth/register', {
     email: 'squads-new-member@example.com',
@@ -862,6 +988,7 @@ test('Squads treasury creation prepares a signable transaction and persists the 
     { key: publicKeyFromString(creatorWalletAddress), permissions: { mask: 7 } },
     { key: publicKeyFromString(approverWalletAddress), permissions: { mask: 2 } },
     { key: publicKeyFromString(newMemberWalletAddress), permissions: { mask: 2 } },
+    { key: publicKeyFromString(agentWalletAddress), permissions: { mask: 1 } },
   ];
 
   const syncedDetail = await post(
@@ -870,7 +997,7 @@ test('Squads treasury creation prepares a signable transaction and persists the 
     register.sessionToken,
   );
   assert.equal(syncedDetail.squads.threshold, 3);
-  assert.equal(syncedDetail.squads.members.length, 3);
+  assert.equal(syncedDetail.squads.members.length, 4);
   const syncedNewMember = syncedDetail.squads.members.find((member: { walletAddress: string }) => member.walletAddress === newMemberWalletAddress);
   assert.equal(syncedNewMember.linkStatus, 'linked');
   assert.equal(syncedNewMember.personalWallet.userWalletId, newMemberWallet.userWalletId);
@@ -903,6 +1030,336 @@ test('Squads treasury creation prepares a signable transaction and persists the 
     changeThresholdIntent.intent.actions.map((action: { kind: string }) => action.kind),
     ['change_threshold'],
   );
+});
+
+test('automation agents can receive Squads spending limits and execute bounded payments', async () => {
+  const originalPrivyAppId = config.privyAppId;
+  const originalPrivyAppSecret = config.privyAppSecret;
+  const agentWalletAddress = Keypair.generate().publicKey.toBase58();
+  const signerWalletAddress = Keypair.generate().publicKey.toBase58();
+  const multisigPda = Keypair.generate().publicKey;
+  const vaultPda = Keypair.generate().publicKey;
+  const destinationWalletAddress = Keypair.generate().publicKey.toBase58();
+  const submittedSignature = '5'.repeat(88);
+
+  try {
+    config.privyAppId = 'test-privy-app';
+    config.privyAppSecret = 'test-privy-secret';
+    setPrivyWalletRuntimeForTests({
+      fetch: async (url, init) => {
+        const method = init?.method ?? 'GET';
+        if (String(url).endsWith('/v1/wallets') && method === 'POST') {
+          return Response.json({
+            id: 'privy-agent-spending-wallet',
+            address: agentWalletAddress,
+            chain_type: 'solana',
+            external_id: 'decimal-agent-test',
+            display_name: 'AP agent wallet',
+            created_at: '2026-05-01T00:00:00.000Z',
+          });
+        }
+        assert.fail(`unexpected Privy test request: ${method} ${url}`);
+      },
+    });
+
+    const register = await post('/auth/register', {
+      email: 'agent-spending@example.com',
+      password: 'DemoPass123!',
+      displayName: 'Agent Spending Owner',
+    });
+    await verifyRegisteredEmail(register);
+    const organization = await post('/organizations', { organizationName: 'Agent Spending Org' }, register.sessionToken);
+    const signerWallet = await post(
+      '/personal-wallets/embedded',
+      {
+        walletAddress: signerWalletAddress,
+        provider: 'privy',
+        providerWalletId: 'privy-agent-spending-signer',
+        label: 'Human signer',
+      },
+      register.sessionToken,
+    );
+    const treasuryWallet = await post(
+      `/organizations/${organization.organizationId}/treasury-wallets`,
+      {
+        chain: 'solana',
+        address: vaultPda.toBase58(),
+        displayName: 'Agent spending vault',
+        source: 'squads_v4',
+        sourceRef: multisigPda.toBase58(),
+        properties: {
+          squads: {
+            provider: 'squads_v4',
+            multisigPda: multisigPda.toBase58(),
+            vaultPda: vaultPda.toBase58(),
+            vaultIndex: 0,
+            threshold: 1,
+          },
+        },
+      },
+      register.sessionToken,
+    );
+    const counterparty = await post(
+      `/organizations/${organization.organizationId}/counterparties`,
+      { displayName: 'Known Research Vendor', category: 'research' },
+      register.sessionToken,
+    );
+    const destination = await post(
+      `/organizations/${organization.organizationId}/destinations`,
+      {
+        counterpartyId: counterparty.counterpartyId,
+        walletAddress: destinationWalletAddress,
+        label: 'Research vendor wallet',
+        trustState: 'trusted',
+        destinationType: 'vendor_wallet',
+      },
+      register.sessionToken,
+    );
+
+    let onchainMembers = [
+      { key: publicKeyFromString(signerWalletAddress), permissions: { mask: 7 } },
+    ];
+    setSquadsTreasuryRuntimeForTests({
+      getLatestBlockhash: async () => ({
+        blockhash: Keypair.generate().publicKey.toBase58(),
+        lastValidBlockHeight: 123,
+      }),
+      loadMultisig: async () => ({
+        createKey: Keypair.generate().publicKey,
+        configAuthority: publicKeyFromString('11111111111111111111111111111111'),
+        threshold: 1,
+        timeLock: 0,
+        transactionIndex: { toString: () => '0' },
+        staleTransactionIndex: { toString: () => '0' },
+        members: onchainMembers,
+      }),
+      loadSpendingLimit: async (spendingLimitPda) => ({
+        multisig: multisigPda,
+        createKey: Keypair.generate().publicKey,
+        vaultIndex: 0,
+        mint: USDC_MINT,
+        amount: { toString: () => '100000' },
+        period: multisig.types.Period.Day,
+        remainingAmount: { toString: () => '100000' },
+        lastReset: { toString: () => '0' },
+        members: [publicKeyFromString(agentWalletAddress)],
+        destinations: [publicKeyFromString(destinationWalletAddress)],
+      }),
+    });
+
+    const agent = await post(
+      `/organizations/${organization.organizationId}/automation-agents`,
+      { name: 'AP intake agent', agentType: 'ap_intake' },
+      register.sessionToken,
+    );
+    const agentWallet = await post(
+      `/organizations/${organization.organizationId}/automation-agents/${agent.automationAgentId}/wallets/managed`,
+      { label: 'AP agent wallet' },
+      register.sessionToken,
+    );
+    assert.equal(agentWallet.walletAddress, agentWalletAddress);
+
+    const addAgentIntent = await post(
+      `/organizations/${organization.organizationId}/treasury-wallets/${treasuryWallet.treasuryWalletId}/squads/config-proposals/add-agent-member-intent`,
+      {
+        creatorPersonalWalletId: signerWallet.userWalletId,
+        agentWalletId: agentWallet.agentWalletId,
+        permissions: ['initiate'],
+      },
+      register.sessionToken,
+    );
+    assert.equal(addAgentIntent.decimalProposal.semanticType, 'add_agent_member');
+    assert.deepEqual(addAgentIntent.intent.actions.map((action: { kind: string }) => action.kind), ['add_member']);
+
+    onchainMembers = [
+      { key: publicKeyFromString(signerWalletAddress), permissions: { mask: 7 } },
+      { key: publicKeyFromString(agentWalletAddress), permissions: { mask: 1 } },
+    ];
+    const spendingLimitIntent = await post(
+      `/organizations/${organization.organizationId}/treasury-wallets/${treasuryWallet.treasuryWalletId}/squads/config-proposals/add-spending-limit-intent`,
+      {
+        creatorPersonalWalletId: signerWallet.userWalletId,
+        agentWalletId: agentWallet.agentWalletId,
+        policyName: 'Research micro-spend',
+        policyCode: 'research',
+        amountRaw: '100000',
+        period: 'day',
+        counterpartyWalletIds: [destination.destinationId],
+      },
+      register.sessionToken,
+    );
+    assert.equal(spendingLimitIntent.decimalProposal.semanticType, 'add_spending_limit');
+    assert.equal(spendingLimitIntent.spendingLimitPolicy.status, 'proposed');
+    assert.equal(spendingLimitIntent.spendingLimitPolicy.destinations.length, 1);
+
+    const syncedPolicy = await post(
+      `/organizations/${organization.organizationId}/spending-limit-policies/${spendingLimitIntent.spendingLimitPolicy.spendingLimitPolicyId}/sync`,
+      {},
+      register.sessionToken,
+    );
+    assert.equal(syncedPolicy.status, 'active');
+    assert.equal(syncedPolicy.metadataJson.onchain.remainingAmountRaw, '100000');
+
+    const paymentOrder = await post(
+      `/organizations/${organization.organizationId}/payment-orders`,
+      {
+        destinationId: destination.destinationId,
+        amountRaw: '25000',
+        memo: 'Research tool subscription',
+        externalReference: 'AGENT-001',
+      },
+      register.sessionToken,
+    );
+    setSpendingLimitExecutionRuntimeForTests({
+      getLatestBlockhash: async () => ({
+        blockhash: Keypair.generate().publicKey.toBase58(),
+        lastValidBlockHeight: 456,
+      }),
+      loadSpendingLimit: async () => ({
+        amount: { toString: () => '100000' },
+        remainingAmount: { toString: () => '100000' },
+        members: [publicKeyFromString(agentWalletAddress)],
+        destinations: [publicKeyFromString(destinationWalletAddress)],
+      }),
+      signTransaction: async (input) => ({
+        signedTransactionBase64: input.serializedTransactionBase64,
+        encoding: 'base64',
+      }),
+      sendRawTransaction: async () => submittedSignature,
+      waitForSignature: async () => ({ confirmed: true, seen: true }),
+    });
+
+    const execution = await post(
+      `/organizations/${organization.organizationId}/payment-orders/${paymentOrder.paymentOrderId}/execute-with-spending-limit`,
+      { spendingLimitPolicyId: syncedPolicy.spendingLimitPolicyId },
+      register.sessionToken,
+    );
+    assert.equal(execution.status, 'settled');
+    assert.equal(execution.signature, submittedSignature);
+    assert.equal(execution.verification.status, 'settled');
+
+    const storedOrder = await prisma.paymentOrder.findUniqueOrThrow({
+      where: { paymentOrderId: paymentOrder.paymentOrderId },
+      include: { transferRequests: true },
+    });
+    assert.equal(storedOrder.state, 'settled');
+    assert.equal(storedOrder.transferRequests[0]?.status, 'matched');
+
+    const executions = await prisma.spendingLimitExecution.findMany({
+      where: { paymentOrderId: paymentOrder.paymentOrderId },
+    });
+    assert.equal(executions.length, 1);
+    assert.equal(executions[0]?.agentWalletId, agentWallet.agentWalletId);
+
+    const listedExecutions = await get(
+      `/organizations/${organization.organizationId}/spending-limit-executions?spendingLimitPolicyId=${syncedPolicy.spendingLimitPolicyId}`,
+      register.sessionToken,
+    );
+    assert.equal(listedExecutions.count, 1);
+    assert.equal(listedExecutions.items[0].status, 'settled');
+    assert.equal(listedExecutions.items[0].spendingLimitPolicy.policyName, 'Research micro-spend');
+
+    const programId = new PublicKey(config.squadsProgramId);
+    const removableCreateKey = Keypair.generate().publicKey;
+    const [removableSpendingLimitPda] = multisig.getSpendingLimitPda({
+      multisigPda,
+      createKey: removableCreateKey,
+      programId,
+    });
+    const removablePolicy = await prisma.spendingLimitPolicy.create({
+      data: {
+        organizationId: organization.organizationId,
+        treasuryWalletId: treasuryWallet.treasuryWalletId,
+        automationAgentId: agent.automationAgentId,
+        agentWalletId: agentWallet.agentWalletId,
+        policyName: 'Disposable daily policy',
+        policyCode: 'remove-me',
+        asset: 'usdc',
+        mintAddress: USDC_MINT.toBase58(),
+        amountRaw: 50000n,
+        period: 'day',
+        vaultIndex: 0,
+        createKey: removableCreateKey.toBase58(),
+        spendingLimitPda: removableSpendingLimitPda.toBase58(),
+        destinationPolicy: 'explicit_allowlist',
+        status: 'active',
+      },
+    });
+    await prisma.spendingLimitPolicyDestination.create({
+      data: {
+        organizationId: organization.organizationId,
+        spendingLimitPolicyId: removablePolicy.spendingLimitPolicyId,
+        counterpartyWalletId: destination.destinationId,
+        walletAddress: destination.walletAddress,
+      },
+    });
+
+    const removeIntent = await post(
+      `/organizations/${organization.organizationId}/spending-limit-policies/${removablePolicy.spendingLimitPolicyId}/remove-intent`,
+      { creatorPersonalWalletId: signerWallet.userWalletId },
+      register.sessionToken,
+    );
+    assert.equal(removeIntent.decimalProposal.semanticType, 'remove_spending_limit');
+    assert.deepEqual(removeIntent.intent.actions.map((action: { kind: string }) => action.kind), ['remove_spending_limit']);
+    assert.equal(removeIntent.spendingLimitPolicy.status, 'revocation_proposed');
+
+    const replaceableCreateKey = Keypair.generate().publicKey;
+    const [replaceableSpendingLimitPda] = multisig.getSpendingLimitPda({
+      multisigPda,
+      createKey: replaceableCreateKey,
+      programId,
+    });
+    const replaceablePolicy = await prisma.spendingLimitPolicy.create({
+      data: {
+        organizationId: organization.organizationId,
+        treasuryWalletId: treasuryWallet.treasuryWalletId,
+        automationAgentId: agent.automationAgentId,
+        agentWalletId: agentWallet.agentWalletId,
+        policyName: 'Replaceable daily policy',
+        policyCode: 'replace-me',
+        asset: 'usdc',
+        mintAddress: USDC_MINT.toBase58(),
+        amountRaw: 75000n,
+        period: 'day',
+        vaultIndex: 0,
+        createKey: replaceableCreateKey.toBase58(),
+        spendingLimitPda: replaceableSpendingLimitPda.toBase58(),
+        destinationPolicy: 'explicit_allowlist',
+        status: 'active',
+      },
+    });
+    await prisma.spendingLimitPolicyDestination.create({
+      data: {
+        organizationId: organization.organizationId,
+        spendingLimitPolicyId: replaceablePolicy.spendingLimitPolicyId,
+        counterpartyWalletId: destination.destinationId,
+        walletAddress: destination.walletAddress,
+      },
+    });
+
+    const replaceIntent = await post(
+      `/organizations/${organization.organizationId}/spending-limit-policies/${replaceablePolicy.spendingLimitPolicyId}/replace-intent`,
+      {
+        creatorPersonalWalletId: signerWallet.userWalletId,
+        policyName: 'Research weekly policy',
+        amountRaw: '200000',
+        period: 'week',
+        counterpartyWalletIds: [destination.destinationId],
+      },
+      register.sessionToken,
+    );
+    assert.equal(replaceIntent.decimalProposal.semanticType, 'replace_spending_limit');
+    assert.deepEqual(replaceIntent.intent.actions.map((action: { kind: string }) => action.kind), ['remove_spending_limit', 'add_spending_limit']);
+    assert.equal(replaceIntent.originalSpendingLimitPolicy.status, 'replacement_proposed');
+    assert.equal(replaceIntent.replacementSpendingLimitPolicy.status, 'proposed');
+    assert.equal(replaceIntent.replacementSpendingLimitPolicy.amountRaw, '200000');
+  } finally {
+    config.privyAppId = originalPrivyAppId;
+    config.privyAppSecret = originalPrivyAppSecret;
+    setPrivyWalletRuntimeForTests(null);
+    setSquadsTreasuryRuntimeForTests(null);
+    setSpendingLimitExecutionRuntimeForTests(null);
+  }
 });
 
 test('Squads vault payment proposals turn payment orders into executable treasury proposals', async () => {

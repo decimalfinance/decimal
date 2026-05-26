@@ -5,12 +5,21 @@ import { AddressInfo } from 'node:net';
 import { Keypair } from '@solana/web3.js';
 import { createApp } from '../src/app.js';
 import { prisma } from '../src/infra/prisma.js';
+import { setInvoiceIntakeRuntimeForTests } from '../src/payments/invoice-intake.js';
+import { setPaymentRunDocumentRuntimeForTests } from '../src/payments/runs.js';
 
 const TRUNCATE_SQL = `
 TRUNCATE TABLE
   auth_sessions,
   wallet_challenges,
+  organization_wallet_authorizations,
+  spending_limit_executions,
+  spending_limit_policy_destinations,
+  spending_limit_policies,
+  agent_wallets,
+  automation_agents,
   user_wallets,
+  organization_invites,
   organization_memberships,
   execution_records,
   transfer_request_notes,
@@ -18,13 +27,11 @@ TRUNCATE TABLE
   collection_request_events,
   collection_requests,
   collection_runs,
-  collection_sources,
   payment_runs,
   payment_order_events,
   payment_orders,
   payment_requests,
   transfer_requests,
-  destinations,
   counterparties,
   treasury_wallets,
   
@@ -61,6 +68,8 @@ before(async () => {
 });
 
 beforeEach(async () => {
+  setInvoiceIntakeRuntimeForTests(null);
+  setPaymentRunDocumentRuntimeForTests(null);
   await executeWithDeadlockRetry(() => prisma.$executeRawUnsafe(TRUNCATE_SQL));
 });
 
@@ -107,7 +116,7 @@ test('payment orders create a business intent and submit into the existing reque
   });
   assert.equal(transferRequest.paymentOrderId, paymentOrder.paymentOrderId);
   assert.equal(transferRequest.sourceTreasuryWalletId, setup.sourceAddress.treasuryWalletId);
-  assert.equal(transferRequest.destinationId, setup.destination.destinationId);
+  assert.equal(transferRequest.counterpartyWalletId, setup.destination.destinationId);
   assert.equal(transferRequest.status, 'approved');
 
   const list = await get(`/organizations/${setup.organization.organizationId}/payment-orders`, setup.sessionToken);
@@ -151,6 +160,161 @@ test('payment requests capture user intent and promote into payment orders', asy
   const list = await get(`/organizations/${setup.organization.organizationId}/payment-requests`, setup.sessionToken);
   assert.equal(list.items.length, 1);
   assert.equal(list.items[0].paymentOrder.paymentOrderId, paymentOrder.paymentOrderId);
+});
+
+test('invoice upload creates a proposal-ready payment order for a trusted wallet', async () => {
+  const setup = await createPaymentOrderSetup();
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [{
+        counterparty: setup.destination.label,
+        amount: 0.01,
+        currency: 'USD',
+        reference: 'INV-UPLOAD-TRUSTED',
+        due_date: '2026-04-15',
+        wallet_address: setup.destinationAddress.address,
+        notes: 'April services',
+      }],
+      modelLatencyMs: 7,
+      pageCount: 1,
+    }),
+  });
+
+  const result = await post(
+    `/organizations/${setup.organization.organizationId}/invoices/upload`,
+    {
+      filename: 'invoice.pdf',
+      mimeType: 'application/pdf',
+      dataBase64: Buffer.from('fake-pdf').toString('base64'),
+      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
+    },
+    setup.sessionToken,
+  );
+
+  assert.equal(result.createdCount, 1);
+  assert.equal(result.skippedCount, 0);
+  assert.equal(result.primaryPaymentOrder.externalReference, 'INV-UPLOAD-TRUSTED');
+  assert.equal(result.primaryPaymentOrder.state, 'approved');
+  assert.equal(result.primaryPaymentOrder.derivedState, 'ready_for_execution');
+  assert.equal(result.primaryPaymentOrder.transferRequests.length, 1);
+  assert.equal(result.paymentOrders[0].decision, 'drafted');
+});
+
+test('invoice upload gates new invoice wallets behind needs_review and clear-review advances them', async () => {
+  const setup = await createPaymentOrderSetup();
+  const newVendorWallet = Keypair.generate().publicKey.toBase58();
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [{
+        counterparty: 'New Review Vendor',
+        amount: 0.01,
+        currency: 'USDC',
+        reference: 'INV-UPLOAD-REVIEW',
+        due_date: '2026-04-18',
+        wallet_address: newVendorWallet,
+        notes: null,
+      }],
+      modelLatencyMs: 9,
+      pageCount: 1,
+    }),
+  });
+
+  const result = await post(
+    `/organizations/${setup.organization.organizationId}/invoices/upload`,
+    {
+      filename: 'new-vendor.png',
+      mimeType: 'image/png',
+      dataBase64: Buffer.from('fake-image').toString('base64'),
+      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
+    },
+    setup.sessionToken,
+  );
+
+  const paymentOrder = result.primaryPaymentOrder;
+  assert.equal(paymentOrder.state, 'needs_review');
+  assert.equal(paymentOrder.derivedState, 'needs_review');
+  assert.equal(paymentOrder.transferRequests.length, 0);
+  assert.equal(paymentOrder.metadataJson.agent.decision, 'needs_review');
+  assert.equal(paymentOrder.metadataJson.agent.triggeredRules[0].rule, 'unreviewed_counterparty');
+
+  let wallet = await prisma.counterpartyWallet.findUniqueOrThrow({
+    where: {
+      organizationId_walletAddress: {
+        organizationId: setup.organization.organizationId,
+        walletAddress: newVendorWallet,
+      },
+    },
+  });
+  assert.equal(wallet.trustState, 'unreviewed');
+
+  const cleared = await post(
+    `/organizations/${setup.organization.organizationId}/payment-orders/${paymentOrder.paymentOrderId}/clear-review`,
+    {
+      reviewNote: 'Verified invoice and wallet by email.',
+    },
+    setup.sessionToken,
+  );
+
+  assert.equal(cleared.state, 'approved');
+  assert.equal(cleared.derivedState, 'ready_for_execution');
+  assert.equal(cleared.transferRequests.length, 1);
+
+  wallet = await prisma.counterpartyWallet.findUniqueOrThrow({
+    where: {
+      organizationId_walletAddress: {
+        organizationId: setup.organization.organizationId,
+        walletAddress: newVendorWallet,
+      },
+    },
+  });
+  assert.equal(wallet.trustState, 'trusted');
+
+  const events = await prisma.paymentOrderEvent.findMany({
+    where: { paymentOrderId: paymentOrder.paymentOrderId },
+    orderBy: { createdAt: 'asc' },
+  });
+  assert.ok(events.some((event) => event.eventType === 'payment_order_review_cleared'));
+  assert.ok(events.some((event) => event.eventType === 'payment_order_approved'));
+});
+
+test('invoice upload flags invalid OCR wallet strings instead of trusting them', async () => {
+  const setup = await createPaymentOrderSetup();
+  const invalidOcrWallet = 'GHqSstHfHHRPacKAFplWeXobLw2RnaZpHd8u5V2BuNmv';
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [{
+        counterparty: setup.destination.label,
+        amount: 0.01,
+        currency: 'USD',
+        reference: 'INV-OCR-INVALID',
+        due_date: '2026-04-22',
+        wallet_address: invalidOcrWallet,
+        notes: 'OCR confused wallet address',
+      }],
+      modelLatencyMs: 11,
+      pageCount: 1,
+    }),
+  });
+
+  const result = await post(
+    `/organizations/${setup.organization.organizationId}/invoices/upload`,
+    {
+      filename: 'ocr-invalid-wallet.pdf',
+      mimeType: 'application/pdf',
+      dataBase64: Buffer.from('fake-pdf').toString('base64'),
+      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
+    },
+    setup.sessionToken,
+  );
+
+  const paymentOrder = result.primaryPaymentOrder;
+  assert.equal(result.createdCount, 1);
+  assert.equal(result.skippedCount, 0);
+  assert.equal(paymentOrder.state, 'needs_review');
+  assert.equal(paymentOrder.derivedState, 'needs_review');
+  assert.equal(paymentOrder.transferRequests.length, 0);
+  assert.equal(paymentOrder.metadataJson.agent.triggeredRules[0].rule, 'invalid_extracted_wallet_address');
+  assert.match(paymentOrder.metadataJson.agent.triggeredRules[0].reason, /not a valid Solana base58 address/i);
 });
 
 test('CSV import creates payment requests and orders against existing destinations', async () => {
@@ -426,6 +590,121 @@ test('payment run CSV preview detects duplicate rows and import is idempotent by
   assert.equal(runCount, 1);
 });
 
+test('payment run document import skips invalid OCR wallet rows and creates valid rows', async () => {
+  const setup = await createPaymentOrderSetup();
+  const invalidOcrWallet = 'GHqSstHfHHRPacKAFplWeXobLw2RnaZpHd8u5V2BuNmv';
+  setPaymentRunDocumentRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [
+        {
+          counterparty: setup.destination.label,
+          amount: 0.01,
+          currency: 'USD',
+          reference: 'RUN-DOC-VALID',
+          due_date: '2026-04-15',
+          wallet_address: null,
+          notes: 'Known vendor row',
+        },
+        {
+          counterparty: 'Bangalore Ops',
+          amount: 0.02,
+          currency: 'USD',
+          reference: 'RUN-DOC-OCR-BAD',
+          due_date: '2026-04-16',
+          wallet_address: invalidOcrWallet,
+          notes: 'OCR confused wallet row',
+        },
+      ],
+      modelLatencyMs: 17,
+      pageCount: 2,
+    }),
+  });
+
+  const result = await post(
+    `/organizations/${setup.organization.organizationId}/payment-runs/from-document`,
+    {
+      filename: 'two-invoices.pdf',
+      mimeType: 'application/pdf',
+      dataBase64: Buffer.from('fake-pdf').toString('base64'),
+      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
+    },
+    setup.sessionToken,
+  );
+
+  assert.equal(result.paymentRun.totals.orderCount, 1);
+  assert.equal(result.importResult.imported, 1);
+  assert.equal(result.skippedRows.length, 1);
+  assert.equal(result.skippedRows[0].counterparty, 'Bangalore Ops');
+  assert.equal(result.skippedRows[0].reason, 'invalid_wallet_address');
+  assert.equal(result.skippedRows[0].walletAddress, invalidOcrWallet);
+  assert.match(result.skippedRows[0].message, /OCR ambiguity/i);
+  assert.equal(result.extractedRows.length, 2);
+});
+
+test('payment run document import returns review data instead of throwing when no row can be routed', async () => {
+  const setup = await createPaymentOrderSetup();
+  const invalidOcrWallet = 'GHqSstHfHHRPacKAFplWeXobLw2RnaZpHd8u5V2BuNmv';
+  setPaymentRunDocumentRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [{
+        counterparty: 'Bangalore Ops Pvt Ltd',
+        amount: 0.01,
+        currency: 'USD',
+        reference: 'RUN-DOC-ALL-OCR-BAD',
+        due_date: '2026-04-16',
+        wallet_address: invalidOcrWallet,
+        notes: 'Only row has OCR-confused wallet',
+      }],
+      modelLatencyMs: 19,
+      pageCount: 1,
+    }),
+  });
+
+  const result = await post(
+    `/organizations/${setup.organization.organizationId}/payment-runs/from-document`,
+    {
+      filename: 'bangalore-ops.pdf',
+      mimeType: 'application/pdf',
+      dataBase64: Buffer.from('fake-pdf').toString('base64'),
+      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
+    },
+    setup.sessionToken,
+  );
+
+  assert.equal(result.paymentRun.inputSource, 'document_import');
+  assert.equal(result.paymentRun.state, 'exception');
+  assert.equal(result.paymentRun.derivedState, 'exception');
+  assert.equal(result.paymentRun.totals.orderCount, 0);
+  assert.equal(result.importResult.imported, 0);
+  assert.equal(result.importResult.failed, 1);
+  assert.equal(result.skippedRows[0].counterparty, 'Bangalore Ops Pvt Ltd');
+  assert.equal(result.skippedRows[0].reason, 'invalid_wallet_address');
+  assert.equal(result.skippedRows[0].walletAddress, invalidOcrWallet);
+  assert.equal(result.documentImportReview.status, 'needs_routing');
+  assert.equal(result.paymentRun.metadataJson.importReview.skippedRows[0].walletAddress, invalidOcrWallet);
+
+  const correctedWallet = Keypair.generate().publicKey.toBase58();
+  const resolved = await post(
+    `/organizations/${setup.organization.organizationId}/payment-runs/${result.paymentRun.paymentRunId}/resolve-document-row`,
+    {
+      rowIndex: 0,
+      walletAddress: correctedWallet,
+      label: 'Bangalore Ops corrected wallet',
+    },
+    setup.sessionToken,
+  );
+
+  assert.equal(resolved.paymentRun.state, 'draft');
+  assert.equal(resolved.paymentRun.derivedState, 'draft');
+  assert.equal(resolved.paymentRun.totals.orderCount, 1);
+  assert.equal(resolved.paymentRun.paymentOrders[0].externalReference, 'RUN-DOC-ALL-OCR-BAD');
+  assert.equal(resolved.paymentRun.paymentOrders[0].counterpartyWallet.walletAddress, correctedWallet);
+  assert.equal(resolved.paymentRun.paymentOrders[0].counterpartyWallet.trustState, 'unreviewed');
+  assert.equal(resolved.paymentRequest.paymentOrder.paymentOrderId, resolved.paymentRun.paymentOrders[0].paymentOrderId);
+  assert.equal(resolved.paymentRun.metadataJson.importReview.status, 'resolved');
+  assert.equal(resolved.paymentRun.metadataJson.importReview.resolvedRows[0].rowIndex, 0);
+});
+
 test('payment run cancellation and close are explicit lifecycle actions', async () => {
   const setup = await createPaymentOrderSetup();
   const cancellableCsv = [
@@ -548,19 +827,19 @@ test('collections create inbound expected transfers against owned receiving wall
 
   const transferRequest = await prisma.transferRequest.findUniqueOrThrow({
     where: { transferRequestId: collection.transferRequestId },
-    include: { destination: true },
+    include: { counterpartyWallet: true },
   });
   assert.equal(transferRequest.requestType, 'collection_request');
   assert.equal(transferRequest.status, 'approved');
   assert.equal(transferRequest.sourceTreasuryWalletId, null);
-  assert.equal(transferRequest.destination.walletAddress, setup.sourceAddress.address);
-  assert.equal(transferRequest.destination.tokenAccountAddress, setup.sourceAddress.usdcAtaAddress);
-  assert.equal(transferRequest.destination.isInternal, true);
-  assert.equal(transferRequest.destination.destinationType, 'internal_collection_receiver');
+  assert.equal(transferRequest.counterpartyWallet.walletAddress, setup.sourceAddress.address);
+  assert.equal(transferRequest.counterpartyWallet.tokenAccountAddress, setup.sourceAddress.usdcAtaAddress);
+  assert.equal(transferRequest.counterpartyWallet.isInternal, true);
+  assert.equal(transferRequest.counterpartyWallet.walletType, 'internal_collection_receiver');
 
   const publicDestinations = await get(`/organizations/${setup.organization.organizationId}/destinations`, setup.sessionToken);
   assert.ok(
-    publicDestinations.items.every((destination: { destinationId: string }) => destination.destinationId !== transferRequest.destinationId),
+    publicDestinations.items.every((destination: { destinationId: string }) => destination.destinationId !== transferRequest.counterpartyWalletId),
     'internal collection receiver should not appear in the normal destination address book',
   );
 
@@ -569,7 +848,7 @@ test('collections create inbound expected transfers against owned receiving wall
     setup.sessionToken,
   );
   assert.ok(
-    destinationsWithInternal.items.some((destination: { destinationId: string }) => destination.destinationId === transferRequest.destinationId),
+    destinationsWithInternal.items.some((destination: { destinationId: string }) => destination.destinationId === transferRequest.counterpartyWalletId),
     'internal collection receiver should remain inspectable when explicitly requested',
   );
 
