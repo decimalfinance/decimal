@@ -17,9 +17,18 @@ import type {
   OrganizationInvite,
   OrganizationInviteRole,
   OrganizationInviteStatus,
+  AutomationAgent,
+  CreateSpendingLimitPolicyIntentRequest,
+  OrganizationCreatedResponse,
   OrganizationMember,
   OrganizationMembership,
   OrganizationSummary,
+  RemoveSpendingLimitPolicyIntentRequest,
+  ReplaceSpendingLimitPolicyIntentRequest,
+  ReplaceSpendingLimitPolicyIntentResponse,
+  SpendingLimitExecution,
+  SpendingLimitPolicy,
+  SpendingLimitPolicyIntentResponse,
   PaymentExecutionPreparation,
   PaymentOrder,
   PaymentProofPacket,
@@ -299,7 +308,7 @@ export const api = {
     });
   },
   createOrganization(input: { organizationName: string }) {
-    return request<OrganizationMembership>('/organizations', {
+    return request<OrganizationCreatedResponse>('/organizations', {
       method: 'POST',
       body: JSON.stringify(input),
     });
@@ -918,6 +927,26 @@ export const api = {
   getPaymentRunDetail(organizationId: string, paymentRunId: string) {
     return request<PaymentRun>(`/organizations/${organizationId}/payment-runs/${paymentRunId}`);
   },
+  resolvePaymentRunDocumentRow(
+    organizationId: string,
+    paymentRunId: string,
+    input: {
+      rowIndex: number;
+      counterpartyWalletId?: string | null;
+      walletAddress?: string | null;
+      label?: string | null;
+      trustState?: 'unreviewed' | 'trusted';
+    },
+  ) {
+    return request<{
+      paymentRun: PaymentRun;
+      paymentRequest: PaymentRequest;
+      resolvedRow: Record<string, unknown>;
+    }>(`/organizations/${organizationId}/payment-runs/${paymentRunId}/resolve-document-row`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
   deletePaymentRun(organizationId: string, paymentRunId: string) {
     return request<Record<string, unknown>>(`/organizations/${organizationId}/payment-runs/${paymentRunId}`, {
       method: 'DELETE',
@@ -1175,6 +1204,129 @@ export const api = {
     return download(
       `/organizations/${organizationId}/collection-runs/${collectionRunId}/proof`,
       `collection-run-${collectionRunId}-proof.json`,
+    );
+  },
+
+  // ─── Automation agents ───────────────────────────────────────────────────
+  // Needed to find the agent wallet ID when creating a spending limit policy.
+  // Every org has a default Decimal operations agent (auto-provisioned).
+
+  listAutomationAgents(organizationId: string, filter: { status?: string } = {}) {
+    const params = new URLSearchParams();
+    if (filter.status) params.set('status', filter.status);
+    const query = params.toString();
+    return request<{ items: AutomationAgent[] }>(
+      `/organizations/${organizationId}/automation-agents${query ? `?${query}` : ''}`,
+    );
+  },
+
+  // ─── Spending limit policies ─────────────────────────────────────────────
+  // Backend calls them "spending-limit-policies"; UI calls them
+  // "Spending limits". Same thing.
+
+  listSpendingLimitPolicies(
+    organizationId: string,
+    filter: {
+      treasuryWalletId?: string;
+      automationAgentId?: string;
+      status?: string;
+      limit?: number;
+    } = {},
+  ) {
+    const params = new URLSearchParams();
+    if (filter.treasuryWalletId) params.set('treasuryWalletId', filter.treasuryWalletId);
+    if (filter.automationAgentId) params.set('automationAgentId', filter.automationAgentId);
+    if (filter.status) params.set('status', filter.status);
+    if (filter.limit !== undefined) params.set('limit', String(filter.limit));
+    const query = params.toString();
+    return request<{ items: SpendingLimitPolicy[] }>(
+      `/organizations/${organizationId}/spending-limit-policies${query ? `?${query}` : ''}`,
+    );
+  },
+
+  getSpendingLimitPolicy(organizationId: string, spendingLimitPolicyId: string) {
+    return request<SpendingLimitPolicy>(
+      `/organizations/${organizationId}/spending-limit-policies/${spendingLimitPolicyId}`,
+    );
+  },
+
+  syncSpendingLimitPolicy(organizationId: string, spendingLimitPolicyId: string) {
+    return request<SpendingLimitPolicy>(
+      `/organizations/${organizationId}/spending-limit-policies/${spendingLimitPolicyId}/sync`,
+      { method: 'POST', body: JSON.stringify({}) },
+    );
+  },
+
+  createSpendingLimitPolicyIntent(
+    organizationId: string,
+    treasuryWalletId: string,
+    body: CreateSpendingLimitPolicyIntentRequest,
+  ) {
+    return request<SpendingLimitPolicyIntentResponse>(
+      `/organizations/${organizationId}/treasury-wallets/${treasuryWalletId}/squads/config-proposals/add-spending-limit-intent`,
+      { method: 'POST', body: JSON.stringify(body) },
+    );
+  },
+
+  replaceSpendingLimitPolicyIntent(
+    organizationId: string,
+    spendingLimitPolicyId: string,
+    body: ReplaceSpendingLimitPolicyIntentRequest,
+  ) {
+    return request<ReplaceSpendingLimitPolicyIntentResponse>(
+      `/organizations/${organizationId}/spending-limit-policies/${spendingLimitPolicyId}/replace-intent`,
+      { method: 'POST', body: JSON.stringify(body) },
+    );
+  },
+
+  removeSpendingLimitPolicyIntent(
+    organizationId: string,
+    spendingLimitPolicyId: string,
+    body: RemoveSpendingLimitPolicyIntentRequest,
+  ) {
+    return request<SpendingLimitPolicyIntentResponse>(
+      `/organizations/${organizationId}/spending-limit-policies/${spendingLimitPolicyId}/remove-intent`,
+      { method: 'POST', body: JSON.stringify(body) },
+    );
+  },
+
+  listSpendingLimitExecutions(
+    organizationId: string,
+    filter: {
+      spendingLimitPolicyId?: string;
+      treasuryWalletId?: string;
+      automationAgentId?: string;
+      agentWalletId?: string;
+      paymentOrderId?: string;
+      status?: string;
+      limit?: number;
+    } = {},
+  ) {
+    const params = new URLSearchParams();
+    if (filter.spendingLimitPolicyId) params.set('spendingLimitPolicyId', filter.spendingLimitPolicyId);
+    if (filter.treasuryWalletId) params.set('treasuryWalletId', filter.treasuryWalletId);
+    if (filter.automationAgentId) params.set('automationAgentId', filter.automationAgentId);
+    if (filter.agentWalletId) params.set('agentWalletId', filter.agentWalletId);
+    if (filter.paymentOrderId) params.set('paymentOrderId', filter.paymentOrderId);
+    if (filter.status) params.set('status', filter.status);
+    if (filter.limit !== undefined) params.set('limit', String(filter.limit));
+    const query = params.toString();
+    return request<{ items: SpendingLimitExecution[] }>(
+      `/organizations/${organizationId}/spending-limit-executions${query ? `?${query}` : ''}`,
+    );
+  },
+
+  listSpendingLimitPolicyExecutions(
+    organizationId: string,
+    spendingLimitPolicyId: string,
+    filter: { status?: string; limit?: number } = {},
+  ) {
+    const params = new URLSearchParams();
+    if (filter.status) params.set('status', filter.status);
+    if (filter.limit !== undefined) params.set('limit', String(filter.limit));
+    const query = params.toString();
+    return request<{ items: SpendingLimitExecution[] }>(
+      `/organizations/${organizationId}/spending-limit-policies/${spendingLimitPolicyId}/executions${query ? `?${query}` : ''}`,
     );
   },
 };

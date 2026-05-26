@@ -21,6 +21,26 @@ export type OrganizationMembership = {
   status: string;
 };
 
+// Backend auto-provisioning status from POST /organizations and
+// POST /invites/:token/accept. We only surface this to the user when status
+// is 'failed' or 'skipped' — happy path is silent.
+export type ProvisioningStatus = 'created' | 'existing' | 'skipped' | 'failed';
+
+export type ProvisioningResult<TWallet = unknown> = {
+  status: ProvisioningStatus;
+  reason: string | null;
+  wallet?: TWallet;
+};
+
+export type OrganizationCreatedResponse = OrganizationMembership & {
+  provisioning?: {
+    personalWallet?: ProvisioningResult;
+    defaultAgent?: ProvisioningResult & {
+      agent?: unknown;
+    };
+  };
+};
+
 export type OrganizationSummary = {
   pendingApprovalCount: number;
   executionQueueCount: number;
@@ -105,6 +125,9 @@ export type AcceptInviteResponse = {
   membershipId: string;
   role: OrganizationInviteRole;
   invite: OrganizationInvite;
+  provisioning?: {
+    personalWallet?: ProvisioningResult;
+  };
 };
 
 export type AuthenticatedSession = {
@@ -362,6 +385,19 @@ export type SquadsDetailMember = {
       displayName: string;
       avatarUrl: string | null;
     };
+  } | null;
+  // Set when this on-chain member is an org automation agent's wallet
+  // (e.g. the Decimal agent). Used to render the row with the Decimal logo
+  // and the "Decimal agent" label instead of the raw address.
+  agentWallet: {
+    agentWalletId: string;
+    walletAddress: string;
+    label: string | null;
+  } | null;
+  automationAgent: {
+    automationAgentId: string;
+    name: string;
+    agentType: string;
   } | null;
   localAuthorization: {
     walletAuthorizationId: string;
@@ -867,6 +903,11 @@ export type ReconciliationRow = {
 };
 
 export type PaymentOrderState =
+  // Agent flagged the invoice during AP intake — needs a human decision
+  // before any on-chain activity. Backend adds this once the AP intake agent
+  // is wired into the api. Both names are accepted; backend may pick one.
+  | 'needs_review'
+  | 'agent_flagged'
   | 'draft'
   | 'pending_approval'
   | 'approved'
@@ -1048,17 +1089,25 @@ export type PaymentRunDocumentExtractedRow = {
 };
 
 export type PaymentRunDocumentSkippedRow = {
+  rowIndex: number;
   counterparty: string;
   amount: number;
   currency: string;
   reference: string | null;
-  reason: 'no_destination_or_wallet' | 'unsupported_currency';
+  walletAddress?: string | null;
+  reason: 'no_destination_or_wallet' | 'unsupported_currency' | 'invalid_wallet_address';
+  message?: string;
 };
 
 export type PaymentRunDocumentImportResult = PaymentRunImportResult & {
   extractedRows: PaymentRunDocumentExtractedRow[];
   skippedRows: PaymentRunDocumentSkippedRow[];
   modelLatencyMs: number;
+  documentImportReview?: {
+    status: string;
+    reason: string;
+    message: string;
+  };
 };
 
 // Server-sent progress events from POST /payment-runs/from-document/stream.
@@ -1428,4 +1477,178 @@ export type ReconciliationDetail = ReconciliationRow & {
   events: TransferRequestEvent[];
   notes: TransferRequestNote[];
   availableTransitions: string[];
+};
+
+// ============================================================
+// Spending limit policies (called "Spending limits" in the UI)
+// ============================================================
+
+// Lifecycle states from backend. Map to user-facing labels in status-labels.ts.
+export type SpendingLimitPolicyStatus =
+  | 'proposed'              // awaiting multisig approval/execution
+  | 'active'                // on-chain, agent can use it
+  | 'replacement_proposed'  // edit pending
+  | 'revocation_proposed'   // remove pending
+  | 'revoked'               // removed from chain
+  | 'failed'
+  | 'paused';
+
+// One of these per Squads spending-limit period.
+export type SpendingLimitPeriod = 'one_time' | 'day' | 'week' | 'month';
+
+// Automation agent (e.g. the auto-provisioned Decimal operations agent).
+export type AutomationAgentWallet = {
+  agentWalletId: string;
+  walletAddress: string;
+  walletType: string;
+  provider: string | null;
+  label: string | null;
+  status: string;
+  verifiedAt: string | null;
+  lastUsedAt: string | null;
+  metadataJson: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AutomationAgent = {
+  automationAgentId: string;
+  organizationId: string;
+  name: string;
+  agentType: string;
+  status: string;
+  metadataJson: Record<string, unknown>;
+  wallets: AutomationAgentWallet[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SpendingLimitPolicyDestination = {
+  spendingLimitPolicyDestinationId: string;
+  counterpartyWalletId: string | null;
+  walletAddress: string;
+  counterpartyWallet: CounterpartyWallet | null;
+  createdAt: string;
+};
+
+export type SpendingLimitPolicy = {
+  spendingLimitPolicyId: string;
+  organizationId: string;
+  treasuryWalletId: string;
+  automationAgentId: string;
+  agentWalletId: string;
+  decimalProposalId: string | null;
+  policyName: string;
+  policyCode: string;
+  asset: string;
+  mintAddress: string | null;
+  amountRaw: string;             // bigint as string — USDC raw (6 decimals)
+  period: SpendingLimitPeriod;
+  vaultIndex: number;
+  createKey: string | null;
+  spendingLimitPda: string | null;
+  destinationPolicy: 'allowlist' | string;
+  status: SpendingLimitPolicyStatus;
+  lastSyncedAt: string | null;
+  metadataJson: Record<string, unknown>;
+  // Joined relations — kept loose because we render minimal fields from them.
+  automationAgent: { automationAgentId: string; name: string; agentType: string } | null;
+  agentWallet: { agentWalletId: string; walletAddress: string; label: string | null } | null;
+  treasuryWallet: TreasuryWallet | null;
+  decimalProposal: DecimalProposal | null;
+  destinations: SpendingLimitPolicyDestination[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SpendingLimitExecutionStatus = 'submitted' | 'settled' | 'mismatch' | string;
+
+export type SpendingLimitExecution = {
+  spendingLimitExecutionId: string;
+  organizationId: string;
+  spendingLimitPolicyId: string;
+  treasuryWalletId: string;
+  automationAgentId: string;
+  agentWalletId: string;
+  paymentOrderId: string | null;
+  counterpartyWalletId: string | null;
+  amountRaw: string;
+  asset: string;
+  destinationWalletAddress: string;
+  signature: string | null;
+  status: SpendingLimitExecutionStatus;
+  verificationJson: Record<string, unknown> | null;
+  metadataJson: Record<string, unknown> | null;
+  submittedAt: string | null;
+  executedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  // Loose joined types — render minimal fields.
+  spendingLimitPolicy: { spendingLimitPolicyId: string; policyName: string; amountRaw: string; period: SpendingLimitPeriod } | null;
+  treasuryWallet: TreasuryWallet | null;
+  automationAgent: { automationAgentId: string; name: string } | null;
+  agentWallet: { agentWalletId: string; walletAddress: string } | null;
+  paymentOrder: PaymentOrder | null;
+  counterpartyWallet: CounterpartyWallet | null;
+};
+
+// Create policy intent — request body matches backend.
+export type CreateSpendingLimitPolicyIntentRequest = {
+  creatorPersonalWalletId: string;
+  agentWalletId: string;
+  policyName: string;
+  policyCode: string;
+  amountRaw: string;
+  period: SpendingLimitPeriod;
+  counterpartyWalletIds: string[];
+  memo?: string;
+};
+
+export type ReplaceSpendingLimitPolicyIntentRequest = {
+  creatorPersonalWalletId: string;
+  agentWalletId?: string;
+  policyName?: string;
+  policyCode?: string;
+  amountRaw?: string;
+  period?: SpendingLimitPeriod;
+  counterpartyWalletIds?: string[];
+  memo?: string;
+};
+
+export type RemoveSpendingLimitPolicyIntentRequest = {
+  creatorPersonalWalletId: string;
+  memo?: string;
+};
+
+// Intent response shape (signable transaction + decimalProposal + the policy
+// row). Reuses DecimalProposalIntentResponse's transaction shape since the
+// backend returns the same kind of signable bundle.
+export type SpendingLimitPolicyIntentResponse = {
+  intent: {
+    provider: string;
+    kind: string;
+    proposalType: string;
+    proposalCategory: string;
+    semanticType: string | null;
+    treasuryWalletId: string;
+    organizationId: string;
+    multisigPda: string;
+    transactionIndex: string;
+    proposalPda: string;
+    actions: Record<string, unknown>[];
+  };
+  transaction: {
+    encoding: 'base64';
+    serializedTransaction: string;
+    requiredSigner: string;
+    recentBlockhash: string;
+    lastValidBlockHeight: number;
+  };
+  decimalProposal: DecimalProposal;
+  spendingLimitPolicy: SpendingLimitPolicy;
+};
+
+export type ReplaceSpendingLimitPolicyIntentResponse = SpendingLimitPolicyIntentResponse & {
+  originalSpendingLimitPolicy: SpendingLimitPolicy;
+  replacementSpendingLimitPolicy: SpendingLimitPolicy;
 };
