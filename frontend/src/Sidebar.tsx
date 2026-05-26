@@ -294,11 +294,6 @@ export function AppSidebar({
               <div className="ax-nav-group-label">Operations</div>
               <NavLinkItem to={base} end icon={icons.overview} label="Overview" />
               <NavLinkItem
-                to={`${base}/proposals`}
-                icon={icons.proposals}
-                label="Proposals"
-              />
-              <NavLinkItem
                 to={`${base}/payments`}
                 icon={icons.payments}
                 label="Payments"

@@ -41,16 +41,26 @@ const EXECUTION_DONE_STATES = new Set([
 
 const READY_TO_PROPOSE_STATES = new Set(['ready', 'ready_for_execution']);
 const PRE_PROPOSAL_STATES = new Set(['draft', 'pending_approval']);
+const AGENT_FLAGGED_STATES = new Set(['needs_review', 'agent_flagged']);
 
 /**
- * Build the Squads-source 5-stage payment lifecycle (Requested · Propose ·
- * Approve · Execute · Verify). Used by both single-payment detail and
- * payment-run detail pages so the rail labels stay in lockstep.
+ * 5-stage payment lifecycle. Shared by single-payment detail and payment-run
+ * detail so the rail labels stay in lockstep.
  *
- * The Verify stage stitches together backend-derived `derivedState` with
+ * The five stages map to user-facing language, not backend mechanics:
+ *
+ *   Received   — agent extracted the payment from an invoice
+ *   Reviewed   — human cleared it (or policy auto-cleared it). Proposal
+ *                creation lives inside this stage; the user doesn't care
+ *                that there's a separate "propose" step.
+ *   Signing    — multisig members are signing
+ *   Sent       — executed on chain
+ *   Settled    — reconciliation confirms the transfer landed
+ *
+ * The Settled stage stitches together backend-derived `derivedState` with
  * frontend-visible RPC settlement verification status: a `'pending'`
- * settlement renders as "Verifying on RPC…", `'mismatch'` flips the stage
- * to a blocked alarm, and `'settled'` is the success terminal.
+ * settlement renders as "Verifying…", `'mismatch'` flips the stage to
+ * blocked, and `'settled'` is the success terminal.
  */
 export function buildSquadsPaymentLifecycle(args: {
   derivedState: string;
@@ -59,9 +69,9 @@ export function buildSquadsPaymentLifecycle(args: {
   settledSub: string;
   /**
    * If true, when the product is in a non-mismatch blocked state (e.g.
-   * `exception`/`partially_settled` on a payment run) the Verify sub-text
+   * `exception`/`partially_settled` on a payment run) the Settled sub-text
    * surfaces "Needs review" instead of falling through to the regular
-   * pending/verifying states. Defaults to false.
+   * verifying state. Defaults to false.
    */
   showBlockedReviewState?: boolean;
 }): LifecycleStage[] {
@@ -77,47 +87,50 @@ export function buildSquadsPaymentLifecycle(args: {
   const approvalDone = APPROVAL_DONE_STATES.has(s);
   const executionDone = EXECUTION_DONE_STATES.has(s);
 
+  const agentFlagged = AGENT_FLAGGED_STATES.has(s);
   const isReadyToPropose = READY_TO_PROPOSE_STATES.has(s);
-  const stillNeedsDecimalApproval = PRE_PROPOSAL_STATES.has(s);
+  const reviewStillPending = agentFlagged || PRE_PROPOSAL_STATES.has(s);
 
   const verifyingNow = executionDone && !settled && settlementVerification === 'pending';
   const showBlockedReview = !verifyMismatch && blocked && Boolean(args.showBlockedReviewState);
 
   return [
     {
-      id: 'request',
-      label: 'Requested',
+      id: 'received',
+      label: 'Received',
       sub: args.requestSub,
       state: 'complete',
     },
     {
-      id: 'proposal',
-      label: proposedDone ? 'Proposed' : 'Propose',
+      id: 'reviewed',
+      label: proposedDone || isReadyToPropose ? 'Reviewed' : agentFlagged ? 'Review' : 'Reviewing',
       sub: cancelled
         ? 'Cancelled'
         : proposedDone
-          ? 'On-chain'
+          ? 'Approved'
           : isReadyToPropose
-            ? 'Ready'
-            : stillNeedsDecimalApproval
-              ? 'Pending approval'
-              : 'Pending',
+            ? 'Ready to sign'
+            : agentFlagged
+              ? 'Needs your eyes'
+              : reviewStillPending
+                ? 'Auto-checking'
+                : 'Pending',
       state: cancelled
         ? 'blocked'
-        : proposedDone
+        : proposedDone || isReadyToPropose
           ? 'complete'
-          : isReadyToPropose
+          : agentFlagged || reviewStillPending
             ? 'current'
             : 'pending',
     },
     {
-      id: 'approval',
-      label: approvalDone ? 'Approved' : 'Approve',
+      id: 'signing',
+      label: approvalDone ? 'Signed' : 'Signing',
       sub: approvalDone
         ? 'Threshold met'
         : proposedDone
-          ? 'Voting'
-          : 'Pending proposal',
+          ? 'Awaiting signatures'
+          : 'Pending',
       state: cancelled || blocked
         ? 'blocked'
         : approvalDone
@@ -127,15 +140,15 @@ export function buildSquadsPaymentLifecycle(args: {
             : 'pending',
     },
     {
-      id: 'execution',
-      label: executionDone ? 'Executed' : 'Execute',
+      id: 'sent',
+      label: executionDone ? 'Sent' : 'Send',
       sub: showBlockedReview
         ? 'Blocked'
         : executionDone
-          ? 'On-chain'
+          ? 'On chain'
           : approvalDone
             ? 'Ready'
-            : 'Pending approval',
+            : 'Pending',
       state: showBlockedReview
         ? 'blocked'
         : executionDone
@@ -145,19 +158,19 @@ export function buildSquadsPaymentLifecycle(args: {
             : 'pending',
     },
     {
-      id: 'settlement',
-      label: verifyMismatch ? 'Mismatch' : settled ? 'Settled' : 'Verify',
+      id: 'settled',
+      label: verifyMismatch ? 'Mismatch' : settled ? 'Settled' : 'Settle',
       sub: verifyMismatch
-        ? 'Settlement deltas did not match'
+        ? 'Amounts did not match'
         : showBlockedReview
           ? 'Needs review'
           : settled
             ? args.settledSub
             : verifyingNow
-              ? 'Verifying on RPC…'
+              ? 'Verifying…'
               : executionDone
-                ? 'Verification pending'
-                : 'Pending execution',
+                ? 'Pending'
+                : 'Pending',
       state: verifyMismatch || showBlockedReview
         ? 'blocked'
         : settled
