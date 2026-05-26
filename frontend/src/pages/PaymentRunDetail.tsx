@@ -3,9 +3,12 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../api';
 import type {
+  CounterpartyWallet,
   DecimalProposal,
   PaymentOrder,
   PaymentRun,
+  PaymentRunDocumentExtractedRow,
+  PaymentRunDocumentSkippedRow,
   TreasuryWallet,
   UserWallet,
 } from '../types';
@@ -32,15 +35,28 @@ import { useToast } from '../ui/Toast';
 
 type PrimaryActionVariant =
   | 'loading'
+  // Drafts exist but at least one destination wallet is unreviewed.
+  // Submitting would be rejected by the backend, so we don't offer it —
+  // instead the user must approve each destination first (inline in the
+  // payments table below).
+  | 'needs_destination_review'
   | 'needs_submit'
   | 'needs_treasury_wallet'
   | 'ready_to_propose'
   | 'proposal_in_progress'
   | 'in_flight'
+  | 'needs_routing_review'
   | 'exception'
   | 'settled'
   | 'cancelled'
   | 'empty';
+
+type DocumentImportReview = {
+  status: string;
+  reason: string | null;
+  skippedRows: PaymentRunDocumentSkippedRow[];
+  extractedRows: PaymentRunDocumentExtractedRow[];
+};
 
 function buildLifecycle(
   run: PaymentRun,
@@ -68,13 +84,27 @@ function determinePrimaryVariant(
   runOrders: PaymentOrder[],
   squadsTreasuryCount: number,
 ): PrimaryActionVariant {
+  if (getRunDocumentImportReview(run)?.status === 'needs_routing') return 'needs_routing_review';
   if (!runOrders.length) return 'empty';
   if (run.derivedState === 'settled' || run.derivedState === 'closed') return 'settled';
   if (run.derivedState === 'exception' || run.derivedState === 'partially_settled') return 'exception';
   if (run.derivedState === 'cancelled') return 'cancelled';
 
   const hasDrafts = runOrders.some((o) => o.derivedState === 'draft');
-  if (hasDrafts) return 'needs_submit';
+  if (hasDrafts) {
+    // Backend rejects submissions whose destinations aren't trusted yet,
+    // so don't pretend Submit is the next step — surface the review work
+    // instead. The per-row Approve buttons in the table handle the actual
+    // trust changes.
+    const hasUnreviewedDestination = runOrders.some(
+      (o) =>
+        o.derivedState === 'draft' &&
+        o.counterpartyWallet?.trustState &&
+        o.counterpartyWallet.trustState !== 'trusted',
+    );
+    if (hasUnreviewedDestination) return 'needs_destination_review';
+    return 'needs_submit';
+  }
 
   if (run.derivedState === 'proposed') return 'proposal_in_progress';
   if (run.derivedState === 'executed') return 'in_flight';
@@ -85,6 +115,59 @@ function determinePrimaryVariant(
   }
 
   return 'empty';
+}
+
+function getRunDocumentImportReview(run: PaymentRun): DocumentImportReview | null {
+  const raw = run.metadataJson?.importReview;
+  if (!isRecord(raw)) return null;
+  return {
+    status: typeof raw.status === 'string' ? raw.status : 'unknown',
+    reason: typeof raw.reason === 'string' ? raw.reason : null,
+    skippedRows: Array.isArray(raw.skippedRows)
+      ? raw.skippedRows
+        .map((row, index) => normalizeDocumentSkippedRow(row, index))
+        .filter((row): row is PaymentRunDocumentSkippedRow => Boolean(row))
+      : [],
+    extractedRows: Array.isArray(raw.extractedRows) ? raw.extractedRows.filter(isDocumentExtractedRow) : [],
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeDocumentSkippedRow(value: unknown, fallbackRowIndex: number): PaymentRunDocumentSkippedRow | null {
+  if (!isRecord(value)) return null;
+  if (
+    typeof value.counterparty !== 'string'
+    || typeof value.amount !== 'number'
+    || typeof value.currency !== 'string'
+    || !(typeof value.reference === 'string' || value.reference === null)
+    || typeof value.reason !== 'string'
+  ) {
+    return null;
+  }
+  return {
+    rowIndex: typeof value.rowIndex === 'number' ? value.rowIndex : fallbackRowIndex,
+    counterparty: value.counterparty,
+    amount: value.amount,
+    currency: value.currency,
+    reference: value.reference,
+    walletAddress: typeof value.walletAddress === 'string' ? value.walletAddress : null,
+    reason: value.reason as PaymentRunDocumentSkippedRow['reason'],
+    message: typeof value.message === 'string' ? value.message : undefined,
+  };
+}
+
+function isDocumentExtractedRow(value: unknown): value is PaymentRunDocumentExtractedRow {
+  return isRecord(value)
+    && typeof value.counterparty === 'string'
+    && typeof value.amount === 'number'
+    && typeof value.currency === 'string'
+    && (typeof value.reference === 'string' || value.reference === null)
+    && (typeof value.due_date === 'string' || value.due_date === null)
+    && (typeof value.wallet_address === 'string' || value.wallet_address === null)
+    && (typeof value.notes === 'string' || value.notes === null);
 }
 
 function rid(value?: string) {
@@ -114,12 +197,20 @@ export function PaymentRunDetailPage() {
   const [selectedSourceTreasuryWalletId, setSelectedSourceTreasuryWalletId] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [routingWalletInputs, setRoutingWalletInputs] = useState<Record<number, string>>({});
+  const [routingExistingWalletInputs, setRoutingExistingWalletInputs] = useState<Record<number, string>>({});
 
   const addressesQuery = useQuery({
     queryKey: ['addresses', organizationId] as const,
     queryFn: () => api.listTreasuryWallets(organizationId!),
     enabled: Boolean(organizationId),
     refetchInterval: 30_000,
+  });
+
+  const counterpartyWalletsQuery = useQuery({
+    queryKey: ['counterparty-wallets', organizationId] as const,
+    queryFn: () => api.listCounterpartyWallets(organizationId!),
+    enabled: Boolean(organizationId),
   });
 
   const runQuery = useQuery({
@@ -206,6 +297,26 @@ export function PaymentRunDetailPage() {
       await queryClient.invalidateQueries({ queryKey: ['payment-orders', organizationId] });
     },
     onError: (err) => toastError(err instanceof Error ? err.message : 'Could not cancel payment.'),
+  });
+
+  const resolveDocumentRowMutation = useMutation({
+    mutationFn: async ({ rowIndex }: { rowIndex: number }) => {
+      const selectedWalletId = routingExistingWalletInputs[rowIndex] || null;
+      const correctedWallet = (routingWalletInputs[rowIndex] ?? '').trim() || null;
+      return api.resolvePaymentRunDocumentRow(organizationId!, paymentRunId!, {
+        rowIndex,
+        counterpartyWalletId: selectedWalletId,
+        walletAddress: selectedWalletId ? null : correctedWallet,
+        trustState: 'unreviewed',
+      });
+    },
+    onSuccess: async () => {
+      success('Payment row created. Review the destination below before submitting.');
+      await queryClient.invalidateQueries({ queryKey: ['payment-run', organizationId, paymentRunId] });
+      await queryClient.invalidateQueries({ queryKey: ['counterparty-wallets', organizationId] });
+      await queryClient.invalidateQueries({ queryKey: ['payment-orders', organizationId] });
+    },
+    onError: (err) => toastError(err instanceof Error ? err.message : 'Could not resolve document row.'),
   });
 
   const proofMutation = useMutation({
@@ -406,6 +517,8 @@ export function PaymentRunDetailPage() {
 
   const run = runQuery.data;
   const runOrders = run.paymentOrders ?? [];
+  const documentImportReview = getRunDocumentImportReview(run);
+  const counterpartyWallets = counterpartyWalletsQuery.data?.items ?? [];
   const lifecycle = buildLifecycle(run, linkedRunVerificationStatus);
   const variant = determinePrimaryVariant(run, runOrders, squadsTreasuryWallets.length);
   const totalAmount = `${formatRawUsdcCompact(run.totals.totalAmountRaw)} ${assetSymbol(runOrders[0]?.asset)}`;
@@ -415,6 +528,12 @@ export function PaymentRunDetailPage() {
 
   const pendingCount = runOrders.filter(
     (o) => o.derivedState === 'draft' || o.derivedState === 'pending_approval',
+  ).length;
+  const unreviewedDestinationCount = runOrders.filter(
+    (o) =>
+      o.derivedState === 'draft' &&
+      o.counterpartyWallet?.trustState &&
+      o.counterpartyWallet.trustState !== 'trusted',
   ).length;
   const readyToSignCount = runOrders.filter((o) =>
     ['approved', 'ready_for_execution'].includes(o.derivedState),
@@ -517,6 +636,7 @@ export function PaymentRunDetailPage() {
           variant={variant}
           run={run}
           pendingCount={pendingCount}
+          unreviewedDestinationCount={unreviewedDestinationCount}
           readyToSignCount={readyToSignCount}
           readyToSignAmount={`${formatRawUsdcCompact(readyToSignAmountRaw.toString())} USDC`}
           squadsTreasuryWallets={squadsTreasuryWallets}
@@ -538,6 +658,18 @@ export function PaymentRunDetailPage() {
           onRetryRunProposalConfirmation={() => retryRunProposalConfirmationMutation.mutate()}
           linkedRunProposal={linkedRunProposal}
           organizationId={organizationId!}
+          documentImportReview={documentImportReview}
+          counterpartyWallets={counterpartyWallets}
+          routingWalletInputs={routingWalletInputs}
+          routingExistingWalletInputs={routingExistingWalletInputs}
+          resolvingDocumentRowIndex={resolveDocumentRowMutation.isPending ? resolveDocumentRowMutation.variables?.rowIndex : undefined}
+          onChangeRoutingWalletInput={(rowIndex, value) =>
+            setRoutingWalletInputs((current) => ({ ...current, [rowIndex]: value }))
+          }
+          onChangeRoutingExistingWallet={(rowIndex, value) =>
+            setRoutingExistingWalletInputs((current) => ({ ...current, [rowIndex]: value }))
+          }
+          onResolveDocumentRow={(rowIndex) => resolveDocumentRowMutation.mutate({ rowIndex })}
         />
 
         <section className="rd-section">
@@ -590,6 +722,7 @@ function PrimaryActionCard(props: {
   variant: PrimaryActionVariant;
   run: PaymentRun;
   pendingCount: number;
+  unreviewedDestinationCount: number;
   readyToSignCount: number;
   readyToSignAmount: string;
   squadsTreasuryWallets: TreasuryWallet[];
@@ -611,11 +744,20 @@ function PrimaryActionCard(props: {
   onRetryRunProposalConfirmation: () => void;
   linkedRunProposal: DecimalProposal | null;
   organizationId: string;
+  documentImportReview: DocumentImportReview | null;
+  counterpartyWallets: CounterpartyWallet[];
+  routingWalletInputs: Record<number, string>;
+  routingExistingWalletInputs: Record<number, string>;
+  resolvingDocumentRowIndex?: number;
+  onChangeRoutingWalletInput: (rowIndex: number, value: string) => void;
+  onChangeRoutingExistingWallet: (rowIndex: number, value: string) => void;
+  onResolveDocumentRow: (rowIndex: number) => void;
 }) {
   const {
     variant,
     run,
     pendingCount,
+    unreviewedDestinationCount,
     readyToSignCount,
     readyToSignAmount,
     squadsTreasuryWallets,
@@ -637,15 +779,57 @@ function PrimaryActionCard(props: {
     onRetryRunProposalConfirmation,
     linkedRunProposal,
     organizationId,
+    documentImportReview,
+    counterpartyWallets,
+    routingWalletInputs,
+    routingExistingWalletInputs,
+    resolvingDocumentRowIndex,
+    onChangeRoutingWalletInput,
+    onChangeRoutingExistingWallet,
+    onResolveDocumentRow,
   } = props;
+
+  if (variant === 'needs_routing_review') {
+    return (
+      <DocumentRoutingReviewCard
+        review={documentImportReview}
+        counterpartyWallets={counterpartyWallets}
+        walletInputs={routingWalletInputs}
+        existingWalletInputs={routingExistingWalletInputs}
+        resolvingRowIndex={resolvingDocumentRowIndex}
+        onChangeWalletInput={onChangeRoutingWalletInput}
+        onChangeExistingWallet={onChangeRoutingExistingWallet}
+        onResolve={onResolveDocumentRow}
+      />
+    );
+  }
+
+  if (variant === 'needs_destination_review') {
+    // Drafts exist but one or more destination wallets are unreviewed.
+    // No Submit button — the user has to review each unreviewed destination
+    // first (via the per-row Approve button in the payments table below).
+    // Rendered as a thin inline banner; this is informational, not actionable.
+    return (
+      <div className="rd-inline-banner" role="note">
+        <span className="rd-inline-banner-icon" aria-hidden>•</span>
+        <span>
+          <strong>
+            {unreviewedDestinationCount} destination
+            {unreviewedDestinationCount === 1 ? '' : 's'} to review.
+          </strong>{' '}
+          Approve each destination below to submit this run.
+        </span>
+      </div>
+    );
+  }
 
   if (variant === 'needs_submit') {
     return (
       <RdPrimaryCard
         emphasis="action"
-        eyebrow="Next step · Submit"
-        title={`${pendingCount} payment${pendingCount === 1 ? '' : 's'} to submit`}
-        body="Submit drafts to advance them to ready. Destinations must be reviewed and trusted first; any draft pointing at an unreviewed destination will be rejected with the destination's name."
+        eyebrow="Submit"
+        title={`${pendingCount} payment${pendingCount === 1 ? '' : 's'} ready`}
+        body="Each destination wallet has been reviewed. Submit to advance to signing."
       >
         <div className="rd-actions">
           <button
@@ -667,9 +851,9 @@ function PrimaryActionCard(props: {
       return (
         <RdPrimaryCard
           emphasis="action"
-          eyebrow="Awaiting · On-chain confirmation"
-          title="Batch proposal submitted — confirmation pending"
-          body="Your signature went through and the batch proposal transaction was submitted. Solana RPC hasn't reported it confirmed yet. Retry confirmation in a few seconds; do not recreate the proposal — it may already be on chain."
+          eyebrow="Awaiting confirmation"
+          title="Submitted on chain"
+          body="Don't recreate — your signature is in flight. Retry confirmation in a few seconds."
         >
           <p className="rd-hint" data-mono="true" style={{ margin: '0 0 12px' }}>
             sig {shortenAddress(pendingRunProposalConfirmation.signature, 6, 6)}
@@ -695,9 +879,9 @@ function PrimaryActionCard(props: {
     return (
       <RdPrimaryCard
         emphasis="action"
-        eyebrow="Next step · Squads batch proposal"
+        eyebrow="Create proposal"
         title={`${readyToSignCount} payment${readyToSignCount === 1 ? '' : 's'} ready · ${readyToSignAmount}`}
-        body="Pick a Squads multisig to fund this batch from. Creating the proposal locks that treasury to the run; signers then approve once before any USDC moves."
+        body="Choose the treasury and the wallet that will initiate signing."
       >
         <div className="rd-primary-grid">
           <label className="rd-field">
@@ -737,7 +921,7 @@ function PrimaryActionCard(props: {
           </label>
         </div>
         <p className="rd-hint" style={{ margin: '0 0 12px' }}>
-          Initiating wallet must be a Squads member of the chosen treasury with the <strong>Initiate</strong> permission. Backend caps batches at 8 rows.
+          Initiating wallet needs the Initiate permission. Max 8 payments per batch.
         </p>
         <div className="rd-actions">
           <button
@@ -762,22 +946,19 @@ function PrimaryActionCard(props: {
 
   if (variant === 'needs_treasury_wallet') {
     return (
-      <RdPrimaryCard
-        emphasis="action"
-        eyebrow="Next step · Add a Squads treasury"
-        title="No Squads multisig connected"
-        body="Batch payouts execute through a Squads multisig. Connect or create one in Treasury accounts before proposing this batch."
-      >
-        <div className="rd-actions">
-          <Link
-            className="rd-btn rd-btn-primary"
-            to={`/organizations/${organizationId}/treasury-accounts`}
-          >
-            Open Treasury accounts
-            <span className="rd-btn-arrow" aria-hidden>→</span>
-          </Link>
-        </div>
-      </RdPrimaryCard>
+      <div className="rd-inline-banner" role="note">
+        <span className="rd-inline-banner-icon" aria-hidden>•</span>
+        <span className="rd-inline-banner-text">
+          <strong>No treasury connected.</strong>{' '}
+          Set one up before this run can be sent.
+        </span>
+        <Link
+          className="rd-btn rd-btn-sm rd-btn-primary rd-inline-banner-action"
+          to={`/organizations/${organizationId}/wallets`}
+        >
+          Set up treasury
+        </Link>
+      </div>
     );
   }
 
@@ -795,16 +976,11 @@ function PrimaryActionCard(props: {
     return (
       <RdPrimaryCard
         emphasis={isApproved ? 'action' : undefined}
-        eyebrow={isApproved ? 'Next step · Execute batch' : 'Next step · Squads voting'}
+        eyebrow={isApproved ? 'Send' : 'Signing'}
         title={
           isApproved
-            ? `Threshold met (${approvalCount} of ${threshold}) — ready to execute`
-            : `${approvalCount} of ${threshold} approvals · ${pendingVoters} awaiting`
-        }
-        body={
-          isApproved
-            ? 'Open the proposal to execute the batch with a Squads member that holds the Execute permission.'
-            : 'This run is bundled into one Squads vault proposal. Voters sign approvals independently.'
+            ? `Threshold met — ready to send`
+            : `${approvalCount} of ${threshold} signed · ${pendingVoters} pending`
         }
       >
         <div className="rd-actions">
@@ -820,14 +996,14 @@ function PrimaryActionCard(props: {
   if (variant === 'in_flight') {
     return (
       <RdPrimaryCard
-        eyebrow="Executed · Verify settlement"
+        eyebrow="Settling"
         title={
           <>
             <span className="rd-mono">{settledCount}</span> of{' '}
-            <span className="rd-mono">{run.totals.actionableCount}</span> matched on-chain
+            <span className="rd-mono">{run.totals.actionableCount}</span> matched on chain
           </>
         }
-        body="The worker is reconstructing USDC transfers and matching them to this run's signatures. This page refreshes every few seconds."
+        body="Verifying transfers landed. This page refreshes automatically."
       >
         {submittedSignatures.length ? (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -843,14 +1019,14 @@ function PrimaryActionCard(props: {
   if (variant === 'settled') {
     return (
       <RdPrimaryCard
-        eyebrow="Complete · All settled"
+        eyebrow="Settled"
         title={
           <>
             <span className="rd-mono">{settledCount}</span> of{' '}
-            <span className="rd-mono">{run.totals.actionableCount}</span> matched · proof ready
+            <span className="rd-mono">{run.totals.actionableCount}</span> settled · proof ready
           </>
         }
-        body="Every payment in this run was approved, signed, observed on-chain, and matched against intent."
+        body="All payments landed and reconciled."
       >
         <div className="rd-actions">
           <button
@@ -894,6 +1070,104 @@ function PrimaryActionCard(props: {
       title="Nothing to do right now"
       body="This run has no pending work. Check back once more payments are added or state changes."
     />
+  );
+}
+
+function DocumentRoutingReviewCard(props: {
+  review: DocumentImportReview | null;
+  counterpartyWallets: CounterpartyWallet[];
+  walletInputs: Record<number, string>;
+  existingWalletInputs: Record<number, string>;
+  resolvingRowIndex?: number;
+  onChangeWalletInput: (rowIndex: number, value: string) => void;
+  onChangeExistingWallet: (rowIndex: number, value: string) => void;
+  onResolve: (rowIndex: number) => void;
+}) {
+  const rows = props.review?.skippedRows ?? [];
+  return (
+    <RdPrimaryCard
+      emphasis="action"
+      eyebrow="Routing review"
+      title={`${rows.length} extracted row${rows.length === 1 ? '' : 's'} need a destination`}
+      body="OCR found payable invoice data, but Decimal could not route it to a valid counterparty wallet. Correct or select the destination, then the normal approval and proposal flow continues."
+    >
+      <div className="rd-stack">
+        {rows.length === 0 ? (
+          <p className="rd-muted">No unresolved document rows remain.</p>
+        ) : rows.map((row) => {
+          const extracted = props.review?.extractedRows[row.rowIndex];
+          const selectedWalletId = props.existingWalletInputs[row.rowIndex] ?? '';
+          const correctedWallet = props.walletInputs[row.rowIndex] ?? '';
+          const resolving = props.resolvingRowIndex === row.rowIndex;
+          return (
+            <div className="rd-review-row" key={`${row.rowIndex}-${row.reference ?? row.counterparty}`}>
+              <div className="rd-review-row-head">
+                <div>
+                  <p className="rd-review-title">{row.counterparty}</p>
+                  <p className="rd-muted">
+                    {row.amount} {row.currency}
+                    {row.reference ? ` · ${row.reference}` : ''}
+                  </p>
+                </div>
+                <span className="rd-pill" data-tone="danger">
+                  {row.reason === 'invalid_wallet_address' ? 'Invalid wallet' : 'Needs destination'}
+                </span>
+              </div>
+              {row.walletAddress ? (
+                <p className="rd-hint" data-mono="true">
+                  OCR read: {row.walletAddress}
+                </p>
+              ) : null}
+              {row.message ? <p className="rd-hint">{row.message}</p> : null}
+              {extracted?.notes ? <p className="rd-hint">{extracted.notes}</p> : null}
+
+              <div className="rd-primary-grid">
+                <label className="rd-field">
+                  <span className="rd-field-label">Use existing destination</span>
+                  <select
+                    className="rd-select"
+                    value={selectedWalletId}
+                    onChange={(e) => props.onChangeExistingWallet(row.rowIndex, e.target.value)}
+                  >
+                    <option value="">Create from corrected wallet</option>
+                    {props.counterpartyWallets.map((wallet) => (
+                      <option key={wallet.counterpartyWalletId} value={wallet.counterpartyWalletId}>
+                        {wallet.label} · {shortenAddress(wallet.walletAddress)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="rd-field">
+                  <span className="rd-field-label">Corrected Solana wallet</span>
+                  <input
+                    className="rd-input"
+                    value={correctedWallet}
+                    onChange={(e) => props.onChangeWalletInput(row.rowIndex, e.target.value)}
+                    placeholder="Paste the corrected wallet address"
+                    disabled={Boolean(selectedWalletId)}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </label>
+              </div>
+
+              <div className="rd-actions">
+                <button
+                  type="button"
+                  className="rd-btn rd-btn-primary"
+                  onClick={() => props.onResolve(row.rowIndex)}
+                  disabled={resolving || (!selectedWalletId && correctedWallet.trim().length === 0)}
+                  aria-busy={resolving}
+                >
+                  {resolving ? 'Creating payment row…' : 'Create payment row'}
+                  {!resolving ? <span className="rd-btn-arrow" aria-hidden>→</span> : null}
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </RdPrimaryCard>
   );
 }
 
@@ -972,17 +1246,10 @@ function RecipientsTable({
                   </span>
                 </td>
                 <td>
-                  <div className="rd-stack-y">
-                    <span className="rd-pill" data-tone={pillTone}>
-                      <span className="rd-pill-dot" aria-hidden />
-                      {displayPaymentStatus(order.derivedState)}
-                    </span>
-                    {isDraft ? (
-                      <span className="rd-pill rd-pill-sm" data-tone={trustTone}>
-                        {trustState}
-                      </span>
-                    ) : null}
-                  </div>
+                  <span className="rd-pill" data-tone={pillTone}>
+                    <span className="rd-pill-dot" aria-hidden />
+                    {displayPaymentStatus(order.derivedState)}
+                  </span>
                 </td>
                 <td>
                   {signature ? (
@@ -1014,18 +1281,9 @@ function RecipientsTable({
                         aria-busy={cancelling}
                         onClick={() => onCancelOrder(order.paymentOrderId)}
                       >
-                        {cancelling ? 'Cancelling…' : 'Cancel'}
+                        {cancelling ? 'Rejecting…' : 'Reject'}
                       </button>
                     ) : null}
-                    <Link
-                      to={`/organizations/${organizationId}/payments/${rid(order.paymentOrderId)}`}
-                      className="rd-btn rd-btn-sm rd-btn-ghost"
-                    >
-                      Details
-                      <span className="rd-btn-arrow" aria-hidden>
-                        →
-                      </span>
-                    </Link>
                   </div>
                 </td>
               </tr>
@@ -1096,4 +1354,3 @@ function ConfirmDialog(props: {
     </div>
   );
 }
-
