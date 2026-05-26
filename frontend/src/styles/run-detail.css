@@ -351,6 +351,38 @@
   }
 }
 
+.rd-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.rd-review-row {
+  border: 1px solid var(--ax-border);
+  border-radius: var(--ax-r-md);
+  background: var(--ax-surface-2);
+  padding: 16px;
+}
+
+.rd-review-row-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.rd-review-title {
+  margin: 0 0 4px;
+  color: var(--ax-text);
+  font-size: 15px;
+  font-weight: 520;
+}
+
+.rd-review-row .rd-hint {
+  margin: 8px 0;
+}
+
 .rd-field {
   display: flex;
   flex-direction: column;
@@ -1090,10 +1122,13 @@
 }
 
 .rd-metric-value {
-  font-family: var(--ax-font-mono);
+  /* Use the body font (Geist) for numeric metrics — matches surrounding
+     text and reads less utilitarian than monospace. Keep tabular-nums so
+     digits line up across rows. */
   font-variant-numeric: tabular-nums;
   font-size: 28px;
-  font-weight: 500;
+  font-weight: 600;
+  letter-spacing: -0.015em;
   color: var(--ax-text);
   line-height: 1.1;
 }
@@ -1414,4 +1449,3 @@
   gap: 8px;
   align-items: center;
 }
-
