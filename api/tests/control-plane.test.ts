@@ -11,6 +11,7 @@ import { setPrivyWalletRuntimeForTests } from '../src/wallets/personal.js';
 import { resetRateLimitBuckets } from '../src/infra/rate-limit.js';
 import { setSquadsTreasuryRuntimeForTests } from '../src/squads/treasury.js';
 import { setSpendingLimitExecutionRuntimeForTests } from '../src/agents/spending-limit-execution.js';
+import { setInvoiceIntakeRuntimeForTests } from '../src/payments/invoice-intake.js';
 
 const TRUNCATE_SQL = `
 TRUNCATE TABLE
@@ -80,6 +81,7 @@ beforeEach(async () => {
   setSquadsTreasuryRuntimeForTests(null);
   setSpendingLimitExecutionRuntimeForTests(null);
   setPrivyWalletRuntimeForTests(null);
+  setInvoiceIntakeRuntimeForTests(null);
   await executeWithDeadlockRetry(() => prisma.$executeRawUnsafe(TRUNCATE_SQL));
 });
 
@@ -1689,6 +1691,228 @@ test('Squads vault payment proposals turn payment orders into executable treasur
     ),
     true,
   );
+});
+
+test('AP invoice intake lets the org agent propose green payments and waits on human review for risky rows', async () => {
+  const register = await post('/auth/register', {
+    email: 'agent-ap@example.com',
+    password: 'DemoPass123!',
+    displayName: 'Agent AP',
+  });
+  await verifyRegisteredEmail(register);
+  const organization = await post('/organizations', { organizationName: 'Agent AP Org' }, register.sessionToken);
+
+  const signerWalletAddress = Keypair.generate().publicKey.toBase58();
+  const agentWalletAddress = Keypair.generate().publicKey.toBase58();
+  const trustedVendorAddress = Keypair.generate().publicKey.toBase58();
+  const reviewVendorAddress = Keypair.generate().publicKey.toBase58();
+  const signerWallet = await post(
+    '/personal-wallets/embedded',
+    {
+      walletAddress: signerWalletAddress,
+      provider: 'privy',
+      providerWalletId: 'privy-agent-ap-signer',
+      label: 'AP owner signer',
+    },
+    register.sessionToken,
+  );
+  const automationAgent = await prisma.automationAgent.create({
+    data: {
+      organizationId: organization.organizationId,
+      name: 'Decimal operations agent',
+      agentType: 'decimal_operations',
+      metadataJson: { systemManaged: true },
+    },
+  });
+  await prisma.agentWallet.create({
+    data: {
+      organizationId: organization.organizationId,
+      automationAgentId: automationAgent.automationAgentId,
+      chain: 'solana',
+      walletAddress: agentWalletAddress,
+      walletType: 'privy_embedded',
+      provider: 'privy',
+      providerWalletId: 'privy-agent-ap-wallet',
+      label: 'Decimal operations agent wallet',
+      status: 'active',
+      verifiedAt: new Date(),
+    },
+  });
+
+  let transactionIndexValue = 0;
+  let multisigCreateKey = Keypair.generate().publicKey.toBase58();
+  setSquadsTreasuryRuntimeForTests({
+    getProgramTreasury: async () => Keypair.generate().publicKey,
+    getLatestBlockhash: async () => ({
+      blockhash: Keypair.generate().publicKey.toBase58(),
+      lastValidBlockHeight: 999,
+    }),
+    loadMultisig: async () => ({
+      createKey: publicKeyFromString(multisigCreateKey),
+      configAuthority: publicKeyFromString('11111111111111111111111111111111'),
+      threshold: 1,
+      timeLock: 0,
+      transactionIndex: { toString: () => String(transactionIndexValue) },
+      staleTransactionIndex: { toString: () => '0' },
+      members: [
+        { key: publicKeyFromString(signerWalletAddress), permissions: { mask: 7 } },
+        { key: publicKeyFromString(agentWalletAddress), permissions: { mask: 1 } },
+      ],
+    }),
+    loadProposal: async () => null,
+    loadConfigTransaction: async () => null,
+    loadVaultTransaction: async () => null,
+    signTransaction: async (input) => ({
+      signedTransactionBase64: input.serializedTransactionBase64,
+      encoding: 'base64',
+    }),
+    sendRawTransaction: async () => Keypair.generate().publicKey.toBase58(),
+    waitForSignature: async () => ({ confirmed: true, seen: true }),
+  });
+
+  const createIntent = await post(
+    `/organizations/${organization.organizationId}/treasury-wallets/squads/create-intent`,
+    {
+      displayName: 'AP Treasury',
+      creatorPersonalWalletId: signerWallet.userWalletId,
+      threshold: 1,
+      members: [{
+        personalWalletId: signerWallet.userWalletId,
+        permissions: ['initiate', 'vote', 'execute'],
+      }],
+    },
+    register.sessionToken,
+  );
+  multisigCreateKey = createIntent.intent.createKey;
+  const treasuryWallet = await post(
+    `/organizations/${organization.organizationId}/treasury-wallets/squads/confirm`,
+    {
+      signature: Keypair.generate().publicKey.toBase58(),
+      displayName: 'AP Treasury',
+      createKey: createIntent.intent.createKey,
+      multisigPda: createIntent.intent.multisigPda,
+      vaultIndex: createIntent.intent.vaultIndex,
+    },
+    register.sessionToken,
+  );
+  const counterparty = await post(
+    `/organizations/${organization.organizationId}/counterparties`,
+    { displayName: 'Trusted Labs' },
+    register.sessionToken,
+  );
+  await post(
+    `/organizations/${organization.organizationId}/destinations`,
+    {
+      walletAddress: trustedVendorAddress,
+      label: 'Trusted Labs',
+      counterpartyId: counterparty.counterpartyId,
+      trustState: 'trusted',
+    },
+    register.sessionToken,
+  );
+
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      pageCount: 1,
+      modelLatencyMs: 25,
+      rows: [
+        {
+          counterparty: 'Trusted Labs',
+          amount: 0.01,
+          currency: 'USD',
+          reference: 'INV-AUTO-1',
+          due_date: '2026-05-30',
+          wallet_address: null,
+          notes: 'Clean AP invoice',
+          source_invoice: {
+            vendorName: 'Trusted Labs',
+            vendorAddress: null,
+            vendorEmail: null,
+            amount: 0.01,
+            currency: 'USD',
+            invoiceNumber: 'INV-AUTO-1',
+            invoiceDate: null,
+            dueDate: '2026-05-30',
+            walletAddress: null,
+            lineItems: [],
+            confidence: { vendor: 0.99, amount: 0.99, overall: 0.99 },
+          },
+        },
+        {
+          counterparty: 'New Vendor',
+          amount: 0.02,
+          currency: 'USD',
+          reference: 'INV-REVIEW-1',
+          due_date: '2026-05-30',
+          wallet_address: reviewVendorAddress,
+          notes: 'New wallet AP invoice',
+          source_invoice: {
+            vendorName: 'New Vendor',
+            vendorAddress: null,
+            vendorEmail: null,
+            amount: 0.02,
+            currency: 'USD',
+            invoiceNumber: 'INV-REVIEW-1',
+            invoiceDate: null,
+            dueDate: '2026-05-30',
+            walletAddress: reviewVendorAddress,
+            lineItems: [],
+            confidence: { vendor: 0.99, amount: 0.99, overall: 0.99 },
+          },
+        },
+      ],
+    }),
+  });
+
+  const imported = await post(
+    `/organizations/${organization.organizationId}/invoices/upload`,
+    {
+      filename: 'ap.pdf',
+      mimeType: 'application/pdf',
+      dataBase64: Buffer.from('mock-pdf').toString('base64'),
+      sourceTreasuryWalletId: treasuryWallet.treasuryWalletId,
+    },
+    register.sessionToken,
+  );
+  assert.equal(imported.createdCount, 2);
+  assert.equal(imported.automation.length, 2);
+  assert.equal(imported.automation[0].status, 'proposal_submitted');
+  assert.equal(imported.automation[1].status, 'needs_review');
+
+  const cleanOrder = await get(
+    `/organizations/${organization.organizationId}/payment-orders/${imported.paymentOrders[0].paymentOrder.paymentOrderId}`,
+    register.sessionToken,
+  );
+  assert.equal(cleanOrder.derivedState, 'proposed');
+  const cleanProposal = await prisma.decimalProposal.findUniqueOrThrow({
+    where: { decimalProposalId: cleanOrder.squadsPaymentProposal.decimalProposalId },
+  });
+  assert.equal(cleanProposal.creatorPersonalWalletId, null);
+  assert.equal(cleanProposal.creatorWalletAddress, agentWalletAddress);
+  assert.equal(cleanProposal.status, 'submitted');
+
+  const reviewOrder = await get(
+    `/organizations/${organization.organizationId}/payment-orders/${imported.paymentOrders[1].paymentOrder.paymentOrderId}`,
+    register.sessionToken,
+  );
+  assert.equal(reviewOrder.derivedState, 'needs_review');
+  assert.equal(reviewOrder.squadsPaymentProposal, null);
+
+  transactionIndexValue = 1;
+  const cleared = await post(
+    `/organizations/${organization.organizationId}/payment-orders/${reviewOrder.paymentOrderId}/clear-review`,
+    { reviewNote: 'Wallet verified against invoice thread.' },
+    register.sessionToken,
+  );
+  assert.equal(cleared.automation.status, 'proposal_submitted');
+  assert.equal(cleared.derivedState, 'proposed');
+
+  const retried = await post(
+    `/organizations/${organization.organizationId}/payment-orders/${reviewOrder.paymentOrderId}/agent/advance`,
+    {},
+    register.sessionToken,
+  );
+  assert.equal(retried.status, 'already_has_proposal');
 });
 
 test('Privy personal wallet signing endpoint signs only transactions requiring that wallet', async () => {
