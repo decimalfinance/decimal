@@ -617,6 +617,7 @@ function serializePaymentRequest(request: PaymentRequestWithRelations) {
     organizationId: request.organizationId,
     paymentRunId: request.paymentRunId,
     counterpartyWalletId: request.counterpartyWalletId,
+    destinationId: request.counterpartyWalletId,
     counterpartyId: request.counterpartyId,
     requestedByUserId: request.requestedByUserId,
     amountRaw: request.amountRaw.toString(),
@@ -643,6 +644,7 @@ function serializePaymentRequest(request: PaymentRequestWithRelations) {
 
 function serializeCounterpartyWalletShallow(wallet: CounterpartyWallet & { counterparty: Counterparty | null }) {
   return {
+    destinationId: wallet.counterpartyWalletId,
     counterpartyWalletId: wallet.counterpartyWalletId,
     organizationId: wallet.organizationId,
     counterpartyId: wallet.counterpartyId,
@@ -651,6 +653,7 @@ function serializeCounterpartyWalletShallow(wallet: CounterpartyWallet & { count
     walletAddress: wallet.walletAddress,
     tokenAccountAddress: wallet.tokenAccountAddress,
     walletType: wallet.walletType,
+    destinationType: wallet.walletType,
     trustState: wallet.trustState,
     label: wallet.label,
     notes: wallet.notes,

@@ -34,7 +34,8 @@ const listPaymentRequestsQuerySchema = z.object({
 });
 
 const createPaymentRequestSchema = z.object({
-  counterpartyWalletId: z.string().uuid(),
+  counterpartyWalletId: z.string().uuid().optional(),
+  destinationId: z.string().uuid().optional(),
   amountRaw: amountRawSchema,
   asset: z.string().trim().min(1).max(20).default('usdc'),
   reason: z.string().trim().min(1).max(1000),
@@ -44,6 +45,9 @@ const createPaymentRequestSchema = z.object({
   createOrderNow: z.boolean().default(false),
   sourceTreasuryWalletId: z.string().uuid().optional(),
   submitOrderNow: z.boolean().default(false),
+}).refine((value) => Boolean(value.counterpartyWalletId ?? value.destinationId), {
+  message: 'counterpartyWalletId is required',
+  path: ['counterpartyWalletId'],
 });
 
 const importPaymentRequestsCsvSchema = z.object({
@@ -78,7 +82,7 @@ paymentRequestsRouter.post('/organizations/:organizationId/payment-requests', as
     const detail = await createPaymentRequest({
       organizationId,
       actorUserId: req.auth!.userId,
-      counterpartyWalletId: input.counterpartyWalletId,
+      counterpartyWalletId: input.counterpartyWalletId ?? input.destinationId!,
       amountRaw: input.amountRaw,
       asset: input.asset,
       reason: input.reason,
