@@ -183,6 +183,39 @@ CREATE TABLE IF NOT EXISTS organization_wallet_authorizations
   UNIQUE (organization_id, treasury_wallet_id, user_wallet_id, role)
 );
 
+CREATE TABLE IF NOT EXISTS automation_agents
+(
+  automation_agent_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  agent_type TEXT NOT NULL DEFAULT 'automation',
+  status TEXT NOT NULL DEFAULT 'active',
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (organization_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS agent_wallets
+(
+  agent_wallet_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
+  automation_agent_id UUID NOT NULL REFERENCES automation_agents(automation_agent_id) ON DELETE CASCADE,
+  chain TEXT NOT NULL DEFAULT 'solana',
+  wallet_address TEXT NOT NULL,
+  wallet_type TEXT NOT NULL DEFAULT 'privy_embedded',
+  provider TEXT NOT NULL DEFAULT 'privy',
+  provider_wallet_id TEXT,
+  label TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  verified_at TIMESTAMPTZ,
+  last_used_at TIMESTAMPTZ,
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (organization_id, chain, wallet_address)
+);
+
 ALTER TABLE treasury_wallets
   ADD COLUMN IF NOT EXISTS usdc_ata_address TEXT;
 
@@ -422,6 +455,67 @@ CREATE TABLE IF NOT EXISTS decimal_proposals
   CONSTRAINT decimal_proposals_squads_unique UNIQUE (organization_id, provider, squads_multisig_pda, transaction_index)
 );
 
+CREATE TABLE IF NOT EXISTS spending_limit_policies
+(
+  spending_limit_policy_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
+  treasury_wallet_id UUID NOT NULL REFERENCES treasury_wallets(treasury_wallet_id) ON DELETE CASCADE,
+  automation_agent_id UUID NOT NULL REFERENCES automation_agents(automation_agent_id) ON DELETE CASCADE,
+  agent_wallet_id UUID NOT NULL REFERENCES agent_wallets(agent_wallet_id) ON DELETE CASCADE,
+  decimal_proposal_id UUID REFERENCES decimal_proposals(decimal_proposal_id) ON DELETE SET NULL,
+  policy_name TEXT NOT NULL,
+  policy_code TEXT,
+  asset TEXT NOT NULL DEFAULT 'usdc',
+  mint_address TEXT NOT NULL,
+  amount_raw BIGINT NOT NULL,
+  period TEXT NOT NULL,
+  vault_index INTEGER NOT NULL DEFAULT 0,
+  create_key TEXT NOT NULL,
+  spending_limit_pda TEXT NOT NULL,
+  destination_policy TEXT NOT NULL DEFAULT 'explicit_allowlist',
+  status TEXT NOT NULL DEFAULT 'proposed',
+  last_synced_at TIMESTAMPTZ,
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (organization_id, spending_limit_pda)
+);
+
+CREATE TABLE IF NOT EXISTS spending_limit_policy_destinations
+(
+  spending_limit_policy_destination_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  spending_limit_policy_id UUID NOT NULL REFERENCES spending_limit_policies(spending_limit_policy_id) ON DELETE CASCADE,
+  organization_id UUID NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
+  counterparty_wallet_id UUID NOT NULL REFERENCES counterparty_wallets(counterparty_wallet_id) ON DELETE RESTRICT,
+  wallet_address TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (spending_limit_policy_id, counterparty_wallet_id)
+);
+
+CREATE TABLE IF NOT EXISTS spending_limit_executions
+(
+  spending_limit_execution_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
+  spending_limit_policy_id UUID REFERENCES spending_limit_policies(spending_limit_policy_id) ON DELETE SET NULL,
+  treasury_wallet_id UUID NOT NULL REFERENCES treasury_wallets(treasury_wallet_id) ON DELETE CASCADE,
+  automation_agent_id UUID NOT NULL REFERENCES automation_agents(automation_agent_id) ON DELETE CASCADE,
+  agent_wallet_id UUID NOT NULL REFERENCES agent_wallets(agent_wallet_id) ON DELETE CASCADE,
+  payment_order_id UUID REFERENCES payment_orders(payment_order_id) ON DELETE SET NULL,
+  counterparty_wallet_id UUID REFERENCES counterparty_wallets(counterparty_wallet_id) ON DELETE SET NULL,
+  amount_raw BIGINT NOT NULL,
+  asset TEXT NOT NULL DEFAULT 'usdc',
+  destination_wallet_address TEXT NOT NULL,
+  signature TEXT,
+  status TEXT NOT NULL DEFAULT 'prepared',
+  verification_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  submitted_at TIMESTAMPTZ,
+  executed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (organization_id, signature)
+);
+
 CREATE TABLE IF NOT EXISTS payment_runs
 (
   payment_run_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -621,7 +715,7 @@ ALTER TABLE transfer_request_events
 
 ALTER TABLE transfer_request_events
   ADD CONSTRAINT chk_transfer_request_events_actor_type CHECK (
-    actor_type IN ('user', 'system')
+    actor_type IN ('user', 'system', 'agent')
   );
 
 ALTER TABLE transfer_request_events
@@ -629,7 +723,7 @@ ALTER TABLE transfer_request_events
 
 ALTER TABLE transfer_request_events
   ADD CONSTRAINT chk_transfer_request_events_event_source CHECK (
-    event_source IN ('user', 'system')
+    event_source IN ('user', 'system', 'agent')
   );
 
 ALTER TABLE execution_records
@@ -678,6 +772,8 @@ ALTER TABLE payment_orders
 ALTER TABLE payment_orders
   ADD CONSTRAINT chk_payment_orders_state CHECK (
     state IN (
+      'needs_review',
+      'agent_flagged',
       'draft',
       'approved',
       'ready',
@@ -737,12 +833,60 @@ ALTER TABLE counterparty_wallets
     trust_state IN ('unreviewed', 'trusted', 'restricted', 'blocked')
   );
 
+ALTER TABLE automation_agents
+  DROP CONSTRAINT IF EXISTS chk_automation_agents_status;
+
+ALTER TABLE automation_agents
+  ADD CONSTRAINT chk_automation_agents_status CHECK (
+    status IN ('active', 'paused', 'archived')
+  );
+
+ALTER TABLE agent_wallets
+  DROP CONSTRAINT IF EXISTS chk_agent_wallets_status;
+
+ALTER TABLE agent_wallets
+  ADD CONSTRAINT chk_agent_wallets_status CHECK (
+    status IN ('active', 'disabled', 'deleted')
+  );
+
+ALTER TABLE spending_limit_policies
+  DROP CONSTRAINT IF EXISTS chk_spending_limit_policies_period;
+
+ALTER TABLE spending_limit_policies
+  ADD CONSTRAINT chk_spending_limit_policies_period CHECK (
+    period IN ('one_time', 'day', 'week', 'month')
+  );
+
+ALTER TABLE spending_limit_policies
+  DROP CONSTRAINT IF EXISTS chk_spending_limit_policies_status;
+
+ALTER TABLE spending_limit_policies
+  ADD CONSTRAINT chk_spending_limit_policies_status CHECK (
+    status IN ('draft', 'proposed', 'active', 'paused', 'revocation_proposed', 'replacement_proposed', 'revoked', 'failed')
+  );
+
+ALTER TABLE spending_limit_policies
+  DROP CONSTRAINT IF EXISTS chk_spending_limit_policies_amount_positive;
+
+ALTER TABLE spending_limit_policies
+  ADD CONSTRAINT chk_spending_limit_policies_amount_positive CHECK (
+    amount_raw > 0
+  );
+
+ALTER TABLE spending_limit_executions
+  DROP CONSTRAINT IF EXISTS chk_spending_limit_executions_status;
+
+ALTER TABLE spending_limit_executions
+  ADD CONSTRAINT chk_spending_limit_executions_status CHECK (
+    status IN ('prepared', 'submitted', 'settled', 'mismatch', 'failed')
+  );
+
 ALTER TABLE payment_order_events
   DROP CONSTRAINT IF EXISTS chk_payment_order_events_actor_type;
 
 ALTER TABLE payment_order_events
   ADD CONSTRAINT chk_payment_order_events_actor_type CHECK (
-    actor_type IN ('user', 'system', 'api_key')
+    actor_type IN ('user', 'system', 'api_key', 'agent')
   );
 
 ALTER TABLE transfer_request_events
@@ -750,7 +894,7 @@ ALTER TABLE transfer_request_events
 
 ALTER TABLE transfer_request_events
   ADD CONSTRAINT chk_transfer_request_events_actor_type CHECK (
-    actor_type IN ('user', 'system', 'api_key')
+    actor_type IN ('user', 'system', 'api_key', 'agent')
   );
 
 ALTER TABLE transfer_request_events
@@ -758,7 +902,7 @@ ALTER TABLE transfer_request_events
 
 ALTER TABLE transfer_request_events
   ADD CONSTRAINT chk_transfer_request_events_event_source CHECK (
-    event_source IN ('user', 'system', 'api_key')
+    event_source IN ('user', 'system', 'api_key', 'agent')
   );
 
 DROP TABLE IF EXISTS workspace_objects CASCADE;
@@ -850,6 +994,26 @@ CREATE INDEX IF NOT EXISTS idx_decimal_proposals_payment_order_created_at
   ON decimal_proposals(payment_order_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_decimal_proposals_payment_run_created_at
   ON decimal_proposals(payment_run_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_automation_agents_org_status_created_at
+  ON automation_agents(organization_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_wallets_org_status_created_at
+  ON agent_wallets(organization_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_wallets_agent_status_created_at
+  ON agent_wallets(automation_agent_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_spending_limit_policies_org_treasury_status_created_at
+  ON spending_limit_policies(organization_id, treasury_wallet_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_spending_limit_policies_agent_status_created_at
+  ON spending_limit_policies(automation_agent_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_spending_limit_policies_agent_wallet_status_created_at
+  ON spending_limit_policies(agent_wallet_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_spending_limit_policy_destinations_org_wallet
+  ON spending_limit_policy_destinations(organization_id, counterparty_wallet_id);
+CREATE INDEX IF NOT EXISTS idx_spending_limit_executions_org_status_created_at
+  ON spending_limit_executions(organization_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_spending_limit_executions_policy_created_at
+  ON spending_limit_executions(spending_limit_policy_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_spending_limit_executions_payment_order_created_at
+  ON spending_limit_executions(payment_order_id, created_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_unique_active_reference
   ON payment_orders(organization_id, counterparty_wallet_id, amount_raw, lower(coalesce(external_reference, invoice_number)))
   WHERE coalesce(external_reference, invoice_number) IS NOT NULL
@@ -922,6 +1086,16 @@ CREATE TRIGGER trg_wallet_authorizations_updated_at
 BEFORE UPDATE ON organization_wallet_authorizations
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_automation_agents_updated_at ON automation_agents;
+CREATE TRIGGER trg_automation_agents_updated_at
+BEFORE UPDATE ON automation_agents
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_agent_wallets_updated_at ON agent_wallets;
+CREATE TRIGGER trg_agent_wallets_updated_at
+BEFORE UPDATE ON agent_wallets
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
 DROP TRIGGER IF EXISTS trg_idempotency_records_updated_at ON idempotency_records;
 CREATE TRIGGER trg_idempotency_records_updated_at
 BEFORE UPDATE ON idempotency_records
@@ -960,6 +1134,16 @@ FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS trg_decimal_proposals_updated_at ON decimal_proposals;
 CREATE TRIGGER trg_decimal_proposals_updated_at
 BEFORE UPDATE ON decimal_proposals
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_spending_limit_policies_updated_at ON spending_limit_policies;
+CREATE TRIGGER trg_spending_limit_policies_updated_at
+BEFORE UPDATE ON spending_limit_policies
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_spending_limit_executions_updated_at ON spending_limit_executions;
+CREATE TRIGGER trg_spending_limit_executions_updated_at
+BEFORE UPDATE ON spending_limit_executions
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_payment_runs_updated_at ON payment_runs;

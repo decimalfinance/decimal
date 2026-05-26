@@ -32,6 +32,11 @@ model Organization {
   collectionRuns CollectionRun[]
   collectionRequests CollectionRequest[]
   collectionEvents CollectionRequestEvent[]
+  automationAgents AutomationAgent[]
+  agentWallets AgentWallet[]
+  spendingLimitPolicies SpendingLimitPolicy[]
+  spendingLimitPolicyDestinations SpendingLimitPolicyDestination[]
+  spendingLimitExecutions SpendingLimitExecution[]
 
   @@map("organizations")
 }
@@ -212,6 +217,8 @@ model TreasuryWallet {
   receivingCollections     CollectionRequest[] @relation("CollectionReceivingWallet")
   receivingCollectionRuns  CollectionRun[]     @relation("CollectionRunReceivingWallet")
   decimalProposals         DecimalProposal[]
+  spendingLimitPolicies    SpendingLimitPolicy[]
+  spendingLimitExecutions  SpendingLimitExecution[]
 
   @@unique([organizationId, address])
   @@map("treasury_wallets")
@@ -244,6 +251,59 @@ model OrganizationWalletAuthorization {
   @@index([userWalletId, status])
   @@index([membershipId, status])
   @@map("organization_wallet_authorizations")
+}
+
+/// AutomationAgent — non-human operator controlled by Decimal.
+/// Agents can prepare work, own backend-managed signing wallets, and later
+/// receive narrowly-scoped Squads permissions/spending limits. They are not
+/// users, and their wallets are not personal wallets.
+model AutomationAgent {
+  automationAgentId String       @id @default(dbgenerated("gen_random_uuid()")) @map("automation_agent_id") @db.Uuid
+  organizationId    String       @map("organization_id") @db.Uuid
+  name              String
+  agentType         String       @default("automation") @map("agent_type")
+  status            String       @default("active")
+  metadataJson      Json         @default("{}") @map("metadata_json")
+  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization      Organization @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
+  wallets           AgentWallet[]
+  spendingLimitPolicies SpendingLimitPolicy[]
+  spendingLimitExecutions SpendingLimitExecution[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, status, createdAt(sort: Desc)])
+  @@map("automation_agents")
+}
+
+/// AgentWallet — backend-managed Solana wallet for a non-human agent.
+/// This may be added to a Squads multisig as an initiate-only member or
+/// attached to one or more Squads spending limits for bounded execution.
+model AgentWallet {
+  agentWalletId      String          @id @default(dbgenerated("gen_random_uuid()")) @map("agent_wallet_id") @db.Uuid
+  organizationId     String          @map("organization_id") @db.Uuid
+  automationAgentId  String          @map("automation_agent_id") @db.Uuid
+  chain              String          @default("solana")
+  walletAddress      String          @map("wallet_address")
+  walletType         String          @default("privy_embedded") @map("wallet_type")
+  provider           String          @default("privy")
+  providerWalletId   String?         @map("provider_wallet_id")
+  label              String?
+  status             String          @default("active")
+  verifiedAt         DateTime?       @map("verified_at") @db.Timestamptz(6)
+  lastUsedAt         DateTime?       @map("last_used_at") @db.Timestamptz(6)
+  metadataJson       Json            @default("{}") @map("metadata_json")
+  createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization       Organization    @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
+  automationAgent    AutomationAgent @relation(fields: [automationAgentId], references: [automationAgentId], onDelete: Cascade)
+  spendingLimitPolicies SpendingLimitPolicy[]
+  spendingLimitExecutions SpendingLimitExecution[]
+
+  @@unique([organizationId, chain, walletAddress])
+  @@index([organizationId, status, createdAt(sort: Desc)])
+  @@index([automationAgentId, status, createdAt(sort: Desc)])
+  @@map("agent_wallets")
 }
 
 model Counterparty {
@@ -292,6 +352,8 @@ model CounterpartyWallet {
   paymentOrders        PaymentOrder[]
   paymentRequests      PaymentRequest[]
   collectionRequests   CollectionRequest[]
+  spendingLimitDestinations SpendingLimitPolicyDestination[]
+  spendingLimitExecutions SpendingLimitExecution[]
 
   @@unique([organizationId, walletAddress])
   @@index([organizationId, createdAt(sort: Desc)])
@@ -366,6 +428,7 @@ model PaymentOrder {
   transferRequests          TransferRequest[]
   events                    PaymentOrderEvent[]
   proposals                 DecimalProposal[]
+  spendingLimitExecutions   SpendingLimitExecution[]
 
   @@index([organizationId, state, createdAt(sort: Desc)])
   @@index([paymentRequestId])
@@ -411,6 +474,7 @@ model DecimalProposal {
   paymentOrder           PaymentOrder?   @relation(fields: [paymentOrderId], references: [paymentOrderId], onDelete: SetNull)
   paymentRun             PaymentRun?     @relation(fields: [paymentRunId], references: [paymentRunId], onDelete: SetNull)
   createdByUser          User?           @relation("DecimalProposalCreatedByUser", fields: [createdByUserId], references: [userId], onDelete: SetNull)
+  spendingLimitPolicies  SpendingLimitPolicy[]
 
   @@unique([organizationId, provider, squadsMultisigPda, transactionIndex])
   @@index([organizationId, status, createdAt(sort: Desc)])
@@ -419,6 +483,94 @@ model DecimalProposal {
   @@index([paymentOrderId, createdAt(sort: Desc)])
   @@index([paymentRunId, createdAt(sort: Desc)])
   @@map("decimal_proposals")
+}
+
+model SpendingLimitPolicy {
+  spendingLimitPolicyId String          @id @default(dbgenerated("gen_random_uuid()")) @map("spending_limit_policy_id") @db.Uuid
+  organizationId        String          @map("organization_id") @db.Uuid
+  treasuryWalletId      String          @map("treasury_wallet_id") @db.Uuid
+  automationAgentId     String          @map("automation_agent_id") @db.Uuid
+  agentWalletId         String          @map("agent_wallet_id") @db.Uuid
+  decimalProposalId     String?         @map("decimal_proposal_id") @db.Uuid
+  policyName            String          @map("policy_name")
+  policyCode            String?         @map("policy_code")
+  asset                 String          @default("usdc")
+  mintAddress           String          @map("mint_address")
+  amountRaw             BigInt          @map("amount_raw")
+  period                String
+  vaultIndex            Int             @default(0) @map("vault_index")
+  createKey             String          @map("create_key")
+  spendingLimitPda      String          @map("spending_limit_pda")
+  destinationPolicy     String          @default("explicit_allowlist") @map("destination_policy")
+  status                String          @default("proposed")
+  lastSyncedAt          DateTime?       @map("last_synced_at") @db.Timestamptz(6)
+  metadataJson          Json            @default("{}") @map("metadata_json")
+  createdAt             DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization          Organization    @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
+  treasuryWallet        TreasuryWallet  @relation(fields: [treasuryWalletId], references: [treasuryWalletId], onDelete: Cascade)
+  automationAgent       AutomationAgent @relation(fields: [automationAgentId], references: [automationAgentId], onDelete: Cascade)
+  agentWallet           AgentWallet     @relation(fields: [agentWalletId], references: [agentWalletId], onDelete: Cascade)
+  decimalProposal       DecimalProposal? @relation(fields: [decimalProposalId], references: [decimalProposalId], onDelete: SetNull)
+  destinations          SpendingLimitPolicyDestination[]
+  executions            SpendingLimitExecution[]
+
+  @@unique([organizationId, spendingLimitPda])
+  @@index([organizationId, treasuryWalletId, status, createdAt(sort: Desc)])
+  @@index([automationAgentId, status, createdAt(sort: Desc)])
+  @@index([agentWalletId, status, createdAt(sort: Desc)])
+  @@map("spending_limit_policies")
+}
+
+model SpendingLimitPolicyDestination {
+  spendingLimitPolicyDestinationId String             @id @default(dbgenerated("gen_random_uuid()")) @map("spending_limit_policy_destination_id") @db.Uuid
+  spendingLimitPolicyId            String             @map("spending_limit_policy_id") @db.Uuid
+  organizationId                   String             @map("organization_id") @db.Uuid
+  counterpartyWalletId             String             @map("counterparty_wallet_id") @db.Uuid
+  walletAddress                    String             @map("wallet_address")
+  createdAt                        DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  policy                           SpendingLimitPolicy @relation(fields: [spendingLimitPolicyId], references: [spendingLimitPolicyId], onDelete: Cascade)
+  organization                     Organization       @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
+  counterpartyWallet               CounterpartyWallet @relation(fields: [counterpartyWalletId], references: [counterpartyWalletId], onDelete: Restrict)
+
+  @@unique([spendingLimitPolicyId, counterpartyWalletId])
+  @@index([organizationId, counterpartyWalletId])
+  @@map("spending_limit_policy_destinations")
+}
+
+model SpendingLimitExecution {
+  spendingLimitExecutionId String               @id @default(dbgenerated("gen_random_uuid()")) @map("spending_limit_execution_id") @db.Uuid
+  organizationId           String               @map("organization_id") @db.Uuid
+  spendingLimitPolicyId    String?              @map("spending_limit_policy_id") @db.Uuid
+  treasuryWalletId         String               @map("treasury_wallet_id") @db.Uuid
+  automationAgentId        String               @map("automation_agent_id") @db.Uuid
+  agentWalletId            String               @map("agent_wallet_id") @db.Uuid
+  paymentOrderId           String?              @map("payment_order_id") @db.Uuid
+  counterpartyWalletId     String?              @map("counterparty_wallet_id") @db.Uuid
+  amountRaw                BigInt               @map("amount_raw")
+  asset                    String               @default("usdc")
+  destinationWalletAddress String               @map("destination_wallet_address")
+  signature                String?
+  status                   String               @default("prepared")
+  verificationJson         Json                 @default("{}") @map("verification_json")
+  metadataJson             Json                 @default("{}") @map("metadata_json")
+  submittedAt              DateTime?            @map("submitted_at") @db.Timestamptz(6)
+  executedAt               DateTime?            @map("executed_at") @db.Timestamptz(6)
+  createdAt                DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization             Organization         @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
+  spendingLimitPolicy      SpendingLimitPolicy? @relation(fields: [spendingLimitPolicyId], references: [spendingLimitPolicyId], onDelete: SetNull)
+  treasuryWallet           TreasuryWallet       @relation(fields: [treasuryWalletId], references: [treasuryWalletId], onDelete: Cascade)
+  automationAgent          AutomationAgent      @relation(fields: [automationAgentId], references: [automationAgentId], onDelete: Cascade)
+  agentWallet              AgentWallet          @relation(fields: [agentWalletId], references: [agentWalletId], onDelete: Cascade)
+  paymentOrder             PaymentOrder?        @relation(fields: [paymentOrderId], references: [paymentOrderId], onDelete: SetNull)
+  counterpartyWallet       CounterpartyWallet?  @relation(fields: [counterpartyWalletId], references: [counterpartyWalletId], onDelete: SetNull)
+
+  @@unique([organizationId, signature])
+  @@index([organizationId, status, createdAt(sort: Desc)])
+  @@index([spendingLimitPolicyId, createdAt(sort: Desc)])
+  @@index([paymentOrderId, createdAt(sort: Desc)])
+  @@map("spending_limit_executions")
 }
 
 model PaymentRequest {
