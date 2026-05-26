@@ -16,7 +16,8 @@ import { z } from 'zod';
 import { ApiError, badRequest, notFound } from '../infra/api-errors.js';
 import { assertOrganizationAdmin } from '../auth/organization-access.js';
 import { prisma } from '../infra/prisma.js';
-import { createPrivySolanaWallet, deletePrivyWallet, signPrivySolanaTransaction } from '../wallets/personal.js';
+import { deletePrivyWallet, signPrivySolanaTransaction } from '../wallets/personal.js';
+import { ensureManagedPersonalWalletForUser } from '../wallets/provisioning.js';
 import { config } from '../config.js';
 import {
   USDC_DECIMALS,
@@ -299,43 +300,12 @@ userWalletsRouter.post(['/personal-wallets/managed', '/user-wallets/managed'], a
       throw new ApiError(501, 'provider_not_supported', 'This wallet provider is not enabled yet.');
     }
 
-    const createdWallet = await createPrivySolanaWallet({
-      userId: req.auth!.userId,
+    const result = await ensureManagedPersonalWalletForUser(req.auth!.userId, {
       label: input.label ?? 'Privy signing wallet',
+      force: true,
+      failOnError: true,
     });
-    const walletAddress = normalizeSolanaAddress(createdWallet.address);
-
-    const wallet = await prisma.personalWallet.upsert({
-      where: {
-        userId_chain_walletAddress: {
-          userId: req.auth!.userId,
-          chain: 'solana',
-          walletAddress,
-        },
-      },
-      update: {
-        walletType: 'privy_embedded',
-        provider: 'privy',
-        providerWalletId: createdWallet.providerWalletId,
-        label: input.label ?? createdWallet.displayName ?? 'Privy signing wallet',
-        status: 'active',
-        verifiedAt: new Date(),
-        metadataJson: createdWallet.metadata,
-      },
-      create: {
-        userId: req.auth!.userId,
-        chain: 'solana',
-        walletAddress,
-        walletType: 'privy_embedded',
-        provider: 'privy',
-        providerWalletId: createdWallet.providerWalletId,
-        label: input.label ?? createdWallet.displayName ?? 'Privy signing wallet',
-        verifiedAt: new Date(),
-        metadataJson: createdWallet.metadata,
-      },
-    });
-
-    res.status(201).json(serializeUserWallet(wallet));
+    res.status(201).json(result.wallet);
   } catch (error) {
     next(error);
   }

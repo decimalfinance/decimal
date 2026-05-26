@@ -5,6 +5,7 @@ import { badRequest, conflict, forbidden, notFound } from '../infra/api-errors.j
 import { config } from '../config.js';
 import { assertOrganizationAdmin } from '../auth/organization-access.js';
 import { prisma } from '../infra/prisma.js';
+import { ensureManagedPersonalWalletForUser } from '../wallets/provisioning.js';
 import { asyncRoute, sendCreated, sendJson, sendList } from '../infra/route-helpers.js';
 
 export const publicOrganizationInvitesRouter = Router();
@@ -201,6 +202,9 @@ organizationInvitesRouter.post('/invites/:inviteToken/accept', asyncRoute(async 
 
     return { membership, invite: accepted };
   });
+  const personalWalletProvisioning = await ensureManagedPersonalWalletForUser(req.auth!.userId, {
+    label: 'Decimal signing wallet',
+  });
 
   sendCreated(res, {
     organizationId: result.invite.organizationId,
@@ -208,6 +212,9 @@ organizationInvitesRouter.post('/invites/:inviteToken/accept', asyncRoute(async 
     membershipId: result.membership.membershipId,
     role: result.membership.role,
     invite: serializeInvite(result.invite),
+    provisioning: {
+      personalWallet: personalWalletProvisioning,
+    },
   });
 }));
 

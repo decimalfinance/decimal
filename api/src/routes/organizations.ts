@@ -2,7 +2,9 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { forbidden } from '../infra/api-errors.js';
 import { assertOrganizationAccess } from '../auth/organization-access.js';
+import { ensureDefaultAutomationAgentWithWallet } from '../agents/automation.js';
 import { prisma } from '../infra/prisma.js';
+import { ensureManagedPersonalWalletForUser } from '../wallets/provisioning.js';
 
 export const organizationsRouter = Router();
 
@@ -126,12 +128,22 @@ organizationsRouter.post('/organizations', async (req, res, next) => {
 
       return createdOrganization;
     });
+    const [personalWalletProvisioning, agentProvisioning] = await Promise.all([
+      ensureManagedPersonalWalletForUser(req.auth!.userId, {
+        label: 'Decimal signing wallet',
+      }),
+      ensureDefaultAutomationAgentWithWallet(organization.organizationId),
+    ]);
 
     res.status(201).json({
       organizationId: organization.organizationId,
       organizationName: organization.organizationName,
       role: 'owner',
       status: organization.status,
+      provisioning: {
+        personalWallet: personalWalletProvisioning,
+        defaultAgent: agentProvisioning,
+      },
     });
   } catch (error) {
     next(error);
