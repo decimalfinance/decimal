@@ -50,9 +50,10 @@ export const API_ENDPOINTS = [
 
   endpoint('list_organizations', 'GET', '/organizations', ['organizations'], 'List organizations for the current user', 'session'),
   endpoint('organization_summary', 'GET', '/organizations/{organizationId}/summary', ['organizations'], 'Lightweight organization counts for shell navigation', 'session', { scope: 'organization:read' }),
-  endpoint('create_organization', 'POST', '/organizations', ['organizations'], 'Create organization', 'session', {
+  endpoint('create_organization', 'POST', '/organizations', ['organizations'], 'Create organization and provision default wallets when enabled', 'session', {
     scope: 'organization:write',
     requestBody: { organizationName: 'string' },
+    response: { provisioning: 'personalWallet + defaultAgent provisioning status' },
   }),
   endpoint('join_organization', 'POST', '/organizations/{organizationId}/join', ['organizations'], 'Deprecated: joining requires an invite link', 'session'),
   endpoint('list_organization_members', 'GET', '/organizations/{organizationId}/members', ['organization invites'], 'List active organization members', 'session', { scope: 'organization:read' }),
@@ -62,7 +63,9 @@ export const API_ENDPOINTS = [
     requestBody: { email: 'string email', role: 'admin | member' },
   }),
   endpoint('revoke_organization_invite', 'POST', '/organizations/{organizationId}/invites/{organizationInviteId}/revoke', ['organization invites'], 'Revoke a pending organization invite', 'session', { scope: 'organization:write' }),
-  endpoint('accept_organization_invite', 'POST', '/invites/{inviteToken}/accept', ['organization invites'], 'Accept an organization invite for the signed-in user', 'session'),
+  endpoint('accept_organization_invite', 'POST', '/invites/{inviteToken}/accept', ['organization invites'], 'Accept an organization invite and provision a personal wallet when enabled', 'session', {
+    response: { provisioning: 'personalWallet provisioning status' },
+  }),
 
   endpoint('list_treasury_wallets', 'GET', '/organizations/{organizationId}/treasury-wallets', ['address book'], 'List owned treasury wallets', 'session', { scope: 'organization:read' }),
   endpoint('list_treasury_wallet_balances', 'GET', '/organizations/{organizationId}/treasury-wallets/balances', ['address book'], 'List treasury wallets with live SOL/USDC balances', 'session', { scope: 'organization:read' }),
@@ -99,9 +102,17 @@ export const API_ENDPOINTS = [
     scope: 'organization:write',
     requestBody: { creatorPersonalWalletId: 'uuid', newMemberPersonalWalletId: 'uuid', permissions: ['initiate', 'vote', 'execute'], newThreshold: 'number optional' },
   }),
+  endpoint('create_squads_add_agent_member_proposal_intent', 'POST', '/organizations/{organizationId}/treasury-wallets/{treasuryWalletId}/squads/config-proposals/add-agent-member-intent', ['automation agents', 'treasury wallets', 'squads'], 'Prepare a signable Squads config proposal that adds an automation wallet as a member', 'session', {
+    scope: 'organization:write',
+    requestBody: { creatorPersonalWalletId: 'uuid', agentWalletId: 'uuid', permissions: ['initiate', 'vote', 'execute'], newThreshold: 'number optional' },
+  }),
   endpoint('create_squads_change_threshold_proposal_intent', 'POST', '/organizations/{organizationId}/treasury-wallets/{treasuryWalletId}/squads/config-proposals/change-threshold-intent', ['treasury wallets', 'squads'], 'Prepare a signable Squads config proposal that changes threshold', 'session', {
     scope: 'organization:write',
     requestBody: { creatorPersonalWalletId: 'uuid', newThreshold: 'number' },
+  }),
+  endpoint('create_squads_spending_limit_proposal_intent', 'POST', '/organizations/{organizationId}/treasury-wallets/{treasuryWalletId}/squads/config-proposals/add-spending-limit-intent', ['automation agents', 'treasury wallets', 'squads'], 'Prepare a signable Squads config proposal that grants a bounded spending limit to an automation wallet', 'session', {
+    scope: 'organization:write',
+    requestBody: { creatorPersonalWalletId: 'uuid', agentWalletId: 'uuid', policyName: 'string', amountRaw: 'string', period: 'one_time | day | week | month', counterpartyWalletIds: 'uuid[]' },
   }),
   endpoint('create_squads_payment_proposal_intent', 'POST', '/organizations/{organizationId}/treasury-wallets/{treasuryWalletId}/squads/vault-proposals/payment-intent', ['treasury wallets', 'squads', 'proposals'], 'Prepare a signable Squads vault proposal that pays a Decimal payment order', 'session', {
     scope: 'execution:write',
@@ -120,6 +131,35 @@ export const API_ENDPOINTS = [
     requestBody: { memberPersonalWalletId: 'uuid' },
   }),
   endpoint('sync_squads_members', 'POST', '/organizations/{organizationId}/treasury-wallets/{treasuryWalletId}/squads/sync-members', ['treasury wallets', 'squads'], 'Sync local Squads member authorizations from onchain multisig state', 'session', { scope: 'organization:write' }),
+  endpoint('list_automation_agents', 'GET', '/organizations/{organizationId}/automation-agents', ['automation agents'], 'List automation agents and their wallets', 'session', { scope: 'organization:read' }),
+  endpoint('create_automation_agent', 'POST', '/organizations/{organizationId}/automation-agents', ['automation agents'], 'Create a non-human automation agent', 'session', {
+    scope: 'organization:write',
+    requestBody: { name: 'string', agentType: 'string optional' },
+  }),
+  endpoint('list_agent_wallets', 'GET', '/organizations/{organizationId}/agent-wallets', ['automation agents'], 'List backend-managed agent wallets', 'session', { scope: 'organization:read' }),
+  endpoint('create_managed_agent_wallet', 'POST', '/organizations/{organizationId}/automation-agents/{automationAgentId}/wallets/managed', ['automation agents'], 'Create a Privy-backed Solana wallet owned by an automation agent', 'session', {
+    scope: 'organization:write',
+    requestBody: { provider: 'privy', label: 'string optional' },
+  }),
+  endpoint('list_spending_limit_policies', 'GET', '/organizations/{organizationId}/spending-limit-policies', ['automation agents', 'squads'], 'List Squads spending-limit policies tracked by Decimal', 'session', { scope: 'organization:read' }),
+  endpoint('get_spending_limit_policy', 'GET', '/organizations/{organizationId}/spending-limit-policies/{spendingLimitPolicyId}', ['automation agents', 'squads'], 'Read one Squads spending-limit policy', 'session', { scope: 'organization:read' }),
+  endpoint('sync_spending_limit_policy', 'POST', '/organizations/{organizationId}/spending-limit-policies/{spendingLimitPolicyId}/sync', ['automation agents', 'squads'], 'Sync one local spending-limit policy from its onchain Squads account', 'session', { scope: 'organization:write' }),
+  endpoint('replace_spending_limit_policy_intent', 'POST', '/organizations/{organizationId}/spending-limit-policies/{spendingLimitPolicyId}/replace-intent', ['automation agents', 'squads'], 'Prepare a signable Squads config proposal that atomically removes one spending policy and adds its replacement', 'session', {
+    scope: 'organization:write',
+    requestBody: { creatorPersonalWalletId: 'uuid', agentWalletId: 'uuid optional', policyName: 'string optional', amountRaw: 'string optional', period: 'one_time | day | week | month optional', counterpartyWalletIds: 'uuid[] optional', memo: 'string optional' },
+  }),
+  endpoint('remove_spending_limit_policy_intent', 'POST', '/organizations/{organizationId}/spending-limit-policies/{spendingLimitPolicyId}/remove-intent', ['automation agents', 'squads'], 'Prepare a signable Squads config proposal that revokes an active spending policy', 'session', {
+    scope: 'organization:write',
+    requestBody: { creatorPersonalWalletId: 'uuid', memo: 'string optional' },
+  }),
+  endpoint('list_spending_limit_executions', 'GET', '/organizations/{organizationId}/spending-limit-executions', ['automation agents', 'squads'], 'List agent executions made through Squads spending-limit policies', 'session', {
+    scope: 'organization:read',
+    query: { spendingLimitPolicyId: 'uuid optional', treasuryWalletId: 'uuid optional', automationAgentId: 'uuid optional', agentWalletId: 'uuid optional', paymentOrderId: 'uuid optional', status: 'string optional', limit: 'number optional' },
+  }),
+  endpoint('list_spending_limit_policy_executions', 'GET', '/organizations/{organizationId}/spending-limit-policies/{spendingLimitPolicyId}/executions', ['automation agents', 'squads'], 'List agent executions for one spending-limit policy', 'session', {
+    scope: 'organization:read',
+    query: { status: 'string optional', limit: 'number optional' },
+  }),
   endpoint('list_decimal_proposals', 'GET', '/organizations/{organizationId}/proposals', ['proposals'], 'List Decimal proposal records including Squads-backed config and vault proposals', 'session', { scope: 'organization:read' }),
   endpoint('get_decimal_proposal', 'GET', '/organizations/{organizationId}/proposals/{decimalProposalId}', ['proposals'], 'Read one Decimal proposal record with live Squads voting state when available', 'session', { scope: 'organization:read' }),
   endpoint('confirm_decimal_proposal_submission', 'POST', '/organizations/{organizationId}/proposals/{decimalProposalId}/confirm-submission', ['proposals'], 'Attach the proposal creation transaction signature after client submission', 'session', {
@@ -167,6 +207,11 @@ export const API_ENDPOINTS = [
   endpoint('get_payment_request', 'GET', '/organizations/{organizationId}/payment-requests/{paymentRequestId}', ['inputs'], 'Get payment request detail', 'session', { scope: 'organization:read' }),
   endpoint('promote_payment_request', 'POST', '/organizations/{organizationId}/payment-requests/{paymentRequestId}/promote', ['inputs'], 'Promote payment request to payment order', 'session', { scope: 'payments:write' }),
   endpoint('cancel_payment_request', 'POST', '/organizations/{organizationId}/payment-requests/{paymentRequestId}/cancel', ['inputs'], 'Cancel payment request', 'session', { scope: 'payments:write' }),
+  endpoint('upload_invoice', 'POST', '/organizations/{organizationId}/invoices/upload', ['inputs', 'payment orders'], 'Upload an invoice document, run AP intake, and create payment orders that are either proposal-ready or human-review gated', 'session', {
+    scope: 'payments:write',
+    requestBody: { filename: 'string', mimeType: 'string', dataBase64: 'string base64', sourceTreasuryWalletId: 'uuid optional' },
+    response: { primaryPaymentOrder: 'payment order', paymentOrders: 'created payment orders with AP intake decisions', skippedRows: 'rows that could not become payment orders' },
+  }),
 
   endpoint('list_payment_runs', 'GET', '/organizations/{organizationId}/payment-runs', ['payment runs'], 'List payment runs', 'session', { scope: 'organization:read' }),
   endpoint('import_payment_run_csv', 'POST', '/organizations/{organizationId}/payment-runs/import-csv', ['payment runs'], 'Import CSV as payment run', 'session', {
@@ -179,6 +224,10 @@ export const API_ENDPOINTS = [
   }),
   endpoint('preview_payment_run_csv', 'POST', '/organizations/{organizationId}/payment-runs/import-csv/preview', ['payment runs'], 'Preview payment run CSV import without side effects', 'session', { scope: 'organization:read' }),
   endpoint('get_payment_run', 'GET', '/organizations/{organizationId}/payment-runs/{paymentRunId}', ['payment runs'], 'Get payment run detail', 'session', { scope: 'organization:read' }),
+  endpoint('resolve_payment_run_document_row', 'POST', '/organizations/{organizationId}/payment-runs/{paymentRunId}/resolve-document-row', ['payment runs', 'inputs'], 'Resolve an unrouted OCR document row into a payment request/order by selecting or correcting the counterparty wallet', 'session', {
+    scope: 'payments:write',
+    requestBody: { rowIndex: 'number', counterpartyWalletId: 'uuid optional', walletAddress: 'string optional', label: 'string optional' },
+  }),
   endpoint('delete_payment_run', 'DELETE', '/organizations/{organizationId}/payment-runs/{paymentRunId}', ['payment runs'], 'Delete payment run', 'session', { scope: 'payments:write' }),
   endpoint('cancel_payment_run', 'POST', '/organizations/{organizationId}/payment-runs/{paymentRunId}/cancel', ['payment runs'], 'Cancel payment run before execution evidence exists', 'session', { scope: 'payments:write' }),
   endpoint('close_payment_run', 'POST', '/organizations/{organizationId}/payment-runs/{paymentRunId}/close', ['payment runs'], 'Close fully settled payment run', 'session', { scope: 'payments:write' }),
@@ -217,10 +266,18 @@ export const API_ENDPOINTS = [
   endpoint('get_payment_order', 'GET', '/organizations/{organizationId}/payment-orders/{paymentOrderId}', ['payment orders'], 'Get payment order detail', 'session', { scope: 'organization:read' }),
   endpoint('update_payment_order', 'PATCH', '/organizations/{organizationId}/payment-orders/{paymentOrderId}', ['payment orders'], 'Update payment order', 'session', { scope: 'payments:write' }),
   endpoint('submit_payment_order', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/submit', ['payment orders'], 'Submit payment order into the approval workflow', 'session', { scope: 'payments:write' }),
+  endpoint('clear_payment_order_review', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/clear-review', ['payment orders'], 'Clear an AP-intake flagged payment order and advance it to the proposal-ready path', 'session', {
+    scope: 'payments:write',
+    requestBody: { reviewNote: 'string optional', trustCounterpartyWallet: 'boolean default true', submitAfterClear: 'boolean default true' },
+  }),
   endpoint('cancel_payment_order', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/cancel', ['payment orders'], 'Cancel payment order', 'session', { scope: 'payments:write' }),
   endpoint('prepare_payment_order_execution', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/prepare-execution', ['payment orders'], 'Prepare signer-ready Solana transfer packet', 'session', { scope: 'execution:write' }),
   endpoint('create_payment_order_execution', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/create-execution', ['payment orders'], 'Record external execution handoff', 'session', { scope: 'execution:write' }),
   endpoint('attach_payment_order_signature', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/attach-signature', ['payment orders'], 'Attach submitted execution signature', 'session', { scope: 'execution:write' }),
+  endpoint('execute_payment_order_with_spending_limit', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/execute-with-spending-limit', ['payment orders', 'automation agents', 'squads'], 'Execute a payment order through an active Squads spending limit signed by the agent wallet', 'session', {
+    scope: 'execution:write',
+    requestBody: { spendingLimitPolicyId: 'uuid', memo: 'string optional' },
+  }),
   endpoint('payment_order_proof', 'GET', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/proof', ['proof'], 'Export payment order proof', 'session', {
     scope: 'proofs:read',
     query: { format: 'json' },
