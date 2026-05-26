@@ -66,6 +66,7 @@ export async function createPaymentOrder(
     metadataJson?: Prisma.InputJsonValue;
     paymentRequestId?: string | null;
     paymentRunId?: string | null;
+    initialState?: Extract<PaymentOrderState, 'draft' | 'needs_review' | 'agent_flagged'>;
     submitNow?: boolean;
   },
 ) {
@@ -127,7 +128,7 @@ export async function createPaymentOrder(
         invoiceNumber: normalizeOptionalText(args.invoiceNumber),
         attachmentUrl: normalizeOptionalText(args.attachmentUrl),
         dueAt: args.dueAt ?? undefined,
-        state: 'draft',
+        state: args.initialState ?? 'draft',
         sourceBalanceSnapshotJson: (args.sourceBalanceSnapshotJson ?? { status: 'unknown' }) as Prisma.InputJsonValue,
         metadataJson: (args.metadataJson ?? {}) as Prisma.InputJsonValue,
         createdByUserId: args.actorUserId ?? undefined,
@@ -155,6 +156,9 @@ export async function createPaymentOrder(
   });
 
   if (args.submitNow) {
+    if (created.state === 'needs_review' || created.state === 'agent_flagged') {
+      throw new Error('Payment orders that need review must be cleared before submission');
+    }
     return submitPaymentOrder({
       organizationId: args.organizationId,
       paymentOrderId: created.paymentOrderId,
@@ -223,7 +227,7 @@ export async function updatePaymentOrder(
     include: paymentOrderInclude,
   });
 
-  if (!['draft', 'approved'].includes(current.state)) {
+  if (!['draft', 'approved', 'needs_review', 'agent_flagged'].includes(current.state)) {
     throw new Error(`Payment order ${current.state} cannot be edited`);
   }
 
@@ -313,7 +317,7 @@ export async function submitPaymentOrder(
     organizationId: string;
     paymentOrderId: string;
   },
-) {
+): Promise<Awaited<ReturnType<typeof getPaymentOrderDetail>>> {
   const current = await prisma.paymentOrder.findFirstOrThrow({
     where: {
       organizationId: args.organizationId,
@@ -324,6 +328,19 @@ export async function submitPaymentOrder(
 
   if (current.transferRequests.length) {
     return getPaymentOrderDetail(args.organizationId, args.paymentOrderId);
+  }
+
+  if (current.state === 'needs_review' || current.state === 'agent_flagged') {
+    return clearPaymentOrderReview({
+      organizationId: args.organizationId,
+      paymentOrderId: current.paymentOrderId,
+      actorUserId: args.actorUserId,
+      actorType: args.actorType,
+      actorId: args.actorId,
+      reviewNote: null,
+      trustCounterpartyWallet: true,
+      submitAfterClear: true,
+    });
   }
 
   if (current.state !== 'draft') {
@@ -397,6 +414,101 @@ export async function submitPaymentOrder(
       payloadJson: {},
     });
   });
+
+  return getPaymentOrderDetail(args.organizationId, args.paymentOrderId);
+}
+
+export async function clearPaymentOrderReview(args: PaymentActorInput & {
+  organizationId: string;
+  paymentOrderId: string;
+  reviewNote?: string | null;
+  trustCounterpartyWallet?: boolean;
+  submitAfterClear?: boolean;
+}): Promise<Awaited<ReturnType<typeof getPaymentOrderDetail>>> {
+  const current = await prisma.paymentOrder.findFirstOrThrow({
+    where: {
+      organizationId: args.organizationId,
+      paymentOrderId: args.paymentOrderId,
+    },
+    include: paymentOrderInclude,
+  });
+
+  if (current.transferRequests.length) {
+    return getPaymentOrderDetail(args.organizationId, args.paymentOrderId);
+  }
+
+  if (current.state !== 'needs_review' && current.state !== 'agent_flagged') {
+    throw new Error(`Payment order ${current.state} does not need review`);
+  }
+
+  if (current.counterpartyWallet.trustState === 'blocked') {
+    throw new Error(`Counterparty wallet "${current.counterpartyWallet.label}" is blocked and cannot be cleared`);
+  }
+
+  if (current.counterpartyWallet.trustState === 'restricted') {
+    throw new Error(
+      `Counterparty wallet "${current.counterpartyWallet.label}" is restricted. Mark it trusted in the address book before clearing this payment.`,
+    );
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const nextMetadata = {
+      ...(isRecordLike(current.metadataJson) ? current.metadataJson : {}),
+      humanReview: {
+        status: 'cleared',
+        clearedAt: new Date().toISOString(),
+        clearedByUserId: args.actorUserId,
+        note: normalizeOptionalText(args.reviewNote),
+      },
+    };
+
+    if (args.trustCounterpartyWallet !== false && current.counterpartyWallet.trustState === 'unreviewed') {
+      await tx.counterpartyWallet.update({
+        where: { counterpartyWalletId: current.counterpartyWalletId },
+        data: {
+          trustState: 'trusted',
+          metadataJson: {
+            ...(isRecordLike(current.counterpartyWallet.metadataJson) ? current.counterpartyWallet.metadataJson : {}),
+            reviewClearedFromPaymentOrderId: current.paymentOrderId,
+            reviewedAt: new Date().toISOString(),
+            reviewedByUserId: args.actorUserId,
+          },
+        },
+      });
+    }
+
+    await tx.paymentOrder.update({
+      where: { paymentOrderId: current.paymentOrderId },
+      data: {
+        state: 'draft',
+        metadataJson: nextMetadata as Prisma.InputJsonValue,
+      },
+    });
+
+    await createPaymentOrderEvent(tx, {
+      paymentOrderId: current.paymentOrderId,
+      organizationId: args.organizationId,
+      eventType: 'payment_order_review_cleared',
+      ...buildPaymentEventActor(args),
+      beforeState: current.state,
+      afterState: 'draft',
+      payloadJson: {
+        reviewNote: normalizeOptionalText(args.reviewNote),
+        trustedCounterpartyWallet:
+          args.trustCounterpartyWallet !== false && current.counterpartyWallet.trustState === 'unreviewed',
+      },
+    });
+  });
+
+  if (args.submitAfterClear ?? true) {
+    return submitPaymentOrder({
+      organizationId: args.organizationId,
+      paymentOrderId: args.paymentOrderId,
+      actorUserId: args.actorUserId,
+      actorType: args.actorType,
+      actorId: args.actorId,
+    });
+  }
 
   return getPaymentOrderDetail(args.organizationId, args.paymentOrderId);
 }
@@ -938,6 +1050,7 @@ async function buildPaymentOrderReadModel(order: PaymentOrderWithRelations) {
     paymentRequestId: order.paymentRequestId,
     paymentRunId: order.paymentRunId,
     counterpartyWalletId: order.counterpartyWalletId,
+    destinationId: order.counterpartyWalletId,
     counterpartyId: order.counterpartyId,
     sourceTreasuryWalletId: order.sourceTreasuryWalletId,
     transferRequestId: primaryTransferRequest?.transferRequestId ?? null,
@@ -965,6 +1078,8 @@ async function buildPaymentOrderReadModel(order: PaymentOrderWithRelations) {
     transferRequests: order.transferRequests.map((request) => ({
       transferRequestId: request.transferRequestId,
       status: request.status,
+      counterpartyWalletId: request.counterpartyWalletId,
+      destinationId: request.counterpartyWalletId,
       amountRaw: request.amountRaw.toString(),
       requestedAt: request.requestedAt,
     })),
@@ -1105,6 +1220,9 @@ function mapSquadsProposalStatusToPaymentState(proposal: DecimalProposal): Payme
 
 function mapInternalPaymentStateToSquadsProductState(state: string): PaymentOrderState {
   switch (state) {
+    case 'needs_review':
+    case 'agent_flagged':
+      return state as PaymentOrderState;
     case 'draft':
       return 'draft';
     case 'approved':
@@ -1500,6 +1618,7 @@ function serializePaymentRequestRef(
     paymentRequestId: request.paymentRequestId,
     organizationId: request.organizationId,
     counterpartyWalletId: request.counterpartyWalletId,
+    destinationId: request.counterpartyWalletId,
     counterpartyId: request.counterpartyId,
     requestedByUserId: request.requestedByUserId,
     amountRaw: request.amountRaw.toString(),
@@ -1521,6 +1640,7 @@ function serializePaymentOrderCounterpartyWallet(
   },
 ) {
   return {
+    destinationId: wallet.counterpartyWalletId,
     counterpartyWalletId: wallet.counterpartyWalletId,
     organizationId: wallet.organizationId,
     counterpartyId: wallet.counterpartyId,
@@ -1529,6 +1649,7 @@ function serializePaymentOrderCounterpartyWallet(
     walletAddress: wallet.walletAddress,
     tokenAccountAddress: wallet.tokenAccountAddress,
     walletType: wallet.walletType,
+    destinationType: wallet.walletType,
     trustState: wallet.trustState,
     label: wallet.label,
     notes: wallet.notes,

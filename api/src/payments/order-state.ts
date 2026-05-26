@@ -1,4 +1,6 @@
 export const PAYMENT_ORDER_STATES = [
+  'needs_review',
+  'agent_flagged',
   'draft',
   'approved',
   'ready',

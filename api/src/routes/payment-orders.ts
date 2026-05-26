@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   attachPaymentOrderSignature,
   cancelPaymentOrder,
+  clearPaymentOrderReview,
   createPaymentOrder,
   createPaymentOrderExecution,
   getPaymentOrderDetail,
@@ -34,7 +35,8 @@ const amountRawSchema = z.union([
 ]);
 
 const createPaymentOrderSchema = z.object({
-  counterpartyWalletId: z.string().uuid(),
+  counterpartyWalletId: z.string().uuid().optional(),
+  destinationId: z.string().uuid().optional(),
   sourceTreasuryWalletId: z.string().uuid().optional(),
   amountRaw: amountRawSchema,
   asset: z.string().trim().min(1).max(20).default('usdc'),
@@ -46,6 +48,9 @@ const createPaymentOrderSchema = z.object({
   sourceBalanceSnapshotJson: z.record(z.any()).default({ status: 'unknown' }),
   metadataJson: z.record(z.any()).default({}),
   submitNow: z.boolean().default(false),
+}).refine((value) => Boolean(value.counterpartyWalletId ?? value.destinationId), {
+  message: 'counterpartyWalletId is required',
+  path: ['counterpartyWalletId'],
 });
 
 const updatePaymentOrderSchema = z.object({
@@ -89,6 +94,12 @@ const proofQuerySchema = z.object({
   format: z.literal('json').default('json'),
 });
 
+const clearReviewSchema = z.object({
+  reviewNote: z.string().trim().max(2000).optional().nullable(),
+  trustCounterpartyWallet: z.boolean().default(true),
+  submitAfterClear: z.boolean().default(true),
+});
+
 paymentOrdersRouter.get('/organizations/:organizationId/payment-orders', asyncRoute(async (req, res) => {
     const { organizationId } = organizationParamsSchema.parse(req.params);
     const query = listPaymentOrdersQuerySchema.parse(req.query);
@@ -115,7 +126,7 @@ paymentOrdersRouter.post('/organizations/:organizationId/payment-orders', asyncR
     const detail = await createPaymentOrder({
       organizationId,
       ...actor,
-      counterpartyWalletId: input.counterpartyWalletId,
+      counterpartyWalletId: input.counterpartyWalletId ?? input.destinationId!,
       sourceTreasuryWalletId: input.sourceTreasuryWalletId,
       amountRaw: input.amountRaw,
       asset: input.asset,
@@ -174,6 +185,22 @@ paymentOrdersRouter.post('/organizations/:organizationId/payment-orders/:payment
     next(error);
   }
 });
+
+paymentOrdersRouter.post('/organizations/:organizationId/payment-orders/:paymentOrderId/clear-review', asyncRoute(async (req, res) => {
+    const { organizationId, paymentOrderId } = paymentOrderParamsSchema.parse(req.params);
+    await assertOrganizationAdmin(organizationId, req.auth!);
+    const input = clearReviewSchema.parse(req.body);
+    const actor = actorFromAuth(req.auth!);
+
+    sendJson(res, await clearPaymentOrderReview({
+      organizationId,
+      paymentOrderId,
+      ...actor,
+      reviewNote: input.reviewNote,
+      trustCounterpartyWallet: input.trustCounterpartyWallet,
+      submitAfterClear: input.submitAfterClear,
+    }));
+}));
 
 paymentOrdersRouter.post('/organizations/:organizationId/payment-orders/:paymentOrderId/cancel', async (req, res, next) => {
   try {
