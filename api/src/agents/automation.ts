@@ -62,6 +62,40 @@ export async function ensureDefaultAutomationAgentWithWallet(
     };
   }
 
+  const existingAgent = await prisma.automationAgent.findFirst({
+    where: {
+      organizationId,
+      status: 'active',
+      OR: [
+        { agentType: 'decimal_operations' },
+        { name: 'Decimal operations agent' },
+      ],
+    },
+    include: automationAgentInclude,
+    orderBy: { createdAt: 'asc' },
+  });
+  const existingWallet = existingAgent?.wallets.find((wallet) =>
+    wallet.status === 'active'
+    && wallet.provider === 'privy'
+    && wallet.providerWalletId,
+  );
+  if (existingAgent && existingWallet) {
+    return {
+      status: 'existing',
+      reason: null,
+      agent: serializeAutomationAgent(existingAgent),
+      wallet: serializeAgentWallet({
+        ...existingWallet,
+        automationAgent: {
+          automationAgentId: existingAgent.automationAgentId,
+          name: existingAgent.name,
+          agentType: existingAgent.agentType,
+          status: existingAgent.status,
+        },
+      }),
+    };
+  }
+
   if (!config.privyAppId || !config.privyAppSecret) {
     if (input.failOnError) {
       throw badRequest('Privy wallet provisioning is not configured.');

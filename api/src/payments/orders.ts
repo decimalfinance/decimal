@@ -46,7 +46,7 @@ export type PaymentOrderWithRelations = PaymentOrder & {
 type PaymentOrderClient = typeof prisma | Prisma.TransactionClient;
 type PaymentActorInput = {
   actorUserId: string | null;
-  actorType?: 'user';
+  actorType?: 'user' | 'agent' | 'system';
   actorId?: string | null;
 };
 
@@ -1551,7 +1551,7 @@ async function createPaymentOrderEvent(
     paymentOrderId: string;
     organizationId: string;
     eventType: string;
-    actorType: 'user' | 'system';
+    actorType: 'user' | 'system' | 'agent';
     actorId?: string | null;
     beforeState?: string | null;
     afterState?: string | null;

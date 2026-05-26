@@ -18,7 +18,9 @@ import {
 export async function markPaymentOrderSquadsProposalPrepared(args: {
   organizationId: string;
   paymentOrderId: string;
-  actorUserId: string;
+  actorUserId: string | null;
+  actorType?: string;
+  actorId?: string | null;
   beforeState: string;
   transferRequestId: string;
   decimalProposalId: string;
@@ -34,8 +36,8 @@ export async function markPaymentOrderSquadsProposalPrepared(args: {
         paymentOrderId: args.paymentOrderId,
         organizationId: args.organizationId,
         eventType: 'squads_payment_proposal_prepared',
-        actorType: 'user',
-        actorId: args.actorUserId,
+        actorType: args.actorType ?? 'user',
+        actorId: args.actorId ?? args.actorUserId,
         beforeState: args.beforeState,
         afterState: 'ready',
         linkedTransferRequestId: args.transferRequestId,
@@ -52,7 +54,9 @@ export async function markPaymentOrderSquadsProposalPrepared(args: {
 export async function markPaymentRunSquadsProposalPrepared(args: {
   organizationId: string;
   paymentRunId: string;
-  actorUserId: string;
+  actorUserId: string | null;
+  actorType?: string;
+  actorId?: string | null;
   decimalProposalId: string;
   transactionIndex: string;
   items: Array<{
@@ -76,8 +80,8 @@ export async function markPaymentRunSquadsProposalPrepared(args: {
           paymentOrderId: item.paymentOrderId,
           organizationId: args.organizationId,
           eventType: 'squads_payment_run_proposal_prepared',
-          actorType: 'user',
-          actorId: args.actorUserId,
+          actorType: args.actorType ?? 'user',
+          actorId: args.actorId ?? args.actorUserId,
           beforeState: item.beforeState,
           afterState: 'ready',
           linkedTransferRequestId: item.transferRequestId,
@@ -98,7 +102,9 @@ export async function markPaymentOrderSquadsProposalSubmitted(
   args: {
     organizationId: string;
     paymentOrderId: string;
-    actorUserId: string;
+    actorUserId: string | null;
+    actorType?: string;
+    actorId?: string | null;
     decimalProposalId: string;
     beforeState: string | null;
     signature: string;
@@ -121,8 +127,8 @@ export async function markPaymentOrderSquadsProposalSubmitted(
       paymentOrderId: args.paymentOrderId,
       organizationId: args.organizationId,
       eventType: 'squads_payment_proposal_submitted',
-      actorType: 'user',
-      actorId: args.actorUserId,
+      actorType: args.actorType ?? 'user',
+      actorId: args.actorId ?? args.actorUserId,
       beforeState: args.beforeState ?? paymentOrder.state,
       afterState: 'proposed',
       linkedSignature: args.signature,
@@ -140,7 +146,9 @@ export async function markPaymentRunSquadsProposalSubmitted(
   args: {
     organizationId: string;
     paymentRunId: string;
-    actorUserId: string;
+    actorUserId: string | null;
+    actorType?: string;
+    actorId?: string | null;
     decimalProposalId: string;
     signature: string;
     transactionIndex: string | null;
@@ -178,8 +186,8 @@ export async function markPaymentRunSquadsProposalSubmitted(
         paymentOrderId: order.paymentOrderId,
         organizationId: args.organizationId,
         eventType: 'squads_payment_run_proposal_submitted',
-        actorType: 'user',
-        actorId: args.actorUserId,
+        actorType: args.actorType ?? 'user',
+        actorId: args.actorId ?? args.actorUserId,
         beforeState: order.state,
         afterState: 'proposed',
         linkedTransferRequestId: order.transferRequests[0]?.transferRequestId ?? null,
@@ -533,4 +541,3 @@ export async function markPaymentRunSquadsProposalExecuted(
     }
   }
 }
-

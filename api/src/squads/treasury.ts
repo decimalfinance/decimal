@@ -9,6 +9,7 @@ import { prisma } from '../infra/prisma.js';
 import { ensureDefaultAutomationAgentWithWallet } from '../agents/automation.js';
 import { submitPaymentOrder } from '../payments/orders.js';
 import { fundNewDevnetWalletIfConfigured } from '../wallets/devnet-funding.js';
+import { signPrivySolanaTransaction } from '../wallets/personal.js';
 import {
   buildDestinationAtaCreateInstruction,
   buildUsdcTransferTransactionInstructions,
@@ -88,6 +89,19 @@ type SquadsSpendingLimitAccountLike = {
   members: PublicKey[];
   destinations: PublicKey[];
 };
+type SquadsProposalCreator = {
+  walletAddress: string;
+  personalWalletId: string | null;
+  providerWalletId?: string | null;
+  automationAgentId?: string | null;
+  agentWalletId?: string | null;
+  agentName?: string | null;
+};
+type SquadsProposalActor = {
+  actorUserId: string | null;
+  actorType: 'user' | 'agent';
+  actorId: string | null;
+};
 
 type SquadsTreasuryRuntime = {
   getLatestBlockhash: () => Promise<{ blockhash: string; lastValidBlockHeight: number }>;
@@ -97,6 +111,9 @@ type SquadsTreasuryRuntime = {
   loadConfigTransaction: (configTransactionPda: PublicKey) => Promise<SquadsConfigTransactionAccountLike | null>;
   loadVaultTransaction: (vaultTransactionPda: PublicKey) => Promise<SquadsVaultTransactionAccountLike | null>;
   loadSpendingLimit: (spendingLimitPda: PublicKey) => Promise<SquadsSpendingLimitAccountLike | null>;
+  signTransaction: typeof signPrivySolanaTransaction;
+  sendRawTransaction: (rawTransaction: Buffer) => Promise<string>;
+  waitForSignature: (signature: string) => Promise<{ confirmed: boolean; seen: boolean }>;
 };
 
 const defaultRuntime: SquadsTreasuryRuntime = {
@@ -143,6 +160,12 @@ const defaultRuntime: SquadsTreasuryRuntime = {
       throw error;
     }
   },
+  signTransaction: signPrivySolanaTransaction,
+  sendRawTransaction: (rawTransaction) => getSolanaConnection().sendRawTransaction(rawTransaction),
+  waitForSignature: (signature) => waitForSignatureVisible(getSolanaConnection(), signature, {
+    timeoutMs: 20_000,
+    pollIntervalMs: 1_000,
+  }),
 };
 
 let runtime: SquadsTreasuryRuntime = defaultRuntime;
@@ -760,10 +783,121 @@ export async function createSquadsPaymentProposalIntent(
   input: CreateSquadsPaymentProposalInput,
 ) {
   const creator = await loadActorPersonalWallet(actorUserId, input.creatorPersonalWalletId);
-  const { wallet, programId, multisigPda, vaultPda, vaultIndex, multisigAccount } = await loadSquadsTreasury(organizationId, treasuryWalletId);
   if (creator.userId !== actorUserId) {
     throw badRequest('creatorPersonalWalletId must belong to the authenticated user.');
   }
+  return createSquadsPaymentProposalIntentForCreator({
+    organizationId,
+    treasuryWalletId,
+    actor: {
+      actorUserId,
+      actorType: 'user',
+      actorId: actorUserId,
+    },
+    creator: {
+      walletAddress: creator.walletAddress,
+      personalWalletId: creator.userWalletId,
+      providerWalletId: creator.providerWalletId,
+    },
+    input,
+  });
+}
+
+export async function createAndSubmitSquadsPaymentProposalAsAgent(
+  organizationId: string,
+  treasuryWalletId: string,
+  actorUserId: string | null,
+  input: { paymentOrderId: string; memo?: string | null },
+) {
+  const defaultAgent = await ensureDefaultAutomationAgentWithWallet(organizationId, {
+    force: true,
+    failOnError: false,
+  });
+  if (!defaultAgent.wallet || !defaultAgent.agent) {
+    throw badRequest('Default automation agent wallet is not available. Configure Privy or create an agent wallet first.');
+  }
+  if (!defaultAgent.wallet.providerWalletId) {
+    throw badRequest('Default automation agent wallet is missing a provider wallet id and cannot sign.');
+  }
+
+  const prepared = await createSquadsPaymentProposalIntentForCreator({
+    organizationId,
+    treasuryWalletId,
+    actor: {
+      actorUserId,
+      actorType: 'agent',
+      actorId: defaultAgent.agent.automationAgentId,
+    },
+    creator: {
+      walletAddress: defaultAgent.wallet.walletAddress,
+      personalWalletId: null,
+      providerWalletId: defaultAgent.wallet.providerWalletId,
+      automationAgentId: defaultAgent.agent.automationAgentId,
+      agentWalletId: defaultAgent.wallet.agentWalletId,
+      agentName: defaultAgent.agent.name,
+    },
+    input,
+  });
+
+  try {
+    const signed = await runtime.signTransaction({
+      providerWalletId: defaultAgent.wallet.providerWalletId,
+      serializedTransactionBase64: prepared.transaction.serializedTransaction,
+    });
+    const signature = await runtime.sendRawTransaction(Buffer.from(signed.signedTransactionBase64, 'base64'));
+    const visible = await runtime.waitForSignature(signature);
+    if (!visible.confirmed) {
+      throw badRequest('Agent-submitted Squads proposal transaction is not confirmed yet. Retry after the transaction lands.', {
+        signature,
+        seen: visible.seen,
+      });
+    }
+    const decimalProposal = await recordDecimalProposalSubmission({
+      organizationId,
+      decimalProposalId: prepared.decimalProposal.decimalProposalId,
+      signature,
+      actor: {
+        actorUserId,
+        actorType: 'agent',
+        actorId: defaultAgent.agent.automationAgentId,
+      },
+    });
+    await prisma.agentWallet.update({
+      where: { agentWalletId: defaultAgent.wallet.agentWalletId },
+      data: { lastUsedAt: new Date() },
+    });
+
+    return {
+      ...prepared,
+      decimalProposal,
+      submittedSignature: signature,
+      automationAgent: defaultAgent.agent,
+      agentWallet: defaultAgent.wallet,
+    };
+  } catch (error) {
+    await markPreparedProposalFailed({
+      organizationId,
+      decimalProposalId: prepared.decimalProposal.decimalProposalId,
+      reason: error instanceof Error ? error.message : 'Agent proposal submission failed',
+      actor: {
+        actorUserId,
+        actorType: 'agent',
+        actorId: defaultAgent.agent.automationAgentId,
+      },
+    });
+    throw error;
+  }
+}
+
+async function createSquadsPaymentProposalIntentForCreator(args: {
+  organizationId: string;
+  treasuryWalletId: string;
+  actor: SquadsProposalActor;
+  creator: SquadsProposalCreator;
+  input: { paymentOrderId: string; memo?: string | null };
+}) {
+  const { organizationId, treasuryWalletId, actor, creator, input } = args;
+  const { wallet, programId, multisigPda, vaultPda, vaultIndex, multisigAccount } = await loadSquadsTreasury(organizationId, treasuryWalletId);
   assertOnchainMemberPermission(multisigAccount, creator.walletAddress, 'initiate');
 
   let paymentOrder = await loadPaymentOrderForSquadsProposal(organizationId, input.paymentOrderId);
@@ -791,9 +925,9 @@ export async function createSquadsPaymentProposalIntent(
     await submitPaymentOrder({
       organizationId,
       paymentOrderId: paymentOrder.paymentOrderId,
-      actorUserId,
-      actorType: 'user',
-      actorId: actorUserId,
+      actorUserId: actor.actorUserId,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
     });
     paymentOrder = await loadPaymentOrderForSquadsProposal(organizationId, input.paymentOrderId);
   }
@@ -905,8 +1039,8 @@ export async function createSquadsPaymentProposalIntent(
     organizationId,
     treasuryWalletId,
     paymentOrderId: paymentOrder.paymentOrderId,
-    createdByUserId: actorUserId,
-    creatorPersonalWalletId: creator.userWalletId,
+    createdByUserId: actor.actorUserId,
+    creatorPersonalWalletId: creator.personalWalletId,
     creatorWalletAddress: creator.walletAddress,
     requiredSigner: creator.walletAddress,
     proposalType: 'vault_transaction',
@@ -918,12 +1052,22 @@ export async function createSquadsPaymentProposalIntent(
     semanticPayload,
     metadataJson: {
       transferRequestId: transferRequest.transferRequestId,
+      ...(creator.automationAgentId
+        ? {
+            createdBy: 'automation_agent',
+            automationAgentId: creator.automationAgentId,
+            agentWalletId: creator.agentWalletId,
+            agentName: creator.agentName,
+          }
+        : {}),
     },
   });
   await markPaymentOrderSquadsProposalPrepared({
     paymentOrderId: paymentOrder.paymentOrderId,
     organizationId,
-    actorUserId,
+    actorUserId: actor.actorUserId,
+    actorType: actor.actorType,
+    actorId: actor.actorId,
     beforeState: paymentOrder.state,
     transferRequestId: transferRequest.transferRequestId,
     decimalProposalId: decimalProposal.decimalProposalId,
@@ -1427,14 +1571,32 @@ export async function confirmDecimalProposalSubmission(
   await getDecimalProposal(organizationId, actorUserId, decimalProposalId);
   const signature = input.signature.trim();
   await verifyRpcSignatureConfirmed(signature, 'proposal_submission');
+  return recordDecimalProposalSubmission({
+    organizationId,
+    decimalProposalId,
+    signature,
+    actor: {
+      actorUserId,
+      actorType: 'user',
+      actorId: actorUserId,
+    },
+  });
+}
+
+async function recordDecimalProposalSubmission(args: {
+  organizationId: string;
+  decimalProposalId: string;
+  signature: string;
+  actor: SquadsProposalActor;
+}) {
   const updated = await prisma.$transaction(async (tx) => {
     const current = await tx.decimalProposal.findFirstOrThrow({
-      where: { organizationId, decimalProposalId },
+      where: { organizationId: args.organizationId, decimalProposalId: args.decimalProposalId },
     });
     const row = await tx.decimalProposal.update({
-      where: { decimalProposalId },
+      where: { decimalProposalId: args.decimalProposalId },
       data: {
-        submittedSignature: signature,
+        submittedSignature: args.signature,
         submittedAt: new Date(),
         status: current.status === 'executed' ? 'executed' : 'submitted',
       },
@@ -1442,28 +1604,93 @@ export async function confirmDecimalProposalSubmission(
     });
     if (current.semanticType === 'send_payment' && current.paymentOrderId) {
       await markPaymentOrderSquadsProposalSubmitted(tx, {
-        organizationId,
-        actorUserId,
+        organizationId: args.organizationId,
+        actorUserId: args.actor.actorUserId,
+        actorType: args.actor.actorType,
+        actorId: args.actor.actorId,
         paymentOrderId: current.paymentOrderId,
-        decimalProposalId,
+        decimalProposalId: args.decimalProposalId,
         beforeState: null,
-        signature,
+        signature: args.signature,
         transactionIndex: current.transactionIndex,
       });
     }
     if (current.semanticType === 'send_payment_run' && current.paymentRunId) {
       await markPaymentRunSquadsProposalSubmitted(tx, {
-        organizationId,
-        actorUserId,
+        organizationId: args.organizationId,
+        actorUserId: args.actor.actorUserId,
+        actorType: args.actor.actorType,
+        actorId: args.actor.actorId,
         paymentRunId: current.paymentRunId,
-        decimalProposalId,
-        signature,
+        decimalProposalId: args.decimalProposalId,
+        signature: args.signature,
         transactionIndex: current.transactionIndex,
       });
     }
     return row;
   });
   return serializeDecimalProposal(updated);
+}
+
+async function markPreparedProposalFailed(args: {
+  organizationId: string;
+  decimalProposalId: string;
+  reason: string;
+  actor: SquadsProposalActor;
+}) {
+  await prisma.$transaction(async (tx) => {
+    const current = await tx.decimalProposal.findFirst({
+      where: { organizationId: args.organizationId, decimalProposalId: args.decimalProposalId },
+      select: {
+        decimalProposalId: true,
+        paymentOrderId: true,
+        status: true,
+        metadataJson: true,
+      },
+    });
+    if (!current || current.status !== 'prepared') {
+      return;
+    }
+    await tx.decimalProposal.update({
+      where: { decimalProposalId: args.decimalProposalId },
+      data: {
+        status: 'failed',
+        metadataJson: {
+          ...(isRecordLike(current.metadataJson) ? current.metadataJson : {}),
+          failure: {
+            reason: args.reason,
+            failedAt: new Date().toISOString(),
+            actorType: args.actor.actorType,
+            actorId: args.actor.actorId,
+          },
+        },
+      },
+    });
+    if (current.paymentOrderId) {
+      const order = await tx.paymentOrder.findFirst({
+        where: { organizationId: args.organizationId, paymentOrderId: current.paymentOrderId },
+        select: { paymentOrderId: true, state: true },
+      });
+      if (!order) {
+        return;
+      }
+      await tx.paymentOrderEvent.create({
+        data: {
+          paymentOrderId: order.paymentOrderId,
+          organizationId: args.organizationId,
+          eventType: 'squads_payment_proposal_failed',
+          actorType: args.actor.actorType,
+          actorId: args.actor.actorId,
+          beforeState: order.state,
+          afterState: order.state,
+          payloadJson: {
+            decimalProposalId: args.decimalProposalId,
+            reason: args.reason,
+          },
+        },
+      });
+    }
+  });
 }
 
 export async function confirmDecimalProposalExecution(
