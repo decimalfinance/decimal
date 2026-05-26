@@ -5,6 +5,8 @@ import { api, ApiError } from '../api';
 import type {
   AuthenticatedSession,
   OrganizationPersonalWallet,
+  SpendingLimitPolicy,
+  SpendingLimitPolicyStatus,
   SquadsDetailMember,
   SquadsMemberLinkStatus,
   SquadsPermission,
@@ -12,7 +14,7 @@ import type {
   TreasuryWallet,
   UserWallet,
 } from '../types';
-import { shortenAddress } from '../domain';
+import { formatRawUsdcCompact, shortenAddress } from '../domain';
 import { signAndSubmitIntent } from '../lib/squads-pipeline';
 import { ChainLink, InfoRow } from '../ui-primitives';
 import { useToast } from '../ui/Toast';
@@ -119,6 +121,20 @@ export function TreasuryWalletDetailPage({ session }: { session: AuthenticatedSe
     enabled: Boolean(organizationId && isSquads && isAdmin),
   });
   const orgPersonalWallets = orgPersonalWalletsQuery.data?.items ?? [];
+
+  // Treasury balance — backend returns balances for ALL treasury wallets in
+  // one call. Pick the one for THIS wallet to display in the header.
+  const balancesQuery = useQuery({
+    queryKey: ['treasury-wallet-balances', organizationId] as const,
+    queryFn: () => api.listTreasuryWalletBalances(organizationId!),
+    enabled: Boolean(organizationId),
+    refetchInterval: 15_000,
+  });
+  const balanceForThisWallet = useMemo(
+    () =>
+      balancesQuery.data?.items.find((b) => b.treasuryWalletId === treasuryWalletId) ?? null,
+    [balancesQuery.data, treasuryWalletId],
+  );
 
   // True when the current user has at least one personal wallet that is an
   // on-chain Squads member of this multisig — gates the "Proposals" link.
@@ -284,14 +300,10 @@ export function TreasuryWalletDetailPage({ session }: { session: AuthenticatedSe
             <Link to={`/organizations/${organizationId}/wallets`}>← Treasury accounts</Link>
           </p>
           <h1 style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            {wallet.displayName || 'Untitled wallet'}
-            {isSquads ? <span className="rd-pill rd-pill-info">Squads</span> : null}
+            {wallet.displayName || 'Untitled treasury'}
             {!wallet.isActive ? <span className="rd-pill rd-pill-info">Inactive</span> : null}
           </h1>
-          <p>
-            <ChainLink address={wallet.address} />
-            {wallet.notes ? <> · {wallet.notes}</> : null}
-          </p>
+          {wallet.notes ? <p style={{ margin: '4px 0 0' }}>{wallet.notes}</p> : null}
         </div>
         {isSquads ? (
           <div className="page-actions">
@@ -311,16 +323,6 @@ export function TreasuryWalletDetailPage({ session }: { session: AuthenticatedSe
                 <button
                   type="button"
                   className="button button-secondary"
-                  onClick={() => syncMutation.mutate()}
-                  disabled={syncMutation.isPending}
-                  aria-busy={syncMutation.isPending}
-                  title="Re-pull on-chain Squads state and refresh local Decimal authorizations."
-                >
-                  {syncMutation.isPending ? 'Syncing…' : 'Sync from chain'}
-                </button>
-                <button
-                  type="button"
-                  className="button button-secondary"
                   onClick={() => setOpenDialog('change-threshold')}
                 >
                   Change threshold
@@ -337,6 +339,22 @@ export function TreasuryWalletDetailPage({ session }: { session: AuthenticatedSe
           </div>
         ) : null}
       </header>
+
+      {isSquads ? (
+        <div className="rd-metrics">
+          <div className="rd-metric">
+            <span className="rd-metric-label">Balance</span>
+            <span className="rd-metric-value">
+              {balanceForThisWallet?.usdcRaw
+                ? formatRawUsdcCompact(balanceForThisWallet.usdcRaw)
+                : balancesQuery.isLoading
+                  ? '—'
+                  : '0.00'}
+            </span>
+            <span className="rd-metric-sub">USDC</span>
+          </div>
+        </div>
+      ) : null}
 
       {!isSquads ? (
         <section className="rd-section" style={{ marginTop: 8 }}>
@@ -365,6 +383,13 @@ export function TreasuryWalletDetailPage({ session }: { session: AuthenticatedSe
         </section>
       ) : detail ? (
         <SquadsDetailContent detail={detail} wallet={wallet} />
+      ) : null}
+
+      {detail && isSquads ? (
+        <SpendingLimitsSection
+          organizationId={organizationId}
+          treasuryWalletId={treasuryWalletId}
+        />
       ) : null}
 
       {detail && isCurrentUserSquadsMember ? (
@@ -474,79 +499,20 @@ function SquadsDetailContent({
         </section>
       ) : null}
 
-      <section className="rd-section" style={{ marginTop: 16 }}>
-        <header style={{ marginBottom: 12 }}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 500 }}>Multisig configuration</h2>
-        </header>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-            gap: '14px 24px',
-          }}
-        >
-          <InfoRow label="Vault PDA">
-            <ExplorerAddress value={squads.vaultPda} />
-          </InfoRow>
-          <InfoRow label="Multisig PDA">
-            <ExplorerAddress value={squads.multisigPda} />
-          </InfoRow>
-          <InfoRow label="Vault index">{squads.vaultIndex}</InfoRow>
-          <InfoRow label="Threshold">
-            {squads.threshold} of {squads.members.length}
-          </InfoRow>
-          <InfoRow label="Time lock">
-            {squads.timeLockSeconds === 0 ? 'None' : `${squads.timeLockSeconds}s`}
-          </InfoRow>
-          <InfoRow label="Authority">
-            {squads.isAutonomous ? (
-              <span title="Multisig governs itself — no external config authority.">Autonomous</span>
-            ) : squads.configAuthority ? (
-              <ExplorerAddress value={squads.configAuthority} />
-            ) : (
-              '—'
-            )}
-          </InfoRow>
-          <InfoRow label="Transaction index">
-            {squads.transactionIndex}
-            {squads.staleTransactionIndex !== '0' ? (
-              <span style={{ marginLeft: 8, opacity: 0.7, fontSize: 12 }}>
-                (stale ≤ {squads.staleTransactionIndex})
-              </span>
-            ) : null}
-          </InfoRow>
-          <InfoRow label="Program">
-            <ExplorerAddress value={squads.programId} />
-          </InfoRow>
-        </div>
-      </section>
-
       <section className="rd-section" style={{ marginTop: 24 }}>
-        <header style={{ marginBottom: 12 }}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 500 }}>Capabilities</h2>
-        </header>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          <CapabilityPill ok={squads.capabilities.canInitiate} label="Initiate" />
-          <CapabilityPill ok={squads.capabilities.canVote} label="Vote" />
-          <CapabilityPill ok={squads.capabilities.canExecute} label="Execute" />
-        </div>
-      </section>
-
-      <section className="rd-section" style={{ marginTop: 24 }}>
-        <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12 }}>
+        <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12, gap: 12 }}>
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 500 }}>Members</h2>
-          <p style={{ margin: 0, fontSize: 13, opacity: 0.7 }}>
-            {squads.members.length} on-chain · {squads.members.filter((m) => m.linkStatus === 'linked').length} linked
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--ax-text-muted)' }}>
+            {squads.threshold} of{' '}
+            {squads.members.filter((m) => m.permissions.includes('vote')).length} approvals needed
           </p>
         </header>
         <div className="rd-table-shell">
           <table className="rd-table">
             <thead>
               <tr>
-                <th>Person</th>
-                <th>Address</th>
-                <th>Permissions</th>
-                <th>Status</th>
+                <th>Member</th>
+                <th style={{ width: 260, textAlign: 'right' }}>Permissions</th>
               </tr>
             </thead>
             <tbody>
@@ -556,22 +522,24 @@ function SquadsDetailContent({
             </tbody>
           </table>
         </div>
-        <p style={{ marginTop: 12, fontSize: 12, opacity: 0.6 }}>
-          Wallet record last updated {new Date(wallet.updatedAt).toLocaleString()}.
-        </p>
       </section>
     </>
   );
 }
 
 function MemberRow({ member }: { member: SquadsDetailMember }) {
+  const isAgent = Boolean(member.agentWallet || member.automationAgent);
   const linked = member.organizationMembership;
-  const status = LINK_STATUS[member.linkStatus];
 
   return (
     <tr>
       <td>
-        {linked ? (
+        {isAgent ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <DecimalAgentAvatar />
+            <div style={{ fontWeight: 500 }}>Decimal agent</div>
+          </div>
+        ) : linked ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <Avatar
               avatarUrl={linked.user.avatarUrl}
@@ -582,51 +550,60 @@ function MemberRow({ member }: { member: SquadsDetailMember }) {
                 {linked.user.displayName || linked.user.email}
               </div>
               {linked.user.displayName ? (
-                <div style={{ fontSize: 12, opacity: 0.7 }}>{linked.user.email}</div>
+                <div style={{ fontSize: 12, color: 'var(--ax-text-muted)' }}>{linked.user.email}</div>
               ) : null}
-              <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>
-                Org role: {linked.role}
-              </div>
             </div>
           </div>
         ) : (
-          <span style={{ opacity: 0.7, fontStyle: 'italic' }}>External signer</span>
+          <span style={{ color: 'var(--ax-text-muted)' }}>Unknown signer</span>
         )}
       </td>
-      <td>
-        <ChainLink address={member.walletAddress} prefix={4} suffix={4} />
-      </td>
-      <td>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      <td style={{ textAlign: 'right' }}>
+        <div style={{ display: 'inline-flex', gap: 5, flexWrap: 'nowrap', justifyContent: 'flex-end' }}>
           {member.permissions.length === 0 ? (
-            <span style={{ opacity: 0.6 }}>None</span>
+            <span style={{ color: 'var(--ax-text-muted)', fontSize: 11 }}>None</span>
           ) : (
-            member.permissions.map((p) => (
-              <span key={p} className="rd-pill rd-pill-info" style={{ fontSize: 11 }}>
-                {PERMISSION_LABEL[p]}
-              </span>
-            ))
+            (['initiate', 'vote', 'execute'] as const).map((p) => {
+              const active = member.permissions.includes(p);
+              return (
+                <span
+                  key={p}
+                  className={`permission-pill${active ? ' permission-pill-active' : ''}`}
+                >
+                  {PERMISSION_LABEL[p]}
+                </span>
+              );
+            })
           )}
         </div>
       </td>
-      <td>
-        <span
-          className="rd-pill rd-pill-info"
-          title={status.hint}
-          style={{
-            fontSize: 11,
-            background:
-              status.tone === 'warn'
-                ? 'rgba(220, 170, 60, 0.18)'
-                : status.tone === 'danger'
-                  ? 'rgba(220, 80, 80, 0.18)'
-                  : undefined,
-          }}
-        >
-          {status.label}
-        </span>
-      </td>
     </tr>
+  );
+}
+
+function DecimalAgentAvatar() {
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 32,
+        height: 32,
+        borderRadius: '50%',
+        background: 'white',
+        border: '1px solid var(--ax-border)',
+        overflow: 'hidden',
+        flexShrink: 0,
+      }}
+      aria-hidden
+    >
+      <img
+        src="/decimal-logo.png"
+        alt=""
+        style={{ width: '75%', height: '75%', objectFit: 'contain' }}
+      />
+    </span>
   );
 }
 
@@ -1441,11 +1418,17 @@ function ProposalProgress({
 }
 
 function Avatar({ avatarUrl, fallback }: { avatarUrl: string | null; fallback: string }) {
-  if (avatarUrl) {
+  const [failed, setFailed] = useState(false);
+  const trimmedUrl = avatarUrl?.trim() || null;
+  const showImage = trimmedUrl && !failed;
+
+  if (showImage) {
     return (
       <img
-        src={avatarUrl}
+        src={trimmedUrl}
         alt=""
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
         style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover' }}
       />
     );
@@ -1467,12 +1450,642 @@ function Avatar({ avatarUrl, fallback }: { avatarUrl: string | null; fallback: s
         alignItems: 'center',
         justifyContent: 'center',
         fontSize: 12,
-        fontWeight: 600,
-        background: 'rgba(255, 255, 255, 0.08)',
-        border: '1px solid rgba(255, 255, 255, 0.12)',
+        fontWeight: 700,
+        color: 'var(--ax-text-secondary)',
+        background: 'var(--ax-bg-elevated, #f6f6f6)',
+        border: '1px solid var(--ax-border)',
+        flexShrink: 0,
       }}
     >
       {initials || '?'}
     </span>
+  );
+}
+
+// ─── Spending limits ───────────────────────────────────────────────────────
+// "Spending limit" is the user-facing term for a Squads spending-limit policy.
+// Each policy lets the Decimal agent pay vetted vendors up to an amount per
+// period without going through the multisig vote for every single payment.
+
+const SPENDING_LIMIT_STATUS_LABEL: Record<SpendingLimitPolicyStatus, string> = {
+  proposed: 'Pending approval',
+  active: 'Active',
+  replacement_proposed: 'Editing',
+  revocation_proposed: 'Removing',
+  revoked: 'Removed',
+  failed: 'Failed',
+  paused: 'Paused',
+};
+
+const SPENDING_LIMIT_STATUS_TONE: Record<SpendingLimitPolicyStatus, 'success' | 'warning' | 'danger' | 'info'> = {
+  proposed: 'warning',
+  active: 'success',
+  replacement_proposed: 'warning',
+  revocation_proposed: 'warning',
+  revoked: 'info',
+  failed: 'danger',
+  paused: 'info',
+};
+
+const SPENDING_LIMIT_PERIOD_LABEL: Record<string, string> = {
+  one_time: 'one-time',
+  day: 'per day',
+  week: 'per week',
+  month: 'per month',
+};
+
+function SpendingLimitsSection({
+  organizationId,
+  treasuryWalletId,
+}: {
+  organizationId: string;
+  treasuryWalletId: string;
+}) {
+  const queryClient = useQueryClient();
+  const [createOpen, setCreateOpen] = useState(false);
+  const policiesQuery = useQuery({
+    queryKey: ['spending-limit-policies', organizationId, treasuryWalletId] as const,
+    queryFn: () =>
+      api.listSpendingLimitPolicies(organizationId, { treasuryWalletId }),
+    enabled: Boolean(organizationId && treasuryWalletId),
+  });
+
+  const policies = policiesQuery.data?.items ?? [];
+
+  return (
+    <section className="rd-section" style={{ marginTop: 32 }}>
+      <header
+        style={{
+          display: 'flex',
+          alignItems: 'baseline',
+          justifyContent: 'space-between',
+          marginBottom: 12,
+          flexWrap: 'wrap',
+          gap: 8,
+        }}
+      >
+        <div>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 500 }}>Spending limits</h2>
+          <p
+            style={{
+              margin: '4px 0 0',
+              fontSize: 13,
+              color: 'var(--ax-text-muted)',
+              lineHeight: 1.5,
+            }}
+          >
+            Let the Decimal agent pay allowlisted vendors up to a limit, without a vote each time.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="button button-primary"
+          onClick={() => setCreateOpen(true)}
+        >
+          + New spending limit
+        </button>
+      </header>
+      <div className="rd-table-shell">
+        <table className="rd-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Limit</th>
+              <th>Vendors</th>
+              <th style={{ textAlign: 'right' }}>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {policiesQuery.isLoading ? (
+              <tr>
+                <td colSpan={4} style={{ padding: 16 }}>
+                  <div className="rd-skeleton rd-skeleton-block" style={{ height: 56 }} />
+                </td>
+              </tr>
+            ) : policies.length === 0 ? (
+              <tr>
+                <td colSpan={4} className="rd-empty-cell" style={{ padding: '28px 24px' }}>
+                  <strong style={{ display: 'block', marginBottom: 4 }}>
+                    No spending limits yet
+                  </strong>
+                  <p style={{ margin: 0, fontSize: 13, color: 'var(--ax-text-muted)', lineHeight: 1.55 }}>
+                    Add one so the Decimal agent can pay vetted vendors for routine bills without
+                    needing a human vote each time.
+                  </p>
+                </td>
+              </tr>
+            ) : (
+              policies.map((policy) => (
+                <SpendingLimitRow key={policy.spendingLimitPolicyId} policy={policy} />
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {createOpen ? (
+        <CreateSpendingLimitDialog
+          organizationId={organizationId}
+          treasuryWalletId={treasuryWalletId}
+          onClose={() => setCreateOpen(false)}
+          onCreated={async () => {
+            setCreateOpen(false);
+            await queryClient.invalidateQueries({
+              queryKey: ['spending-limit-policies', organizationId, treasuryWalletId],
+            });
+            await queryClient.invalidateQueries({
+              queryKey: ['organization-proposals', organizationId],
+            });
+          }}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+function SpendingLimitRow({ policy }: { policy: SpendingLimitPolicy }) {
+  const status = policy.status as SpendingLimitPolicyStatus;
+  const statusLabel = SPENDING_LIMIT_STATUS_LABEL[status] ?? policy.status;
+  const statusTone = SPENDING_LIMIT_STATUS_TONE[status] ?? 'info';
+  const periodLabel = SPENDING_LIMIT_PERIOD_LABEL[policy.period] ?? policy.period;
+  const amountDisplay = `${formatRawUsdcCompact(policy.amountRaw)} USDC`;
+  const destinationsCount = policy.destinations.length;
+
+  return (
+    <tr>
+      <td style={{ fontWeight: 500 }}>{policy.policyName}</td>
+      <td style={{ fontVariantNumeric: 'tabular-nums' }}>
+        {amountDisplay} <span style={{ color: 'var(--ax-text-muted)', fontSize: 12 }}>{periodLabel}</span>
+      </td>
+      <td style={{ color: 'var(--ax-text-muted)', fontSize: 13 }}>
+        {destinationsCount} vendor{destinationsCount === 1 ? '' : 's'}
+      </td>
+      <td style={{ textAlign: 'right' }}>
+        <span className={`rd-pill rd-pill-${statusTone}`}>
+          <span className="rd-pill-dot" aria-hidden />
+          {statusLabel}
+        </span>
+      </td>
+    </tr>
+  );
+}
+
+// ─── Create Spending Limit dialog ─────────────────────────────────────────
+// 3-step flow mirroring Create Treasury:
+//   1. config  — name, amount, period, vendor multi-select
+//   2. review  — summary card
+//   3. sign    — signing progress (signing → sending → confirming → saving)
+// After step 3, the policy is created on-chain in `proposed` state and the
+// existing multisig vote flow takes over.
+
+type CreateSpendingLimitPhase =
+  | 'idle'
+  | 'signing'
+  | 'submitting'
+  | 'confirming-onchain'
+  | 'persisting'
+  | 'error';
+
+const PERIOD_OPTIONS: Array<{ key: 'one_time' | 'day' | 'week' | 'month'; label: string }> = [
+  { key: 'one_time', label: 'One-time' },
+  { key: 'day', label: 'Per day' },
+  { key: 'week', label: 'Per week' },
+  { key: 'month', label: 'Per month' },
+];
+
+function CreateSpendingLimitDialog({
+  organizationId,
+  treasuryWalletId,
+  onClose,
+  onCreated,
+}: {
+  organizationId: string;
+  treasuryWalletId: string;
+  onClose: () => void;
+  onCreated: () => void | Promise<void>;
+}) {
+  const { success, error: toastError } = useToast();
+  const [step, setStep] = useState<'config' | 'review' | 'sign'>('config');
+  const [name, setName] = useState('');
+  const [amountUsd, setAmountUsd] = useState('');
+  const [period, setPeriod] = useState<'one_time' | 'day' | 'week' | 'month'>('month');
+  const [selectedVendorIds, setSelectedVendorIds] = useState<string[]>([]);
+  const [phase, setPhase] = useState<CreateSpendingLimitPhase>('idle');
+  const [phaseError, setPhaseError] = useState<string | null>(null);
+
+  // Counterparty wallets — the vendors the agent can pay under this policy.
+  const counterpartyWalletsQuery = useQuery({
+    queryKey: ['counterparty-wallets', organizationId] as const,
+    queryFn: () => api.listCounterpartyWallets(organizationId),
+    enabled: Boolean(organizationId),
+  });
+  const counterpartyWallets = useMemo(
+    () =>
+      (counterpartyWalletsQuery.data?.items ?? []).filter(
+        (w) => w.isActive && w.trustState === 'trusted',
+      ),
+    [counterpartyWalletsQuery.data],
+  );
+
+  // Auto-pick the user's personal wallet (signs the create proposal).
+  const personalWalletsQuery = useQuery({
+    queryKey: ['personal-wallets'] as const,
+    queryFn: () => api.listPersonalWallets(),
+  });
+  const personalWallet = useMemo(() => {
+    const items = personalWalletsQuery.data?.items ?? [];
+    return items.find((w) => w.status === 'active' && w.chain === 'solana') ?? null;
+  }, [personalWalletsQuery.data]);
+
+  // Find the Decimal automation agent wallet (auto-added at org creation).
+  const agentsQuery = useQuery({
+    queryKey: ['automation-agents', organizationId] as const,
+    queryFn: () => api.listAutomationAgents(organizationId),
+    enabled: Boolean(organizationId),
+  });
+  const agentWallet = useMemo(() => {
+    const agents = agentsQuery.data?.items ?? [];
+    // Prefer the default decimal_operations agent; fall back to the first
+    // active agent we find with at least one Privy wallet.
+    const ordered = [
+      ...agents.filter((a) => a.agentType === 'decimal_operations' && a.status === 'active'),
+      ...agents.filter((a) => a.agentType !== 'decimal_operations' && a.status === 'active'),
+    ];
+    for (const agent of ordered) {
+      const active = agent.wallets.find((w) => w.status === 'active');
+      if (active) return { agent, wallet: active };
+    }
+    return null;
+  }, [agentsQuery.data]);
+
+  const intentMutation = useMutation({
+    mutationFn: async () => {
+      if (!personalWallet) throw new Error('Your signing wallet is still loading.');
+      if (!agentWallet) throw new Error('No active Decimal agent found for this org.');
+      const amountRaw = usdToRaw(amountUsd);
+      const policyCode = nameToCode(name) || `policy-${Date.now()}`;
+      return api.createSpendingLimitPolicyIntent(organizationId, treasuryWalletId, {
+        creatorPersonalWalletId: personalWallet.userWalletId,
+        agentWalletId: agentWallet.wallet.agentWalletId,
+        policyName: name.trim(),
+        policyCode,
+        amountRaw,
+        period,
+        counterpartyWalletIds: selectedVendorIds,
+      });
+    },
+    onSuccess: () => {
+      setStep('review');
+    },
+    onError: (err) => {
+      const message = err instanceof ApiError || err instanceof Error ? err.message : 'Could not prepare the proposal.';
+      toastError(message);
+    },
+  });
+
+  async function runSignAndConfirm() {
+    const intent = intentMutation.data;
+    if (!intent || !personalWallet) return;
+    setStep('sign');
+    setPhaseError(null);
+    try {
+      setPhase('signing');
+      const sig = await signAndSubmitIntent({
+        intent,
+        signerPersonalWalletId: personalWallet.userWalletId,
+      });
+      setPhase('submitting');
+      setPhase('confirming-onchain');
+      setPhase('persisting');
+      await api.confirmProposalSubmission(organizationId, intent.decimalProposal.decimalProposalId, {
+        signature: sig,
+      });
+      setPhase('idle');
+      success('Spending limit submitted — needs team approval to activate.');
+      await onCreated();
+    } catch (err) {
+      const message = err instanceof ApiError || err instanceof Error ? err.message : 'Could not create the spending limit.';
+      setPhase('error');
+      setPhaseError(message);
+    }
+  }
+
+  const amountValid = amountUsd.trim().length > 0 && Number(amountUsd) > 0;
+  const canContinue =
+    name.trim().length > 0
+    && amountValid
+    && selectedVendorIds.length > 0
+    && Boolean(personalWallet)
+    && Boolean(agentWallet)
+    && !intentMutation.isPending;
+
+  return (
+    <DialogShell labelledBy="rd-spending-title" onClose={onClose}>
+      {step === 'config' ? (
+        <>
+          <h2 id="rd-spending-title" className="rd-dialog-title">New spending limit</h2>
+          <p className="rd-dialog-body">
+            Let the Decimal agent pay specific vendors up to a limit, without a team vote each time.
+          </p>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              intentMutation.mutate();
+            }}
+          >
+            <label className="field" style={{ marginBottom: 20 }}>
+              Name
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Cloud bills"
+                autoComplete="off"
+                autoFocus
+                required
+              />
+            </label>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+              <label className="field" style={{ marginBottom: 0 }}>
+                Amount (USDC)
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={amountUsd}
+                  onChange={(e) => setAmountUsd(e.target.value.replace(/[^0-9.]/g, ''))}
+                  placeholder="5000"
+                  required
+                />
+              </label>
+              <div className="field" style={{ marginBottom: 0 }}>
+                <span>Period</span>
+                <div className="period-segmented" role="radiogroup" aria-label="Period">
+                  {PERIOD_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      role="radio"
+                      aria-checked={period === opt.key}
+                      className={`period-btn${period === opt.key ? ' period-btn-selected' : ''}`}
+                      onClick={() => setPeriod(opt.key)}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="field" style={{ marginBottom: 24 }}>
+              <span>Allowed vendors</span>
+              {counterpartyWalletsQuery.isLoading ? (
+                <div className="rd-skeleton rd-skeleton-block" style={{ height: 80 }} />
+              ) : counterpartyWallets.length === 0 ? (
+                <div
+                  style={{
+                    padding: 14,
+                    border: '1px dashed var(--ax-border)',
+                    borderRadius: 8,
+                    fontSize: 13,
+                    color: 'var(--ax-text-muted)',
+                    lineHeight: 1.55,
+                  }}
+                >
+                  No trusted vendors yet. Add vendors to the address book first.
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    border: '1px solid var(--ax-border)',
+                    borderRadius: 8,
+                    overflow: 'hidden',
+                    maxHeight: 240,
+                    overflowY: 'auto',
+                  }}
+                >
+                  {counterpartyWallets.map((wallet, idx) => {
+                    const selected = selectedVendorIds.includes(wallet.counterpartyWalletId);
+                    return (
+                      <label
+                        key={wallet.counterpartyWalletId}
+                        className="approver-row"
+                        style={{
+                          borderTop: idx === 0 ? 'none' : '1px solid var(--ax-border)',
+                          background: selected ? 'var(--ax-surface-1)' : 'transparent',
+                          cursor: 'pointer',
+                          gridTemplateColumns: 'auto 1fr',
+                        }}
+                      >
+                        <CustomCheckbox
+                          checked={selected}
+                          onChange={() =>
+                            setSelectedVendorIds((prev) =>
+                              prev.includes(wallet.counterpartyWalletId)
+                                ? prev.filter((id) => id !== wallet.counterpartyWalletId)
+                                : [...prev, wallet.counterpartyWalletId],
+                            )
+                          }
+                        />
+                        <div className="approver-row-body">
+                          <div className="approver-row-name">
+                            <span>{wallet.label}</span>
+                          </div>
+                          <div className="approver-row-sub">
+                            {wallet.counterparty?.displayName ?? 'Vendor'}
+                          </div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="rd-dialog-actions" style={{ marginTop: 20 }}>
+              <button type="button" className="button button-secondary" onClick={onClose}>
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="button button-primary"
+                disabled={!canContinue}
+                aria-busy={intentMutation.isPending}
+              >
+                {intentMutation.isPending ? 'Loading…' : 'Continue'}
+              </button>
+            </div>
+          </form>
+        </>
+      ) : step === 'review' && intentMutation.data ? (
+        <>
+          <h2 id="rd-spending-title" className="rd-dialog-title">Review spending limit</h2>
+          <p className="rd-dialog-body">
+            Looks good? Submit it for team approval. The agent can only use it once approved.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <SquadsReviewRow label="Name" value={name} />
+            <SquadsReviewRow
+              label="Limit"
+              value={`${Number(amountUsd).toLocaleString()} USDC ${PERIOD_OPTIONS.find((o) => o.key === period)?.label.toLowerCase()}`}
+            />
+            <SquadsReviewRow
+              label="Vendors"
+              value={
+                <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {selectedVendorIds.map((id) => {
+                    const wallet = counterpartyWallets.find((w) => w.counterpartyWalletId === id);
+                    return (
+                      <li key={id} style={{ fontSize: 13 }}>
+                        {wallet?.counterparty?.displayName ?? wallet?.label ?? 'Vendor'}
+                      </li>
+                    );
+                  })}
+                </ul>
+              }
+            />
+          </div>
+          <div className="rd-dialog-actions" style={{ marginTop: 20 }}>
+            <button type="button" className="button button-secondary" onClick={() => setStep('config')}>
+              Back
+            </button>
+            <button type="button" className="button button-primary" onClick={runSignAndConfirm}>
+              Submit for approval
+            </button>
+          </div>
+        </>
+      ) : step === 'sign' ? (
+        <>
+          <h2 id="rd-spending-title" className="rd-dialog-title">Creating spending limit</h2>
+          <p className="rd-dialog-body">This takes a few seconds. Don't close this window.</p>
+          <ol style={{ listStyle: 'none', padding: 0, margin: '12px 0', display: 'grid', gap: 6 }}>
+            {[
+              { key: 'signing', label: 'Signing' },
+              { key: 'submitting', label: 'Sending' },
+              { key: 'confirming-onchain', label: 'Confirming' },
+              { key: 'persisting', label: 'Saving spending limit' },
+            ].map((s) => {
+              const order = ['idle', 'signing', 'submitting', 'confirming-onchain', 'persisting'];
+              const idx = order.indexOf(s.key);
+              const cur = order.indexOf(phase === 'error' ? 'idle' : phase);
+              const isDone = cur > idx;
+              const isActive = phase === s.key;
+              return (
+                <li key={s.key} style={{
+                  display: 'flex', alignItems: 'center', gap: 10, fontSize: 13,
+                  color: isActive ? 'var(--ax-text)' : isDone ? 'var(--ax-text-muted)' : 'var(--ax-text-faint)',
+                }}>
+                  <span aria-hidden style={{
+                    width: 18, height: 18, borderRadius: 9, display: 'inline-grid', placeItems: 'center',
+                    fontSize: 11, fontWeight: 600,
+                    background: isDone ? 'var(--ax-accent-dim)' : 'var(--ax-surface-2)',
+                    color: isDone ? 'var(--ax-accent)' : 'var(--ax-text-muted)',
+                    border: isActive ? '1px solid var(--ax-accent)' : '1px solid transparent',
+                  }}>{isDone ? '✓' : ''}</span>
+                  {s.label}
+                </li>
+              );
+            })}
+          </ol>
+          {phaseError ? (
+            <div style={{
+              padding: 12, border: '1px solid var(--ax-danger)', borderRadius: 6,
+              fontSize: 13, lineHeight: 1.5, marginBottom: 12,
+            }}>
+              <strong style={{ display: 'block', marginBottom: 4, color: 'var(--ax-danger)' }}>
+                Something went wrong
+              </strong>
+              <span style={{ color: 'var(--ax-text-muted)' }}>{phaseError}</span>
+            </div>
+          ) : null}
+          <div className="rd-dialog-actions" style={{ marginTop: 20 }}>
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={() => setStep('review')}
+              disabled={phase !== 'idle' && phase !== 'error'}
+            >
+              Back
+            </button>
+            <button
+              type="button"
+              className="button button-primary"
+              onClick={() => runSignAndConfirm()}
+              disabled={phase !== 'idle' && phase !== 'error'}
+              aria-busy={phase !== 'idle' && phase !== 'error'}
+            >
+              {phase === 'idle' || phase === 'error' ? 'Submit for approval' : 'Working…'}
+            </button>
+          </div>
+        </>
+      ) : null}
+    </DialogShell>
+  );
+}
+
+// Convert "5000.50" → "5000500000" (USDC has 6 decimals).
+function usdToRaw(value: string): string {
+  const [whole, frac = ''] = value.replace(/[^0-9.]/g, '').split('.');
+  const fracPadded = (frac + '000000').slice(0, 6);
+  return (BigInt(whole || '0') * 1_000_000n + BigInt(fracPadded || '0')).toString();
+}
+
+// Derive a stable policy code from the user-facing name. Backend uses this
+// for idempotency; we slugify to keep it URL-safe.
+function nameToCode(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 48);
+}
+
+// ─── Local helpers (also in Wallets.tsx; duplicated to avoid extracting a
+// shared ui module before there's a third use site). ───────────────────────
+
+function CustomCheckbox({
+  checked,
+  disabled,
+  onChange,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  onChange: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={onChange}
+      className={`custom-checkbox${checked ? ' custom-checkbox-checked' : ''}${disabled ? ' custom-checkbox-disabled' : ''}`}
+    >
+      {checked ? (
+        <svg viewBox="0 0 16 16" aria-hidden>
+          <path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      ) : null}
+    </button>
+  );
+}
+
+function SquadsReviewRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '140px 1fr',
+        gap: 12,
+        alignItems: 'start',
+        paddingBottom: 8,
+        borderBottom: '1px solid var(--ax-border)',
+      }}
+    >
+      <span style={{ color: 'var(--ax-text-muted)', fontSize: 13 }}>{label}</span>
+      <div style={{ fontSize: 14 }}>{value}</div>
+    </div>
   );
 }
