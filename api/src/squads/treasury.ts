@@ -1,10 +1,14 @@
 import type { Prisma } from '@prisma/client';
 import * as multisig from '@sqds/multisig';
+import BN from 'bn.js';
 import { Keypair, PublicKey, TransactionMessage, VersionedTransaction, type AddressLookupTableAccount, type TransactionInstruction } from '@solana/web3.js';
 import { ApiError, badRequest, conflict, notFound } from '../infra/api-errors.js';
 import { config } from '../config.js';
+import { logger } from '../infra/logger.js';
 import { prisma } from '../infra/prisma.js';
+import { ensureDefaultAutomationAgentWithWallet } from '../agents/automation.js';
 import { submitPaymentOrder } from '../payments/orders.js';
+import { fundNewDevnetWalletIfConfigured } from '../wallets/devnet-funding.js';
 import {
   buildDestinationAtaCreateInstruction,
   buildUsdcTransferTransactionInstructions,
@@ -72,6 +76,18 @@ type SquadsVaultTransactionAccountLike = {
   vaultIndex: number;
   message: unknown;
 };
+type SquadsSpendingLimitAccountLike = {
+  multisig: PublicKey;
+  createKey: PublicKey;
+  vaultIndex: number;
+  mint: PublicKey;
+  amount: { toString(): string };
+  period: multisig.types.Period;
+  remainingAmount: { toString(): string };
+  lastReset: { toString(): string };
+  members: PublicKey[];
+  destinations: PublicKey[];
+};
 
 type SquadsTreasuryRuntime = {
   getLatestBlockhash: () => Promise<{ blockhash: string; lastValidBlockHeight: number }>;
@@ -80,6 +96,7 @@ type SquadsTreasuryRuntime = {
   loadProposal: (proposalPda: PublicKey) => Promise<SquadsProposalAccountLike | null>;
   loadConfigTransaction: (configTransactionPda: PublicKey) => Promise<SquadsConfigTransactionAccountLike | null>;
   loadVaultTransaction: (vaultTransactionPda: PublicKey) => Promise<SquadsVaultTransactionAccountLike | null>;
+  loadSpendingLimit: (spendingLimitPda: PublicKey) => Promise<SquadsSpendingLimitAccountLike | null>;
 };
 
 const defaultRuntime: SquadsTreasuryRuntime = {
@@ -109,6 +126,16 @@ const defaultRuntime: SquadsTreasuryRuntime = {
   loadVaultTransaction: async (vaultTransactionPda) => {
     try {
       return await multisig.accounts.VaultTransaction.fromAccountAddress(getSolanaConnection(), vaultTransactionPda);
+    } catch (error) {
+      if (isMissingSquadsAccountError(error)) {
+        return null;
+      }
+      throw error;
+    }
+  },
+  loadSpendingLimit: async (spendingLimitPda) => {
+    try {
+      return await multisig.accounts.SpendingLimit.fromAccountAddress(getSolanaConnection(), spendingLimitPda);
     } catch (error) {
       if (isMissingSquadsAccountError(error)) {
         return null;
@@ -146,9 +173,46 @@ export type CreateSquadsAddMemberProposalInput = {
   memo?: string | null;
 };
 
+export type CreateSquadsAddAgentMemberProposalInput = {
+  creatorPersonalWalletId: string;
+  agentWalletId: string;
+  permissions: SquadsPermissionName[];
+  newThreshold?: number;
+  memo?: string | null;
+};
+
 export type CreateSquadsChangeThresholdProposalInput = {
   creatorPersonalWalletId: string;
   newThreshold: number;
+  memo?: string | null;
+};
+
+export type SquadsSpendingLimitPeriod = 'one_time' | 'day' | 'week' | 'month';
+
+export type CreateSquadsSpendingLimitProposalInput = {
+  creatorPersonalWalletId: string;
+  agentWalletId: string;
+  policyName: string;
+  policyCode?: string | null;
+  amountRaw: string | bigint;
+  period: SquadsSpendingLimitPeriod;
+  counterpartyWalletIds: string[];
+  memo?: string | null;
+};
+
+export type CreateSquadsRemoveSpendingLimitProposalInput = {
+  creatorPersonalWalletId: string;
+  memo?: string | null;
+};
+
+export type CreateSquadsReplaceSpendingLimitProposalInput = {
+  creatorPersonalWalletId: string;
+  agentWalletId?: string;
+  policyName?: string;
+  policyCode?: string | null;
+  amountRaw?: string | bigint;
+  period?: SquadsSpendingLimitPeriod;
+  counterpartyWalletIds?: string[];
   memo?: string | null;
 };
 
@@ -187,6 +251,8 @@ export async function createSquadsTreasuryIntent(
 ) {
   const normalized = normalizeCreateIntentInput(input);
   const memberState = await loadAndValidateMembers(organizationId, actorUserId, normalized);
+  const defaultAgentMember = await loadDefaultAgentTreasuryMember(organizationId);
+  const treasuryMembers = appendAgentTreasuryMember(memberState.members, defaultAgentMember);
   const programId = new PublicKey(config.squadsProgramId);
   const createKey = Keypair.generate();
   const [multisigPda] = multisig.getMultisigPda({ createKey: createKey.publicKey, programId });
@@ -208,7 +274,7 @@ export async function createSquadsTreasuryIntent(
     multisigPda,
     configAuthority: null,
     threshold: normalized.threshold,
-    members: memberState.squadsMembers,
+    members: treasuryMembers.map(toSquadsMember),
     timeLock: normalized.timeLockSeconds,
     createKey: createKey.publicKey,
     rentCollector: new PublicKey(memberState.creator.walletAddress),
@@ -224,13 +290,7 @@ export async function createSquadsTreasuryIntent(
   const transaction = new VersionedTransaction(message);
   transaction.sign([createKey]);
 
-  const members = memberState.members.map((member) => ({
-    personalWalletId: member.personalWalletId,
-    walletAddress: member.walletAddress,
-    userId: member.userId,
-    membershipId: member.membershipId,
-    permissions: member.permissions,
-  }));
+  const members = treasuryMembers.map(serializeTreasuryCreateIntentMember);
 
   return {
     intent: {
@@ -244,6 +304,7 @@ export async function createSquadsTreasuryIntent(
       timeLockSeconds: normalized.timeLockSeconds,
       displayName: normalized.displayName,
       members,
+      defaultAgentIncluded: Boolean(defaultAgentMember),
     },
     transaction: {
       encoding: 'base64',
@@ -288,6 +349,44 @@ export async function createSquadsAddMemberProposalIntent(
   });
 }
 
+export async function createSquadsAddAgentMemberProposalIntent(
+  organizationId: string,
+  treasuryWalletId: string,
+  actorUserId: string,
+  input: CreateSquadsAddAgentMemberProposalInput,
+) {
+  const creator = await loadActorPersonalWallet(actorUserId, input.creatorPersonalWalletId);
+  const agentWallet = await loadOrganizationAgentWallet(organizationId, input.agentWalletId);
+  const permissions = normalizePermissionNames(input.permissions);
+  const actions: multisig.types.ConfigAction[] = [{
+    __kind: 'AddMember',
+    newMember: {
+      key: new PublicKey(agentWallet.walletAddress),
+      permissions: multisig.types.Permissions.fromPermissions(
+        permissions.map((permission) => SQUADS_PERMISSION_MAP[permission]),
+      ),
+    },
+  }];
+  if (input.newThreshold !== undefined) {
+    actions.push({ __kind: 'ChangeThreshold', newThreshold: normalizeThreshold(input.newThreshold) });
+  }
+
+  return createSquadsConfigProposalIntent({
+    organizationId,
+    treasuryWalletId,
+    actorUserId,
+    creator,
+    actions,
+    memo: normalizeOptionalText(input.memo) ?? `Add ${agentWallet.label ?? agentWallet.walletAddress} automation wallet to Decimal treasury`,
+    semanticType: 'add_agent_member',
+    metadataJson: {
+      automationAgentId: agentWallet.automationAgentId,
+      agentWalletId: agentWallet.agentWalletId,
+      agentWalletAddress: agentWallet.walletAddress,
+    },
+  });
+}
+
 export async function createSquadsChangeThresholdProposalIntent(
   organizationId: string,
   treasuryWalletId: string,
@@ -304,6 +403,354 @@ export async function createSquadsChangeThresholdProposalIntent(
     memo: normalizeOptionalText(input.memo) ?? `Change Decimal treasury threshold to ${input.newThreshold}`,
     semanticType: 'change_threshold',
   });
+}
+
+export async function createSquadsSpendingLimitProposalIntent(
+  organizationId: string,
+  treasuryWalletId: string,
+  actorUserId: string,
+  input: CreateSquadsSpendingLimitProposalInput,
+) {
+  const creator = await loadActorPersonalWallet(actorUserId, input.creatorPersonalWalletId);
+  const agentWallet = await loadOrganizationAgentWallet(organizationId, input.agentWalletId);
+  const { programId, multisigPda, multisigAccount, vaultIndex } = await loadSquadsTreasury(organizationId, treasuryWalletId);
+  assertOnchainMemberPermission(multisigAccount, agentWallet.walletAddress, 'initiate');
+
+  const amountRaw = normalizePositiveBigInt(input.amountRaw, 'amountRaw');
+  const period = normalizeSpendingLimitPeriod(input.period);
+  const destinations = await loadTrustedSpendingLimitDestinations(organizationId, input.counterpartyWalletIds);
+  const destinationWalletAddresses = uniqueStrings(destinations.map((destination) => destination.walletAddress));
+  if (!destinationWalletAddresses.length) {
+    throw badRequest('At least one trusted destination is required for a spending limit.');
+  }
+
+  const createKey = Keypair.generate().publicKey;
+  const [spendingLimitPda] = multisig.getSpendingLimitPda({
+    multisigPda,
+    createKey,
+    programId,
+  });
+  const action: multisig.types.ConfigAction = {
+    __kind: 'AddSpendingLimit',
+    createKey,
+    vaultIndex,
+    mint: USDC_MINT,
+    amount: new BN(amountRaw.toString()),
+    period,
+    members: [new PublicKey(agentWallet.walletAddress)],
+    destinations: destinationWalletAddresses.map((walletAddress) => new PublicKey(walletAddress)),
+  };
+
+  const response = await createSquadsConfigProposalIntent({
+    organizationId,
+    treasuryWalletId,
+    actorUserId,
+    creator,
+    actions: [action],
+    memo: normalizeOptionalText(input.memo) ?? `Add ${input.policyName.trim()} spending limit`,
+    semanticType: 'add_spending_limit',
+    metadataJson: {
+      automationAgentId: agentWallet.automationAgentId,
+      agentWalletId: agentWallet.agentWalletId,
+      spendingLimitPda: spendingLimitPda.toBase58(),
+    },
+  });
+
+  const policy = await prisma.$transaction(async (tx) => {
+    const row = await tx.spendingLimitPolicy.create({
+      data: {
+        organizationId,
+        treasuryWalletId,
+        automationAgentId: agentWallet.automationAgentId,
+        agentWalletId: agentWallet.agentWalletId,
+        decimalProposalId: response.decimalProposal.decimalProposalId,
+        policyName: normalizeRequiredText(input.policyName, 'policyName'),
+        policyCode: normalizeOptionalText(input.policyCode),
+        asset: USDC_ASSET,
+        mintAddress: USDC_MINT.toBase58(),
+        amountRaw,
+        period: spendingLimitPeriodName(period),
+        vaultIndex,
+        createKey: createKey.toBase58(),
+        spendingLimitPda: spendingLimitPda.toBase58(),
+        destinationPolicy: 'explicit_allowlist',
+        status: 'proposed',
+        metadataJson: {
+          proposalTransactionIndex: response.intent.transactionIndex,
+          destinationWalletAddresses,
+        },
+      },
+    });
+    await tx.spendingLimitPolicyDestination.createMany({
+      data: destinations.map((destination) => ({
+        spendingLimitPolicyId: row.spendingLimitPolicyId,
+        organizationId,
+        counterpartyWalletId: destination.counterpartyWalletId,
+        walletAddress: destination.walletAddress,
+      })),
+      skipDuplicates: true,
+    });
+    return tx.spendingLimitPolicy.findUniqueOrThrow({
+      where: { spendingLimitPolicyId: row.spendingLimitPolicyId },
+      include: spendingLimitPolicyInclude,
+    });
+  });
+
+  return {
+    ...response,
+    spendingLimitPolicy: serializeSpendingLimitPolicy(policy),
+  };
+}
+
+export async function createSquadsRemoveSpendingLimitProposalIntent(
+  organizationId: string,
+  actorUserId: string,
+  spendingLimitPolicyId: string,
+  input: CreateSquadsRemoveSpendingLimitProposalInput,
+) {
+  const creator = await loadActorPersonalWallet(actorUserId, input.creatorPersonalWalletId);
+  const policy = await loadSpendingLimitPolicyForMutation(organizationId, spendingLimitPolicyId);
+  if (policy.status !== 'active') {
+    throw badRequest('Only active spending limit policies can be removed.');
+  }
+
+  const response = await createSquadsConfigProposalIntent({
+    organizationId,
+    treasuryWalletId: policy.treasuryWalletId,
+    actorUserId,
+    creator,
+    actions: [{
+      __kind: 'RemoveSpendingLimit',
+      spendingLimit: new PublicKey(policy.spendingLimitPda),
+    }],
+    memo: normalizeOptionalText(input.memo) ?? `Remove ${policy.policyName} spending policy`,
+    semanticType: 'remove_spending_limit',
+    metadataJson: {
+      spendingLimitPolicyId: policy.spendingLimitPolicyId,
+      spendingLimitPda: policy.spendingLimitPda,
+    },
+  });
+
+  const updatedPolicy = await prisma.spendingLimitPolicy.update({
+    where: { spendingLimitPolicyId: policy.spendingLimitPolicyId },
+    data: {
+      status: 'revocation_proposed',
+      metadataJson: {
+        ...(isRecordLike(policy.metadataJson) ? policy.metadataJson : {}),
+        revocationProposalId: response.decimalProposal.decimalProposalId,
+        revocationTransactionIndex: response.intent.transactionIndex,
+        revocationRequestedAt: new Date().toISOString(),
+      },
+    },
+    include: spendingLimitPolicyInclude,
+  });
+
+  return {
+    ...response,
+    spendingLimitPolicy: serializeSpendingLimitPolicy(updatedPolicy),
+  };
+}
+
+export async function createSquadsReplaceSpendingLimitProposalIntent(
+  organizationId: string,
+  actorUserId: string,
+  spendingLimitPolicyId: string,
+  input: CreateSquadsReplaceSpendingLimitProposalInput,
+) {
+  const creator = await loadActorPersonalWallet(actorUserId, input.creatorPersonalWalletId);
+  const existingPolicy = await loadSpendingLimitPolicyForMutation(organizationId, spendingLimitPolicyId);
+  if (existingPolicy.status !== 'active') {
+    throw badRequest('Only active spending limit policies can be replaced.');
+  }
+
+  const agentWallet = input.agentWalletId
+    ? await loadOrganizationAgentWallet(organizationId, input.agentWalletId)
+    : {
+        ...existingPolicy.agentWallet,
+        agentWalletId: existingPolicy.agentWalletId,
+        automationAgentId: existingPolicy.automationAgentId,
+      };
+  const { programId, multisigPda, multisigAccount, vaultIndex } = await loadSquadsTreasury(organizationId, existingPolicy.treasuryWalletId);
+  assertOnchainMemberPermission(multisigAccount, agentWallet.walletAddress, 'initiate');
+
+  const amountRaw = input.amountRaw === undefined
+    ? existingPolicy.amountRaw
+    : normalizePositiveBigInt(input.amountRaw, 'amountRaw');
+  const period = input.period
+    ? normalizeSpendingLimitPeriod(input.period)
+    : normalizeSpendingLimitPeriod(existingPolicy.period as SquadsSpendingLimitPeriod);
+  const destinations = input.counterpartyWalletIds
+    ? await loadTrustedSpendingLimitDestinations(organizationId, input.counterpartyWalletIds)
+    : existingPolicy.destinations.map((destination) => destination.counterpartyWallet);
+  const destinationWalletAddresses = uniqueStrings(destinations.map((destination) => destination.walletAddress));
+  if (!destinationWalletAddresses.length) {
+    throw badRequest('At least one trusted destination is required for a spending limit.');
+  }
+
+  const createKey = Keypair.generate().publicKey;
+  const [replacementSpendingLimitPda] = multisig.getSpendingLimitPda({
+    multisigPda,
+    createKey,
+    programId,
+  });
+  const removeAction: multisig.types.ConfigAction = {
+    __kind: 'RemoveSpendingLimit',
+    spendingLimit: new PublicKey(existingPolicy.spendingLimitPda),
+  };
+  const addAction: multisig.types.ConfigAction = {
+    __kind: 'AddSpendingLimit',
+    createKey,
+    vaultIndex,
+    mint: USDC_MINT,
+    amount: new BN(amountRaw.toString()),
+    period,
+    members: [new PublicKey(agentWallet.walletAddress)],
+    destinations: destinationWalletAddresses.map((walletAddress) => new PublicKey(walletAddress)),
+  };
+
+  const policyName = normalizeOptionalText(input.policyName) ?? existingPolicy.policyName;
+  const policyCode = input.policyCode === undefined ? existingPolicy.policyCode : normalizeOptionalText(input.policyCode);
+  const response = await createSquadsConfigProposalIntent({
+    organizationId,
+    treasuryWalletId: existingPolicy.treasuryWalletId,
+    actorUserId,
+    creator,
+    actions: [removeAction, addAction],
+    memo: normalizeOptionalText(input.memo) ?? `Replace ${existingPolicy.policyName} spending policy`,
+    semanticType: 'replace_spending_limit',
+    metadataJson: {
+      replacesSpendingLimitPolicyId: existingPolicy.spendingLimitPolicyId,
+      oldSpendingLimitPda: existingPolicy.spendingLimitPda,
+      newSpendingLimitPda: replacementSpendingLimitPda.toBase58(),
+      automationAgentId: agentWallet.automationAgentId,
+      agentWalletId: agentWallet.agentWalletId,
+    },
+  });
+
+  const result = await prisma.$transaction(async (tx) => {
+    const replacement = await tx.spendingLimitPolicy.create({
+      data: {
+        organizationId,
+        treasuryWalletId: existingPolicy.treasuryWalletId,
+        automationAgentId: agentWallet.automationAgentId,
+        agentWalletId: agentWallet.agentWalletId,
+        decimalProposalId: response.decimalProposal.decimalProposalId,
+        policyName,
+        policyCode,
+        asset: USDC_ASSET,
+        mintAddress: USDC_MINT.toBase58(),
+        amountRaw,
+        period: spendingLimitPeriodName(period),
+        vaultIndex,
+        createKey: createKey.toBase58(),
+        spendingLimitPda: replacementSpendingLimitPda.toBase58(),
+        destinationPolicy: 'explicit_allowlist',
+        status: 'proposed',
+        metadataJson: {
+          proposalTransactionIndex: response.intent.transactionIndex,
+          destinationWalletAddresses,
+          replacesSpendingLimitPolicyId: existingPolicy.spendingLimitPolicyId,
+        },
+      },
+    });
+    await tx.spendingLimitPolicyDestination.createMany({
+      data: destinations.map((destination) => ({
+        spendingLimitPolicyId: replacement.spendingLimitPolicyId,
+        organizationId,
+        counterpartyWalletId: destination.counterpartyWalletId,
+        walletAddress: destination.walletAddress,
+      })),
+      skipDuplicates: true,
+    });
+    const updatedOriginal = await tx.spendingLimitPolicy.update({
+      where: { spendingLimitPolicyId: existingPolicy.spendingLimitPolicyId },
+      data: {
+        status: 'replacement_proposed',
+        metadataJson: {
+          ...(isRecordLike(existingPolicy.metadataJson) ? existingPolicy.metadataJson : {}),
+          replacementSpendingLimitPolicyId: replacement.spendingLimitPolicyId,
+          replacementProposalId: response.decimalProposal.decimalProposalId,
+          replacementTransactionIndex: response.intent.transactionIndex,
+          replacementRequestedAt: new Date().toISOString(),
+        },
+      },
+      include: spendingLimitPolicyInclude,
+    });
+    const replacementWithRelations = await tx.spendingLimitPolicy.findUniqueOrThrow({
+      where: { spendingLimitPolicyId: replacement.spendingLimitPolicyId },
+      include: spendingLimitPolicyInclude,
+    });
+    return { updatedOriginal, replacement: replacementWithRelations };
+  });
+
+  return {
+    ...response,
+    originalSpendingLimitPolicy: serializeSpendingLimitPolicy(result.updatedOriginal),
+    replacementSpendingLimitPolicy: serializeSpendingLimitPolicy(result.replacement),
+  };
+}
+
+export async function listSpendingLimitPolicies(
+  organizationId: string,
+  input: { treasuryWalletId?: string; automationAgentId?: string; status?: string; limit?: number } = {},
+) {
+  const policies = await prisma.spendingLimitPolicy.findMany({
+    where: {
+      organizationId,
+      ...(input.treasuryWalletId ? { treasuryWalletId: input.treasuryWalletId } : {}),
+      ...(input.automationAgentId ? { automationAgentId: input.automationAgentId } : {}),
+      ...(input.status ? { status: input.status } : {}),
+    },
+    include: spendingLimitPolicyInclude,
+    orderBy: { createdAt: 'desc' },
+    take: input.limit ?? 100,
+  });
+  return { items: policies.map(serializeSpendingLimitPolicy) };
+}
+
+export async function getSpendingLimitPolicy(organizationId: string, spendingLimitPolicyId: string) {
+  const policy = await prisma.spendingLimitPolicy.findFirstOrThrow({
+    where: { organizationId, spendingLimitPolicyId },
+    include: spendingLimitPolicyInclude,
+  });
+  return serializeSpendingLimitPolicy(policy);
+}
+
+export async function syncSpendingLimitPolicy(organizationId: string, spendingLimitPolicyId: string) {
+  const policy = await prisma.spendingLimitPolicy.findFirstOrThrow({
+    where: { organizationId, spendingLimitPolicyId },
+    include: spendingLimitPolicyInclude,
+  });
+  const account = await runtime.loadSpendingLimit(new PublicKey(policy.spendingLimitPda));
+  const now = new Date();
+  const nextStatus = resolveSyncedSpendingLimitStatus(policy.status, Boolean(account));
+  const updated = await prisma.spendingLimitPolicy.update({
+    where: { spendingLimitPolicyId },
+    data: {
+      status: nextStatus,
+      lastSyncedAt: now,
+      metadataJson: {
+        ...(isRecordLike(policy.metadataJson) ? policy.metadataJson : {}),
+        onchain: account
+          ? {
+            multisig: account.multisig.toBase58(),
+            createKey: account.createKey.toBase58(),
+            vaultIndex: account.vaultIndex,
+            mint: account.mint.toBase58(),
+            amountRaw: account.amount.toString(),
+            remainingAmountRaw: account.remainingAmount.toString(),
+            period: spendingLimitPeriodName(account.period),
+            lastReset: account.lastReset.toString(),
+            members: addressesFromPublicKeys(account.members),
+            destinations: addressesFromPublicKeys(account.destinations),
+            syncedAt: now.toISOString(),
+          }
+          : null,
+      },
+    },
+    include: spendingLimitPolicyInclude,
+  });
+  return serializeSpendingLimitPolicy(updated);
 }
 
 export async function createSquadsPaymentProposalIntent(
@@ -781,11 +1228,13 @@ export async function createSquadsConfigProposalExecuteIntent(
   assertOnchainMemberPermission(multisigAccount, member.walletAddress, 'execute');
   const transactionIndex = parseTransactionIndex(input.transactionIndex);
   const latestBlockhash = await runtime.getLatestBlockhash();
+  const spendingLimits = await loadSpendingLimitPdasForConfigTransaction(programId, multisigPda, transactionIndex);
   const instruction = multisig.instructions.configTransactionExecute({
     multisigPda,
     transactionIndex,
     member: new PublicKey(member.walletAddress),
     rentPayer: new PublicKey(member.walletAddress),
+    spendingLimits,
     programId,
   });
 
@@ -1286,11 +1735,18 @@ export async function createDecimalProposalExecuteIntent(
   const transactionIndex = parseTransactionIndex(proposal.transactionIndex);
   const latestBlockhash = await runtime.getLatestBlockhash();
   if (proposal.proposalType === 'config_transaction') {
+    const spendingLimits = await loadSpendingLimitPdasForConfigTransaction(
+      programId,
+      multisigPda,
+      transactionIndex,
+      ['add_spending_limit', 'remove_spending_limit', 'replace_spending_limit'].includes(proposal.semanticType ?? ''),
+    );
     const instruction = multisig.instructions.configTransactionExecute({
       multisigPda,
       transactionIndex,
       member: new PublicKey(member.walletAddress),
       rentPayer: new PublicKey(member.walletAddress),
+      spendingLimits,
       programId,
     });
     return buildSquadsSignableResponse({
@@ -1386,10 +1842,11 @@ export async function syncSquadsTreasuryMembers(organizationId: string, treasury
   const onchainMembers = serializeOnchainMembers(multisigAccount.members);
   const linkedMembers = await loadMembersByWalletAddresses(organizationId, onchainMembers.map((member) => member.walletAddress));
   const onchainMemberByAddress = new Map(onchainMembers.map((member) => [member.walletAddress, member]));
-  const linkedMemberIds = new Set(linkedMembers.map((member) => member.personalWalletId));
+  const linkedPersonalMembers = linkedMembers.filter((member) => member.memberType === 'personal');
+  const linkedMemberIds = new Set(linkedPersonalMembers.map((member) => member.personalWalletId));
 
   await prisma.$transaction(async (tx) => {
-    for (const member of linkedMembers) {
+    for (const member of linkedPersonalMembers) {
       const onchainMember = onchainMemberByAddress.get(member.walletAddress);
       await tx.organizationWalletAuthorization.upsert({
         where: {
@@ -1498,10 +1955,10 @@ export async function confirmSquadsTreasuryCreation(
   const onchainMembers = serializeOnchainMembers(multisigAccount.members);
   const linkedMembers = await loadMembersByWalletAddresses(organizationId, onchainMembers.map((member) => member.walletAddress));
   if (linkedMembers.length !== onchainMembers.length) {
-    throw badRequest('Every Squads member must be an active Decimal personal wallet in this organization.');
+    throw badRequest('Every Squads member must be either an active Decimal personal wallet or an active Decimal agent wallet in this organization.');
   }
 
-  const creatorWallet = linkedMembers.find((member) => member.userId === actorUserId);
+  const creatorWallet = linkedMembers.find((member) => member.memberType === 'personal' && member.userId === actorUserId);
   if (!creatorWallet) {
     throw badRequest('The confirming user must control one of the Squads member wallets.');
   }
@@ -1536,7 +1993,7 @@ export async function confirmSquadsTreasuryCreation(
       },
     });
 
-    for (const member of linkedMembers) {
+    for (const member of linkedMembers.filter((linkedMember) => linkedMember.memberType === 'personal')) {
       const onchainMember = onchainMembers.find((item) => item.walletAddress === member.walletAddress);
       await tx.organizationWalletAuthorization.upsert({
         where: {
@@ -1577,6 +2034,30 @@ export async function confirmSquadsTreasuryCreation(
 
     return created;
   });
+
+  const funding = await fundNewDevnetWalletIfConfigured(wallet.address)
+    .catch((error) => {
+      const reason = error instanceof Error ? error.message : 'devnet_funding_failed';
+      logger.warn('devnet_funding.treasury_wallet_failed', {
+        organizationId,
+        treasuryWalletId: wallet.treasuryWalletId,
+        walletAddress: wallet.address,
+        reason,
+      });
+      return { status: 'skipped' as const, reason };
+    });
+
+  if (funding.status === 'funded' || funding.status === 'already_funded') {
+    const updatedWallet = await prisma.treasuryWallet.update({
+      where: { treasuryWalletId: wallet.treasuryWalletId },
+      data: {
+        propertiesJson: mergeSquadsMetadata(wallet.propertiesJson, {
+          devnetFunding: funding as unknown as Prisma.InputJsonObject,
+        }),
+      },
+    });
+    return serializeSquadsTreasuryWallet(updatedWallet);
+  }
 
   return serializeSquadsTreasuryWallet(wallet);
 }
@@ -1666,6 +2147,8 @@ export async function getSquadsTreasuryDetail(organizationId: string, treasuryWa
           linkStatus: deriveMemberLinkStatus(linked),
           personalWallet: linked?.personalWallet ?? null,
           organizationMembership: linked?.organizationMembership ?? null,
+          agentWallet: linked?.agentWallet ?? null,
+          automationAgent: linked?.automationAgent ?? null,
           localAuthorization: linked?.localAuthorization ?? null,
         };
       }),
@@ -1692,6 +2175,7 @@ async function createSquadsConfigProposalIntent(args: {
   actions: multisig.types.ConfigAction[];
   memo: string;
   semanticType: string;
+  metadataJson?: Prisma.InputJsonValue;
 }) {
   const { wallet, programId, multisigPda, multisigAccount } = await loadSquadsTreasury(args.organizationId, args.treasuryWalletId);
   if (args.creator.userId !== args.actorUserId) {
@@ -1753,7 +2237,7 @@ async function createSquadsConfigProposalIntent(args: {
     response,
     vaultIndex: null,
     semanticPayload: { actions: serializeConfigActions(args.actions) },
-    metadataJson: {},
+    metadataJson: args.metadataJson ?? {},
   });
 
   return {
@@ -1874,6 +2358,126 @@ const decimalProposalInclude = {
 } satisfies Prisma.DecimalProposalInclude;
 
 type DecimalProposalWithRelations = Prisma.DecimalProposalGetPayload<{ include: typeof decimalProposalInclude }>;
+
+const spendingLimitPolicyInclude = {
+  automationAgent: {
+    select: {
+      automationAgentId: true,
+      name: true,
+      agentType: true,
+      status: true,
+    },
+  },
+  agentWallet: {
+    select: {
+      agentWalletId: true,
+      walletAddress: true,
+      label: true,
+      provider: true,
+      status: true,
+    },
+  },
+  treasuryWallet: {
+    select: {
+      treasuryWalletId: true,
+      address: true,
+      displayName: true,
+      source: true,
+      sourceRef: true,
+    },
+  },
+  decimalProposal: {
+    select: {
+      decimalProposalId: true,
+      status: true,
+      transactionIndex: true,
+      squadsProposalPda: true,
+      submittedSignature: true,
+      executedSignature: true,
+    },
+  },
+  destinations: {
+    include: {
+      counterpartyWallet: {
+        select: {
+          counterpartyWalletId: true,
+          label: true,
+          walletAddress: true,
+          tokenAccountAddress: true,
+          trustState: true,
+          isActive: true,
+        },
+      },
+    },
+    orderBy: { createdAt: 'asc' },
+  },
+} satisfies Prisma.SpendingLimitPolicyInclude;
+
+type SpendingLimitPolicyWithRelations = Prisma.SpendingLimitPolicyGetPayload<{ include: typeof spendingLimitPolicyInclude }>;
+
+function serializeSpendingLimitPolicy(row: SpendingLimitPolicyWithRelations) {
+  return {
+    spendingLimitPolicyId: row.spendingLimitPolicyId,
+    organizationId: row.organizationId,
+    treasuryWalletId: row.treasuryWalletId,
+    automationAgentId: row.automationAgentId,
+    agentWalletId: row.agentWalletId,
+    decimalProposalId: row.decimalProposalId,
+    policyName: row.policyName,
+    policyCode: row.policyCode,
+    asset: row.asset,
+    mintAddress: row.mintAddress,
+    amountRaw: row.amountRaw.toString(),
+    period: row.period,
+    vaultIndex: row.vaultIndex,
+    createKey: row.createKey,
+    spendingLimitPda: row.spendingLimitPda,
+    destinationPolicy: row.destinationPolicy,
+    status: row.status,
+    lastSyncedAt: row.lastSyncedAt?.toISOString() ?? null,
+    metadataJson: row.metadataJson,
+    automationAgent: row.automationAgent,
+    agentWallet: row.agentWallet,
+    treasuryWallet: row.treasuryWallet,
+    decimalProposal: row.decimalProposal,
+    destinations: row.destinations.map((destination) => ({
+      spendingLimitPolicyDestinationId: destination.spendingLimitPolicyDestinationId,
+      counterpartyWalletId: destination.counterpartyWalletId,
+      walletAddress: destination.walletAddress,
+      counterpartyWallet: destination.counterpartyWallet,
+      createdAt: destination.createdAt.toISOString(),
+    })),
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+async function loadSpendingLimitPolicyForMutation(organizationId: string, spendingLimitPolicyId: string) {
+  const policy = await prisma.spendingLimitPolicy.findFirst({
+    where: { organizationId, spendingLimitPolicyId },
+    include: spendingLimitPolicyInclude,
+  });
+  if (!policy) {
+    throw notFound('Spending limit policy not found');
+  }
+  if (policy.treasuryWallet.source !== SQUADS_SOURCE || !policy.treasuryWallet.sourceRef) {
+    throw badRequest('Spending limit policy is not attached to a programmable treasury.');
+  }
+  return policy;
+}
+
+function resolveSyncedSpendingLimitStatus(currentStatus: string, accountExists: boolean) {
+  if (accountExists) {
+    if (['revocation_proposed', 'replacement_proposed'].includes(currentStatus)) {
+      return currentStatus;
+    }
+    return ['revoked', 'removed'].includes(currentStatus) ? currentStatus : 'active';
+  }
+  if (['active', 'revocation_proposed', 'replacement_proposed'].includes(currentStatus)) {
+    return 'revoked';
+  }
+  return currentStatus;
+}
 
 async function persistDecimalProposal(args: {
   organizationId: string;
@@ -2230,7 +2834,74 @@ function normalizeVaultIndex(value: number | undefined) {
   return vaultIndex;
 }
 
+function normalizePositiveBigInt(value: string | bigint, fieldName: string) {
+  try {
+    const normalized = typeof value === 'bigint' ? value : BigInt(value);
+    if (normalized <= 0n) {
+      throw new Error('not positive');
+    }
+    return normalized;
+  } catch {
+    throw badRequest(`${fieldName} must be a positive integer string.`);
+  }
+}
+
+function normalizeSpendingLimitPeriod(period: SquadsSpendingLimitPeriod) {
+  switch (period) {
+    case 'one_time':
+      return multisig.types.Period.OneTime;
+    case 'day':
+      return multisig.types.Period.Day;
+    case 'week':
+      return multisig.types.Period.Week;
+    case 'month':
+      return multisig.types.Period.Month;
+    default:
+      throw badRequest(`Unsupported spending limit period: ${period}`);
+  }
+}
+
+function spendingLimitPeriodName(period: multisig.types.Period) {
+  switch (period) {
+    case multisig.types.Period.OneTime:
+      return 'one_time';
+    case multisig.types.Period.Day:
+      return 'day';
+    case multisig.types.Period.Week:
+      return 'week';
+    case multisig.types.Period.Month:
+      return 'month';
+    default:
+      return String(period);
+  }
+}
+
+function normalizeRequiredText(value: string, fieldName: string) {
+  const normalized = value.trim();
+  if (!normalized) {
+    throw badRequest(`${fieldName} is required.`);
+  }
+  return normalized;
+}
+
 type ActivePersonalWallet = Awaited<ReturnType<typeof loadActorPersonalWallet>>;
+type ValidatedPersonalTreasuryMember = {
+  memberType: 'personal';
+  personalWalletId: string;
+  walletAddress: string;
+  userId: string;
+  membershipId: string;
+  permissions: SquadsPermissionName[];
+};
+type ValidatedAgentTreasuryMember = {
+  memberType: 'agent';
+  agentWalletId: string;
+  automationAgentId: string;
+  walletAddress: string;
+  label: string | null;
+  permissions: SquadsPermissionName[];
+};
+type ValidatedTreasuryMember = ValidatedPersonalTreasuryMember | ValidatedAgentTreasuryMember;
 
 async function loadActorPersonalWallet(actorUserId: string, personalWalletId: string) {
   const wallet = await prisma.personalWallet.findFirst({
@@ -2278,6 +2949,168 @@ async function loadOrganizationPersonalWallet(organizationId: string, personalWa
     throw badRequest('newMemberPersonalWalletId must be an active personal wallet owned by an active organization member.');
   }
   return wallet;
+}
+
+async function loadOrganizationAgentWallet(organizationId: string, agentWalletId: string) {
+  const wallet = await prisma.agentWallet.findFirst({
+    where: {
+      organizationId,
+      agentWalletId,
+      status: 'active',
+      chain: SOLANA_CHAIN,
+    },
+    include: {
+      automationAgent: {
+        select: {
+          automationAgentId: true,
+          name: true,
+          status: true,
+        },
+      },
+    },
+  });
+  if (!wallet || wallet.automationAgent.status !== 'active') {
+    throw badRequest('agentWalletId must be an active automation wallet in this organization.');
+  }
+  return wallet;
+}
+
+async function loadDefaultAgentTreasuryMember(organizationId: string): Promise<ValidatedAgentTreasuryMember | null> {
+  const existing = await findDefaultAgentWallet(organizationId);
+  if (existing) {
+    return serializeAgentTreasuryMember(existing);
+  }
+
+  const provisioning = await ensureDefaultAutomationAgentWithWallet(organizationId)
+    .catch((error) => {
+      logger.warn('squads_treasury.default_agent_provisioning_failed', {
+        organizationId,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    });
+  if (!provisioning?.wallet) {
+    return null;
+  }
+
+  return {
+    memberType: 'agent',
+    agentWalletId: provisioning.wallet.agentWalletId,
+    automationAgentId: provisioning.wallet.automationAgentId,
+    walletAddress: provisioning.wallet.walletAddress,
+    label: provisioning.wallet.label,
+    permissions: ['initiate'],
+  };
+}
+
+async function findDefaultAgentWallet(organizationId: string) {
+  return prisma.agentWallet.findFirst({
+    where: {
+      organizationId,
+      status: 'active',
+      chain: SOLANA_CHAIN,
+      automationAgent: {
+        status: 'active',
+        OR: [
+          { agentType: 'decimal_operations' },
+          { name: 'Decimal operations agent' },
+        ],
+      },
+    },
+    include: {
+      automationAgent: {
+        select: {
+          automationAgentId: true,
+          name: true,
+          status: true,
+        },
+      },
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+}
+
+function appendAgentTreasuryMember(
+  personalMembers: ValidatedPersonalTreasuryMember[],
+  agentMember: ValidatedAgentTreasuryMember | null,
+): ValidatedTreasuryMember[] {
+  if (!agentMember) {
+    return personalMembers;
+  }
+  if (personalMembers.some((member) => member.walletAddress === agentMember.walletAddress)) {
+    return personalMembers;
+  }
+  return [...personalMembers, agentMember];
+}
+
+function serializeAgentTreasuryMember(wallet: Awaited<ReturnType<typeof findDefaultAgentWallet>>): ValidatedAgentTreasuryMember | null {
+  if (!wallet) {
+    return null;
+  }
+  return {
+    memberType: 'agent',
+    agentWalletId: wallet.agentWalletId,
+    automationAgentId: wallet.automationAgentId,
+    walletAddress: wallet.walletAddress,
+    label: wallet.label,
+    permissions: ['initiate'],
+  };
+}
+
+function toSquadsMember(member: ValidatedTreasuryMember) {
+  return {
+    key: new PublicKey(member.walletAddress),
+    permissions: multisig.types.Permissions.fromPermissions(
+      member.permissions.map((permission) => SQUADS_PERMISSION_MAP[permission]),
+    ),
+  };
+}
+
+function serializeTreasuryCreateIntentMember(member: ValidatedTreasuryMember) {
+  if (member.memberType === 'agent') {
+    return {
+      memberType: 'agent',
+      agentWalletId: member.agentWalletId,
+      automationAgentId: member.automationAgentId,
+      walletAddress: member.walletAddress,
+      label: member.label,
+      permissions: member.permissions,
+    };
+  }
+  return {
+    memberType: 'personal',
+    personalWalletId: member.personalWalletId,
+    walletAddress: member.walletAddress,
+    userId: member.userId,
+    membershipId: member.membershipId,
+    permissions: member.permissions,
+  };
+}
+
+async function loadTrustedSpendingLimitDestinations(organizationId: string, counterpartyWalletIds: string[]) {
+  const uniqueIds = uniqueStrings(counterpartyWalletIds);
+  if (!uniqueIds.length) {
+    throw badRequest('counterpartyWalletIds must include at least one destination.');
+  }
+  const wallets = await prisma.counterpartyWallet.findMany({
+    where: {
+      organizationId,
+      counterpartyWalletId: { in: uniqueIds },
+      isActive: true,
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+  if (wallets.length !== uniqueIds.length) {
+    throw badRequest('Every spending-limit destination must be an active counterparty wallet in this organization.');
+  }
+  const untrusted = wallets.find((wallet) => wallet.trustState !== 'trusted');
+  if (untrusted) {
+    throw badRequest('Spending-limit destinations must be trusted before they can be delegated to an agent.', {
+      counterpartyWalletId: untrusted.counterpartyWalletId,
+      trustState: untrusted.trustState,
+    });
+  }
+  return wallets;
 }
 
 async function loadPaymentOrderForSquadsProposal(organizationId: string, paymentOrderId: string) {
@@ -2434,6 +3267,7 @@ async function loadAndValidateMembers(
       throw badRequest('Every Squads member wallet owner must be an active organization member.');
     }
     return {
+      memberType: 'personal' as const,
       personalWalletId: wallet.userWalletId,
       walletAddress: wallet.walletAddress,
       userId: wallet.userId,
@@ -2460,101 +3294,213 @@ async function loadAndValidateMembers(
   return {
     creator,
     members,
-    squadsMembers: members.map((member) => ({
-      key: new PublicKey(member.walletAddress),
-      permissions: multisig.types.Permissions.fromPermissions(
-        member.permissions.map((permission) => SQUADS_PERMISSION_MAP[permission]),
-      ),
-    })),
   };
 }
 
 async function loadMembersByWalletAddresses(organizationId: string, walletAddresses: string[]) {
-  const wallets = await prisma.personalWallet.findMany({
-    where: {
-      chain: SOLANA_CHAIN,
-      walletAddress: { in: walletAddresses },
-      status: 'active',
-    },
-    include: {
-      user: {
-        select: {
-          userId: true,
-          memberships: {
-            where: { organizationId, status: 'active' },
-            select: { membershipId: true },
-            take: 1,
+  const uniqueWalletAddresses = uniqueStrings(walletAddresses);
+  const [personalWallets, agentWallets] = await Promise.all([
+    prisma.personalWallet.findMany({
+      where: {
+        chain: SOLANA_CHAIN,
+        walletAddress: { in: uniqueWalletAddresses },
+        status: 'active',
+      },
+      include: {
+        user: {
+          select: {
+            userId: true,
+            memberships: {
+              where: { organizationId, status: 'active' },
+              select: { membershipId: true },
+              take: 1,
+            },
           },
         },
       },
-    },
-  });
+    }),
+    prisma.agentWallet.findMany({
+      where: {
+        organizationId,
+        chain: SOLANA_CHAIN,
+        walletAddress: { in: uniqueWalletAddresses },
+        status: 'active',
+        automationAgent: {
+          status: 'active',
+        },
+      },
+      include: {
+        automationAgent: {
+          select: {
+            automationAgentId: true,
+            name: true,
+            agentType: true,
+            status: true,
+          },
+        },
+      },
+    }),
+  ]);
 
-  return wallets
+  const personalMembers = personalWallets
     .filter((wallet) => wallet.user.memberships[0])
     .map((wallet) => ({
+      memberType: 'personal' as const,
       personalWalletId: wallet.userWalletId,
       walletAddress: wallet.walletAddress,
       userId: wallet.userId,
       membershipId: wallet.user.memberships[0]!.membershipId,
     }));
+
+  const personalWalletAddresses = new Set(personalMembers.map((member) => member.walletAddress));
+  const agentMembers = agentWallets
+    .filter((wallet) => !personalWalletAddresses.has(wallet.walletAddress))
+    .map((wallet) => ({
+      memberType: 'agent' as const,
+      agentWalletId: wallet.agentWalletId,
+      automationAgentId: wallet.automationAgentId,
+      walletAddress: wallet.walletAddress,
+      label: wallet.label,
+      automationAgent: wallet.automationAgent,
+    }));
+
+  return [...personalMembers, ...agentMembers];
 }
+
+type DetailedSquadsMemberLink = {
+  memberType: 'personal' | 'agent';
+  walletStatus: string;
+  membershipStatus: string | null;
+  authorizationStatus: string | null;
+  personalWallet: {
+    userWalletId: string;
+    userId: string;
+    chain: string;
+    walletAddress: string;
+    walletType: string;
+    provider: string | null;
+    label: string | null;
+    status: string;
+    verifiedAt: string | null;
+    lastUsedAt: string | null;
+  } | null;
+  organizationMembership: {
+    membershipId: string;
+    role: string;
+    status: string;
+    createdAt: string;
+    user: {
+      userId: string;
+      email: string;
+      displayName: string;
+      avatarUrl: string | null;
+    };
+  } | null;
+  localAuthorization: {
+    walletAuthorizationId: string;
+    role: string;
+    scope: string;
+    status: string;
+    revokedAt: string | null;
+    metadataJson: Prisma.JsonValue;
+    createdAt: string;
+  } | null;
+  agentWallet: {
+    agentWalletId: string;
+    automationAgentId: string;
+    chain: string;
+    walletAddress: string;
+    walletType: string;
+    provider: string;
+    label: string | null;
+    status: string;
+    verifiedAt: string | null;
+    lastUsedAt: string | null;
+  } | null;
+  automationAgent: {
+    automationAgentId: string;
+    name: string;
+    agentType: string;
+    status: string;
+  } | null;
+};
 
 async function loadDetailedMembersByWalletAddresses(
   organizationId: string,
   treasuryWalletId: string,
   walletAddresses: string[],
 ) {
-  const wallets = await prisma.personalWallet.findMany({
-    where: {
-      chain: SOLANA_CHAIN,
-      walletAddress: { in: walletAddresses },
-    },
-    include: {
-      user: {
-        select: {
-          userId: true,
-          email: true,
-          displayName: true,
-          avatarUrl: true,
-          memberships: {
-            where: { organizationId },
-            select: {
-              membershipId: true,
-              role: true,
-              status: true,
-              createdAt: true,
+  const uniqueWalletAddresses = uniqueStrings(walletAddresses);
+  const [wallets, agentWallets] = await Promise.all([
+    prisma.personalWallet.findMany({
+      where: {
+        chain: SOLANA_CHAIN,
+        walletAddress: { in: uniqueWalletAddresses },
+      },
+      include: {
+        user: {
+          select: {
+            userId: true,
+            email: true,
+            displayName: true,
+            avatarUrl: true,
+            memberships: {
+              where: { organizationId },
+              select: {
+                membershipId: true,
+                role: true,
+                status: true,
+                createdAt: true,
+              },
+              take: 1,
             },
-            take: 1,
+          },
+        },
+        walletAuthorizations: {
+          where: {
+            organizationId,
+            treasuryWalletId,
+            role: 'squads_member',
+          },
+          select: {
+            walletAuthorizationId: true,
+            role: true,
+            scope: true,
+            status: true,
+            revokedAt: true,
+            metadataJson: true,
+            createdAt: true,
+          },
+          take: 1,
+        },
+      },
+    }),
+    prisma.agentWallet.findMany({
+      where: {
+        organizationId,
+        chain: SOLANA_CHAIN,
+        walletAddress: { in: uniqueWalletAddresses },
+      },
+      include: {
+        automationAgent: {
+          select: {
+            automationAgentId: true,
+            name: true,
+            agentType: true,
+            status: true,
           },
         },
       },
-      walletAuthorizations: {
-        where: {
-          organizationId,
-          treasuryWalletId,
-          role: 'squads_member',
-        },
-        select: {
-          walletAuthorizationId: true,
-          role: true,
-          scope: true,
-          status: true,
-          revokedAt: true,
-          metadataJson: true,
-          createdAt: true,
-        },
-        take: 1,
-      },
-    },
-  });
+    }),
+  ]);
 
-  return new Map(wallets.map((wallet) => {
+  const linked = new Map<string, DetailedSquadsMemberLink>(wallets.map((wallet) => {
     const membership = wallet.user.memberships[0] ?? null;
     const authorization = wallet.walletAuthorizations[0] ?? null;
     return [
       wallet.walletAddress,
       {
+        memberType: 'personal' as const,
         walletStatus: wallet.status,
         membershipStatus: membership?.status ?? null,
         authorizationStatus: authorization?.status ?? null,
@@ -2595,9 +3541,41 @@ async function loadDetailedMembersByWalletAddresses(
             createdAt: authorization.createdAt.toISOString(),
           }
           : null,
+        agentWallet: null,
+        automationAgent: null,
       },
-    ];
+    ] satisfies [string, DetailedSquadsMemberLink];
   }));
+
+  for (const wallet of agentWallets) {
+    if (linked.has(wallet.walletAddress)) {
+      continue;
+    }
+    linked.set(wallet.walletAddress, {
+      memberType: 'agent' as const,
+      walletStatus: wallet.status,
+      membershipStatus: wallet.automationAgent.status,
+      authorizationStatus: 'active',
+      personalWallet: null,
+      organizationMembership: null,
+      localAuthorization: null,
+      agentWallet: {
+        agentWalletId: wallet.agentWalletId,
+        automationAgentId: wallet.automationAgentId,
+        chain: wallet.chain,
+        walletAddress: wallet.walletAddress,
+        walletType: wallet.walletType,
+        provider: wallet.provider,
+        label: wallet.label,
+        status: wallet.status,
+        verifiedAt: wallet.verifiedAt?.toISOString() ?? null,
+        lastUsedAt: wallet.lastUsedAt?.toISOString() ?? null,
+      },
+      automationAgent: wallet.automationAgent,
+    });
+  }
+
+  return linked;
 }
 
 async function loadSquadsTreasury(organizationId: string, treasuryWalletId: string) {
@@ -2738,6 +3716,24 @@ function validateConfigActionsAgainstCurrentMembers(
       members.delete(walletAddress);
     } else if (multisig.types.isConfigActionChangeThreshold(action)) {
       threshold = normalizeThreshold(action.newThreshold);
+    } else if (multisig.types.isConfigActionAddSpendingLimit(action)) {
+      if (BigInt(action.amount.toString()) <= 0n) {
+        throw badRequest('Spending limit amount must be positive.');
+      }
+      if (!action.members.length) {
+        throw badRequest('Spending limit must include at least one member.');
+      }
+      for (const member of action.members) {
+        const walletAddress = member.toBase58();
+        if (!members.has(walletAddress)) {
+          throw badRequest('Spending limit member must already be an onchain Squads member.', {
+            walletAddress,
+          });
+        }
+      }
+      if (!action.destinations.length) {
+        throw badRequest('Spending limit must include at least one destination.');
+      }
     }
   }
 
@@ -2778,6 +3774,24 @@ function serializeConfigActions(actions: multisig.types.ConfigAction[]) {
         newThreshold: action.newThreshold,
       };
     }
+    if (multisig.types.isConfigActionAddSpendingLimit(action)) {
+      return {
+        kind: 'add_spending_limit',
+        createKey: action.createKey.toBase58(),
+        vaultIndex: action.vaultIndex,
+        mintAddress: action.mint.toBase58(),
+        amountRaw: action.amount.toString(),
+        period: spendingLimitPeriodName(action.period),
+        members: addressesFromPublicKeys(action.members),
+        destinations: addressesFromPublicKeys(action.destinations),
+      };
+    }
+    if (multisig.types.isConfigActionRemoveSpendingLimit(action)) {
+      return {
+        kind: 'remove_spending_limit',
+        spendingLimitPda: action.spendingLimit.toBase58(),
+      };
+    }
     return {
       kind: action.__kind,
     };
@@ -2791,7 +3805,59 @@ function configActionWalletAddresses(action: multisig.types.ConfigAction) {
   if (multisig.types.isConfigActionRemoveMember(action)) {
     return [action.oldMember.toBase58()];
   }
+  if (multisig.types.isConfigActionAddSpendingLimit(action)) {
+    return [
+      ...addressesFromPublicKeys(action.members),
+      ...addressesFromPublicKeys(action.destinations),
+    ];
+  }
   return [];
+}
+
+async function loadSpendingLimitPdasForConfigTransaction(
+  programId: PublicKey,
+  multisigPda: PublicKey,
+  transactionIndex: bigint,
+  requireLoaded = false,
+) {
+  const [configTransactionPda] = multisig.getTransactionPda({
+    multisigPda,
+    index: transactionIndex,
+    programId,
+  });
+  const configTransaction = await runtime.loadConfigTransaction(configTransactionPda);
+  if (!configTransaction) {
+    if (requireLoaded) {
+      throw badRequest('Config transaction is not available yet. Retry after the proposal creation transaction lands.');
+    }
+    return undefined;
+  }
+
+  const spendingLimits = spendingLimitPdasForConfigActions(programId, multisigPda, configTransaction.actions);
+  return spendingLimits.length ? spendingLimits : undefined;
+}
+
+function spendingLimitPdasForConfigActions(
+  programId: PublicKey,
+  multisigPda: PublicKey,
+  actions: multisig.types.ConfigAction[],
+) {
+  const spendingLimits: PublicKey[] = [];
+  for (const action of actions) {
+    if (multisig.types.isConfigActionAddSpendingLimit(action)) {
+      const [spendingLimitPda] = multisig.getSpendingLimitPda({
+        multisigPda,
+        createKey: action.createKey,
+        programId,
+      });
+      spendingLimits.push(spendingLimitPda);
+      continue;
+    }
+    if (multisig.types.isConfigActionRemoveSpendingLimit(action)) {
+      spendingLimits.push(action.spendingLimit);
+    }
+  }
+  return uniquePublicKeys(spendingLimits);
 }
 
 function addressesFromPublicKeys(values: PublicKey[]) {
@@ -2800,6 +3866,18 @@ function addressesFromPublicKeys(values: PublicKey[]) {
 
 function uniqueStrings(values: string[]) {
   return [...new Set(values)];
+}
+
+function uniquePublicKeys(values: PublicKey[]) {
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    const key = value.toBase58();
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
 
 type DetailedSquadsMemberMap = Awaited<ReturnType<typeof loadDetailedMembersByWalletAddresses>>;
@@ -2829,6 +3907,14 @@ function serializeProposalMemberLink(walletAddress: string, linkedMembers: Detai
         user: linked.organizationMembership.user,
       }
       : null,
+    agentWallet: linked?.agentWallet
+      ? {
+        agentWalletId: linked.agentWallet.agentWalletId,
+        automationAgentId: linked.agentWallet.automationAgentId,
+        label: linked.agentWallet.label,
+      }
+      : null,
+    automationAgent: linked?.automationAgent ?? null,
   };
 }
 
@@ -2933,4 +4019,3 @@ function publicKeysEqual(left: PublicKey, right: PublicKey) {
 function normalizeOptionalText(value?: string | null) {
   return value?.trim() || null;
 }
-

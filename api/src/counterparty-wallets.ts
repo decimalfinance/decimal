@@ -107,12 +107,18 @@ export async function listCounterpartyWallets(
   options?: {
     limit?: number;
     includeInternal?: boolean;
+    view?: 'all' | 'destinations' | 'collection_sources';
   },
 ) {
+  const walletTypeFilter = options?.view === 'destinations'
+    ? { walletType: { not: 'payer_wallet' } }
+    : {};
+
   const items = await prisma.counterpartyWallet.findMany({
     where: {
       organizationId,
       ...(options?.includeInternal ? {} : { isInternal: false }),
+      ...walletTypeFilter,
     },
     include: {
       counterparty: true,
@@ -156,6 +162,62 @@ export async function createCounterpartyWallet(organizationId: string, input: Cr
   });
 
   return serializeCounterpartyWallet(wallet);
+}
+
+export async function createCollectionSourceWallet(organizationId: string, input: CreateCounterpartyWalletInput) {
+  const organization = await getOrganization(organizationId);
+
+  if (input.counterpartyId) {
+    await assertCounterpartyBelongsToOrg(organization.organizationId, input.counterpartyId);
+  }
+
+  const walletAddress = normalizeRequiredText(input.walletAddress, 'Wallet address is required');
+  const tokenAccountAddress = normalizeOptionalText(input.tokenAccountAddress) ?? deriveUsdcAtaForWallet(walletAddress);
+  const existing = await prisma.counterpartyWallet.findUnique({
+    where: {
+      organizationId_walletAddress: {
+        organizationId: organization.organizationId,
+        walletAddress,
+      },
+    },
+    include: { counterparty: true },
+  });
+
+  if (existing) {
+    const updated = await prisma.counterpartyWallet.update({
+      where: { counterpartyWalletId: existing.counterpartyWalletId },
+      data: {
+        counterpartyId: input.counterpartyId ?? existing.counterpartyId,
+        tokenAccountAddress,
+        trustState: input.trustState ?? existing.trustState,
+        notes: input.notes !== undefined ? normalizeOptionalText(input.notes) : undefined,
+        isActive: input.isActive ?? existing.isActive,
+      },
+      include: { counterparty: true },
+    });
+    return serializeCounterpartyWallet(updated);
+  }
+
+  const created = await prisma.counterpartyWallet.create({
+    data: {
+      organizationId: organization.organizationId,
+      counterpartyId: input.counterpartyId ?? null,
+      chain: input.chain ?? SOLANA_CHAIN,
+      asset: input.asset ?? USDC_ASSET,
+      walletAddress,
+      tokenAccountAddress,
+      walletType: input.walletType ?? 'payer_wallet',
+      trustState: input.trustState ?? 'unreviewed',
+      label: input.label,
+      notes: normalizeOptionalText(input.notes),
+      isInternal: input.isInternal ?? false,
+      isActive: input.isActive ?? true,
+      metadataJson: (input.metadataJson ?? {}) as Prisma.InputJsonValue,
+    },
+    include: { counterparty: true },
+  });
+
+  return serializeCounterpartyWallet(created);
 }
 
 export async function updateCounterpartyWallet(
@@ -273,6 +335,8 @@ export function serializeCounterpartyWallet(wallet: CounterpartyWallet & {
   counterparty?: Counterparty | null;
 }) {
   return {
+    collectionSourceId: wallet.counterpartyWalletId,
+    destinationId: wallet.counterpartyWalletId,
     counterpartyWalletId: wallet.counterpartyWalletId,
     organizationId: wallet.organizationId,
     counterpartyId: wallet.counterpartyId,
@@ -281,6 +345,7 @@ export function serializeCounterpartyWallet(wallet: CounterpartyWallet & {
     walletAddress: wallet.walletAddress,
     tokenAccountAddress: wallet.tokenAccountAddress,
     walletType: wallet.walletType,
+    destinationType: wallet.walletType,
     trustState: wallet.trustState,
     label: wallet.label,
     notes: wallet.notes,
