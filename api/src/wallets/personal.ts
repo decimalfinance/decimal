@@ -15,14 +15,25 @@ export function setPrivyWalletRuntimeForTests(nextRuntime: Partial<PrivyWalletRu
   runtime = nextRuntime ? { ...defaultRuntime, ...nextRuntime } : defaultRuntime;
 }
 
-export async function createPrivySolanaWallet(input: { userId: string; label: string }) {
+export async function createPrivySolanaWallet(input: {
+  userId?: string;
+  ownerType?: 'user' | 'agent';
+  ownerId?: string;
+  label: string;
+  idempotencyKey?: string;
+}) {
   assertPrivyConfigured('Privy wallet creation is not configured. Add PRIVY_APP_ID and PRIVY_APP_SECRET to api/.env.');
 
-  const externalId = `decimal-user-${input.userId}`.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 64);
+  const ownerType = input.ownerType ?? 'user';
+  const ownerId = input.ownerId ?? input.userId;
+  if (!ownerId) {
+    throw new ApiError(400, 'wallet_owner_required', 'Wallet owner id is required.');
+  }
+  const externalId = `decimal-${ownerType}-${ownerId}`.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 64);
   const response = await runtime.fetch(`${config.privyApiBaseUrl}/v1/wallets`, {
     method: 'POST',
     headers: privyHeaders({
-      'privy-idempotency-key': `user-wallet-${input.userId}`,
+      'privy-idempotency-key': input.idempotencyKey ?? `${ownerType}-wallet-${ownerId}`,
     }),
     body: JSON.stringify({
       chain_type: 'solana',
