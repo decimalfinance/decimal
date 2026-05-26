@@ -209,8 +209,8 @@ export const API_ENDPOINTS = [
   endpoint('cancel_payment_request', 'POST', '/organizations/{organizationId}/payment-requests/{paymentRequestId}/cancel', ['inputs'], 'Cancel payment request', 'session', { scope: 'payments:write' }),
   endpoint('upload_invoice', 'POST', '/organizations/{organizationId}/invoices/upload', ['inputs', 'payment orders'], 'Upload an invoice document, run AP intake, and create payment orders that are either proposal-ready or human-review gated', 'session', {
     scope: 'payments:write',
-    requestBody: { filename: 'string', mimeType: 'string', dataBase64: 'string base64', sourceTreasuryWalletId: 'uuid optional' },
-    response: { primaryPaymentOrder: 'payment order', paymentOrders: 'created payment orders with AP intake decisions', skippedRows: 'rows that could not become payment orders' },
+    requestBody: { filename: 'string', mimeType: 'string', dataBase64: 'string base64', sourceTreasuryWalletId: 'uuid optional', autoAdvance: 'boolean default true' },
+    response: { primaryPaymentOrder: 'payment order', paymentOrders: 'created payment orders with AP intake decisions', skippedRows: 'rows that could not become payment orders', automation: 'per-order agent proposal advance results' },
   }),
 
   endpoint('list_payment_runs', 'GET', '/organizations/{organizationId}/payment-runs', ['payment runs'], 'List payment runs', 'session', { scope: 'organization:read' }),
@@ -268,7 +268,12 @@ export const API_ENDPOINTS = [
   endpoint('submit_payment_order', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/submit', ['payment orders'], 'Submit payment order into the approval workflow', 'session', { scope: 'payments:write' }),
   endpoint('clear_payment_order_review', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/clear-review', ['payment orders'], 'Clear an AP-intake flagged payment order and advance it to the proposal-ready path', 'session', {
     scope: 'payments:write',
-    requestBody: { reviewNote: 'string optional', trustCounterpartyWallet: 'boolean default true', submitAfterClear: 'boolean default true' },
+    requestBody: { reviewNote: 'string optional', trustCounterpartyWallet: 'boolean default true', submitAfterClear: 'boolean default true', autoAdvance: 'boolean default true' },
+    response: { automation: 'agent proposal advance result when autoAdvance is true' },
+  }),
+  endpoint('advance_payment_order_with_agent', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/agent/advance', ['payment orders', 'automation agents', 'squads'], 'Ask the Decimal agent to create and submit a Squads proposal for a green payment order', 'session', {
+    scope: 'payments:write',
+    requestBody: { sourceTreasuryWalletId: 'uuid optional' },
   }),
   endpoint('cancel_payment_order', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/cancel', ['payment orders'], 'Cancel payment order', 'session', { scope: 'payments:write' }),
   endpoint('prepare_payment_order_execution', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/prepare-execution', ['payment orders'], 'Prepare signer-ready Solana transfer packet', 'session', { scope: 'execution:write' }),

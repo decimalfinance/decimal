@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { assertOrganizationAdmin } from '../auth/organization-access.js';
 import { asyncRoute, sendCreated } from '../infra/route-helpers.js';
+import { tryAdvancePaymentOrderWithAgent } from '../agents/payment-automation.js';
 import { uploadInvoiceToPaymentOrders } from '../payments/invoice-intake.js';
 
 export const invoicesRouter = Router();
@@ -17,6 +18,7 @@ const uploadInvoiceSchema = z.object({
   mimeType: z.string().trim().min(1).max(100),
   dataBase64: z.string().min(1),
   sourceTreasuryWalletId: z.string().uuid().optional().nullable(),
+  autoAdvance: z.boolean().default(true),
 });
 
 invoicesRouter.post('/organizations/:organizationId/invoices/upload', asyncRoute(async (req, res) => {
@@ -28,12 +30,27 @@ invoicesRouter.post('/organizations/:organizationId/invoices/upload', asyncRoute
     throw new Error(`Document exceeds ${MAX_DOCUMENT_BYTES / (1024 * 1024)}MB limit`);
   }
 
-  sendCreated(res, await uploadInvoiceToPaymentOrders({
+  const result = await uploadInvoiceToPaymentOrders({
     organizationId,
     actorUserId: req.auth!.userId,
     fileBytes,
     filename: input.filename,
     mimeType: input.mimeType,
     sourceTreasuryWalletId: input.sourceTreasuryWalletId,
-  }));
+  });
+  const automation = input.autoAdvance
+    ? await Promise.all(result.paymentOrders.map((item) =>
+        tryAdvancePaymentOrderWithAgent({
+          organizationId,
+          paymentOrderId: item.paymentOrder.paymentOrderId,
+          actorUserId: req.auth!.userId,
+          sourceTreasuryWalletId: input.sourceTreasuryWalletId,
+        }),
+      ))
+    : [];
+
+  sendCreated(res, {
+    ...result,
+    automation,
+  });
 }));

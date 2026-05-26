@@ -12,6 +12,7 @@ import {
   updatePaymentOrder,
   submitPaymentOrder,
 } from '../payments/orders.js';
+import { tryAdvancePaymentOrderWithAgent } from '../agents/payment-automation.js';
 import { buildPaymentOrderProofPacket } from '../payments/order-proof.js';
 import { isPaymentOrderState } from '../payments/order-state.js';
 import { isSolanaSignatureLike } from '../solana.js';
@@ -98,6 +99,11 @@ const clearReviewSchema = z.object({
   reviewNote: z.string().trim().max(2000).optional().nullable(),
   trustCounterpartyWallet: z.boolean().default(true),
   submitAfterClear: z.boolean().default(true),
+  autoAdvance: z.boolean().default(true),
+});
+
+const agentAdvanceSchema = z.object({
+  sourceTreasuryWalletId: z.string().uuid().optional().nullable(),
 });
 
 paymentOrdersRouter.get('/organizations/:organizationId/payment-orders', asyncRoute(async (req, res) => {
@@ -192,13 +198,38 @@ paymentOrdersRouter.post('/organizations/:organizationId/payment-orders/:payment
     const input = clearReviewSchema.parse(req.body);
     const actor = actorFromAuth(req.auth!);
 
-    sendJson(res, await clearPaymentOrderReview({
+    await clearPaymentOrderReview({
       organizationId,
       paymentOrderId,
       ...actor,
       reviewNote: input.reviewNote,
       trustCounterpartyWallet: input.trustCounterpartyWallet,
       submitAfterClear: input.submitAfterClear,
+    });
+    const automation = input.autoAdvance
+      ? await tryAdvancePaymentOrderWithAgent({
+          organizationId,
+          paymentOrderId,
+          actorUserId: req.auth!.userId,
+        })
+      : null;
+    const detail = await getPaymentOrderDetail(organizationId, paymentOrderId);
+    sendJson(res, {
+      ...detail,
+      automation,
+    });
+}));
+
+paymentOrdersRouter.post('/organizations/:organizationId/payment-orders/:paymentOrderId/agent/advance', asyncRoute(async (req, res) => {
+    const { organizationId, paymentOrderId } = paymentOrderParamsSchema.parse(req.params);
+    await assertOrganizationAdmin(organizationId, req.auth!);
+    const input = agentAdvanceSchema.parse(req.body);
+
+    sendJson(res, await tryAdvancePaymentOrderWithAgent({
+      organizationId,
+      paymentOrderId,
+      actorUserId: req.auth!.userId,
+      sourceTreasuryWalletId: input.sourceTreasuryWalletId,
     }));
 }));
 
