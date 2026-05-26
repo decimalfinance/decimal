@@ -11,6 +11,7 @@ import {
   listPaymentRuns,
   preparePaymentRunExecution,
   previewPaymentRunCsv,
+  resolvePaymentRunDocumentRow,
 } from '../payments/runs.js';
 import { buildPaymentRunProofPacket } from '../payments/run-proof.js';
 import { isSolanaSignatureLike } from '../solana.js';
@@ -37,6 +38,7 @@ const importPaymentRunCsvSchema = z.object({
   runName: z.string().trim().max(200).optional(),
   sourceTreasuryWalletId: z.string().uuid().optional(),
   importKey: z.string().trim().max(200).optional(),
+  submitOrderNow: z.boolean().default(false),
 });
 
 // Doc-to-proposal: client base64-encodes the file in JSON to avoid pulling
@@ -59,6 +61,17 @@ const attachPaymentRunSignatureSchema = z.object({
   submittedAt: z.string().datetime().optional(),
 });
 
+const resolvePaymentRunDocumentRowSchema = z.object({
+  rowIndex: z.number().int().min(0),
+  counterpartyWalletId: z.string().uuid().optional().nullable(),
+  walletAddress: z.string().trim().optional().nullable(),
+  label: z.string().trim().max(200).optional().nullable(),
+  trustState: z.enum(['unreviewed', 'trusted']).default('unreviewed'),
+}).refine((value) => Boolean(value.counterpartyWalletId ?? value.walletAddress), {
+  message: 'Provide counterpartyWalletId or walletAddress',
+  path: ['walletAddress'],
+});
+
 paymentRunsRouter.get('/organizations/:organizationId/payment-runs', asyncRoute(async (req, res) => {
     const { organizationId } = organizationParamsSchema.parse(req.params);
     await assertOrganizationAccess(organizationId, req.auth!);
@@ -76,6 +89,7 @@ paymentRunsRouter.post('/organizations/:organizationId/payment-runs/import-csv',
       runName: input.runName,
       sourceTreasuryWalletId: input.sourceTreasuryWalletId,
       importKey: input.importKey,
+      submitOrderNow: input.submitOrderNow,
     }));
 }));
 
@@ -160,6 +174,22 @@ paymentRunsRouter.get('/organizations/:organizationId/payment-runs/:paymentRunId
     const { organizationId, paymentRunId } = paymentRunParamsSchema.parse(req.params);
     await assertOrganizationAccess(organizationId, req.auth!);
     sendJson(res, await getPaymentRunDetail(organizationId, paymentRunId));
+}));
+
+paymentRunsRouter.post('/organizations/:organizationId/payment-runs/:paymentRunId/resolve-document-row', asyncRoute(async (req, res) => {
+    const { organizationId, paymentRunId } = paymentRunParamsSchema.parse(req.params);
+    await assertOrganizationAdmin(organizationId, req.auth!);
+    const input = resolvePaymentRunDocumentRowSchema.parse(req.body);
+    sendCreated(res, await resolvePaymentRunDocumentRow({
+      organizationId,
+      paymentRunId,
+      actorUserId: req.auth!.userId,
+      rowIndex: input.rowIndex,
+      counterpartyWalletId: input.counterpartyWalletId,
+      walletAddress: input.walletAddress,
+      label: input.label,
+      trustState: input.trustState,
+    }));
 }));
 
 paymentRunsRouter.delete('/organizations/:organizationId/payment-runs/:paymentRunId', asyncRoute(async (req, res) => {
