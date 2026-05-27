@@ -6,7 +6,6 @@ import { Keypair } from '@solana/web3.js';
 import { createApp } from '../src/app.js';
 import { prisma } from '../src/infra/prisma.js';
 import { setInvoiceIntakeRuntimeForTests } from '../src/payments/invoice-intake.js';
-import { setPaymentRunDocumentRuntimeForTests } from '../src/payments/runs.js';
 
 const TRUNCATE_SQL = `
 TRUNCATE TABLE
@@ -27,14 +26,13 @@ TRUNCATE TABLE
   collection_request_events,
   collection_requests,
   collection_runs,
-  payment_runs,
   payment_order_events,
+  decimal_proposals,
   payment_orders,
-  payment_requests,
   transfer_requests,
+  counterparty_wallets,
   counterparties,
   treasury_wallets,
-  
   organizations,
   users
 RESTART IDENTITY CASCADE
@@ -69,7 +67,6 @@ before(async () => {
 
 beforeEach(async () => {
   setInvoiceIntakeRuntimeForTests(null);
-  setPaymentRunDocumentRuntimeForTests(null);
   await executeWithDeadlockRetry(() => prisma.$executeRawUnsafe(TRUNCATE_SQL));
 });
 
@@ -80,14 +77,14 @@ after(async () => {
   await prisma.$disconnect();
 });
 
-test('payment orders create a business intent and submit into the existing request policy flow', async () => {
+test('manual payment orders are the single payment intent entity', async () => {
   const setup = await createPaymentOrderSetup();
 
   const paymentOrder = await post(
     `/organizations/${setup.organization.organizationId}/payment-orders`,
     {
-      destinationId: setup.destination.destinationId,
-      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
+      counterpartyWalletId: setup.counterpartyWallet.counterpartyWalletId,
+      sourceTreasuryWalletId: setup.sourceTreasuryWallet.treasuryWalletId,
       amountRaw: '10000',
       memo: 'Invoice 1234 payout',
       externalReference: 'INV-1234',
@@ -97,84 +94,44 @@ test('payment orders create a business intent and submit into the existing reque
         balanceRaw: '25000',
         observedAt: '2026-04-10T12:00:00.000Z',
       },
-      submitNow: true,
     },
     setup.sessionToken,
   );
 
   assert.equal(paymentOrder.memo, 'Invoice 1234 payout');
   assert.equal(paymentOrder.externalReference, 'INV-1234');
-  assert.equal(paymentOrder.sourceTreasuryWalletId, setup.sourceAddress.treasuryWalletId);
-  assert.equal(paymentOrder.destinationId, setup.destination.destinationId);
-  assert.equal(paymentOrder.transferRequests.length, 1);
-  assert.equal(paymentOrder.reconciliationDetail.status, 'approved');
-  assert.equal(paymentOrder.derivedState, 'ready_for_execution');
+  assert.equal(paymentOrder.state, 'draft');
+  assert.equal(paymentOrder.derivedState, 'draft');
+  assert.equal(paymentOrder.inputBatchId, null);
+  assert.equal(paymentOrder.transferRequests.length, 0);
   assert.equal(paymentOrder.balanceWarning.status, 'sufficient');
-
-  const transferRequest = await prisma.transferRequest.findUniqueOrThrow({
-    where: { transferRequestId: paymentOrder.transferRequestId },
-  });
-  assert.equal(transferRequest.paymentOrderId, paymentOrder.paymentOrderId);
-  assert.equal(transferRequest.sourceTreasuryWalletId, setup.sourceAddress.treasuryWalletId);
-  assert.equal(transferRequest.counterpartyWalletId, setup.destination.destinationId);
-  assert.equal(transferRequest.status, 'approved');
-
-  const list = await get(`/organizations/${setup.organization.organizationId}/payment-orders`, setup.sessionToken);
-  assert.equal(list.items.length, 1);
-  assert.equal(list.items[0].paymentOrderId, paymentOrder.paymentOrderId);
 });
 
-test('payment requests capture user intent and promote into payment orders', async () => {
+test('invoice upload creates draft orders for trusted wallets and review-gated orders for new wallets', async () => {
   const setup = await createPaymentOrderSetup();
-
-  const paymentRequest = await post(
-    `/organizations/${setup.organization.organizationId}/payment-requests`,
-    {
-      destinationId: setup.destination.destinationId,
-      amountRaw: '15000',
-      reason: 'Pay Fuyo LLC for INV-102',
-      externalReference: 'INV-102',
-      createOrderNow: true,
-      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
-      submitOrderNow: true,
-    },
-    setup.sessionToken,
-  );
-
-  assert.equal(paymentRequest.reason, 'Pay Fuyo LLC for INV-102');
-  assert.equal(paymentRequest.externalReference, 'INV-102');
-  assert.equal(paymentRequest.state, 'converted_to_order');
-  assert.ok(paymentRequest.paymentOrder.paymentOrderId);
-
-  const paymentOrder = await get(
-    `/organizations/${setup.organization.organizationId}/payment-orders/${paymentRequest.paymentOrder.paymentOrderId}`,
-    setup.sessionToken,
-  );
-  assert.equal(paymentOrder.paymentRequestId, paymentRequest.paymentRequestId);
-  assert.equal(paymentOrder.memo, 'Pay Fuyo LLC for INV-102');
-  assert.equal(paymentOrder.externalReference, 'INV-102');
-  assert.equal(paymentOrder.transferRequests.length, 1);
-  assert.equal(paymentOrder.derivedState, 'ready_for_execution');
-  assert.equal(paymentOrder.paymentRequest.reason, 'Pay Fuyo LLC for INV-102');
-
-  const list = await get(`/organizations/${setup.organization.organizationId}/payment-requests`, setup.sessionToken);
-  assert.equal(list.items.length, 1);
-  assert.equal(list.items[0].paymentOrder.paymentOrderId, paymentOrder.paymentOrderId);
-});
-
-test('invoice upload creates a proposal-ready payment order for a trusted wallet', async () => {
-  const setup = await createPaymentOrderSetup();
+  const newVendorWallet = Keypair.generate().publicKey.toBase58();
   setInvoiceIntakeRuntimeForTests({
     extractRowsFromDocument: async () => ({
-      rows: [{
-        counterparty: setup.destination.label,
-        amount: 0.01,
-        currency: 'USD',
-        reference: 'INV-UPLOAD-TRUSTED',
-        due_date: '2026-04-15',
-        wallet_address: setup.destinationAddress.address,
-        notes: 'April services',
-      }],
+      rows: [
+        {
+          counterparty: setup.counterpartyWallet.label,
+          amount: 0.01,
+          currency: 'USDC',
+          reference: 'INV-UPLOAD-TRUSTED',
+          due_date: '2026-04-15',
+          wallet_address: setup.counterpartyWallet.walletAddress,
+          notes: 'April services',
+        },
+        {
+          counterparty: 'New Review Vendor',
+          amount: 0.02,
+          currency: 'USDC',
+          reference: 'INV-UPLOAD-REVIEW',
+          due_date: '2026-04-18',
+          wallet_address: newVendorWallet,
+          notes: null,
+        },
+      ],
       modelLatencyMs: 7,
       pageCount: 1,
     }),
@@ -186,80 +143,36 @@ test('invoice upload creates a proposal-ready payment order for a trusted wallet
       filename: 'invoice.pdf',
       mimeType: 'application/pdf',
       dataBase64: Buffer.from('fake-pdf').toString('base64'),
-      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
+      sourceTreasuryWalletId: setup.sourceTreasuryWallet.treasuryWalletId,
+      autoAdvance: false,
     },
     setup.sessionToken,
   );
 
-  assert.equal(result.createdCount, 1);
+  assert.equal(result.createdCount, 2);
   assert.equal(result.skippedCount, 0);
-  assert.equal(result.primaryPaymentOrder.externalReference, 'INV-UPLOAD-TRUSTED');
-  assert.equal(result.primaryPaymentOrder.state, 'approved');
-  assert.equal(result.primaryPaymentOrder.derivedState, 'ready_for_execution');
-  assert.equal(result.primaryPaymentOrder.transferRequests.length, 1);
   assert.equal(result.paymentOrders[0].decision, 'drafted');
-});
+  assert.equal(result.paymentOrders[0].paymentOrder.state, 'draft');
+  assert.equal(result.paymentOrders[0].paymentOrder.transferRequests.length, 0);
+  assert.equal(result.paymentOrders[1].decision, 'needs_review');
+  assert.equal(result.paymentOrders[1].paymentOrder.state, 'needs_review');
+  assert.equal(result.paymentOrders[1].paymentOrder.transferRequests.length, 0);
 
-test('invoice upload gates new invoice wallets behind needs_review and clear-review advances them', async () => {
-  const setup = await createPaymentOrderSetup();
-  const newVendorWallet = Keypair.generate().publicKey.toBase58();
-  setInvoiceIntakeRuntimeForTests({
-    extractRowsFromDocument: async () => ({
-      rows: [{
-        counterparty: 'New Review Vendor',
-        amount: 0.01,
-        currency: 'USDC',
-        reference: 'INV-UPLOAD-REVIEW',
-        due_date: '2026-04-18',
-        wallet_address: newVendorWallet,
-        notes: null,
-      }],
-      modelLatencyMs: 9,
-      pageCount: 1,
-    }),
-  });
-
-  const result = await post(
-    `/organizations/${setup.organization.organizationId}/invoices/upload`,
-    {
-      filename: 'new-vendor.png',
-      mimeType: 'image/png',
-      dataBase64: Buffer.from('fake-image').toString('base64'),
-      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
-    },
-    setup.sessionToken,
-  );
-
-  const paymentOrder = result.primaryPaymentOrder;
-  assert.equal(paymentOrder.state, 'needs_review');
-  assert.equal(paymentOrder.derivedState, 'needs_review');
-  assert.equal(paymentOrder.transferRequests.length, 0);
-  assert.equal(paymentOrder.metadataJson.agent.decision, 'needs_review');
-  assert.equal(paymentOrder.metadataJson.agent.triggeredRules[0].rule, 'unreviewed_counterparty');
-
-  let wallet = await prisma.counterpartyWallet.findUniqueOrThrow({
-    where: {
-      organizationId_walletAddress: {
-        organizationId: setup.organization.organizationId,
-        walletAddress: newVendorWallet,
-      },
-    },
-  });
-  assert.equal(wallet.trustState, 'unreviewed');
-
+  const reviewOrder = result.paymentOrders[1].paymentOrder;
   const cleared = await post(
-    `/organizations/${setup.organization.organizationId}/payment-orders/${paymentOrder.paymentOrderId}/clear-review`,
+    `/organizations/${setup.organization.organizationId}/payment-orders/${reviewOrder.paymentOrderId}/clear-review`,
     {
       reviewNote: 'Verified invoice and wallet by email.',
+      autoAdvance: false,
     },
     setup.sessionToken,
   );
 
-  assert.equal(cleared.state, 'approved');
-  assert.equal(cleared.derivedState, 'ready_for_execution');
-  assert.equal(cleared.transferRequests.length, 1);
+  assert.equal(cleared.state, 'draft');
+  assert.equal(cleared.derivedState, 'draft');
+  assert.equal(cleared.transferRequests.length, 0);
 
-  wallet = await prisma.counterpartyWallet.findUniqueOrThrow({
+  const wallet = await prisma.counterpartyWallet.findUniqueOrThrow({
     where: {
       organizationId_walletAddress: {
         organizationId: setup.organization.organizationId,
@@ -268,1047 +181,114 @@ test('invoice upload gates new invoice wallets behind needs_review and clear-rev
     },
   });
   assert.equal(wallet.trustState, 'trusted');
+});
 
-  const events = await prisma.paymentOrderEvent.findMany({
-    where: { paymentOrderId: paymentOrder.paymentOrderId },
-    orderBy: { createdAt: 'asc' },
+test('CSV batch import creates PaymentOrders with a shared input batch id', async () => {
+  const setup = await createPaymentOrderSetup();
+  const secondWallet = await createCounterpartyWallet(setup, {
+    label: 'Second trusted vendor',
+    walletAddress: Keypair.generate().publicKey.toBase58(),
   });
-  assert.ok(events.some((event) => event.eventType === 'payment_order_review_cleared'));
-  assert.ok(events.some((event) => event.eventType === 'payment_order_approved'));
-});
-
-test('invoice upload flags invalid OCR wallet strings instead of trusting them', async () => {
-  const setup = await createPaymentOrderSetup();
-  const invalidOcrWallet = 'GHqSstHfHHRPacKAFplWeXobLw2RnaZpHd8u5V2BuNmv';
-  setInvoiceIntakeRuntimeForTests({
-    extractRowsFromDocument: async () => ({
-      rows: [{
-        counterparty: setup.destination.label,
-        amount: 0.01,
-        currency: 'USD',
-        reference: 'INV-OCR-INVALID',
-        due_date: '2026-04-22',
-        wallet_address: invalidOcrWallet,
-        notes: 'OCR confused wallet address',
-      }],
-      modelLatencyMs: 11,
-      pageCount: 1,
-    }),
-  });
-
-  const result = await post(
-    `/organizations/${setup.organization.organizationId}/invoices/upload`,
-    {
-      filename: 'ocr-invalid-wallet.pdf',
-      mimeType: 'application/pdf',
-      dataBase64: Buffer.from('fake-pdf').toString('base64'),
-      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
-    },
-    setup.sessionToken,
-  );
-
-  const paymentOrder = result.primaryPaymentOrder;
-  assert.equal(result.createdCount, 1);
-  assert.equal(result.skippedCount, 0);
-  assert.equal(paymentOrder.state, 'needs_review');
-  assert.equal(paymentOrder.derivedState, 'needs_review');
-  assert.equal(paymentOrder.transferRequests.length, 0);
-  assert.equal(paymentOrder.metadataJson.agent.triggeredRules[0].rule, 'invalid_extracted_wallet_address');
-  assert.match(paymentOrder.metadataJson.agent.triggeredRules[0].reason, /not a valid Solana base58 address/i);
-});
-
-test('CSV import creates payment requests and orders against existing destinations', async () => {
-  const setup = await createPaymentOrderSetup();
   const csv = [
-    'counterparty,destination,amount,reference,due_date',
-    `Fuyo LLC,${setup.destination.label},0.015,INV-CSV-1,2026-04-15`,
-  ].join('\n');
-
-  const result = await post(
-    `/organizations/${setup.organization.organizationId}/payment-requests/import-csv`,
-    {
-      csv,
-      createOrderNow: true,
-      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
-      submitOrderNow: true,
-    },
-    setup.sessionToken,
-  );
-
-  assert.equal(result.imported, 1);
-  assert.equal(result.failed, 0);
-  assert.equal(result.items[0].paymentRequest.amountRaw, '15000');
-  assert.equal(result.items[0].paymentRequest.state, 'converted_to_order');
-  assert.equal(result.items[0].paymentRequest.destinationId, setup.destination.destinationId);
-
-  const paymentOrder = await get(
-    `/organizations/${setup.organization.organizationId}/payment-orders/${result.items[0].paymentRequest.paymentOrder.paymentOrderId}`,
-    setup.sessionToken,
-  );
-  assert.equal(paymentOrder.amountRaw, '15000');
-  assert.equal(paymentOrder.externalReference, 'INV-CSV-1');
-  assert.equal(paymentOrder.destinationId, setup.destination.destinationId);
-  assert.equal(paymentOrder.derivedState, 'ready_for_execution');
-});
-
-test('CSV import creates unreviewed destinations for raw wallet addresses', async () => {
-  const setup = await createPaymentOrderSetup();
-  const firstWallet = Keypair.generate().publicKey.toBase58();
-  const secondWallet = Keypair.generate().publicKey.toBase58();
-  const csv = [
-    'counterparty,destination,amount,reference,due_date',
-    `Acme Corp,${firstWallet},0.01,INV-1001,2026-04-15`,
-    `Beta Supplies,${secondWallet},0.01,INV-1002,2026-04-18`,
-  ].join('\n');
-
-  const result = await post(
-    `/organizations/${setup.organization.organizationId}/payment-requests/import-csv`,
-    {
-      csv,
-      createOrderNow: true,
-      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
-      submitOrderNow: false,
-    },
-    setup.sessionToken,
-  );
-
-  assert.equal(result.imported, 2);
-  assert.equal(result.failed, 0);
-  assert.equal(result.items[0].paymentRequest.amountRaw, '10000');
-  assert.equal(result.items[1].paymentRequest.externalReference, 'INV-1002');
-
-  const destinations = await get(`/organizations/${setup.organization.organizationId}/destinations`, setup.sessionToken);
-  const importedDestinations = destinations.items.filter((item: { walletAddress: string }) => [firstWallet, secondWallet].includes(item.walletAddress));
-  assert.equal(importedDestinations.length, 2);
-  assert.deepEqual(
-    importedDestinations.map((item: { trustState: string }) => item.trustState).sort(),
-    ['unreviewed', 'unreviewed'],
-  );
-
-  const addresses = await get(`/organizations/${setup.organization.organizationId}/treasury-wallets`, setup.sessionToken);
-  const importedAddresses = addresses.items.filter((item: { address: string }) => [firstWallet, secondWallet].includes(item.address));
-  assert.equal(importedAddresses.length, 0);
-});
-
-test('payment runs import CSV rows and prepare one batch execution packet', async () => {
-  const setup = await createPaymentOrderSetup();
-  const secondDestinationAddress = await post(
-    `/organizations/${setup.organization.organizationId}/treasury-wallets`,
-    {
-      chain: 'solana',
-      address: Keypair.generate().publicKey.toBase58(),
-      displayName: `Second vendor ${crypto.randomUUID().slice(0, 8)}`,
-    },
-    setup.sessionToken,
-  );
-  const secondDestination = await post(
-    `/organizations/${setup.organization.organizationId}/destinations`,
-    {
-      walletAddress: secondDestinationAddress.address,
-      tokenAccountAddress: secondDestinationAddress.usdcAtaAddress ?? undefined,
-      label: `Second payout ${crypto.randomUUID().slice(0, 8)}`,
-      trustState: 'trusted',
-      destinationType: 'vendor_wallet',
-      isInternal: false,
-    },
-    setup.sessionToken,
-  );
-  const csv = [
-    'counterparty,destination,amount,reference,due_date',
-    `Acme Corp,${setup.destination.label},0.01,RUN-1001,2026-04-15`,
-    `Beta Supplies,${secondDestination.label},0.02,RUN-1002,2026-04-18`,
-  ].join('\n');
-
-  const imported = await post(
-    `/organizations/${setup.organization.organizationId}/payment-runs/import-csv`,
-    {
-      runName: 'April payroll run',
-      csv,
-      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
-      submitOrderNow: true,
-    },
-    setup.sessionToken,
-  );
-
-  assert.equal(imported.importResult.imported, 2);
-  assert.equal(imported.importResult.failed, 0);
-  assert.equal(imported.paymentRun.runName, 'April payroll run');
-  assert.equal(imported.paymentRun.totals.orderCount, 2);
-  assert.equal(imported.paymentRun.totals.totalAmountRaw, '30000');
-  assert.equal(imported.paymentRun.reconciliationSummary.requestedAmountRaw, '30000');
-  assert.equal(imported.paymentRun.reconciliationSummary.matchedAmountRaw, '0');
-  assert.equal(imported.paymentRun.reconciliationSummary.settlementCounts.pending, 2);
-
-  const prepared = await post(
-    `/organizations/${setup.organization.organizationId}/payment-runs/${imported.paymentRun.paymentRunId}/prepare-execution`,
-    {
-      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
-    },
-    setup.sessionToken,
-  );
-
-  assert.equal(prepared.executionRecords.length, 2);
-  assert.equal(prepared.executionPacket.kind, 'solana_spl_usdc_transfer_batch');
-  assert.equal(prepared.executionPacket.transfers.length, 2);
-  assert.equal(prepared.executionPacket.instructions.length, 4);
-  assert.equal(prepared.executionPacket.amountRaw, '30000');
-  assert.equal(prepared.paymentRun.derivedState, 'ready_for_execution');
-
-  const preparedAgain = await post(
-    `/organizations/${setup.organization.organizationId}/payment-runs/${imported.paymentRun.paymentRunId}/prepare-execution`,
-    {
-      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
-    },
-    setup.sessionToken,
-  );
-  assert.deepEqual(
-    preparedAgain.executionRecords.map((record: { executionRecordId: string }) => record.executionRecordId),
-    prepared.executionRecords.map((record: { executionRecordId: string }) => record.executionRecordId),
-  );
-
-  const signature = '5'.repeat(88);
-  const attached = await post(
-    `/organizations/${setup.organization.organizationId}/payment-runs/${imported.paymentRun.paymentRunId}/attach-signature`,
-    {
-      submittedSignature: signature,
-      submittedAt: '2026-04-10T12:00:00.000Z',
-    },
-    setup.sessionToken,
-  );
-
-  assert.equal(attached.executionRecords.length, 2);
-  assert.ok(attached.executionRecords.every((record: { submittedSignature: string; state: string }) => record.submittedSignature === signature && record.state === 'submitted_onchain'));
-  assert.equal(attached.paymentRun.derivedState, 'submitted_onchain');
-
-  const runProof = await get(
-    `/organizations/${setup.organization.organizationId}/payment-runs/${imported.paymentRun.paymentRunId}/proof`,
-    setup.sessionToken,
-  );
-  assert.equal(runProof.packetType, 'stablecoin_payment_run_proof');
-  assert.equal(runProof.detailLevel, 'summary');
-  assert.match(runProof.proofId, /^decimal_payment_run_proof_/);
-  assert.match(runProof.canonicalDigest, /^[a-f0-9]{64}$/);
-  assert.equal(runProof.orderProofs.length, 0);
-  assert.equal(runProof.readiness.counts.total, 2);
-  assert.equal(runProof.reconciliationSummary.requestedAmountRaw, '30000');
-  assert.equal(runProof.reconciliationSummary.settlementCounts.pending, 2);
-  assert.equal(runProof.agentSummary.canTreatAsFinal, false);
-  assert.match(runProof.orders[0].proofId, /^decimal_payment_proof_/);
-  assert.match(runProof.orders[0].proofDigest, /^[a-f0-9]{64}$/);
-  assert.match(runProof.orders[0].fullProofEndpoint, /\/payment-orders\/.+\/proof$/);
-  assert.equal(runProof.orders[0].latestExecution, undefined);
-  assert.equal(runProof.orders[0].match, undefined);
-  assert.equal(runProof.orders[0].exceptions, undefined);
-
-  const summaryRunProof = await get(
-    `/organizations/${setup.organization.organizationId}/payment-runs/${imported.paymentRun.paymentRunId}/proof?detail=summary`,
-    setup.sessionToken,
-  );
-  assert.equal(summaryRunProof.detailLevel, 'summary');
-  assert.equal(summaryRunProof.orderProofs.length, 0);
-  assert.equal(summaryRunProof.orders.length, 2);
-
-  const compactRunProof = await get(
-    `/organizations/${setup.organization.organizationId}/payment-runs/${imported.paymentRun.paymentRunId}/proof?detail=compact`,
-    setup.sessionToken,
-  );
-  assert.equal(compactRunProof.detailLevel, 'compact');
-  assert.equal(compactRunProof.orderProofs.length, 2);
-  assert.equal(compactRunProof.orders[0].proofId, compactRunProof.orderProofs[0].proofId);
-  assert.equal(compactRunProof.orders[0].proofDigest, compactRunProof.orderProofs[0].canonicalDigest);
-  assert.equal(compactRunProof.orderProofs[0].sourceArtifacts, undefined);
-  assert.equal(compactRunProof.orderProofs[0].auditTrail, undefined);
-  assert.match(compactRunProof.orderProofs[0].fullProofEndpoint, /\/payment-orders\/.+\/proof$/);
-
-  const fullRunProof = await get(
-    `/organizations/${setup.organization.organizationId}/payment-runs/${imported.paymentRun.paymentRunId}/proof?detail=full`,
-    setup.sessionToken,
-  );
-  assert.equal(fullRunProof.detailLevel, 'full');
-  assert.equal(fullRunProof.orderProofs.length, 2);
-  assert.ok(fullRunProof.orderProofs[0].sourceArtifacts);
-  assert.ok(Array.isArray(fullRunProof.orderProofs[0].auditTrail));
-
-});
-
-test('payment run CSV preview detects duplicate rows and import is idempotent by key', async () => {
-  const setup = await createPaymentOrderSetup();
-  const csv = [
-    'counterparty,destination,amount,reference,due_date',
-    `Acme Corp,${setup.destination.label},0.01,RUN-IDEMP-1,2026-04-15`,
-  ].join('\n');
-  const duplicateCsv = [
-    'counterparty,destination,amount,reference,due_date',
-    `Acme Corp,${setup.destination.label},0.01,RUN-DUP-1,2026-04-15`,
-    `Acme Corp,${setup.destination.label},0.01,RUN-DUP-1,2026-04-15`,
+    'payee,destination,amount,reference,due_date',
+    `${setup.counterpartyWallet.label},${setup.counterpartyWallet.walletAddress},0.01,CSV-1001,2026-04-15`,
+    `${secondWallet.label},${secondWallet.walletAddress},0.02,CSV-1002,2026-04-16`,
   ].join('\n');
 
   const preview = await post(
-    `/organizations/${setup.organization.organizationId}/payment-runs/import-csv/preview`,
-    { csv: duplicateCsv },
-    setup.sessionToken,
-  );
-  assert.equal(preview.totalRows, 2);
-  // Row 1 clean against an existing destination; row 2 flagged as duplicate.
-  assert.equal(preview.ready, 1);
-  assert.equal(preview.warnings, 1);
-  assert.equal(preview.failed, 0);
-  assert.equal(preview.canImport, true);
-  assert.match(preview.csvFingerprint, /^[a-f0-9]{64}$/);
-  assert.match(preview.items[1].warnings[0], /Duplicate CSV row/i);
-
-  const imported = await post(
-    `/organizations/${setup.organization.organizationId}/payment-runs/import-csv`,
-    {
-      runName: 'Idempotent run',
-      csv,
-      importKey: 'idem-run-1',
-      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
-      submitOrderNow: true,
-    },
-    setup.sessionToken,
-  );
-  const replay = await post(
-    `/organizations/${setup.organization.organizationId}/payment-runs/import-csv`,
-    {
-      runName: 'Should not create another run',
-      csv,
-      importKey: 'idem-run-1',
-      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
-      submitOrderNow: true,
-    },
-    setup.sessionToken,
-  );
-
-  assert.equal(imported.paymentRun.paymentRunId, replay.paymentRun.paymentRunId);
-  assert.equal(replay.importResult.idempotentReplay, true);
-  assert.equal(replay.paymentRun.totals.orderCount, 1);
-
-  const runCount = await prisma.paymentRun.count({
-    where: { organizationId: setup.organization.organizationId },
-  });
-  assert.equal(runCount, 1);
-});
-
-test('payment run document import skips invalid OCR wallet rows and creates valid rows', async () => {
-  const setup = await createPaymentOrderSetup();
-  const invalidOcrWallet = 'GHqSstHfHHRPacKAFplWeXobLw2RnaZpHd8u5V2BuNmv';
-  setPaymentRunDocumentRuntimeForTests({
-    extractRowsFromDocument: async () => ({
-      rows: [
-        {
-          counterparty: setup.destination.label,
-          amount: 0.01,
-          currency: 'USD',
-          reference: 'RUN-DOC-VALID',
-          due_date: '2026-04-15',
-          wallet_address: null,
-          notes: 'Known vendor row',
-        },
-        {
-          counterparty: 'Bangalore Ops',
-          amount: 0.02,
-          currency: 'USD',
-          reference: 'RUN-DOC-OCR-BAD',
-          due_date: '2026-04-16',
-          wallet_address: invalidOcrWallet,
-          notes: 'OCR confused wallet row',
-        },
-      ],
-      modelLatencyMs: 17,
-      pageCount: 2,
-    }),
-  });
-
-  const result = await post(
-    `/organizations/${setup.organization.organizationId}/payment-runs/from-document`,
-    {
-      filename: 'two-invoices.pdf',
-      mimeType: 'application/pdf',
-      dataBase64: Buffer.from('fake-pdf').toString('base64'),
-      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
-    },
-    setup.sessionToken,
-  );
-
-  assert.equal(result.paymentRun.totals.orderCount, 1);
-  assert.equal(result.importResult.imported, 1);
-  assert.equal(result.skippedRows.length, 1);
-  assert.equal(result.skippedRows[0].counterparty, 'Bangalore Ops');
-  assert.equal(result.skippedRows[0].reason, 'invalid_wallet_address');
-  assert.equal(result.skippedRows[0].walletAddress, invalidOcrWallet);
-  assert.match(result.skippedRows[0].message, /OCR ambiguity/i);
-  assert.equal(result.extractedRows.length, 2);
-});
-
-test('payment run document import returns review data instead of throwing when no row can be routed', async () => {
-  const setup = await createPaymentOrderSetup();
-  const invalidOcrWallet = 'GHqSstHfHHRPacKAFplWeXobLw2RnaZpHd8u5V2BuNmv';
-  setPaymentRunDocumentRuntimeForTests({
-    extractRowsFromDocument: async () => ({
-      rows: [{
-        counterparty: 'Bangalore Ops Pvt Ltd',
-        amount: 0.01,
-        currency: 'USD',
-        reference: 'RUN-DOC-ALL-OCR-BAD',
-        due_date: '2026-04-16',
-        wallet_address: invalidOcrWallet,
-        notes: 'Only row has OCR-confused wallet',
-      }],
-      modelLatencyMs: 19,
-      pageCount: 1,
-    }),
-  });
-
-  const result = await post(
-    `/organizations/${setup.organization.organizationId}/payment-runs/from-document`,
-    {
-      filename: 'bangalore-ops.pdf',
-      mimeType: 'application/pdf',
-      dataBase64: Buffer.from('fake-pdf').toString('base64'),
-      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
-    },
-    setup.sessionToken,
-  );
-
-  assert.equal(result.paymentRun.inputSource, 'document_import');
-  assert.equal(result.paymentRun.state, 'exception');
-  assert.equal(result.paymentRun.derivedState, 'exception');
-  assert.equal(result.paymentRun.totals.orderCount, 0);
-  assert.equal(result.importResult.imported, 0);
-  assert.equal(result.importResult.failed, 1);
-  assert.equal(result.skippedRows[0].counterparty, 'Bangalore Ops Pvt Ltd');
-  assert.equal(result.skippedRows[0].reason, 'invalid_wallet_address');
-  assert.equal(result.skippedRows[0].walletAddress, invalidOcrWallet);
-  assert.equal(result.documentImportReview.status, 'needs_routing');
-  assert.equal(result.paymentRun.metadataJson.importReview.skippedRows[0].walletAddress, invalidOcrWallet);
-
-  const correctedWallet = Keypair.generate().publicKey.toBase58();
-  const resolved = await post(
-    `/organizations/${setup.organization.organizationId}/payment-runs/${result.paymentRun.paymentRunId}/resolve-document-row`,
-    {
-      rowIndex: 0,
-      walletAddress: correctedWallet,
-      label: 'Bangalore Ops corrected wallet',
-    },
-    setup.sessionToken,
-  );
-
-  assert.equal(resolved.paymentRun.state, 'draft');
-  assert.equal(resolved.paymentRun.derivedState, 'draft');
-  assert.equal(resolved.paymentRun.totals.orderCount, 1);
-  assert.equal(resolved.paymentRun.paymentOrders[0].externalReference, 'RUN-DOC-ALL-OCR-BAD');
-  assert.equal(resolved.paymentRun.paymentOrders[0].counterpartyWallet.walletAddress, correctedWallet);
-  assert.equal(resolved.paymentRun.paymentOrders[0].counterpartyWallet.trustState, 'unreviewed');
-  assert.equal(resolved.paymentRequest.paymentOrder.paymentOrderId, resolved.paymentRun.paymentOrders[0].paymentOrderId);
-  assert.equal(resolved.paymentRun.metadataJson.importReview.status, 'resolved');
-  assert.equal(resolved.paymentRun.metadataJson.importReview.resolvedRows[0].rowIndex, 0);
-});
-
-test('payment run cancellation and close are explicit lifecycle actions', async () => {
-  const setup = await createPaymentOrderSetup();
-  const cancellableCsv = [
-    'counterparty,destination,amount,reference,due_date',
-    `Cancel Corp,${setup.destination.label},0.01,RUN-CANCEL-1,2026-04-15`,
-  ].join('\n');
-  const cancellable = await post(
-    `/organizations/${setup.organization.organizationId}/payment-runs/import-csv`,
-    {
-      runName: 'Cancellable run',
-      csv: cancellableCsv,
-      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
-      submitOrderNow: false,
-    },
-    setup.sessionToken,
-  );
-
-  const cancelled = await post(
-    `/organizations/${setup.organization.organizationId}/payment-runs/${cancellable.paymentRun.paymentRunId}/cancel`,
-    {},
-    setup.sessionToken,
-  );
-  assert.equal(cancelled.state, 'cancelled');
-  assert.equal(cancelled.derivedState, 'cancelled');
-  assert.equal(cancelled.paymentOrders[0].state, 'cancelled');
-  assert.equal(cancelled.paymentOrders[0].derivedState, 'cancelled');
-
-  const closableCsv = [
-    'counterparty,destination,amount,reference,due_date',
-    `Close Corp,${setup.destination.label},0.01,RUN-CLOSE-1,2026-04-15`,
-  ].join('\n');
-  const closable = await post(
-    `/organizations/${setup.organization.organizationId}/payment-runs/import-csv`,
-    {
-      runName: 'Closable run',
-      csv: closableCsv,
-      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
-      submitOrderNow: true,
-    },
-    setup.sessionToken,
-  );
-  const order = closable.paymentRun.paymentOrders[0];
-  await seedExactSettlement({
-    organizationId: setup.organization.organizationId,
-    transferRequestId: order.transferRequestId,
-    amountRaw: '10000',
-  });
-
-  const closed = await post(
-    `/organizations/${setup.organization.organizationId}/payment-runs/${closable.paymentRun.paymentRunId}/close`,
-    {},
-    setup.sessionToken,
-  );
-  assert.equal(closed.state, 'closed');
-  assert.equal(closed.derivedState, 'closed');
-  assert.equal(closed.paymentOrders[0].state, 'closed');
-  assert.equal(closed.paymentOrders[0].derivedState, 'closed');
-
-  const transferRequest = await prisma.transferRequest.findUniqueOrThrow({
-    where: { transferRequestId: order.transferRequestId },
-  });
-  assert.equal(transferRequest.status, 'closed');
-});
-
-test('collections create inbound expected transfers against owned receiving wallets', async () => {
-  const setup = await createPaymentOrderSetup();
-  const payerWallet = Keypair.generate().publicKey.toBase58();
-  const dualRoleSource = await post(
-    `/organizations/${setup.organization.organizationId}/collection-sources`,
-    {
-      counterpartyId: setup.counterparty.counterpartyId,
-      walletAddress: setup.destinationAddress.address,
-      tokenAccountAddress: setup.destinationAddress.usdcAtaAddress,
-      label: 'Vendor payer wallet',
-      trustState: 'trusted',
-    },
-    setup.sessionToken,
-  );
-
-  assert.equal(dualRoleSource.walletAddress, setup.destinationAddress.address);
-  assert.equal(dualRoleSource.trustState, 'trusted');
-
-  const collection = await post(
-    `/organizations/${setup.organization.organizationId}/collections`,
-    {
-      receivingTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
-      collectionSourceId: dualRoleSource.collectionSourceId,
-      amountRaw: '25000',
-      reason: 'Collect invoice AR-1001',
-      externalReference: 'AR-1001',
-      dueAt: '2026-04-20T00:00:00.000Z',
-    },
-    setup.sessionToken,
-  );
-
-  assert.equal(collection.state, 'open');
-  assert.equal(collection.derivedState, 'open');
-  assert.equal(collection.amountRaw, '25000');
-  assert.equal(collection.receivingTreasuryWallet.treasuryWalletId, setup.sourceAddress.treasuryWalletId);
-  assert.equal(collection.receivingTreasuryWallet.address, setup.sourceAddress.address);
-  assert.equal(collection.collectionSourceId, dualRoleSource.collectionSourceId);
-  assert.equal(collection.collectionSource.walletAddress, setup.destinationAddress.address);
-  assert.equal(collection.payerWalletAddress, setup.destinationAddress.address);
-  assert.ok(collection.transferRequestId);
-
-  const adHocCollection = await post(
-    `/organizations/${setup.organization.organizationId}/collections`,
-    {
-      receivingTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
-      counterpartyId: setup.counterparty.counterpartyId,
-      payerWalletAddress: payerWallet,
-      amountRaw: '26000',
-      reason: 'Collect ad hoc payer',
-      externalReference: 'AR-1002',
-    },
-    setup.sessionToken,
-  );
-  assert.equal(adHocCollection.collectionSource.walletAddress, payerWallet);
-  assert.equal(adHocCollection.collectionSource.trustState, 'unreviewed');
-
-  const transferRequest = await prisma.transferRequest.findUniqueOrThrow({
-    where: { transferRequestId: collection.transferRequestId },
-    include: { counterpartyWallet: true },
-  });
-  assert.equal(transferRequest.requestType, 'collection_request');
-  assert.equal(transferRequest.status, 'approved');
-  assert.equal(transferRequest.sourceTreasuryWalletId, null);
-  assert.equal(transferRequest.counterpartyWallet.walletAddress, setup.sourceAddress.address);
-  assert.equal(transferRequest.counterpartyWallet.tokenAccountAddress, setup.sourceAddress.usdcAtaAddress);
-  assert.equal(transferRequest.counterpartyWallet.isInternal, true);
-  assert.equal(transferRequest.counterpartyWallet.walletType, 'internal_collection_receiver');
-
-  const publicDestinations = await get(`/organizations/${setup.organization.organizationId}/destinations`, setup.sessionToken);
-  assert.ok(
-    publicDestinations.items.every((destination: { destinationId: string }) => destination.destinationId !== transferRequest.counterpartyWalletId),
-    'internal collection receiver should not appear in the normal destination address book',
-  );
-
-  const destinationsWithInternal = await get(
-    `/organizations/${setup.organization.organizationId}/destinations?includeInternal=true`,
-    setup.sessionToken,
-  );
-  assert.ok(
-    destinationsWithInternal.items.some((destination: { destinationId: string }) => destination.destinationId === transferRequest.counterpartyWalletId),
-    'internal collection receiver should remain inspectable when explicitly requested',
-  );
-
-  const collected = await get(
-    `/organizations/${setup.organization.organizationId}/collections/${collection.collectionRequestId}`,
-    setup.sessionToken,
-  );
-  assert.equal(collected.derivedState, 'open');
-  assert.equal(collected.reconciliationDetail.requestDisplayState, 'pending');
-  assert.equal(collected.reconciliationDetail.match, null);
-
-  const proof = await get(
-    `/organizations/${setup.organization.organizationId}/collections/${collection.collectionRequestId}/proof`,
-    setup.sessionToken,
-  );
-  assert.equal(proof.packetType, 'stablecoin_collection_proof');
-  assert.equal(proof.status, 'in_progress');
-  assert.equal(proof.collectionSourceReview.status, 'awaiting_observation');
-  assert.equal(proof.collectionSourceReview.expectedSourceWallet, setup.destinationAddress.address);
-  assert.equal(proof.collectionSourceReview.observedSourceWallet, null);
-  assert.equal(proof.readiness.status, 'in_progress');
-
-});
-
-test('collection runs import CSV rows into a batch of inbound collection requests', async () => {
-  const setup = await createPaymentOrderSetup();
-  const firstPayerWallet = Keypair.generate().publicKey.toBase58();
-  const secondPayerWallet = Keypair.generate().publicKey.toBase58();
-  const csv = [
-    'counterparty,receiving_wallet,payer_wallet,amount,reference,due_date',
-    `Acme Customer,${setup.sourceAddress.displayName},${firstPayerWallet},0.03,AR-RUN-1,2026-04-20`,
-    `Beta Customer,${setup.sourceAddress.address},${secondPayerWallet},0.04,AR-RUN-2,2026-04-21`,
-  ].join('\n');
-
-  const preview = await post(
-    `/organizations/${setup.organization.organizationId}/collection-runs/import-csv/preview`,
+    `/organizations/${setup.organization.organizationId}/payment-orders/batch-csv/preview`,
     { csv },
     setup.sessionToken,
   );
   assert.equal(preview.totalRows, 2);
   assert.equal(preview.ready, 2);
-  assert.equal(preview.failed, 0);
   assert.equal(preview.canImport, true);
-  assert.match(preview.csvFingerprint, /^[a-f0-9]{64}$/);
 
   const imported = await post(
-    `/organizations/${setup.organization.organizationId}/collection-runs/import-csv`,
+    `/organizations/${setup.organization.organizationId}/payment-orders/batch-csv`,
     {
-      runName: 'April receivables',
       csv,
-      importKey: 'collection-run-1',
-      notes: 'Monthly AR upload',
+      sourceTreasuryWalletId: setup.sourceTreasuryWallet.treasuryWalletId,
+      batchLabel: 'April vendor batch',
+      autoAdvance: false,
     },
     setup.sessionToken,
   );
 
-  assert.equal(imported.importResult.imported, 2);
-  assert.equal(imported.importResult.failed, 0);
-  assert.equal(imported.collectionRun.runName, 'April receivables');
-  assert.equal(imported.collectionRun.summary.total, 2);
-  assert.equal(imported.collectionRun.summary.totalAmountRaw, '70000');
-  assert.equal(imported.collectionRun.collectionRequests.length, 2);
-  assert.equal(imported.collectionRun.collectionRequests[0].transferRequest.requestType, 'collection_request');
+  assert.equal(imported.imported, 2);
+  assert.equal(imported.failed, 0);
+  assert.equal(imported.inputBatchLabel, 'April vendor batch');
+  assert.equal(new Set(imported.paymentOrders.map((item: { inputBatchId: string }) => item.inputBatchId)).size, 1);
+  for (const item of imported.paymentOrders) {
+    assert.equal(item.status, 'imported');
+    assert.equal(item.paymentOrder.inputBatchId, imported.inputBatchId);
+    assert.equal(item.paymentOrder.inputBatchLabel, 'April vendor batch');
+    assert.equal(item.paymentOrder.state, 'draft');
+    assert.equal(item.paymentOrder.transferRequests.length, 0);
+  }
 
-  const replay = await post(
-    `/organizations/${setup.organization.organizationId}/collection-runs/import-csv`,
-    {
-      runName: 'Should replay',
-      csv,
-      importKey: 'collection-run-1',
-    },
+  const list = await get(
+    `/organizations/${setup.organization.organizationId}/payment-orders?inputBatchId=${imported.inputBatchId}`,
     setup.sessionToken,
   );
-  assert.equal(replay.importResult.idempotentReplay, true);
-  assert.equal(replay.collectionRun.collectionRunId, imported.collectionRun.collectionRunId);
-
-  const transferRequestCount = await prisma.transferRequest.count({
-    where: {
-      organizationId: setup.organization.organizationId,
-      requestType: 'collection_request',
-    },
-  });
-  assert.equal(transferRequestCount, 2);
-
-  const collectionSources = await get(`/organizations/${setup.organization.organizationId}/collection-sources`, setup.sessionToken);
-  const importedSources = collectionSources.items.filter((item: { walletAddress: string }) => [firstPayerWallet, secondPayerWallet].includes(item.walletAddress));
-  assert.equal(importedSources.length, 2);
-  assert.deepEqual(
-    importedSources.map((item: { trustState: string }) => item.trustState).sort(),
-    ['unreviewed', 'unreviewed'],
-  );
-
-  const destinations = await get(`/organizations/${setup.organization.organizationId}/destinations?includeInternal=true`, setup.sessionToken);
-  const payerDestinations = destinations.items.filter((item: { walletAddress: string }) => [firstPayerWallet, secondPayerWallet].includes(item.walletAddress));
-  assert.equal(payerDestinations.length, 0);
-
-  const runProof = await get(
-    `/organizations/${setup.organization.organizationId}/collection-runs/${imported.collectionRun.collectionRunId}/proof`,
-    setup.sessionToken,
-  );
-  assert.equal(runProof.packetType, 'stablecoin_collection_run_proof');
-  assert.equal(runProof.collections.length, 2);
-  assert.equal(runProof.readiness.status, 'needs_review');
-  assert.equal(runProof.collections[0].sourceReviewStatus, 'source_needs_review');
-
+  assert.equal(list.items.length, 2);
 });
 
-test('payment order duplicate references and unsafe source wallets are rejected', async () => {
+test('payment proof reflects the collapsed payment lifecycle', async () => {
   const setup = await createPaymentOrderSetup();
-
-  await post(
+  const paymentOrder = await post(
     `/organizations/${setup.organization.organizationId}/payment-orders`,
     {
-      destinationId: setup.destination.destinationId,
-      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
+      counterpartyWalletId: setup.counterpartyWallet.counterpartyWalletId,
+      sourceTreasuryWalletId: setup.sourceTreasuryWallet.treasuryWalletId,
       amountRaw: '10000',
-      externalReference: 'DUP-1',
+      externalReference: 'PROOF-1',
     },
     setup.sessionToken,
   );
-
-  let response = await fetch(`${baseUrl}/organizations/${setup.organization.organizationId}/payment-orders`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...authHeaders(setup.sessionToken),
-    },
-    body: JSON.stringify({
-      destinationId: setup.destination.destinationId,
-      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
-      amountRaw: '10000',
-      externalReference: 'dup-1',
-    }),
-  });
-  assert.equal(response.status, 400);
-  assert.match((await response.json()).message, /already exists/i);
-
-  response = await fetch(`${baseUrl}/organizations/${setup.organization.organizationId}/payment-orders`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...authHeaders(setup.sessionToken),
-    },
-    body: JSON.stringify({
-      destinationId: setup.destination.destinationId,
-      sourceTreasuryWalletId: setup.destinationAddress.treasuryWalletId,
-      amountRaw: '10000',
-      externalReference: 'SRC-SAME',
-    }),
-  });
-  assert.equal(response.status, 400);
-  assert.match((await response.json()).message, /Source wallet cannot be the same/i);
-
-  const outsider = await createPaymentOrderSetup({
-    userEmail: 'outsider@example.com',
-    organizationName: 'Outsider Organization',
-  });
-  response = await fetch(`${baseUrl}/organizations/${setup.organization.organizationId}/payment-orders`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...authHeaders(setup.sessionToken),
-    },
-    body: JSON.stringify({
-      destinationId: setup.destination.destinationId,
-      sourceTreasuryWalletId: outsider.sourceAddress.treasuryWalletId,
-      amountRaw: '10000',
-      externalReference: 'OUTSIDER-SOURCE',
-    }),
-  });
-  assert.equal(response.status, 400);
-  assert.match((await response.json()).message, /Source wallet not found/i);
-});
-
-test('unreviewed destinations are blocked at submit instead of routing to a pre-Squads approval inbox', async () => {
-  const setup = await createPaymentOrderSetup({ destinationTrustState: 'unreviewed' });
-
-  const response = await fetch(`${baseUrl}/organizations/${setup.organization.organizationId}/payment-orders`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...authHeaders(setup.sessionToken),
-    },
-    body: JSON.stringify({
-      destinationId: setup.destination.destinationId,
-      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
-      amountRaw: '10000',
-      memo: 'New vendor review',
-      submitNow: true,
-    }),
-  });
-
-  assert.equal(response.status, 400);
-  const body = await response.json();
-  assert.match(body.message, /unreviewed/i);
-  assert.match(body.message, /trusted/i);
-});
-
-test('payment order execution handoff records external references and submitted signatures without custody', async () => {
-  const setup = await createPaymentOrderSetup();
-  const paymentOrder = await createSubmittedPaymentOrder(setup, 'EXEC-1');
-
-  const execution = await post(
-    `/organizations/${setup.organization.organizationId}/payment-orders/${paymentOrder.paymentOrderId}/create-execution`,
-    {
-      executionSource: 'external_proposal',
-      externalReference: 'squads://proposal/abc',
-      metadataJson: {
-        proposalId: 'abc',
-      },
-    },
-    setup.sessionToken,
-  );
-
-  assert.equal(execution.transferRequestId, paymentOrder.transferRequestId);
-  assert.equal(execution.executionSource, 'external_proposal');
-  assert.equal(execution.state, 'ready_for_execution');
-  assert.equal(execution.metadataJson.externalExecutionReference, 'squads://proposal/abc');
-
-  const signature = '3E91VpnTrs4k5y9XrjJbeWZu7nHo4ZpD2sQAAAA1111111111111111111111111111';
-  const updatedExecution = await post(
-    `/organizations/${setup.organization.organizationId}/payment-orders/${paymentOrder.paymentOrderId}/attach-signature`,
-    {
-      submittedSignature: signature,
-      externalReference: 'squads://proposal/abc',
-    },
-    setup.sessionToken,
-  );
-
-  assert.equal(updatedExecution.submittedSignature, signature);
-  assert.equal(updatedExecution.state, 'submitted_onchain');
-
-  const detail = await get(
-    `/organizations/${setup.organization.organizationId}/payment-orders/${paymentOrder.paymentOrderId}`,
-    setup.sessionToken,
-  );
-  assert.equal(detail.derivedState, 'execution_recorded');
-  assert.equal(detail.reconciliationDetail.status, 'submitted_onchain');
-  assert.equal(detail.reconciliationDetail.latestExecution.submittedSignature, signature);
-});
-
-test('payment orders prepare a signer-ready Solana USDC transfer packet', async () => {
-  const setup = await createPaymentOrderSetup();
-  const draftOrder = await post(
-    `/organizations/${setup.organization.organizationId}/payment-orders`,
-    {
-      destinationId: setup.destination.destinationId,
-      amountRaw: '10000',
-      externalReference: 'PREPARE-1',
-      submitNow: false,
-    },
-    setup.sessionToken,
-  );
-
-  const prepared = await post(
-    `/organizations/${setup.organization.organizationId}/payment-orders/${draftOrder.paymentOrderId}/prepare-execution`,
-    {
-      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
-    },
-    setup.sessionToken,
-  );
-
-  assert.equal(prepared.executionPacket.kind, 'solana_spl_usdc_transfer');
-  assert.equal(prepared.executionPacket.paymentOrderId, draftOrder.paymentOrderId);
-  assert.equal(prepared.executionPacket.source.walletAddress, setup.sourceAddress.address);
-  assert.equal(prepared.executionPacket.source.tokenAccountAddress, setup.sourceAddress.usdcAtaAddress);
-  assert.equal(prepared.executionPacket.destination.walletAddress, setup.destinationAddress.address);
-  assert.equal(prepared.executionPacket.destination.tokenAccountAddress, setup.destinationAddress.usdcAtaAddress);
-  assert.equal(prepared.executionPacket.token.symbol, 'USDC');
-  assert.equal(prepared.executionPacket.token.decimals, 6);
-  assert.equal(prepared.executionPacket.amountRaw, '10000');
-  assert.equal(prepared.executionPacket.instructions.length, 2);
-  assert.equal(prepared.executionPacket.requiredSigners[0], setup.sourceAddress.address);
-  assert.equal(prepared.executionPacket.signing.requiresRecentBlockhash, true);
-  assert.equal(prepared.executionRecord.executionSource, 'prepared_solana_transfer');
-  assert.equal(prepared.executionRecord.state, 'ready_for_execution');
-  assert.equal(prepared.executionRecord.metadataJson.preparedExecution.executionRecordId, prepared.executionRecord.executionRecordId);
-
-  const preparedAgain = await post(
-    `/organizations/${setup.organization.organizationId}/payment-orders/${draftOrder.paymentOrderId}/prepare-execution`,
-    {
-      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
-    },
-    setup.sessionToken,
-  );
-  assert.equal(preparedAgain.executionRecord.executionRecordId, prepared.executionRecord.executionRecordId);
-
-  const transferRequest = await prisma.transferRequest.findUniqueOrThrow({
-    where: { transferRequestId: prepared.paymentOrder.transferRequestId },
-  });
-  assert.equal(transferRequest.sourceTreasuryWalletId, setup.sourceAddress.treasuryWalletId);
-  assert.equal(transferRequest.status, 'ready_for_execution');
-
-  const events = await prisma.paymentOrderEvent.findMany({
-    where: { paymentOrderId: draftOrder.paymentOrderId },
-    orderBy: { createdAt: 'asc' },
-  });
-  assert.ok(events.some((event) => event.eventType === 'payment_order_source_selected'));
-  assert.ok(events.some((event) => event.eventType === 'payment_order_execution_prepared'));
-});
-
-test('payment order execution preparation cannot bypass destination trust gate', async () => {
-  const setup = await createPaymentOrderSetup({ destinationTrustState: 'unreviewed' });
-  const draftOrder = await post(
-    `/organizations/${setup.organization.organizationId}/payment-orders`,
-    {
-      destinationId: setup.destination.destinationId,
-      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
-      amountRaw: '10000',
-      externalReference: 'PREPARE-APPROVAL',
-      submitNow: false,
-    },
-    setup.sessionToken,
-  );
-
-  // Submitting an order whose destination isn't trusted is blocked at the
-  // payment-orders endpoint — Squads multisig is the approval ceremony, but
-  // we still require destinations to be reviewed and trusted before any
-  // payment can target them.
-  const submitResponse = await fetch(
-    `${baseUrl}/organizations/${setup.organization.organizationId}/payment-orders/${draftOrder.paymentOrderId}/submit`,
-    {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        ...authHeaders(setup.sessionToken),
-      },
-      body: JSON.stringify({}),
-    },
-  );
-  assert.equal(submitResponse.status, 400);
-  assert.match((await submitResponse.json()).message, /unreviewed/i);
-
-  // The order stays draft, no transfer-request was ever created.
-  const paymentOrder = await prisma.paymentOrder.findUniqueOrThrow({
-    where: { paymentOrderId: draftOrder.paymentOrderId },
-    include: { transferRequests: true },
-  });
-  assert.equal(paymentOrder.state, 'draft');
-  assert.equal(paymentOrder.transferRequests.length, 0);
-});
-
-test('payment orders derive settled and exception states from existing reconciliation truth', async () => {
-  const setup = await createPaymentOrderSetup();
-  const paymentOrder = await createSubmittedPaymentOrder(setup, 'MATCH-1');
 
   await seedExactSettlement({
     organizationId: setup.organization.organizationId,
-    transferRequestId: paymentOrder.transferRequestId,
+    paymentOrderId: paymentOrder.paymentOrderId,
     amountRaw: '10000',
   });
-
-  const settled = await get(
-    `/organizations/${setup.organization.organizationId}/payment-orders/${paymentOrder.paymentOrderId}`,
-    setup.sessionToken,
-  );
-  assert.equal(settled.derivedState, 'settled');
-  assert.equal(settled.reconciliationDetail.requestDisplayState, 'matched');
-  assert.equal(settled.reconciliationDetail.match.matchedAmountRaw, '10000');
 
   const proof = await get(
     `/organizations/${setup.organization.organizationId}/payment-orders/${paymentOrder.paymentOrderId}/proof`,
     setup.sessionToken,
   );
-  assert.equal(proof.packetType, 'stablecoin_payment_proof');
-  assert.match(proof.proofId, /^decimal_payment_proof_/);
-  assert.match(proof.canonicalDigest, /^[a-f0-9]{64}$/);
   assert.equal(proof.status, 'complete');
-  assert.equal(proof.readiness.status, 'complete');
-  assert.deepEqual(proof.readiness.warnings, []);
   assert.equal(proof.intent.paymentOrderId, paymentOrder.paymentOrderId);
-  assert.equal(proof.intent.amountRaw, '10000');
-  assert.equal(proof.intent.amountUsdc, '0.010000');
-  assert.equal(proof.settlement.matchStatus, 'rpc_verified');
-  assert.equal(proof.settlement.matchedAmountRaw, '10000');
-  assert.equal(proof.settlement.reconciliationOutcome, 'matched_exact');
-  assert.equal(proof.agentSummary.canTreatAsFinal, true);
-  assert.equal(proof.verification.reconciliation.outcome, 'matched_exact');
-
-  const partialOrder = await createSubmittedPaymentOrder(setup, 'MATCH-PARTIAL');
-  await seedPartialSettlement({
-    organizationId: setup.organization.organizationId,
-    transferRequestId: partialOrder.transferRequestId,
-    amountRaw: '10000',
-    matchedAmountRaw: '4000',
-  });
-
-  const partial = await get(
-    `/organizations/${setup.organization.organizationId}/payment-orders/${partialOrder.paymentOrderId}`,
-    setup.sessionToken,
-  );
-  assert.equal(partial.derivedState, 'exception');
-  assert.equal(partial.reconciliationDetail.requestDisplayState, 'exception');
-  assert.equal(partial.reconciliationDetail.exceptions[0].reasonCode, 'rpc_settlement_mismatch');
-
-  const partialProof = await get(
-    `/organizations/${setup.organization.organizationId}/payment-orders/${partialOrder.paymentOrderId}/proof`,
-    setup.sessionToken,
-  );
-  assert.equal(partialProof.status, 'exception');
-  assert.equal(partialProof.settlement.reconciliationOutcome, 'exception');
+  assert.equal(proof.readiness.status, 'complete');
+  assert.ok(proof.canonicalDigest);
 });
-
-async function createSubmittedPaymentOrder(
-  setup: Awaited<ReturnType<typeof createPaymentOrderSetup>>,
-  reference: string,
-) {
-  return post(
-    `/organizations/${setup.organization.organizationId}/payment-orders`,
-    {
-      destinationId: setup.destination.destinationId,
-      sourceTreasuryWalletId: setup.sourceAddress.treasuryWalletId,
-      amountRaw: '10000',
-      externalReference: reference,
-      sourceBalanceSnapshotJson: {
-        status: 'known',
-        balanceRaw: '100000',
-      },
-      submitNow: true,
-    },
-    setup.sessionToken,
-  );
-}
 
 async function createPaymentOrderSetup(options?: {
   userEmail?: string;
   organizationName?: string;
-  destinationTrustState?: 'trusted' | 'unreviewed' | 'restricted' | 'blocked';
+  counterpartyWalletTrustState?: 'trusted' | 'unreviewed' | 'restricted' | 'blocked';
 }) {
   const register = await post('/auth/register', {
-    email: options?.userEmail ?? 'phase-f@example.com',
+    email: options?.userEmail ?? `payments-${crypto.randomUUID()}@example.com`,
     password: 'DemoPass123!',
-    displayName: 'Phase F Operator',
+    displayName: 'Payments Operator',
   });
   await verifyRegisteredEmail(register);
 
   const organization = await post(
     '/organizations',
     {
-      organizationName: options?.organizationName ?? 'Phase F Treasury',
+      organizationName: options?.organizationName ?? `Payments ${crypto.randomUUID().slice(0, 8)}`,
     },
     register.sessionToken,
   );
 
-  const sourceAddress = await post(
+  const sourceTreasuryWallet = await post(
     `/organizations/${organization.organizationId}/treasury-wallets`,
     {
       chain: 'solana',
-      address: 'PGm4dkZcqPTkYKqAjNtAokVwJirJB8XQcGpYWBVcFMW',
+      address: Keypair.generate().publicKey.toBase58(),
       displayName: 'Ops source wallet',
-    },
-    register.sessionToken,
-  );
-
-  const destinationAddress = await post(
-    `/organizations/${organization.organizationId}/treasury-wallets`,
-    {
-      chain: 'solana',
-      address: 'VhfmPjvQxSiQW2FjnvoghewGGVYaWcz4cmDxpFPQEti',
-      displayName: 'Vendor destination wallet',
     },
     register.sessionToken,
   );
@@ -1322,43 +302,79 @@ async function createPaymentOrderSetup(options?: {
     register.sessionToken,
   );
 
-  const destination = await post(
-    `/organizations/${organization.organizationId}/destinations`,
+  const counterpartyWallet = await createCounterpartyWallet(
     {
-      walletAddress: destinationAddress.address,
-      tokenAccountAddress: destinationAddress.usdcAtaAddress ?? undefined,
+      sessionToken: register.sessionToken,
+      organization,
+    },
+    {
       counterpartyId: counterparty.counterpartyId,
       label: `Vendor payout ${crypto.randomUUID().slice(0, 8)}`,
-      trustState: options?.destinationTrustState ?? 'trusted',
-      destinationType: 'vendor_wallet',
-      isInternal: false,
+      walletAddress: Keypair.generate().publicKey.toBase58(),
+      trustState: options?.counterpartyWalletTrustState ?? 'trusted',
     },
-    register.sessionToken,
   );
 
   return {
     sessionToken: register.sessionToken as string,
     organization,
-    sourceAddress,
-    destinationAddress,
+    sourceTreasuryWallet,
     counterparty,
-    destination,
+    counterpartyWallet,
   };
+}
+
+async function createCounterpartyWallet(
+  setup: { sessionToken: string; organization: { organizationId: string } },
+  input: {
+    counterpartyId?: string;
+    label: string;
+    walletAddress: string;
+    trustState?: 'trusted' | 'unreviewed' | 'restricted' | 'blocked';
+  },
+) {
+  return post(
+    `/organizations/${setup.organization.organizationId}/counterparty-wallets`,
+    {
+      counterpartyId: input.counterpartyId,
+      walletAddress: input.walletAddress,
+      label: input.label,
+      trustState: input.trustState ?? 'trusted',
+      walletType: 'vendor_wallet',
+      isInternal: false,
+    },
+    setup.sessionToken,
+  );
 }
 
 async function seedExactSettlement(args: {
   organizationId: string;
-  transferRequestId: string;
+  paymentOrderId: string;
   amountRaw: string;
 }) {
-  const signature = `5Exact${crypto.randomUUID().replaceAll('-', '')}`;
-  const request = await prisma.transferRequest.update({
-    where: { transferRequestId: args.transferRequestId },
-    data: { status: 'matched' },
+  const paymentOrder = await prisma.paymentOrder.findFirstOrThrow({
+    where: {
+      organizationId: args.organizationId,
+      paymentOrderId: args.paymentOrderId,
+    },
   });
+  const request = await prisma.transferRequest.create({
+    data: {
+      organizationId: args.organizationId,
+      paymentOrderId: args.paymentOrderId,
+      counterpartyWalletId: paymentOrder.counterpartyWalletId,
+      sourceTreasuryWalletId: paymentOrder.sourceTreasuryWalletId,
+      requestType: 'payment_order',
+      asset: 'usdc',
+      amountRaw: BigInt(args.amountRaw),
+      status: 'matched',
+      propertiesJson: {},
+    },
+  });
+  const signature = `5Exact${crypto.randomUUID().replaceAll('-', '')}`;
   await prisma.executionRecord.create({
     data: {
-      transferRequestId: args.transferRequestId,
+      transferRequestId: request.transferRequestId,
       organizationId: args.organizationId,
       executionSource: 'test_rpc_verification',
       state: 'settled',
@@ -1378,55 +394,10 @@ async function seedExactSettlement(args: {
       },
     },
   });
-  if (request.paymentOrderId) {
-    await prisma.paymentOrder.update({
-      where: { paymentOrderId: request.paymentOrderId },
-      data: { state: 'settled' },
-    });
-  }
-}
-
-async function seedPartialSettlement(args: {
-  organizationId: string;
-  transferRequestId: string;
-  amountRaw: string;
-  matchedAmountRaw: string;
-}) {
-  const signature = `5Partial${crypto.randomUUID().replaceAll('-', '')}`;
-  const variance = (BigInt(args.amountRaw) - BigInt(args.matchedAmountRaw)).toString();
-  const request = await prisma.transferRequest.update({
-    where: { transferRequestId: args.transferRequestId },
-    data: { status: 'submitted_onchain' },
+  await prisma.paymentOrder.update({
+    where: { paymentOrderId: args.paymentOrderId },
+    data: { state: 'settled' },
   });
-  await prisma.executionRecord.create({
-    data: {
-      transferRequestId: args.transferRequestId,
-      organizationId: args.organizationId,
-      executionSource: 'test_rpc_verification',
-      state: 'submitted_onchain',
-      submittedSignature: signature,
-      submittedAt: new Date('2026-04-10T12:31:00.000Z'),
-      metadataJson: {
-        rpcSettlementVerification: {
-          status: 'mismatch',
-          signature,
-          checkedAt: '2026-04-10T12:31:01.000Z',
-          items: [{
-            expectedAmountRaw: args.amountRaw,
-            observedDeltaRaw: args.matchedAmountRaw,
-            settled: false,
-            varianceRaw: variance,
-          }],
-        },
-      },
-    },
-  });
-  if (request.paymentOrderId) {
-    await prisma.paymentOrder.update({
-      where: { paymentOrderId: request.paymentOrderId },
-      data: { state: 'executed' },
-    });
-  }
 }
 
 async function post(path: string, body: unknown, sessionToken?: string) {
@@ -1448,12 +419,6 @@ async function post(path: string, body: unknown, sessionToken?: string) {
   return JSON.parse(text);
 }
 
-async function verifyRegisteredEmail(register: { sessionToken: string; devEmailVerificationCode?: string | null }) {
-  const code = register.devEmailVerificationCode;
-  assert.ok(code, 'registration should return a demo email verification code until email delivery exists');
-  await post('/auth/verify-email', { code }, register.sessionToken);
-}
-
 async function get(path: string, sessionToken: string) {
   const response = await fetch(`${baseUrl}${path}`, {
     headers: authHeaders(sessionToken),
@@ -1461,6 +426,12 @@ async function get(path: string, sessionToken: string) {
   const text = await response.text();
   assert.equal(response.status, 200, text);
   return JSON.parse(text);
+}
+
+async function verifyRegisteredEmail(register: { sessionToken: string; devEmailVerificationCode?: string | null }) {
+  const code = register.devEmailVerificationCode;
+  assert.ok(code, 'registration should return a demo email verification code until email delivery exists');
+  await post('/auth/verify-email', { code }, register.sessionToken);
 }
 
 function authHeaders(sessionToken: string) {

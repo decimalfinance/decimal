@@ -33,11 +33,9 @@ TRUNCATE TABLE
   collection_request_events,
   collection_requests,
   collection_runs,
-  payment_runs,
   payment_order_events,
   decimal_proposals,
   payment_orders,
-  payment_requests,
   transfer_requests,
   counterparties,
   treasury_wallets,
@@ -106,15 +104,16 @@ test('public health, capabilities, and OpenAPI endpoints expose the lean API sur
   assert.equal(capabilities.solana.rpcUrl, config.solanaRpcUrl);
   assert.ok(capabilities.solana.usdcMint);
   assert.ok(capabilities.workflows.some((workflow: { id: string }) => workflow.id === 'single_payment'));
-  assert.ok(capabilities.workflows.some((workflow: { id: string }) => workflow.id === 'csv_to_payment_run'));
+  assert.ok(capabilities.workflows.some((workflow: { id: string }) => workflow.id === 'csv_to_payment_orders'));
   assert.equal(capabilities.apiSurface.idempotency.includes('Idempotency-Key'), true);
 
   const openApiResponse = await fetch(`${baseUrl}/openapi.json`);
   assert.equal(openApiResponse.status, 200);
   const openApi = await openApiResponse.json();
   assert.equal(openApi.openapi, '3.1.0');
-  assert.ok(openApi.paths['/organizations/{organizationId}/payment-requests']);
+  assert.equal(openApi.paths['/organizations/{organizationId}/payment-requests'], undefined);
   assert.ok(openApi.paths['/organizations/{organizationId}/payment-orders']);
+  assert.ok(openApi.paths['/organizations/{organizationId}/payment-orders/batch-csv']);
   assert.equal(openApi.paths['/organizations/{organizationId}/api-keys'], undefined);
   assert.equal(openApi.paths['/organizations/{organizationId}/agent/tasks'], undefined);
 });
@@ -1496,8 +1495,8 @@ test('Squads vault payment proposals turn payment orders into executable treasur
     `/organizations/${organization.organizationId}/payment-orders/${paymentOrder.paymentOrderId}`,
     register.sessionToken,
   );
-  assert.equal(preparedPaymentOrder.derivedState, 'ready');
-  assert.equal(preparedPaymentOrder.productLifecycle.productState, 'ready');
+  assert.equal(preparedPaymentOrder.derivedState, 'proposed');
+  assert.equal(preparedPaymentOrder.productLifecycle.productState, 'proposed');
   assert.equal(preparedPaymentOrder.canCreateSquadsPaymentProposal, false);
   assert.equal(preparedPaymentOrder.squadsPaymentProposal.decimalProposalId, paymentProposal.decimalProposal.decimalProposalId);
 
@@ -1607,12 +1606,12 @@ test('Squads vault payment proposals turn payment orders into executable treasur
     },
     register.sessionToken,
   );
-  const importedRun = await post(
-    `/organizations/${organization.organizationId}/payment-runs/import-csv`,
+  const importedBatch = await post(
+    `/organizations/${organization.organizationId}/payment-orders/batch-csv`,
     {
-      runName: 'Payroll batch',
+      batchLabel: 'Payroll batch',
       sourceTreasuryWalletId: treasuryWallet.treasuryWalletId,
-      submitOrderNow: true,
+      autoAdvance: false,
       csv: [
         'payee,destination,amount,reference,due_date',
         `Batch Vendor A,${runDestinationOne},0.01,BATCH-1,2026-04-15`,
@@ -1621,33 +1620,34 @@ test('Squads vault payment proposals turn payment orders into executable treasur
     },
     register.sessionToken,
   );
-  assert.equal(importedRun.paymentRun.paymentOrders.length, 2);
+  assert.equal(importedBatch.paymentOrders.length, 2);
+  const batchPaymentOrderIds = importedBatch.paymentOrders.map((item: { paymentOrder: { paymentOrderId: string } }) => item.paymentOrder.paymentOrderId);
 
   const runProposal = await post(
-    `/organizations/${organization.organizationId}/treasury-wallets/${treasuryWallet.treasuryWalletId}/squads/vault-proposals/payment-run-intent`,
+    `/organizations/${organization.organizationId}/treasury-wallets/${treasuryWallet.treasuryWalletId}/squads/vault-proposals/payment-batch-intent`,
     {
-      paymentRunId: importedRun.paymentRun.paymentRunId,
+      inputBatchId: importedBatch.inputBatchId,
+      paymentOrderIds: batchPaymentOrderIds,
       creatorPersonalWalletId: signerWallet.userWalletId,
       memo: 'Payroll batch proposal',
     },
     register.sessionToken,
   );
-  assert.equal(runProposal.intent.kind, 'vault_payment_run_proposal_create');
+  assert.equal(runProposal.intent.kind, 'vault_payment_batch_proposal_create');
   assert.equal(runProposal.intent.proposalType, 'vault_transaction');
   assert.equal(runProposal.intent.semanticType, 'send_payment_run');
   assert.equal(runProposal.intent.transactionIndex, '2');
   assert.equal(runProposal.intent.actions.length, 2);
-  assert.equal(runProposal.decimalProposal.paymentRunId, importedRun.paymentRun.paymentRunId);
+  assert.equal(runProposal.decimalProposal.inputBatchId, importedBatch.inputBatchId);
   assert.equal(runProposal.decimalProposal.paymentOrderId, null);
   assert.equal(runProposal.decimalProposal.semanticPayloadJson.orderCount, 2);
   assert.equal(runProposal.decimalProposal.semanticPayloadJson.totalAmountRaw, '30000');
 
-  const preparedRun = await get(
-    `/organizations/${organization.organizationId}/payment-runs/${importedRun.paymentRun.paymentRunId}`,
+  const preparedBatch = await get(
+    `/organizations/${organization.organizationId}/payment-orders?inputBatchId=${importedBatch.inputBatchId}`,
     register.sessionToken,
   );
-  assert.equal(preparedRun.derivedState, 'ready');
-  assert.equal(preparedRun.paymentOrders.every((order: { derivedState: string }) => order.derivedState === 'ready'), true);
+  assert.equal(preparedBatch.items.every((order: { derivedState: string }) => order.derivedState === 'draft'), true);
 
   proposalsByPda.set(runProposal.intent.proposalPda, {
     transactionIndex: { toString: () => '2' },
@@ -1664,12 +1664,11 @@ test('Squads vault payment proposals turn payment orders into executable treasur
     register.sessionToken,
   );
   assert.equal(runSubmitted.localStatus, 'submitted');
-  const submittedRun = await get(
-    `/organizations/${organization.organizationId}/payment-runs/${importedRun.paymentRun.paymentRunId}`,
+  const submittedBatch = await get(
+    `/organizations/${organization.organizationId}/payment-orders?inputBatchId=${importedBatch.inputBatchId}`,
     register.sessionToken,
   );
-  assert.equal(submittedRun.derivedState, 'proposed');
-  assert.equal(submittedRun.paymentOrders.every((order: { derivedState: string }) => order.derivedState === 'proposed'), true);
+  assert.equal(submittedBatch.items.every((order: { derivedState: string }) => order.derivedState === 'proposed'), true);
 
   const runExecuted = await post(
     `/organizations/${organization.organizationId}/proposals/${runProposal.decimalProposal.decimalProposalId}/confirm-execution`,
@@ -1677,14 +1676,13 @@ test('Squads vault payment proposals turn payment orders into executable treasur
     register.sessionToken,
   );
   assert.equal(runExecuted.localStatus, 'executed');
-  const executedRun = await get(
-    `/organizations/${organization.organizationId}/payment-runs/${importedRun.paymentRun.paymentRunId}`,
+  const executedBatch = await get(
+    `/organizations/${organization.organizationId}/payment-orders?inputBatchId=${importedBatch.inputBatchId}`,
     register.sessionToken,
   );
-  assert.equal(executedRun.derivedState, 'settled');
-  assert.equal(executedRun.paymentOrders.every((order: { derivedState: string }) => order.derivedState === 'settled'), true);
+  assert.equal(executedBatch.items.every((order: { derivedState: string }) => order.derivedState === 'settled'), true);
   assert.equal(
-    executedRun.paymentOrders.every((order: { reconciliationDetail: { latestExecution: { submittedSignature: string; state: string } | null; requestDisplayState: string } }) =>
+    executedBatch.items.every((order: { reconciliationDetail: { latestExecution: { submittedSignature: string; state: string } | null; requestDisplayState: string } }) =>
       order.reconciliationDetail.latestExecution?.submittedSignature === runExecuted.executedSignature
       && order.reconciliationDetail.latestExecution.state === 'settled'
       && order.reconciliationDetail.requestDisplayState === 'matched',
