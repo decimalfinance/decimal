@@ -2920,7 +2920,11 @@ function extractPaymentOrderIdsFromProposalPayload(
     .filter((value): value is string => Boolean(value)));
 }
 
-async function loadLiveProposalState(row: DecimalProposalWithRelations) {
+export async function loadLiveProposalState(row: {
+  squadsProposalPda: string | null;
+  treasuryWalletId: string | null;
+  organizationId: string;
+}) {
   if (!row.squadsProposalPda || !row.treasuryWalletId) {
     return null;
   }

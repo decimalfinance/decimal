@@ -20,6 +20,7 @@ import {
 } from '../solana.js';
 import { createTransferRequestEvent } from '../transfer-requests/events.js';
 import { getPrimaryTransferRequest } from '../transfer-requests/helpers.js';
+import { loadLiveProposalState } from '../squads/treasury.js';
 export { PAYMENT_ORDER_STATES, isPaymentOrderState, type PaymentOrderState } from './order-state.js';
 import type { PaymentOrderState } from './order-state.js';
 
@@ -1065,7 +1066,7 @@ async function buildPaymentOrderReadModel(order: PaymentOrderWithRelations) {
       requestedAt: request.requestedAt,
     })),
     squadsLifecycle,
-    squadsPaymentProposal: latestSquadsPaymentProposal ? serializePaymentOrderProposal(latestSquadsPaymentProposal) : null,
+    squadsPaymentProposal: latestSquadsPaymentProposal ? await serializePaymentOrderProposal(latestSquadsPaymentProposal) : null,
     canCreateSquadsPaymentProposal: !latestSquadsPaymentProposal || isTerminalSquadsPaymentProposal(latestSquadsPaymentProposal),
     events: (order.events ?? []).map(serializePaymentOrderEvent),
     reconciliationDetail,
@@ -1215,14 +1216,16 @@ function isTerminalSquadsPaymentProposal(proposal: DecimalProposal) {
   return ['rejected', 'cancelled', 'failed'].includes(proposal.status);
 }
 
-function serializePaymentOrderProposal(proposal: DecimalProposal) {
+async function serializePaymentOrderProposal(proposal: DecimalProposal) {
+  const live = await loadLiveProposalState(proposal);
   return {
     decimalProposalId: proposal.decimalProposalId,
     provider: proposal.provider,
     proposalType: proposal.proposalType,
     proposalCategory: proposal.proposalCategory,
     semanticType: proposal.semanticType,
-    status: proposal.status,
+    status: live?.status ?? proposal.status,
+    localStatus: proposal.status,
     submittedSignature: proposal.submittedSignature,
     executedSignature: proposal.executedSignature,
     submittedAt: proposal.submittedAt,
@@ -1235,6 +1238,7 @@ function serializePaymentOrderProposal(proposal: DecimalProposal) {
       transactionIndex: proposal.transactionIndex,
       vaultIndex: proposal.vaultIndex,
     },
+    voting: live?.voting ?? null,
     createdAt: proposal.createdAt,
     updatedAt: proposal.updatedAt,
   };
