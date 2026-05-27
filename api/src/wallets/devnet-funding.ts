@@ -11,6 +11,8 @@ export type DevnetFundingResult =
       status: 'funded' | 'already_funded';
       walletAddress: string;
       funderAddress: string;
+      currentBalanceLamports: number;
+      targetBalanceLamports: number;
       lamports: number;
       signature: string | null;
     };
@@ -19,6 +21,11 @@ type DevnetFundingRuntime = {
   getRecipientBalance: (wallet: PublicKey) => Promise<number>;
   sendLamports: (input: { recipient: PublicKey; lamports: number; funder: Keypair }) => Promise<string>;
   waitForSignature: (signature: string) => Promise<{ confirmed: boolean; seen: boolean }>;
+};
+
+type DevnetFundingOptions = {
+  minimumLamports?: number;
+  reason?: string;
 };
 
 const defaultRuntime: DevnetFundingRuntime = {
@@ -49,7 +56,10 @@ export function setDevnetFundingRuntimeForTests(nextRuntime: Partial<DevnetFundi
   funderCache = null;
 }
 
-export async function fundNewDevnetWalletIfConfigured(walletAddress: string): Promise<DevnetFundingResult> {
+export async function fundNewDevnetWalletIfConfigured(
+  walletAddress: string,
+  options: DevnetFundingOptions = {},
+): Promise<DevnetFundingResult> {
   if (!config.devnetAutoFundWallets) {
     return { status: 'skipped', reason: 'devnet_auto_fund_disabled' };
   }
@@ -60,28 +70,37 @@ export async function fundNewDevnetWalletIfConfigured(walletAddress: string): Pr
     return { status: 'skipped', reason: 'zero_lamports' };
   }
 
+  const targetLamports = options.minimumLamports ?? config.devnetAutoFundLamports;
+  if (!Number.isInteger(targetLamports) || targetLamports <= 0) {
+    return { status: 'skipped', reason: 'invalid_minimum_lamports' };
+  }
+
   const recipient = new PublicKey(walletAddress);
   const funder = loadFunderKeypair();
   const currentBalance = await runtime.getRecipientBalance(recipient);
-  if (currentBalance >= config.devnetAutoFundLamports) {
+  if (currentBalance >= targetLamports) {
     logger.info('devnet_funding.skipped_already_funded', {
       walletAddress: recipient.toBase58(),
       funderAddress: funder.publicKey.toBase58(),
       currentBalanceLamports: currentBalance,
-      targetLamports: config.devnetAutoFundLamports,
+      targetLamports,
+      reason: options.reason ?? null,
     });
     return {
       status: 'already_funded',
       walletAddress: recipient.toBase58(),
       funderAddress: funder.publicKey.toBase58(),
-      lamports: config.devnetAutoFundLamports,
+      currentBalanceLamports: currentBalance,
+      targetBalanceLamports: targetLamports,
+      lamports: 0,
       signature: null,
     };
   }
 
+  const transferLamports = targetLamports - currentBalance;
   const signature = await runtime.sendLamports({
     recipient,
-    lamports: config.devnetAutoFundLamports,
+    lamports: transferLamports,
     funder,
   });
   const confirmation = await runtime.waitForSignature(signature);
@@ -89,24 +108,32 @@ export async function fundNewDevnetWalletIfConfigured(walletAddress: string): Pr
     logger.warn('devnet_funding.confirmation_timeout', {
       walletAddress: recipient.toBase58(),
       funderAddress: funder.publicKey.toBase58(),
-      lamports: config.devnetAutoFundLamports,
+      currentBalanceLamports: currentBalance,
+      targetBalanceLamports: targetLamports,
+      lamports: transferLamports,
       signature,
+      reason: options.reason ?? null,
     });
   }
 
   logger.info('devnet_funding.funded', {
     walletAddress: recipient.toBase58(),
     funderAddress: funder.publicKey.toBase58(),
-    lamports: config.devnetAutoFundLamports,
+    currentBalanceLamports: currentBalance,
+    targetBalanceLamports: targetLamports,
+    lamports: transferLamports,
     signature,
     confirmed: confirmation.confirmed,
+    reason: options.reason ?? null,
   });
 
   return {
     status: 'funded',
     walletAddress: recipient.toBase58(),
     funderAddress: funder.publicKey.toBase58(),
-    lamports: config.devnetAutoFundLamports,
+    currentBalanceLamports: currentBalance,
+    targetBalanceLamports: targetLamports,
+    lamports: transferLamports,
     signature,
   };
 }

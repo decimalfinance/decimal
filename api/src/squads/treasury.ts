@@ -43,6 +43,7 @@ import {
 } from './shared.js';
 
 const MAX_SQUADS_PAYMENT_RUN_TRANSFERS = 8;
+const SQUADS_PROPOSAL_RENT_PAYER_MIN_LAMPORTS = 25_000_000;
 // Squads v4 uses the same program id on devnet and mainnet. The value remains
 // configurable so tests or future deployments can override it explicitly.
 const SQUADS_PERMISSION_MAP = {
@@ -803,6 +804,33 @@ export async function createSquadsPaymentProposalIntent(
   });
 }
 
+async function ensureSquadsProposalRentPayerFunded(args: {
+  organizationId: string;
+  treasuryWalletId: string;
+  walletAddress: string;
+  actorType: SquadsProposalActor['actorType'];
+  proposalKind: string;
+}) {
+  const funding = await fundNewDevnetWalletIfConfigured(args.walletAddress, {
+    minimumLamports: SQUADS_PROPOSAL_RENT_PAYER_MIN_LAMPORTS,
+    reason: `squads_${args.proposalKind}_proposal_rent_payer`,
+  });
+  if (funding.status !== 'skipped') {
+    logger.info('squads.proposal_rent_payer_funding_checked', {
+      organizationId: args.organizationId,
+      treasuryWalletId: args.treasuryWalletId,
+      walletAddress: args.walletAddress,
+      actorType: args.actorType,
+      proposalKind: args.proposalKind,
+      fundingStatus: funding.status,
+      lamports: funding.lamports,
+      targetBalanceLamports: funding.targetBalanceLamports,
+      signature: funding.signature,
+    });
+  }
+  return funding;
+}
+
 export async function createAndSubmitSquadsPaymentProposalAsAgent(
   organizationId: string,
   treasuryWalletId: string,
@@ -819,7 +847,10 @@ export async function createAndSubmitSquadsPaymentProposalAsAgent(
   if (!defaultAgent.wallet.providerWalletId) {
     throw badRequest('Default automation agent wallet is missing a provider wallet id and cannot sign.');
   }
-  const funding = await fundNewDevnetWalletIfConfigured(defaultAgent.wallet.walletAddress);
+  const funding = await fundNewDevnetWalletIfConfigured(defaultAgent.wallet.walletAddress, {
+    minimumLamports: SQUADS_PROPOSAL_RENT_PAYER_MIN_LAMPORTS,
+    reason: 'agent_squads_proposal_rent_payer',
+  });
   if (funding.status !== 'skipped') {
     await prisma.agentWallet.update({
       where: { agentWalletId: defaultAgent.wallet.agentWalletId },
@@ -958,6 +989,13 @@ async function createSquadsPaymentProposalIntentForCreator(args: {
   if (paymentOrder.asset.toLowerCase() !== USDC_ASSET) {
     throw badRequest(`Squads payment proposals currently support USDC only, received ${paymentOrder.asset}.`);
   }
+  await ensureSquadsProposalRentPayerFunded({
+    organizationId,
+    treasuryWalletId,
+    walletAddress: creator.walletAddress,
+    actorType: actor.actorType,
+    proposalKind: 'payment',
+  });
 
   const sourceTokenAccount = wallet.usdcAtaAddress ?? deriveUsdcAtaForWallet(vaultPda.toBase58());
   const destinationTokenAccount = paymentOrder.counterpartyWallet.tokenAccountAddress
@@ -1105,6 +1143,13 @@ export async function createSquadsPaymentRunProposalIntent(
     throw badRequest('creatorPersonalWalletId must belong to the authenticated user.');
   }
   assertOnchainMemberPermission(multisigAccount, creator.walletAddress, 'initiate');
+  await ensureSquadsProposalRentPayerFunded({
+    organizationId,
+    treasuryWalletId,
+    walletAddress: creator.walletAddress,
+    actorType: 'user',
+    proposalKind: 'payment_run',
+  });
 
   let paymentRun = await loadPaymentRunForSquadsProposal(organizationId, input.paymentRunId);
   if (!paymentRun.paymentOrders.length) {
@@ -2423,6 +2468,13 @@ async function createSquadsConfigProposalIntent(args: {
   }
   assertOnchainMemberPermission(multisigAccount, args.creator.walletAddress, 'initiate');
   validateConfigActionsAgainstCurrentMembers(multisigAccount, args.actions);
+  await ensureSquadsProposalRentPayerFunded({
+    organizationId: args.organizationId,
+    treasuryWalletId: args.treasuryWalletId,
+    walletAddress: args.creator.walletAddress,
+    actorType: 'user',
+    proposalKind: args.semanticType,
+  });
 
   const transactionIndex = BigInt(multisigAccount.transactionIndex.toString()) + 1n;
   const latestBlockhash = await runtime.getLatestBlockhash();
