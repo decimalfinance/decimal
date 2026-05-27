@@ -80,11 +80,10 @@ export async function ensureDefaultAutomationAgentWithWallet(
     && wallet.providerWalletId,
   );
   if (existingAgent && existingWallet) {
-    return {
-      status: 'existing',
-      reason: null,
-      agent: serializeAutomationAgent(existingAgent),
-      wallet: serializeAgentWallet({
+    const fundedWallet = await fundAgentWalletIfConfigured({
+      organizationId,
+      automationAgentId: existingAgent.automationAgentId,
+      wallet: {
         ...existingWallet,
         automationAgent: {
           automationAgentId: existingAgent.automationAgentId,
@@ -92,7 +91,13 @@ export async function ensureDefaultAutomationAgentWithWallet(
           agentType: existingAgent.agentType,
           status: existingAgent.status,
         },
-      }),
+      },
+    });
+    return {
+      status: 'existing',
+      reason: null,
+      agent: serializeAutomationAgent(existingAgent),
+      wallet: fundedWallet,
     };
   }
 
@@ -137,11 +142,10 @@ export async function ensureDefaultAutomationAgentWithWallet(
       && wallet.providerWalletId,
     );
     if (existingWallet) {
-      return {
-        status: 'existing',
-        reason: null,
-        agent: serializeAutomationAgent(agent),
-        wallet: serializeAgentWallet({
+      const fundedWallet = await fundAgentWalletIfConfigured({
+        organizationId,
+        automationAgentId: agent.automationAgentId,
+        wallet: {
           ...existingWallet,
           automationAgent: {
             automationAgentId: agent.automationAgentId,
@@ -149,7 +153,13 @@ export async function ensureDefaultAutomationAgentWithWallet(
             agentType: agent.agentType,
             status: agent.status,
           },
-        }),
+        },
+      });
+      return {
+        status: 'existing',
+        reason: null,
+        agent: serializeAutomationAgent(agent),
+        wallet: fundedWallet,
       };
     }
 
@@ -220,7 +230,11 @@ export async function createManagedAgentWallet(organizationId: string, automatio
     orderBy: { createdAt: 'asc' },
   });
   if (existingWallet) {
-    return serializeAgentWallet(existingWallet);
+    return fundAgentWalletIfConfigured({
+      organizationId,
+      automationAgentId,
+      wallet: existingWallet,
+    });
   }
 
   const label = input.label?.trim() || `${agent.name} wallet`;
@@ -263,24 +277,36 @@ export async function createManagedAgentWallet(organizationId: string, automatio
     },
     include: agentWalletInclude,
   });
-  const funding = await fundNewDevnetWalletIfConfigured(row.walletAddress)
+  return fundAgentWalletIfConfigured({
+    organizationId,
+    automationAgentId,
+    wallet: row,
+  });
+}
+
+async function fundAgentWalletIfConfigured(args: {
+  organizationId: string;
+  automationAgentId: string;
+  wallet: AgentWalletWithRelations;
+}) {
+  const funding = await fundNewDevnetWalletIfConfigured(args.wallet.walletAddress)
     .catch((error) => {
       const reason = error instanceof Error ? error.message : 'devnet_funding_failed';
       logger.warn('devnet_funding.agent_wallet_failed', {
-        organizationId,
-        automationAgentId,
-        agentWalletId: row.agentWalletId,
-        walletAddress: row.walletAddress,
+        organizationId: args.organizationId,
+        automationAgentId: args.automationAgentId,
+        agentWalletId: args.wallet.agentWalletId,
+        walletAddress: args.wallet.walletAddress,
         reason,
       });
       return { status: 'skipped' as const, reason };
     });
   if (funding.status !== 'skipped') {
     const updated = await prisma.agentWallet.update({
-      where: { agentWalletId: row.agentWalletId },
+      where: { agentWalletId: args.wallet.agentWalletId },
       data: {
         metadataJson: {
-          ...(isRecordLike(row.metadataJson) ? row.metadataJson : {}),
+          ...(isRecordLike(args.wallet.metadataJson) ? args.wallet.metadataJson : {}),
           devnetFunding: funding,
         },
       },
@@ -288,7 +314,7 @@ export async function createManagedAgentWallet(organizationId: string, automatio
     });
     return serializeAgentWallet(updated);
   }
-  return serializeAgentWallet(row);
+  return serializeAgentWallet(args.wallet);
 }
 
 export async function listAgentWallets(organizationId: string, input: {

@@ -819,6 +819,19 @@ export async function createAndSubmitSquadsPaymentProposalAsAgent(
   if (!defaultAgent.wallet.providerWalletId) {
     throw badRequest('Default automation agent wallet is missing a provider wallet id and cannot sign.');
   }
+  const funding = await fundNewDevnetWalletIfConfigured(defaultAgent.wallet.walletAddress);
+  if (funding.status !== 'skipped') {
+    await prisma.agentWallet.update({
+      where: { agentWalletId: defaultAgent.wallet.agentWalletId },
+      data: {
+        metadataJson: {
+          ...(isRecordLike(defaultAgent.wallet.metadataJson) ? defaultAgent.wallet.metadataJson : {}),
+          devnetFunding: funding,
+          lastPreProposalFunding: funding,
+        },
+      },
+    });
+  }
 
   const prepared = await createSquadsPaymentProposalIntentForCreator({
     organizationId,
