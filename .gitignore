@@ -56,6 +56,10 @@ single_payment.pdf
 
 deliverables
 
+# Synthetic test data — bulky PDFs, easy to regenerate locally via
+# `node synthetic_data/render-invoice-pdfs.mjs`
+synthetic_data/
+
 # Local scratch artifacts
 db-queries.txt
 fuyofulo logo.jpg
