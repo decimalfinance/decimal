@@ -73,8 +73,8 @@ organizationsRouter.get('/organizations/:organizationId/summary', async (req, re
       unreviewedWalletsCount,
     ] = await Promise.all([
       prisma.paymentOrder.count({ where: { organizationId, state: 'pending_approval' } }),
-      prisma.paymentOrder.count({ where: { organizationId, state: { in: ['approved', 'ready_for_execution', 'execution_recorded'] } } }),
-      prisma.paymentOrder.count({ where: { organizationId, state: { notIn: ['settled', 'closed', 'cancelled'] } } }),
+      prisma.paymentOrder.count({ where: { organizationId, state: { in: ['draft', 'proposed', 'executed'] } } }),
+      prisma.paymentOrder.count({ where: { organizationId, state: { notIn: ['settled', 'cancelled'] } } }),
       prisma.collectionRequest.count({ where: { organizationId, state: { notIn: ['collected', 'closed', 'cancelled'] } } }),
       prisma.counterpartyWallet.count({
         where: {

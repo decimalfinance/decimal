@@ -482,7 +482,7 @@ async function loadPaymentOrder(organizationId: string, paymentOrderId: string) 
   if (!paymentOrder) {
     throw notFound('Payment order not found');
   }
-  if (paymentOrder.state === 'cancelled' || paymentOrder.state === 'closed') {
+  if (paymentOrder.state === 'cancelled' || paymentOrder.state === 'settled') {
     throw badRequest(`Payment order is ${paymentOrder.state}.`);
   }
   return paymentOrder;

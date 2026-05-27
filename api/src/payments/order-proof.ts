@@ -32,11 +32,12 @@ export async function buildPaymentOrderProofPacket(organizationId: string, payme
     status: proofStatus,
     readiness,
     intent: {
-      paymentRequestId: detail.paymentRequestId,
       paymentOrderId: detail.paymentOrderId,
+      inputBatchId: detail.inputBatchId,
+      inputBatchLabel: detail.inputBatchLabel,
       transferRequestId: detail.transferRequestId,
       reference: detail.externalReference ?? detail.invoiceNumber ?? null,
-      reason: detail.paymentRequest?.reason ?? detail.memo ?? null,
+      reason: detail.memo ?? null,
       amountRaw: detail.amountRaw,
       amountUsdc: formatRawUsdc(detail.amountRaw),
       asset: detail.asset,
@@ -109,7 +110,6 @@ export async function buildPaymentOrderProofPacket(organizationId: string, payme
       checks: readiness.checks,
     },
     sourceArtifacts: {
-      paymentRequest: detail.paymentRequest,
       paymentOrderEvents: detail.events,
       transferRequestEvents: reconciliation?.events ?? [],
       executionRecords: reconciliation?.executionRecords ?? [],
@@ -135,17 +135,17 @@ export async function buildPaymentOrderProofPacket(organizationId: string, payme
 }
 
 function deriveProofStatus(derivedState: PaymentOrderState, requestDisplayState: string | null) {
-  if (derivedState === 'closed') {
-    return 'closed';
-  }
   if (requestDisplayState === 'matched' || derivedState === 'settled') {
     return 'complete';
   }
-  if (requestDisplayState === 'partial' || derivedState === 'partially_settled') {
+  if (requestDisplayState === 'partial') {
     return 'partial';
   }
-  if (requestDisplayState === 'exception' || derivedState === 'exception') {
+  if (requestDisplayState === 'exception') {
     return 'exception';
+  }
+  if (derivedState === 'cancelled') {
+    return 'cancelled';
   }
   return 'in_progress';
 }
@@ -171,7 +171,7 @@ function deriveProofReadiness(args: {
     buildProofCheck(
       'approval_cleared',
       'Approval is cleared',
-      args.approvalState === 'approved' || args.proofStatus === 'complete' || args.proofStatus === 'closed'
+      args.approvalState === 'approved' || args.derivedState !== 'needs_review' || args.proofStatus === 'complete'
         ? 'pass'
         : args.approvalState === 'rejected'
           ? 'fail'
@@ -183,7 +183,7 @@ function deriveProofReadiness(args: {
       'Execution evidence is present',
       args.latestExecution?.submittedSignature || externalExecutionReference
         ? 'pass'
-        : args.derivedState === 'draft' || args.derivedState === 'approved'
+        : args.derivedState === 'draft' || args.derivedState === 'needs_review' || args.derivedState === 'proposed'
           ? 'pending'
           : 'warn',
       args.latestExecution?.submittedSignature
@@ -195,7 +195,7 @@ function deriveProofReadiness(args: {
     buildProofCheck(
       'settlement_reconciled',
       'Settlement is reconciled',
-      args.proofStatus === 'complete' || args.proofStatus === 'closed'
+      args.proofStatus === 'complete'
         ? 'pass'
         : args.proofStatus === 'partial' || args.proofStatus === 'exception'
           ? 'warn'

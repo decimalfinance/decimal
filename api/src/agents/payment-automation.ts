@@ -99,16 +99,7 @@ export async function advancePaymentOrderWithAgent(args: {
     };
   }
 
-  if (paymentOrder.paymentRunId) {
-    return {
-      status: 'not_applicable',
-      paymentOrderId: paymentOrder.paymentOrderId,
-      treasuryWalletId: paymentOrder.sourceTreasuryWalletId,
-      reason: 'Payment order belongs to a payment run. Create a batch proposal for the run instead.',
-    };
-  }
-
-  if (['cancelled', 'closed', 'settled'].includes(paymentOrder.state)) {
+  if (['cancelled', 'settled'].includes(paymentOrder.state)) {
     return {
       status: 'not_applicable',
       paymentOrderId: paymentOrder.paymentOrderId,
@@ -117,7 +108,7 @@ export async function advancePaymentOrderWithAgent(args: {
     };
   }
 
-  if (paymentOrder.state === 'needs_review' || paymentOrder.state === 'agent_flagged') {
+  if (paymentOrder.state === 'needs_review') {
     return {
       status: 'needs_review',
       paymentOrderId: paymentOrder.paymentOrderId,

@@ -154,7 +154,7 @@ export async function uploadInvoiceToPaymentOrders(args: {
           },
         },
         initialState: triggeredRules.length ? 'needs_review' : 'draft',
-        submitNow: triggeredRules.length ? false : Boolean(args.sourceTreasuryWalletId),
+        submitNow: false,
       });
 
       created.push({
