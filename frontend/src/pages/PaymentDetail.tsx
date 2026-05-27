@@ -864,10 +864,6 @@ function PrimaryAction(props: {
       : isApproved
         ? `Threshold met — ready to send`
         : `${approvalCount} of ${threshold} signed · ${pendingCount} pending`;
-    const detailHref = proposal
-      ? `/organizations/${order.organizationId}/proposals/${proposal.decimalProposalId}`
-      : `/organizations/${order.organizationId}/proposals`;
-
     return (
       <RdPrimaryCard
         emphasis={isApproved && proposalExecuteWalletId ? 'action' : undefined}
@@ -959,10 +955,6 @@ function PrimaryAction(props: {
               {!proposalExecuting ? <span className="rd-btn-arrow" aria-hidden>→</span> : null}
             </button>
           ) : null}
-          <Link className="rd-btn rd-btn-secondary" to={detailHref}>
-            Open proposal
-            <span className="rd-btn-arrow" aria-hidden>→</span>
-          </Link>
         </div>
       </RdPrimaryCard>
     );
