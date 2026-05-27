@@ -10,8 +10,8 @@ import {
   listPaymentOrders,
   preparePaymentOrderExecution,
   updatePaymentOrder,
-  submitPaymentOrder,
 } from '../payments/orders.js';
+import { importPaymentOrdersFromCsv, previewPaymentOrdersCsv } from '../payments/csv-intake.js';
 import { tryAdvancePaymentOrderWithAgent } from '../agents/payment-automation.js';
 import { buildPaymentOrderProofPacket } from '../payments/order-proof.js';
 import { isPaymentOrderState } from '../payments/order-state.js';
@@ -68,7 +68,14 @@ const updatePaymentOrderSchema = z.object({
 const listPaymentOrdersQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(250).default(100),
   state: z.string().refine((value) => isPaymentOrderState(value), 'Invalid payment order state').optional(),
-  paymentRunId: z.string().uuid().optional(),
+  inputBatchId: z.string().uuid().optional(),
+});
+
+const batchCsvSchema = z.object({
+  csv: z.string().min(1),
+  sourceTreasuryWalletId: z.string().uuid().optional().nullable(),
+  batchLabel: z.string().trim().max(200).optional().nullable(),
+  autoAdvance: z.boolean().default(true),
 });
 
 const createExecutionSchema = z.object({
@@ -114,12 +121,12 @@ paymentOrdersRouter.get('/organizations/:organizationId/payment-orders', asyncRo
     const result = await listPaymentOrders(organizationId, {
       limit: query.limit,
       state: query.state,
-      paymentRunId: query.paymentRunId,
+      inputBatchId: query.inputBatchId,
     });
     sendList(res, unwrapItems(result), {
       limit: query.limit,
       state: query.state ?? null,
-      paymentRunId: query.paymentRunId ?? null,
+      inputBatchId: query.inputBatchId ?? null,
     });
 }));
 
@@ -129,7 +136,7 @@ paymentOrdersRouter.post('/organizations/:organizationId/payment-orders', asyncR
     const input = createPaymentOrderSchema.parse(req.body);
     const actor = actorFromAuth(req.auth!);
 
-    const detail = await createPaymentOrder({
+    const created = await createPaymentOrder({
       organizationId,
       ...actor,
       counterpartyWalletId: input.counterpartyWalletId ?? input.destinationId!,
@@ -143,10 +150,59 @@ paymentOrdersRouter.post('/organizations/:organizationId/payment-orders', asyncR
       dueAt: input.dueAt ? new Date(input.dueAt) : null,
       sourceBalanceSnapshotJson: input.sourceBalanceSnapshotJson,
       metadataJson: input.metadataJson,
-      submitNow: input.submitNow,
+      submitNow: false,
     });
+    const automation = input.submitNow
+      ? await tryAdvancePaymentOrderWithAgent({
+          organizationId,
+          paymentOrderId: created.paymentOrderId,
+          actorUserId: req.auth!.userId,
+          sourceTreasuryWalletId: input.sourceTreasuryWalletId,
+        })
+      : null;
+    const detail = input.submitNow
+      ? await getPaymentOrderDetail(organizationId, created.paymentOrderId)
+      : created;
 
-    sendCreated(res, detail);
+    sendCreated(res, automation ? { ...detail, automation } : detail);
+}));
+
+paymentOrdersRouter.post('/organizations/:organizationId/payment-orders/batch-csv/preview', asyncRoute(async (req, res) => {
+    const { organizationId } = organizationParamsSchema.parse(req.params);
+    await assertOrganizationAccess(organizationId, req.auth!);
+    const input = batchCsvSchema.pick({ csv: true }).parse(req.body);
+    sendJson(res, await previewPaymentOrdersCsv({
+      organizationId,
+      csv: input.csv,
+    }));
+}));
+
+paymentOrdersRouter.post('/organizations/:organizationId/payment-orders/batch-csv', asyncRoute(async (req, res) => {
+    const { organizationId } = organizationParamsSchema.parse(req.params);
+    await assertOrganizationAdmin(organizationId, req.auth!);
+    const input = batchCsvSchema.parse(req.body);
+    const result = await importPaymentOrdersFromCsv({
+      organizationId,
+      actorUserId: req.auth!.userId,
+      csv: input.csv,
+      sourceTreasuryWalletId: input.sourceTreasuryWalletId,
+      batchLabel: input.batchLabel,
+      submitReadyOrders: true,
+    });
+    const automation = input.autoAdvance
+      ? await Promise.all(result.paymentOrders.map((item) =>
+          tryAdvancePaymentOrderWithAgent({
+            organizationId,
+            paymentOrderId: item.paymentOrder.paymentOrderId,
+            actorUserId: req.auth!.userId,
+            sourceTreasuryWalletId: input.sourceTreasuryWalletId,
+          }),
+        ))
+      : [];
+    sendCreated(res, {
+      ...result,
+      automation,
+    });
 }));
 
 paymentOrdersRouter.get('/organizations/:organizationId/payment-orders/:paymentOrderId', asyncRoute(async (req, res) => {
@@ -180,12 +236,11 @@ paymentOrdersRouter.post('/organizations/:organizationId/payment-orders/:payment
   try {
     const { organizationId, paymentOrderId } = paymentOrderParamsSchema.parse(req.params);
     await assertOrganizationAdmin(organizationId, req.auth!);
-    const actor = actorFromAuth(req.auth!);
 
-    res.json(await submitPaymentOrder({
+    res.json(await tryAdvancePaymentOrderWithAgent({
       organizationId,
       paymentOrderId,
-      ...actor,
+      actorUserId: req.auth!.userId,
     }));
   } catch (error) {
     next(error);
@@ -204,7 +259,7 @@ paymentOrdersRouter.post('/organizations/:organizationId/payment-orders/:payment
       ...actor,
       reviewNote: input.reviewNote,
       trustCounterpartyWallet: input.trustCounterpartyWallet,
-      submitAfterClear: input.submitAfterClear,
+      submitAfterClear: false,
     });
     const automation = input.autoAdvance
       ? await tryAdvancePaymentOrderWithAgent({

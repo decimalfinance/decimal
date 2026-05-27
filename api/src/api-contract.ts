@@ -118,9 +118,9 @@ export const API_ENDPOINTS = [
     scope: 'execution:write',
     requestBody: { paymentOrderId: 'uuid', creatorPersonalWalletId: 'uuid', memo: 'string optional' },
   }),
-  endpoint('create_squads_payment_run_proposal_intent', 'POST', '/organizations/{organizationId}/treasury-wallets/{treasuryWalletId}/squads/vault-proposals/payment-run-intent', ['treasury wallets', 'squads', 'payment runs', 'proposals'], 'Prepare one signable Squads vault proposal that pays every payable row in a Decimal payment run', 'session', {
+  endpoint('create_squads_batched_payment_proposal_intent', 'POST', '/organizations/{organizationId}/treasury-wallets/{treasuryWalletId}/squads/vault-proposals/payment-batch-intent', ['treasury wallets', 'squads', 'payment orders', 'proposals'], 'Prepare one signable Squads vault proposal that pays a selected set of Decimal payment orders', 'session', {
     scope: 'execution:write',
-    requestBody: { paymentRunId: 'uuid', creatorPersonalWalletId: 'uuid', memo: 'string optional' },
+    requestBody: { paymentOrderIds: 'uuid[]', inputBatchId: 'uuid optional', creatorPersonalWalletId: 'uuid', memo: 'string optional' },
   }),
   endpoint('approve_squads_config_proposal_intent', 'POST', '/organizations/{organizationId}/treasury-wallets/{treasuryWalletId}/squads/config-proposals/{transactionIndex}/approve-intent', ['treasury wallets', 'squads'], 'Prepare a signable Squads proposal approval transaction', 'session', {
     scope: 'organization:write',
@@ -200,42 +200,15 @@ export const API_ENDPOINTS = [
   }),
   endpoint('update_counterparty_wallet', 'PATCH', '/organizations/{organizationId}/counterparty-wallets/{counterpartyWalletId}', ['address book'], 'Update counterparty wallet', 'session', { scope: 'organization:write' }),
 
-  endpoint('list_payment_requests', 'GET', '/organizations/{organizationId}/payment-requests', ['inputs'], 'List payment requests', 'session', { scope: 'organization:read' }),
-  endpoint('create_payment_request', 'POST', '/organizations/{organizationId}/payment-requests', ['inputs'], 'Create payment request', 'session', { scope: 'payments:write' }),
-  endpoint('import_payment_requests_csv', 'POST', '/organizations/{organizationId}/payment-requests/import-csv', ['inputs'], 'Import payment requests from CSV', 'session', { scope: 'payments:write' }),
-  endpoint('preview_payment_requests_csv', 'POST', '/organizations/{organizationId}/payment-requests/import-csv/preview', ['inputs'], 'Preview payment request CSV import without side effects', 'session', { scope: 'organization:read' }),
-  endpoint('get_payment_request', 'GET', '/organizations/{organizationId}/payment-requests/{paymentRequestId}', ['inputs'], 'Get payment request detail', 'session', { scope: 'organization:read' }),
-  endpoint('promote_payment_request', 'POST', '/organizations/{organizationId}/payment-requests/{paymentRequestId}/promote', ['inputs'], 'Promote payment request to payment order', 'session', { scope: 'payments:write' }),
-  endpoint('cancel_payment_request', 'POST', '/organizations/{organizationId}/payment-requests/{paymentRequestId}/cancel', ['inputs'], 'Cancel payment request', 'session', { scope: 'payments:write' }),
   endpoint('upload_invoice', 'POST', '/organizations/{organizationId}/invoices/upload', ['inputs', 'payment orders'], 'Upload an invoice document, run AP intake, and create payment orders that are either proposal-ready or human-review gated', 'session', {
     scope: 'payments:write',
     requestBody: { filename: 'string', mimeType: 'string', dataBase64: 'string base64', sourceTreasuryWalletId: 'uuid optional', autoAdvance: 'boolean default true' },
     response: { primaryPaymentOrder: 'payment order', paymentOrders: 'created payment orders with AP intake decisions', skippedRows: 'rows that could not become payment orders', automation: 'per-order agent proposal advance results' },
   }),
-
-  endpoint('list_payment_runs', 'GET', '/organizations/{organizationId}/payment-runs', ['payment runs'], 'List payment runs', 'session', { scope: 'organization:read' }),
-  endpoint('import_payment_run_csv', 'POST', '/organizations/{organizationId}/payment-runs/import-csv', ['payment runs'], 'Import CSV as payment run', 'session', {
+  endpoint('preview_payment_orders_batch_csv', 'POST', '/organizations/{organizationId}/payment-orders/batch-csv/preview', ['inputs', 'payment orders'], 'Preview CSV rows before creating payment orders', 'session', { scope: 'organization:read' }),
+  endpoint('import_payment_orders_batch_csv', 'POST', '/organizations/{organizationId}/payment-orders/batch-csv', ['inputs', 'payment orders'], 'Import CSV rows directly as payment orders with a shared input batch label', 'session', {
     scope: 'payments:write',
-    requestBody: { csv: 'string', runName: 'string optional', importKey: 'string optional' },
-  }),
-  endpoint('import_payment_run_document', 'POST', '/organizations/{organizationId}/payment-runs/from-document', ['payment runs', 'inputs'], 'Import a PDF or image invoice into a draft payment run', 'session', {
-    scope: 'payments:write',
-    requestBody: { filename: 'string', mimeType: 'string', dataBase64: 'string base64', runName: 'string optional', sourceTreasuryWalletId: 'uuid optional' },
-  }),
-  endpoint('preview_payment_run_csv', 'POST', '/organizations/{organizationId}/payment-runs/import-csv/preview', ['payment runs'], 'Preview payment run CSV import without side effects', 'session', { scope: 'organization:read' }),
-  endpoint('get_payment_run', 'GET', '/organizations/{organizationId}/payment-runs/{paymentRunId}', ['payment runs'], 'Get payment run detail', 'session', { scope: 'organization:read' }),
-  endpoint('resolve_payment_run_document_row', 'POST', '/organizations/{organizationId}/payment-runs/{paymentRunId}/resolve-document-row', ['payment runs', 'inputs'], 'Resolve an unrouted OCR document row into a payment request/order by selecting or correcting the counterparty wallet', 'session', {
-    scope: 'payments:write',
-    requestBody: { rowIndex: 'number', counterpartyWalletId: 'uuid optional', walletAddress: 'string optional', label: 'string optional' },
-  }),
-  endpoint('delete_payment_run', 'DELETE', '/organizations/{organizationId}/payment-runs/{paymentRunId}', ['payment runs'], 'Delete payment run', 'session', { scope: 'payments:write' }),
-  endpoint('cancel_payment_run', 'POST', '/organizations/{organizationId}/payment-runs/{paymentRunId}/cancel', ['payment runs'], 'Cancel payment run before execution evidence exists', 'session', { scope: 'payments:write' }),
-  endpoint('close_payment_run', 'POST', '/organizations/{organizationId}/payment-runs/{paymentRunId}/close', ['payment runs'], 'Close fully settled payment run', 'session', { scope: 'payments:write' }),
-  endpoint('prepare_payment_run_execution', 'POST', '/organizations/{organizationId}/payment-runs/{paymentRunId}/prepare-execution', ['payment runs'], 'Prepare batch execution packet', 'session', { scope: 'execution:write' }),
-  endpoint('attach_payment_run_signature', 'POST', '/organizations/{organizationId}/payment-runs/{paymentRunId}/attach-signature', ['payment runs'], 'Attach submitted batch signature', 'session', { scope: 'execution:write' }),
-  endpoint('payment_run_proof', 'GET', '/organizations/{organizationId}/payment-runs/{paymentRunId}/proof', ['proof'], 'Export payment run proof', 'session', {
-    scope: 'proofs:read',
-    query: { detail: 'summary | compact | full' },
+    requestBody: { csv: 'string', sourceTreasuryWalletId: 'uuid optional', batchLabel: 'string optional', autoAdvance: 'boolean default true' },
   }),
 
   endpoint('list_collections', 'GET', '/organizations/{organizationId}/collections', ['collections'], 'List expected inbound collections', 'session', { scope: 'organization:read' }),
@@ -265,7 +238,7 @@ export const API_ENDPOINTS = [
   endpoint('create_payment_order', 'POST', '/organizations/{organizationId}/payment-orders', ['payment orders'], 'Create payment order', 'session', { scope: 'payments:write' }),
   endpoint('get_payment_order', 'GET', '/organizations/{organizationId}/payment-orders/{paymentOrderId}', ['payment orders'], 'Get payment order detail', 'session', { scope: 'organization:read' }),
   endpoint('update_payment_order', 'PATCH', '/organizations/{organizationId}/payment-orders/{paymentOrderId}', ['payment orders'], 'Update payment order', 'session', { scope: 'payments:write' }),
-  endpoint('submit_payment_order', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/submit', ['payment orders'], 'Submit payment order into the approval workflow', 'session', { scope: 'payments:write' }),
+  endpoint('submit_payment_order', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/submit', ['payment orders'], 'Legacy alias for agent advance on a payment order', 'session', { scope: 'payments:write' }),
   endpoint('clear_payment_order_review', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/clear-review', ['payment orders'], 'Clear an AP-intake flagged payment order and advance it to the proposal-ready path', 'session', {
     scope: 'payments:write',
     requestBody: { reviewNote: 'string optional', trustCounterpartyWallet: 'boolean default true', submitAfterClear: 'boolean default true', autoAdvance: 'boolean default true' },
