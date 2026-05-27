@@ -1,5 +1,4 @@
-// Shared helpers for navigating ordered transfer-request lists across
-// payment-orders.ts and payment-runs.ts.
+// Shared helpers for navigating ordered transfer-request lists.
 
 /**
  * Pick the most recently created transfer request from an order. The

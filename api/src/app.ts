@@ -18,8 +18,6 @@ import { organizationsRouter } from './routes/organizations.js';
 import { organizationInvitesRouter, publicOrganizationInvitesRouter } from './routes/organization-invites.js';
 import { opsRouter } from './routes/ops.js';
 import { paymentOrdersRouter } from './routes/payment-orders.js';
-import { paymentRequestsRouter } from './routes/payment-requests.js';
-import { paymentRunsRouter } from './routes/payment-runs.js';
 import { proposalsRouter } from './routes/proposals.js';
 import { publicRateLimitMiddleware } from './infra/rate-limit.js';
 import { treasuryWalletsRouter } from './routes/treasury-wallets.js';
@@ -93,8 +91,6 @@ export function createApp() {
   app.use(walletAuthorizationsRouter);
   app.use(counterpartyWalletsRouter);
   app.use(invoicesRouter);
-  app.use(paymentRequestsRouter);
-  app.use(paymentRunsRouter);
   app.use(paymentOrdersRouter);
   app.use(proposalsRouter);
   app.use(collectionsRouter);

@@ -6,7 +6,7 @@ Current domain boundaries:
 
 - `routes/` contains HTTP validation and response wiring only.
 - `squads-treasury.ts` is the current Squads domain service and owns Squads v4 transaction construction, proposal reads, and proposal execution intents.
-- `payment-orders.ts`, `payment-runs.ts`, `collections.ts`, and related files are workflow services.
+- `payment-orders.ts`, `collections.ts`, and related files are workflow services.
 - `solana.ts` owns chain constants, RPC connections, and raw Solana instruction builders.
 
 New backend work should prefer one of these patterns:

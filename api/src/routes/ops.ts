@@ -75,18 +75,13 @@ opsRouter.get('/organizations/:organizationId/ops-health', async (req, res, next
     await assertOrganizationAccess(organizationId, req.auth!);
 
     await prisma.$queryRaw`SELECT 1`;
-    const [proposalCounts, paymentCounts, runCounts] = await Promise.all([
+    const [proposalCounts, paymentCounts] = await Promise.all([
       prisma.decimalProposal.groupBy({
         by: ['status'],
         where: { organizationId },
         _count: { status: true },
       }),
       prisma.paymentOrder.groupBy({
-        by: ['state'],
-        where: { organizationId },
-        _count: { state: true },
-      }),
-      prisma.paymentRun.groupBy({
         by: ['state'],
         where: { organizationId },
         _count: { state: true },
@@ -99,7 +94,6 @@ opsRouter.get('/organizations/:organizationId/ops-health', async (req, res, next
       indexerStatus: 'not_required',
       proposals: groupCounts(proposalCounts, 'status'),
       paymentOrders: groupCounts(paymentCounts, 'state'),
-      paymentRuns: groupCounts(runCounts, 'state'),
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {

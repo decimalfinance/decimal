@@ -237,10 +237,8 @@ BEGIN
     'transfer_request_notes',
     'counterparty_wallets',
     'execution_records',
-    'payment_runs',
     'payment_orders',
     'payment_order_events',
-    'payment_requests',
     'collection_runs',
     'collection_requests',
     'collection_request_events'
@@ -400,8 +398,8 @@ CREATE TABLE IF NOT EXISTS payment_orders
 (
   payment_order_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id UUID NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
-  payment_request_id UUID,
-  payment_run_id UUID,
+  input_batch_id UUID,
+  input_batch_label TEXT,
   counterparty_wallet_id UUID NOT NULL REFERENCES counterparty_wallets(counterparty_wallet_id) ON DELETE RESTRICT,
   counterparty_id UUID REFERENCES counterparties(counterparty_id) ON DELETE SET NULL,
   source_treasury_wallet_id UUID REFERENCES treasury_wallets(treasury_wallet_id) ON DELETE SET NULL,
@@ -426,7 +424,6 @@ CREATE TABLE IF NOT EXISTS decimal_proposals
   organization_id UUID NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
   treasury_wallet_id UUID REFERENCES treasury_wallets(treasury_wallet_id) ON DELETE SET NULL,
   payment_order_id UUID REFERENCES payment_orders(payment_order_id) ON DELETE SET NULL,
-  payment_run_id UUID,
   provider TEXT NOT NULL DEFAULT 'squads_v4',
   proposal_type TEXT NOT NULL,
   proposal_category TEXT NOT NULL,
@@ -516,40 +513,6 @@ CREATE TABLE IF NOT EXISTS spending_limit_executions
   UNIQUE (organization_id, signature)
 );
 
-CREATE TABLE IF NOT EXISTS payment_runs
-(
-  payment_run_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  organization_id UUID NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
-  source_treasury_wallet_id UUID REFERENCES treasury_wallets(treasury_wallet_id) ON DELETE SET NULL,
-  run_name TEXT NOT NULL,
-  input_source TEXT NOT NULL DEFAULT 'manual',
-  state TEXT NOT NULL DEFAULT 'draft',
-  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_by_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS payment_requests
-(
-  payment_request_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  organization_id UUID NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
-  payment_run_id UUID,
-  counterparty_wallet_id UUID NOT NULL REFERENCES counterparty_wallets(counterparty_wallet_id) ON DELETE RESTRICT,
-  counterparty_id UUID REFERENCES counterparties(counterparty_id) ON DELETE SET NULL,
-  requested_by_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
-  amount_raw BIGINT NOT NULL,
-  asset TEXT NOT NULL DEFAULT 'usdc',
-  reason TEXT NOT NULL,
-  external_reference TEXT,
-  due_at TIMESTAMPTZ,
-  state TEXT NOT NULL DEFAULT 'submitted',
-  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (organization_id, counterparty_wallet_id, amount_raw, external_reference)
-);
-
 CREATE TABLE IF NOT EXISTS collection_runs
 (
   collection_run_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -630,50 +593,13 @@ ALTER TABLE transfer_requests
   ADD COLUMN IF NOT EXISTS payment_order_id UUID;
 
 ALTER TABLE payment_orders
-  ADD COLUMN IF NOT EXISTS payment_request_id UUID;
+  ADD COLUMN IF NOT EXISTS input_batch_id UUID;
 
 ALTER TABLE payment_orders
-  ADD COLUMN IF NOT EXISTS payment_run_id UUID;
+  ADD COLUMN IF NOT EXISTS input_batch_label TEXT;
 
 ALTER TABLE payment_orders
   ADD COLUMN IF NOT EXISTS source_treasury_wallet_id UUID REFERENCES treasury_wallets(treasury_wallet_id) ON DELETE SET NULL;
-
-ALTER TABLE payment_runs
-  ADD COLUMN IF NOT EXISTS source_treasury_wallet_id UUID REFERENCES treasury_wallets(treasury_wallet_id) ON DELETE SET NULL;
-
-ALTER TABLE payment_requests
-  ADD COLUMN IF NOT EXISTS payment_run_id UUID;
-
-ALTER TABLE decimal_proposals
-  ADD COLUMN IF NOT EXISTS payment_run_id UUID;
-
-ALTER TABLE payment_orders
-  DROP CONSTRAINT IF EXISTS payment_orders_payment_run_id_fkey;
-
-ALTER TABLE payment_orders
-  ADD CONSTRAINT payment_orders_payment_run_id_fkey
-  FOREIGN KEY (payment_run_id) REFERENCES payment_runs(payment_run_id) ON DELETE SET NULL;
-
-ALTER TABLE payment_requests
-  DROP CONSTRAINT IF EXISTS payment_requests_payment_run_id_fkey;
-
-ALTER TABLE payment_requests
-  ADD CONSTRAINT payment_requests_payment_run_id_fkey
-  FOREIGN KEY (payment_run_id) REFERENCES payment_runs(payment_run_id) ON DELETE SET NULL;
-
-ALTER TABLE decimal_proposals
-  DROP CONSTRAINT IF EXISTS decimal_proposals_payment_run_id_fkey;
-
-ALTER TABLE decimal_proposals
-  ADD CONSTRAINT decimal_proposals_payment_run_id_fkey
-  FOREIGN KEY (payment_run_id) REFERENCES payment_runs(payment_run_id) ON DELETE SET NULL;
-
-ALTER TABLE payment_orders
-  DROP CONSTRAINT IF EXISTS payment_orders_payment_request_id_fkey;
-
-ALTER TABLE payment_orders
-  ADD CONSTRAINT payment_orders_payment_request_id_fkey
-  FOREIGN KEY (payment_request_id) REFERENCES payment_requests(payment_request_id) ON DELETE SET NULL;
 
 ALTER TABLE transfer_requests
   DROP CONSTRAINT IF EXISTS transfer_requests_payment_order_id_fkey;
@@ -740,32 +666,6 @@ ALTER TABLE execution_records
     )
   );
 
-ALTER TABLE payment_runs
-  DROP CONSTRAINT IF EXISTS chk_payment_runs_state;
-
-ALTER TABLE payment_runs
-  ADD CONSTRAINT chk_payment_runs_state CHECK (
-    state IN (
-      'draft',
-      'approved',
-      'ready',
-      'proposed',
-      'ready_for_execution',
-      'proposal_prepared',
-      'proposal_submitted',
-      'proposal_approved',
-      'proposal_executed',
-      'execution_recorded',
-      'executed',
-      'submitted_onchain',
-      'partially_settled',
-      'settled',
-      'exception',
-      'closed',
-      'cancelled'
-    )
-  );
-
 ALTER TABLE payment_orders
   DROP CONSTRAINT IF EXISTS chk_payment_orders_state;
 
@@ -773,32 +673,12 @@ ALTER TABLE payment_orders
   ADD CONSTRAINT chk_payment_orders_state CHECK (
     state IN (
       'needs_review',
-      'agent_flagged',
       'draft',
-      'approved',
-      'ready',
       'proposed',
-      'ready_for_execution',
-      'proposal_prepared',
-      'proposal_submitted',
-      'proposal_approved',
-      'proposal_executed',
-      'execution_recorded',
       'executed',
-      'partially_settled',
       'settled',
-      'exception',
-      'closed',
       'cancelled'
     )
-  );
-
-ALTER TABLE payment_requests
-  DROP CONSTRAINT IF EXISTS chk_payment_requests_state;
-
-ALTER TABLE payment_requests
-  ADD CONSTRAINT chk_payment_requests_state CHECK (
-    state IN ('submitted', 'converted_to_order', 'cancelled')
   );
 
 ALTER TABLE collection_runs
@@ -967,19 +847,10 @@ CREATE INDEX IF NOT EXISTS idx_execution_records_org_created_at
   ON execution_records(organization_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_execution_records_request_created_at
   ON execution_records(transfer_request_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_payment_runs_org_state_created_at
-  ON payment_runs(organization_id, state, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_payment_runs_source_created_at
-  ON payment_runs(source_treasury_wallet_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_payment_orders_org_state_created_at
   ON payment_orders(organization_id, state, created_at DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_payment_request_id_unique
-  ON payment_orders(payment_request_id)
-  WHERE payment_request_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_payment_orders_payment_request_id
-  ON payment_orders(payment_request_id);
-CREATE INDEX IF NOT EXISTS idx_payment_orders_payment_run_created_at
-  ON payment_orders(payment_run_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_payment_orders_input_batch_created_at
+  ON payment_orders(input_batch_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_payment_orders_counterparty_wallet_created_at
   ON payment_orders(counterparty_wallet_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_payment_orders_source_created_at
@@ -992,8 +863,6 @@ CREATE INDEX IF NOT EXISTS idx_decimal_proposals_treasury_created_at
   ON decimal_proposals(treasury_wallet_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_decimal_proposals_payment_order_created_at
   ON decimal_proposals(payment_order_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_decimal_proposals_payment_run_created_at
-  ON decimal_proposals(payment_run_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_automation_agents_org_status_created_at
   ON automation_agents(organization_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_wallets_org_status_created_at
@@ -1017,19 +886,11 @@ CREATE INDEX IF NOT EXISTS idx_spending_limit_executions_payment_order_created_a
 CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_unique_active_reference
   ON payment_orders(organization_id, counterparty_wallet_id, amount_raw, lower(coalesce(external_reference, invoice_number)))
   WHERE coalesce(external_reference, invoice_number) IS NOT NULL
-    AND state NOT IN ('closed', 'cancelled');
+    AND state NOT IN ('settled', 'cancelled');
 CREATE INDEX IF NOT EXISTS idx_payment_order_events_order_created_at
   ON payment_order_events(payment_order_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_payment_order_events_org_created_at
   ON payment_order_events(organization_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_payment_requests_org_state_created_at
-  ON payment_requests(organization_id, state, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_payment_requests_payment_run_created_at
-  ON payment_requests(payment_run_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_payment_requests_counterparty_wallet_created_at
-  ON payment_requests(counterparty_wallet_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_payment_requests_counterparty_created_at
-  ON payment_requests(counterparty_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_collection_runs_org_state_created_at
   ON collection_runs(organization_id, state, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_collection_runs_receiving_created_at
@@ -1144,16 +1005,6 @@ FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS trg_spending_limit_executions_updated_at ON spending_limit_executions;
 CREATE TRIGGER trg_spending_limit_executions_updated_at
 BEFORE UPDATE ON spending_limit_executions
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-
-DROP TRIGGER IF EXISTS trg_payment_runs_updated_at ON payment_runs;
-CREATE TRIGGER trg_payment_runs_updated_at
-BEFORE UPDATE ON payment_runs
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-
-DROP TRIGGER IF EXISTS trg_payment_requests_updated_at ON payment_requests;
-CREATE TRIGGER trg_payment_requests_updated_at
-BEFORE UPDATE ON payment_requests
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_collection_runs_updated_at ON collection_runs;

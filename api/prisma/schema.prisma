@@ -25,10 +25,8 @@ model Organization {
   executionRecords ExecutionRecord[]
   transferRequestEvents TransferRequestEvent[]
   transferRequestNotes TransferRequestNote[]
-  paymentRuns PaymentRun[]
   paymentOrders PaymentOrder[]
   paymentOrderEvents PaymentOrderEvent[]
-  paymentRequests PaymentRequest[]
   collectionRuns CollectionRun[]
   collectionRequests CollectionRequest[]
   collectionEvents CollectionRequestEvent[]
@@ -63,8 +61,6 @@ model User {
   executionRecords           ExecutionRecord[]        @relation("ExecutionRecordExecutorUser")
   paymentOrdersCreated       PaymentOrder[]           @relation("PaymentOrderCreatedByUser")
   decimalProposalsCreated    DecimalProposal[]        @relation("DecimalProposalCreatedByUser")
-  paymentRequestsCreated     PaymentRequest[]         @relation("PaymentRequestRequestedByUser")
-  paymentRunsCreated         PaymentRun[]             @relation("PaymentRunCreatedByUser")
   collectionRequestsCreated  CollectionRequest[]      @relation("CollectionRequestCreatedByUser")
   collectionRunsCreated      CollectionRun[]          @relation("CollectionRunCreatedByUser")
   organizationInvitesSent    OrganizationInvite[]     @relation("OrganizationInviteInvitedBy")
@@ -213,7 +209,6 @@ model TreasuryWallet {
   walletAuthorizations OrganizationWalletAuthorization[]
   outboundTransferRequests TransferRequest[] @relation("TransferRequestSourceWallet")
   sourcePaymentOrders      PaymentOrder[]    @relation("PaymentOrderSourceWallet")
-  sourcePaymentRuns        PaymentRun[]      @relation("PaymentRunSourceWallet")
   receivingCollections     CollectionRequest[] @relation("CollectionReceivingWallet")
   receivingCollectionRuns  CollectionRun[]     @relation("CollectionRunReceivingWallet")
   decimalProposals         DecimalProposal[]
@@ -319,7 +314,6 @@ model Counterparty {
   organization      Organization     @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
   wallets           CounterpartyWallet[]
   paymentOrders     PaymentOrder[]
-  paymentRequests   PaymentRequest[]
   collectionRequests CollectionRequest[]
 
   @@index([organizationId, createdAt(sort: Desc)])
@@ -350,7 +344,6 @@ model CounterpartyWallet {
   organization         Organization      @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
   transferRequests     TransferRequest[]
   paymentOrders        PaymentOrder[]
-  paymentRequests      PaymentRequest[]
   collectionRequests   CollectionRequest[]
   spendingLimitDestinations SpendingLimitPolicyDestination[]
   spendingLimitExecutions SpendingLimitExecution[]
@@ -400,8 +393,8 @@ model TransferRequest {
 model PaymentOrder {
   paymentOrderId            String              @id @default(dbgenerated("gen_random_uuid()")) @map("payment_order_id") @db.Uuid
   organizationId               String              @map("organization_id") @db.Uuid
-  paymentRequestId          String?             @unique @map("payment_request_id") @db.Uuid
-  paymentRunId              String?             @map("payment_run_id") @db.Uuid
+  inputBatchId              String?             @map("input_batch_id") @db.Uuid
+  inputBatchLabel           String?             @map("input_batch_label")
   counterpartyWalletId      String              @map("counterparty_wallet_id") @db.Uuid
   counterpartyId            String?             @map("counterparty_id") @db.Uuid
   sourceTreasuryWalletId    String?             @map("source_treasury_wallet_id") @db.Uuid
@@ -419,8 +412,6 @@ model PaymentOrder {
   createdAt                 DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                 DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
   organization           Organization           @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
-  paymentRequest            PaymentRequest?     @relation(fields: [paymentRequestId], references: [paymentRequestId], onDelete: SetNull)
-  paymentRun                PaymentRun?         @relation(fields: [paymentRunId], references: [paymentRunId], onDelete: SetNull)
   counterpartyWallet        CounterpartyWallet  @relation(fields: [counterpartyWalletId], references: [counterpartyWalletId], onDelete: Restrict)
   counterparty              Counterparty?       @relation(fields: [counterpartyId], references: [counterpartyId], onDelete: SetNull)
   sourceTreasuryWallet      TreasuryWallet?     @relation("PaymentOrderSourceWallet", fields: [sourceTreasuryWalletId], references: [treasuryWalletId], onDelete: SetNull)
@@ -431,8 +422,7 @@ model PaymentOrder {
   spendingLimitExecutions   SpendingLimitExecution[]
 
   @@index([organizationId, state, createdAt(sort: Desc)])
-  @@index([paymentRequestId])
-  @@index([paymentRunId, createdAt(sort: Desc)])
+  @@index([inputBatchId, createdAt(sort: Desc)])
   @@index([counterpartyWalletId, createdAt(sort: Desc)])
   @@index([sourceTreasuryWalletId, createdAt(sort: Desc)])
   @@map("payment_orders")
@@ -443,7 +433,6 @@ model DecimalProposal {
   organizationId         String          @map("organization_id") @db.Uuid
   treasuryWalletId       String?         @map("treasury_wallet_id") @db.Uuid
   paymentOrderId         String?         @map("payment_order_id") @db.Uuid
-  paymentRunId           String?         @map("payment_run_id") @db.Uuid
   provider               String          @default("squads_v4")
   proposalType           String          @map("proposal_type")
   proposalCategory       String          @map("proposal_category")
@@ -472,7 +461,6 @@ model DecimalProposal {
   organization           Organization    @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
   treasuryWallet         TreasuryWallet? @relation(fields: [treasuryWalletId], references: [treasuryWalletId], onDelete: SetNull)
   paymentOrder           PaymentOrder?   @relation(fields: [paymentOrderId], references: [paymentOrderId], onDelete: SetNull)
-  paymentRun             PaymentRun?     @relation(fields: [paymentRunId], references: [paymentRunId], onDelete: SetNull)
   createdByUser          User?           @relation("DecimalProposalCreatedByUser", fields: [createdByUserId], references: [userId], onDelete: SetNull)
   spendingLimitPolicies  SpendingLimitPolicy[]
 
@@ -481,7 +469,6 @@ model DecimalProposal {
   @@index([organizationId, proposalType, createdAt(sort: Desc)])
   @@index([treasuryWalletId, createdAt(sort: Desc)])
   @@index([paymentOrderId, createdAt(sort: Desc)])
-  @@index([paymentRunId, createdAt(sort: Desc)])
   @@map("decimal_proposals")
 }
 
@@ -571,60 +558,6 @@ model SpendingLimitExecution {
   @@index([spendingLimitPolicyId, createdAt(sort: Desc)])
   @@index([paymentOrderId, createdAt(sort: Desc)])
   @@map("spending_limit_executions")
-}
-
-model PaymentRequest {
-  paymentRequestId  String        @id @default(dbgenerated("gen_random_uuid()")) @map("payment_request_id") @db.Uuid
-  organizationId       String        @map("organization_id") @db.Uuid
-  paymentRunId      String?       @map("payment_run_id") @db.Uuid
-  counterpartyWalletId String     @map("counterparty_wallet_id") @db.Uuid
-  counterpartyId    String?       @map("counterparty_id") @db.Uuid
-  requestedByUserId String?       @map("requested_by_user_id") @db.Uuid
-  amountRaw         BigInt        @map("amount_raw")
-  asset             String        @default("usdc")
-  reason            String
-  externalReference String?       @map("external_reference")
-  dueAt             DateTime?     @map("due_at") @db.Timestamptz(6)
-  state             String        @default("submitted")
-  metadataJson      Json          @default("{}") @map("metadata_json")
-  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization           Organization     @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
-  paymentRun        PaymentRun?   @relation(fields: [paymentRunId], references: [paymentRunId], onDelete: SetNull)
-  counterpartyWallet CounterpartyWallet @relation(fields: [counterpartyWalletId], references: [counterpartyWalletId], onDelete: Restrict)
-  counterparty      Counterparty? @relation(fields: [counterpartyId], references: [counterpartyId], onDelete: SetNull)
-  requestedByUser   User?         @relation("PaymentRequestRequestedByUser", fields: [requestedByUserId], references: [userId], onDelete: SetNull)
-  paymentOrder      PaymentOrder?
-
-  @@unique([organizationId, counterpartyWalletId, amountRaw, externalReference])
-  @@index([organizationId, state, createdAt(sort: Desc)])
-  @@index([paymentRunId, createdAt(sort: Desc)])
-  @@index([counterpartyWalletId, createdAt(sort: Desc)])
-  @@index([counterpartyId, createdAt(sort: Desc)])
-  @@map("payment_requests")
-}
-
-model PaymentRun {
-  paymentRunId           String           @id @default(dbgenerated("gen_random_uuid()")) @map("payment_run_id") @db.Uuid
-  organizationId            String           @map("organization_id") @db.Uuid
-  sourceTreasuryWalletId String?          @map("source_treasury_wallet_id") @db.Uuid
-  runName                String           @map("run_name")
-  inputSource            String           @default("manual") @map("input_source")
-  state                  String           @default("draft")
-  metadataJson           Json             @default("{}") @map("metadata_json")
-  createdByUserId        String?          @map("created_by_user_id") @db.Uuid
-  createdAt              DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt              DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization           Organization        @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
-  sourceTreasuryWallet   TreasuryWallet?  @relation("PaymentRunSourceWallet", fields: [sourceTreasuryWalletId], references: [treasuryWalletId], onDelete: SetNull)
-  createdByUser          User?            @relation("PaymentRunCreatedByUser", fields: [createdByUserId], references: [userId], onDelete: SetNull)
-  paymentRequests        PaymentRequest[]
-  paymentOrders          PaymentOrder[]
-  proposals              DecimalProposal[]
-
-  @@index([organizationId, state, createdAt(sort: Desc)])
-  @@index([sourceTreasuryWalletId, createdAt(sort: Desc)])
-  @@map("payment_runs")
 }
 
 model CollectionRun {
