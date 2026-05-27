@@ -1022,7 +1022,10 @@ async function buildPaymentOrderReadModel(order: PaymentOrderWithRelations) {
     ? await getReconciliationDetail(order.organizationId, primaryTransferRequest.transferRequestId)
     : null;
   const latestSquadsPaymentProposal = getLatestSquadsPaymentProposal(order);
-  const squadsLifecycle = deriveSquadsPaymentLifecycle(latestSquadsPaymentProposal);
+  const liveProposalState = latestSquadsPaymentProposal
+    ? await loadLiveProposalState(latestSquadsPaymentProposal)
+    : null;
+  const squadsLifecycle = deriveSquadsPaymentLifecycle(latestSquadsPaymentProposal, liveProposalState);
   const derivedState = derivePaymentOrderState(order, reconciliationDetail, squadsLifecycle);
   const productLifecycle = derivePaymentProductLifecycle(order, derivedState, squadsLifecycle);
   const balanceWarning = deriveBalanceWarning(order);
@@ -1066,7 +1069,7 @@ async function buildPaymentOrderReadModel(order: PaymentOrderWithRelations) {
       requestedAt: request.requestedAt,
     })),
     squadsLifecycle,
-    squadsPaymentProposal: latestSquadsPaymentProposal ? await serializePaymentOrderProposal(latestSquadsPaymentProposal) : null,
+    squadsPaymentProposal: latestSquadsPaymentProposal ? serializePaymentOrderProposal(latestSquadsPaymentProposal, liveProposalState) : null,
     canCreateSquadsPaymentProposal: !latestSquadsPaymentProposal || isTerminalSquadsPaymentProposal(latestSquadsPaymentProposal),
     events: (order.events ?? []).map(serializePaymentOrderEvent),
     reconciliationDetail,
@@ -1150,17 +1153,19 @@ function getLatestSquadsPaymentProposal(order: PaymentOrderWithRelations) {
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0] ?? null;
 }
 
-function deriveSquadsPaymentLifecycle(proposal: DecimalProposal | null) {
+type LiveProposalState = Awaited<ReturnType<typeof loadLiveProposalState>>;
+
+function deriveSquadsPaymentLifecycle(proposal: DecimalProposal | null, live: LiveProposalState) {
   if (!proposal) {
     return null;
   }
 
-  const localStatus = proposal.status;
-  const productState = mapSquadsProposalStatusToPaymentState(proposal);
+  const effectiveStatus = live?.status ?? proposal.status;
+  const productState = mapSquadsProposalStatusToPaymentState(proposal, effectiveStatus);
   return {
     provider: proposal.provider,
     decimalProposalId: proposal.decimalProposalId,
-    proposalStatus: localStatus,
+    proposalStatus: effectiveStatus,
     productState,
     paymentState: productState,
     hasSubmittedSignature: Boolean(proposal.submittedSignature?.trim()),
@@ -1174,20 +1179,20 @@ function deriveSquadsPaymentLifecycle(proposal: DecimalProposal | null) {
   };
 }
 
-function mapSquadsProposalStatusToPaymentState(proposal: DecimalProposal): PaymentOrderState {
-  if (proposal.executedSignature || proposal.status === 'executed') {
+function mapSquadsProposalStatusToPaymentState(proposal: DecimalProposal, status: string): PaymentOrderState {
+  if (proposal.executedSignature || status === 'executed') {
     return 'executed';
   }
   if (
     proposal.submittedSignature
-    || proposal.status === 'prepared'
-    || proposal.status === 'submitted'
-    || proposal.status === 'active'
-    || proposal.status === 'approved'
+    || status === 'prepared'
+    || status === 'submitted'
+    || status === 'active'
+    || status === 'approved'
   ) {
     return 'proposed';
   }
-  if (proposal.status === 'rejected' || proposal.status === 'cancelled' || proposal.status === 'failed') {
+  if (status === 'rejected' || status === 'cancelled' || status === 'failed') {
     return 'cancelled';
   }
   return 'draft';
@@ -1216,8 +1221,7 @@ function isTerminalSquadsPaymentProposal(proposal: DecimalProposal) {
   return ['rejected', 'cancelled', 'failed'].includes(proposal.status);
 }
 
-async function serializePaymentOrderProposal(proposal: DecimalProposal) {
-  const live = await loadLiveProposalState(proposal);
+function serializePaymentOrderProposal(proposal: DecimalProposal, live: LiveProposalState) {
   return {
     decimalProposalId: proposal.decimalProposalId,
     provider: proposal.provider,
