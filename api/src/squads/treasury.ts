@@ -29,9 +29,9 @@ import {
   markPaymentOrderSquadsProposalExecuted,
   markPaymentOrderSquadsProposalPrepared,
   markPaymentOrderSquadsProposalSubmitted,
-  markPaymentRunSquadsProposalExecuted,
-  markPaymentRunSquadsProposalPrepared,
-  markPaymentRunSquadsProposalSubmitted,
+  markPaymentBatchSquadsProposalExecuted,
+  markPaymentBatchSquadsProposalPrepared,
+  markPaymentBatchSquadsProposalSubmitted,
 } from './payment-markers.js';
 import {
   SQUADS_SOURCE,
@@ -246,8 +246,9 @@ export type CreateSquadsPaymentProposalInput = {
   memo?: string | null;
 };
 
-export type CreateSquadsPaymentRunProposalInput = {
-  paymentRunId: string;
+export type CreateSquadsBatchedPaymentProposalInput = {
+  paymentOrderIds: string[];
+  inputBatchId?: string | null;
   creatorPersonalWalletId: string;
   memo?: string | null;
 };
@@ -1131,12 +1132,20 @@ async function createSquadsPaymentProposalIntentForCreator(args: {
   };
 }
 
-export async function createSquadsPaymentRunProposalIntent(
+export async function createSquadsBatchedPaymentProposalIntent(
   organizationId: string,
   treasuryWalletId: string,
   actorUserId: string,
-  input: CreateSquadsPaymentRunProposalInput,
+  input: CreateSquadsBatchedPaymentProposalInput,
 ) {
+  const uniquePaymentOrderIds = uniqueStrings(input.paymentOrderIds);
+  if (!uniquePaymentOrderIds.length) {
+    throw badRequest('At least one paymentOrderId is required.');
+  }
+  if (uniquePaymentOrderIds.length > MAX_SQUADS_PAYMENT_RUN_TRANSFERS) {
+    throw badRequest(`Batch has ${uniquePaymentOrderIds.length} orders. Split it into chunks of ${MAX_SQUADS_PAYMENT_RUN_TRANSFERS} or fewer before creating a Squads proposal.`);
+  }
+
   const creator = await loadActorPersonalWallet(actorUserId, input.creatorPersonalWalletId);
   const { wallet, programId, multisigPda, vaultPda, vaultIndex, multisigAccount } = await loadSquadsTreasury(organizationId, treasuryWalletId);
   if (creator.userId !== actorUserId) {
@@ -1148,20 +1157,20 @@ export async function createSquadsPaymentRunProposalIntent(
     treasuryWalletId,
     walletAddress: creator.walletAddress,
     actorType: 'user',
-    proposalKind: 'payment_run',
+    proposalKind: 'payment_batch',
   });
 
-  let paymentRun = await loadPaymentRunForSquadsProposal(organizationId, input.paymentRunId);
-  if (!paymentRun.paymentOrders.length) {
-    throw badRequest('Payment run has no payment orders.');
-  }
-  if (paymentRun.paymentOrders.length > MAX_SQUADS_PAYMENT_RUN_TRANSFERS) {
-    throw badRequest(`Payment run has ${paymentRun.paymentOrders.length} orders. Split it into chunks of ${MAX_SQUADS_PAYMENT_RUN_TRANSFERS} or fewer before creating a Squads proposal.`);
+  let paymentOrders = await loadPaymentOrdersForSquadsBatchProposal(organizationId, uniquePaymentOrderIds);
+  if (input.inputBatchId) {
+    const wrongBatch = paymentOrders.find((order) => order.inputBatchId !== input.inputBatchId);
+    if (wrongBatch) {
+      throw badRequest(`Payment order ${wrongBatch.paymentOrderId} does not belong to input batch ${input.inputBatchId}.`);
+    }
   }
 
-  const existingProposal = await findActiveSquadsPaymentRunProposal(organizationId, paymentRun.paymentRunId);
+  const existingProposal = await findActiveSquadsBatchedPaymentProposal(organizationId, uniquePaymentOrderIds);
   if (existingProposal) {
-    throw conflict('Payment run already has a Squads payment proposal.', {
+    throw conflict('One or more payment orders already have an active Squads batch payment proposal.', {
       decimalProposalId: existingProposal.decimalProposalId,
       status: existingProposal.status,
       transactionIndex: existingProposal.transactionIndex,
@@ -1171,11 +1180,7 @@ export async function createSquadsPaymentRunProposalIntent(
   }
 
   await prisma.$transaction(async (tx) => {
-    await tx.paymentRun.update({
-      where: { paymentRunId: paymentRun.paymentRunId },
-      data: { sourceTreasuryWalletId: treasuryWalletId },
-    });
-    for (const order of paymentRun.paymentOrders) {
+    for (const order of paymentOrders) {
       if (order.sourceTreasuryWalletId && order.sourceTreasuryWalletId !== treasuryWalletId) {
         throw badRequest(`Payment order ${order.paymentOrderId} already uses a different source treasury.`);
       }
@@ -1195,7 +1200,7 @@ export async function createSquadsPaymentRunProposalIntent(
     }
   });
 
-  for (const order of paymentRun.paymentOrders) {
+  for (const order of paymentOrders) {
     if (!order.transferRequests.length && order.state === 'draft') {
       await submitPaymentOrder({
         organizationId,
@@ -1207,16 +1212,16 @@ export async function createSquadsPaymentRunProposalIntent(
     }
   }
 
-  paymentRun = await loadPaymentRunForSquadsProposal(organizationId, input.paymentRunId);
-  const blocked = paymentRun.paymentOrders.filter((order) => {
+  paymentOrders = await loadPaymentOrdersForSquadsBatchProposal(organizationId, uniquePaymentOrderIds);
+  const blocked = paymentOrders.filter((order) => {
     const request = order.transferRequests[0] ?? null;
     return !request || ['pending_approval', 'escalated'].includes(request.status);
   });
   if (blocked.length) {
-    throw badRequest(`${blocked.length} payment run row(s) need approval before a Squads proposal can be created.`);
+    throw badRequest(`${blocked.length} payment row(s) need approval before a Squads proposal can be created.`);
   }
 
-  const invalid = paymentRun.paymentOrders.find((order) => {
+  const invalid = paymentOrders.find((order) => {
     const request = order.transferRequests[0] ?? null;
     return !request || !['approved', 'ready_for_execution'].includes(request.status);
   });
@@ -1224,12 +1229,12 @@ export async function createSquadsPaymentRunProposalIntent(
     const status = invalid.transferRequests[0]?.status ?? invalid.state;
     throw badRequest(`Payment order ${invalid.paymentOrderId} cannot be proposed while it is ${status}.`);
   }
-  if (paymentRun.paymentOrders.some((order) => order.asset.toLowerCase() !== USDC_ASSET)) {
-    throw badRequest('Squads payment run proposals currently support USDC only.');
+  if (paymentOrders.some((order) => order.asset.toLowerCase() !== USDC_ASSET)) {
+    throw badRequest('Squads batched payment proposals currently support USDC only.');
   }
 
   const sourceTokenAccount = wallet.usdcAtaAddress ?? deriveUsdcAtaForWallet(vaultPda.toBase58());
-  const orderPayloads = paymentRun.paymentOrders.map((order, index) => {
+  const orderPayloads = paymentOrders.map((order, index) => {
     const transferRequest = order.transferRequests[0]!;
     const destinationTokenAccount = order.counterpartyWallet.tokenAccountAddress
       ?? deriveUsdcAtaForWallet(order.counterpartyWallet.walletAddress);
@@ -1268,7 +1273,7 @@ export async function createSquadsPaymentRunProposalIntent(
       vaultIndex,
       ephemeralSigners: 0,
       transactionMessage: vaultTransactionMessage,
-      memo: normalizeOptionalText(input.memo) ?? `Decimal payment run ${paymentRun.paymentRunId}`,
+      memo: normalizeOptionalText(input.memo) ?? `Decimal payment batch ${input.inputBatchId ?? uniquePaymentOrderIds[0]}`,
       programId,
     }),
     multisig.instructions.proposalCreate({
@@ -1283,8 +1288,8 @@ export async function createSquadsPaymentRunProposalIntent(
 
   const totalAmountRaw = orderPayloads.reduce((sum, item) => sum + item.paymentOrder.amountRaw, 0n);
   const semanticPayload = {
-    paymentRunId: paymentRun.paymentRunId,
-    runName: paymentRun.runName,
+    inputBatchId: input.inputBatchId ?? orderPayloads[0]?.paymentOrder.inputBatchId ?? null,
+    inputBatchLabel: orderPayloads[0]?.paymentOrder.inputBatchLabel ?? null,
     sourceTreasuryWalletId: treasuryWalletId,
     sourceWalletAddress: vaultPda.toBase58(),
     sourceTokenAccountAddress: sourceTokenAccount,
@@ -1320,7 +1325,7 @@ export async function createSquadsPaymentRunProposalIntent(
     signerWalletAddress: creator.walletAddress,
     latestBlockhash,
     instructions,
-    kind: 'vault_payment_run_proposal_create',
+    kind: 'vault_payment_batch_proposal_create',
     proposalType: 'vault_transaction',
     proposalCategory: 'execution',
     semanticType: 'send_payment_run',
@@ -1331,7 +1336,7 @@ export async function createSquadsPaymentRunProposalIntent(
       destinationWalletAddress: item.paymentOrder.counterpartyWallet.walletAddress,
       destinationTokenAccountAddress: item.destinationTokenAccount,
       paymentOrderId: item.paymentOrder.paymentOrderId,
-      paymentRunId: paymentRun.paymentRunId,
+      inputBatchId: item.paymentOrder.inputBatchId,
     })),
   });
 
@@ -1339,7 +1344,6 @@ export async function createSquadsPaymentRunProposalIntent(
     organizationId,
     treasuryWalletId,
     paymentOrderId: null,
-    paymentRunId: paymentRun.paymentRunId,
     createdByUserId: actorUserId,
     creatorPersonalWalletId: creator.userWalletId,
     creatorWalletAddress: creator.walletAddress,
@@ -1352,15 +1356,15 @@ export async function createSquadsPaymentRunProposalIntent(
     vaultIndex,
     semanticPayload,
     metadataJson: {
-      paymentRunId: paymentRun.paymentRunId,
+      inputBatchId: input.inputBatchId ?? orderPayloads[0]?.paymentOrder.inputBatchId ?? null,
       paymentOrderIds: orderPayloads.map((item) => item.paymentOrder.paymentOrderId),
       transferRequestIds: orderPayloads.map((item) => item.transferRequest.transferRequestId),
     },
   });
 
-  await markPaymentRunSquadsProposalPrepared({
+  await markPaymentBatchSquadsProposalPrepared({
     organizationId,
-    paymentRunId: paymentRun.paymentRunId,
+    inputBatchId: input.inputBatchId ?? orderPayloads[0]?.paymentOrder.inputBatchId ?? null,
     actorUserId,
     decimalProposalId: decimalProposal.decimalProposalId,
     transactionIndex: response.intent.transactionIndex,
@@ -1673,17 +1677,21 @@ async function recordDecimalProposalSubmission(args: {
         transactionIndex: current.transactionIndex,
       });
     }
-    if (current.semanticType === 'send_payment_run' && current.paymentRunId) {
-      await markPaymentRunSquadsProposalSubmitted(tx, {
+    if (current.semanticType === 'send_payment_run') {
+      const paymentOrderIds = extractPaymentOrderIdsFromProposalPayload(current.semanticPayloadJson, current.metadataJson);
+      if (paymentOrderIds.length) {
+        await markPaymentBatchSquadsProposalSubmitted(tx, {
         organizationId: args.organizationId,
         actorUserId: args.actor.actorUserId,
         actorType: args.actor.actorType,
         actorId: args.actor.actorId,
-        paymentRunId: current.paymentRunId,
+          paymentOrderIds,
+          inputBatchId: getSemanticPayloadString(current.semanticPayloadJson, 'inputBatchId'),
         decimalProposalId: args.decimalProposalId,
         signature: args.signature,
         transactionIndex: current.transactionIndex,
       });
+      }
     }
     return row;
   });
@@ -1815,17 +1823,21 @@ export async function confirmDecimalProposalExecution(
         settled,
       });
     }
-    if (current.semanticType === 'send_payment_run' && current.paymentRunId) {
-      await markPaymentRunSquadsProposalExecuted(tx, {
+    if (current.semanticType === 'send_payment_run') {
+      const paymentOrderIds = extractPaymentOrderIdsFromProposalPayload(current.semanticPayloadJson, current.metadataJson);
+      if (paymentOrderIds.length) {
+        await markPaymentBatchSquadsProposalExecuted(tx, {
         organizationId,
         actorUserId,
-        paymentRunId: current.paymentRunId,
+          paymentOrderIds,
+          inputBatchId: getSemanticPayloadString(current.semanticPayloadJson, 'inputBatchId'),
         decimalProposalId,
         signature,
         transactionIndex: current.transactionIndex,
         settlementVerification,
         settled,
       });
+      }
     }
     return row;
   });
@@ -2631,14 +2643,6 @@ const decimalProposalInclude = {
       },
     },
   },
-  paymentRun: {
-    select: {
-      paymentRunId: true,
-      runName: true,
-      state: true,
-      sourceTreasuryWalletId: true,
-    },
-  },
   createdByUser: {
     select: {
       userId: true,
@@ -2775,7 +2779,6 @@ async function persistDecimalProposal(args: {
   organizationId: string;
   treasuryWalletId: string | null;
   paymentOrderId: string | null;
-  paymentRunId?: string | null;
   createdByUserId: string | null;
   creatorPersonalWalletId: string | null;
   creatorWalletAddress: string | null;
@@ -2803,7 +2806,6 @@ async function persistDecimalProposal(args: {
       organizationId: args.organizationId,
       treasuryWalletId: args.treasuryWalletId,
       paymentOrderId: args.paymentOrderId,
-      paymentRunId: args.paymentRunId ?? null,
       provider: SQUADS_SOURCE,
       proposalType: args.proposalType,
       proposalCategory: args.proposalCategory,
@@ -2826,7 +2828,6 @@ async function persistDecimalProposal(args: {
     update: {
       treasuryWalletId: args.treasuryWalletId,
       paymentOrderId: args.paymentOrderId,
-      paymentRunId: args.paymentRunId ?? null,
       proposalType: args.proposalType,
       proposalCategory: args.proposalCategory,
       semanticType: args.semanticType,
@@ -2854,7 +2855,7 @@ async function serializeDecimalProposal(row: DecimalProposalWithRelations) {
     organizationId: row.organizationId,
     treasuryWalletId: row.treasuryWalletId,
     paymentOrderId: row.paymentOrderId,
-    paymentRunId: row.paymentRunId,
+    inputBatchId: getSemanticPayloadString(row.semanticPayloadJson, 'inputBatchId'),
     provider: row.provider,
     proposalType: row.proposalType,
     proposalCategory: row.proposalCategory,
@@ -2882,7 +2883,6 @@ async function serializeDecimalProposal(row: DecimalProposalWithRelations) {
     semanticPayloadJson: row.semanticPayloadJson,
     metadataJson: row.metadataJson,
     treasuryWallet: row.treasuryWallet,
-    paymentRun: row.paymentRun,
     paymentOrder: row.paymentOrder
       ? {
         ...row.paymentOrder,
@@ -2893,6 +2893,31 @@ async function serializeDecimalProposal(row: DecimalProposalWithRelations) {
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+function getSemanticPayloadString(payload: Prisma.JsonValue, key: string) {
+  return isRecordLike(payload) && typeof payload[key] === 'string'
+    ? payload[key]
+    : null;
+}
+
+function extractPaymentOrderIdsFromProposalPayload(
+  semanticPayloadJson: Prisma.JsonValue,
+  metadataJson: Prisma.JsonValue,
+) {
+  const fromMetadata = isRecordLike(metadataJson) && Array.isArray(metadataJson.paymentOrderIds)
+    ? metadataJson.paymentOrderIds.filter((value): value is string => typeof value === 'string')
+    : [];
+  if (fromMetadata.length) {
+    return uniqueStrings(fromMetadata);
+  }
+
+  const orders = isRecordLike(semanticPayloadJson) && Array.isArray(semanticPayloadJson.orders)
+    ? semanticPayloadJson.orders
+    : [];
+  return uniqueStrings(orders
+    .map((order) => isRecordLike(order) && typeof order.paymentOrderId === 'string' ? order.paymentOrderId : null)
+    .filter((value): value is string => Boolean(value)));
 }
 
 async function loadLiveProposalState(row: DecimalProposalWithRelations) {
@@ -3419,36 +3444,34 @@ async function loadPaymentOrderForSquadsProposal(organizationId: string, payment
   if (!paymentOrder) {
     throw notFound('Payment order not found');
   }
-  if (paymentOrder.state === 'cancelled' || paymentOrder.state === 'closed') {
+  if (paymentOrder.state === 'cancelled' || paymentOrder.state === 'settled') {
     throw badRequest(`Payment order is ${paymentOrder.state}.`);
   }
   return paymentOrder;
 }
 
-async function loadPaymentRunForSquadsProposal(organizationId: string, paymentRunId: string) {
-  const paymentRun = await prisma.paymentRun.findFirst({
-    where: { organizationId, paymentRunId },
+async function loadPaymentOrdersForSquadsBatchProposal(organizationId: string, paymentOrderIds: string[]) {
+  const orders = await prisma.paymentOrder.findMany({
+    where: {
+      organizationId,
+      paymentOrderId: { in: paymentOrderIds },
+      state: { not: 'cancelled' },
+    },
     include: {
-      paymentOrders: {
-        where: { state: { not: 'cancelled' } },
-        include: {
-          counterpartyWallet: true,
-          transferRequests: {
-            orderBy: { requestedAt: 'desc' },
-            take: 1,
-          },
-        },
-        orderBy: { createdAt: 'asc' },
+      counterpartyWallet: true,
+      transferRequests: {
+        orderBy: { requestedAt: 'desc' },
+        take: 1,
       },
     },
+    orderBy: { createdAt: 'asc' },
   });
-  if (!paymentRun) {
-    throw notFound('Payment run not found');
+  const found = new Set(orders.map((order) => order.paymentOrderId));
+  const missing = paymentOrderIds.filter((paymentOrderId) => !found.has(paymentOrderId));
+  if (missing.length) {
+    throw notFound(`Payment order(s) not found: ${missing.join(', ')}`);
   }
-  if (paymentRun.state === 'cancelled' || paymentRun.state === 'closed') {
-    throw badRequest(`Payment run is ${paymentRun.state}.`);
-  }
-  return paymentRun;
+  return orders;
 }
 
 async function findActiveSquadsPaymentProposal(organizationId: string, paymentOrderId: string) {
@@ -3464,17 +3487,21 @@ async function findActiveSquadsPaymentProposal(organizationId: string, paymentOr
   });
 }
 
-async function findActiveSquadsPaymentRunProposal(organizationId: string, paymentRunId: string) {
-  return prisma.decimalProposal.findFirst({
+async function findActiveSquadsBatchedPaymentProposal(organizationId: string, paymentOrderIds: string[]) {
+  const activeProposals = await prisma.decimalProposal.findMany({
     where: {
       organizationId,
-      paymentRunId,
       provider: SQUADS_SOURCE,
       semanticType: 'send_payment_run',
       status: { notIn: ['rejected', 'cancelled', 'failed'] },
     },
     orderBy: { createdAt: 'desc' },
   });
+  const target = new Set(paymentOrderIds);
+  return activeProposals.find((proposal) =>
+    extractPaymentOrderIdsFromProposalPayload(proposal.semanticPayloadJson, proposal.metadataJson)
+      .some((paymentOrderId) => target.has(paymentOrderId)),
+  ) ?? null;
 }
 
 async function verifyRpcSignatureConfirmed(signature: string, purpose: string) {

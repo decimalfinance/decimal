@@ -14,8 +14,8 @@ import {
   createSquadsChangeThresholdProposalIntent,
   createSquadsConfigProposalApprovalIntent,
   createSquadsConfigProposalExecuteIntent,
+  createSquadsBatchedPaymentProposalIntent,
   createSquadsPaymentProposalIntent,
-  createSquadsPaymentRunProposalIntent,
   createSquadsTreasuryIntent,
   getSquadsConfigProposal,
   getSquadsTreasuryDetail,
@@ -105,8 +105,9 @@ const createSquadsPaymentProposalSchema = z.object({
   memo: z.string().optional().nullable(),
 });
 
-const createSquadsPaymentRunProposalSchema = z.object({
-  paymentRunId: z.string().uuid(),
+const createSquadsBatchedPaymentProposalSchema = z.object({
+  paymentOrderIds: z.array(z.string().uuid()).min(1).max(8),
+  inputBatchId: z.string().uuid().optional().nullable(),
   creatorPersonalWalletId: z.string().uuid(),
   memo: z.string().optional().nullable(),
 });
@@ -315,12 +316,12 @@ treasuryWalletsRouter.post(
 );
 
 treasuryWalletsRouter.post(
-  '/organizations/:organizationId/treasury-wallets/:treasuryWalletId/squads/vault-proposals/payment-run-intent',
+  '/organizations/:organizationId/treasury-wallets/:treasuryWalletId/squads/vault-proposals/payment-batch-intent',
   asyncRoute(async (req, res) => {
     const { organizationId, treasuryWalletId } = treasuryWalletParamsSchema.parse(req.params);
     await assertOrganizationAccess(organizationId, req.auth!);
-    const input = createSquadsPaymentRunProposalSchema.parse(req.body);
-    sendCreated(res, await createSquadsPaymentRunProposalIntent(organizationId, treasuryWalletId, req.auth!.userId, input));
+    const input = createSquadsBatchedPaymentProposalSchema.parse(req.body);
+    sendCreated(res, await createSquadsBatchedPaymentProposalIntent(organizationId, treasuryWalletId, req.auth!.userId, input));
   }),
 );
 

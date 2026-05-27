@@ -12,8 +12,8 @@ import {
 // Per-stage state writers triggered from the squads-treasury proposal
 // lifecycle. Pulled out of squads-treasury.ts so the file with the public
 // API stays readable; these are private helpers that mutate payment_orders,
-// payment_runs, transfer_requests, execution_records, and the matching
-// event tables in a single Prisma transaction.
+// transfer_requests, execution_records, and the matching event tables in a
+// single Prisma transaction.
 
 export async function markPaymentOrderSquadsProposalPrepared(args: {
   organizationId: string;
@@ -29,7 +29,7 @@ export async function markPaymentOrderSquadsProposalPrepared(args: {
   await prisma.$transaction(async (tx) => {
     await tx.paymentOrder.update({
       where: { paymentOrderId: args.paymentOrderId },
-      data: { state: 'ready' },
+      data: { state: 'draft' },
     });
     await tx.paymentOrderEvent.create({
       data: {
@@ -39,7 +39,7 @@ export async function markPaymentOrderSquadsProposalPrepared(args: {
         actorType: args.actorType ?? 'user',
         actorId: args.actorId ?? args.actorUserId,
         beforeState: args.beforeState,
-        afterState: 'ready',
+        afterState: 'draft',
         linkedTransferRequestId: args.transferRequestId,
         payloadJson: {
           decimalProposalId: args.decimalProposalId,
@@ -51,9 +51,9 @@ export async function markPaymentOrderSquadsProposalPrepared(args: {
   });
 }
 
-export async function markPaymentRunSquadsProposalPrepared(args: {
+export async function markPaymentBatchSquadsProposalPrepared(args: {
   organizationId: string;
-  paymentRunId: string;
+  inputBatchId: string | null;
   actorUserId: string | null;
   actorType?: string;
   actorId?: string | null;
@@ -66,27 +66,23 @@ export async function markPaymentRunSquadsProposalPrepared(args: {
   }>;
 }) {
   await prisma.$transaction(async (tx) => {
-    await tx.paymentRun.update({
-      where: { paymentRunId: args.paymentRunId },
-      data: { state: 'ready' },
-    });
     for (const item of args.items) {
       await tx.paymentOrder.update({
         where: { paymentOrderId: item.paymentOrderId },
-        data: { state: 'ready' },
+        data: { state: 'draft' },
       });
       await tx.paymentOrderEvent.create({
         data: {
           paymentOrderId: item.paymentOrderId,
           organizationId: args.organizationId,
-          eventType: 'squads_payment_run_proposal_prepared',
+          eventType: 'squads_payment_batch_proposal_prepared',
           actorType: args.actorType ?? 'user',
           actorId: args.actorId ?? args.actorUserId,
           beforeState: item.beforeState,
-          afterState: 'ready',
+          afterState: 'draft',
           linkedTransferRequestId: item.transferRequestId,
           payloadJson: {
-            paymentRunId: args.paymentRunId,
+            inputBatchId: args.inputBatchId,
             decimalProposalId: args.decimalProposalId,
             transactionIndex: args.transactionIndex,
             provider: SQUADS_SOURCE,
@@ -141,11 +137,12 @@ export async function markPaymentOrderSquadsProposalSubmitted(
   });
 }
 
-export async function markPaymentRunSquadsProposalSubmitted(
+export async function markPaymentBatchSquadsProposalSubmitted(
   tx: Prisma.TransactionClient,
   args: {
     organizationId: string;
-    paymentRunId: string;
+    paymentOrderIds: string[];
+    inputBatchId?: string | null;
     actorUserId: string | null;
     actorType?: string;
     actorId?: string | null;
@@ -154,29 +151,24 @@ export async function markPaymentRunSquadsProposalSubmitted(
     transactionIndex: string | null;
   },
 ) {
-  const paymentRun = await tx.paymentRun.findFirst({
-    where: { organizationId: args.organizationId, paymentRunId: args.paymentRunId },
+  const paymentOrders = await tx.paymentOrder.findMany({
+    where: {
+      organizationId: args.organizationId,
+      paymentOrderId: { in: args.paymentOrderIds },
+      state: { not: 'cancelled' },
+    },
     include: {
-      paymentOrders: {
-        where: { state: { not: 'cancelled' } },
-        include: {
-          transferRequests: {
-            orderBy: { requestedAt: 'desc' },
-            take: 1,
-          },
-        },
+      transferRequests: {
+        orderBy: { requestedAt: 'desc' },
+        take: 1,
       },
     },
   });
-  if (!paymentRun) {
+  if (!paymentOrders.length) {
     return;
   }
 
-  await tx.paymentRun.update({
-    where: { paymentRunId: args.paymentRunId },
-    data: { state: 'proposed' },
-  });
-  for (const order of paymentRun.paymentOrders) {
+  for (const order of paymentOrders) {
     await tx.paymentOrder.update({
       where: { paymentOrderId: order.paymentOrderId },
       data: { state: 'proposed' },
@@ -185,7 +177,7 @@ export async function markPaymentRunSquadsProposalSubmitted(
       data: {
         paymentOrderId: order.paymentOrderId,
         organizationId: args.organizationId,
-        eventType: 'squads_payment_run_proposal_submitted',
+        eventType: 'squads_payment_batch_proposal_submitted',
         actorType: args.actorType ?? 'user',
         actorId: args.actorId ?? args.actorUserId,
         beforeState: order.state,
@@ -193,7 +185,7 @@ export async function markPaymentRunSquadsProposalSubmitted(
         linkedTransferRequestId: order.transferRequests[0]?.transferRequestId ?? null,
         linkedSignature: args.signature,
         payloadJson: {
-          paymentRunId: args.paymentRunId,
+          inputBatchId: args.inputBatchId ?? order.inputBatchId,
           decimalProposalId: args.decimalProposalId,
           transactionIndex: args.transactionIndex,
           provider: SQUADS_SOURCE,
@@ -374,11 +366,12 @@ export async function markPaymentOrderSquadsProposalExecuted(
 }
 
 // Idempotent. See markPaymentOrderSquadsProposalExecuted for the contract.
-export async function markPaymentRunSquadsProposalExecuted(
+export async function markPaymentBatchSquadsProposalExecuted(
   tx: Prisma.TransactionClient,
   args: {
     organizationId: string;
-    paymentRunId: string;
+    paymentOrderIds: string[];
+    inputBatchId?: string | null;
     actorUserId: string;
     decimalProposalId: string;
     signature: string;
@@ -387,38 +380,29 @@ export async function markPaymentRunSquadsProposalExecuted(
     settled: boolean;
   },
 ) {
-  const paymentRun = await tx.paymentRun.findFirst({
-    where: { organizationId: args.organizationId, paymentRunId: args.paymentRunId },
+  const paymentOrders = await tx.paymentOrder.findMany({
+    where: {
+      organizationId: args.organizationId,
+      paymentOrderId: { in: args.paymentOrderIds },
+      state: { not: 'cancelled' },
+    },
     include: {
-      paymentOrders: {
-        where: { state: { not: 'cancelled' } },
-        include: {
-          transferRequests: {
-            orderBy: { requestedAt: 'desc' },
-            take: 1,
-          },
-        },
+      transferRequests: {
+        orderBy: { requestedAt: 'desc' },
+        take: 1,
       },
     },
   });
-  if (!paymentRun) {
+  if (!paymentOrders.length) {
     return;
   }
 
   const targetTransferStatus = args.settled ? 'matched' : 'submitted_onchain';
   const targetExecutionState = args.settled ? 'settled' : 'submitted_onchain';
   const targetOrderState = args.settled ? 'settled' : 'executed';
-  const targetRunState = args.settled ? 'settled' : 'executed';
   const verificationJson = serializeSettlementVerification(args.settlementVerification);
 
-  if (paymentRun.state !== targetRunState) {
-    await tx.paymentRun.update({
-      where: { paymentRunId: args.paymentRunId },
-      data: { state: targetRunState },
-    });
-  }
-
-  for (const order of paymentRun.paymentOrders) {
+  for (const order of paymentOrders) {
     const transferRequest = order.transferRequests[0] ?? null;
     let executionRecordId: string | null = null;
     if (transferRequest) {
@@ -447,7 +431,7 @@ export async function markPaymentRunSquadsProposalExecuted(
             state: targetExecutionState,
             submittedAt: new Date(),
             metadataJson: {
-              paymentRunId: args.paymentRunId,
+              inputBatchId: args.inputBatchId ?? order.inputBatchId,
               paymentOrderId: order.paymentOrderId,
               decimalProposalId: args.decimalProposalId,
               transactionIndex: args.transactionIndex,
@@ -487,8 +471,8 @@ export async function markPaymentRunSquadsProposalExecuted(
           transferRequestId: transferRequest.transferRequestId,
           organizationId: args.organizationId,
           eventType: upgradingToSettled
-            ? 'squads_payment_run_proposal_settled'
-            : 'squads_payment_run_proposal_executed',
+            ? 'squads_payment_batch_proposal_settled'
+            : 'squads_payment_batch_proposal_executed',
           actorType: 'user',
           actorId: args.actorUserId,
           eventSource: 'user',
@@ -496,7 +480,7 @@ export async function markPaymentRunSquadsProposalExecuted(
           afterState: targetTransferStatus,
           linkedSignature: args.signature,
           payloadJson: {
-            paymentRunId: args.paymentRunId,
+            inputBatchId: args.inputBatchId ?? order.inputBatchId,
             paymentOrderId: order.paymentOrderId,
             decimalProposalId: args.decimalProposalId,
             executionRecordId,
@@ -520,8 +504,8 @@ export async function markPaymentRunSquadsProposalExecuted(
           paymentOrderId: order.paymentOrderId,
           organizationId: args.organizationId,
           eventType: upgradingToSettled
-            ? 'squads_payment_run_proposal_settled'
-            : 'squads_payment_run_proposal_executed',
+            ? 'squads_payment_batch_proposal_settled'
+            : 'squads_payment_batch_proposal_executed',
           actorType: 'user',
           actorId: args.actorUserId,
           beforeState: previousOrderState,
@@ -530,7 +514,7 @@ export async function markPaymentRunSquadsProposalExecuted(
           linkedExecutionRecordId: executionRecordId,
           linkedSignature: args.signature,
           payloadJson: {
-            paymentRunId: args.paymentRunId,
+            inputBatchId: args.inputBatchId ?? order.inputBatchId,
             decimalProposalId: args.decimalProposalId,
             transactionIndex: args.transactionIndex,
             provider: SQUADS_SOURCE,
