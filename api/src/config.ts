@@ -17,11 +17,6 @@ type FileConfig = {
   squadsDefaultVaultIndex?: number;
   squadsDefaultTimelockSeconds?: number;
   squadsProgramTreasury?: string | null;
-  gridEnvironment?: GridEnvironment;
-  gridBaseUrl?: string | null;
-  gridAppId?: string | null;
-  gridTimeoutMs?: number;
-  gridRetryAttempts?: number;
   autoProvisionWallets?: boolean;
   devnetAutoFundWallets?: boolean;
   openAiModel?: string;
@@ -79,12 +74,6 @@ type DecimalConfig = {
   squadsDefaultVaultIndex: number;
   squadsDefaultTimelockSeconds: number;
   squadsProgramTreasury: string | null;
-  gridApiKey: string;
-  gridEnvironment: GridEnvironment;
-  gridBaseUrl: string | null;
-  gridAppId: string | null;
-  gridTimeoutMs: number;
-  gridRetryAttempts: number;
   autoProvisionWallets: boolean;
   devnetAutoFundWallets: boolean;
   devnetFunderKeypairPath: string;
@@ -92,7 +81,6 @@ type DecimalConfig = {
 };
 
 export type SolanaNetwork = 'devnet' | 'mainnet';
-export type GridEnvironment = 'sandbox' | 'production';
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'silent';
 
 export const config: DecimalConfig = buildConfig();
@@ -143,12 +131,6 @@ function buildConfig(): DecimalConfig {
       process.env.SQUADS_DEFAULT_TIMELOCK_SECONDS ?? fileConfig.squadsDefaultTimelockSeconds ?? 0,
     ),
     squadsProgramTreasury: normalizeOptionalText(process.env.SQUADS_PROGRAM_TREASURY ?? fileConfig.squadsProgramTreasury),
-    gridApiKey: (process.env.GRID_API_KEY ?? '').trim(),
-    gridEnvironment: getGridEnvironment(process.env.GRID_ENVIRONMENT ?? fileConfig.gridEnvironment ?? 'sandbox'),
-    gridBaseUrl: normalizeOptionalUrl(process.env.GRID_BASE_URL ?? fileConfig.gridBaseUrl),
-    gridAppId: normalizeOptionalText(process.env.GRID_APP_ID ?? fileConfig.gridAppId),
-    gridTimeoutMs: Number(process.env.GRID_TIMEOUT_MS ?? fileConfig.gridTimeoutMs ?? 15_000),
-    gridRetryAttempts: Number(process.env.GRID_RETRY_ATTEMPTS ?? fileConfig.gridRetryAttempts ?? 2),
     autoProvisionWallets: getBooleanConfig(
       process.env.AUTO_PROVISION_WALLETS,
       fileConfig.autoProvisionWallets ?? (nodeEnv !== 'test' && Boolean(process.env.PRIVY_APP_ID && process.env.PRIVY_APP_SECRET)),
@@ -177,14 +159,6 @@ export function getSolanaNetwork(): SolanaNetwork {
 
 function defaultSolanaRpcUrl(network: SolanaNetwork) {
   return network === 'devnet' ? 'https://api.devnet.solana.com' : 'https://api.mainnet-beta.solana.com';
-}
-
-function getGridEnvironment(value: string): GridEnvironment {
-  const normalized = value.trim().toLowerCase();
-  if (normalized !== 'sandbox' && normalized !== 'production') {
-    throw new Error(`Invalid GRID_ENVIRONMENT="${value}". Use 'sandbox' or 'production'.`);
-  }
-  return normalized;
 }
 
 function getLogLevel(value: string): LogLevel {
@@ -279,14 +253,6 @@ function validateConfig(nextConfig: DecimalConfig) {
     || nextConfig.squadsDefaultTimelockSeconds > 7_776_000
   ) {
     throw new Error('SQUADS_DEFAULT_TIMELOCK_SECONDS must be an integer between 0 and 7776000.');
-  }
-
-  if (!Number.isInteger(nextConfig.gridTimeoutMs) || nextConfig.gridTimeoutMs < 1_000 || nextConfig.gridTimeoutMs > 120_000) {
-    throw new Error('GRID_TIMEOUT_MS must be an integer between 1000 and 120000.');
-  }
-
-  if (!Number.isInteger(nextConfig.gridRetryAttempts) || nextConfig.gridRetryAttempts < 0 || nextConfig.gridRetryAttempts > 5) {
-    throw new Error('GRID_RETRY_ATTEMPTS must be an integer between 0 and 5.');
   }
 
   if (!nextConfig.isProduction) {

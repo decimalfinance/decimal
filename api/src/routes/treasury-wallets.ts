@@ -2,12 +2,6 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { assertOrganizationAccess, assertOrganizationAdmin } from '../auth/organization-access.js';
 import { fetchWalletBalances, SOLANA_CHAIN, USDC_ASSET } from '../solana.js';
-import { getSolUsdPrice } from '../pricing.js';
-import {
-  createGridTreasuryAccount,
-  getGridTreasuryAccountBalances,
-  getGridTreasuryAccountStatus,
-} from '../grid/treasury.js';
 import {
   confirmSquadsTreasuryCreation,
   createSquadsAddMemberProposalIntent,
@@ -51,7 +45,6 @@ const createTreasuryWalletSchema = z.object({
 });
 
 const squadsPermissionSchema = z.enum(['initiate', 'vote', 'execute']);
-const gridPermissionSchema = z.enum(['initiate', 'vote', 'execute']);
 
 const createSquadsTreasuryIntentSchema = z.object({
   displayName: z.string().optional().nullable(),
@@ -62,18 +55,6 @@ const createSquadsTreasuryIntentSchema = z.object({
   members: z.array(z.object({
     personalWalletId: z.string().uuid(),
     permissions: z.array(squadsPermissionSchema).min(1),
-  })).min(1),
-});
-
-const createGridTreasuryAccountSchema = z.object({
-  displayName: z.string().optional().nullable(),
-  memo: z.string().optional().nullable(),
-  threshold: z.number().int().min(1).max(65_535),
-  timeLockSeconds: z.number().int().min(0).max(7_776_000).optional().nullable(),
-  signers: z.array(z.object({
-    personalWalletId: z.string().uuid(),
-    permissions: z.array(gridPermissionSchema).min(1),
-    role: z.enum(['primary', 'backup']).optional(),
   })).min(1),
 });
 
@@ -155,29 +136,26 @@ treasuryWalletsRouter.get(
     const { organizationId } = organizationParamsSchema.parse(req.params);
     await assertOrganizationAccess(organizationId, req.auth!);
     const wallets = unwrapItems(await listTreasuryWallets(organizationId, { limit: 250 }));
-    const [items, solUsdPrice] = await Promise.all([
-      Promise.all(
-        wallets.map(async (wallet) => {
-          const balances = await fetchWalletBalances({
-            walletAddress: wallet.address,
-            usdcAtaAddress: wallet.usdcAtaAddress,
-          });
-          return {
-            treasuryWalletId: wallet.treasuryWalletId,
-            address: wallet.address,
-            usdcAtaAddress: wallet.usdcAtaAddress,
-            displayName: wallet.displayName,
-            isActive: wallet.isActive,
-            ...balances,
-          };
-        }),
-      ),
-      getSolUsdPrice(),
-    ]);
+    const items = await Promise.all(
+      wallets.map(async (wallet) => {
+        const balances = await fetchWalletBalances({
+          walletAddress: wallet.address,
+          usdcAtaAddress: wallet.usdcAtaAddress,
+        });
+        return {
+          treasuryWalletId: wallet.treasuryWalletId,
+          address: wallet.address,
+          usdcAtaAddress: wallet.usdcAtaAddress,
+          displayName: wallet.displayName,
+          isActive: wallet.isActive,
+          ...balances,
+        };
+      }),
+    );
     res.json({
       items,
-      solUsdPrice,
-      priceSource: solUsdPrice === null ? null : 'binance:SOLUSDT',
+      solUsdPrice: null,
+      priceSource: null,
       fetchedAt: new Date().toISOString(),
     });
   }),
@@ -189,34 +167,6 @@ treasuryWalletsRouter.post('/organizations/:organizationId/treasury-wallets', as
   const input = createTreasuryWalletSchema.parse(req.body);
   sendCreated(res, await createTreasuryWallet(organizationId, input));
 }));
-
-treasuryWalletsRouter.post(
-  '/organizations/:organizationId/treasury-wallets/grid/create-account',
-  asyncRoute(async (req, res) => {
-    const { organizationId } = organizationParamsSchema.parse(req.params);
-    await assertOrganizationAdmin(organizationId, req.auth!);
-    const input = createGridTreasuryAccountSchema.parse(req.body);
-    sendCreated(res, await createGridTreasuryAccount(organizationId, input));
-  }),
-);
-
-treasuryWalletsRouter.get(
-  '/organizations/:organizationId/treasury-wallets/:treasuryWalletId/grid/status',
-  asyncRoute(async (req, res) => {
-    const { organizationId, treasuryWalletId } = treasuryWalletParamsSchema.parse(req.params);
-    await assertOrganizationAccess(organizationId, req.auth!);
-    sendJson(res, await getGridTreasuryAccountStatus(organizationId, treasuryWalletId));
-  }),
-);
-
-treasuryWalletsRouter.get(
-  '/organizations/:organizationId/treasury-wallets/:treasuryWalletId/grid/balances',
-  asyncRoute(async (req, res) => {
-    const { organizationId, treasuryWalletId } = treasuryWalletParamsSchema.parse(req.params);
-    await assertOrganizationAccess(organizationId, req.auth!);
-    sendJson(res, await getGridTreasuryAccountBalances(organizationId, treasuryWalletId));
-  }),
-);
 
 treasuryWalletsRouter.post(
   '/organizations/:organizationId/treasury-wallets/squads/create-intent',

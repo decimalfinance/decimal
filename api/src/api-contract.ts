@@ -73,18 +73,6 @@ export const API_ENDPOINTS = [
     scope: 'organization:write',
     requestBody: { chain: 'solana', address: 'string', displayName: 'string optional' },
   }),
-  endpoint('create_grid_treasury_account', 'POST', '/organizations/{organizationId}/treasury-wallets/grid/create-account', ['treasury wallets', 'grid'], 'Create a Grid signers account and persist it as an organization treasury wallet', 'session', {
-    scope: 'organization:write',
-    requestBody: {
-      displayName: 'string optional',
-      memo: 'string optional',
-      threshold: 'number',
-      timeLockSeconds: 'number optional',
-      signers: 'array of personal wallets + initiate/vote/execute permissions',
-    },
-  }),
-  endpoint('get_grid_treasury_status', 'GET', '/organizations/{organizationId}/treasury-wallets/{treasuryWalletId}/grid/status', ['treasury wallets', 'grid'], 'Read live Grid account status for a Grid-managed treasury wallet', 'session', { scope: 'organization:read' }),
-  endpoint('get_grid_treasury_balances', 'GET', '/organizations/{organizationId}/treasury-wallets/{treasuryWalletId}/grid/balances', ['treasury wallets', 'grid'], 'Read live Grid balances for a Grid-managed treasury wallet', 'session', { scope: 'organization:read' }),
   endpoint('create_squads_treasury_intent', 'POST', '/organizations/{organizationId}/treasury-wallets/squads/create-intent', ['treasury wallets', 'squads'], 'Prepare a signable Squads v4 treasury creation transaction', 'session', {
     scope: 'organization:write',
     requestBody: { creatorPersonalWalletId: 'uuid', threshold: 'number', members: 'array of personal wallets + permissions' },
