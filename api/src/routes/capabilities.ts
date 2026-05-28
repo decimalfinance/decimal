@@ -52,7 +52,7 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
         steps: [
           'POST /organizations/:organizationId/invoices/upload with autoAdvance=true',
           'POST /organizations/:organizationId/payment-orders/:paymentOrderId/clear-review with autoAdvance=true when review is required',
-          'POST /organizations/:organizationId/payment-orders/:paymentOrderId/agent/advance for idempotent retry/manual agent advance',
+          'POST /organizations/:organizationId/payment-orders/:paymentOrderId/agent/advance for idempotent router retry/manual agent routing',
           'POST /organizations/:organizationId/proposals/:decimalProposalId/approve-intent for human Squads votes',
           'POST /organizations/:organizationId/proposals/:decimalProposalId/execute-intent once threshold is met',
           'POST /organizations/:organizationId/proposals/:decimalProposalId/confirm-execution',
@@ -61,10 +61,10 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
       },
       {
         id: 'single_payment',
-        summary: 'Create one payment order, let the Decimal agent create a Squads proposal, execute it, verify settlement by RPC, then export proof.',
+        summary: 'Create one payment order, let the Decimal agent route it through an active spending limit or Squads proposal, execute it, verify settlement by RPC, then export proof.',
         steps: [
           'POST /organizations/:organizationId/payment-orders with submitNow=true',
-          'POST /organizations/:organizationId/payment-orders/:paymentOrderId/agent/advance for idempotent retry/manual agent advance',
+          'POST /organizations/:organizationId/payment-orders/:paymentOrderId/agent/advance for idempotent router retry/manual agent routing',
           'POST /organizations/:organizationId/proposals/:decimalProposalId/confirm-submission',
           'POST /organizations/:organizationId/proposals/:decimalProposalId/confirm-execution',
           'GET /organizations/:organizationId/payment-orders/:paymentOrderId/proof',
@@ -220,7 +220,7 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
     safetyNotes: [
       'The API never accepts or stores private keys.',
       'Prepared Squads transactions are signed by user-controlled personal wallets through the wallet/Privy flow.',
-      'Green AP intake rows can be proposed by the backend-managed org agent wallet, but execution still follows Squads voting unless a spending limit is explicitly active.',
+      'Green AP intake rows are routed by the backend-managed org agent wallet: matching active spending limits execute directly, otherwise the agent creates a Squads voting proposal.',
       'Submitted signatures are verified by Solana RPC before being stored as proposal evidence.',
       'Payment settlement is verified from RPC transaction token-account deltas.',
     ],

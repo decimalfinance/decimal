@@ -185,7 +185,7 @@ export const API_ENDPOINTS = [
   endpoint('upload_invoice', 'POST', '/organizations/{organizationId}/invoices/upload', ['inputs', 'payment orders'], 'Upload an invoice document, run AP intake, and create payment orders that are either proposal-ready or human-review gated', 'session', {
     scope: 'payments:write',
     requestBody: { filename: 'string', mimeType: 'string', dataBase64: 'string base64', sourceTreasuryWalletId: 'uuid optional', autoAdvance: 'boolean default true' },
-    response: { primaryPaymentOrder: 'payment order', paymentOrders: 'created payment orders with AP intake decisions', skippedRows: 'rows that could not become payment orders', automation: 'per-order agent proposal advance results' },
+    response: { primaryPaymentOrder: 'payment order', paymentOrders: 'created payment orders with AP intake decisions', skippedRows: 'rows that could not become payment orders', automation: 'per-order routing results: review, spending-limit execution, or Squads proposal' },
   }),
   endpoint('preview_payment_orders_batch_csv', 'POST', '/organizations/{organizationId}/payment-orders/batch-csv/preview', ['inputs', 'payment orders'], 'Preview CSV rows before creating payment orders', 'session', { scope: 'organization:read' }),
   endpoint('import_payment_orders_batch_csv', 'POST', '/organizations/{organizationId}/payment-orders/batch-csv', ['inputs', 'payment orders'], 'Import CSV rows directly as payment orders with a shared input batch label', 'session', {
@@ -224,9 +224,9 @@ export const API_ENDPOINTS = [
   endpoint('clear_payment_order_review', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/clear-review', ['payment orders'], 'Clear an AP-intake flagged payment order and advance it to the proposal-ready path', 'session', {
     scope: 'payments:write',
     requestBody: { reviewNote: 'string optional', trustCounterpartyWallet: 'boolean default true', submitAfterClear: 'boolean default true', autoAdvance: 'boolean default true' },
-    response: { automation: 'agent proposal advance result when autoAdvance is true' },
+    response: { automation: 'agent routing result when autoAdvance is true' },
   }),
-  endpoint('advance_payment_order_with_agent', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/agent/advance', ['payment orders', 'automation agents', 'squads'], 'Ask the Decimal agent to create and submit a Squads proposal for a green payment order', 'session', {
+  endpoint('advance_payment_order_with_agent', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/agent/advance', ['payment orders', 'automation agents', 'squads'], 'Ask the Decimal agent to route a green payment through a spending limit or Squads proposal', 'session', {
     scope: 'payments:write',
     requestBody: { sourceTreasuryWalletId: 'uuid optional' },
   }),
