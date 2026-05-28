@@ -1219,6 +1219,41 @@ test('automation agents can receive Squads spending limits and execute bounded p
     assert.equal(listedExecutions.items[0].status, 'settled');
     assert.equal(listedExecutions.items[0].spendingLimitPolicy.policyName, 'Research micro-spend');
 
+    const routedSignature = '6'.repeat(88);
+    setSpendingLimitExecutionRuntimeForTests({
+      getLatestBlockhash: async () => ({
+        blockhash: Keypair.generate().publicKey.toBase58(),
+        lastValidBlockHeight: 789,
+      }),
+      loadSpendingLimit: async () => ({
+        amount: { toString: () => '100000' },
+        remainingAmount: { toString: () => '75000' },
+        members: [publicKeyFromString(agentWalletAddress)],
+        destinations: [publicKeyFromString(destinationWalletAddress)],
+      }),
+      signTransaction: async (input) => ({
+        signedTransactionBase64: input.serializedTransactionBase64,
+        encoding: 'base64',
+      }),
+      sendRawTransaction: async () => routedSignature,
+      waitForSignature: async () => ({ confirmed: true, seen: true }),
+    });
+    const routedPaymentOrder = await post(
+      `/organizations/${organization.organizationId}/payment-orders`,
+      {
+        destinationId: destination.destinationId,
+        amountRaw: '25000',
+        memo: 'Agent-routed research spend',
+        externalReference: 'AGENT-ROUTED-001',
+        submitNow: true,
+      },
+      register.sessionToken,
+    );
+    assert.equal(routedPaymentOrder.automation.status, 'spending_limit_executed');
+    assert.equal(routedPaymentOrder.automation.signature, routedSignature);
+    assert.equal(routedPaymentOrder.automation.spendingLimitPolicyId, syncedPolicy.spendingLimitPolicyId);
+    assert.equal(routedPaymentOrder.derivedState, 'settled');
+
     const programId = new PublicKey(config.squadsProgramId);
     const removableCreateKey = Keypair.generate().publicKey;
     const [removableSpendingLimitPda] = multisig.getSpendingLimitPda({
