@@ -1431,6 +1431,7 @@ function SpendingLimitsSection({
 }) {
   const queryClient = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
+  const [removingPolicy, setRemovingPolicy] = useState<SpendingLimitPolicy | null>(null);
   const policiesQuery = useQuery({
     queryKey: ['spending-limit-policies', organizationId, treasuryWalletId] as const,
     queryFn: () =>
@@ -1504,7 +1505,11 @@ function SpendingLimitsSection({
               </tr>
             ) : (
               policies.map((policy) => (
-                <SpendingLimitRow key={policy.spendingLimitPolicyId} policy={policy} />
+                <SpendingLimitRow
+                  key={policy.spendingLimitPolicyId}
+                  policy={policy}
+                  onRemove={() => setRemovingPolicy(policy)}
+                />
               ))
             )}
           </tbody>
@@ -1527,17 +1532,44 @@ function SpendingLimitsSection({
           }}
         />
       ) : null}
+
+      {removingPolicy ? (
+        <RemoveSpendingLimitDialog
+          organizationId={organizationId}
+          treasuryWalletId={treasuryWalletId}
+          policy={removingPolicy}
+          onClose={() => setRemovingPolicy(null)}
+          onRemoved={async () => {
+            setRemovingPolicy(null);
+            await queryClient.invalidateQueries({
+              queryKey: ['spending-limit-policies', organizationId, treasuryWalletId],
+            });
+            await queryClient.invalidateQueries({
+              queryKey: ['organization-proposals', organizationId],
+            });
+          }}
+        />
+      ) : null}
     </section>
   );
 }
 
-function SpendingLimitRow({ policy }: { policy: SpendingLimitPolicy }) {
+function SpendingLimitRow({
+  policy,
+  onRemove,
+}: {
+  policy: SpendingLimitPolicy;
+  onRemove: () => void;
+}) {
   const status = policy.status as SpendingLimitPolicyStatus;
   const statusLabel = SPENDING_LIMIT_STATUS_LABEL[status] ?? policy.status;
   const statusTone = SPENDING_LIMIT_STATUS_TONE[status] ?? 'info';
   const periodLabel = SPENDING_LIMIT_PERIOD_LABEL[policy.period] ?? policy.period;
   const amountDisplay = `${formatRawUsdcCompact(policy.amountRaw)} USDC`;
   const destinationsCount = policy.destinations.length;
+  // Remove only makes sense once the policy is live on chain. Pending /
+  // already-revoked / failed states aren't removable from here.
+  const canRemove = status === 'active';
 
   return (
     <tr>
@@ -1549,9 +1581,27 @@ function SpendingLimitRow({ policy }: { policy: SpendingLimitPolicy }) {
         {destinationsCount} vendor{destinationsCount === 1 ? '' : 's'}
       </td>
       <td style={{ textAlign: 'right' }}>
-        <span className={`rd-pill rd-pill-${statusTone}`}>
-          <span className="rd-pill-dot" aria-hidden />
-          {statusLabel}
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
+          <span className={`rd-pill rd-pill-${statusTone}`}>
+            <span className="rd-pill-dot" aria-hidden />
+            {statusLabel}
+          </span>
+          {canRemove ? (
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={onRemove}
+              style={{
+                padding: '4px 10px',
+                fontSize: 12,
+                color: 'var(--ax-danger)',
+                borderColor: 'var(--ax-border)',
+              }}
+              aria-label={`Remove ${policy.policyName}`}
+            >
+              Remove
+            </button>
+          ) : null}
         </span>
       </td>
     </tr>
@@ -1948,6 +1998,236 @@ function CreateSpendingLimitDialog({
           </div>
         </>
       ) : null}
+    </DialogShell>
+  );
+}
+
+// ─── Remove Spending Limit dialog ─────────────────────────────────────────
+// Two-step flow:
+//   1. confirm — surface what the policy is, what disappears, and what the
+//      voting cost is. The remove is a Squads config proposal under the hood,
+//      so it still needs the multisig to approve before the policy truly
+//      goes away on chain.
+//   2. sign    — same phased progress UI as Create / Replace so the user
+//      gets a single mental model for "this is a chain-bound action".
+type RemoveSpendingLimitPhase =
+  | 'idle'
+  | 'signing'
+  | 'submitting'
+  | 'confirming-onchain'
+  | 'persisting'
+  | 'error';
+
+function RemoveSpendingLimitDialog({
+  organizationId,
+  policy,
+  onClose,
+  onRemoved,
+}: {
+  organizationId: string;
+  treasuryWalletId: string;
+  policy: SpendingLimitPolicy;
+  onClose: () => void;
+  onRemoved: () => void | Promise<void>;
+}) {
+  const { success, error: toastError } = useToast();
+  const [step, setStep] = useState<'confirm' | 'sign'>('confirm');
+  const [phase, setPhase] = useState<RemoveSpendingLimitPhase>('idle');
+  const [phaseError, setPhaseError] = useState<string | null>(null);
+
+  // Same signer-selection rule as Create: the operator's own personal wallet
+  // submits the config-proposal-create instruction. Squads members vote
+  // afterward; the agent wallet does NOT sign this — it's the one being
+  // revoked.
+  const personalWalletsQuery = useQuery({
+    queryKey: ['personal-wallets'] as const,
+    queryFn: () => api.listPersonalWallets(),
+  });
+  const personalWallet = useMemo(() => {
+    const items = personalWalletsQuery.data?.items ?? [];
+    return items.find((w) => w.status === 'active' && w.chain === 'solana') ?? null;
+  }, [personalWalletsQuery.data]);
+
+  async function runSignAndConfirm() {
+    if (!personalWallet) {
+      toastError('Your signing wallet is still loading.');
+      return;
+    }
+    setStep('sign');
+    setPhase('signing');
+    setPhaseError(null);
+    try {
+      const intent = await api.removeSpendingLimitPolicyIntent(
+        organizationId,
+        policy.spendingLimitPolicyId,
+        { creatorPersonalWalletId: personalWallet.userWalletId },
+      );
+      setPhase('submitting');
+      const sig = await signAndSubmitIntent({
+        intent,
+        signerPersonalWalletId: personalWallet.userWalletId,
+      });
+      setPhase('confirming-onchain');
+      setPhase('persisting');
+      await api.confirmProposalSubmission(
+        organizationId,
+        intent.decimalProposal.decimalProposalId,
+        { signature: sig },
+      );
+      setPhase('idle');
+      success('Removal submitted — needs team approval to take effect.');
+      await onRemoved();
+    } catch (err) {
+      const message = err instanceof ApiError || err instanceof Error ? err.message : 'Could not submit the removal.';
+      setPhase('error');
+      setPhaseError(message);
+    }
+  }
+
+  const periodLabel = SPENDING_LIMIT_PERIOD_LABEL[policy.period] ?? policy.period;
+  const amountDisplay = `${formatRawUsdcCompact(policy.amountRaw)} USDC`;
+  const destinationsCount = policy.destinations.length;
+  const isWorking = phase !== 'idle' && phase !== 'error';
+
+  return (
+    <DialogShell labelledBy="rd-remove-spending-title" onClose={isWorking ? () => undefined : onClose}>
+      {step === 'confirm' ? (
+        <>
+          <h2 id="rd-remove-spending-title" className="rd-dialog-title">Remove spending limit</h2>
+          <p className="rd-dialog-body">
+            The agent will stop being able to pay these vendors automatically. New invoices to them
+            will go through the normal multisig vote instead.
+          </p>
+
+          <div
+            style={{
+              padding: 16,
+              background: 'var(--ax-surface-1)',
+              borderRadius: 8,
+              marginBottom: 16,
+              border: '1px solid var(--ax-border)',
+            }}
+          >
+            <div style={{ fontWeight: 500, fontSize: 14, marginBottom: 6 }}>
+              {policy.policyName}
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--ax-text-muted)' }}>
+              {amountDisplay} <span style={{ marginLeft: 4 }}>· {periodLabel}</span>
+              <span style={{ marginLeft: 4 }}>
+                · {destinationsCount} vendor{destinationsCount === 1 ? '' : 's'}
+              </span>
+            </div>
+          </div>
+
+          <div
+            style={{
+              padding: 12,
+              border: '1px solid var(--ax-border)',
+              borderRadius: 8,
+              fontSize: 13,
+              lineHeight: 1.55,
+              color: 'var(--ax-text-muted)',
+              marginBottom: 20,
+            }}
+          >
+            <strong style={{ display: 'block', marginBottom: 4, color: 'var(--ax-text)' }}>
+              This creates a Squads config proposal.
+            </strong>
+            Voters still need to approve and execute the proposal before the limit actually
+            disappears on chain. Until then the agent can keep using it.
+          </div>
+
+          <div className="rd-dialog-actions" style={{ marginTop: 4 }}>
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={onClose}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="button button-primary"
+              style={{
+                background: 'var(--ax-danger)',
+                borderColor: 'var(--ax-danger)',
+              }}
+              onClick={runSignAndConfirm}
+              disabled={!personalWallet}
+            >
+              Remove spending limit
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <h2 id="rd-remove-spending-title" className="rd-dialog-title">Removing spending limit</h2>
+          <p className="rd-dialog-body">This takes a few seconds. Don't close this window.</p>
+          <ol style={{ listStyle: 'none', padding: 0, margin: '12px 0', display: 'grid', gap: 6 }}>
+            {[
+              { key: 'signing', label: 'Signing' },
+              { key: 'submitting', label: 'Sending' },
+              { key: 'confirming-onchain', label: 'Confirming' },
+              { key: 'persisting', label: 'Saving removal proposal' },
+            ].map((s) => {
+              const order = ['idle', 'signing', 'submitting', 'confirming-onchain', 'persisting'];
+              const idx = order.indexOf(s.key);
+              const cur = order.indexOf(phase === 'error' ? 'idle' : phase);
+              const isDone = cur > idx;
+              const isActive = phase === s.key;
+              return (
+                <li key={s.key} style={{
+                  display: 'flex', alignItems: 'center', gap: 10, fontSize: 13,
+                  color: isActive ? 'var(--ax-text)' : isDone ? 'var(--ax-text-muted)' : 'var(--ax-text-faint)',
+                }}>
+                  <span aria-hidden style={{
+                    width: 18, height: 18, borderRadius: 9, display: 'inline-grid', placeItems: 'center',
+                    fontSize: 11, fontWeight: 600,
+                    background: isDone ? 'var(--ax-accent-dim)' : 'var(--ax-surface-2)',
+                    color: isDone ? 'var(--ax-accent)' : 'var(--ax-text-muted)',
+                    border: isActive ? '1px solid var(--ax-accent)' : '1px solid transparent',
+                  }}>{isDone ? '✓' : ''}</span>
+                  {s.label}
+                </li>
+              );
+            })}
+          </ol>
+          {phaseError ? (
+            <div style={{
+              padding: 12, border: '1px solid var(--ax-danger)', borderRadius: 6,
+              fontSize: 13, lineHeight: 1.5, marginBottom: 12,
+            }}>
+              <strong style={{ display: 'block', marginBottom: 4, color: 'var(--ax-danger)' }}>
+                Something went wrong
+              </strong>
+              <span style={{ color: 'var(--ax-text-muted)' }}>{phaseError}</span>
+            </div>
+          ) : null}
+          <div className="rd-dialog-actions" style={{ marginTop: 20 }}>
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={() => setStep('confirm')}
+              disabled={isWorking}
+            >
+              Back
+            </button>
+            <button
+              type="button"
+              className="button button-primary"
+              style={{
+                background: 'var(--ax-danger)',
+                borderColor: 'var(--ax-danger)',
+              }}
+              onClick={runSignAndConfirm}
+              disabled={isWorking}
+              aria-busy={isWorking}
+            >
+              {!isWorking ? 'Retry removal' : 'Working…'}
+            </button>
+          </div>
+        </>
+      )}
     </DialogShell>
   );
 }
