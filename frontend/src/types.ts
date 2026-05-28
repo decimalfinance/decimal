@@ -46,12 +46,7 @@ export type OrganizationSummary = {
   executionQueueCount: number;
   paymentsIncompleteCount: number;
   collectionsOpenCount: number;
-  // Backend currently returns the same total under both legacy field names
-  // (`destinationsUnreviewedCount` / `payersUnreviewedCount`) — Destination and
-  // CollectionSource are now unified into CounterpartyWallet, so the frontend
-  // reads either and treats them as one count of unreviewed address-book entries.
-  destinationsUnreviewedCount: number;
-  payersUnreviewedCount: number;
+  unreviewedWalletsCount: number;
   generatedAt: string;
 };
 
@@ -206,13 +201,7 @@ export type OrganizationPersonalWallet = UserWallet & {
   } | null;
 };
 
-export type ManagedWalletProvider =
-  | 'privy'
-  | 'fireblocks'
-  | 'coinbase_cdp'
-  | 'para'
-  | 'turnkey'
-  | 'dfns';
+export type ManagedWalletProvider = 'privy';
 
 export type WalletAuthorizationRole = 'owner' | 'admin' | 'signer' | 'approver';
 export type WalletAuthorizationScope = 'organization' | 'treasury_wallet';
@@ -262,14 +251,6 @@ export type WalletAuthorization = {
     displayName: string | null;
     isActive: boolean;
   } | null;
-};
-
-export type WalletChallenge = {
-  chain: 'solana';
-  walletAddress: string;
-  nonce: string;
-  message: string;
-  expiresAt: string;
 };
 
 export type TreasuryWallet = {

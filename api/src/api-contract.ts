@@ -36,17 +36,11 @@ export const API_ENDPOINTS = [
   endpoint('logout', 'POST', '/auth/logout', ['auth'], 'Invalidate current user session', 'session'),
 
   endpoint('list_personal_wallets', 'GET', '/personal-wallets', ['personal wallets'], 'List personal signing wallets for the current user', 'session'),
-  endpoint('create_personal_wallet_challenge', 'POST', '/personal-wallets/challenge', ['personal wallets'], 'Create personal wallet ownership challenge', 'session', {
-    requestBody: { walletAddress: 'string' },
-  }),
-  endpoint('connect_external_personal_wallet', 'POST', '/personal-wallets/external', ['personal wallets'], 'Connect external personal wallet with signed challenge', 'session'),
-  endpoint('register_embedded_personal_wallet', 'POST', '/personal-wallets/embedded', ['personal wallets'], 'Register embedded personal wallet metadata', 'session'),
   endpoint('create_managed_personal_wallet', 'POST', '/personal-wallets/managed', ['personal wallets'], 'Create a managed personal signing wallet with a configured custody provider', 'session'),
   endpoint('delete_personal_wallet', 'DELETE', '/personal-wallets/{userWalletId}', ['personal wallets'], 'Delete a Privy embedded personal wallet and archive its local record', 'session'),
   endpoint('sign_personal_wallet_versioned_transaction', 'POST', '/personal-wallets/{userWalletId}/sign-versioned-transaction', ['personal wallets', 'squads'], 'Sign a Squads v4 versioned transaction with a Privy-backed personal wallet', 'session', {
     requestBody: { serializedTransactionBase64: 'string base64' },
   }),
-  endpoint('list_legacy_user_wallets', 'GET', '/user-wallets', ['personal wallets'], 'Legacy alias for personal wallets', 'session'),
 
   endpoint('list_organizations', 'GET', '/organizations', ['organizations'], 'List organizations for the current user', 'session'),
   endpoint('organization_summary', 'GET', '/organizations/{organizationId}/summary', ['organizations'], 'Lightweight organization counts for shell navigation', 'session', { scope: 'organization:read' }),

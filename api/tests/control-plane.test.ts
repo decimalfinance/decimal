@@ -16,7 +16,6 @@ import { setInvoiceIntakeRuntimeForTests } from '../src/payments/invoice-intake.
 const TRUNCATE_SQL = `
 TRUNCATE TABLE
   auth_sessions,
-  wallet_challenges,
   organization_wallet_authorizations,
   spending_limit_executions,
   spending_limit_policy_destinations,
@@ -194,7 +193,7 @@ test('session auth supports organization and address-book setup', async () => {
   const summary = await get(`/organizations/${organization.organizationId}/summary`, register.sessionToken);
   assert.equal(summary.paymentsIncompleteCount, 0);
   assert.equal(summary.collectionsOpenCount, 0);
-  assert.equal(summary.destinationsUnreviewedCount, 0);
+  assert.equal(summary.unreviewedWalletsCount, 0);
 
   const session = await get('/auth/session', register.sessionToken);
   assert.equal(session.authenticated, true);
@@ -423,7 +422,7 @@ test('google oauth start uses stable local redirect URI when configured', async 
   assert.equal(redirect.searchParams.get('redirect_uri'), 'http://127.0.0.1:3100/auth/google/callback');
 });
 
-test('email verification gates organization setup and wallet registration is user-scoped', async () => {
+test('email verification gates organization setup and managed wallets are user-scoped', async () => {
   const register = await post('/auth/register', {
     email: 'onboarding@example.com',
     password: 'DemoPass123!',
@@ -446,33 +445,25 @@ test('email verification gates organization setup and wallet registration is use
   const organization = await post('/organizations', { organizationName: 'Verified Org' }, register.sessionToken);
   assert.equal(organization.organizationName, 'Verified Org');
 
-  const embeddedWallet = await post(
-    '/user-wallets/embedded',
-    {
+  const embeddedWallet = await prisma.personalWallet.create({
+    data: {
+      userId: register.user.userId,
+      chain: 'solana',
       walletAddress: Keypair.generate().publicKey.toBase58(),
+      walletType: 'privy_embedded',
       provider: 'privy',
       providerWalletId: 'privy-wallet-1',
       label: 'Embedded signer',
+      verifiedAt: new Date(),
     },
-    register.sessionToken,
-  );
+  });
   assert.equal(embeddedWallet.walletType, 'privy_embedded');
   assert.equal(embeddedWallet.provider, 'privy');
   assert.ok(embeddedWallet.verifiedAt);
 
-  const wallets = await get('/user-wallets', register.sessionToken);
+  const wallets = await get('/personal-wallets', register.sessionToken);
   assert.equal(wallets.items.length, 1);
   assert.equal(wallets.items[0].userWalletId, embeddedWallet.userWalletId);
-
-  const unsupportedManagedWallet = await fetch(`${baseUrl}/user-wallets/managed`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...authHeaders(register.sessionToken),
-    },
-    body: JSON.stringify({ provider: 'fireblocks', label: 'Fireblocks signer' }),
-  });
-  assert.equal(unsupportedManagedWallet.status, 501);
 });
 
 test('personal wallets are separate from organization treasury wallets and require explicit authorization', async () => {
@@ -484,16 +475,10 @@ test('personal wallets are separate from organization treasury wallets and requi
   await verifyRegisteredEmail(register);
 
   const organization = await post('/organizations', { organizationName: 'Wallet Model Org' }, register.sessionToken);
-  const personalWallet = await post(
-    '/personal-wallets/embedded',
-    {
-      walletAddress: Keypair.generate().publicKey.toBase58(),
-      provider: 'privy',
-      providerWalletId: 'privy-personal-wallet-1',
-      label: 'Personal signer',
-    },
-    register.sessionToken,
-  );
+  const personalWallet = await createTestPersonalWallet(register.user.userId, {
+    providerWalletId: 'privy-personal-wallet-1',
+    label: 'Personal signer',
+  });
   assert.equal(personalWallet.walletType, 'privy_embedded');
 
   const personalWallets = await get('/personal-wallets', register.sessionToken);
@@ -556,16 +541,10 @@ test('users can delete their own Privy personal wallet and local authorizations 
     await verifyRegisteredEmail(register);
 
     const organization = await post('/organizations', { organizationName: 'Delete Wallet Org' }, register.sessionToken);
-    const wallet = await post(
-      '/personal-wallets/embedded',
-      {
-        walletAddress: Keypair.generate().publicKey.toBase58(),
-        provider: 'privy',
-        providerWalletId: 'privy-delete-wallet',
-        label: 'Disposable Privy wallet',
-      },
-      register.sessionToken,
-    );
+    const wallet = await createTestPersonalWallet(register.user.userId, {
+      providerWalletId: 'privy-delete-wallet',
+      label: 'Disposable Privy wallet',
+    });
     await post(
       `/organizations/${organization.organizationId}/wallet-authorizations`,
       {
@@ -641,26 +620,16 @@ test('Squads treasury creation prepares a signable transaction and persists the 
   const creatorWalletAddress = Keypair.generate().publicKey.toBase58();
   const approverWalletAddress = Keypair.generate().publicKey.toBase58();
   const agentWalletAddress = Keypair.generate().publicKey.toBase58();
-  const creatorWallet = await post(
-    '/personal-wallets/embedded',
-    {
-      walletAddress: creatorWalletAddress,
-      provider: 'privy',
-      providerWalletId: 'privy-squads-creator',
-      label: 'Creator signer',
-    },
-    register.sessionToken,
-  );
-  const approverWallet = await post(
-    '/personal-wallets/embedded',
-    {
-      walletAddress: approverWalletAddress,
-      provider: 'privy',
-      providerWalletId: 'privy-squads-approver',
-      label: 'Approver signer',
-    },
-    approver.sessionToken,
-  );
+  const creatorWallet = await createTestPersonalWallet(register.user.userId, {
+    walletAddress: creatorWalletAddress,
+    providerWalletId: 'privy-squads-creator',
+    label: 'Creator signer',
+  });
+  const approverWallet = await createTestPersonalWallet(approver.user.userId, {
+    walletAddress: approverWalletAddress,
+    providerWalletId: 'privy-squads-approver',
+    label: 'Approver signer',
+  });
   const automationAgent = await prisma.automationAgent.create({
     data: {
       organizationId: organization.organizationId,
@@ -840,16 +809,11 @@ test('Squads treasury creation prepares a signable transaction and persists the 
   );
   await post(`/invites/${invite.inviteToken}/accept`, {}, invitedMember.sessionToken);
   const newMemberWalletAddress = Keypair.generate().publicKey.toBase58();
-  const newMemberWallet = await post(
-    '/personal-wallets/embedded',
-    {
-      walletAddress: newMemberWalletAddress,
-      provider: 'privy',
-      providerWalletId: 'privy-squads-new-member',
-      label: 'New member signer',
-    },
-    invitedMember.sessionToken,
-  );
+  const newMemberWallet = await createTestPersonalWallet(invitedMember.user.userId, {
+    walletAddress: newMemberWalletAddress,
+    providerWalletId: 'privy-squads-new-member',
+    label: 'New member signer',
+  });
 
   const addMemberIntent = await post(
     `/organizations/${organization.organizationId}/treasury-wallets/${treasuryWallet.treasuryWalletId}/squads/config-proposals/add-member-intent`,
@@ -1070,16 +1034,11 @@ test('automation agents can receive Squads spending limits and execute bounded p
     });
     await verifyRegisteredEmail(register);
     const organization = await post('/organizations', { organizationName: 'Agent Spending Org' }, register.sessionToken);
-    const signerWallet = await post(
-      '/personal-wallets/embedded',
-      {
-        walletAddress: signerWalletAddress,
-        provider: 'privy',
-        providerWalletId: 'privy-agent-spending-signer',
-        label: 'Human signer',
-      },
-      register.sessionToken,
-    );
+    const signerWallet = await createTestPersonalWallet(register.user.userId, {
+      walletAddress: signerWalletAddress,
+      providerWalletId: 'privy-agent-spending-signer',
+      label: 'Human signer',
+    });
     const treasuryWallet = await post(
       `/organizations/${organization.organizationId}/treasury-wallets`,
       {
@@ -1372,16 +1331,11 @@ test('Squads vault payment proposals turn payment orders into executable treasur
   await verifyRegisteredEmail(register);
   const organization = await post('/organizations', { organizationName: 'Squads Payment Org' }, register.sessionToken);
   const signerWalletAddress = Keypair.generate().publicKey.toBase58();
-  const signerWallet = await post(
-    '/personal-wallets/embedded',
-    {
-      walletAddress: signerWalletAddress,
-      provider: 'privy',
-      providerWalletId: 'privy-squads-payment-signer',
-      label: 'Payment signer',
-    },
-    register.sessionToken,
-  );
+  const signerWallet = await createTestPersonalWallet(register.user.userId, {
+    walletAddress: signerWalletAddress,
+    providerWalletId: 'privy-squads-payment-signer',
+    label: 'Payment signer',
+  });
 
   const programTreasury = Keypair.generate().publicKey;
   let onchainMultisig: {
@@ -1704,16 +1658,11 @@ test('AP invoice intake lets the org agent propose green payments and waits on h
   const agentWalletAddress = Keypair.generate().publicKey.toBase58();
   const trustedVendorAddress = Keypair.generate().publicKey.toBase58();
   const reviewVendorAddress = Keypair.generate().publicKey.toBase58();
-  const signerWallet = await post(
-    '/personal-wallets/embedded',
-    {
-      walletAddress: signerWalletAddress,
-      provider: 'privy',
-      providerWalletId: 'privy-agent-ap-signer',
-      label: 'AP owner signer',
-    },
-    register.sessionToken,
-  );
+  const signerWallet = await createTestPersonalWallet(register.user.userId, {
+    walletAddress: signerWalletAddress,
+    providerWalletId: 'privy-agent-ap-signer',
+    label: 'AP owner signer',
+  });
   const automationAgent = await prisma.automationAgent.create({
     data: {
       organizationId: organization.organizationId,
@@ -1928,16 +1877,11 @@ test('Privy personal wallet signing endpoint signs only transactions requiring t
     await verifyRegisteredEmail(register);
 
     const walletAddress = Keypair.generate().publicKey.toBase58();
-    const wallet = await post(
-      '/personal-wallets/embedded',
-      {
-        walletAddress,
-        provider: 'privy',
-        providerWalletId: 'privy-signing-wallet',
-        label: 'Privy signer',
-      },
-      register.sessionToken,
-    );
+    const wallet = await createTestPersonalWallet(register.user.userId, {
+      walletAddress,
+      providerWalletId: 'privy-signing-wallet',
+      label: 'Privy signer',
+    });
     const serializedTransactionBase64 = buildSquadsCreateLikeTransactionBase64(walletAddress);
     let privyRequestBody: unknown = null;
     setPrivyWalletRuntimeForTests({
@@ -2024,6 +1968,25 @@ async function verifyRegisteredEmail(register: { sessionToken: string; devEmailV
   assert.ok(code, 'registration should return a demo email verification code until email delivery exists');
   const result = await post('/auth/verify-email', { code }, register.sessionToken);
   assert.ok(result.user.emailVerifiedAt);
+}
+
+async function createTestPersonalWallet(userId: string, input: {
+  walletAddress?: string;
+  providerWalletId: string;
+  label?: string;
+}) {
+  return prisma.personalWallet.create({
+    data: {
+      userId,
+      chain: 'solana',
+      walletAddress: input.walletAddress ?? Keypair.generate().publicKey.toBase58(),
+      walletType: 'privy_embedded',
+      provider: 'privy',
+      providerWalletId: input.providerWalletId,
+      label: input.label ?? null,
+      verifiedAt: new Date(),
+    },
+  });
 }
 
 function authHeaders(token: string) {

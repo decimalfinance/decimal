@@ -1,5 +1,7 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
+DROP TABLE IF EXISTS wallet_challenges CASCADE;
+
 CREATE OR REPLACE FUNCTION set_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -71,19 +73,6 @@ CREATE TABLE IF NOT EXISTS user_wallets
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (user_id, chain, wallet_address)
-);
-
-CREATE TABLE IF NOT EXISTS wallet_challenges
-(
-  wallet_challenge_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-  chain TEXT NOT NULL DEFAULT 'solana',
-  wallet_address TEXT NOT NULL,
-  nonce_hash TEXT NOT NULL UNIQUE,
-  message TEXT NOT NULL,
-  expires_at TIMESTAMPTZ NOT NULL,
-  consumed_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS organization_memberships

@@ -23,7 +23,7 @@ infra-down:
 reset-data:
 	set -euo pipefail && \
 	docker compose up -d --remove-orphans postgres && \
-	docker compose exec -T postgres sh -lc "$(PSQL_QUIET) -U usdc_ops -d usdc_ops -c \"TRUNCATE TABLE auth_sessions, wallet_challenges, user_wallets, organization_memberships, collection_request_events, collection_requests, collection_runs, counterparty_wallets, transfer_requests, treasury_wallets, organizations, users RESTART IDENTITY CASCADE;\"" >/dev/null && \
+	docker compose exec -T postgres sh -lc "$(PSQL_QUIET) -U usdc_ops -d usdc_ops -c \"TRUNCATE TABLE auth_sessions, user_wallets, organization_memberships, collection_request_events, collection_requests, collection_runs, counterparty_wallets, transfer_requests, treasury_wallets, organizations, users RESTART IDENTITY CASCADE;\"" >/dev/null && \
 	echo "Application data cleared from Postgres."
 
 dev:

@@ -68,7 +68,6 @@ import type {
   WalletAuthorizationRole,
   WalletAuthorizationScope,
   WalletAuthorizationStatus,
-  WalletChallenge,
 } from './types';
 import { getPublicApiBaseUrl } from './public-config';
 
@@ -269,13 +268,7 @@ export const api = {
     );
   },
   // Personal wallets — user-owned signing wallets.
-  // Backend accepts both /personal-wallets/* (preferred) and /user-wallets/*
-  // (legacy alias). New code uses the preferred path.
   listPersonalWallets() {
-    return request<{ items: UserWallet[] }>('/personal-wallets');
-  },
-  /** @deprecated use listPersonalWallets */
-  listUserWallets() {
     return request<{ items: UserWallet[] }>('/personal-wallets');
   },
   // Active personal wallets owned by all members of the organization. Admin
@@ -284,36 +277,6 @@ export const api = {
     return request<{ items: OrganizationPersonalWallet[] }>(
       `/organizations/${organizationId}/personal-wallets`,
     );
-  },
-  createWalletChallenge(input: { walletAddress: string }) {
-    return request<WalletChallenge>('/personal-wallets/challenge', {
-      method: 'POST',
-      body: JSON.stringify(input),
-    });
-  },
-  connectExternalWallet(input: {
-    walletAddress: string;
-    nonce: string;
-    signedMessageBase64: string;
-    signatureBase64: string;
-    provider?: string;
-    label?: string;
-  }) {
-    return request<UserWallet>('/personal-wallets/external', {
-      method: 'POST',
-      body: JSON.stringify(input),
-    });
-  },
-  registerEmbeddedWallet(input: {
-    walletAddress: string;
-    provider?: string;
-    providerWalletId?: string;
-    label?: string;
-  }) {
-    return request<UserWallet>('/personal-wallets/embedded', {
-      method: 'POST',
-      body: JSON.stringify(input),
-    });
   },
   createPersonalWalletManaged(input: {
     provider: ManagedWalletProvider;
@@ -415,16 +378,6 @@ export const api = {
       signedTransactionBase64: string;
       encoding: 'base64';
     }>(`/personal-wallets/${userWalletId}/sign-versioned-transaction`, {
-      method: 'POST',
-      body: JSON.stringify(input),
-    });
-  },
-  /** @deprecated use createPersonalWalletManaged */
-  createManagedWallet(input: {
-    provider: ManagedWalletProvider;
-    label?: string;
-  }) {
-    return request<UserWallet>('/personal-wallets/managed', {
       method: 'POST',
       body: JSON.stringify(input),
     });
