@@ -135,22 +135,11 @@ export function WalletsPage({ session: _session }: { session: AuthenticatedSessi
   });
 
   const rows = balancesQuery.data?.items ?? [];
-  const solUsdPrice = balancesQuery.data?.solUsdPrice ?? null;
   const totalUsdcRaw = useMemo(() => sumUsdc(rows.map((r) => r.usdcRaw)), [rows]);
   const totalSol = useMemo(() => sumSol(rows.map((r) => r.solLamports)), [rows]);
   const totalUsdValue = useMemo(
-    () =>
-      rows.reduce(
-        (acc, row) =>
-          acc
-          + computeWalletUsdValue({
-            usdcRaw: row.usdcRaw,
-            solLamports: row.solLamports,
-            solUsdPrice,
-          }),
-        0,
-      ),
-    [rows, solUsdPrice],
+    () => rows.reduce((acc, row) => acc + computeWalletUsdValue({ usdcRaw: row.usdcRaw }), 0),
+    [rows],
   );
   const isInitialLoading = balancesQuery.isLoading && rows.length === 0;
 
@@ -172,9 +161,7 @@ export function WalletsPage({ session: _session }: { session: AuthenticatedSessi
           <p className="eyebrow">Registry</p>
           <h1>Treasury accounts</h1>
           <p>
-            {solUsdPrice === null
-              ? 'Organization-owned Solana wallets that Decimal monitors and reconciles. Balances refresh every 15 seconds.'
-              : `Organization-owned Solana wallets that Decimal monitors and reconciles · SOL @ $${formatUsd(solUsdPrice)} · refreshes every 15s.`}
+            Organization-owned Solana wallets that Decimal monitors and reconciles. Balances refresh every 15 seconds.
           </p>
         </div>
         <div className="page-actions">
@@ -322,13 +309,7 @@ export function WalletsPage({ session: _session }: { session: AuthenticatedSessi
                     <td className="rd-num">
                       <span>
                         $
-                        {formatUsd(
-                          computeWalletUsdValue({
-                            usdcRaw: row.usdcRaw,
-                            solLamports: row.solLamports,
-                            solUsdPrice,
-                          }),
-                        )}
+                        {formatUsd(computeWalletUsdValue({ usdcRaw: row.usdcRaw }))}
                       </span>
                     </td>
                     <td>

@@ -154,8 +154,6 @@ treasuryWalletsRouter.get(
     );
     res.json({
       items,
-      solUsdPrice: null,
-      priceSource: null,
       fetchedAt: new Date().toISOString(),
     });
   }),

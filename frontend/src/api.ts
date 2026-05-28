@@ -434,8 +434,6 @@ export const api = {
   listTreasuryWalletBalances(organizationId: string) {
     return request<{
       fetchedAt: string;
-      solUsdPrice: number | null;
-      priceSource: string | null;
       items: Array<{
         treasuryWalletId: string;
         address: string;

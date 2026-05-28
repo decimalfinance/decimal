@@ -19,24 +19,10 @@ export function formatUsd(value: number): string {
   return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-// Total USD value of one wallet: USDC (6 decimals) + SOL (9 decimals) × price.
-// If the SOL price is null we only count USDC — callers may separately show
-// "SOL price unavailable" context.
-export function computeWalletUsdValue(args: {
-  usdcRaw: string | null;
-  solLamports: string;
-  solUsdPrice: number | null;
-}): number {
-  const usdc = args.usdcRaw === null ? 0 : Number(BigInt(args.usdcRaw)) / 1_000_000;
-  let solLamportsNum = 0;
-  try {
-    solLamportsNum = Number(BigInt(args.solLamports));
-  } catch {
-    solLamportsNum = 0;
-  }
-  const sol = solLamportsNum / 1_000_000_000;
-  const solUsd = args.solUsdPrice === null ? 0 : sol * args.solUsdPrice;
-  return usdc + solUsd;
+// USDC-only USD value (SOL pricing was dropped — backend no longer publishes
+// a price, so we'd be multiplying by zero). USDC is 6 decimals.
+export function computeWalletUsdValue(args: { usdcRaw: string | null }): number {
+  return args.usdcRaw === null ? 0 : Number(BigInt(args.usdcRaw)) / 1_000_000;
 }
 
 export function formatRawUsdcCompact(amountRaw: string) {
