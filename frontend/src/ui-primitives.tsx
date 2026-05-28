@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { useEffect, useId, useState } from 'react';
-import { orbAccountUrl, orbTransactionUrl, shortenAddress } from './domain';
+import { orbAccountUrl, orbTransactionUrl, shortenAddress } from './lib/app';
 
 export function Modal({
   title,
