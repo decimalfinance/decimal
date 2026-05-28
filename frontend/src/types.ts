@@ -1549,22 +1549,33 @@ export type ReplaceSpendingLimitPolicyIntentResponse = SpendingLimitPolicyIntent
 // ─── Agent-aware invoice intake + advance ──────────────────────────────────
 // Per-row outcome from POST /invoices/upload (and /clear-review,
 // /agent/advance). Mirrors PaymentOrderAgentAdvanceResult in the backend.
-// `proposal_submitted` is the success case where the org agent signed and
-// submitted a Squads payment proposal. All other statuses carry a `reason`
+// `proposal_submitted` and `spending_limit_executed` are success cases where
+// the org agent routed the payment on chain. Other statuses carry a `reason`
 // the UI can render so the user knows what to do next.
 export type PaymentOrderAgentAdvanceResult =
   | {
       status: 'proposal_submitted';
       paymentOrderId: string;
-      treasuryWalletId: string;
+      treasuryWalletId: string | null;
       decimalProposalId: string;
       submittedSignature: string;
       reason: null;
       decimalProposal: unknown;
     }
   | {
+      status: 'spending_limit_executed';
+      paymentOrderId: string;
+      treasuryWalletId: string;
+      spendingLimitPolicyId: string | null;
+      spendingLimitExecutionId: string;
+      signature: string | null;
+      reason: null;
+      execution: unknown;
+    }
+  | {
       status:
         | 'already_has_proposal'
+        | 'already_has_spending_limit_execution'
         | 'needs_review'
         | 'needs_source_treasury'
         | 'unsupported_source_treasury'

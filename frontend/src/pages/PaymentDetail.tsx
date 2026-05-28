@@ -202,8 +202,12 @@ export function PaymentDetailPage() {
       const automation = result.automation;
       if (automation?.status === 'proposal_submitted') {
         success('Approved. Agent submitted the proposal on chain.');
+      } else if (automation?.status === 'spending_limit_executed') {
+        success('Approved. Agent executed the payment through a spending limit.');
       } else if (automation?.status === 'already_has_proposal') {
         success('Approved. Proposal was already on chain.');
+      } else if (automation?.status === 'already_has_spending_limit_execution') {
+        success('Approved. Spending-limit execution was already recorded.');
       } else if (automation?.status === 'needs_source_treasury' || automation?.status === 'unsupported_source_treasury') {
         info('Approved. Pick a treasury to fund this payment from.');
       } else if (automation?.status === 'failed' || automation?.status === 'blocked') {

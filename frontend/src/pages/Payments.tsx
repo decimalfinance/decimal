@@ -390,9 +390,11 @@ export function PaymentsPage() {
             await queryClient.invalidateQueries({ queryKey: ['payment-runs', organizationId] });
             await queryClient.invalidateQueries({ queryKey: ['payment-orders', organizationId] });
             const submitted = result.automation.filter((a) => a.status === 'proposal_submitted').length;
+            const executed = result.automation.filter((a) => a.status === 'spending_limit_executed').length;
             const review = result.paymentOrders.filter((p) => p.decision === 'needs_review').length;
             const parts: string[] = [];
             if (submitted > 0) parts.push(`${submitted} auto-submitted`);
+            if (executed > 0) parts.push(`${executed} auto-executed`);
             if (review > 0) parts.push(`${review} needs review`);
             if (result.skippedCount > 0) parts.push(`${result.skippedCount} skipped`);
             success(parts.length ? `Invoice processed — ${parts.join(', ')}.` : 'Invoice processed.');
@@ -932,6 +934,7 @@ function UploadResultPanel(props: {
   }, [result.automation]);
 
   const submittedCount = result.automation.filter((a) => a.status === 'proposal_submitted').length;
+  const executedCount = result.automation.filter((a) => a.status === 'spending_limit_executed').length;
   const reviewCount = result.paymentOrders.filter((p) => p.decision === 'needs_review').length;
 
   return (
@@ -939,6 +942,7 @@ function UploadResultPanel(props: {
       <div style={{ fontSize: 13, color: 'var(--ax-text-secondary)', marginBottom: 12 }}>
         {result.createdCount} payment order{result.createdCount === 1 ? '' : 's'} created
         {submittedCount > 0 ? ` · ${submittedCount} auto-submitted` : null}
+        {executedCount > 0 ? ` · ${executedCount} auto-executed` : null}
         {reviewCount > 0 ? ` · ${reviewCount} needs review` : null}
         {result.skippedCount > 0 ? ` · ${result.skippedCount} skipped` : null}
       </div>
@@ -1087,7 +1091,9 @@ function SkippedRowDisplay(props: { row: InvoiceIntakeSkippedRow }) {
 function statusToneForAutomation(status: PaymentOrderAgentAdvanceResult['status']): 'success' | 'warning' | 'danger' | 'neutral' {
   switch (status) {
     case 'proposal_submitted':
+    case 'spending_limit_executed':
     case 'already_has_proposal':
+    case 'already_has_spending_limit_execution':
       return 'success';
     case 'needs_review':
     case 'needs_source_treasury':
@@ -1105,7 +1111,9 @@ function statusToneForAutomation(status: PaymentOrderAgentAdvanceResult['status'
 function labelForAutomationStatus(status: PaymentOrderAgentAdvanceResult['status']): string {
   switch (status) {
     case 'proposal_submitted': return 'Auto-submitted for voting';
+    case 'spending_limit_executed': return 'Auto-executed';
     case 'already_has_proposal': return 'Has proposal';
+    case 'already_has_spending_limit_execution': return 'Already executed';
     case 'needs_review': return 'Needs review';
     case 'needs_source_treasury': return 'Needs treasury';
     case 'unsupported_source_treasury': return 'Treasury unsupported';
