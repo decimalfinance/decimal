@@ -911,84 +911,8 @@ export type PaymentOrderEvent = {
   createdAt: string;
 };
 
-export type PreparedSolanaInstruction = {
-  programId: string;
-  keys: Array<{
-    pubkey: string;
-    isSigner: boolean;
-    isWritable: boolean;
-  }>;
-  dataBase64: string;
-};
-
-export type PaymentExecutionPacket = {
-  kind: 'solana_spl_usdc_transfer' | 'solana_spl_usdc_transfer_batch';
-  version: number;
-  network: string;
-  paymentOrderId?: string;
-  paymentOrderIds?: string[];
-  inputBatchId?: string;
-  inputBatchLabel?: string;
-  transferRequestId?: string;
-  transferRequestIds?: string[];
-  executionRecordId?: string;
-  executionRecordIds?: string[];
-  createdAt: string;
-  source: {
-    treasuryWalletId: string;
-    walletAddress: string;
-    tokenAccountAddress: string;
-    label: string | null;
-  };
-  destination?: {
-    counterpartyWalletId: string;
-    label: string;
-    walletAddress: string;
-    tokenAccountAddress: string;
-    counterpartyName: string | null;
-  };
-  transfers?: Array<{
-    paymentOrderId: string;
-    transferRequestId: string;
-    executionRecordId: string;
-    destination: {
-      counterpartyWalletId: string;
-      label: string;
-      walletAddress: string;
-      tokenAccountAddress: string;
-    };
-    amountRaw: string;
-    memo: string | null;
-    reference: string | null;
-  }>;
-  token: {
-    symbol: string;
-    mint: string;
-    decimals: number;
-  };
-  amountRaw: string;
-  memo: string | null;
-  reference: string | null;
-  signerWallet: string;
-  feePayer: string;
-  requiredSigners: string[];
-  instructions: PreparedSolanaInstruction[];
-  signing: {
-    mode: string;
-    requiresRecentBlockhash: boolean;
-    note: string;
-  };
-};
-
-export type PaymentExecutionPreparation = {
-  executionRecord: ExecutionRecord;
-  executionPacket: PaymentExecutionPacket;
-  paymentOrder: PaymentOrder;
-};
-
-// CSV intake (bulk-create N PaymentOrders directly). Replaces the old
-// PaymentRun/PaymentRequest two-step flow. Same response shape as the
-// invoice upload endpoint so the UI can reuse the result panel.
+// CSV intake: bulk-create N PaymentOrders directly with a shared inputBatchId.
+// Same response shape as invoice upload so the UI can reuse the result panel.
 export type BatchCsvImportedRow = {
   rowNumber: number;
   status: 'imported';

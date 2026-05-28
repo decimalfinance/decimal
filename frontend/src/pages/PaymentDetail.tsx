@@ -5,22 +5,15 @@ import { api } from '../api';
 import type {
   AuthenticatedSession,
   DecimalProposal,
-  PaymentExecutionPacket,
   PaymentOrder,
-  TreasuryWallet,
 } from '../types';
 import {
   assetSymbol,
-  discoverSolanaWallets,
   downloadJson,
   formatRawUsdcCompact,
   formatRelativeTime,
   formatTimestamp,
   shortenAddress,
-  signAndSubmitPreparedPayment,
-  subscribeSolanaWallets,
-  walletLabel,
-  type BrowserWalletOption,
 } from '../domain';
 import { displayPaymentStatus, statusToneForPayment, toneToPill } from '../status-labels';
 import { signAndSubmitIntent } from '../lib/squads-pipeline';
@@ -38,8 +31,7 @@ import type { UserWallet } from '../types';
 
 type ActionVariant =
   | 'needs_review'
-  | 'needs_submit'
-  | 'ready_to_sign'
+  | 'needs_route'
   | 'ready_to_propose'
   | 'proposal_in_progress'
   | 'in_flight'
@@ -63,11 +55,9 @@ function buildLifecycle(
 
 function determineVariant(order: PaymentOrder): ActionVariant {
   const s = order.productLifecycle?.productState ?? order.derivedState;
-  // needs_review: agent flagged the invoice, no proposal yet. Approve clears
-  //   the flag and (with autoAdvance) asks the agent to submit the proposal.
-  // draft: cleared but no proposal yet. If the source is a Squads vault and
-  //   no proposal is in flight, the user can create one manually; otherwise
-  //   "submit" routes through clear-review (which is a no-op for draft).
+  // needs_review: agent flagged the invoice; a human must clear it first.
+  // draft: clear payment intent with no execution route yet. It can be routed
+  //   through an agent spending limit or a Squads proposal.
   // proposed: a Squads proposal exists; the substate (collecting votes /
   //   executing) is tracked on the proposal, not the order.
   // executed: on-chain transfer landed, settlement verification in flight.
@@ -76,7 +66,7 @@ function determineVariant(order: PaymentOrder): ActionVariant {
   if (s === 'draft') {
     return order.sourceTreasuryWallet?.source === 'squads_v4' && order.canCreateSquadsPaymentProposal !== false
       ? 'ready_to_propose'
-      : 'needs_submit';
+      : 'needs_route';
   }
   if (s === 'proposed') return 'proposal_in_progress';
   if (s === 'executed') return 'in_flight';
@@ -91,14 +81,6 @@ export function PaymentDetailPage() {
   const queryClient = useQueryClient();
 
   const { success, error: toastError, info } = useToast();
-  const [prepared, setPrepared] = useState<PaymentExecutionPacket | null>(null);
-  const [selectedSourceAddressId, setSelectedSourceAddressId] = useState('');
-  const [selectedWalletId, setSelectedWalletId] = useState<string | undefined>();
-  const [wallets, setWallets] = useState<BrowserWalletOption[]>(() => discoverSolanaWallets());
-
-  useEffect(() => subscribeSolanaWallets(setWallets), []);
-  useEffect(() => setPrepared(null), [selectedSourceAddressId]);
-
   const orderQuery = useQuery({
     queryKey: ['payment-order', organizationId, paymentOrderId] as const,
     queryFn: () => api.getPaymentOrderDetail(organizationId!, paymentOrderId!),
@@ -111,61 +93,13 @@ export function PaymentDetailPage() {
     },
   });
 
-  const addressesQuery = useQuery({
-    queryKey: ['addresses', organizationId] as const,
-    queryFn: () => api.listTreasuryWallets(organizationId!),
-    enabled: Boolean(organizationId),
-    refetchInterval: 30_000,
-  });
-
-  const sourceAddresses = addressesQuery.data?.items ?? [];
-  const effectiveSourceAddressId =
-    selectedSourceAddressId
-    || orderQuery.data?.sourceTreasuryWalletId
-    || sourceAddresses[0]?.treasuryWalletId
-    || '';
-
-  const submitMutation = useMutation({
-    mutationFn: () => api.submitPaymentOrder(organizationId!, paymentOrderId!),
+  const routeMutation = useMutation({
+    mutationFn: () => api.advancePaymentOrder(organizationId!, paymentOrderId!),
     onSuccess: async () => {
-      success('Submitted for approval.');
+      success('Agent routing started.');
       await queryClient.invalidateQueries({ queryKey: ['payment-order', organizationId, paymentOrderId] });
     },
-    onError: (err) => toastError(err instanceof Error ? err.message : 'Could not submit.'),
-  });
-
-  const signMutation = useMutation({
-    mutationFn: async () => {
-      if (!effectiveSourceAddressId) throw new Error('Select a source wallet before signing.');
-      const sourceAddressRow = sourceAddresses.find((r) => r.treasuryWalletId === effectiveSourceAddressId);
-      if (!sourceAddressRow?.address) throw new Error('Source wallet is still loading.');
-      let packet = prepared;
-      if (!packet || packet.signerWallet !== sourceAddressRow.address) {
-        const preparation = await api.preparePaymentOrderExecution(organizationId!, paymentOrderId!, {
-          sourceTreasuryWalletId: effectiveSourceAddressId,
-        });
-        packet = preparation.executionPacket;
-        setPrepared(packet);
-      }
-      const signature = await signAndSubmitPreparedPayment(packet!, selectedWalletId);
-      await api.attachPaymentOrderSignature(organizationId!, paymentOrderId!, {
-        submittedSignature: signature,
-        submittedAt: new Date().toISOString(),
-      });
-      return signature;
-    },
-    onSuccess: async (signature) => {
-      success(`Signed · ${shortenAddress(signature, 8, 8)}`);
-      await queryClient.invalidateQueries({ queryKey: ['payment-order', organizationId, paymentOrderId] });
-    },
-    onError: (err) => {
-      const message = err instanceof Error ? err.message : 'Could not sign payment.';
-      if (/user|reject|cancel/i.test(message)) {
-        info('Signing cancelled. Ready to retry.');
-      } else {
-        toastError(message);
-      }
-    },
+    onError: (err) => toastError(err instanceof Error ? err.message : 'Could not route payment.'),
   });
 
   const proofMutation = useMutation({
@@ -187,21 +121,18 @@ export function PaymentDetailPage() {
   });
 
   // "Approve & continue" on a needs_review order. Clears the AP-intake
-  // flag, trusts the counterparty wallet, submits internally, and (with
-  // autoAdvance) asks the agent to create the Squads proposal in the
-  // same call. We translate the agent's per-row outcome into a toast so
-  // the user knows what actually happened on chain.
+  // flag, trusts the counterparty wallet, and asks the agent router to either
+  // use a spending limit or create a Squads proposal in the same call.
   const clearReviewMutation = useMutation({
     mutationFn: () =>
       api.clearPaymentOrderReview(organizationId!, paymentOrderId!, {
         autoAdvance: true,
-        submitAfterClear: true,
         trustCounterpartyWallet: true,
       }),
     onSuccess: async (result) => {
       const automation = result.automation;
       if (automation?.status === 'proposal_submitted') {
-        success('Approved. Agent submitted the proposal on chain.');
+        success('Approved. Agent created the proposal on chain.');
       } else if (automation?.status === 'spending_limit_executed') {
         success('Approved. Agent executed the payment through a spending limit.');
       } else if (automation?.status === 'already_has_proposal') {
@@ -211,7 +142,7 @@ export function PaymentDetailPage() {
       } else if (automation?.status === 'needs_source_treasury' || automation?.status === 'unsupported_source_treasury') {
         info('Approved. Pick a treasury to fund this payment from.');
       } else if (automation?.status === 'failed' || automation?.status === 'blocked') {
-        toastError(`Approved internally, but agent couldn't submit: ${automation.reason}`);
+        toastError(`Approved internally, but agent couldn't route it: ${automation.reason}`);
       } else {
         success('Approved.');
       }
@@ -452,20 +383,12 @@ export function PaymentDetailPage() {
           amountLabel={amountLabel}
           submittedSignature={latestExec?.submittedSignature ?? order.squadsLifecycle?.executedSignature ?? order.squadsLifecycle?.submittedSignature ?? null}
           matchedAt={match?.matchedAt ?? null}
-          sourceAddresses={sourceAddresses}
-          effectiveSourceAddressId={effectiveSourceAddressId}
-          onSelectSource={setSelectedSourceAddressId}
-          wallets={wallets}
-          selectedWalletId={selectedWalletId}
-          onSelectWallet={setSelectedWalletId}
-          submitting={submitMutation.isPending}
+          routing={routeMutation.isPending}
           approvingReview={clearReviewMutation.isPending}
-          signing={signMutation.isPending}
           exporting={proofMutation.isPending}
           cancelling={cancelMutation.isPending}
-          onSubmit={() => submitMutation.mutate()}
+          onRoute={() => routeMutation.mutate()}
           onApproveReview={() => clearReviewMutation.mutate()}
-          onSign={() => signMutation.mutate()}
           onExportProof={() => proofMutation.mutate()}
           onCancel={() => cancelMutation.mutate()}
           ownPersonalWallets={ownPersonalWallets}
@@ -634,20 +557,12 @@ function PrimaryAction(props: {
   amountLabel: string;
   submittedSignature: string | null;
   matchedAt: string | null;
-  sourceAddresses: TreasuryWallet[];
-  effectiveSourceAddressId: string;
-  onSelectSource: (id: string) => void;
-  wallets: BrowserWalletOption[];
-  selectedWalletId: string | undefined;
-  onSelectWallet: (id: string | undefined) => void;
-  submitting: boolean;
+  routing: boolean;
   approvingReview: boolean;
-  signing: boolean;
   exporting: boolean;
   cancelling: boolean;
-  onSubmit: () => void;
+  onRoute: () => void;
   onApproveReview: () => void;
-  onSign: () => void;
   onExportProof: () => void;
   onCancel: () => void;
   ownPersonalWallets: UserWallet[];
@@ -671,19 +586,11 @@ function PrimaryAction(props: {
     order,
     amountLabel,
     submittedSignature,
-    sourceAddresses,
-    effectiveSourceAddressId,
-    onSelectSource,
-    wallets,
-    selectedWalletId,
-    onSelectWallet,
-    submitting,
+    routing,
     approvingReview,
-    signing,
     exporting,
-    onSubmit,
+    onRoute,
     onApproveReview,
-    onSign,
     onExportProof,
     ownPersonalWallets,
     proposalCreatorWalletId,
@@ -737,23 +644,23 @@ function PrimaryAction(props: {
     );
   }
 
-  if (variant === 'needs_submit') {
+  if (variant === 'needs_route') {
     return (
       <RdPrimaryCard
         emphasis="action"
-        eyebrow="Submit"
-        title="Ready to submit"
-        body="Advance this payment to signing."
+        eyebrow="Route"
+        title="Ready for agent routing"
+        body="Ask the Decimal agent to use an active spending limit or create a Squads proposal."
       >
         <div className="rd-actions">
           <button
             type="button"
             className="rd-btn rd-btn-primary"
-            onClick={onSubmit}
-            disabled={submitting}
-            aria-busy={submitting}
+            onClick={onRoute}
+            disabled={routing}
+            aria-busy={routing}
           >
-            {submitting ? 'Submitting…' : 'Submit for approval'}
+            {routing ? 'Routing…' : 'Route payment'}
           </button>
         </div>
       </RdPrimaryCard>
@@ -958,73 +865,6 @@ function PrimaryAction(props: {
               {!proposalExecuting ? <span className="rd-btn-arrow" aria-hidden>→</span> : null}
             </button>
           ) : null}
-        </div>
-      </RdPrimaryCard>
-    );
-  }
-
-  if (variant === 'ready_to_sign') {
-    const hasWallets = wallets.length > 0;
-    return (
-      <RdPrimaryCard
-        emphasis="action"
-        eyebrow="Sign and send"
-        title={
-          <>
-            <span className="rd-mono">{amountLabel}</span> ready to sign
-          </>
-        }
-        body="One signature sends this payment."
-      >
-        <div className="rd-primary-grid">
-          <label className="rd-field">
-            <span className="rd-field-label">Source wallet</span>
-            {sourceAddresses.length ? (
-              <select
-                className="rd-select"
-                value={effectiveSourceAddressId}
-                onChange={(e) => onSelectSource(e.target.value)}
-              >
-                {sourceAddresses.map((a) => (
-                  <option key={a.treasuryWalletId} value={a.treasuryWalletId}>
-                    {walletLabel(a)}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <span className="rd-field-label" style={{ color: 'var(--ax-warning)' }}>
-                Add a wallet in Address book first.
-              </span>
-            )}
-          </label>
-          <label className="rd-field">
-            <span className="rd-field-label">Signing wallet</span>
-            <select
-              className="rd-select"
-              value={selectedWalletId ?? ''}
-              onChange={(e) => onSelectWallet(e.target.value || undefined)}
-              disabled={!hasWallets}
-            >
-              <option value="">{hasWallets ? 'Auto-detect' : 'No wallet detected'}</option>
-              {wallets.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <div className="rd-actions">
-          <button
-            type="button"
-            className="rd-btn rd-btn-primary"
-            onClick={onSign}
-            disabled={signing || !effectiveSourceAddressId}
-            aria-busy={signing}
-          >
-            {signing ? 'Waiting for signature…' : 'Sign and submit'}
-            {!signing ? <span className="rd-btn-arrow" aria-hidden>→</span> : null}
-          </button>
         </div>
       </RdPrimaryCard>
     );

@@ -357,7 +357,7 @@ export function PaymentsPage() {
           onClose={() => setCreateOpen(false)}
           onSuccess={async () => {
             setCreateOpen(false);
-            success('Payment created and submitted for approval.');
+            success('Payment created and routed.');
             await queryClient.invalidateQueries({ queryKey: ['payment-orders', organizationId] });
           }}
           onError={(message) => toastError(message)}
@@ -371,7 +371,7 @@ export function PaymentsPage() {
           onClose={() => setImportOpen(false)}
           onSuccess={async (name, rows) => {
             setImportOpen(false);
-            success(`Imported "${name}" with ${rows} rows. Open the batch to review destinations and submit.`);
+            success(`Imported "${name}" with ${rows} rows. Open the batch to review destinations and route.`);
             await queryClient.invalidateQueries({ queryKey: ['payment-runs', organizationId] });
             await queryClient.invalidateQueries({ queryKey: ['payment-orders', organizationId] });
           }}
@@ -385,7 +385,7 @@ export function PaymentsPage() {
           onClose={() => setUploadDocOpen(false)}
           onSuccess={async (result) => {
             // We leave the dialog open so the user can see the per-row
-            // outcomes (auto-submitted, needs review, failed, etc.) and act
+            // outcomes (proposal-created, auto-executed, needs review, failed, etc.) and act
             // on each. Just refresh background data here.
             await queryClient.invalidateQueries({ queryKey: ['payment-runs', organizationId] });
             await queryClient.invalidateQueries({ queryKey: ['payment-orders', organizationId] });
@@ -393,7 +393,7 @@ export function PaymentsPage() {
             const executed = result.automation.filter((a) => a.status === 'spending_limit_executed').length;
             const review = result.paymentOrders.filter((p) => p.decision === 'needs_review').length;
             const parts: string[] = [];
-            if (submitted > 0) parts.push(`${submitted} auto-submitted`);
+            if (submitted > 0) parts.push(`${submitted} proposals created`);
             if (executed > 0) parts.push(`${executed} auto-executed`);
             if (review > 0) parts.push(`${review} needs review`);
             if (result.skippedCount > 0) parts.push(`${result.skippedCount} skipped`);
@@ -431,15 +431,15 @@ function CreatePaymentDialog(props: {
       if (!counterpartyWalletId || !amount || !reason) {
         throw new Error('Destination, amount, and reason are required.');
       }
-      // Create the PaymentOrder directly and ask the agent to advance it
-      // (submitNow=true triggers the proposal-creation step server-side).
+      // Create the PaymentOrder directly and ask the agent to route it
+      // through a spending limit or Squads proposal server-side.
       return api.createPaymentOrder(organizationId, {
         counterpartyWalletId,
         amountRaw: usdcToRaw(amount),
         memo: reason,
         externalReference: String(form.get('externalReference') ?? '') || undefined,
         sourceTreasuryWalletId: String(form.get('sourceTreasuryWalletId') ?? '') || undefined,
-        submitNow: true,
+        autoAdvance: true,
       });
     },
     onSuccess: () => onSuccess(),
@@ -458,7 +458,7 @@ function CreatePaymentDialog(props: {
           New payment
         </h2>
         <p className="rd-dialog-body">
-          One payment, one destination. Gets submitted for approval automatically.
+          One payment, one destination. Decimal routes it through a spending limit or Squads proposal automatically.
         </p>
         <form
           onSubmit={(e) => {
@@ -810,7 +810,7 @@ function UploadDocumentDialog(props: {
         {!running && !result && !error ? (
           <>
             <p className="rd-dialog-body" style={{ margin: '0 0 20px' }}>
-              Drop a PDF or image. The agent extracts, drafts, and auto-submits proposal-ready rows.
+              Drop a PDF or image. The agent extracts, drafts, and routes proposal-ready rows.
             </p>
             <div
               onDragOver={(e) => {
@@ -878,7 +878,7 @@ function UploadDocumentDialog(props: {
               }}
             />
             <div style={{ fontSize: 14, color: 'var(--ax-text-secondary)' }}>
-              Reading the invoice, drafting payments, and asking the agent to submit proposals…
+              Reading the invoice, drafting payments, and asking the agent to route them…
             </div>
             {file ? (
               <div style={{ fontSize: 12, color: 'var(--ax-text-muted)' }}>

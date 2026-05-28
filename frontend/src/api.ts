@@ -28,7 +28,6 @@ import type {
   SpendingLimitExecution,
   SpendingLimitPolicy,
   SpendingLimitPolicyIntentResponse,
-  PaymentExecutionPreparation,
   PaymentOrder,
   PaymentProofPacket,
   BatchCsvUploadResult,
@@ -769,9 +768,8 @@ export const api = {
       `/organizations/${organizationId}/payment-orders?${params.toString()}`,
     );
   },
-  // Manual single-payment intake. Creates a PaymentOrder directly and
-  // (with submitNow) runs the agent-advance step in the same call so the
-  // proposal gets created on chain without a second round-trip.
+  // Manual single-payment intake. Creates a PaymentOrder directly and,
+  // with autoAdvance, runs the unified agent router in the same call.
   createPaymentOrder(
     organizationId: string,
     input: {
@@ -785,7 +783,7 @@ export const api = {
       dueAt?: string;
       sourceTreasuryWalletId?: string;
       metadataJson?: Record<string, unknown>;
-      submitNow?: boolean;
+      autoAdvance?: boolean;
     },
   ) {
     return request<PaymentOrder & { automation?: PaymentOrderAgentAdvanceResult }>(
@@ -795,7 +793,8 @@ export const api = {
   },
   // Bulk-create N PaymentOrders from a CSV string. Each row becomes a
   // PaymentOrder tagged with the same inputBatchId. With autoAdvance the
-  // agent immediately tries to submit a Squads proposal per clean row.
+  // agent immediately routes each clean row through a spending limit or
+  // Squads proposal.
   uploadBatchCsv(
     organizationId: string,
     input: {
@@ -819,12 +818,6 @@ export const api = {
   getPaymentOrderDetail(organizationId: string, paymentOrderId: string) {
     return request<PaymentOrder>(`/organizations/${organizationId}/payment-orders/${paymentOrderId}`);
   },
-  submitPaymentOrder(organizationId: string, paymentOrderId: string) {
-    return request<PaymentOrder>(`/organizations/${organizationId}/payment-orders/${paymentOrderId}/submit`, {
-      method: 'POST',
-      body: JSON.stringify({}),
-    });
-  },
   cancelPaymentOrder(organizationId: string, paymentOrderId: string) {
     return request<PaymentOrder>(`/organizations/${organizationId}/payment-orders/${paymentOrderId}/cancel`, {
       method: 'POST',
@@ -832,8 +825,8 @@ export const api = {
     });
   },
   // Agent-aware invoice upload. Creates payment orders from the document and,
-  // when autoAdvance is true (default), asks the Decimal org agent to create
-  // and submit Squads proposals for any rows that are proposal-ready. Risky
+  // when autoAdvance is true (default), asks the Decimal org agent to route
+  // any proposal-ready rows. Risky
   // rows come back as needs_review and the user clears them via
   // clearPaymentOrderReview.
   uploadInvoice(
@@ -852,15 +845,14 @@ export const api = {
     );
   },
   // Clear a needs_review payment order. With autoAdvance the backend will
-  // also kick the agent to create and submit the Squads proposal in the
-  // same call, returning the result in `automation`.
+  // also kicks the agent router in the same call, returning the result in
+  // `automation`.
   clearPaymentOrderReview(
     organizationId: string,
     paymentOrderId: string,
     input?: {
       reviewNote?: string | null;
       trustCounterpartyWallet?: boolean;
-      submitAfterClear?: boolean;
       autoAdvance?: boolean;
     },
   ) {
@@ -881,39 +873,6 @@ export const api = {
     return request<PaymentOrderAgentAdvanceResult>(
       `/organizations/${organizationId}/payment-orders/${paymentOrderId}/agent/advance`,
       { method: 'POST', body: JSON.stringify(input ?? {}) },
-    );
-  },
-  preparePaymentOrderExecution(
-    organizationId: string,
-    paymentOrderId: string,
-    input?: {
-      sourceTreasuryWalletId?: string;
-    },
-  ) {
-    return request<PaymentExecutionPreparation>(
-      `/organizations/${organizationId}/payment-orders/${paymentOrderId}/prepare-execution`,
-      {
-        method: 'POST',
-        body: JSON.stringify(input ?? {}),
-      },
-    );
-  },
-  attachPaymentOrderSignature(
-    organizationId: string,
-    paymentOrderId: string,
-    input: {
-      submittedSignature?: string;
-      externalReference?: string;
-      submittedAt?: string;
-      metadataJson?: Record<string, unknown>;
-    },
-  ) {
-    return request(
-      `/organizations/${organizationId}/payment-orders/${paymentOrderId}/attach-signature`,
-      {
-        method: 'POST',
-        body: JSON.stringify(input),
-      },
     );
   },
   getPaymentOrderProof(organizationId: string, paymentOrderId: string) {

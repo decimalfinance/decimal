@@ -331,7 +331,7 @@ export function DataTableShell({
 }
 
 // Primary-action card frame on rd-styled detail pages. Each lifecycle
-// variant ('needs_submit', 'ready_to_propose', 'ready_to_sign',
+// variant ('needs_route', 'ready_to_propose',
 // 'proposal_in_progress', 'in_flight', 'settled', 'exception',
 // 'cancelled') uses the same eyebrow/title/body shell with variant-
 // specific copy and (optionally) action buttons or richer content as
@@ -359,7 +359,7 @@ export function RdPrimaryCard({
   );
 }
 
-// Header chrome for rd-styled detail pages (PaymentDetail, PaymentRunDetail,
+// Header chrome for rd-styled detail pages (PaymentDetail,
 // CollectionDetail): eyebrow + title + per-page meta line on the left, an
 // optional side slot (status pill, actions, etc) on the right.
 export function RdPageHeader({
@@ -417,7 +417,7 @@ export function DetailEntry({ label, children }: { label: string; children: Reac
 }
 
 // Standard loading skeleton for detail pages. Matches the visual rhythm of
-// PaymentDetail / PaymentRunDetail: a small back-link line, a title line,
+// PaymentDetail: a small back-link line, a title line,
 // optionally a meta line, then hero + body blocks.
 export function DetailPageSkeleton({
   containerClassName = 'rd-page-container',
