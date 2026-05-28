@@ -232,7 +232,6 @@ export const API_ENDPOINTS = [
   }),
   endpoint('cancel_payment_order', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/cancel', ['payment orders'], 'Cancel payment order', 'session', { scope: 'payments:write' }),
   endpoint('prepare_payment_order_execution', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/prepare-execution', ['payment orders'], 'Prepare signer-ready Solana transfer packet', 'session', { scope: 'execution:write' }),
-  endpoint('create_payment_order_execution', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/create-execution', ['payment orders'], 'Record external execution handoff', 'session', { scope: 'execution:write' }),
   endpoint('attach_payment_order_signature', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/attach-signature', ['payment orders'], 'Attach submitted execution signature', 'session', { scope: 'execution:write' }),
   endpoint('execute_payment_order_with_spending_limit', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/execute-with-spending-limit', ['payment orders', 'automation agents', 'squads'], 'Execute a payment order through an active Squads spending limit signed by the agent wallet', 'session', {
     scope: 'execution:write',

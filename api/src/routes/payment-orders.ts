@@ -5,7 +5,6 @@ import {
   cancelPaymentOrder,
   clearPaymentOrderReview,
   createPaymentOrder,
-  createPaymentOrderExecution,
   getPaymentOrderDetail,
   listPaymentOrders,
   preparePaymentOrderExecution,
@@ -76,12 +75,6 @@ const batchCsvSchema = z.object({
   sourceTreasuryWalletId: z.string().uuid().optional().nullable(),
   batchLabel: z.string().trim().max(200).optional().nullable(),
   autoAdvance: z.boolean().default(true),
-});
-
-const createExecutionSchema = z.object({
-  executionSource: z.string().trim().min(1).max(100).default('manual_signature'),
-  externalReference: z.string().trim().max(500).optional(),
-  metadataJson: z.record(z.any()).default({}),
 });
 
 const prepareExecutionSchema = z.object({
@@ -321,31 +314,6 @@ paymentOrdersRouter.post(
       });
 
       res.status(201).json(prepared);
-    } catch (error) {
-      next(error);
-    }
-  },
-);
-
-paymentOrdersRouter.post(
-  '/organizations/:organizationId/payment-orders/:paymentOrderId/create-execution',
-  async (req, res, next) => {
-    try {
-      const { organizationId, paymentOrderId } = paymentOrderParamsSchema.parse(req.params);
-      await assertOrganizationAdmin(organizationId, req.auth!);
-      const input = createExecutionSchema.parse(req.body);
-      const actor = actorFromAuth(req.auth!);
-
-      const executionRecord = await createPaymentOrderExecution({
-        organizationId,
-        paymentOrderId,
-        ...actor,
-        executionSource: input.executionSource,
-        externalReference: input.externalReference,
-        metadataJson: input.metadataJson,
-      });
-
-      res.status(201).json(executionRecord);
     } catch (error) {
       next(error);
     }
