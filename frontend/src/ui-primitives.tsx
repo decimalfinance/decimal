@@ -688,3 +688,47 @@ function CheckIcon({ size }: { size: number }) {
     </svg>
   );
 }
+
+export function PageFrame({
+  eyebrow,
+  title,
+  description,
+  action,
+  children,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="page-frame">
+      <header className="page-header">
+        <div>
+          <p className="eyebrow">{eyebrow}</p>
+          <h1>{title}</h1>
+          <p>{description}</p>
+        </div>
+        {action ? <div className="page-actions">{action}</div> : null}
+      </header>
+      {children}
+    </div>
+  );
+}
+
+export function SectionHeader({ title, description }: { title: string; description?: string }) {
+  return <PanelHeader title={title} description={description} />;
+}
+
+export function EmptyState({ title, description }: { title: string; description: string }) {
+  return <EmptyPanel title={title} description={description} />;
+}
+
+export function ScreenState({ title, description }: { title: string; description: string }) {
+  return (
+    <main className="screen-state">
+      <EmptyState title={title} description={description} />
+    </main>
+  );
+}
