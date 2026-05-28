@@ -50,6 +50,10 @@ type UnifiedRow = {
   // 'single' otherwise (invoice upload or manual entry).
   origin: 'single' | 'batch';
   originLabel?: string;
+  // True if the agent auto-paid this order under a spending-limit policy
+  // instead of going through the Squads voting path. Drives the small "SL"
+  // chip next to the status pill so the user can scan SL vs proposal routes.
+  routedViaSpendingLimit: boolean;
   createdAt: string;
   to: string;
 };
@@ -137,6 +141,7 @@ export function PaymentsPage() {
       needsReview: orderNeedsReview(o),
       origin: o.inputBatchLabel ? 'batch' : 'single',
       originLabel: o.inputBatchLabel ?? undefined,
+      routedViaSpendingLimit: Boolean(o.spendingLimitExecution),
       createdAt: o.createdAt,
       to: `/organizations/${organizationId}/payments/${o.paymentOrderId}`,
     }));
@@ -332,9 +337,21 @@ export function PaymentsPage() {
                       </span>
                     </td>
                     <td>
-                      <span className="rd-pill" data-tone={toneToPill(row.tone)}>
-                        <span className="rd-pill-dot" aria-hidden />
-                        {row.state}
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <span className="rd-pill" data-tone={toneToPill(row.tone)}>
+                          <span className="rd-pill-dot" aria-hidden />
+                          {row.state}
+                        </span>
+                        {row.routedViaSpendingLimit ? (
+                          <span
+                            className="rd-pill"
+                            data-tone="info"
+                            title="Auto-paid by the Decimal agent under an active spending limit policy."
+                            style={{ fontSize: 11 }}
+                          >
+                            SL
+                          </span>
+                        ) : null}
                       </span>
                     </td>
                     <td>

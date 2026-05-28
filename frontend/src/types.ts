@@ -1009,8 +1009,39 @@ export type PaymentOrder = {
   } | null;
   squadsPaymentProposal: DecimalProposal | null;
   canCreateSquadsPaymentProposal: boolean;
+  // Present when the router took the agent path (spending-limit execution)
+  // instead of creating a Squads proposal. The FE uses presence-of-this-field
+  // as the signal to render the SL execution card.
+  spendingLimitExecution: PaymentOrderSpendingLimitExecution | null;
   events: PaymentOrderEvent[];
   reconciliationDetail: ReconciliationDetail | null;
+};
+
+export type PaymentOrderSpendingLimitExecution = {
+  spendingLimitExecutionId: string;
+  spendingLimitPolicyId: string;
+  treasuryWalletId: string;
+  amountRaw: string;
+  asset: string;
+  destinationWalletAddress: string;
+  signature: string | null;
+  status: SpendingLimitExecutionStatus;
+  submittedAt: string | null;
+  executedAt: string | null;
+  createdAt: string;
+  spendingLimitPolicy: {
+    spendingLimitPolicyId: string;
+    policyName: string;
+    policyCode: string;
+    amountRaw: string;
+    period: SpendingLimitPeriod;
+    status: SpendingLimitPolicyStatus;
+  } | null;
+  agentWallet: {
+    agentWalletId: string;
+    walletAddress: string;
+    label: string | null;
+  } | null;
 };
 
 export type PaymentProofPacket = {

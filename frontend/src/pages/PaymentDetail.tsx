@@ -34,6 +34,8 @@ type ActionVariant =
   | 'needs_route'
   | 'ready_to_propose'
   | 'proposal_in_progress'
+  | 'spending_limit_in_flight'
+  | 'spending_limit_settled'
   | 'in_flight'
   | 'settled'
   | 'exception'
@@ -69,6 +71,13 @@ function determineVariant(order: PaymentOrder): ActionVariant {
       : 'needs_route';
   }
   if (s === 'proposed') return 'proposal_in_progress';
+  // Spending-limit route: an SL execution exists on the order, so the agent
+  // took the auto path instead of opening a multisig proposal. Show a
+  // dedicated card so the user can see WHICH policy ran.
+  if (order.spendingLimitExecution) {
+    if (s === 'executed') return 'spending_limit_in_flight';
+    if (s === 'settled') return 'spending_limit_settled';
+  }
   if (s === 'executed') return 'in_flight';
   if (s === 'settled') return 'settled';
   if (s === 'cancelled') return 'cancelled';
@@ -865,6 +874,55 @@ function PrimaryAction(props: {
               {!proposalExecuting ? <span className="rd-btn-arrow" aria-hidden>→</span> : null}
             </button>
           ) : null}
+        </div>
+      </RdPrimaryCard>
+    );
+  }
+
+  if (variant === 'spending_limit_in_flight') {
+    const exec = order.spendingLimitExecution;
+    const policyName = exec?.spendingLimitPolicy?.policyName ?? 'spending limit policy';
+    const execSignature = exec?.signature ?? submittedSignature;
+    return (
+      <RdPrimaryCard
+        eyebrow="Auto-paid by agent"
+        title={`Paid via ${policyName}`}
+        body="The agent executed this payment directly under an active spending limit. Verifying settlement."
+      >
+        {execSignature ? (
+          <div style={{ marginTop: 8 }}>
+            <ChainLink signature={execSignature} prefix={8} suffix={8} />
+          </div>
+        ) : null}
+      </RdPrimaryCard>
+    );
+  }
+
+  if (variant === 'spending_limit_settled') {
+    const exec = order.spendingLimitExecution;
+    const policyName = exec?.spendingLimitPolicy?.policyName ?? 'spending limit policy';
+    const execSignature = exec?.signature ?? submittedSignature;
+    return (
+      <RdPrimaryCard
+        eyebrow="Settled · auto-paid"
+        title={`Paid via ${policyName}`}
+        body="The agent settled this payment under an active spending limit. Proof packet is ready."
+      >
+        {execSignature ? (
+          <div style={{ marginBottom: 12 }}>
+            <ChainLink signature={execSignature} prefix={8} suffix={8} />
+          </div>
+        ) : null}
+        <div className="rd-actions">
+          <button
+            type="button"
+            className="rd-btn rd-btn-primary"
+            onClick={onExportProof}
+            disabled={exporting}
+            aria-busy={exporting}
+          >
+            {exporting ? 'Exporting…' : 'Download proof (JSON)'}
+          </button>
         </div>
       </RdPrimaryCard>
     );

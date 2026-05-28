@@ -5,6 +5,9 @@ import type {
   PaymentOrder,
   PaymentOrderEvent,
   Prisma,
+  SpendingLimitExecution,
+  SpendingLimitPolicy,
+  AgentWallet,
   TransferRequest,
   User,
   TreasuryWallet,
@@ -32,6 +35,15 @@ export type PaymentOrderWithRelations = PaymentOrder & {
     }
   >;
   proposals?: DecimalProposal[];
+  spendingLimitExecutions?: Array<
+    SpendingLimitExecution & {
+      spendingLimitPolicy: Pick<
+        SpendingLimitPolicy,
+        'spendingLimitPolicyId' | 'policyName' | 'policyCode' | 'amountRaw' | 'period' | 'status'
+      > | null;
+      agentWallet: Pick<AgentWallet, 'agentWalletId' | 'walletAddress' | 'label'> | null;
+    }
+  >;
   events?: PaymentOrderEvent[];
 };
 
@@ -560,8 +572,49 @@ async function buildPaymentOrderReadModel(order: PaymentOrderWithRelations) {
     squadsLifecycle,
     squadsPaymentProposal: latestSquadsPaymentProposal ? serializePaymentOrderProposal(latestSquadsPaymentProposal, liveProposalState) : null,
     canCreateSquadsPaymentProposal: !latestSquadsPaymentProposal || isTerminalSquadsPaymentProposal(latestSquadsPaymentProposal),
+    spendingLimitExecution: serializeLatestSpendingLimitExecution(order),
     events: (order.events ?? []).map(serializePaymentOrderEvent),
     reconciliationDetail,
+  };
+}
+
+// Surface the latest non-cancelled spending-limit execution on the payment-
+// order read model. Presence of this block is the canonical signal that the
+// router took the agent path instead of the Squads-proposal path — the FE
+// uses it to swap the in-flight / settled card variant.
+function serializeLatestSpendingLimitExecution(order: PaymentOrderWithRelations) {
+  const executions = order.spendingLimitExecutions ?? [];
+  const latest = executions[0];
+  if (!latest) return null;
+  return {
+    spendingLimitExecutionId: latest.spendingLimitExecutionId,
+    spendingLimitPolicyId: latest.spendingLimitPolicyId,
+    treasuryWalletId: latest.treasuryWalletId,
+    amountRaw: latest.amountRaw.toString(),
+    asset: latest.asset,
+    destinationWalletAddress: latest.destinationWalletAddress,
+    signature: latest.signature,
+    status: latest.status,
+    submittedAt: latest.submittedAt?.toISOString() ?? null,
+    executedAt: latest.executedAt?.toISOString() ?? null,
+    createdAt: latest.createdAt.toISOString(),
+    spendingLimitPolicy: latest.spendingLimitPolicy
+      ? {
+          spendingLimitPolicyId: latest.spendingLimitPolicy.spendingLimitPolicyId,
+          policyName: latest.spendingLimitPolicy.policyName,
+          policyCode: latest.spendingLimitPolicy.policyCode,
+          amountRaw: latest.spendingLimitPolicy.amountRaw.toString(),
+          period: latest.spendingLimitPolicy.period,
+          status: latest.spendingLimitPolicy.status,
+        }
+      : null,
+    agentWallet: latest.agentWallet
+      ? {
+          agentWalletId: latest.agentWallet.agentWalletId,
+          walletAddress: latest.agentWallet.walletAddress,
+          label: latest.agentWallet.label,
+        }
+      : null,
   };
 }
 
@@ -798,6 +851,28 @@ const paymentOrderInclude = {
       semanticType: 'send_payment',
     },
     orderBy: { createdAt: 'desc' as const },
+  },
+  spendingLimitExecutions: {
+    orderBy: { createdAt: 'desc' as const },
+    include: {
+      spendingLimitPolicy: {
+        select: {
+          spendingLimitPolicyId: true,
+          policyName: true,
+          policyCode: true,
+          amountRaw: true,
+          period: true,
+          status: true,
+        },
+      },
+      agentWallet: {
+        select: {
+          agentWalletId: true,
+          walletAddress: true,
+          label: true,
+        },
+      },
+    },
   },
 } satisfies Prisma.PaymentOrderInclude;
 
