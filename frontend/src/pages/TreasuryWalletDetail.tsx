@@ -8,7 +8,6 @@ import type {
   SpendingLimitPolicy,
   SpendingLimitPolicyStatus,
   SquadsDetailMember,
-  SquadsMemberLinkStatus,
   SquadsPermission,
   SquadsTreasuryDetail,
   TreasuryWallet,
@@ -16,46 +15,11 @@ import type {
 } from '../types';
 import { formatRawUsdcCompact, shortenAddress } from '../domain';
 import { signAndSubmitIntent } from '../lib/squads-pipeline';
-import { ChainLink, InfoRow } from '../ui-primitives';
 import { useToast } from '../ui/Toast';
 import { ProposalsTable, type ProposalsTableBusy } from '../ui/ProposalsTable';
 import type { DecimalProposal } from '../types';
 
 const ALL_PERMISSIONS: SquadsPermission[] = ['initiate', 'vote', 'execute'];
-
-type LinkStatusDescriptor = {
-  label: string;
-  tone: 'ok' | 'info' | 'warn' | 'danger';
-  hint: string;
-};
-
-const LINK_STATUS: Record<SquadsMemberLinkStatus, LinkStatusDescriptor> = {
-  linked: {
-    label: 'Linked',
-    tone: 'ok',
-    hint: 'Active personal wallet, active org member, active wallet authorization.',
-  },
-  unlinked: {
-    label: 'Unlinked',
-    tone: 'info',
-    hint: 'No personal wallet on Decimal matches this address.',
-  },
-  wallet_inactive: {
-    label: 'Wallet inactive',
-    tone: 'warn',
-    hint: 'A matching personal wallet exists but is no longer active.',
-  },
-  not_org_member: {
-    label: 'Not in org',
-    tone: 'warn',
-    hint: 'Personal wallet matches but the user is not an active member of this organization.',
-  },
-  authorization_missing: {
-    label: 'Authorization missing',
-    tone: 'warn',
-    hint: 'Linked but the local Squads-member wallet authorization is not active.',
-  },
-};
 
 const PERMISSION_LABEL: Record<SquadsPermission, string> = {
   initiate: 'Initiate',
@@ -233,20 +197,6 @@ export function TreasuryWalletDetailPage({ session }: { session: AuthenticatedSe
     onSettled: () => setProposalsBusy(null),
   });
 
-  const syncMutation = useMutation({
-    mutationFn: () => api.syncSquadsTreasuryMembers(organizationId!, treasuryWalletId!),
-    onSuccess: (synced) => {
-      queryClient.setQueryData(
-        ['treasury-wallet-detail', organizationId, treasuryWalletId],
-        synced,
-      );
-      success('Synced from chain.');
-    },
-    onError: (err) => {
-      toastError(err instanceof Error ? err.message : 'Sync failed.');
-    },
-  });
-
   async function refreshDetail() {
     await queryClient.invalidateQueries({
       queryKey: ['treasury-wallet-detail', organizationId, treasuryWalletId],
@@ -382,7 +332,7 @@ export function TreasuryWalletDetailPage({ session }: { session: AuthenticatedSe
           </div>
         </section>
       ) : detail ? (
-        <SquadsDetailContent detail={detail} wallet={wallet} />
+        <SquadsDetailContent detail={detail} />
       ) : null}
 
       {detail && isSquads ? (
@@ -472,10 +422,8 @@ export function TreasuryWalletDetailPage({ session }: { session: AuthenticatedSe
 
 function SquadsDetailContent({
   detail,
-  wallet,
 }: {
   detail: SquadsTreasuryDetail;
-  wallet: TreasuryWallet;
 }) {
   const { squads } = detail;
 
@@ -605,26 +553,6 @@ function DecimalAgentAvatar() {
       />
     </span>
   );
-}
-
-function CapabilityPill({ ok, label }: { ok: boolean; label: string }) {
-  return (
-    <span
-      className="rd-pill rd-pill-info"
-      style={{
-        fontSize: 12,
-        opacity: ok ? 1 : 0.45,
-      }}
-      title={ok ? `At least one member can ${label.toLowerCase()}.` : `No member has ${label.toLowerCase()} permission.`}
-    >
-      <span className="rd-pill-dot" />
-      {label}: {ok ? 'yes' : 'no'}
-    </span>
-  );
-}
-
-function ExplorerAddress({ value }: { value: string }) {
-  return <ChainLink address={value} />;
 }
 
 // ---------------------------------------------------------------------------

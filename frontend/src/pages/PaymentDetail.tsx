@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, ApiError } from '../api';
+import { api } from '../api';
 import type {
   AuthenticatedSession,
   DecimalProposal,
@@ -33,7 +33,6 @@ import { useSquadsProposalActions } from '../lib/squads-actions';
 import { buildSquadsPaymentLifecycle } from '../lib/lifecycle';
 import { ChainLink, DetailEntry, DetailPageSkeleton, DetailPageState, RdPageHeader, RdPrimaryCard } from '../ui-primitives';
 import { LifecycleRail, type LifecycleStage, type StageState } from '../ui/LifecycleRail';
-import { SettlementBanner } from '../ui/SettlementBanner';
 import { useToast } from '../ui/Toast';
 import type { UserWallet } from '../types';
 

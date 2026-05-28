@@ -5,7 +5,6 @@ import { api } from '../api';
 import type {
   AuthenticatedSession,
   CollectionRequest,
-  CollectionRunSummary,
   Counterparty,
   CounterpartyWallet,
   CounterpartyWalletTrustState,

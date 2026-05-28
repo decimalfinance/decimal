@@ -325,7 +325,7 @@ function Scene({
   const activeRef = useRef(-1);
   const doneRef = useRef(0);
 
-  useFrame((state, dt) => {
+  useFrame((state) => {
     if (motion === 'off') return;
     const t = state.clock.elapsedTime % total;
 

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { Link, useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api';
 import type { CollectionRequest, CollectionRequestEvent } from '../types';
@@ -72,7 +72,6 @@ export function CollectionDetailPage() {
     organizationId: string;
     collectionRequestId: string;
   }>();
-  const _navigate = useNavigate();
   const queryClient = useQueryClient();
   const { success, error: toastError } = useToast();
 

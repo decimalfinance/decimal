@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api';
 import type {
-  AuthenticatedSession,
   BatchCsvUploadResult,
   CounterpartyWallet,
   InvoiceIntakeSkippedRow,
@@ -77,7 +76,7 @@ function usdcToRaw(value: string): string {
   return (BigInt(whole || '0') * 1_000_000n + BigInt(fracPadded || '0')).toString();
 }
 
-export function PaymentsPage({ session }: { session: AuthenticatedSession }) {
+export function PaymentsPage() {
   const { organizationId } = useParams<{ organizationId: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();

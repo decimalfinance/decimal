@@ -1,6 +1,6 @@
 import type { FormEvent, ReactNode } from 'react';
-import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
-import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AppSidebar } from './Sidebar';
 import { api, ApiError } from './api';
@@ -23,41 +23,14 @@ import { AuthDivider, OAuthButton } from './ui/AuthButtons';
 import { useToast } from './ui/Toast';
 import type {
   AuthenticatedSession,
-  PaymentOrder,
-  PaymentOrderState,
-  TreasuryWallet,
-  Organization,
   UserWallet,
 } from './api';
-import {
-  discoverSolanaWallets,
-  formatRawUsdcCompact,
-  formatRelativeTime,
-  formatTimestamp,
-  shortenAddress,
-  signAndSubmitPreparedPayment,
-  subscribeSolanaWallets,
-  type BrowserWalletOption,
-} from './domain';
+import { formatRawUsdcCompact } from './domain';
 import { setRuntimeSolanaConfig } from './solana-network';
-import { parseCsvPreview } from './csv-parse';
-import { ProofJsonView } from './proof-json-view';
-import {
-  displayPaymentStatus,
-  displayReconciliationState,
-  humanizeExceptionReason,
-  isPaymentOrderState,
-  statusToneForPayment,
-  toneForGenericState,
-} from './status-labels';
 import {
   ChainLink,
-  Collapsible,
-  DataTableShell,
   EmptyPanel,
-  Modal,
   PanelHeader,
-  Tabs,
 } from './ui-primitives';
 
 function queryKeys(organizationId?: string, paymentOrderId?: string) {
@@ -66,9 +39,6 @@ function queryKeys(organizationId?: string, paymentOrderId?: string) {
     addresses: ['addresses', organizationId] as const,
     counterparties: ['counterparties', organizationId] as const,
     counterpartyWallets: ['counterparty-wallets', organizationId] as const,
-    paymentRequests: ['payment-requests', organizationId] as const,
-    paymentRuns: ['payment-runs', organizationId] as const,
-    paymentRun: ['payment-run', organizationId, paymentOrderId] as const,
     paymentOrders: ['payment-orders', organizationId] as const,
     paymentOrder: ['payment-order', organizationId, paymentOrderId] as const,
   };
@@ -208,7 +178,7 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
         ) : (
         <Routes>
           <Route path="/" element={<HomeRedirect session={session} />} />
-          <Route path="/setup" element={<SetupPage session={session} />} />
+          <Route path="/setup" element={<SetupPage />} />
           <Route path="/profile" element={<ProfilePage session={session} />} />
           <Route path="/organizations/:organizationId" element={<InboxPage session={session} />} />
           <Route path="/organizations/:organizationId/wallets" element={<WalletsPage session={session} />} />
@@ -219,7 +189,7 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
           <Route path="/organizations/:organizationId/members" element={<MembersPage session={session} />} />
           <Route path="/organizations/:organizationId/counterparties" element={<CounterpartiesPage session={session} />} />
           <Route path="/organizations/:organizationId/destinations" element={<Navigate to="counterparties" replace />} />
-          <Route path="/organizations/:organizationId/payments" element={<PaymentsPageV2 session={session} />} />
+          <Route path="/organizations/:organizationId/payments" element={<PaymentsPageV2 />} />
           <Route path="/organizations/:organizationId/payments/:paymentOrderId" element={<PaymentDetailPageV2 />} />
           <Route path="/organizations/:organizationId/collections" element={<CollectionsPage session={session} />} />
           <Route path="/organizations/:organizationId/collections/:collectionRequestId" element={<CollectionDetailPage />} />
@@ -701,7 +671,7 @@ function HomeRedirect({ session }: { session: AuthenticatedSession }) {
   return <Navigate to={`/organizations/${first.organization.organizationId}`} replace />;
 }
 
-function SetupPage({ session }: { session: AuthenticatedSession }) {
+function SetupPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { success, error: toastError } = useToast();
@@ -1179,11 +1149,6 @@ function ProfilePage({ session }: { session: AuthenticatedSession }) {
       ) : null}
     </main>
   );
-}
-
-function formatProfileDate(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 const PROFILE_LAMPORTS_PER_SOL = 1_000_000_000n;
@@ -1850,59 +1815,6 @@ function DeletePersonalWalletDialog(props: {
 }
 
 
-function WalletPicker({
-  wallets,
-  selectedWalletId,
-  onSelect,
-}: {
-  wallets: BrowserWalletOption[];
-  selectedWalletId?: string;
-  onSelect: (walletId?: string) => void;
-}) {
-  return (
-    <div className="wallet-picker">
-      <button
-        className={`wallet-picker-row${!selectedWalletId ? ' wallet-picker-row-active' : ''}`}
-        onClick={() => onSelect(undefined)}
-        type="button"
-      >
-        <span className="wallet-picker-main">
-          <span className="wallet-picker-icon" aria-hidden>◇</span>
-          <span className="wallet-picker-copy">
-            <strong>Auto-detect wallet</strong>
-            <small>Use first available browser wallet</small>
-          </span>
-        </span>
-        <span className="wallet-picker-badge">AUTO</span>
-      </button>
-      {wallets.map((wallet) => (
-        <button
-          key={wallet.id}
-          className={`wallet-picker-row${selectedWalletId === wallet.id ? ' wallet-picker-row-active' : ''}`}
-          disabled={!wallet.ready}
-          onClick={() => onSelect(wallet.id)}
-          type="button"
-        >
-          <span className="wallet-picker-main">
-            {wallet.icon ? (
-              <img className="wallet-picker-image" src={wallet.icon} alt="" />
-            ) : (
-              <span className="wallet-picker-icon" aria-hidden>◆</span>
-            )}
-            <span className="wallet-picker-copy">
-              <strong>{wallet.name}</strong>
-              <small>{wallet.address ? shortenAddress(wallet.address) : 'No account exposed yet'}</small>
-            </span>
-          </span>
-          <span className={`wallet-picker-badge ${wallet.ready ? 'wallet-picker-badge-ready' : 'wallet-picker-badge-disabled'}`}>
-            {wallet.ready ? 'INSTALLED' : 'UNAVAILABLE'}
-          </span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
 function PageFrame({
   eyebrow,
   title,
@@ -1931,26 +1843,6 @@ function PageFrame({
   );
 }
 
-function InlineProgressTracker({ state }: { state: string }) {
-  const stages = ['draft', 'pending_approval', 'ready_for_execution', 'execution_recorded', 'settled'];
-  const currentIndex = Math.max(
-    stages.indexOf(state === 'approved' ? 'ready_for_execution' : (state === 'closed' ? 'settled' : state)),
-    0,
-  );
-  return (
-    <span className="inline-progress" aria-label={`Progress: ${state}`}>
-      {stages.map((_, idx) => (
-        <span
-          key={idx}
-          className={`inline-progress-dot${
-            idx < currentIndex ? ' inline-progress-dot-complete' : idx === currentIndex ? ' inline-progress-dot-current' : ''
-          }`}
-        />
-      ))}
-    </span>
-  );
-}
-
 function SectionHeader({ title, description }: { title: string; description?: string }) {
   return <PanelHeader title={title} description={description} />;
 }
@@ -1967,39 +1859,9 @@ function ScreenState({ title, description }: { title: string; description: strin
   );
 }
 
-function HeroCell({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="hero-cell">
-      <span>{label}</span>
-      <strong>{children}</strong>
-    </div>
-  );
-}
-
-function StatusBadge({ tone, state, children }: { tone?: 'success' | 'warning' | 'danger' | 'neutral'; state?: string; children: ReactNode }) {
-  const resolved =
-    tone ?? (state && isPaymentOrderState(state) ? statusToneForPayment(state) : toneForGenericState(state ?? ''));
-  return <span className={`status-badge status-${resolved}`}>{children}</span>;
-}
-
 function getOrganizations(session: AuthenticatedSession) {
   return session.organizations.map((organization) => ({ organization }));
 }
-
-function findOrganization(session: AuthenticatedSession, organizationId?: string): Organization | null {
-  if (!organizationId) return null;
-  const organization = session.organizations.find((candidate) => candidate.organizationId === organizationId);
-  return organization
-    ? {
-        organizationId: organization.organizationId,
-        organizationName: organization.organizationName,
-        status: organization.status,
-        createdAt: '',
-        updatedAt: '',
-      }
-    : null;
-}
-
 
 function getFormString(formData: FormData, key: string) {
   return String(formData.get(key) ?? '').trim();
@@ -2008,55 +1870,4 @@ function getFormString(formData: FormData, key: string) {
 function getOptionalFormString(formData: FormData, key: string) {
   const value = getFormString(formData, key);
   return value || null;
-}
-
-function normalizeDateInput(value: string | null) {
-  if (!value) return undefined;
-  return value.includes('T') ? new Date(value).toISOString() : new Date(`${value}T00:00:00`).toISOString();
-}
-
-function usdcToRaw(value: string) {
-  const trimmed = value.trim();
-  if (/^\d+$/.test(trimmed) && trimmed.length > 6) return trimmed;
-  const [wholePart, decimalPart = ''] = trimmed.split('.');
-  if (!/^\d+$/.test(wholePart || '0') || !/^\d*$/.test(decimalPart)) {
-    throw new Error('Amount must be a valid USDC number.');
-  }
-  const decimals = decimalPart.padEnd(6, '0').slice(0, 6);
-  return `${wholePart || '0'}${decimals}`.replace(/^0+(?=\d)/, '') || '0';
-}
-
-function yesNo(value: boolean) {
-  return value ? 'yes' : 'no';
-}
-
-function assetSymbol(asset: string | null | undefined) {
-  return (asset ?? '').toUpperCase();
-}
-
-function formatDateCompact(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'N/A';
-  return new Intl.DateTimeFormat(undefined, {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  }).format(date);
-}
-
-function walletLabel(address: Pick<TreasuryWallet, 'displayName' | 'address'> | null | undefined) {
-  if (!address) return null;
-  return address.displayName ?? shortenAddress(address.address);
-}
-
-function downloadJson(fileName: string, payload: unknown) {
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-  const url = window.URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = fileName;
-  document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
-  window.URL.revokeObjectURL(url);
 }

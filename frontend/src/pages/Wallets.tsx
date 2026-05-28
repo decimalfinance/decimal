@@ -152,7 +152,6 @@ export function WalletsPage({ session: _session }: { session: AuthenticatedSessi
       ),
     [rows, solUsdPrice],
   );
-  const fetchedAt = balancesQuery.data?.fetchedAt;
   const isInitialLoading = balancesQuery.isLoading && rows.length === 0;
 
   if (!organizationId) {
@@ -436,11 +435,6 @@ function AddWalletDialog(props: {
 }
 
 const ALL_SQUADS_PERMISSIONS: SquadsPermission[] = ['initiate', 'vote', 'execute'];
-const SQUADS_PERMISSION_LABEL: Record<SquadsPermission, string> = {
-  initiate: 'Initiate',
-  vote: 'Vote',
-  execute: 'Execute',
-};
 
 // CreateSquadsTreasuryDialog
 //
@@ -689,8 +683,6 @@ function CreateSquadsTreasuryDialog(props: {
 
   const intent = pendingIntent?.intent;
   const tx = pendingIntent?.transaction;
-  const requiredSignerWallet =
-    tx && personalWallets.find((w) => w.walletAddress === tx.requiredSigner);
 
   return (
     <DialogShell labelledBy="rd-squads-title" onClose={onClose}>
@@ -1315,10 +1307,3 @@ function RefreshIcon({ spinning }: { spinning?: boolean }) {
   );
 }
 
-function formatRelative(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  if (diff < 5_000) return 'just now';
-  if (diff < 60_000) return `${Math.round(diff / 1000)}s ago`;
-  if (diff < 3_600_000) return `${Math.round(diff / 60_000)}m ago`;
-  return new Date(iso).toLocaleTimeString();
-}
