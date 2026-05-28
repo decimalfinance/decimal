@@ -4,7 +4,7 @@ import { PublicKey, TransactionMessage, VersionedTransaction } from '@solana/web
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { badRequest, conflict, notFound } from '../infra/api-errors.js';
 import { prisma } from '../infra/prisma.js';
-import { submitPaymentOrder } from '../payments/orders.js';
+import { ensurePaymentOrderAuditRequest } from '../payments/orders.js';
 import {
   buildDestinationAtaCreateInstruction,
   deriveUsdcAtaForWallet,
@@ -216,7 +216,7 @@ export async function executePaymentOrderWithSpendingLimit(
   }
 
   if (!paymentOrder.transferRequests.length && paymentOrder.state === 'draft') {
-    await submitPaymentOrder({
+    await ensurePaymentOrderAuditRequest({
       organizationId,
       paymentOrderId,
       actorUserId,

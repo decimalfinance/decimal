@@ -7,7 +7,7 @@ import { config } from '../config.js';
 import { logger } from '../infra/logger.js';
 import { prisma } from '../infra/prisma.js';
 import { ensureDefaultAutomationAgentWithWallet } from '../agents/automation.js';
-import { submitPaymentOrder } from '../payments/orders.js';
+import { ensurePaymentOrderAuditRequest } from '../payments/orders.js';
 import { fundNewDevnetWalletIfConfigured } from '../wallets/devnet-funding.js';
 import { signPrivySolanaTransaction } from '../wallets/personal.js';
 import {
@@ -967,7 +967,7 @@ async function createSquadsPaymentProposalIntentForCreator(args: {
     paymentOrder = await loadPaymentOrderForSquadsProposal(organizationId, input.paymentOrderId);
   }
   if (!paymentOrder.transferRequests.length && paymentOrder.state === 'draft') {
-    await submitPaymentOrder({
+    await ensurePaymentOrderAuditRequest({
       organizationId,
       paymentOrderId: paymentOrder.paymentOrderId,
       actorUserId: actor.actorUserId,
@@ -1202,7 +1202,7 @@ export async function createSquadsBatchedPaymentProposalIntent(
 
   for (const order of paymentOrders) {
     if (!order.transferRequests.length && order.state === 'draft') {
-      await submitPaymentOrder({
+      await ensurePaymentOrderAuditRequest({
         organizationId,
         paymentOrderId: order.paymentOrderId,
         actorUserId,

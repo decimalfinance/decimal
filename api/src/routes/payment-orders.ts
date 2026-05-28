@@ -1,20 +1,17 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import {
-  attachPaymentOrderSignature,
   cancelPaymentOrder,
   clearPaymentOrderReview,
   createPaymentOrder,
   getPaymentOrderDetail,
   listPaymentOrders,
-  preparePaymentOrderExecution,
   updatePaymentOrder,
 } from '../payments/orders.js';
 import { importPaymentOrdersFromCsv, previewPaymentOrdersCsv } from '../payments/csv-intake.js';
 import { tryAdvancePaymentOrderWithAgent } from '../agents/payment-automation.js';
 import { buildPaymentOrderProofPacket } from '../payments/order-proof.js';
 import { isPaymentOrderState } from '../payments/order-state.js';
-import { isSolanaSignatureLike } from '../solana.js';
 import { assertOrganizationAccess, assertOrganizationAdmin } from '../auth/organization-access.js';
 import { actorFromAuth } from '../auth/actor.js';
 import { asyncRoute, sendCreated, sendJson, sendList, unwrapItems } from '../infra/route-helpers.js';
@@ -35,8 +32,7 @@ const amountRawSchema = z.union([
 ]);
 
 const createPaymentOrderSchema = z.object({
-  counterpartyWalletId: z.string().uuid().optional(),
-  destinationId: z.string().uuid().optional(),
+  counterpartyWalletId: z.string().uuid(),
   sourceTreasuryWalletId: z.string().uuid().optional(),
   amountRaw: amountRawSchema,
   asset: z.string().trim().min(1).max(20).default('usdc'),
@@ -47,10 +43,7 @@ const createPaymentOrderSchema = z.object({
   dueAt: z.string().datetime().optional(),
   sourceBalanceSnapshotJson: z.record(z.any()).default({ status: 'unknown' }),
   metadataJson: z.record(z.any()).default({}),
-  submitNow: z.boolean().default(false),
-}).refine((value) => Boolean(value.counterpartyWalletId ?? value.destinationId), {
-  message: 'counterpartyWalletId is required',
-  path: ['counterpartyWalletId'],
+  autoAdvance: z.boolean().default(false),
 });
 
 const updatePaymentOrderSchema = z.object({
@@ -77,20 +70,6 @@ const batchCsvSchema = z.object({
   autoAdvance: z.boolean().default(true),
 });
 
-const prepareExecutionSchema = z.object({
-  sourceTreasuryWalletId: z.string().uuid().optional(),
-});
-
-const attachSignatureSchema = z.object({
-  submittedSignature: z.string().trim().refine(isSolanaSignatureLike, 'Invalid Solana signature').optional(),
-  externalReference: z.string().trim().max(500).optional(),
-  submittedAt: z.string().datetime().optional(),
-  metadataJson: z.record(z.any()).default({}),
-}).refine(
-  (value) => Boolean(value.submittedSignature || value.externalReference || Object.keys(value.metadataJson).length),
-  'A submitted signature, external execution reference, or metadata is required',
-);
-
 const proofQuerySchema = z.object({
   format: z.literal('json').default('json'),
 });
@@ -98,7 +77,6 @@ const proofQuerySchema = z.object({
 const clearReviewSchema = z.object({
   reviewNote: z.string().trim().max(2000).optional().nullable(),
   trustCounterpartyWallet: z.boolean().default(true),
-  submitAfterClear: z.boolean().default(true),
   autoAdvance: z.boolean().default(true),
 });
 
@@ -132,7 +110,7 @@ paymentOrdersRouter.post('/organizations/:organizationId/payment-orders', asyncR
     const created = await createPaymentOrder({
       organizationId,
       ...actor,
-      counterpartyWalletId: input.counterpartyWalletId ?? input.destinationId!,
+      counterpartyWalletId: input.counterpartyWalletId,
       sourceTreasuryWalletId: input.sourceTreasuryWalletId,
       amountRaw: input.amountRaw,
       asset: input.asset,
@@ -143,9 +121,8 @@ paymentOrdersRouter.post('/organizations/:organizationId/payment-orders', asyncR
       dueAt: input.dueAt ? new Date(input.dueAt) : null,
       sourceBalanceSnapshotJson: input.sourceBalanceSnapshotJson,
       metadataJson: input.metadataJson,
-      submitNow: false,
     });
-    const automation = input.submitNow
+    const automation = input.autoAdvance
       ? await tryAdvancePaymentOrderWithAgent({
           organizationId,
           paymentOrderId: created.paymentOrderId,
@@ -153,7 +130,7 @@ paymentOrdersRouter.post('/organizations/:organizationId/payment-orders', asyncR
           sourceTreasuryWalletId: input.sourceTreasuryWalletId,
         })
       : null;
-    const detail = input.submitNow
+    const detail = input.autoAdvance
       ? await getPaymentOrderDetail(organizationId, created.paymentOrderId)
       : created;
 
@@ -180,7 +157,6 @@ paymentOrdersRouter.post('/organizations/:organizationId/payment-orders/batch-cs
       csv: input.csv,
       sourceTreasuryWalletId: input.sourceTreasuryWalletId,
       batchLabel: input.batchLabel,
-      submitReadyOrders: true,
     });
     const automation = input.autoAdvance
       ? await Promise.all(result.paymentOrders.map((item) =>
@@ -225,21 +201,6 @@ paymentOrdersRouter.patch('/organizations/:organizationId/payment-orders/:paymen
   }
 });
 
-paymentOrdersRouter.post('/organizations/:organizationId/payment-orders/:paymentOrderId/submit', async (req, res, next) => {
-  try {
-    const { organizationId, paymentOrderId } = paymentOrderParamsSchema.parse(req.params);
-    await assertOrganizationAdmin(organizationId, req.auth!);
-
-    res.json(await tryAdvancePaymentOrderWithAgent({
-      organizationId,
-      paymentOrderId,
-      actorUserId: req.auth!.userId,
-    }));
-  } catch (error) {
-    next(error);
-  }
-});
-
 paymentOrdersRouter.post('/organizations/:organizationId/payment-orders/:paymentOrderId/clear-review', asyncRoute(async (req, res) => {
     const { organizationId, paymentOrderId } = paymentOrderParamsSchema.parse(req.params);
     await assertOrganizationAdmin(organizationId, req.auth!);
@@ -252,7 +213,6 @@ paymentOrdersRouter.post('/organizations/:organizationId/payment-orders/:payment
       ...actor,
       reviewNote: input.reviewNote,
       trustCounterpartyWallet: input.trustCounterpartyWallet,
-      submitAfterClear: false,
     });
     const automation = input.autoAdvance
       ? await tryAdvancePaymentOrderWithAgent({
@@ -296,55 +256,6 @@ paymentOrdersRouter.post('/organizations/:organizationId/payment-orders/:payment
     next(error);
   }
 });
-
-paymentOrdersRouter.post(
-  '/organizations/:organizationId/payment-orders/:paymentOrderId/prepare-execution',
-  async (req, res, next) => {
-    try {
-      const { organizationId, paymentOrderId } = paymentOrderParamsSchema.parse(req.params);
-      await assertOrganizationAdmin(organizationId, req.auth!);
-      const input = prepareExecutionSchema.parse(req.body);
-      const actor = actorFromAuth(req.auth!);
-
-      const prepared = await preparePaymentOrderExecution({
-        organizationId,
-        paymentOrderId,
-        ...actor,
-        sourceTreasuryWalletId: input.sourceTreasuryWalletId,
-      });
-
-      res.status(201).json(prepared);
-    } catch (error) {
-      next(error);
-    }
-  },
-);
-
-paymentOrdersRouter.post(
-  '/organizations/:organizationId/payment-orders/:paymentOrderId/attach-signature',
-  async (req, res, next) => {
-    try {
-      const { organizationId, paymentOrderId } = paymentOrderParamsSchema.parse(req.params);
-      await assertOrganizationAdmin(organizationId, req.auth!);
-      const input = attachSignatureSchema.parse(req.body);
-      const actor = actorFromAuth(req.auth!);
-
-      const executionRecord = await attachPaymentOrderSignature({
-        organizationId,
-        paymentOrderId,
-        ...actor,
-        submittedSignature: input.submittedSignature,
-        externalReference: input.externalReference,
-        submittedAt: input.submittedAt ? new Date(input.submittedAt) : null,
-        metadataJson: input.metadataJson,
-      });
-
-      res.json(executionRecord);
-    } catch (error) {
-      next(error);
-    }
-  },
-);
 
 paymentOrdersRouter.get(
   '/organizations/:organizationId/payment-orders/:paymentOrderId/proof',

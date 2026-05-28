@@ -154,7 +154,6 @@ export async function uploadInvoiceToPaymentOrders(args: {
           },
         },
         initialState: triggeredRules.length ? 'needs_review' : 'draft',
-        submitNow: false,
       });
 
       created.push({

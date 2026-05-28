@@ -43,7 +43,6 @@ export async function importPaymentOrdersFromCsv(args: {
   csv: string;
   sourceTreasuryWalletId?: string | null;
   batchLabel?: string | null;
-  submitReadyOrders?: boolean;
 }) {
   const parsedRows = await parseAndResolvePaymentCsv(args.organizationId, args.csv);
   const inputBatchId = crypto.randomUUID();
@@ -79,7 +78,6 @@ export async function importPaymentOrdersFromCsv(args: {
           counterpartyName: item.parsed.counterpartyName,
         },
         initialState: needsReview ? 'needs_review' : 'draft',
-        submitNow: false,
       });
 
       items.push({

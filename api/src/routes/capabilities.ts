@@ -63,7 +63,7 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
         id: 'single_payment',
         summary: 'Create one payment order, let the Decimal agent route it through an active spending limit or Squads proposal, execute it, verify settlement by RPC, then export proof.',
         steps: [
-          'POST /organizations/:organizationId/payment-orders with submitNow=true',
+          'POST /organizations/:organizationId/payment-orders with autoAdvance=true',
           'POST /organizations/:organizationId/payment-orders/:paymentOrderId/agent/advance for idempotent router retry/manual agent routing',
           'POST /organizations/:organizationId/proposals/:decimalProposalId/confirm-submission',
           'POST /organizations/:organizationId/proposals/:decimalProposalId/confirm-execution',
@@ -191,11 +191,8 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
         routes: [
           'GET /organizations/:organizationId/payment-orders',
           'POST /organizations/:organizationId/payment-orders',
-          'POST /organizations/:organizationId/payment-orders/:paymentOrderId/submit',
           'POST /organizations/:organizationId/payment-orders/:paymentOrderId/clear-review',
           'POST /organizations/:organizationId/payment-orders/:paymentOrderId/agent/advance',
-          'POST /organizations/:organizationId/payment-orders/:paymentOrderId/prepare-execution',
-          'POST /organizations/:organizationId/payment-orders/:paymentOrderId/attach-signature',
           'POST /organizations/:organizationId/collections/:collectionRequestId/cancel',
           'PATCH /organizations/:organizationId/counterparty-wallets/:counterpartyWalletId',
           'POST /organizations/:organizationId/payment-orders/:paymentOrderId/execute-with-spending-limit',

@@ -1163,7 +1163,7 @@ test('automation agents can receive Squads spending limits and execute bounded p
     const paymentOrder = await post(
       `/organizations/${organization.organizationId}/payment-orders`,
       {
-        destinationId: destination.destinationId,
+        counterpartyWalletId: destination.destinationId,
         amountRaw: '25000',
         memo: 'Research tool subscription',
         externalReference: 'AGENT-001',
@@ -1241,11 +1241,11 @@ test('automation agents can receive Squads spending limits and execute bounded p
     const routedPaymentOrder = await post(
       `/organizations/${organization.organizationId}/payment-orders`,
       {
-        destinationId: destination.destinationId,
+        counterpartyWalletId: destination.destinationId,
         amountRaw: '25000',
         memo: 'Agent-routed research spend',
         externalReference: 'AGENT-ROUTED-001',
-        submitNow: true,
+        autoAdvance: true,
       },
       register.sessionToken,
     );
@@ -1456,7 +1456,7 @@ test('Squads vault payment proposals turn payment orders into executable treasur
   const paymentOrder = await post(
     `/organizations/${organization.organizationId}/payment-orders`,
     {
-      destinationId: destination.destinationId,
+      counterpartyWalletId: destination.destinationId,
       sourceTreasuryWalletId: treasuryWallet.treasuryWalletId,
       amountRaw: '10000',
       externalReference: 'INV-SQUADS-1',

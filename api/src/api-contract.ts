@@ -220,10 +220,9 @@ export const API_ENDPOINTS = [
   endpoint('create_payment_order', 'POST', '/organizations/{organizationId}/payment-orders', ['payment orders'], 'Create payment order', 'session', { scope: 'payments:write' }),
   endpoint('get_payment_order', 'GET', '/organizations/{organizationId}/payment-orders/{paymentOrderId}', ['payment orders'], 'Get payment order detail', 'session', { scope: 'organization:read' }),
   endpoint('update_payment_order', 'PATCH', '/organizations/{organizationId}/payment-orders/{paymentOrderId}', ['payment orders'], 'Update payment order', 'session', { scope: 'payments:write' }),
-  endpoint('submit_payment_order', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/submit', ['payment orders'], 'Legacy alias for agent advance on a payment order', 'session', { scope: 'payments:write' }),
   endpoint('clear_payment_order_review', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/clear-review', ['payment orders'], 'Clear an AP-intake flagged payment order and advance it to the proposal-ready path', 'session', {
     scope: 'payments:write',
-    requestBody: { reviewNote: 'string optional', trustCounterpartyWallet: 'boolean default true', submitAfterClear: 'boolean default true', autoAdvance: 'boolean default true' },
+    requestBody: { reviewNote: 'string optional', trustCounterpartyWallet: 'boolean default true', autoAdvance: 'boolean default true' },
     response: { automation: 'agent routing result when autoAdvance is true' },
   }),
   endpoint('advance_payment_order_with_agent', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/agent/advance', ['payment orders', 'automation agents', 'squads'], 'Ask the Decimal agent to route a green payment through a spending limit or Squads proposal', 'session', {
@@ -231,8 +230,6 @@ export const API_ENDPOINTS = [
     requestBody: { sourceTreasuryWalletId: 'uuid optional' },
   }),
   endpoint('cancel_payment_order', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/cancel', ['payment orders'], 'Cancel payment order', 'session', { scope: 'payments:write' }),
-  endpoint('prepare_payment_order_execution', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/prepare-execution', ['payment orders'], 'Prepare signer-ready Solana transfer packet', 'session', { scope: 'execution:write' }),
-  endpoint('attach_payment_order_signature', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/attach-signature', ['payment orders'], 'Attach submitted execution signature', 'session', { scope: 'execution:write' }),
   endpoint('execute_payment_order_with_spending_limit', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/execute-with-spending-limit', ['payment orders', 'automation agents', 'squads'], 'Execute a payment order through an active Squads spending limit signed by the agent wallet', 'session', {
     scope: 'execution:write',
     requestBody: { spendingLimitPolicyId: 'uuid', memo: 'string optional' },
