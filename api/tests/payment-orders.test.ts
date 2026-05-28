@@ -10,7 +10,6 @@ import { setInvoiceIntakeRuntimeForTests } from '../src/payments/invoice-intake.
 const TRUNCATE_SQL = `
 TRUNCATE TABLE
   auth_sessions,
-  wallet_challenges,
   organization_wallet_authorizations,
   spending_limit_executions,
   spending_limit_policy_destinations,

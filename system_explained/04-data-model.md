@@ -8,14 +8,11 @@ Important tables:
 - `organization_memberships`: roles inside organizations.
 - `organization_invites`: email-bound invites.
 - `user_wallets`: personal signing wallets.
-- `wallet_challenges`: external-wallet ownership challenge records.
 - `treasury_wallets`: organization treasury accounts, including Squads vaults.
 - `organization_wallet_authorizations`: local link between personal wallets and treasury permissions.
 - `counterparties`: business labels.
 - `counterparty_wallets`: unified address book for payees, payers, and internal receiving wallets.
-- `payment_requests`: input-layer payment requests.
-- `payment_runs`: CSV/batch payment parent.
-- `payment_orders`: one outbound payment intent.
+- `payment_orders`: one outbound payment intent. Batch imports are grouped by `input_batch_id` and `input_batch_label` on this table, not a separate run table.
 - `collection_runs`: batch wrapper for expected inbound collections.
 - `collection_requests`: expected inbound collection intents.
 - `collection_request_events`: collection audit trail.
@@ -33,7 +30,7 @@ Important tables:
 
 `users` are global human accounts. `organizations` are tenants. A user receives access through `organization_memberships`; joining an organization should happen through `organization_invites`.
 
-`user_wallets` are personal signing wallets. They are not treasury wallets and should not be treated as organization funds. A personal wallet can be linked to organization permissions through `organization_wallet_authorizations`.
+`user_wallets` are personal signing wallets. They are Privy-managed in the active product path, not browser-wallet challenge records. They are not treasury wallets and should not be treated as organization funds. A personal wallet can be linked to organization permissions through `organization_wallet_authorizations`.
 
 ## Treasury State
 
@@ -64,17 +61,17 @@ Key rules:
 - `walletType` describes intent, for example payee, payer, wallet, or internal receiver.
 - `trustState` gates outbound execution. Unreviewed or blocked wallets should not be paid from a Squads treasury.
 - `isInternal` marks organization-controlled receiving addresses created for collection bookkeeping.
-- Payment orders, payment requests, collection requests, and transfer requests all point at `counterpartyWalletId` where applicable.
+- Payment orders, collection requests, and transfer requests all point at `counterpartyWalletId` where applicable.
 
 This is the correct abstraction for the current product because the same address can be both a payer and a payee over time.
 
 ## Payment State
 
-`payment_requests` are input-layer requests. `payment_orders` are executable outbound payment intents. `payment_runs` group many orders into one batch flow.
+`payment_orders` are executable outbound payment intents. Manual entry, CSV rows, and invoice extraction all converge into this one table.
 
 For compatibility with earlier code, each payment order can still link to a `transfer_request`. That row carries approval and settlement state used by the proof builders.
 
-Document imports are not a separate table. They become `payment_runs` with metadata about extraction and skipped rows.
+Document and CSV imports are not separate tables. Batch metadata is stored on the resulting `payment_orders` through `input_batch_id`, `input_batch_label`, and `metadata_json`.
 
 ## Collection State
 
@@ -96,6 +93,9 @@ The following old tables are no longer part of the active model:
 - `collection_sources`.
 - `exception_notes`.
 - `exception_states`.
+- `payment_requests`.
+- `payment_runs`.
+- `wallet_challenges`.
 - workspace tables.
 
 RPC settlement mismatches are represented in read models and proposal metadata, not persisted into a separate exception workflow.
