@@ -161,12 +161,7 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
   });
   const paymentsIncompleteCount = organizationSummaryQuery.data?.paymentsIncompleteCount ?? 0;
   const collectionsOpenCount = organizationSummaryQuery.data?.collectionsOpenCount ?? 0;
-  // Destination and CollectionSource are now one CounterpartyWallet entity. The
-  // backend still emits both legacy fields with the same total — read either.
-  const unreviewedWalletsCount =
-    organizationSummaryQuery.data?.destinationsUnreviewedCount ??
-    organizationSummaryQuery.data?.payersUnreviewedCount ??
-    0;
+  const unreviewedWalletsCount = organizationSummaryQuery.data?.unreviewedWalletsCount ?? 0;
 
   // Treasury gate: payments / collections / overview are useless without a
   // treasury to send money from. When the active org has no treasury, replace

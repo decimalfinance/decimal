@@ -85,18 +85,12 @@ organizationsRouter.get('/organizations/:organizationId/summary', async (req, re
       }),
     ]);
 
-    // A wallet no longer has a direction — same row may serve outbound and
-    // inbound flows. Surface a single unreviewed-wallets total under both
-    // legacy field names so the existing frontend OrganizationSummary type
-    // keeps compiling. Drop one of these once the UI converges on a single
-    // count.
     res.json({
       pendingApprovalCount,
       executionQueueCount,
       paymentsIncompleteCount,
       collectionsOpenCount,
-      destinationsUnreviewedCount: unreviewedWalletsCount,
-      payersUnreviewedCount: unreviewedWalletsCount,
+      unreviewedWalletsCount,
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {
