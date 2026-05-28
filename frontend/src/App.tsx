@@ -1,30 +1,43 @@
-import { useEffect, useMemo } from 'react';
+import { Suspense, lazy, useEffect, useMemo } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AppSidebar } from './Sidebar';
 import { api } from './api';
-import { InboxPage } from './pages/Inbox';
-import { ProposalRedirectPage } from './pages/ProposalRedirect';
-import { PaymentsPage as PaymentsPageV2 } from './pages/Payments';
-import { PaymentDetailPage as PaymentDetailPageV2 } from './pages/PaymentDetail';
-import { CollectionsPage } from './pages/Collections';
-import { CollectionDetailPage } from './pages/CollectionDetail';
-import { CollectionRunDetailPage } from './pages/CollectionRunDetail';
-import { WalletsPage } from './pages/Wallets';
-import { CounterpartiesPage } from './pages/Counterparties';
-import { LandingPage as LandingPageV2 } from './pages/Landing';
-import { MembersPage } from './pages/Members';
-import { TreasuryWalletDetailPage } from './pages/TreasuryWalletDetail';
-import { OrganizationProposalsPage } from './pages/OrganizationProposals';
-import { OrganizationProposalDetailPage } from './pages/OrganizationProposalDetail';
-import { InviteAcceptPage } from './pages/InviteAccept';
-import { LoginPage, OAuthCallbackPage, RegisterPage, VerifyEmailPage } from './pages/auth';
-import { HomeRedirect, SetupPage } from './pages/Setup';
-import { ProfilePage } from './pages/Profile';
 import type { AuthenticatedSession } from './api';
 import { setRuntimeSolanaConfig } from './solana-network';
 import { ScreenState } from './ui-primitives';
 import { getOrganizations, queryKeys } from './lib/app-helpers';
+
+// Lazy-loaded route pages. Each becomes its own chunk, so the main bundle
+// only ships the shell + the first matched page. Notably keeps Three.js
+// (Landing) and Solana web3 (Wallets, PaymentDetail, TreasuryWalletDetail,
+// OrganizationProposalDetail) out of the initial download for everyone else.
+const InboxPage = lazy(() => import('./pages/Inbox').then((m) => ({ default: m.InboxPage })));
+const ProposalRedirectPage = lazy(() => import('./pages/ProposalRedirect').then((m) => ({ default: m.ProposalRedirectPage })));
+const PaymentsPageV2 = lazy(() => import('./pages/Payments').then((m) => ({ default: m.PaymentsPage })));
+const PaymentDetailPageV2 = lazy(() => import('./pages/PaymentDetail').then((m) => ({ default: m.PaymentDetailPage })));
+const CollectionsPage = lazy(() => import('./pages/Collections').then((m) => ({ default: m.CollectionsPage })));
+const CollectionDetailPage = lazy(() => import('./pages/CollectionDetail').then((m) => ({ default: m.CollectionDetailPage })));
+const CollectionRunDetailPage = lazy(() => import('./pages/CollectionRunDetail').then((m) => ({ default: m.CollectionRunDetailPage })));
+const WalletsPage = lazy(() => import('./pages/Wallets').then((m) => ({ default: m.WalletsPage })));
+const CounterpartiesPage = lazy(() => import('./pages/Counterparties').then((m) => ({ default: m.CounterpartiesPage })));
+const LandingPageV2 = lazy(() => import('./pages/Landing').then((m) => ({ default: m.LandingPage })));
+const MembersPage = lazy(() => import('./pages/Members').then((m) => ({ default: m.MembersPage })));
+const TreasuryWalletDetailPage = lazy(() => import('./pages/TreasuryWalletDetail').then((m) => ({ default: m.TreasuryWalletDetailPage })));
+const OrganizationProposalsPage = lazy(() => import('./pages/OrganizationProposals').then((m) => ({ default: m.OrganizationProposalsPage })));
+const OrganizationProposalDetailPage = lazy(() => import('./pages/OrganizationProposalDetail').then((m) => ({ default: m.OrganizationProposalDetailPage })));
+const InviteAcceptPage = lazy(() => import('./pages/InviteAccept').then((m) => ({ default: m.InviteAcceptPage })));
+const LoginPage = lazy(() => import('./pages/auth').then((m) => ({ default: m.LoginPage })));
+const RegisterPage = lazy(() => import('./pages/auth').then((m) => ({ default: m.RegisterPage })));
+const OAuthCallbackPage = lazy(() => import('./pages/auth').then((m) => ({ default: m.OAuthCallbackPage })));
+const VerifyEmailPage = lazy(() => import('./pages/auth').then((m) => ({ default: m.VerifyEmailPage })));
+const HomeRedirect = lazy(() => import('./pages/Setup').then((m) => ({ default: m.HomeRedirect })));
+const SetupPage = lazy(() => import('./pages/Setup').then((m) => ({ default: m.SetupPage })));
+const ProfilePage = lazy(() => import('./pages/Profile').then((m) => ({ default: m.ProfilePage })));
+
+const RouteFallback = () => (
+  <ScreenState title="Loading" description="Fetching the next page." />
+);
 
 export function App() {
   const location = useLocation();
@@ -53,17 +66,19 @@ export function App() {
   }, [capabilitiesQuery.data?.solana]);
 
   return (
-    <Routes>
-      <Route path="/" element={<LandingPageV2 />} />
-      <Route path="/landing" element={<LandingPageV2 />} />
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/register" element={<RegisterPage />} />
-      <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
-      <Route path="/invites/:inviteToken" element={<InviteAcceptPage />} />
-      <Route path="/verify-email" element={<RequireSession sessionQuery={sessionQuery} />} />
-      <Route path="/*" element={<RequireSession sessionQuery={sessionQuery} />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <Suspense fallback={<RouteFallback />}>
+      <Routes>
+        <Route path="/" element={<LandingPageV2 />} />
+        <Route path="/landing" element={<LandingPageV2 />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+        <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
+        <Route path="/invites/:inviteToken" element={<InviteAcceptPage />} />
+        <Route path="/verify-email" element={<RequireSession sessionQuery={sessionQuery} />} />
+        <Route path="/*" element={<RequireSession sessionQuery={sessionQuery} />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Suspense>
   );
 }
 
@@ -150,26 +165,28 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
         {shouldShowTreasuryGate ? (
           <TreasurySetupGate organizationId={activeOrganizationId!} />
         ) : (
-        <Routes>
-          <Route path="/" element={<HomeRedirect session={session} />} />
-          <Route path="/setup" element={<SetupPage />} />
-          <Route path="/profile" element={<ProfilePage session={session} />} />
-          <Route path="/organizations/:organizationId" element={<InboxPage session={session} />} />
-          <Route path="/organizations/:organizationId/wallets" element={<WalletsPage session={session} />} />
-          <Route path="/organizations/:organizationId/wallets/:treasuryWalletId" element={<TreasuryWalletDetailPage session={session} />} />
-          <Route path="/organizations/:organizationId/proposals" element={<OrganizationProposalsPage session={session} />} />
-          <Route path="/organizations/:organizationId/proposals/:decimalProposalId" element={<ProposalRedirectPage />} />
-          <Route path="/organizations/:organizationId/proposals/:decimalProposalId/legacy" element={<OrganizationProposalDetailPage session={session} />} />
-          <Route path="/organizations/:organizationId/members" element={<MembersPage session={session} />} />
-          <Route path="/organizations/:organizationId/counterparties" element={<CounterpartiesPage session={session} />} />
-          <Route path="/organizations/:organizationId/destinations" element={<Navigate to="counterparties" replace />} />
-          <Route path="/organizations/:organizationId/payments" element={<PaymentsPageV2 />} />
-          <Route path="/organizations/:organizationId/payments/:paymentOrderId" element={<PaymentDetailPageV2 />} />
-          <Route path="/organizations/:organizationId/collections" element={<CollectionsPage session={session} />} />
-          <Route path="/organizations/:organizationId/collections/:collectionRequestId" element={<CollectionDetailPage />} />
-          <Route path="/organizations/:organizationId/collection-runs/:collectionRunId" element={<CollectionRunDetailPage />} />
-          <Route path="/organizations/:organizationId/payers" element={<Navigate to="../counterparties" replace />} />
-        </Routes>
+          <Suspense fallback={<RouteFallback />}>
+            <Routes>
+              <Route path="/" element={<HomeRedirect session={session} />} />
+              <Route path="/setup" element={<SetupPage />} />
+              <Route path="/profile" element={<ProfilePage session={session} />} />
+              <Route path="/organizations/:organizationId" element={<InboxPage session={session} />} />
+              <Route path="/organizations/:organizationId/wallets" element={<WalletsPage session={session} />} />
+              <Route path="/organizations/:organizationId/wallets/:treasuryWalletId" element={<TreasuryWalletDetailPage session={session} />} />
+              <Route path="/organizations/:organizationId/proposals" element={<OrganizationProposalsPage session={session} />} />
+              <Route path="/organizations/:organizationId/proposals/:decimalProposalId" element={<ProposalRedirectPage />} />
+              <Route path="/organizations/:organizationId/proposals/:decimalProposalId/legacy" element={<OrganizationProposalDetailPage session={session} />} />
+              <Route path="/organizations/:organizationId/members" element={<MembersPage session={session} />} />
+              <Route path="/organizations/:organizationId/counterparties" element={<CounterpartiesPage session={session} />} />
+              <Route path="/organizations/:organizationId/destinations" element={<Navigate to="counterparties" replace />} />
+              <Route path="/organizations/:organizationId/payments" element={<PaymentsPageV2 />} />
+              <Route path="/organizations/:organizationId/payments/:paymentOrderId" element={<PaymentDetailPageV2 />} />
+              <Route path="/organizations/:organizationId/collections" element={<CollectionsPage session={session} />} />
+              <Route path="/organizations/:organizationId/collections/:collectionRequestId" element={<CollectionDetailPage />} />
+              <Route path="/organizations/:organizationId/collection-runs/:collectionRunId" element={<CollectionRunDetailPage />} />
+              <Route path="/organizations/:organizationId/payers" element={<Navigate to="../counterparties" replace />} />
+            </Routes>
+          </Suspense>
         )}
       </main>
     </div>
