@@ -1704,13 +1704,50 @@ export function CreateSpendingLimitDialog({
   onCreated: () => void | Promise<void>;
 }) {
   const { success, error: toastError } = useToast();
-  const [step, setStep] = useState<'config' | 'review' | 'sign'>('config');
+  // Three-step flow per the design: Scope → Limit & vendors → Review.
+  // `sign` is a transient sub-state of step 2 once the user hits "Send for
+  // approval" — the button label changes through signing phases but the
+  // stepper stays on Review.
+  const [step, setStep] = useState<0 | 1 | 2>(0);
   const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
   const [amountUsd, setAmountUsd] = useState('');
   const [period, setPeriod] = useState<'one_time' | 'day' | 'week' | 'month'>('month');
   const [selectedVendorIds, setSelectedVendorIds] = useState<string[]>([]);
   const [phase, setPhase] = useState<CreateSpendingLimitPhase>('idle');
   const [phaseError, setPhaseError] = useState<string | null>(null);
+
+  // Treasury wallet — needed for the read-only Treasury / Vault chips in
+  // step 0. Cached per org so multiple instances share the result.
+  const treasuryListQuery = useQuery({
+    queryKey: ['treasury-wallets', organizationId] as const,
+    queryFn: () => api.listTreasuryWallets(organizationId),
+  });
+  const vault = useMemo(
+    () =>
+      treasuryListQuery.data?.items.find((w) => w.treasuryWalletId === treasuryWalletId) ?? null,
+    [treasuryListQuery.data, treasuryWalletId],
+  );
+  // Parent account = primary sibling (lowest vault index) sharing the
+  // multisig PDA. Used as the read-only "Treasury" chip; this vault row
+  // becomes the "Vault" chip.
+  const parentAccountName = useMemo(() => {
+    if (!vault || vault.source !== 'squads_v4' || !vault.sourceRef) return vault?.displayName ?? '—';
+    const siblings = (treasuryListQuery.data?.items ?? [])
+      .filter((w) => w.source === 'squads_v4' && w.sourceRef === vault.sourceRef)
+      .sort((a, b) => (a.sourceVaultIndex ?? 999) - (b.sourceVaultIndex ?? 999));
+    return siblings[0]?.displayName ?? vault.displayName ?? '—';
+  }, [vault, treasuryListQuery.data]);
+
+  // Parent multisig detail — for the "needs N of M approvals" sl-banner.
+  const detailQuery = useQuery({
+    queryKey: ['treasury-wallet-detail', organizationId, treasuryWalletId] as const,
+    queryFn: () => api.getSquadsTreasuryDetail(organizationId, treasuryWalletId),
+    enabled: Boolean(organizationId && treasuryWalletId),
+  });
+  const threshold = detailQuery.data?.squads.threshold ?? 0;
+  const voterCount =
+    detailQuery.data?.squads.members.filter((m) => m.permissions.includes('vote')).length ?? 0;
 
   // Counterparty wallets — the vendors the agent can pay under this policy.
   const counterpartyWalletsQuery = useQuery({
@@ -1774,7 +1811,7 @@ export function CreateSpendingLimitDialog({
       });
     },
     onSuccess: () => {
-      setStep('review');
+      setStep(2);
     },
     onError: (err) => {
       const message = err instanceof ApiError || err instanceof Error ? err.message : 'Could not prepare the proposal.';
@@ -1785,7 +1822,6 @@ export function CreateSpendingLimitDialog({
   async function runSignAndConfirm() {
     const intent = intentMutation.data;
     if (!intent || !personalWallet) return;
-    setStep('sign');
     setPhaseError(null);
     try {
       setPhase('signing');
@@ -1810,62 +1846,180 @@ export function CreateSpendingLimitDialog({
   }
 
   const amountValid = amountUsd.trim().length > 0 && Number(amountUsd) > 0;
-  const canContinue =
-    name.trim().length > 0
-    && amountValid
-    && selectedVendorIds.length > 0
-    && Boolean(personalWallet)
-    && Boolean(agentWallet)
-    && !intentMutation.isPending;
+  const isWorking =
+    phase === 'signing' ||
+    phase === 'submitting' ||
+    phase === 'confirming-onchain' ||
+    phase === 'persisting';
+  const canContinueStep0 = name.trim().length > 0;
+  const canContinueStep1 =
+    amountValid &&
+    selectedVendorIds.length > 0 &&
+    Boolean(personalWallet) &&
+    Boolean(agentWallet);
+  const periodLabel = PERIOD_OPTIONS.find((o) => o.key === period)?.label.toLowerCase() ?? 'per month';
+
+  const reviewButtonLabel = (() => {
+    if (intentMutation.isPending) return 'Preparing…';
+    if (phase === 'signing') return 'Signing…';
+    if (phase === 'submitting') return 'Sending…';
+    if (phase === 'confirming-onchain') return 'Confirming…';
+    if (phase === 'persisting') return 'Saving…';
+    return 'Send for approval';
+  })();
+
+  // Escape closes when not mid-flight.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape' && !isWorking) onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isWorking, onClose]);
+
+  // When intent is ready (mutation succeeds), advance to review.
+  useEffect(() => {
+    if (intentMutation.data && step === 1) setStep(2);
+  }, [intentMutation.data, step]);
+
+  function handleNext() {
+    if (step === 0) {
+      if (canContinueStep0) setStep(1);
+      return;
+    }
+    if (step === 1) {
+      if (canContinueStep1) {
+        intentMutation.mutate();
+      }
+      return;
+    }
+    if (step === 2) {
+      void runSignAndConfirm();
+    }
+  }
 
   return (
-    <DialogShell labelledBy="rd-spending-title" onClose={onClose}>
-      {step === 'config' ? (
-        <>
-          <h2 id="rd-spending-title" className="rd-dialog-title">New spending limit</h2>
-          <p className="rd-dialog-body">
-            Let the Decimal agent pay specific vendors up to a limit, without a team vote each time.
-          </p>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              intentMutation.mutate();
-            }}
+    <div
+      className="overlay"
+      style={{ position: 'fixed', inset: 0, zIndex: 60 }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !isWorking) onClose();
+      }}
+    >
+      <div
+        className="dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="dec-new-sl-title"
+        style={{ maxWidth: 560 }}
+      >
+        <div className="dialog-head">
+          <div>
+            <h2 id="dec-new-sl-title">New spending limit</h2>
+            <p>Let the agent pay specific vendors up to a cap without a team vote each time.</p>
+          </div>
+          <button
+            type="button"
+            className="drawer-x"
+            onClick={onClose}
+            disabled={isWorking}
+            aria-label="Close"
           >
-            <label className="field" style={{ marginBottom: 20 }}>
-              Name
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Cloud bills"
-                autoComplete="off"
-                autoFocus
-                required
-              />
-            </label>
+            ×
+          </button>
+        </div>
+        <div className="dialog-body">
+          <Stepper step={step} />
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
-              <label className="field" style={{ marginBottom: 0 }}>
-                Amount (USDC)
+          {step === 0 ? (
+            <>
+              <div className="field">
+                <label className="field-label" htmlFor="dec-sl-name">Policy name</label>
                 <input
-                  type="text"
-                  inputMode="decimal"
-                  value={amountUsd}
-                  onChange={(e) => setAmountUsd(e.target.value.replace(/[^0-9.]/g, ''))}
-                  placeholder="5000"
-                  required
+                  id="dec-sl-name"
+                  className="input"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Apr cloud bills"
+                  autoFocus
                 />
-              </label>
-              <div className="field" style={{ marginBottom: 0 }}>
-                <span>Period</span>
-                <div className="period-segmented" role="radiogroup" aria-label="Period">
+              </div>
+              <div className="row" style={{ display: 'flex', gap: 12 }}>
+                <div className="field" style={{ flex: 1 }}>
+                  <label className="field-label">Treasury</label>
+                  <div
+                    className="input"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      background: 'var(--bg-surface-2)',
+                      color: 'var(--text-muted)',
+                    }}
+                  >
+                    <Ico.treasury w={14} />{parentAccountName}
+                  </div>
+                </div>
+                <div className="field" style={{ flex: 1 }}>
+                  <label className="field-label">Vault</label>
+                  <div
+                    className="input"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      background: 'var(--bg-surface-2)',
+                      color: 'var(--text-muted)',
+                    }}
+                  >
+                    <Ico.vault w={14} />{vault?.displayName ?? '—'}
+                  </div>
+                </div>
+              </div>
+              <div className="field">
+                <label className="field-label" htmlFor="dec-sl-desc">
+                  Description{' '}
+                  <span style={{ color: 'var(--text-faint)', fontWeight: 400 }}>· optional</span>
+                </label>
+                <textarea
+                  id="dec-sl-desc"
+                  className="input"
+                  rows={2}
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="What does the agent get to pay for under this policy?"
+                  style={{ resize: 'vertical' }}
+                />
+              </div>
+            </>
+          ) : null}
+
+          {step === 1 ? (
+            <>
+              <div className="field">
+                <label className="field-label">Limit</label>
+                <div className="amount-input">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={amountUsd}
+                    onChange={(e) => setAmountUsd(e.target.value.replace(/[^0-9.]/g, ''))}
+                    placeholder="5,000"
+                    autoFocus
+                  />
+                  <span className="ai-cur">USDC</span>
+                </div>
+              </div>
+              <div className="field">
+                <label className="field-label">Period</label>
+                <div className="seg-pick" role="radiogroup" aria-label="Period">
                   {PERIOD_OPTIONS.map((opt) => (
                     <button
                       key={opt.key}
                       type="button"
                       role="radio"
                       aria-checked={period === opt.key}
-                      className={`period-btn${period === opt.key ? ' period-btn-selected' : ''}`}
+                      className={period === opt.key ? 'on' : ''}
                       onClick={() => setPeriod(opt.key)}
                     >
                       {opt.label}
@@ -1873,194 +2027,215 @@ export function CreateSpendingLimitDialog({
                   ))}
                 </div>
               </div>
-            </div>
-
-            <div className="field" style={{ marginBottom: 24 }}>
-              <span>Allowed vendors</span>
-              {counterpartyWalletsQuery.isLoading ? (
-                <div className="rd-skeleton rd-skeleton-block" style={{ height: 80 }} />
-              ) : counterpartyWallets.length === 0 ? (
-                <div
-                  style={{
-                    padding: 14,
-                    border: '1px dashed var(--ax-border)',
-                    borderRadius: 8,
-                    fontSize: 13,
-                    color: 'var(--ax-text-muted)',
-                    lineHeight: 1.55,
-                  }}
-                >
-                  No trusted vendors yet. Add vendors to the address book first.
-                </div>
-              ) : (
-                <div
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    border: '1px solid var(--ax-border)',
-                    borderRadius: 8,
-                    overflow: 'hidden',
-                    maxHeight: 240,
-                    overflowY: 'auto',
-                  }}
-                >
-                  {counterpartyWallets.map((wallet, idx) => {
-                    const selected = selectedVendorIds.includes(wallet.counterpartyWalletId);
-                    return (
-                      <label
-                        key={wallet.counterpartyWalletId}
-                        className="approver-row"
-                        style={{
-                          borderTop: idx === 0 ? 'none' : '1px solid var(--ax-border)',
-                          background: selected ? 'var(--ax-surface-1)' : 'transparent',
-                          cursor: 'pointer',
-                          gridTemplateColumns: 'auto 1fr',
-                        }}
-                      >
-                        <CustomCheckbox
-                          checked={selected}
-                          onChange={() =>
+              <div className="field">
+                <label className="field-label">Vendors the agent can pay</label>
+                {counterpartyWalletsQuery.isLoading ? (
+                  <div className="skeleton" style={{ height: 100, borderRadius: 8 }} />
+                ) : counterpartyWallets.length === 0 ? (
+                  <div
+                    style={{
+                      padding: 14,
+                      border: '1px dashed var(--border-strong)',
+                      borderRadius: 8,
+                      fontSize: 13,
+                      color: 'var(--text-muted)',
+                      lineHeight: 1.55,
+                    }}
+                  >
+                    No trusted vendors yet. Add vendors to the address book first.
+                  </div>
+                ) : (
+                  <div className="check-list">
+                    {counterpartyWallets.map((wallet) => {
+                      const checked = selectedVendorIds.includes(wallet.counterpartyWalletId);
+                      return (
+                        <div
+                          key={wallet.counterpartyWalletId}
+                          className={`check-item${checked ? ' on' : ''}`}
+                          role="checkbox"
+                          aria-checked={checked}
+                          tabIndex={0}
+                          onClick={() =>
                             setSelectedVendorIds((prev) =>
                               prev.includes(wallet.counterpartyWalletId)
                                 ? prev.filter((id) => id !== wallet.counterpartyWalletId)
                                 : [...prev, wallet.counterpartyWalletId],
                             )
                           }
-                        />
-                        <div className="approver-row-body">
-                          <div className="approver-row-name">
-                            <span>{wallet.label}</span>
-                          </div>
-                          <div className="approver-row-sub">
-                            {wallet.counterparty?.displayName ?? 'Vendor'}
-                          </div>
+                          onKeyDown={(e) => {
+                            if (e.key === ' ' || e.key === 'Enter') {
+                              e.preventDefault();
+                              setSelectedVendorIds((prev) =>
+                                prev.includes(wallet.counterpartyWalletId)
+                                  ? prev.filter((id) => id !== wallet.counterpartyWalletId)
+                                  : [...prev, wallet.counterpartyWalletId],
+                              );
+                            }
+                          }}
+                          style={{ cursor: 'pointer' }}
+                        >
+                          <span className="check-box" aria-hidden>
+                            {checked ? <Ico.checkSm w={12} /> : null}
+                          </span>
+                          <span className="ci-av">{vendorInitials(wallet.label)}</span>
+                          <span className="ci-name">
+                            {wallet.counterparty?.displayName ?? wallet.label}
+                          </span>
+                          <span className="ci-sub">
+                            {wallet.trustState === 'trusted' ? 'Verified' : wallet.trustState}
+                          </span>
                         </div>
-                      </label>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </>
+          ) : null}
 
-            <div className="rd-dialog-actions" style={{ marginTop: 20 }}>
-              <button type="button" className="button button-secondary" onClick={onClose}>
+          {step === 2 ? (
+            <>
+              <div className="review-card">
+                <div className="rv-row">
+                  <span className="rv-k">Policy</span>
+                  <span className="rv-v">{name}</span>
+                </div>
+                <div className="rv-row">
+                  <span className="rv-k">Vault</span>
+                  <span className="rv-v">
+                    {parentAccountName} · {vault?.displayName ?? '—'}
+                  </span>
+                </div>
+                <div className="rv-row">
+                  <span className="rv-k">Limit</span>
+                  <span className="rv-v mono">
+                    {Number(amountUsd).toLocaleString()} USDC {periodLabel}
+                  </span>
+                </div>
+                <div className="rv-row">
+                  <span className="rv-k">Vendors</span>
+                  <span className="rv-v">
+                    {selectedVendorIds.length}{' '}
+                    {selectedVendorIds.length === 1 ? 'vendor' : 'vendors'}
+                  </span>
+                </div>
+                {description.trim() ? (
+                  <div className="rv-row">
+                    <span className="rv-k">Description</span>
+                    <span className="rv-v">{description.trim()}</span>
+                  </div>
+                ) : null}
+              </div>
+              <div className="sl-banner">
+                <span className="slb-icon">
+                  <Ico.shield w={16} />
+                </span>
+                <span className="slb-text">
+                  Creating this policy needs{' '}
+                  <b>
+                    {threshold || '—'} of {voterCount || '—'}
+                  </b>{' '}
+                  approvals from the treasury signers before it goes live.
+                </span>
+              </div>
+              {phaseError ? (
+                <div style={{ fontSize: 12, color: 'var(--danger)' }}>{phaseError}</div>
+              ) : null}
+            </>
+          ) : null}
+        </div>
+        <div className="dialog-foot">
+          {step === 0 ? (
+            <>
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ flex: 1 }}
+                onClick={handleNext}
+                disabled={!canContinueStep0}
+              >
+                Continue<Ico.arrowRight w={14} />
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={onClose}>
                 Cancel
               </button>
+            </>
+          ) : null}
+          {step === 1 ? (
+            <>
               <button
-                type="submit"
-                className="button button-primary"
-                disabled={!canContinue}
+                type="button"
+                className="btn btn-primary"
+                style={{ flex: 1 }}
+                onClick={handleNext}
+                disabled={!canContinueStep1 || intentMutation.isPending}
                 aria-busy={intentMutation.isPending}
               >
-                {intentMutation.isPending ? 'Loading…' : 'Continue'}
+                {intentMutation.isPending ? 'Preparing…' : (
+                  <>Review<Ico.arrowRight w={14} /></>
+                )}
               </button>
-            </div>
-          </form>
-        </>
-      ) : step === 'review' && intentMutation.data ? (
-        <>
-          <h2 id="rd-spending-title" className="rd-dialog-title">Review spending limit</h2>
-          <p className="rd-dialog-body">
-            Looks good? Submit it for team approval. The agent can only use it once approved.
-          </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <SquadsReviewRow label="Name" value={name} />
-            <SquadsReviewRow
-              label="Limit"
-              value={`${Number(amountUsd).toLocaleString()} USDC ${PERIOD_OPTIONS.find((o) => o.key === period)?.label.toLowerCase()}`}
-            />
-            <SquadsReviewRow
-              label="Vendors"
-              value={
-                <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {selectedVendorIds.map((id) => {
-                    const wallet = counterpartyWallets.find((w) => w.counterpartyWalletId === id);
-                    return (
-                      <li key={id} style={{ fontSize: 13 }}>
-                        {wallet?.counterparty?.displayName ?? wallet?.label ?? 'Vendor'}
-                      </li>
-                    );
-                  })}
-                </ul>
-              }
-            />
-          </div>
-          <div className="rd-dialog-actions" style={{ marginTop: 20 }}>
-            <button type="button" className="button button-secondary" onClick={() => setStep('config')}>
-              Back
-            </button>
-            <button type="button" className="button button-primary" onClick={runSignAndConfirm}>
-              Submit for approval
-            </button>
-          </div>
-        </>
-      ) : step === 'sign' ? (
-        <>
-          <h2 id="rd-spending-title" className="rd-dialog-title">Creating spending limit</h2>
-          <p className="rd-dialog-body">This takes a few seconds. Don't close this window.</p>
-          <ol style={{ listStyle: 'none', padding: 0, margin: '12px 0', display: 'grid', gap: 6 }}>
-            {[
-              { key: 'signing', label: 'Signing' },
-              { key: 'submitting', label: 'Sending' },
-              { key: 'confirming-onchain', label: 'Confirming' },
-              { key: 'persisting', label: 'Saving spending limit' },
-            ].map((s) => {
-              const order = ['idle', 'signing', 'submitting', 'confirming-onchain', 'persisting'];
-              const idx = order.indexOf(s.key);
-              const cur = order.indexOf(phase === 'error' ? 'idle' : phase);
-              const isDone = cur > idx;
-              const isActive = phase === s.key;
-              return (
-                <li key={s.key} style={{
-                  display: 'flex', alignItems: 'center', gap: 10, fontSize: 13,
-                  color: isActive ? 'var(--ax-text)' : isDone ? 'var(--ax-text-muted)' : 'var(--ax-text-faint)',
-                }}>
-                  <span aria-hidden style={{
-                    width: 18, height: 18, borderRadius: 9, display: 'inline-grid', placeItems: 'center',
-                    fontSize: 11, fontWeight: 600,
-                    background: isDone ? 'var(--ax-accent-dim)' : 'var(--ax-surface-2)',
-                    color: isDone ? 'var(--ax-accent)' : 'var(--ax-text-muted)',
-                    border: isActive ? '1px solid var(--ax-accent)' : '1px solid transparent',
-                  }}>{isDone ? '✓' : ''}</span>
-                  {s.label}
-                </li>
-              );
-            })}
-          </ol>
-          {phaseError ? (
-            <div style={{
-              padding: 12, border: '1px solid var(--ax-danger)', borderRadius: 6,
-              fontSize: 13, lineHeight: 1.5, marginBottom: 12,
-            }}>
-              <strong style={{ display: 'block', marginBottom: 4, color: 'var(--ax-danger)' }}>
-                Something went wrong
-              </strong>
-              <span style={{ color: 'var(--ax-text-muted)' }}>{phaseError}</span>
-            </div>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setStep(0)}
+                disabled={intentMutation.isPending}
+              >
+                Back
+              </button>
+            </>
           ) : null}
-          <div className="rd-dialog-actions" style={{ marginTop: 20 }}>
-            <button
-              type="button"
-              className="button button-secondary"
-              onClick={() => setStep('review')}
-              disabled={phase !== 'idle' && phase !== 'error'}
-            >
-              Back
-            </button>
-            <button
-              type="button"
-              className="button button-primary"
-              onClick={() => runSignAndConfirm()}
-              disabled={phase !== 'idle' && phase !== 'error'}
-              aria-busy={phase !== 'idle' && phase !== 'error'}
-            >
-              {phase === 'idle' || phase === 'error' ? 'Submit for approval' : 'Working…'}
-            </button>
-          </div>
-        </>
-      ) : null}
-    </DialogShell>
+          {step === 2 ? (
+            <>
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ flex: 1 }}
+                onClick={handleNext}
+                disabled={isWorking}
+                aria-busy={isWorking}
+              >
+                {reviewButtonLabel}
+                {isWorking ? null : <Ico.arrowRight w={14} />}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setStep(1)}
+                disabled={isWorking}
+              >
+                Back
+              </button>
+            </>
+          ) : null}
+        </div>
+      </div>
+    </div>
   );
+}
+
+function Stepper({ step }: { step: 0 | 1 | 2 }) {
+  const steps = ['Scope', 'Limit & vendors', 'Review'];
+  return (
+    <div className="stepper">
+      {steps.map((label, i) => (
+        <span key={label} style={{ display: 'contents' }}>
+          <div className={`st${i === step ? ' on' : i < step ? ' done' : ''}`}>
+            <span className="st-n">{i < step ? <Ico.checkSm w={10} /> : i + 1}</span>
+            {label}
+          </div>
+          {i < steps.length - 1 ? <span className="st-sep" /> : null}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function vendorInitials(label: string): string {
+  const parts = label.trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0]![0]! + parts[1]![0]!).toUpperCase();
+  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
+  return '??';
 }
 
 // ─── Remove Spending Limit dialog ─────────────────────────────────────────
