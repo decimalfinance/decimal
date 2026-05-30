@@ -12,6 +12,7 @@ import { api, ApiError } from '../api';
 import type {
   AuthenticatedSession,
   DecimalProposal,
+  SpendingLimitPolicy,
   SquadsProposalDecision,
   SquadsProposalPendingVoter,
 } from '../types';
@@ -70,6 +71,36 @@ export function OrganizationProposalDetailPage({ session }: { session: Authentic
     enabled: Boolean(organizationId && decimalProposalId),
     refetchInterval: 15_000,
   });
+
+  // Pull all SL policies for this org so spending-limit proposals can
+  // be enriched with the policy name + the actual vendor names (the
+  // raw config-action payload only carries wallet addresses). One
+  // query, cached across the spending-limits page.
+  const spendingLimitsQuery = useQuery({
+    queryKey: ['spending-limit-policies', organizationId, 'all'] as const,
+    queryFn: () => api.listSpendingLimitPolicies(organizationId!),
+    enabled: Boolean(organizationId),
+  });
+  const linkedSpendingLimitPolicy = useMemo<SpendingLimitPolicy | null>(() => {
+    const proposal = proposalQuery.data;
+    if (!proposal) return null;
+    const semantic = proposal.semanticType ?? '';
+    const policies = spendingLimitsQuery.data?.items ?? [];
+    // add_spending_limit / replace_spending_limit — the new policy
+    // points back at this proposal via decimalProposalId.
+    if (semantic === 'add_spending_limit' || semantic === 'replace_spending_limit') {
+      return policies.find((p) => p.decimalProposalId === proposal.decimalProposalId) ?? null;
+    }
+    // remove_spending_limit — the policy id is stamped on the proposal
+    // metadataJson at create time (api/src/squads/treasury.ts:559).
+    if (semantic === 'remove_spending_limit') {
+      const meta = proposal.metadataJson as { spendingLimitPolicyId?: string } | null;
+      const id = meta?.spendingLimitPolicyId;
+      if (!id) return null;
+      return policies.find((p) => p.spendingLimitPolicyId === id) ?? null;
+    }
+    return null;
+  }, [proposalQuery.data, spendingLimitsQuery.data]);
 
   const actions = useSquadsProposalActions({
     organizationId,
@@ -191,6 +222,7 @@ export function OrganizationProposalDetailPage({ session }: { session: Authentic
           actions={actions}
           syncing={syncMutation.isPending}
           onSync={() => syncMutation.mutate()}
+          linkedSpendingLimitPolicy={linkedSpendingLimitPolicy}
           onTreasuryClick={(treasuryWalletId) =>
             navigate(`/organizations/${organizationId}/wallets/${treasuryWalletId}`)
           }
@@ -224,6 +256,7 @@ function ProposalBody({
   actions,
   syncing,
   onSync,
+  linkedSpendingLimitPolicy,
   onTreasuryClick,
 }: {
   proposal: DecimalProposal;
@@ -231,6 +264,7 @@ function ProposalBody({
   actions: ReturnType<typeof useSquadsProposalActions>;
   syncing: boolean;
   onSync: () => void;
+  linkedSpendingLimitPolicy: SpendingLimitPolicy | null;
   onTreasuryClick: (treasuryWalletId: string) => void;
 }) {
   const { pendingVoterWallet, executeWallet, approving, rejecting, executing } = actions;
@@ -270,7 +304,7 @@ function ProposalBody({
         <div className="eyebrow" style={{ marginBottom: 10 }}>PROPOSAL</div>
         <div className="pagehead" style={{ paddingBottom: 16 }}>
           <div className="ph-titles">
-            <h1>{friendlyTitle(proposal)}</h1>
+            <h1>{friendlyTitle(proposal, linkedSpendingLimitPolicy)}</h1>
             <p className="ph-desc">
               {friendlySubtitle(proposal)}
               {treasuryName ? (
@@ -329,7 +363,11 @@ function ProposalBody({
       ) : null}
 
       {/* Semantic-specific summary */}
-      <SemanticSummary proposal={proposal} organizationId={organizationId} />
+      <SemanticSummary
+        proposal={proposal}
+        organizationId={organizationId}
+        linkedSpendingLimitPolicy={linkedSpendingLimitPolicy}
+      />
 
       {/* Approvals */}
       <ApprovalsSection proposal={proposal} />
@@ -465,9 +503,11 @@ function ActionBar({
 function SemanticSummary({
   proposal,
   organizationId,
+  linkedSpendingLimitPolicy,
 }: {
   proposal: DecimalProposal;
   organizationId: string;
+  linkedSpendingLimitPolicy: SpendingLimitPolicy | null;
 }) {
   const semantic = proposal.semanticType ?? '';
 
@@ -477,17 +517,194 @@ function SemanticSummary({
   if (semantic === 'send_payment_run') {
     return <PaymentRunSummary proposal={proposal} organizationId={organizationId} />;
   }
+  // Spending-limit family — render the actual policy detail when we
+  // can resolve the linked policy. The policy has the human name and
+  // resolved vendor labels; the raw action payload only carries
+  // wallet addresses, which read as gibberish to an operator.
+  if (semantic === 'add_spending_limit' || semantic === 'replace_spending_limit') {
+    return (
+      <SpendingLimitProposalSummary
+        proposal={proposal}
+        policy={linkedSpendingLimitPolicy}
+        action={semantic === 'add_spending_limit' ? 'add' : 'replace'}
+      />
+    );
+  }
+  if (semantic === 'remove_spending_limit') {
+    return (
+      <SpendingLimitProposalSummary
+        proposal={proposal}
+        policy={linkedSpendingLimitPolicy}
+        action="remove"
+      />
+    );
+  }
   if (semantic === 'add_member') return <AddMemberSummary proposal={proposal} />;
   if (semantic === 'remove_member') return <RemoveMemberSummary proposal={proposal} />;
   if (semantic === 'change_threshold') return <ChangeThresholdSummary proposal={proposal} />;
-  // Fallback for any other config-transaction proposal (spending-limit
-  // add/remove/replace, add_agent_member, future kinds). The
-  // semanticPayloadJson carries an `actions` array shaped by the
-  // backend's serializeConfigActions — render whatever fields each
-  // action exposes in plain language. Without this the page used to
-  // just say "Treasury config" with no detail, which the user (rightly)
-  // flagged as opaque.
+  // Fallback for any remaining config-transaction proposal (e.g.
+  // add_agent_member, future kinds). The semanticPayloadJson carries
+  // an `actions` array shaped by the backend's serializeConfigActions
+  // — render whatever fields each action exposes in plain language.
   return <ConfigActionsSummary proposal={proposal} />;
+}
+
+function SpendingLimitProposalSummary({
+  proposal,
+  policy,
+  action,
+}: {
+  proposal: DecimalProposal;
+  policy: SpendingLimitPolicy | null;
+  action: 'add' | 'remove' | 'replace';
+}) {
+  // Pull amount/period/destinations from the policy when available;
+  // fall back to the raw config-action payload (covers the edge case
+  // where the policy row hasn't synced or was deleted).
+  const payload = proposal.semanticPayloadJson as { actions?: unknown };
+  const firstAction =
+    (Array.isArray(payload?.actions) ? (payload.actions[0] as Record<string, unknown> | undefined) : undefined) ?? {};
+  const amountRaw = policy?.amountRaw ?? (firstAction.amountRaw as string | undefined);
+  const period = policy?.period ?? (firstAction.period as string | undefined);
+  const policyName = policy?.policyName;
+  const destinations = policy?.destinations ?? [];
+
+  const headlineCopy = (() => {
+    if (action === 'remove') {
+      return 'Remove this spending-limit policy. The agent will no longer be able to auto-pay these vendors.';
+    }
+    if (action === 'replace') {
+      return 'Replace the policy with the new amount, period, and vendor list below.';
+    }
+    return 'When approved, the agent will be able to pay these vendors automatically up to the cap below — no team vote needed for each payment.';
+  })();
+
+  return (
+    <div>
+      <div className="sec-head">
+        <div className="sh-titles">
+          <h2>What this changes</h2>
+          <p className="sh-desc">{headlineCopy}</p>
+        </div>
+      </div>
+
+      {/* Hero number — the actual cap. Mirrors the .cap-card pattern
+          on the spending-limit detail page so operators read it the
+          same way everywhere. */}
+      <div className="cap-card" style={{ marginBottom: 14 }}>
+        <div className="cap-top">
+          <div className="cap-spent">
+            <span className="cs-lab">{action === 'remove' ? 'Current cap' : 'Cap'}</span>
+            <span className="cs-amt">
+              {amountRaw ? formatRawAmount(amountRaw, 6) : '—'}
+              <small>USDC</small>
+            </span>
+            <span className="cs-of">{periodSentence(period)}</span>
+          </div>
+          {policyName ? (
+            <div className="cap-right">
+              <span className="cr-lab">Policy</span>
+              <span className="cr-rem" style={{ fontFamily: 'var(--font-body)' }}>
+                {policyName}
+              </span>
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      {/* Vendors covered. List by name first (from the linked policy),
+          fall back to truncated wallet addresses when the policy row
+          isn't resolvable. */}
+      <div className="tbl-card">
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th style={{ width: '50%' }}>Vendor</th>
+              <th>Trust</th>
+              <th>Wallet</th>
+            </tr>
+          </thead>
+          <tbody>
+            {destinations.length > 0 ? (
+              destinations.map((d) => {
+                const label =
+                  d.counterpartyWallet?.label ??
+                  d.counterpartyWallet?.counterparty?.displayName ??
+                  shortenAddress(d.walletAddress, 4, 4);
+                const trust = d.counterpartyWallet?.trustState ?? 'unreviewed';
+                const trustTone: PillTone =
+                  trust === 'trusted'
+                    ? 'success'
+                    : trust === 'blocked' || trust === 'restricted'
+                      ? 'danger'
+                      : 'warning';
+                const trustLabel =
+                  trust === 'trusted'
+                    ? 'Verified'
+                    : trust.charAt(0).toUpperCase() + trust.slice(1);
+                return (
+                  <tr key={d.spendingLimitPolicyDestinationId}>
+                    <td>
+                      <div className="member-cell">
+                        <span className="m-avatar">{vendorInitials(label)}</span>
+                        <span className="m-name">{label}</span>
+                      </div>
+                    </td>
+                    <td>
+                      <Pill tone={trustTone}>{trustLabel}</Pill>
+                    </td>
+                    <td>
+                      <span className="mono" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                        {shortenAddress(d.walletAddress, 4, 4)}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })
+            ) : (
+              // Fallback: raw action.destinations carries just wallet
+              // addresses. Better than nothing — at least the operator
+              // sees how many vendors are covered.
+              (Array.isArray(firstAction.destinations) ? (firstAction.destinations as string[]) : []).map(
+                (addr) => (
+                  <tr key={addr}>
+                    <td colSpan={3}>
+                      <span className="mono" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                        {shortenAddress(addr, 4, 4)}
+                      </span>
+                    </td>
+                  </tr>
+                ),
+              )
+            )}
+            {destinations.length === 0 &&
+            (!Array.isArray(firstAction.destinations) || firstAction.destinations.length === 0) ? (
+              <tr>
+                <td colSpan={3} style={{ padding: 18, color: 'var(--text-muted)', fontSize: 13 }}>
+                  No vendors on this policy yet.
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function vendorInitials(label: string): string {
+  const parts = label.trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0]![0]! + parts[1]![0]!).toUpperCase();
+  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
+  return '??';
+}
+
+function periodSentence(period: string | undefined): string {
+  if (period === 'month') return 'per month, resets the 1st';
+  if (period === 'week') return 'per week, resets every Monday';
+  if (period === 'day') return 'per day, resets at midnight';
+  if (period === 'one_time') return 'one-time — single use';
+  return `per ${period ?? 'period'}`;
 }
 
 function ConfigActionsSummary({ proposal }: { proposal: DecimalProposal }) {
@@ -1003,11 +1220,21 @@ function computeInitials(name: string | null, fallback: string): string {
 // rendering, especially for config proposals where the semanticType
 // alone ("Treasury config") doesn't tell the operator what's changing.
 
-function friendlyTitle(proposal: DecimalProposal): string {
+function friendlyTitle(
+  proposal: DecimalProposal,
+  linkedSpendingLimitPolicy: SpendingLimitPolicy | null,
+): string {
   const semantic = proposal.semanticType ?? '';
-  if (semantic === 'add_spending_limit') return 'New spending-limit policy';
-  if (semantic === 'remove_spending_limit') return 'Remove spending-limit policy';
-  if (semantic === 'replace_spending_limit') return 'Update spending-limit policy';
+  const policyName = linkedSpendingLimitPolicy?.policyName;
+  if (semantic === 'add_spending_limit') {
+    return policyName ? `New spending limit · ${policyName}` : 'New spending-limit policy';
+  }
+  if (semantic === 'remove_spending_limit') {
+    return policyName ? `Remove spending limit · ${policyName}` : 'Remove spending-limit policy';
+  }
+  if (semantic === 'replace_spending_limit') {
+    return policyName ? `Update spending limit · ${policyName}` : 'Update spending-limit policy';
+  }
   if (semantic === 'add_agent_member') return 'Add agent as signer';
   return summarizeProposal(proposal);
 }
