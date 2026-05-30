@@ -36,7 +36,6 @@ export function LandingPage() {
     <>
       <Nav googleHref={googleHref} />
       <Hero googleHref={googleHref} />
-      <Marquee />
       <PaymentsSection />
       <SpendingLimitsSection />
       <HowItWorks />
@@ -147,32 +146,6 @@ function GoogleG() {
         d="M24 10.75c3.23 0 6.13 1.11 8.41 3.29l6.31-6.31C34.91 4.18 29.93 2 24 2 15.4 2 7.96 6.93 4.34 14.12l7.35 5.7C13.42 14.62 18.27 10.75 24 10.75z"
       />
     </svg>
-  );
-}
-
-/* ───────────────── Marquee ───────────────── */
-
-function Marquee() {
-  const items = [
-    { num: '~412 ms', lab: 'Settlement on Solana' },
-    { num: 'AI', lab: 'Invoice extraction' },
-    { num: 'm-of-n', lab: 'Threshold · you choose' },
-    { num: 'USDC', lab: 'One dollar, always' },
-    { num: 'Squads', lab: 'Multisig program' },
-    { num: 'Privy', lab: 'Embedded wallets' },
-  ];
-  const loop = [...items, ...items, ...items];
-  return (
-    <div className="marquee stat-marquee">
-      <div className="marquee-track">
-        {loop.map((it, i) => (
-          <span className="stat-item" key={i}>
-            <span className="sm-num">{it.num}</span>
-            <span className="sm-lab">{it.lab}</span>
-          </span>
-        ))}
-      </div>
-    </div>
   );
 }
 
