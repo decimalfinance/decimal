@@ -768,16 +768,29 @@ function Approver({
     <span
       className={`ab-appr${done ? '' : ' pending'}`}
       title={title}
-      style={showImage ? { padding: 0, overflow: 'hidden', background: 'transparent' } : undefined}
+      style={showImage ? { padding: 0, background: 'transparent' } : undefined}
     >
+      {/* Inner span clips the photo to the chip circle; the chip itself
+          must keep overflow visible so the badge can stick out the
+          bottom-right per the design. */}
       {showImage ? (
-        <img
-          src={avatarUrl!}
-          alt=""
-          referrerPolicy="no-referrer"
-          onError={() => setFailed(true)}
-          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-        />
+        <span
+          style={{
+            width: '100%',
+            height: '100%',
+            borderRadius: '50%',
+            overflow: 'hidden',
+            display: 'block',
+          }}
+        >
+          <img
+            src={avatarUrl!}
+            alt=""
+            referrerPolicy="no-referrer"
+            onError={() => setFailed(true)}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          />
+        </span>
       ) : (
         init
       )}
