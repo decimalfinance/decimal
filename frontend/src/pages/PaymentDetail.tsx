@@ -132,6 +132,52 @@ export function PaymentDetailPage() {
     onError: (err) => toastError(err instanceof Error ? err.message : 'Could not cancel.'),
   });
 
+  // Manual sync — for the case where the on-chain side moved past what
+  // the local cache reflects (e.g. the user double-clicked Execute, the
+  // first sig landed but confirm never ran, or the auto-retry hook is
+  // off because no signature was recorded). Best-effort: if we have a
+  // recorded sig, re-run confirm; otherwise just poke advancePaymentOrder
+  // to nudge the agent router. Always invalidates the cache.
+  const syncMutation = useMutation({
+    mutationFn: async () => {
+      const fresh = orderQuery.data;
+      const proposal = fresh?.squadsPaymentProposal ?? null;
+      const sig =
+        proposal?.executedSignature
+        ?? proposal?.submittedSignature
+        ?? fresh?.squadsLifecycle?.executedSignature
+        ?? fresh?.squadsLifecycle?.submittedSignature
+        ?? fresh?.reconciliationDetail?.latestExecution?.submittedSignature
+        ?? null;
+      let didSomething = false;
+      if (proposal && sig) {
+        try {
+          await api.confirmProposalExecution(organizationId!, proposal.decimalProposalId, { signature: sig });
+          didSomething = true;
+        } catch {
+          // Backend confirm may say "already settled" — that's fine, the
+          // invalidate below will pull the fresh state.
+        }
+      }
+      if (fresh?.derivedState === 'draft') {
+        try {
+          await api.advancePaymentOrder(organizationId!, paymentOrderId!);
+          didSomething = true;
+        } catch {
+          // ignore — agent may be blocked; refresh anyway
+        }
+      }
+      return { didSomething };
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['payment-order', organizationId, paymentOrderId] });
+      await queryClient.invalidateQueries({ queryKey: ['payment-orders', organizationId] });
+      await queryClient.invalidateQueries({ queryKey: ['organization-proposals', organizationId] });
+      success('Synced from chain.');
+    },
+    onError: (err) => toastError(err instanceof Error ? err.message : 'Sync failed.'),
+  });
+
   // "Approve & continue" on a needs_review order. Clears the AP-intake
   // flag, trusts the counterparty wallet, and asks the agent router to either
   // use a spending limit or create a Squads proposal in the same call.
@@ -411,11 +457,24 @@ export function PaymentDetailPage() {
                   Created {formatRelativeTime(order.createdAt)}
                 </p>
               </div>
-              <div className="head-status">
-                <Pill tone={toneToPill(statusTone) as PillTone}>
-                  {displayPaymentStatus(order.derivedState)}
-                </Pill>
-                {order.spendingLimitExecution ? <SLPill /> : null}
+              <div className="ph-actions" style={{ alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => syncMutation.mutate()}
+                  disabled={syncMutation.isPending}
+                  aria-busy={syncMutation.isPending}
+                  title="Reconcile on-chain state"
+                >
+                  <Ico.download w={13} style={{ transform: 'rotate(180deg)' }} />
+                  {syncMutation.isPending ? 'Syncing…' : 'Sync'}
+                </button>
+                <div className="head-status">
+                  <Pill tone={toneToPill(statusTone) as PillTone}>
+                    {displayPaymentStatus(order.derivedState)}
+                  </Pill>
+                  {order.spendingLimitExecution ? <SLPill /> : null}
+                </div>
               </div>
             </div>
           </div>
