@@ -1111,11 +1111,38 @@ html body {
 .l-dot { width: 11px; height: 11px; border-radius: 50%; background: #D6CFBF; }
 .l-url { margin-left: 16px; font-family: var(--font-mono); font-size: 12px; color: var(--l-faint);
   background: #fff; border: 1px solid var(--l-border); border-radius: 6px; padding: 4px 14px; white-space: nowrap; }
-.l-screen { position: relative; width: 100%; overflow: hidden; background: var(--l-canvas); padding: 28px; }
+.l-screen { position: relative; width: 100%; overflow: hidden; background: var(--l-canvas); }
 
 /* Faithful Payments product preview — static mock styled to match the
    real product, scoped to .lp-pay so .dec rules don't leak in. */
-.lp-pay { color: var(--l-ink); font-family: var(--font-body); }
+.lp-pay { color: var(--l-ink); font-family: var(--font-body); display: flex; align-items: stretch; min-height: 720px; }
+.lp-pay-main { flex: 1; min-width: 0; padding: 26px 28px; }
+
+/* Sidebar */
+.lp-pay-sb { width: 230px; flex-shrink: 0; padding: 16px 14px 14px; border-right: 1px solid var(--l-warm-border); display: flex; flex-direction: column; gap: 14px; }
+.lp-pay-sb .sb-brand { display: flex; align-items: center; gap: 9px; padding: 4px 6px 6px; }
+.lp-pay-sb .sb-logo { width: 26px; height: 26px; border-radius: 6px; background: var(--l-pink); color: #fff; font-family: var(--font-display); font-weight: 700; font-size: 14px; display: inline-flex; align-items: center; justify-content: center; }
+.lp-pay-sb .sb-name { font-family: var(--font-display); font-weight: 700; font-size: 17px; letter-spacing: -0.02em; color: var(--l-ink); }
+.lp-pay-sb .sb-org { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border: 1px solid var(--l-warm-border); border-radius: 8px; background: #fff; }
+.lp-pay-sb .sb-org-init { width: 22px; height: 22px; border-radius: 4px; background: var(--l-ink); color: #fff; font-family: var(--font-display); font-weight: 700; font-size: 10px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.lp-pay-sb .sb-org-name { flex: 1; font-size: 13px; font-weight: 600; color: var(--l-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lp-pay-sb .sb-org svg { width: 13px; height: 13px; color: var(--l-faint); flex-shrink: 0; }
+.lp-pay-sb .sb-nav { display: flex; flex-direction: column; gap: 1px; flex: 1; }
+.lp-pay-sb .sb-group { font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--l-faint); padding: 14px 10px 6px; }
+.lp-pay-sb .sb-item { position: relative; display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 6px; font-size: 13px; color: var(--l-muted); cursor: default; }
+.lp-pay-sb .sb-item.on { background: #fff; color: var(--l-ink); font-weight: 600; }
+.lp-pay-sb .sb-bar { position: absolute; left: -14px; top: 6px; bottom: 6px; width: 2px; background: var(--l-pink); border-radius: 0 2px 2px 0; }
+.lp-pay-sb .sb-ico { display: inline-flex; color: var(--l-faint); flex-shrink: 0; }
+.lp-pay-sb .sb-item.on .sb-ico { color: var(--l-ink); }
+.lp-pay-sb .sb-ico svg { width: 15px; height: 15px; }
+.lp-pay-sb .sb-lab { flex: 1; }
+.lp-pay-sb .sb-count { background: color-mix(in srgb, var(--l-pink) 12%, transparent); color: var(--l-pink); font-family: var(--font-mono); font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; }
+.lp-pay-sb .sb-user { display: flex; align-items: center; gap: 9px; padding: 9px 10px; border: 1px solid var(--l-warm-border); border-radius: 8px; background: #fff; }
+.lp-pay-sb .sb-user-av { width: 28px; height: 28px; border-radius: 50%; background: var(--l-cream-2); color: var(--l-ink); font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.lp-pay-sb .sb-user-col { flex: 1; min-width: 0; }
+.lp-pay-sb .sb-user-nm { font-size: 12.5px; font-weight: 600; color: var(--l-ink); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lp-pay-sb .sb-user-em { font-size: 11px; color: var(--l-faint); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lp-pay-sb .sb-user svg { width: 13px; height: 13px; color: var(--l-faint); flex-shrink: 0; }
 .lp-pay .hd { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .lp-pay .hd .eyebrow { font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--l-pink); }
 .lp-pay .hd h3 { font-family: var(--font-display); font-size: 24px; font-weight: 600; letter-spacing: -0.02em; margin: 6px 0 0; }
@@ -1355,4 +1382,9 @@ html body {
 @media (max-width: 720px) {
   .l-limit-grid { grid-template-columns: 1fr; }
   .lp-pay .met { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 860px) {
+  .lp-pay { min-height: 0; }
+  .lp-pay-sb { display: none; }
+  .lp-pay-main { padding: 20px; }
 }

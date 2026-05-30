@@ -174,6 +174,8 @@ function PaymentsSection() {
           </div>
           <div className="l-screen">
             <div className="lp-pay">
+              <PaymentsSidebar />
+              <div className="lp-pay-main">
               {/* Page head — eyebrow + title + 3 toolbar buttons */}
               <div className="hd">
                 <div>
@@ -286,11 +288,130 @@ function PaymentsSection() {
                   </div>
                 </div>
               </div>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </section>
+  );
+}
+
+// Static sidebar mirroring the real app shell — Decimal wordmark, org
+// chip, three nav groups, user chip. Read-only; only Payments is
+// shown as the active item.
+function PaymentsSidebar() {
+  return (
+    <aside className="lp-pay-sb">
+      <div className="sb-brand">
+        <span className="sb-logo">D</span>
+        <span className="sb-name">Decimal</span>
+      </div>
+      <div className="sb-org">
+        <span className="sb-org-init">NV</span>
+        <span className="sb-org-name">Northvale Labs</span>
+        <ChevronMini />
+      </div>
+      <div className="sb-nav">
+        <div className="sb-group">OPERATIONS</div>
+        <SbItem icon={<GridMini />} label="Overview" />
+        <SbItem icon={<PaymentsIco />} label="Payments" active count="3" />
+        <SbItem icon={<CollectionsIco />} label="Collections" />
+        <div className="sb-group">REGISTRY</div>
+        <SbItem icon={<TreasuryMini />} label="Treasury accounts" />
+        <SbItem icon={<MembersIco />} label="Members" />
+        <SbItem icon={<AddressIco />} label="Address book" count="2" />
+        <div className="sb-group">GOVERNANCE</div>
+        <SbItem icon={<ProposalsIco />} label="Proposals" />
+        <SbItem icon={<ShieldIco />} label="Spending limits" />
+      </div>
+      <div className="sb-user">
+        <span className="sb-user-av">JK</span>
+        <div className="sb-user-col">
+          <span className="sb-user-nm">Jordan Keil</span>
+          <span className="sb-user-em">jordan@northvale.co</span>
+        </div>
+        <ChevronMini />
+      </div>
+    </aside>
+  );
+}
+
+function SbItem({
+  icon,
+  label,
+  active,
+  count,
+}: {
+  icon: ReactNode;
+  label: string;
+  active?: boolean;
+  count?: string;
+}) {
+  return (
+    <div className={`sb-item${active ? ' on' : ''}`}>
+      {active ? <span className="sb-bar" /> : null}
+      <span className="sb-ico">{icon}</span>
+      <span className="sb-lab">{label}</span>
+      {count ? <span className="sb-count">{count}</span> : null}
+    </div>
+  );
+}
+
+function GridMini() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+      <rect x="14" y="14" width="7" height="7" rx="1" />
+    </svg>
+  );
+}
+function PaymentsIco() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="2.5" y="5" width="19" height="14" rx="2" />
+      <path d="M2.5 9.5h19" />
+    </svg>
+  );
+}
+function CollectionsIco() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 3v18M5 8l7-5 7 5M5 8v8l7 5 7-5V8" />
+    </svg>
+  );
+}
+function MembersIco() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="9" cy="8" r="3.2" />
+      <path d="M3.5 19a5.5 5.5 0 0 1 11 0M16 6.2a3 3 0 0 1 0 5.6M17.5 19a5 5 0 0 0-2-4" />
+    </svg>
+  );
+}
+function AddressIco() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="4" y="3" width="16" height="18" rx="2" />
+      <path d="M9 8h6M9 12h6M9 16h3" />
+    </svg>
+  );
+}
+function ProposalsIco() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M9 5h11M9 12h11M9 19h11M4.5 5h.01M4.5 12h.01M4.5 19h.01" />
+    </svg>
+  );
+}
+function ShieldIco() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 3 5 6v5c0 4.5 3 7.5 7 9 4-1.5 7-4.5 7-9V6l-7-3Z" />
+      <path d="M9 12l2 2 4-4" />
+    </svg>
   );
 }
 
