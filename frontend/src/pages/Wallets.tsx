@@ -20,6 +20,8 @@ import {
 import { resolveSolanaRpcUrl, waitForSignatureVisible } from '../lib/solana-wallet';
 import { useToast } from '../ui/Toast';
 import { ChainLink, CopyButton, EmptyIcon, RdEmptyState } from '../ui-primitives';
+import { Ico } from '../dec/icons';
+import { PageHead } from '../dec/primitives';
 
 function decodeBase64ToBytes(base64: string): Uint8Array {
   const binary = atob(base64);
@@ -71,6 +73,7 @@ function sumSol(values: string[]): string {
 
 export function WalletsPage({ session: _session }: { session: AuthenticatedSession }) {
   const { organizationId } = useParams<{ organizationId: string }>();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { success, error: toastError } = useToast();
   const [addOpen, setAddOpen] = useState(false);
@@ -154,178 +157,134 @@ export function WalletsPage({ session: _session }: { session: AuthenticatedSessi
     );
   }
 
+  // Sum balances across all treasuries — surfaces in the "Total balance"
+  // metric. Compact USDC display since amounts can be six figures+.
+  const totalBalanceDisplay = formatRawUsdcCompact(totalUsdcRaw);
+  const accountCount = rows.length;
+  // Until the data model exposes vaults, every treasury == one vault, so
+  // the count matches the row count. When we surface real vaults, swap
+  // for a per-treasury aggregation.
+  const vaultCount = rows.length;
+  const activeCount = rows.filter((r) => r.isActive).length;
+
   return (
-    <main className="page-frame">
-      <header className="page-header">
-        <div>
-          <p className="eyebrow">Registry</p>
-          <h1>Treasury accounts</h1>
-          <p>
-            Organization-owned Solana wallets that Decimal monitors and reconciles. Balances refresh every 15 seconds.
-          </p>
-        </div>
-        <div className="page-actions">
-          <button
-            type="button"
-            className="button button-secondary"
-            onClick={() => balancesQuery.refetch()}
-            disabled={balancesQuery.isFetching}
-            aria-busy={balancesQuery.isFetching}
-          >
-            <RefreshIcon spinning={balancesQuery.isFetching} />
-            {balancesQuery.isFetching ? 'Refreshing…' : 'Refresh'}
-          </button>
-          <button type="button" className="button button-secondary" onClick={() => setAddOpen(true)}>
-            + Add existing address
-          </button>
-          <button
-            type="button"
-            className="button button-primary"
-            onClick={() => setCreateSquadsOpen(true)}
-          >
-            + Create treasury
-          </button>
-        </div>
-      </header>
+    <div className="page">
+      <div className="stack stack-24">
+        <PageHead
+          eyebrow="REGISTRY"
+          title="Treasury accounts"
+          desc="Each account holds one team of signers and one or more vaults. Your keys, your team — Decimal is just the surface."
+          actions={
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => setCreateSquadsOpen(true)}
+            >
+              <Ico.plus w={15} />New treasury account
+            </button>
+          }
+        />
 
-      <div className="rd-metrics">
-        <div className="rd-metric">
-          <span className="rd-metric-label">Total value</span>
-          <span className="rd-metric-value">${formatUsd(totalUsdValue)}</span>
+        <div className="metrics" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+          <div className="metric">
+            <div className="m-label">Total balance</div>
+            <div className="m-value">{totalBalanceDisplay}</div>
+            <div className="m-sub">USDC across all vaults</div>
+          </div>
+          <div className="metric">
+            <div className="m-label">Accounts</div>
+            <div className="m-value">{accountCount}</div>
+            <div className="m-sub">{activeCount === accountCount ? 'all active' : `${activeCount} active`}</div>
+          </div>
+          <div className="metric">
+            <div className="m-label">Vaults</div>
+            <div className="m-value">{vaultCount}</div>
+            <div className="m-sub">{vaultCount === 1 ? 'across 1 account' : `across ${accountCount} accounts`}</div>
+          </div>
         </div>
-        <div className="rd-metric">
-          <span className="rd-metric-label">Total USDC</span>
-          <span className="rd-metric-value">{formatRawUsdcCompact(totalUsdcRaw)}</span>
-        </div>
-        <div className="rd-metric">
-          <span className="rd-metric-label">Total SOL</span>
-          <span className="rd-metric-value">{totalSol}</span>
-        </div>
-        <div className="rd-metric">
-          <span className="rd-metric-label">Wallets</span>
-          <span className="rd-metric-value">{rows.length}</span>
-        </div>
-      </div>
 
-      <section className="rd-section" style={{ marginTop: 8 }}>
-        <div className="rd-table-shell">
+        <div className="tbl-card">
           {isInitialLoading ? (
             <div style={{ padding: 16 }}>
-              <div className="rd-skeleton rd-skeleton-block" style={{ height: 56, marginBottom: 8 }} />
-              <div className="rd-skeleton rd-skeleton-block" style={{ height: 56, marginBottom: 8 }} />
-              <div className="rd-skeleton rd-skeleton-block" style={{ height: 56 }} />
+              <div className="skeleton" style={{ height: 48, marginBottom: 6 }} />
+              <div className="skeleton" style={{ height: 48, marginBottom: 6 }} />
+              <div className="skeleton" style={{ height: 48 }} />
             </div>
           ) : rows.length === 0 ? (
-            <RdEmptyState
-              icon={<EmptyIcon kind="wallet" />}
-              title="Set up your first treasury"
-              description="Treasuries hold funds and define who can approve payments from them."
-              primary={{ label: 'Create treasury', onClick: () => setCreateSquadsOpen(true) }}
-              secondary={{ label: 'Add existing address', onClick: () => setAddOpen(true) }}
-            />
+            <div className="empty">
+              <div className="empty-icon"><Ico.treasury w={22} /></div>
+              <h4>Set up your first treasury</h4>
+              <p>Treasuries hold funds and define who can approve payments from them.</p>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setCreateSquadsOpen(true)}
+                style={{ marginTop: 6 }}
+              >
+                <Ico.plus w={15} />New treasury account
+              </button>
+            </div>
           ) : (
-            <table className="rd-table">
+            <table className="tbl">
               <thead>
                 <tr>
-                  <th style={{ width: '20%' }}>Name</th>
-                  <th style={{ width: '20%' }}>Address</th>
-                  <th className="rd-num" style={{ width: '16%' }}>
-                    USDC
-                  </th>
-                  <th className="rd-num" style={{ width: '14%' }}>
-                    SOL
-                  </th>
-                  <th className="rd-num" style={{ width: '18%' }}>
-                    Total value
-                  </th>
-                  <th style={{ width: '12%' }}>Status</th>
+                  <th style={{ width: '34%' }}>Account</th>
+                  <th className="num" style={{ width: '18%' }}>Balance</th>
+                  <th style={{ width: '14%' }}>Vaults</th>
+                  <th style={{ width: '20%' }}>Signers</th>
+                  <th>Status</th>
+                  <th style={{ width: 28 }}></th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row) => {
                   const meta = treasuryWalletMetaById.get(row.treasuryWalletId);
                   const isSquads = meta?.source === 'squads_v4';
-                  const multisigPda = isSquads ? meta?.sourceRef : null;
                   return (
-                  <tr key={row.treasuryWalletId}>
-                    <td>
-                      <div className="rd-payee-main">
-                        <span className="rd-payee-name" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                          {isSquads ? (
-                            <Link
-                              to={`/organizations/${organizationId}/wallets/${row.treasuryWalletId}`}
-                              style={{ color: 'inherit', textDecoration: 'underline', textUnderlineOffset: 3, textDecorationColor: 'rgba(255,255,255,0.25)' }}
-                            >
-                              {row.displayName ?? 'Untitled wallet'}
-                            </Link>
-                          ) : (
-                            <span>{row.displayName ?? 'Untitled wallet'}</span>
-                          )}
-                          {isSquads ? (
-                            <span
-                              className="rd-pill rd-pill-info"
-                              style={{ fontSize: 10, padding: '2px 8px' }}
-                              title="Backed by a Squads v4 multisig"
-                            >
-                              Squads
+                    <tr
+                      key={row.treasuryWalletId}
+                      onClick={() => navigate(`/organizations/${organizationId}/wallets/${row.treasuryWalletId}`)}
+                    >
+                      <td>
+                        <div className="treas-cell">
+                          <span className="tc-icon"><Ico.treasury w={17} /></span>
+                          <div className="col">
+                            <span className="tc-name">{row.displayName ?? 'Untitled treasury'}</span>
+                            <span className="tc-sub" style={{ fontFamily: 'var(--font-body)' }}>
+                              {isSquads ? 'Team-approved · multi-signer' : 'Single signer'}
                             </span>
-                          ) : null}
-                        </span>
-                        {row.rpcError ? (
-                          <span className="rd-payee-ref" style={{ color: 'var(--ax-warning)' }}>
-                            {row.rpcError}
-                          </span>
-                        ) : null}
-                      </div>
-                    </td>
-                    <td>
-                      <ChainLink address={row.address} prefix={4} suffix={4} />
-                      {multisigPda ? (
-                        <div
-                          style={{
-                            fontSize: 11,
-                            color: 'var(--ax-text-muted)',
-                            marginTop: 2,
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 6,
-                          }}
-                        >
-                          <span style={{ fontFamily: 'monospace' }} title={`Multisig PDA: ${multisigPda}`}>
-                            multisig {shortenAddress(multisigPda, 4, 4)}
-                          </span>
-                          <CopyButton value={multisigPda} ariaLabel="Copy multisig PDA" />
+                          </div>
                         </div>
-                      ) : null}
-                    </td>
-                    <td className="rd-num">
-                      {row.usdcRaw === null ? (
-                        <span style={{ color: 'var(--ax-text-faint)' }}>—</span>
-                      ) : (
-                        <span>{formatRawUsdcCompact(row.usdcRaw)} USDC</span>
-                      )}
-                    </td>
-                    <td className="rd-num">{formatSolFromLamports(row.solLamports)} SOL</td>
-                    <td className="rd-num">
-                      <span>
-                        $
-                        {formatUsd(computeWalletUsdValue({ usdcRaw: row.usdcRaw }))}
-                      </span>
-                    </td>
-                    <td>
-                      <span className="rd-pill" data-tone={row.isActive ? 'success' : undefined}>
-                        <span className="rd-pill-dot" aria-hidden />
-                        {row.isActive ? 'Active' : 'Inactive'}
-                      </span>
-                    </td>
-                  </tr>
+                      </td>
+                      <td className="td-num">
+                        {row.usdcRaw === null ? (
+                          <span style={{ color: 'var(--text-faint)' }}>—</span>
+                        ) : (
+                          <>{formatRawUsdcCompact(row.usdcRaw)} <span style={{ color: 'var(--text-faint)' }}>USDC</span></>
+                        )}
+                      </td>
+                      <td>
+                        <span className="vault-count">
+                          <span className="vk-icon"><Ico.vault w={15} /></span>
+                          1 vault
+                        </span>
+                      </td>
+                      <td>
+                        <SignerStack treasuryWalletId={row.treasuryWalletId} />
+                      </td>
+                      <td>
+                        <span className={`pill ${row.isActive ? 'pill-success' : 'pill-neutral'}`}>
+                          <span className="dot" />{row.isActive ? 'Active' : 'Inactive'}
+                        </span>
+                      </td>
+                      <td><span className="row-arrow"><Ico.chevRight w={16} /></span></td>
+                    </tr>
                   );
                 })}
               </tbody>
             </table>
           )}
         </div>
-      </section>
 
       {addOpen ? (
         <AddWalletDialog
@@ -350,7 +309,8 @@ export function WalletsPage({ session: _session }: { session: AuthenticatedSessi
           }}
         />
       ) : null}
-    </main>
+      </div>
+    </div>
   );
 }
 
@@ -1288,3 +1248,43 @@ function RefreshIcon({ spinning }: { spinning?: boolean }) {
   );
 }
 
+
+// SignerStack — avatar-stack of org members on a treasury row. Currently
+// every org member is a signer on every treasury, so we just fetch the
+// org member list once via React Query cache (re-used across rows). When
+// per-treasury member sets land, swap this for a treasury-scoped query.
+function SignerStack({ treasuryWalletId: _treasuryWalletId }: { treasuryWalletId: string }) {
+  const { organizationId } = useParams<{ organizationId: string }>();
+  const membersQuery = useQuery({
+    queryKey: ['organization-members', organizationId] as const,
+    queryFn: () => api.listOrganizationMembers(organizationId!),
+    enabled: Boolean(organizationId),
+  });
+  const members = membersQuery.data?.items ?? [];
+  const activeMembers = members.filter((m) => m.status === 'active');
+  const total = activeMembers.length + 1; // +1 for the Decimal agent
+
+  return (
+    <div className="avatar-stack">
+      {activeMembers.slice(0, 3).map((m) => (
+        <span key={m.membershipId} className="as-dot">
+          {initialsFromUser(m.user.displayName, m.user.email)}
+        </span>
+      ))}
+      <span className="as-dot agent" title="Decimal agent">
+        <Ico.bolt w={12} fill="currentColor" sw={0} />
+      </span>
+      <span className="as-more">{total}</span>
+    </div>
+  );
+}
+
+function initialsFromUser(name: string | null, email: string): string {
+  if (name && name.trim()) {
+    const parts = name.trim().split(/\s+/);
+    if (parts.length >= 2) return (parts[0]![0]! + parts[1]![0]!).toUpperCase();
+    return name.slice(0, 2).toUpperCase();
+  }
+  const local = email.split('@')[0] ?? '?';
+  return local.slice(0, 2).toUpperCase();
+}

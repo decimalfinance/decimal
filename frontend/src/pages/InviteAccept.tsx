@@ -8,7 +8,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../api';
-import type { AuthenticatedSession, PublicInvite, UserWallet } from '../types';
+import type { AuthenticatedSession, PublicInvite } from '../types';
 import { Ico } from '../dec/icons';
 import { AuthLayout } from './auth';
 
@@ -36,20 +36,10 @@ export function InviteAcceptPage() {
     mutationFn: () => api.acceptInvite(inviteToken!),
     onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: ['session'] });
-      let personalWallets: UserWallet[] = [];
-      try {
-        const data = await api.listPersonalWallets();
-        personalWallets = data.items.filter(
-          (w) => w.status === 'active' && w.chain === 'solana',
-        );
-      } catch {
-        // ignore — fall back to default redirect
-      }
-      const target =
-        personalWallets.length === 0
-          ? '/profile'
-          : `/organizations/${result.organizationId}/wallets`;
-      navigate(target, { replace: true });
+      // Land on the org's Overview — that's the workspace home and the
+      // first-run dashboard if there's no treasury yet. Sending people
+      // straight to /wallets felt like an empty admin page on join.
+      navigate(`/organizations/${result.organizationId}`, { replace: true });
     },
     onError: (err) => {
       const message =
