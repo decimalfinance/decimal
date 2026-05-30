@@ -18,7 +18,7 @@ import type {
 import { useAutoRetryProposalVerification } from '../lib/settlement';
 import { useSquadsProposalActions } from '../lib/squads-actions';
 import { shortenAddress } from '../domain';
-import { orbAccountUrl, orbTransactionUrl } from '../lib/app';
+import { orbAccountUrl } from '../lib/app';
 import { useToast } from '../ui/Toast';
 import {
   proposalTypeLabel,
@@ -259,6 +259,10 @@ function ProposalBody({
     actions.reject(signerWalletId);
   }
 
+  // Suppress the unused #tx-index — we deliberately hide the on-chain
+  // sequence number from operators per the no-crypto-jargon rule.
+  void txIndex;
+
   return (
     <div className="stack stack-16">
       {/* Header */}
@@ -266,9 +270,9 @@ function ProposalBody({
         <div className="eyebrow" style={{ marginBottom: 10 }}>PROPOSAL</div>
         <div className="pagehead" style={{ paddingBottom: 16 }}>
           <div className="ph-titles">
-            <h1>{summarizeProposal(proposal)}</h1>
+            <h1>{friendlyTitle(proposal)}</h1>
             <p className="ph-desc">
-              {proposalTypeLabel(proposal)}
+              {friendlySubtitle(proposal)}
               {treasuryName ? (
                 <>
                   &nbsp;&nbsp;<span style={{ color: 'var(--text-faint)' }}>·</span>&nbsp;&nbsp;
@@ -283,12 +287,6 @@ function ProposalBody({
                   >
                     <Ico.treasury w={15} />{treasuryName}
                   </span>
-                </>
-              ) : null}
-              {txIndex ? (
-                <>
-                  &nbsp;&nbsp;<span style={{ color: 'var(--text-faint)' }}>·</span>&nbsp;&nbsp;
-                  <span className="mono" style={{ fontSize: 12 }}>#{txIndex}</span>
                 </>
               ) : null}
             </p>
@@ -335,9 +333,6 @@ function ProposalBody({
 
       {/* Approvals */}
       <ApprovalsSection proposal={proposal} />
-
-      {/* On-chain detail grid */}
-      <OnChainSection proposal={proposal} />
     </div>
   );
 }
@@ -485,7 +480,108 @@ function SemanticSummary({
   if (semantic === 'add_member') return <AddMemberSummary proposal={proposal} />;
   if (semantic === 'remove_member') return <RemoveMemberSummary proposal={proposal} />;
   if (semantic === 'change_threshold') return <ChangeThresholdSummary proposal={proposal} />;
-  return null;
+  // Fallback for any other config-transaction proposal (spending-limit
+  // add/remove/replace, add_agent_member, future kinds). The
+  // semanticPayloadJson carries an `actions` array shaped by the
+  // backend's serializeConfigActions — render whatever fields each
+  // action exposes in plain language. Without this the page used to
+  // just say "Treasury config" with no detail, which the user (rightly)
+  // flagged as opaque.
+  return <ConfigActionsSummary proposal={proposal} />;
+}
+
+function ConfigActionsSummary({ proposal }: { proposal: DecimalProposal }) {
+  const payload = proposal.semanticPayloadJson as { actions?: unknown };
+  const actions = Array.isArray(payload?.actions) ? payload.actions : [];
+  if (!actions.length) return null;
+  return (
+    <div>
+      <div className="sec-head">
+        <div className="sh-titles"><h2>What this changes</h2></div>
+      </div>
+      <div className="review-card">
+        {actions.map((raw, i) => {
+          const action = raw as Record<string, unknown>;
+          const kind = String(action.kind ?? '');
+          if (kind === 'add_member') {
+            const addr = action.walletAddress as string | undefined;
+            const perms = (action.permissions as string[] | undefined) ?? [];
+            return (
+              <RvRow key={i} label="Add signer">
+                <span className="mono">{addr ? shortenAddress(addr, 4, 4) : '—'}</span>
+                {perms.length ? (
+                  <span style={{ color: 'var(--text-faint)' }}> · {perms.join(' / ')}</span>
+                ) : null}
+              </RvRow>
+            );
+          }
+          if (kind === 'remove_member') {
+            const addr = action.walletAddress as string | undefined;
+            return (
+              <RvRow key={i} label="Remove signer">
+                <span className="mono">{addr ? shortenAddress(addr, 4, 4) : '—'}</span>
+              </RvRow>
+            );
+          }
+          if (kind === 'change_threshold') {
+            const next = action.newThreshold as number | undefined;
+            return (
+              <RvRow key={i} label="New required approvals">
+                <b>{next ?? '—'}</b>
+              </RvRow>
+            );
+          }
+          if (kind === 'add_spending_limit') {
+            const amount = action.amountRaw as string | undefined;
+            const period = action.period as string | undefined;
+            const destinations = (action.destinations as string[] | undefined) ?? [];
+            return (
+              <RvRow key={i} label="New spending limit">
+                <span className="mono">
+                  {amount ? formatRawAmount(amount, 6) : '—'} USDC
+                </span>
+                <span style={{ color: 'var(--text-faint)' }}> · {periodLabel(period)}</span>
+                <div style={{ marginTop: 2, fontSize: 11, color: 'var(--text-muted)' }}>
+                  {destinations.length} {destinations.length === 1 ? 'vendor' : 'vendors'}
+                </div>
+              </RvRow>
+            );
+          }
+          if (kind === 'remove_spending_limit') {
+            return (
+              <RvRow key={i} label="Remove spending limit">
+                <span style={{ color: 'var(--text-muted)' }}>
+                  The agent can no longer pay vendors automatically under this policy.
+                </span>
+              </RvRow>
+            );
+          }
+          return (
+            <RvRow key={i} label="Change">
+              <span style={{ color: 'var(--text-muted)' }}>{kind || 'Treasury configuration update'}</span>
+            </RvRow>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function RvRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="rv-row">
+      <span className="rv-k">{label}</span>
+      <span className="rv-v">{children}</span>
+    </div>
+  );
+}
+
+function periodLabel(period: string | undefined): string {
+  if (period === 'month') return 'per month';
+  if (period === 'week') return 'per week';
+  if (period === 'day') return 'per day';
+  if (period === 'one_time') return 'one-time';
+  return period ?? 'per period';
 }
 
 function PaymentSummary({
@@ -785,8 +881,7 @@ function ApprovalsSection({ proposal }: { proposal: DecimalProposal }) {
           <table className="tbl">
             <thead>
               <tr>
-                <th style={{ width: '50%' }}>Signer</th>
-                <th>Wallet</th>
+                <th style={{ width: '70%' }}>Signer</th>
                 <th>Status</th>
               </tr>
             </thead>
@@ -834,11 +929,6 @@ function DecisionRow({
         <SignerCell user={user} fallbackAddress={decision.walletAddress} />
       </td>
       <td>
-        <span className="mono" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-          {shortenAddress(decision.walletAddress, 4, 4)}
-        </span>
-      </td>
-      <td>
         <Pill tone={DECISION_TONE[kind]}>{DECISION_LABEL[kind]}</Pill>
       </td>
     </tr>
@@ -851,11 +941,6 @@ function PendingRow({ voter }: { voter: SquadsProposalPendingVoter }) {
     <tr>
       <td>
         <SignerCell user={user} fallbackAddress={voter.walletAddress} />
-      </td>
-      <td>
-        <span className="mono" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-          {shortenAddress(voter.walletAddress, 4, 4)}
-        </span>
       </td>
       <td>
         <Pill tone="neutral">Pending</Pill>
@@ -912,112 +997,30 @@ function computeInitials(name: string | null, fallback: string): string {
   return fallback.slice(0, 2).toUpperCase();
 }
 
-// ─── On-chain ───────────────────────────────────────────────────────────
+// ─── Friendly title / subtitle ──────────────────────────────────────────
+// summarizeProposal is the cross-app fallback (used in the proposals
+// list); on the detail page we have room for a more descriptive
+// rendering, especially for config proposals where the semanticType
+// alone ("Treasury config") doesn't tell the operator what's changing.
 
-function OnChainSection({ proposal }: { proposal: DecimalProposal }) {
-  const cells: Array<{ label: string; value: React.ReactNode; sub?: string }> = [];
-  if (proposal.squads.proposalPda) {
-    cells.push({
-      label: 'Proposal account',
-      value: <AddrLink address={proposal.squads.proposalPda} />,
-    });
-  }
-  if (proposal.squads.transactionPda) {
-    cells.push({
-      label: 'Squads transaction',
-      value: <AddrLink address={proposal.squads.transactionPda} />,
-    });
-  }
-  if (proposal.squads.multisigPda) {
-    cells.push({
-      label: 'Multisig',
-      value: <AddrLink address={proposal.squads.multisigPda} />,
-    });
-  }
-  if (proposal.squads.transactionIndex) {
-    cells.push({
-      label: 'Tx index',
-      value: <span className="mono">#{proposal.squads.transactionIndex}</span>,
-    });
-  }
-
-  const row2: Array<{ label: string; value: React.ReactNode; sub?: string }> = [];
-  if (proposal.submittedSignature) {
-    row2.push({
-      label: 'Submitted',
-      value: <SigLink signature={proposal.submittedSignature} />,
-      sub: proposal.submittedAt ? new Date(proposal.submittedAt).toLocaleString() : undefined,
-    });
-  }
-  if (proposal.executedSignature) {
-    row2.push({
-      label: 'Executed',
-      value: <SigLink signature={proposal.executedSignature} />,
-      sub: proposal.executedAt ? new Date(proposal.executedAt).toLocaleString() : undefined,
-    });
-  }
-
-  return (
-    <div>
-      <div className="sec-head">
-        <div className="sh-titles"><h2>On-chain</h2></div>
-      </div>
-      {cells.length > 0 ? (
-        <div className="detail-grid" style={{ gridTemplateColumns: `repeat(${Math.min(cells.length, 4)}, 1fr)` }}>
-          {cells.map((c) => (
-            <div className="detail-cell" key={c.label}>
-              <span className="d-label">{c.label}</span>
-              <span className="d-value">{c.value}</span>
-              {c.sub ? <span className="d-sub">{c.sub}</span> : null}
-            </div>
-          ))}
-        </div>
-      ) : null}
-      {row2.length > 0 ? (
-        <div className="detail-row2" style={{ gridTemplateColumns: `repeat(${Math.min(row2.length, 2)}, 1fr)` }}>
-          {row2.map((c) => (
-            <div className="detail-cell" key={c.label}>
-              <span className="d-label">{c.label}</span>
-              <span className="d-value">{c.value}</span>
-              {c.sub ? <span className="d-sub">{c.sub}</span> : null}
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
+function friendlyTitle(proposal: DecimalProposal): string {
+  const semantic = proposal.semanticType ?? '';
+  if (semantic === 'add_spending_limit') return 'New spending-limit policy';
+  if (semantic === 'remove_spending_limit') return 'Remove spending-limit policy';
+  if (semantic === 'replace_spending_limit') return 'Update spending-limit policy';
+  if (semantic === 'add_agent_member') return 'Add agent as signer';
+  return summarizeProposal(proposal);
 }
 
-function AddrLink({ address }: { address: string }) {
-  return (
-    <a
-      href={orbAccountUrl(address)}
-      target="_blank"
-      rel="noreferrer"
-      className="chainlink"
-      style={{ textDecoration: 'none', padding: '5px 9px', fontSize: 11 }}
-    >
-      <Ico.link w={13} />
-      <span className="sig">{shortenAddress(address, 4, 4)}</span>
-      <Ico.external w={12} />
-    </a>
-  );
-}
-
-function SigLink({ signature }: { signature: string }) {
-  return (
-    <a
-      href={orbTransactionUrl(signature)}
-      target="_blank"
-      rel="noreferrer"
-      className="chainlink"
-      style={{ textDecoration: 'none', padding: '5px 9px', fontSize: 11 }}
-    >
-      <Ico.link w={13} />
-      <span className="sig">{shortenAddress(signature, 4, 4)}</span>
-      <Ico.external w={12} />
-    </a>
-  );
+function friendlySubtitle(proposal: DecimalProposal): string {
+  const semantic = proposal.semanticType ?? '';
+  if (semantic.startsWith('add_spending_limit')) return 'Spending limit';
+  if (semantic === 'remove_spending_limit' || semantic === 'replace_spending_limit') return 'Spending limit';
+  if (semantic === 'add_member' || semantic === 'remove_member' || semantic === 'add_agent_member')
+    return 'Team membership';
+  if (semantic === 'change_threshold') return 'Required approvals';
+  if (semantic === 'send_payment' || semantic === 'send_payment_run') return 'Payment';
+  return proposalTypeLabel(proposal);
 }
 
 function formatRawAmount(amountRaw: string | null, decimals: number): string {
