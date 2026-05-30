@@ -78,7 +78,10 @@ export function MembersPage({ session }: { session: AuthenticatedSession }) {
     currentMembership?.role === 'owner' || currentMembership?.role === 'admin';
 
   const [inviteOpen, setInviteOpen] = useState(false);
-  const [revealedInvite, setRevealedInvite] =
+  // Per the design, when the invite is generated the SAME modal swaps to a
+  // "link" step showing the copy field + "Shown once" warning. So we keep
+  // the modal open and stash the created invite for it to render.
+  const [createdInvite, setCreatedInvite] =
     useState<CreateOrganizationInviteResponse | null>(null);
 
   const membersQuery = useQuery({
@@ -98,8 +101,8 @@ export function MembersPage({ session }: { session: AuthenticatedSession }) {
       api.createOrganizationInvite(organizationId!, input),
     onSuccess: async (created) => {
       success('Invite created.');
-      setInviteOpen(false);
-      setRevealedInvite(created);
+      // Keep the modal open — it swaps to the link step internally.
+      setCreatedInvite(created);
       await queryClient.invalidateQueries({
         queryKey: ['organization-invites', organizationId, 'pending'],
       });
@@ -199,13 +202,6 @@ export function MembersPage({ session }: { session: AuthenticatedSession }) {
           </div>
         </div>
 
-        {revealedInvite ? (
-          <RevealedInviteBanner
-            invite={revealedInvite}
-            onDismiss={() => setRevealedInvite(null)}
-          />
-        ) : null}
-
         <div className="tbl-card">
           {membersQuery.isLoading ? (
             <div style={{ padding: 16 }}>
@@ -270,7 +266,12 @@ export function MembersPage({ session }: { session: AuthenticatedSession }) {
       {inviteOpen ? (
         <InviteMemberDialog
           pending={createInviteMutation.isPending}
-          onClose={() => setInviteOpen(false)}
+          createdInvite={createdInvite}
+          onClose={() => {
+            setInviteOpen(false);
+            setCreatedInvite(null);
+            createInviteMutation.reset();
+          }}
           onSubmit={(input) => createInviteMutation.mutate(input)}
         />
       ) : null}
@@ -383,89 +384,27 @@ function MemberAvatar({ avatarUrl, initials }: { avatarUrl: string | null; initi
   );
 }
 
-// Inline banner that shows once after creating an invite. Per the design,
-// the link is shown ONCE with a copyable field + "Shown once" warning.
-function RevealedInviteBanner({
-  invite,
-  onDismiss,
-}: {
-  invite: CreateOrganizationInviteResponse;
-  onDismiss: () => void;
-}) {
-  const { success, error: toastError } = useToast();
-  const [copied, setCopied] = useState(false);
-
-  async function handleCopy() {
-    try {
-      await navigator.clipboard.writeText(invite.inviteLink);
-      setCopied(true);
-      success('Invite link copied.');
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      toastError('Unable to copy. Select the link and copy manually.');
-    }
-  }
-
-  return (
-    <div
-      className="surface"
-      style={{
-        padding: 18,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 12,
-        borderColor: 'color-mix(in srgb, var(--success) 35%, var(--border))',
-        background: 'color-mix(in srgb, var(--success) 6%, var(--bg-surface))',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--success)' }}>
-            Invitation ready
-          </div>
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: 17, fontWeight: 600, letterSpacing: '-0.01em', marginTop: 4 }}>
-            Share this link with {invite.invitedEmail}
-          </div>
-        </div>
-        <button type="button" className="drawer-x" onClick={onDismiss}>
-          <Ico.x w={14} />
-        </button>
-      </div>
-      <div className="copy-field">
-        <input readOnly value={invite.inviteLink} onFocus={(e) => e.currentTarget.select()} />
-        <button type="button" className="btn btn-primary" onClick={handleCopy}>
-          <Ico.copy w={14} />{copied ? 'Copied' : 'Copy'}
-        </button>
-      </div>
-      <div style={{ display: 'flex', gap: 9, alignItems: 'flex-start' }}>
-        <span className="pill pill-warning" style={{ marginTop: 1 }}>
-          <span className="dot" />Shown once
-        </span>
-        <span style={{ flex: 1, fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-          Copy this link now — for security it won't be shown again. Expires in 7 days · single use.
-          You can revoke it and generate a new one anytime.
-        </span>
-      </div>
-    </div>
-  );
-}
-
-// Two-step centered dialog: compose → link generated. We don't actually
-// transition steps in this component — once the user submits, the parent
-// closes the modal and reveals the link as an inline banner. This keeps
-// the surface single-purpose (compose) and matches the data flow (the
-// link only exists after the mutation succeeds).
+// Centered dialog with TWO steps per the design (pages-people.jsx InviteModal):
+//   1. compose — email + role → "Generate invite link"
+//   2. link    — "Inviting {email}" + copy field + "Shown once" warning →
+//                "Email the link" + "Done"
+// The step is implicit: if `createdInvite` is set, we're on step 2; otherwise
+// step 1. Both share the .dialog-head / .dialog-body / .dialog-foot shell.
 function InviteMemberDialog({
   pending,
+  createdInvite,
   onClose,
   onSubmit,
 }: {
   pending: boolean;
+  createdInvite: CreateOrganizationInviteResponse | null;
   onClose: () => void;
   onSubmit: (input: { email: string; role: OrganizationInviteRole }) => void;
 }) {
+  const { success, error: toastError } = useToast();
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<OrganizationInviteRole>('member');
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -482,65 +421,151 @@ function InviteMemberDialog({
     onSubmit({ email: trimmed, role });
   }
 
+  async function handleCopy() {
+    if (!createdInvite) return;
+    try {
+      await navigator.clipboard.writeText(createdInvite.inviteLink);
+      setCopied(true);
+      success('Invite link copied.');
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toastError('Unable to copy. Select the link and copy manually.');
+    }
+  }
+
+  function handleEmail() {
+    if (!createdInvite) return;
+    const subject = encodeURIComponent(`You're invited to ${createdInvite.organization.organizationName} on Decimal`);
+    const body = encodeURIComponent(
+      `Hi,\n\nYou've been invited to join ${createdInvite.organization.organizationName} on Decimal.\n\nUse this link to sign in and join (single use, expires in 7 days):\n\n${createdInvite.inviteLink}\n`,
+    );
+    window.location.href = `mailto:${createdInvite.invitedEmail}?subject=${subject}&body=${body}`;
+  }
+
+  const onLinkStep = Boolean(createdInvite);
+  const roleLabel = createdInvite
+    ? createdInvite.role.charAt(0).toUpperCase() + createdInvite.role.slice(1)
+    : '';
+
   return (
-    <div className="overlay" style={{ position: 'fixed', inset: 0, zIndex: 60 }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div
+      className="overlay"
+      style={{ position: 'fixed', inset: 0, zIndex: 60 }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
       <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="dec-invite-title">
         <div className="dialog-head">
           <div>
-            <h2 id="dec-invite-title">Invite a member</h2>
-            <p>Enter their email and pick a role. We'll generate a link you can share.</p>
+            <h2 id="dec-invite-title">
+              {onLinkStep ? 'Invitation ready' : 'Invite a member'}
+            </h2>
+            <p>
+              {onLinkStep
+                ? `Share this link with ${createdInvite!.invitedEmail}. They'll sign in and join ${createdInvite!.organization.organizationName}.`
+                : "Enter their email and pick a role. We'll generate a link you can share."}
+            </p>
           </div>
           <button type="button" className="drawer-x" onClick={onClose} aria-label="Close">
             <Ico.x w={14} />
           </button>
         </div>
-        <form onSubmit={handleSubmit}>
-          <div className="dialog-body">
-            <div className="field">
-              <label className="field-label">Email address</label>
-              <input
-                className="input"
-                type="email"
-                required
-                autoFocus
-                autoComplete="off"
-                autoCapitalize="off"
-                autoCorrect="off"
-                spellCheck={false}
-                placeholder="teammate@company.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-            <div className="field">
-              <label className="field-label">Role</label>
-              <div className="select">
-                <select
-                  value={role}
-                  onChange={(e) => setRole(e.target.value as OrganizationInviteRole)}
-                >
-                  <option value="member">Member — can view and initiate payments</option>
-                  <option value="admin">Admin — can manage members &amp; settings</option>
-                </select>
-                <Ico.chevDown w={14} />
+
+        {onLinkStep ? (
+          <>
+            <div className="dialog-body">
+              <div className="field">
+                <label className="field-label">Inviting</label>
+                <div className="member-cell">
+                  <span className="m-avatar invited"><Ico.mail w={15} /></span>
+                  <div className="col">
+                    <span className="m-name">{createdInvite!.invitedEmail}</span>
+                    <span className="m-sub" style={{ fontFamily: 'var(--font-body)' }}>{roleLabel}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="field">
+                <label className="field-label">Invite link</label>
+                <div className="copy-field">
+                  <input
+                    readOnly
+                    value={createdInvite!.inviteLink}
+                    onFocus={(e) => e.currentTarget.select()}
+                  />
+                  <button type="button" className="btn btn-primary" onClick={handleCopy}>
+                    <Ico.copy w={14} />{copied ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+              </div>
+              <div className="row" style={{ gap: 9, alignItems: 'flex-start' }}>
+                <span className="pill pill-warning" style={{ marginTop: 1 }}>
+                  <span className="dot" />Shown once
+                </span>
+                <span style={{ flex: 1, fontSize: 12, color: 'var(--text-faint)', lineHeight: 1.5 }}>
+                  Copy this link now — for security it won't be shown again. Expires in 7 days · single use.
+                  You can revoke it and generate a new one anytime.
+                </span>
               </div>
             </div>
-          </div>
-          <div className="dialog-foot">
-            <button
-              type="submit"
-              className="btn btn-primary"
-              style={{ flex: 1 }}
-              disabled={pending || !email.trim()}
-              aria-busy={pending}
-            >
-              {pending ? 'Generating…' : <>Generate invite link<Ico.arrowRight w={14} /></>}
-            </button>
-            <button type="button" className="btn btn-secondary" onClick={onClose}>
-              Cancel
-            </button>
-          </div>
-        </form>
+            <div className="dialog-foot">
+              <button type="button" className="btn btn-primary" style={{ flex: 1 }} onClick={handleEmail}>
+                <Ico.mail w={15} />Email the link
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={onClose}>
+                Done
+              </button>
+            </div>
+          </>
+        ) : (
+          <form onSubmit={handleSubmit}>
+            <div className="dialog-body">
+              <div className="field">
+                <label className="field-label">Email address</label>
+                <input
+                  className="input"
+                  type="email"
+                  required
+                  autoFocus
+                  autoComplete="off"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  placeholder="teammate@company.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label className="field-label">Role</label>
+                <div className="select">
+                  <select
+                    value={role}
+                    onChange={(e) => setRole(e.target.value as OrganizationInviteRole)}
+                  >
+                    <option value="member">Member — can view and initiate payments</option>
+                    <option value="admin">Admin — can manage members &amp; settings</option>
+                  </select>
+                  <Ico.chevDown w={14} />
+                </div>
+              </div>
+            </div>
+            <div className="dialog-foot">
+              <button
+                type="submit"
+                className="btn btn-primary"
+                style={{ flex: 1 }}
+                disabled={pending || !email.trim()}
+                aria-busy={pending}
+              >
+                {pending ? 'Generating…' : <>Generate invite link<Ico.arrowRight w={14} /></>}
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={onClose}>
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );
