@@ -113,90 +113,15 @@ export function TreasuryWalletDetailPage({ session }: { session: AuthenticatedSe
   }, [detailQuery.data, session.user.userId]);
 
   const [openDialog, setOpenDialog] = useState<'add-member' | 'change-threshold' | 'add-vault' | null>(null);
-  const [proposalsBusy, setProposalsBusy] = useState<ProposalsTableBusy | null>(null);
 
-  // Inline proposals (this treasury only). Only fetch once we know the wallet
-  // is a Squads treasury; non-members get a 403 silently and the section
-  // stays hidden.
-  const treasuryProposalsQuery = useQuery({
-    queryKey: ['organization-proposals', organizationId, 'pending', treasuryWalletId] as const,
-    queryFn: () =>
-      api.listOrganizationProposals(organizationId!, {
-        status: 'pending',
-        treasuryWalletId: treasuryWalletId!,
-        limit: 25,
-      }),
-    enabled: Boolean(organizationId && treasuryWalletId && isSquads),
-    refetchInterval: 20_000,
-    retry: false,
-  });
-  const treasuryProposals = treasuryProposalsQuery.data?.items ?? [];
-
-  async function refreshProposals(decimalProposalId?: string) {
-    await queryClient.invalidateQueries({ queryKey: ['organization-proposals', organizationId] });
-    if (decimalProposalId) {
-      await queryClient.invalidateQueries({
-        queryKey: ['organization-proposal', organizationId, decimalProposalId],
-      });
-    }
-  }
-
-  const proposalApproveMutation = useMutation({
-    mutationFn: async (input: { proposal: DecimalProposal; signerWalletId: string }) => {
-      const intent = await api.createProposalApprovalIntent(
-        organizationId!,
-        input.proposal.decimalProposalId,
-        { memberPersonalWalletId: input.signerWalletId },
-      );
-      return signAndSubmitIntent({ intent, signerPersonalWalletId: input.signerWalletId });
-    },
-    onSuccess: async (_sig, vars) => {
-      success('Approval submitted.');
-      await refreshProposals(vars.proposal.decimalProposalId);
-    },
-    onError: (err) => {
-      toastError(err instanceof ApiError || err instanceof Error ? err.message : 'Approve failed.');
-    },
-    onSettled: () => setProposalsBusy(null),
-  });
-
-  const proposalExecuteMutation = useMutation({
-    mutationFn: async (input: { proposal: DecimalProposal; signerWalletId: string }) => {
-      const decimalProposalId = input.proposal.decimalProposalId;
-      const intent = await api.createProposalExecuteIntent(
-        organizationId!,
-        decimalProposalId,
-        { memberPersonalWalletId: input.signerWalletId },
-      );
-      const sig = await signAndSubmitIntent({
-        intent,
-        signerPersonalWalletId: input.signerWalletId,
-      });
-      try {
-        await api.confirmProposalExecution(organizationId!, decimalProposalId, { signature: sig });
-      } catch {
-        // ignore
-      }
-      if (input.proposal.proposalType === 'config_transaction') {
-        try {
-          await api.syncSquadsTreasuryMembers(organizationId!, treasuryWalletId!);
-        } catch {
-          // ignore
-        }
-      }
-      return { decimalProposalId, signature: sig };
-    },
-    onSuccess: async (result) => {
-      success('Proposal executed.');
-      await refreshProposals(result.decimalProposalId);
-      await queryClient.invalidateQueries({
-        queryKey: ['treasury-wallet-detail', organizationId, treasuryWalletId],
-      });
-    },
-    onError: (err) => {
-      toastError(err instanceof ApiError || err instanceof Error ? err.message : 'Execute failed.');
-    },
-    onSettled: () => setProposalsBusy(null),
+  // Org-wide spending-limit policies — used to surface a per-vault count
+  // on the Vaults table. One query keyed by org is cheaper than N queries
+  // (one per vault), and we render minimal fields so the loose shape is
+  // fine.
+  const spendingLimitsQuery = useQuery({
+    queryKey: ['spending-limit-policies', organizationId, 'all'] as const,
+    queryFn: () => api.listSpendingLimitPolicies(organizationId!),
+    enabled: Boolean(organizationId && isSquads),
   });
 
   async function refreshDetail() {
@@ -393,7 +318,11 @@ export function TreasuryWalletDetailPage({ session }: { session: AuthenticatedSe
                   <b>{threshold} of {voterCount}</b> approvals required to send a payment from any vault.
                 </span>
               </div>
-              <MembersTable members={detail.squads.members} />
+              <MembersTable
+                members={detail.squads.members.filter(
+                  (m) => !m.agentWallet && !m.automationAgent,
+                )}
+              />
             </div>
 
             {/* Vaults — sibling wallets sharing this team. */}
@@ -419,61 +348,11 @@ export function TreasuryWalletDetailPage({ session }: { session: AuthenticatedSe
               <VaultsTable
                 vaults={siblingVaults}
                 balanceByWalletId={balanceByWalletId}
-                currentWalletId={treasuryWalletId}
+                spendingLimits={spendingLimitsQuery.data?.items ?? []}
                 organizationId={organizationId}
               />
             </div>
           </>
-        ) : null}
-
-        {detail && isSquads ? (
-          <SpendingLimitsSection
-            organizationId={organizationId}
-            treasuryWalletId={treasuryWalletId}
-          />
-        ) : null}
-
-        {detail && isCurrentUserSquadsMember ? (
-          <div>
-            <div className="sec-head">
-              <div className="sh-titles">
-                <h2>Pending proposals</h2>
-                <p className="sh-desc">Anything waiting on a team approval shows up here.</p>
-              </div>
-              <Link
-                to={`/organizations/${organizationId}/proposals?treasuryWalletId=${treasuryWalletId}`}
-                className="link"
-                style={{ fontSize: 13, textDecoration: 'none', color: 'var(--text-muted)' }}
-              >
-                View all<Ico.arrowRight w={13} />
-              </Link>
-            </div>
-            {treasuryProposalsQuery.isLoading ? (
-              <div className="skeleton" style={{ height: 80, borderRadius: 12 }} />
-            ) : treasuryProposalsQuery.error ? (
-              <div className="tbl-card" style={{ padding: 24 }}>
-                <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Couldn't load proposals.</span>
-              </div>
-            ) : (
-              <ProposalsTable
-                proposals={treasuryProposals}
-                ownPersonalWallets={ownPersonalWallets}
-                currentUserId={session.user.userId}
-                organizationId={organizationId}
-                busy={proposalsBusy}
-                showTreasuryColumn={false}
-                emptyHint="No pending proposals for this treasury."
-                onApprove={(proposal, signerWalletId) => {
-                  setProposalsBusy({ decimalProposalId: proposal.decimalProposalId, action: 'approve' });
-                  proposalApproveMutation.mutate({ proposal, signerWalletId });
-                }}
-                onExecute={(proposal, signerWalletId) => {
-                  setProposalsBusy({ decimalProposalId: proposal.decimalProposalId, action: 'execute' });
-                  proposalExecuteMutation.mutate({ proposal, signerWalletId });
-                }}
-              />
-            )}
-          </div>
         ) : null}
 
       {detail && openDialog === 'add-member' ? (
@@ -646,24 +525,33 @@ function initialsFromName(name: string | null, email: string): string {
 }
 
 // ─── VaultsTable ─────────────────────────────────────────────────────────
-// Sibling vaults (TreasuryWallet rows sharing the same multisig PDA). The
-// current vault is included but tagged with "This vault" so users know
-// where they are. Spending-limit counts aren't fetched here — surfacing
-// them per-row would require a query per vault; the section above this
-// table already shows the org-wide policies list.
+// Sibling vaults (TreasuryWallet rows sharing the same multisig PDA). All
+// rows get a Manage action — including the current vault, since the user
+// asked for a uniform shape. Spending-limit counts come from one
+// org-wide policies query grouped per vault.
 
 function VaultsTable({
   vaults,
   balanceByWalletId,
-  currentWalletId,
+  spendingLimits,
   organizationId,
 }: {
   vaults: TreasuryWallet[];
   balanceByWalletId: Map<string, string | null>;
-  currentWalletId: string;
+  spendingLimits: SpendingLimitPolicy[];
   organizationId: string;
 }) {
   const navigate = useNavigate();
+
+  // Per-vault active spending-limit count.
+  const activeByWallet = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const p of spendingLimits) {
+      if (p.status !== 'active') continue;
+      map.set(p.treasuryWalletId, (map.get(p.treasuryWalletId) ?? 0) + 1);
+    }
+    return map;
+  }, [spendingLimits]);
 
   if (vaults.length === 0) {
     return (
@@ -678,27 +566,22 @@ function VaultsTable({
       <table className="tbl">
         <thead>
           <tr>
-            <th style={{ width: '50%' }}>Vault</th>
+            <th style={{ width: '40%' }}>Vault</th>
             <th className="num">Balance</th>
-            <th className="num" style={{ width: 140 }}></th>
+            <th>Spending limits</th>
+            <th className="num" style={{ width: 130 }}></th>
           </tr>
         </thead>
         <tbody>
           {vaults.map((v) => {
             const raw = balanceByWalletId.get(v.treasuryWalletId);
-            const isCurrent = v.treasuryWalletId === currentWalletId;
+            const activeCount = activeByWallet.get(v.treasuryWalletId) ?? 0;
             return (
               <tr key={v.treasuryWalletId}>
                 <td>
                   <div className="treas-cell">
                     <span className="tc-icon"><Ico.vault w={17} /></span>
-                    <div className="col">
-                      <span className="tc-name">{v.displayName || 'Untitled vault'}</span>
-                      <span className="tc-sub">
-                        index {v.sourceVaultIndex ?? '—'}
-                        {isCurrent ? ' · this vault' : ''}
-                      </span>
-                    </div>
+                    <span className="tc-name">{v.displayName || 'Untitled vault'}</span>
                   </div>
                 </td>
                 <td className="td-num" style={{ paddingRight: 28 }}>
@@ -706,20 +589,22 @@ function VaultsTable({
                   <span style={{ color: 'var(--text-faint)' }}>USDC</span>
                 </td>
                 <td>
+                  <span className={`sl-count${activeCount === 0 ? ' zero' : ''}`}>
+                    <span className="slc-icon"><Ico.shield w={15} /></span>
+                    {activeCount > 0 ? `${activeCount} active` : 'None'}
+                  </span>
+                </td>
+                <td>
                   <div className="row-actions">
-                    {isCurrent ? (
-                      <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>—</span>
-                    ) : (
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-secondary"
-                        onClick={() =>
-                          navigate(`/organizations/${organizationId}/wallets/${v.treasuryWalletId}`)
-                        }
-                      >
-                        Manage<Ico.arrowRight w={13} />
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-secondary"
+                      onClick={() =>
+                        navigate(`/organizations/${organizationId}/wallets/${v.treasuryWalletId}`)
+                      }
+                    >
+                      Manage<Ico.arrowRight w={13} />
+                    </button>
                   </div>
                 </td>
               </tr>
