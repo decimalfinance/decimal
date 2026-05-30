@@ -1,39 +1,39 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+// Cross-treasury proposals page — implements PageProposals from the
+// design handoff. Lists every active/closed Squads proposal in the org
+// with vote dots, status pill, and per-row action (Vote / Execute /
+// View). Approve + Execute mutations land where they do everywhere
+// else; this surface just lets the user reach them faster.
+
+import { useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../api';
 import type {
   AuthenticatedSession,
   DecimalProposal,
-  ProposalSemanticType,
   SquadsProposalListStatusFilter,
 } from '../types';
 import { signAndSubmitIntent } from '../lib/squads-pipeline';
 import { useToast } from '../ui/Toast';
-import { ProposalsTable, type ProposalsTableBusy } from '../ui/ProposalsTable';
-import { RdFilterBar } from '../ui-primitives';
+import { PageHead, Pill, type PillTone } from '../dec/primitives';
+import { Ico } from '../dec/icons';
+import { proposalTypeLabel, summarizeProposal } from '../ui/DecimalProposalCard';
 
-const SEMANTIC_FILTER_OPTIONS: Array<{
-  value: '' | ProposalSemanticType;
-  label: string;
-}> = [
-  { value: '', label: 'All types' },
-  { value: 'send_payment', label: 'Payment' },
-  { value: 'add_member', label: 'Add member' },
-  { value: 'change_threshold', label: 'Change threshold' },
-];
+// "All" loads pending + closed without server-side scoping; we'd
+// otherwise need two queries to derive the 3 metrics + the All tab.
+const STATUS_FILTERS: SquadsProposalListStatusFilter[] = ['all', 'pending', 'closed'];
+
+type LocalTab = 'all' | 'needs_vote' | 'active' | 'completed';
 
 export function OrganizationProposalsPage({ session }: { session: AuthenticatedSession }) {
   const { organizationId } = useParams<{ organizationId: string }>();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { success, error: toastError } = useToast();
 
-  const [statusFilter, setStatusFilter] = useState<SquadsProposalListStatusFilter>('pending');
-  const [semanticFilter, setSemanticFilter] = useState<'' | ProposalSemanticType>('');
+  const [tab, setTab] = useState<LocalTab>('all');
   const [search, setSearch] = useState('');
-  const [busy, setBusy] = useState<ProposalsTableBusy | null>(null);
 
   const treasuryWalletFilter = searchParams.get('treasuryWalletId') ?? '';
 
@@ -42,10 +42,12 @@ export function OrganizationProposalsPage({ session }: { session: AuthenticatedS
     queryFn: () => api.listPersonalWallets(),
     enabled: Boolean(organizationId),
   });
-  const ownPersonalWallets = useMemo(
+  const ownPersonalWalletAddresses = useMemo(
     () =>
-      (ownPersonalWalletsQuery.data?.items ?? []).filter(
-        (w) => w.status === 'active' && w.chain === 'solana',
+      new Set(
+        (ownPersonalWalletsQuery.data?.items ?? [])
+          .filter((w) => w.status === 'active' && w.chain === 'solana')
+          .map((w) => w.walletAddress),
       ),
     [ownPersonalWalletsQuery.data],
   );
@@ -56,67 +58,88 @@ export function OrganizationProposalsPage({ session }: { session: AuthenticatedS
     enabled: Boolean(organizationId),
   });
   const treasuries = treasuriesQuery.data?.items ?? [];
+  const treasuryNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const t of treasuries) map.set(t.treasuryWalletId, t.displayName ?? 'Untitled treasury');
+    return map;
+  }, [treasuries]);
 
+  // Pull the full universe of proposals up-front so the local-tabs and
+  // metrics can be computed without bouncing back to the server. The
+  // list endpoint is cheap; pending+closed combined is bounded by how
+  // many proposals an org has, which stays small.
   const proposalsQuery = useQuery({
     queryKey: [
       'organization-proposals',
       organizationId,
-      statusFilter,
+      'all',
       treasuryWalletFilter,
     ] as const,
-    queryFn: () =>
-      api.listOrganizationProposals(organizationId!, {
-        status: statusFilter,
-        treasuryWalletId: treasuryWalletFilter || undefined,
-      }),
+    queryFn: async () => {
+      const results = await Promise.all(
+        STATUS_FILTERS.filter((s) => s !== 'all').map((status) =>
+          api.listOrganizationProposals(organizationId!, {
+            status,
+            treasuryWalletId: treasuryWalletFilter || undefined,
+          }),
+        ),
+      );
+      return { items: results.flatMap((r) => r.items) };
+    },
     enabled: Boolean(organizationId),
     refetchInterval: 20_000,
   });
 
   const allItems = proposalsQuery.data?.items ?? [];
-  const items = useMemo(() => {
+  const currentUserId = session.user.userId;
+
+  // "Needs your vote" = the proposal is active AND one of the pending
+  // voters is a wallet the current user owns.
+  function needsMyVote(p: DecimalProposal): boolean {
+    if (p.status !== 'active') return false;
+    return (p.voting?.pendingVoters ?? []).some(
+      (v) =>
+        v.personalWallet?.userId === currentUserId &&
+        ownPersonalWalletAddresses.has(v.walletAddress),
+    );
+  }
+
+  const counts = useMemo(() => {
+    let needsVote = 0;
+    let active = 0;
+    let completed = 0;
+    for (const p of allItems) {
+      if (needsMyVote(p)) needsVote += 1;
+      if (p.status === 'active' || p.status === 'approved') active += 1;
+      if (p.status === 'executed') completed += 1;
+    }
+    return { needsVote, active, completed, all: allItems.length };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allItems, currentUserId, ownPersonalWalletAddresses]);
+
+  const filteredRows = useMemo(() => {
     let out = allItems;
-    if (semanticFilter) out = out.filter((p) => p.semanticType === semanticFilter);
+    if (tab === 'needs_vote') out = out.filter(needsMyVote);
+    else if (tab === 'active') out = out.filter((p) => p.status === 'active' || p.status === 'approved');
+    else if (tab === 'completed') out = out.filter((p) => p.status === 'executed');
+
     const q = search.trim().toLowerCase();
     if (q) {
-      const treasuryNameById = new Map(
-        treasuries.map((t) => [t.treasuryWalletId, (t.displayName ?? '').toLowerCase()]),
-      );
-      out = out.filter((p) =>
-        [
-          p.decimalProposalId,
-          p.semanticType ?? '',
-          p.paymentOrderId ?? '',
-          p.creatorWalletAddress ?? '',
-          p.treasuryWalletId ? (treasuryNameById.get(p.treasuryWalletId) ?? '') : '',
-        ]
-          .join(' ')
-          .toLowerCase()
-          .includes(q),
-      );
-    }
-    return out;
-  }, [allItems, semanticFilter, search, treasuries]);
-
-  // Metrics summarize the currently-loaded proposal universe (the
-  // status filter scope). On the All tab they cover everything; on
-  // Pending they cover active+approved; on Closed they cover
-  // executed+cancelled+rejected.
-  const awaitingVotes = allItems.filter((p) => p.status === 'active').length;
-  const readyToExecute = allItems.filter((p) => p.status === 'approved').length;
-  const executed = allItems.filter((p) => p.status === 'executed').length;
-  const closedUnsuccess = allItems.filter(
-    (p) => p.status === 'cancelled' || p.status === 'rejected',
-  ).length;
-
-  async function refreshProposals(decimalProposalId?: string) {
-    await queryClient.invalidateQueries({ queryKey: ['organization-proposals', organizationId] });
-    await queryClient.invalidateQueries({ queryKey: ['payment-orders', organizationId] });
-    if (decimalProposalId) {
-      await queryClient.invalidateQueries({
-        queryKey: ['organization-proposal', organizationId, decimalProposalId],
+      out = out.filter((p) => {
+        const title = summarizeProposal(p).toLowerCase();
+        const treasuryName = p.treasuryWalletId
+          ? (treasuryNameById.get(p.treasuryWalletId) ?? '').toLowerCase()
+          : '';
+        return title.includes(q) || treasuryName.includes(q);
       });
     }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allItems, tab, search, treasuryNameById, currentUserId, ownPersonalWalletAddresses]);
+
+  async function refreshProposals() {
+    await queryClient.invalidateQueries({ queryKey: ['organization-proposals', organizationId] });
+    await queryClient.invalidateQueries({ queryKey: ['payment-orders', organizationId] });
   }
 
   const approveMutation = useMutation({
@@ -126,20 +149,15 @@ export function OrganizationProposalsPage({ session }: { session: AuthenticatedS
         input.proposal.decimalProposalId,
         { memberPersonalWalletId: input.signerWalletId },
       );
-      const sig = await signAndSubmitIntent({
-        intent,
-        signerPersonalWalletId: input.signerWalletId,
-      });
-      return { decimalProposalId: input.proposal.decimalProposalId, signature: sig };
+      return signAndSubmitIntent({ intent, signerPersonalWalletId: input.signerWalletId });
     },
-    onSuccess: async (result) => {
+    onSuccess: async () => {
       success('Approval submitted.');
-      await refreshProposals(result.decimalProposalId);
+      await refreshProposals();
     },
     onError: (err) => {
       toastError(err instanceof ApiError || err instanceof Error ? err.message : 'Approve failed.');
     },
-    onSettled: () => setBusy(null),
   });
 
   const executeMutation = useMutation({
@@ -150,14 +168,11 @@ export function OrganizationProposalsPage({ session }: { session: AuthenticatedS
         decimalProposalId,
         { memberPersonalWalletId: input.signerWalletId },
       );
-      const sig = await signAndSubmitIntent({
-        intent,
-        signerPersonalWalletId: input.signerWalletId,
-      });
+      const sig = await signAndSubmitIntent({ intent, signerPersonalWalletId: input.signerWalletId });
       try {
         await api.confirmProposalExecution(organizationId!, decimalProposalId, { signature: sig });
       } catch {
-        // ignore — refetch will catch up
+        // ignore — auto-retry / sync reconciles
       }
       if (input.proposal.proposalType === 'config_transaction' && input.proposal.treasuryWalletId) {
         try {
@@ -166,339 +181,283 @@ export function OrganizationProposalsPage({ session }: { session: AuthenticatedS
           // ignore
         }
       }
-      return { decimalProposalId, signature: sig };
+      return { decimalProposalId };
     },
-    onSuccess: async (result) => {
+    onSuccess: async () => {
       success('Proposal executed.');
-      await refreshProposals(result.decimalProposalId);
-      await queryClient.invalidateQueries({
-        queryKey: ['treasury-wallet-detail', organizationId],
-      });
+      await refreshProposals();
     },
     onError: (err) => {
       toastError(err instanceof ApiError || err instanceof Error ? err.message : 'Execute failed.');
     },
-    onSettled: () => setBusy(null),
   });
 
-  function setTreasuryFilter(treasuryWalletId: string) {
-    const next = new URLSearchParams(searchParams);
-    if (treasuryWalletId) {
-      next.set('treasuryWalletId', treasuryWalletId);
-    } else {
-      next.delete('treasuryWalletId');
+  // Pick the user's own personal wallet that's listed as a pending voter
+  // (or has execute permission) on a given proposal, so the row's Vote/
+  // Execute button knows which wallet to sign with.
+  function pickPendingVoterWallet(p: DecimalProposal): string | null {
+    const match = (p.voting?.pendingVoters ?? []).find(
+      (v) =>
+        v.personalWallet?.userId === currentUserId &&
+        ownPersonalWalletAddresses.has(v.walletAddress),
+    );
+    return match?.personalWallet?.userWalletId ?? null;
+  }
+  function pickExecuteWallet(p: DecimalProposal): string | null {
+    const canExec = new Set(p.voting?.canExecuteWalletAddresses ?? []);
+    for (const addr of ownPersonalWalletAddresses) {
+      if (canExec.has(addr)) {
+        const own = (ownPersonalWalletsQuery.data?.items ?? []).find((w) => w.walletAddress === addr);
+        if (own) return own.userWalletId;
+      }
     }
-    setSearchParams(next, { replace: true });
+    return null;
   }
 
   if (!organizationId) {
     return (
-      <main className="page-frame">
-        <div className="rd-state">
-          <h2 className="rd-state-title">Organization unavailable</h2>
-          <p className="rd-state-body">Pick an organization from the sidebar.</p>
+      <div className="page">
+        <div className="empty">
+          <h4>Organization unavailable</h4>
+          <p>Pick an organization from the sidebar.</p>
         </div>
-      </main>
+      </div>
     );
   }
 
-  const showTreasuryColumn = !treasuryWalletFilter;
-  const squadsTreasuries = treasuries.filter((t) => t.source === 'squads_v4' && t.isActive);
+  const tabs: Array<{ id: LocalTab; label: string; count: number }> = [
+    { id: 'all', label: 'All', count: counts.all },
+    { id: 'needs_vote', label: 'Needs your vote', count: counts.needsVote },
+    { id: 'active', label: 'Active', count: counts.active },
+    { id: 'completed', label: 'Completed', count: counts.completed },
+  ];
 
   return (
-    <main className="page-frame">
-      <header className="page-header">
-        <div>
-          <p className="eyebrow">Operations</p>
-          <h1>Proposals</h1>
-          <p>
-            Squads config and payment proposals across every treasury you sign for in this organization. Each proposal is its own on-chain transaction; sign approvals independently.
-          </p>
-        </div>
-        <div className="page-actions">
-          <button
-            type="button"
-            className="button button-secondary"
-            onClick={() => proposalsQuery.refetch()}
-            disabled={proposalsQuery.isFetching}
-            aria-busy={proposalsQuery.isFetching}
-          >
-            {proposalsQuery.isFetching ? 'Refreshing…' : 'Refresh'}
-          </button>
-          <NewProposalButton organizationId={organizationId} navigate={navigate} />
-        </div>
-      </header>
+    <div className="page">
+      <div className="stack stack-24">
+        <PageHead
+          eyebrow="GOVERNANCE"
+          title="Proposals"
+          desc="Team decisions that need signer approval — new spending limits, members, and changes to how money moves."
+        />
 
-      <div className="rd-metrics">
-        <div className="rd-metric">
-          <span className="rd-metric-label">Awaiting votes</span>
-          <span className="rd-metric-value" data-tone={awaitingVotes > 0 ? 'warning' : undefined}>
-            {awaitingVotes}
-          </span>
+        <div className="metrics" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+          <div className={`metric${counts.needsVote > 0 ? ' is-alert' : ''}`}>
+            <div className="m-label">Needs your vote</div>
+            <div className="m-value">{counts.needsVote}</div>
+            <div className="m-sub">{counts.needsVote === 1 ? 'awaits you' : 'awaiting you'}</div>
+          </div>
+          <div className="metric">
+            <div className="m-label">Active</div>
+            <div className="m-value">{counts.active}</div>
+            <div className="m-sub">in progress</div>
+          </div>
+          <div className="metric">
+            <div className="m-label">Completed</div>
+            <div className="m-value">{counts.completed}</div>
+            <div className="m-sub">executed</div>
+          </div>
         </div>
-        <div className="rd-metric">
-          <span className="rd-metric-label">Ready to execute</span>
-          <span className="rd-metric-value" data-tone={readyToExecute > 0 ? 'warning' : undefined}>
-            {readyToExecute}
-          </span>
+
+        <div className="filterbar">
+          <div className="tabs">
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className={`tab${tab === t.id ? ' on' : ''}`}
+                onClick={() => setTab(t.id)}
+              >
+                {t.label}
+                <span className="tab-count">{t.count}</span>
+              </button>
+            ))}
+          </div>
+          <div className="filter-right">
+            <div className="input-search">
+              <Ico.search w={15} />
+              <input
+                className="input"
+                placeholder="Search proposals"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+          </div>
         </div>
-        <div className="rd-metric">
-          <span className="rd-metric-label">Executed</span>
-          <span className="rd-metric-value" data-tone="success">
-            {executed}
-          </span>
-        </div>
-        <div className="rd-metric">
-          <span className="rd-metric-label">Closed unsuccessful</span>
-          <span className="rd-metric-value" data-tone={closedUnsuccess > 0 ? 'danger' : undefined}>
-            {closedUnsuccess}
-          </span>
+
+        <div className="tbl-card">
+          {proposalsQuery.isLoading ? (
+            <div style={{ padding: 16 }}>
+              <div className="skeleton" style={{ height: 48, marginBottom: 6 }} />
+              <div className="skeleton" style={{ height: 48, marginBottom: 6 }} />
+              <div className="skeleton" style={{ height: 48 }} />
+            </div>
+          ) : filteredRows.length === 0 ? (
+            <div className="empty">
+              <div className="empty-icon"><Ico.proposals w={22} /></div>
+              <h4>No proposals here</h4>
+              <p>
+                {tab === 'needs_vote'
+                  ? "Nothing's waiting on your signature right now."
+                  : tab === 'active'
+                    ? 'No active proposals.'
+                    : tab === 'completed'
+                      ? 'No completed proposals yet.'
+                      : 'No proposals match these filters.'}
+              </p>
+            </div>
+          ) : (
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th style={{ width: '40%' }}>Proposal</th>
+                  <th>Treasury</th>
+                  <th>Approvals</th>
+                  <th>Status</th>
+                  <th className="num" style={{ width: 140 }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRows.map((p) => (
+                  <ProposalRow
+                    key={p.decimalProposalId}
+                    proposal={p}
+                    treasuryName={
+                      p.treasuryWalletId ? treasuryNameById.get(p.treasuryWalletId) ?? '—' : '—'
+                    }
+                    needsMyVote={needsMyVote(p)}
+                    pendingVoterWalletId={pickPendingVoterWallet(p)}
+                    executeWalletId={pickExecuteWallet(p)}
+                    busy={approveMutation.isPending || executeMutation.isPending}
+                    onView={() =>
+                      navigate(`/organizations/${organizationId}/proposals/${p.decimalProposalId}`)
+                    }
+                    onApprove={(walletId) => approveMutation.mutate({ proposal: p, signerWalletId: walletId })}
+                    onExecute={(walletId) => executeMutation.mutate({ proposal: p, signerWalletId: walletId })}
+                  />
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
-
-      <FilterRow
-        search={search}
-        onSearchChange={setSearch}
-        statusFilter={statusFilter}
-        onStatusFilterChange={setStatusFilter}
-        semanticFilter={semanticFilter}
-        onSemanticFilterChange={setSemanticFilter}
-        treasuries={squadsTreasuries.map((t) => ({
-          treasuryWalletId: t.treasuryWalletId,
-          displayName: t.displayName,
-        }))}
-        treasuryFilter={treasuryWalletFilter}
-        onTreasuryFilterChange={setTreasuryFilter}
-        rightMeta={`${items.length} of ${allItems.length}`}
-      />
-
-      {proposalsQuery.isLoading ? (
-        <section className="rd-section">
-          <div className="rd-skeleton rd-skeleton-block" style={{ height: 140, marginBottom: 8 }} />
-          <div className="rd-skeleton rd-skeleton-block" style={{ height: 140 }} />
-        </section>
-      ) : proposalsQuery.error ? (
-        <section className="rd-section">
-          <div className="rd-empty-cell" style={{ padding: '48px 24px' }}>
-            <strong>Couldn't load proposals</strong>
-            <p style={{ margin: 0 }}>
-              {proposalsQuery.error instanceof Error
-                ? proposalsQuery.error.message
-                : 'Unknown error.'}
-            </p>
-          </div>
-        </section>
-      ) : (
-        <ProposalsTable
-          proposals={items}
-          ownPersonalWallets={ownPersonalWallets}
-          currentUserId={session.user.userId}
-          organizationId={organizationId}
-          busy={busy}
-          showTreasuryColumn={showTreasuryColumn}
-          emptyHint={
-            statusFilter === 'pending'
-              ? 'No pending proposals — try the All or Closed filter to see history.'
-              : 'No proposals match these filters.'
-          }
-          onApprove={(proposal, signerWalletId) => {
-            setBusy({ decimalProposalId: proposal.decimalProposalId, action: 'approve' });
-            approveMutation.mutate({ proposal, signerWalletId });
-          }}
-          onExecute={(proposal, signerWalletId) => {
-            setBusy({ decimalProposalId: proposal.decimalProposalId, action: 'execute' });
-            executeMutation.mutate({ proposal, signerWalletId });
-          }}
-        />
-      )}
-    </main>
-  );
-}
-
-function FilterRow({
-  search,
-  onSearchChange,
-  statusFilter,
-  onStatusFilterChange,
-  semanticFilter,
-  onSemanticFilterChange,
-  treasuries,
-  treasuryFilter,
-  onTreasuryFilterChange,
-  rightMeta,
-}: {
-  search: string;
-  onSearchChange: (next: string) => void;
-  statusFilter: SquadsProposalListStatusFilter;
-  onStatusFilterChange: (next: SquadsProposalListStatusFilter) => void;
-  semanticFilter: '' | ProposalSemanticType;
-  onSemanticFilterChange: (next: '' | ProposalSemanticType) => void;
-  treasuries: Array<{ treasuryWalletId: string; displayName: string | null }>;
-  treasuryFilter: string;
-  onTreasuryFilterChange: (treasuryWalletId: string) => void;
-  rightMeta: string;
-}) {
-  const tabs = (['pending', 'all', 'closed'] as SquadsProposalListStatusFilter[]).map((id) => ({
-    id,
-    label: id.charAt(0).toUpperCase() + id.slice(1),
-    active: statusFilter === id,
-    onClick: () => onStatusFilterChange(id),
-  }));
-  const selects = [
-    {
-      label: 'Type',
-      value: semanticFilter,
-      onChange: (next: string) => onSemanticFilterChange(next as '' | ProposalSemanticType),
-      options: SEMANTIC_FILTER_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
-    },
-    {
-      label: 'Treasury',
-      value: treasuryFilter,
-      onChange: onTreasuryFilterChange,
-      options: [
-        { value: '', label: 'All treasuries' },
-        ...treasuries.map((t) => ({
-          value: t.treasuryWalletId,
-          label: t.displayName ?? 'Untitled treasury',
-        })),
-      ],
-    },
-  ];
-  return (
-    <RdFilterBar
-      search={{
-        value: search,
-        onChange: onSearchChange,
-        placeholder: 'Search proposal id, treasury, payment run',
-        ariaLabel: 'Search proposals',
-      }}
-      tabs={tabs}
-      selects={selects}
-      rightMeta={rightMeta}
-    />
-  );
-}
-
-function NewProposalButton({
-  organizationId,
-  navigate,
-}: {
-  organizationId: string;
-  navigate: (path: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function onDocClick(e: MouseEvent) {
-      if (!ref.current) return;
-      if (e.target instanceof Node && ref.current.contains(e.target)) return;
-      setOpen(false);
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setOpen(false);
-    }
-    document.addEventListener('mousedown', onDocClick);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDocClick);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
-
-  return (
-    <div ref={ref} style={{ position: 'relative' }}>
-      <button
-        type="button"
-        className="button button-primary"
-        onClick={() => setOpen((o) => !o)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-      >
-        + New proposal
-      </button>
-      {open ? (
-        <div
-          role="menu"
-          style={{
-            position: 'absolute',
-            top: 'calc(100% + 6px)',
-            right: 0,
-            minWidth: 280,
-            padding: 6,
-            borderRadius: 10,
-            border: '1px solid var(--ax-border)',
-            background: 'var(--ax-surface-1)',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
-            zIndex: 20,
-            display: 'flex',
-            flexDirection: 'column',
-          }}
-        >
-          <MenuItem
-            title="Send payment"
-            description="From an approved payment order whose source is a Squads treasury."
-            onClick={() => {
-              setOpen(false);
-              navigate(`/organizations/${organizationId}/payments`);
-            }}
-          />
-          <MenuItem
-            title="Add member"
-            description="Initiate from a Squads treasury detail page."
-            onClick={() => {
-              setOpen(false);
-              navigate(`/organizations/${organizationId}/wallets`);
-            }}
-          />
-          <MenuItem
-            title="Change threshold"
-            description="Initiate from a Squads treasury detail page."
-            onClick={() => {
-              setOpen(false);
-              navigate(`/organizations/${organizationId}/wallets`);
-            }}
-          />
-        </div>
-      ) : null}
     </div>
   );
 }
 
-function MenuItem({
-  title,
-  description,
-  onClick,
+// ─── ProposalRow ─────────────────────────────────────────────────────────
+
+const STATUS_TONE: Record<string, PillTone> = {
+  active: 'warning',
+  approved: 'info',
+  executed: 'success',
+  cancelled: 'neutral',
+  rejected: 'neutral',
+};
+const STATUS_LABEL: Record<string, string> = {
+  active: 'Awaiting others',
+  approved: 'Ready to execute',
+  executed: 'Executed',
+  cancelled: 'Cancelled',
+  rejected: 'Rejected',
+};
+
+function ProposalRow({
+  proposal,
+  treasuryName,
+  needsMyVote,
+  pendingVoterWalletId,
+  executeWalletId,
+  busy,
+  onView,
+  onApprove,
+  onExecute,
 }: {
-  title: string;
-  description: string;
-  onClick: () => void;
+  proposal: DecimalProposal;
+  treasuryName: string;
+  needsMyVote: boolean;
+  pendingVoterWalletId: string | null;
+  executeWalletId: string | null;
+  busy: boolean;
+  onView: () => void;
+  onApprove: (walletId: string) => void;
+  onExecute: (walletId: string) => void;
 }) {
+  const title = summarizeProposal(proposal);
+  const typeLabel = proposalTypeLabel(proposal);
+  const approved = proposal.voting?.approvals.length ?? 0;
+  const total = proposal.voting?.threshold ?? 0;
+  const statusKey = proposal.status === 'active' && needsMyVote ? 'needs_vote' : proposal.status;
+  const statusTone =
+    statusKey === 'needs_vote' ? 'warning' : STATUS_TONE[proposal.status] ?? 'neutral';
+  const statusLabel =
+    statusKey === 'needs_vote' ? 'Needs your vote' : STATUS_LABEL[proposal.status] ?? proposal.status;
+
   return (
-    <button
-      type="button"
-      role="menuitem"
-      onClick={onClick}
-      style={{
-        textAlign: 'left',
-        padding: '10px 12px',
-        background: 'transparent',
-        border: 'none',
-        borderRadius: 8,
-        cursor: 'pointer',
-        color: 'inherit',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 2,
-      }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--ax-surface-2)')}
-      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-    >
-      <strong style={{ fontSize: 13 }}>{title}</strong>
-      <span style={{ fontSize: 12, color: 'var(--ax-text-muted)', lineHeight: 1.4 }}>
-        {description}
-      </span>
-    </button>
+    <tr onClick={onView} style={{ cursor: 'pointer' }}>
+      <td>
+        <div className="cell-vendor">
+          <span className="v-name">{title}</span>
+          <span className="v-sub" style={{ fontFamily: 'var(--font-body)' }}>{typeLabel}</span>
+        </div>
+      </td>
+      <td>
+        <span className="cell-source">
+          {treasuryName !== '—' ? <Ico.treasury w={15} /> : null}
+          {treasuryName}
+        </span>
+      </td>
+      <td>
+        <VoteDots approved={approved} total={total} />
+      </td>
+      <td>
+        <Pill tone={statusTone}>{statusLabel}</Pill>
+      </td>
+      <td onClick={(e) => e.stopPropagation()}>
+        <div className="row-actions">
+          {needsMyVote && pendingVoterWalletId ? (
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              disabled={busy}
+              onClick={() => onApprove(pendingVoterWalletId)}
+            >
+              Vote<Ico.arrowRight w={13} />
+            </button>
+          ) : proposal.status === 'approved' && executeWalletId ? (
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              disabled={busy}
+              onClick={() => onExecute(executeWalletId)}
+            >
+              <Ico.bolt w={13} fill="currentColor" sw={0} />Execute
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-sm btn-secondary"
+              onClick={onView}
+            >
+              View<Ico.arrowRight w={13} />
+            </button>
+          )}
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+function VoteDots({ approved, total }: { approved: number; total: number }) {
+  // Cap at 6 dots so very wide thresholds don't blow up the row.
+  const dots = Math.min(total, 6);
+  return (
+    <span className="appr-dots">
+      {Array.from({ length: dots }).map((_, i) => (
+        <span className={`ad${i < approved ? ' on' : ''}`} key={i} />
+      ))}
+      <span className="appr-meta">&nbsp;{approved} of {total}</span>
+    </span>
   );
 }

@@ -1,3 +1,8 @@
+// Address book — implements PageAddressBook from the design.
+// Vendors and counterparties the org pays. Per-row aggregates (last
+// payment, total paid, payment count) are computed client-side from
+// paymentOrders so we don't need a new endpoint.
+
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -6,20 +11,41 @@ import type {
   AuthenticatedSession,
   CounterpartyWallet,
   CounterpartyWalletTrustState,
+  PaymentOrder,
 } from '../types';
 import { useToast } from '../ui/Toast';
-import { ChainLink, EmptyIcon, RdEmptyState, RdFilterBar } from '../ui-primitives';
+import { formatRawUsdcCompact } from '../domain';
+import { PageHead, Pill, type PillTone } from '../dec/primitives';
+import { Ico } from '../dec/icons';
 
-type TrustFilter = 'all' | CounterpartyWalletTrustState;
+type LocalTab = 'all' | 'trusted' | 'unreviewed';
 
-function trustTone(
-  t: CounterpartyWalletTrustState,
-): 'success' | 'warning' | 'danger' | 'info' {
+function trustTone(t: CounterpartyWalletTrustState): PillTone {
   if (t === 'trusted') return 'success';
   if (t === 'blocked' || t === 'restricted') return 'danger';
   if (t === 'unreviewed') return 'warning';
-  return 'info';
+  return 'neutral';
 }
+
+function trustLabel(t: CounterpartyWalletTrustState): string {
+  if (t === 'trusted') return 'Verified';
+  if (t === 'unreviewed') return 'Unreviewed';
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+function vendorInitials(label: string): string {
+  const parts = label.trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0]![0]! + parts[1]![0]!).toUpperCase();
+  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
+  return '??';
+}
+
+type VendorRow = {
+  wallet: CounterpartyWallet;
+  lastPaidAt: string | null;
+  totalPaidRaw: string;
+  paymentCount: number;
+};
 
 export function CounterpartiesPage({ session: _session }: { session: AuthenticatedSession }) {
   const { organizationId } = useParams<{ organizationId: string }>();
@@ -29,11 +55,20 @@ export function CounterpartiesPage({ session: _session }: { session: Authenticat
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<CounterpartyWallet | null>(null);
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<TrustFilter>('all');
+  const [tab, setTab] = useState<LocalTab>('all');
 
   const walletsQuery = useQuery({
     queryKey: ['counterparty-wallets', organizationId] as const,
     queryFn: () => api.listCounterpartyWallets(organizationId!),
+    enabled: Boolean(organizationId),
+  });
+
+  // Used to compute per-vendor aggregates. Limit=100 from the list
+  // endpoint is enough for the "last payment / total paid" view; older
+  // rows fall off naturally.
+  const paymentsQuery = useQuery({
+    queryKey: ['payment-orders', organizationId, 'address-book-aggregates'] as const,
+    queryFn: () => api.listPaymentOrders(organizationId!),
     enabled: Boolean(organizationId),
   });
 
@@ -55,11 +90,11 @@ export function CounterpartiesPage({ session: _session }: { session: Authenticat
         notes: input.notes,
       }),
     onSuccess: async () => {
-      success('Wallet saved.');
+      success('Vendor saved.');
       setAddOpen(false);
       await invalidate();
     },
-    onError: (err) => toastError(err instanceof Error ? err.message : 'Unable to save wallet.'),
+    onError: (err) => toastError(err instanceof Error ? err.message : 'Unable to save vendor.'),
   });
 
   const updateMutation = useMutation({
@@ -75,184 +110,232 @@ export function CounterpartiesPage({ session: _session }: { session: Authenticat
         notes: input.notes,
       }),
     onSuccess: async () => {
-      success('Wallet updated.');
+      success('Vendor updated.');
       setEditing(null);
       await invalidate();
     },
-    onError: (err) => toastError(err instanceof Error ? err.message : 'Unable to update wallet.'),
+    onError: (err) => toastError(err instanceof Error ? err.message : 'Unable to update vendor.'),
   });
 
   if (!organizationId) {
     return (
-      <main className="page-frame">
-        <div className="rd-state">
-          <h2 className="rd-state-title">Organization unavailable</h2>
-          <p className="rd-state-body">Pick an organization from the sidebar.</p>
+      <div className="page">
+        <div className="empty">
+          <h4>Organization unavailable</h4>
+          <p>Pick an organization from the sidebar.</p>
         </div>
-      </main>
+      </div>
     );
   }
 
   const wallets = (walletsQuery.data?.items ?? []).filter((w) => w.isActive);
 
-  const filteredWallets = useMemo(() => {
-    let out = wallets;
-    if (filter !== 'all') out = out.filter((w) => w.trustState === filter);
+  // Aggregate payment history per counterparty wallet.
+  const aggregatesByWalletId = useMemo(() => {
+    const map = new Map<string, { totalRaw: bigint; count: number; lastPaidAt: string | null }>();
+    for (const o of paymentsQuery.data?.items ?? []) {
+      const key = o.counterpartyWalletId;
+      if (!key) continue;
+      const state = String(o.derivedState ?? o.state).toLowerCase();
+      // Only count payments that actually moved money. Drafts and
+      // cancelled rows would inflate the picture.
+      const settled =
+        state === 'settled' ||
+        state === 'executed' ||
+        state === 'closed' ||
+        Boolean(o.spendingLimitExecution);
+      if (!settled) continue;
+      const prev = map.get(key) ?? { totalRaw: 0n, count: 0, lastPaidAt: null };
+      try { prev.totalRaw += BigInt(o.amountRaw); } catch { /* ignore */ }
+      prev.count += 1;
+      const when = o.updatedAt ?? o.createdAt;
+      if (!prev.lastPaidAt || (when && when > prev.lastPaidAt)) prev.lastPaidAt = when;
+      map.set(key, prev);
+    }
+    return map;
+  }, [paymentsQuery.data]);
+
+  const rows = useMemo<VendorRow[]>(
+    () =>
+      wallets.map((w) => {
+        const agg = aggregatesByWalletId.get(w.counterpartyWalletId);
+        return {
+          wallet: w,
+          lastPaidAt: agg?.lastPaidAt ?? null,
+          totalPaidRaw: (agg?.totalRaw ?? 0n).toString(),
+          paymentCount: agg?.count ?? 0,
+        };
+      }),
+    [wallets, aggregatesByWalletId],
+  );
+
+  const filtered = useMemo(() => {
+    let out = rows;
+    if (tab === 'trusted') out = out.filter((r) => r.wallet.trustState === 'trusted');
+    else if (tab === 'unreviewed') out = out.filter((r) => r.wallet.trustState !== 'trusted');
     const q = search.trim().toLowerCase();
     if (q) {
       out = out.filter(
-        (w) =>
-          w.label.toLowerCase().includes(q) || w.walletAddress.toLowerCase().includes(q),
+        (r) =>
+          r.wallet.label.toLowerCase().includes(q) ||
+          r.wallet.walletAddress.toLowerCase().includes(q),
       );
     }
-    return out
-      .slice()
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [wallets, search, filter]);
+    return out.slice().sort((a, b) => a.wallet.label.localeCompare(b.wallet.label));
+  }, [rows, tab, search]);
 
-  const trusted = wallets.filter((w) => w.trustState === 'trusted').length;
-  const unreviewed = wallets.filter((w) => w.trustState === 'unreviewed').length;
-  const restrictedOrBlocked = wallets.filter(
-    (w) => w.trustState === 'blocked' || w.trustState === 'restricted',
-  ).length;
+  const totals = useMemo(() => {
+    return {
+      all: rows.length,
+      trusted: rows.filter((r) => r.wallet.trustState === 'trusted').length,
+      unreviewed: rows.filter((r) => r.wallet.trustState !== 'trusted').length,
+    };
+  }, [rows]);
 
   const isLoading = walletsQuery.isLoading;
 
   return (
-    <main className="page-frame">
-      <header className="page-header">
-        <div>
-          <p className="eyebrow">Address book</p>
-          <h1>Wallet addresses</h1>
-          <p>
-            Solana wallets you transact with — vendors, contractors, customers, your own. Trust
-            state gates whether transfers can execute against an entry.
-          </p>
-        </div>
-        <div className="page-actions">
-          <button type="button" className="button button-primary" onClick={() => setAddOpen(true)}>
-            + Add wallet
-          </button>
-        </div>
-      </header>
+    <div className="page">
+      <div className="stack stack-24">
+        <PageHead
+          eyebrow="REGISTRY"
+          title="Address book"
+          desc="Vendors and counterparties you pay. Review a new vendor once, then pay them again with confidence."
+          actions={
+            <button type="button" className="btn btn-primary" onClick={() => setAddOpen(true)}>
+              <Ico.plus w={15} />Add vendor
+            </button>
+          }
+        />
 
-      <div className="rd-metrics">
-        <div className="rd-metric">
-          <span className="rd-metric-label">Total</span>
-          <span className="rd-metric-value">{wallets.length}</span>
+        <div className="filterbar">
+          <div className="tabs">
+            <button
+              type="button"
+              className={`tab${tab === 'all' ? ' on' : ''}`}
+              onClick={() => setTab('all')}
+            >
+              All<span className="tab-count">{totals.all}</span>
+            </button>
+            <button
+              type="button"
+              className={`tab${tab === 'trusted' ? ' on' : ''}`}
+              onClick={() => setTab('trusted')}
+            >
+              Verified<span className="tab-count">{totals.trusted}</span>
+            </button>
+            <button
+              type="button"
+              className={`tab${tab === 'unreviewed' ? ' on' : ''}`}
+              onClick={() => setTab('unreviewed')}
+            >
+              Needs review<span className="tab-count">{totals.unreviewed}</span>
+            </button>
+          </div>
+          <div className="filter-right">
+            <div className="input-search">
+              <Ico.search w={15} />
+              <input
+                className="input"
+                placeholder="Search vendors"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+          </div>
         </div>
-        <div className="rd-metric">
-          <span className="rd-metric-label">Unreviewed</span>
-          <span className="rd-metric-value" data-tone={unreviewed > 0 ? 'warning' : undefined}>
-            {unreviewed}
-          </span>
-        </div>
-        <div className="rd-metric">
-          <span className="rd-metric-label">Trusted</span>
-          <span className="rd-metric-value" data-tone="success">
-            {trusted}
-          </span>
-        </div>
-        <div className="rd-metric">
-          <span className="rd-metric-label">Restricted / blocked</span>
-          <span
-            className="rd-metric-value"
-            data-tone={restrictedOrBlocked > 0 ? 'danger' : undefined}
-          >
-            {restrictedOrBlocked}
-          </span>
-        </div>
-      </div>
 
-      <RdFilterBar
-        search={{
-          value: search,
-          onChange: setSearch,
-          placeholder: 'Search label or wallet address',
-          ariaLabel: 'Search wallets',
-        }}
-        tabs={(['all', 'unreviewed', 'trusted', 'restricted', 'blocked'] as const).map((key) => ({
-          id: key,
-          label: key === 'all' ? 'All' : key.charAt(0).toUpperCase() + key.slice(1),
-          active: filter === key,
-          onClick: () => setFilter(key),
-        }))}
-        rightMeta={`${filteredWallets.length} of ${wallets.length}`}
-      />
-
-      <section className="rd-section" style={{ marginTop: 0 }}>
-        <div className="rd-table-shell">
+        <div className="tbl-card">
           {isLoading ? (
             <div style={{ padding: 16 }}>
-              <div className="rd-skeleton rd-skeleton-block" style={{ height: 56, marginBottom: 8 }} />
-              <div className="rd-skeleton rd-skeleton-block" style={{ height: 56, marginBottom: 8 }} />
-              <div className="rd-skeleton rd-skeleton-block" style={{ height: 56 }} />
+              <div className="skeleton" style={{ height: 56, marginBottom: 6 }} />
+              <div className="skeleton" style={{ height: 56, marginBottom: 6 }} />
+              <div className="skeleton" style={{ height: 56 }} />
             </div>
-          ) : filteredWallets.length === 0 ? (
-            wallets.length === 0 ? (
-              <RdEmptyState
-                icon={<EmptyIcon kind="address-book" />}
-                title="No wallets yet"
-                description="Save the wallets you pay or get paid by. Once trusted, they're available for one-click selection on every payment and collection."
-                primary={{ label: 'Add wallet', onClick: () => setAddOpen(true) }}
-              />
-            ) : (
-              <RdEmptyState
-                title="Nothing matches"
-                description="Clear the search or change the filter to see more."
-              />
-            )
+          ) : filtered.length === 0 ? (
+            <div className="empty">
+              <div className="empty-icon"><Ico.address w={22} /></div>
+              <h4>{rows.length === 0 ? 'No vendors yet' : 'Nothing matches'}</h4>
+              <p>
+                {rows.length === 0
+                  ? "Save the vendors you pay. Once verified, they're available for one-click selection on every payment."
+                  : 'Clear the search or change the tab.'}
+              </p>
+              {rows.length === 0 ? (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={() => setAddOpen(true)}
+                  style={{ marginTop: 8 }}
+                >
+                  <Ico.plus w={13} />Add vendor
+                </button>
+              ) : null}
+            </div>
           ) : (
-            <table className="rd-table">
+            <table className="tbl">
               <thead>
                 <tr>
-                  <th style={{ width: '34%' }}>Label</th>
-                  <th style={{ width: '38%' }}>Wallet</th>
-                  <th style={{ width: '14%' }}>Trust</th>
-                  <th aria-label="Actions" style={{ width: '14%' }} />
+                  <th style={{ width: '36%' }}>Vendor</th>
+                  <th>Status</th>
+                  <th>Last payment</th>
+                  <th className="num">Total paid</th>
+                  <th className="num">Payments</th>
+                  <th style={{ width: 28 }}></th>
                 </tr>
               </thead>
               <tbody>
-                {filteredWallets.map((w) => (
-                  <tr key={w.counterpartyWalletId}>
-                    <td>
-                      <div className="rd-recipient-main">
-                        <span className="rd-recipient-name">{w.label}</span>
-                        {w.notes ? (
-                          <span className="rd-recipient-ref">{w.notes}</span>
-                        ) : null}
-                      </div>
-                    </td>
-                    <td>
-                      <ChainLink address={w.walletAddress} />
-                    </td>
-                    <td>
-                      <span className="rd-pill" data-tone={trustTone(w.trustState)}>
-                        <span className="rd-pill-dot" aria-hidden />
-                        {w.trustState}
-                      </span>
-                    </td>
-                    <td>
-                      <div className="rd-row-actions">
-                        <button
-                          type="button"
-                          className="rd-btn rd-btn-sm rd-btn-ghost"
-                          onClick={() => setEditing(w)}
-                        >
-                          Edit
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {filtered.map((r) => {
+                  const w = r.wallet;
+                  const lastDate = r.lastPaidAt
+                    ? new Date(r.lastPaidAt).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                      })
+                    : '—';
+                  return (
+                    <tr
+                      key={w.counterpartyWalletId}
+                      onClick={() => setEditing(w)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <td>
+                        <div className="member-cell">
+                          <span className="m-avatar">{vendorInitials(w.label)}</span>
+                          <div className="col">
+                            <span className="m-name">{w.label}</span>
+                            {w.counterparty?.displayName && w.counterparty.displayName !== w.label ? (
+                              <span className="m-sub" style={{ fontFamily: 'var(--font-body)', fontSize: 11, color: 'var(--text-faint)' }}>
+                                {w.counterparty.displayName}
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                      </td>
+                      <td>
+                        <Pill tone={trustTone(w.trustState)}>{trustLabel(w.trustState)}</Pill>
+                      </td>
+                      <td>
+                        <span className="joined">{lastDate}</span>
+                      </td>
+                      <td className="td-num" style={{ paddingRight: 28 }}>
+                        {formatRawUsdcCompact(r.totalPaidRaw)}{' '}
+                        <span style={{ color: 'var(--text-faint)' }}>USDC</span>
+                      </td>
+                      <td className="td-num" style={{ paddingRight: 28 }}>{r.paymentCount}</td>
+                      <td><span className="row-arrow"><Ico.chevRight w={16} /></span></td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
         </div>
-      </section>
+      </div>
 
       {addOpen ? (
-        <WalletDialog
+        <VendorDialog
           mode="create"
           pending={createMutation.isPending}
           onClose={() => setAddOpen(false)}
@@ -261,7 +344,7 @@ export function CounterpartiesPage({ session: _session }: { session: Authenticat
       ) : null}
 
       {editing ? (
-        <WalletDialog
+        <VendorDialog
           mode="edit"
           initial={editing}
           pending={updateMutation.isPending}
@@ -276,11 +359,11 @@ export function CounterpartiesPage({ session: _session }: { session: Authenticat
           }
         />
       ) : null}
-    </main>
+    </div>
   );
 }
 
-function WalletDialog(
+function VendorDialog(
   props:
     | {
         mode: 'create';
@@ -310,6 +393,13 @@ function WalletDialog(
   const { mode, pending, onClose, onSubmit } = props;
   const initial = props.mode === 'edit' ? props.initial : null;
 
+  const [label, setLabel] = useState(initial?.label ?? '');
+  const [walletAddress, setWalletAddress] = useState(initial?.walletAddress ?? '');
+  const [trustState, setTrustState] = useState<CounterpartyWalletTrustState>(
+    initial?.trustState ?? 'unreviewed',
+  );
+  const [notes, setNotes] = useState(initial?.notes ?? '');
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose();
@@ -318,101 +408,138 @@ function WalletDialog(
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const title = mode === 'create' ? 'Add wallet' : 'Edit wallet';
-  const submitLabel = mode === 'create' ? 'Save wallet' : 'Save changes';
+  const title = mode === 'create' ? 'Add vendor' : 'Edit vendor';
+  const submitLabel = mode === 'create' ? 'Save vendor' : 'Save changes';
 
   return (
-    <div className="rd-dialog-backdrop" role="dialog" aria-modal="true">
-      <div className="rd-dialog" style={{ maxWidth: 540 }}>
-        <h2 className="rd-dialog-title">{title}</h2>
-        <p className="rd-dialog-body">
-          {mode === 'create'
-            ? 'Add a Solana wallet to your address book. Mark it trusted now or review and approve later.'
-            : 'Update the label, trust state, or notes. The wallet address itself can\'t be changed.'}
-        </p>
+    <div
+      className="overlay"
+      style={{ position: 'fixed', inset: 0, zIndex: 60 }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !pending) onClose();
+      }}
+    >
+      <div
+        className="dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="dec-vendor-title"
+        style={{ maxWidth: 540 }}
+      >
+        <div className="dialog-head">
+          <div>
+            <h2 id="dec-vendor-title">{title}</h2>
+            <p>
+              {mode === 'create'
+                ? 'Solana wallet you pay. Mark verified now or review and approve later.'
+                : "Update the label, status, or notes. The wallet address can't be changed."}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="drawer-x"
+            onClick={onClose}
+            disabled={pending}
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            const form = new FormData(e.currentTarget);
             onSubmit({
-              label: String(form.get('label') ?? '').trim(),
-              walletAddress:
-                mode === 'create'
-                  ? String(form.get('walletAddress') ?? '').trim()
-                  : initial!.walletAddress,
-              trustState: String(
-                form.get('trustState') ?? 'unreviewed',
-              ) as CounterpartyWalletTrustState,
-              notes: String(form.get('notes') ?? '').trim() || undefined,
+              label: label.trim(),
+              walletAddress: mode === 'create' ? walletAddress.trim() : initial!.walletAddress,
+              trustState,
+              notes: notes.trim() || undefined,
             });
           }}
         >
-          <div className="rd-form-grid">
-            <label className="rd-field" style={{ gridColumn: '1 / -1' }}>
-              <span className="rd-field-label">Label</span>
+          <div className="dialog-body">
+            <div className="field">
+              <label className="field-label" htmlFor="dec-vendor-label">Vendor name</label>
               <input
-                name="label"
+                id="dec-vendor-label"
+                className="input"
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+                placeholder="Acme Corp"
+                autoFocus
                 required
-                placeholder="Acme Corp — ops wallet"
-                className="rd-input"
-                autoComplete="off"
-                defaultValue={initial?.label ?? ''}
               />
-            </label>
+            </div>
             {mode === 'create' ? (
-              <label className="rd-field" style={{ gridColumn: '1 / -1' }}>
-                <span className="rd-field-label">Solana wallet address</span>
+              <div className="field">
+                <label className="field-label" htmlFor="dec-vendor-addr">Solana wallet address</label>
                 <input
-                  name="walletAddress"
-                  required
+                  id="dec-vendor-addr"
+                  className="input mono"
+                  value={walletAddress}
+                  onChange={(e) => setWalletAddress(e.target.value)}
                   placeholder="Solana address"
-                  className="rd-input"
-                  autoComplete="off"
+                  required
+                  style={{ fontSize: 12 }}
                 />
-              </label>
+              </div>
             ) : (
-              <div className="rd-field" style={{ gridColumn: '1 / -1' }}>
-                <span className="rd-field-label">Wallet address</span>
-                <div className="rd-mono" style={{ fontSize: 12, color: 'var(--ax-text-muted)' }}>
+              <div className="field">
+                <label className="field-label">Wallet address</label>
+                <div
+                  className="input mono"
+                  style={{
+                    background: 'var(--bg-surface-2)',
+                    color: 'var(--text-muted)',
+                    fontSize: 12,
+                    wordBreak: 'break-all',
+                  }}
+                >
                   {initial!.walletAddress}
                 </div>
               </div>
             )}
-            <label className="rd-field" style={{ gridColumn: '1 / -1' }}>
-              <span className="rd-field-label">Trust state</span>
-              <select
-                name="trustState"
-                className="rd-select"
-                defaultValue={initial?.trustState ?? 'unreviewed'}
-              >
-                <option value="unreviewed">Unreviewed</option>
-                <option value="trusted">Trusted</option>
-                <option value="restricted">Restricted</option>
-                <option value="blocked">Blocked</option>
-              </select>
-            </label>
-            <label className="rd-field" style={{ gridColumn: '1 / -1' }}>
-              <span className="rd-field-label">Notes (optional)</span>
+            <div className="field">
+              <label className="field-label" htmlFor="dec-vendor-trust">Trust status</label>
+              <div className="select">
+                <select
+                  id="dec-vendor-trust"
+                  value={trustState}
+                  onChange={(e) => setTrustState(e.target.value as CounterpartyWalletTrustState)}
+                >
+                  <option value="unreviewed">Unreviewed</option>
+                  <option value="trusted">Verified</option>
+                  <option value="restricted">Restricted</option>
+                  <option value="blocked">Blocked</option>
+                </select>
+                <Ico.chevDown w={14} />
+              </div>
+            </div>
+            <div className="field">
+              <label className="field-label" htmlFor="dec-vendor-notes">
+                Notes{' '}
+                <span style={{ color: 'var(--text-faint)', fontWeight: 400 }}>· optional</span>
+              </label>
               <input
-                name="notes"
+                id="dec-vendor-notes"
+                className="input"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
                 placeholder="Verified via signed contract on 2026-04-22"
-                className="rd-input"
-                autoComplete="off"
-                defaultValue={initial?.notes ?? ''}
               />
-            </label>
+            </div>
           </div>
-          <div className="rd-dialog-actions" style={{ marginTop: 24 }}>
-            <button type="button" className="button button-secondary" onClick={onClose}>
-              Cancel
-            </button>
+          <div className="dialog-foot">
             <button
               type="submit"
-              className="button button-primary"
+              className="btn btn-primary"
+              style={{ flex: 1 }}
               disabled={pending}
               aria-busy={pending}
             >
               {pending ? 'Saving…' : submitLabel}
+            </button>
+            <button type="button" className="btn btn-secondary" onClick={onClose} disabled={pending}>
+              Cancel
             </button>
           </div>
         </form>
