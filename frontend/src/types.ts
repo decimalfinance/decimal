@@ -263,11 +263,20 @@ export type TreasuryWallet = {
   isActive: boolean;
   source: string;
   sourceRef: string | null;
+  // For squads_v4 treasuries: which vault PDA under the multisig this row
+  // represents. One multisig can have many deterministic vaults (0..255).
+  // Null for non-Squads rows.
+  sourceVaultIndex: number | null;
   displayName: string | null;
   notes: string | null;
   propertiesJson: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+};
+
+export type RegisterSquadsTreasuryVaultRequest = {
+  displayName?: string | null;
+  vaultIndex: number;
 };
 
 // Squads v4 treasury creation — see backend api/src/squads-treasury.ts.

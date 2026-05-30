@@ -37,6 +37,7 @@ import type {
   PaymentOrderClearReviewResult,
   PublicInvite,
   ConfirmSquadsTreasuryRequest,
+  RegisterSquadsTreasuryVaultRequest,
   CreateSquadsTreasuryIntentRequest,
   CreateSquadsTreasuryIntentResponse,
   CreateSquadsAddMemberProposalRequest,
@@ -559,6 +560,23 @@ export const api = {
   ) {
     return request<TreasuryWallet>(
       `/organizations/${organizationId}/treasury-wallets/squads/confirm`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+    );
+  },
+  // Register a second (third, ...) vault under an existing Squads treasury.
+  // Vault PDAs are deterministic — no on-chain tx needed, the backend just
+  // derives the address and writes a new TreasuryWallet row sharing the same
+  // sourceRef (multisig PDA) but a different sourceVaultIndex.
+  registerSquadsTreasuryVault(
+    organizationId: string,
+    treasuryWalletId: string,
+    input: RegisterSquadsTreasuryVaultRequest,
+  ) {
+    return request<TreasuryWallet>(
+      `/organizations/${organizationId}/treasury-wallets/${treasuryWalletId}/squads/vaults`,
       {
         method: 'POST',
         body: JSON.stringify(input),

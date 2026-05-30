@@ -110,7 +110,7 @@ export function TreasuryWalletDetailPage({ session }: { session: AuthenticatedSe
     );
   }, [detailQuery.data, session.user.userId]);
 
-  const [openDialog, setOpenDialog] = useState<'add-member' | 'change-threshold' | null>(null);
+  const [openDialog, setOpenDialog] = useState<'add-member' | 'change-threshold' | 'add-vault' | null>(null);
   const [proposalsBusy, setProposalsBusy] = useState<ProposalsTableBusy | null>(null);
 
   // Inline proposals (this treasury only). Only fetch once we know the wallet
@@ -273,6 +273,13 @@ export function TreasuryWalletDetailPage({ session }: { session: AuthenticatedSe
                 <button
                   type="button"
                   className="button button-secondary"
+                  onClick={() => setOpenDialog('add-vault')}
+                >
+                  + Add vault
+                </button>
+                <button
+                  type="button"
+                  className="button button-secondary"
                   onClick={() => setOpenDialog('change-threshold')}
                 >
                   Change threshold
@@ -412,6 +419,23 @@ export function TreasuryWalletDetailPage({ session }: { session: AuthenticatedSe
             setOpenDialog(null);
             await refreshDetail();
             success('Threshold changed.');
+          }}
+          onError={(message) => toastError(message)}
+        />
+      ) : null}
+
+      {wallet && openDialog === 'add-vault' ? (
+        <AddSquadsVaultDialog
+          organizationId={organizationId}
+          baseWallet={wallet}
+          siblingVaults={treasuryListQuery.data?.items ?? []}
+          onClose={() => setOpenDialog(null)}
+          onCreated={async (created) => {
+            setOpenDialog(null);
+            await queryClient.invalidateQueries({ queryKey: ['treasury-wallets', organizationId] });
+            await queryClient.invalidateQueries({ queryKey: ['treasury-wallet-balances', organizationId] });
+            success(`Vault "${created.displayName ?? 'untitled'}" added.`);
+            navigate(`/organizations/${organizationId}/wallets/${created.treasuryWalletId}`);
           }}
           onError={(message) => toastError(message)}
         />
@@ -2294,6 +2318,188 @@ function SquadsReviewRow({ label, value }: { label: string; value: React.ReactNo
     >
       <span style={{ color: 'var(--ax-text-muted)', fontSize: 13 }}>{label}</span>
       <div style={{ fontSize: 14 }}>{value}</div>
+    </div>
+  );
+}
+
+// ─── Add vault dialog ──────────────────────────────────────────────────
+// Backend creates a deterministic vault PDA under the same multisig PDA.
+// No on-chain signature needed. Only requires a display name and a vault
+// index in 0..255 that isn't already taken on this multisig.
+function AddSquadsVaultDialog({
+  organizationId,
+  baseWallet,
+  siblingVaults,
+  onClose,
+  onCreated,
+  onError,
+}: {
+  organizationId: string;
+  baseWallet: TreasuryWallet;
+  siblingVaults: TreasuryWallet[];
+  onClose: () => void;
+  onCreated: (created: TreasuryWallet) => void;
+  onError: (message: string) => void;
+}) {
+  const usedVaultIndexes = useMemo(() => {
+    const used = new Set<number>();
+    for (const w of siblingVaults) {
+      if (w.source !== 'squads_v4' || w.sourceRef !== baseWallet.sourceRef) continue;
+      if (typeof w.sourceVaultIndex === 'number') used.add(w.sourceVaultIndex);
+    }
+    return used;
+  }, [siblingVaults, baseWallet.sourceRef]);
+
+  const nextIndex = useMemo(() => {
+    for (let i = 0; i <= 255; i += 1) {
+      if (!usedVaultIndexes.has(i)) return i;
+    }
+    return 255;
+  }, [usedVaultIndexes]);
+
+  const [displayName, setDisplayName] = useState('');
+  const [vaultIndex, setVaultIndex] = useState<number>(nextIndex);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const noIndexesLeft = usedVaultIndexes.size > 255;
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      api.registerSquadsTreasuryVault(organizationId, baseWallet.treasuryWalletId, {
+        displayName: displayName.trim() || null,
+        vaultIndex,
+      }),
+    onSuccess: onCreated,
+    onError: (err) => {
+      const message = err instanceof ApiError || err instanceof Error ? err.message : 'Could not add vault.';
+      onError(message);
+    },
+  });
+
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setLocalError(null);
+    const trimmedName = displayName.trim();
+    if (!trimmedName) {
+      setLocalError('Vault name is required.');
+      return;
+    }
+    if (!Number.isInteger(vaultIndex) || vaultIndex < 0 || vaultIndex > 255) {
+      setLocalError('Vault index must be between 0 and 255.');
+      return;
+    }
+    if (usedVaultIndexes.has(vaultIndex)) {
+      setLocalError(`Vault index ${vaultIndex} is already registered for this treasury.`);
+      return;
+    }
+    mutation.mutate();
+  }
+
+  // Show existing vaults so the user understands what they're adding alongside.
+  const sortedSiblings = useMemo(
+    () =>
+      siblingVaults
+        .filter((w) => w.source === 'squads_v4' && w.sourceRef === baseWallet.sourceRef)
+        .sort((a, b) => (a.sourceVaultIndex ?? 999) - (b.sourceVaultIndex ?? 999)),
+    [siblingVaults, baseWallet.sourceRef],
+  );
+
+  return (
+    <div
+      className="overlay"
+      style={{ position: 'fixed', inset: 0, zIndex: 60 }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="dec-add-vault-title">
+        <div className="dialog-head">
+          <div>
+            <h2 id="dec-add-vault-title">Add vault</h2>
+            <p>
+              Create another vault controlled by the same team and approval threshold. Each vault
+              has its own balance and can be used as a payment source.
+            </p>
+          </div>
+          <button type="button" className="drawer-x" onClick={onClose} aria-label="Close">
+            ×
+          </button>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="dialog-body">
+            <div className="field">
+              <label className="field-label">Vault name</label>
+              <input
+                className="input"
+                type="text"
+                placeholder="e.g. Payroll vault"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                autoFocus
+                required
+              />
+            </div>
+
+            <div className="field">
+              <label className="field-label">Vault index</label>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                max={255}
+                value={Number.isFinite(vaultIndex) ? vaultIndex : ''}
+                onChange={(e) => setVaultIndex(Number(e.target.value))}
+              />
+              <span className="input-help">
+                A number from 0 to 255 that uniquely identifies this vault under the same team.
+              </span>
+            </div>
+
+            {sortedSiblings.length > 0 ? (
+              <div className="field">
+                <label className="field-label">Existing vaults</label>
+                <div className="summary-card">
+                  {sortedSiblings.map((w) => (
+                    <div key={w.treasuryWalletId} className="summary-row">
+                      <span className="sr-key">{w.displayName ?? 'Untitled vault'}</span>
+                      <span className="sr-val mono">index {w.sourceVaultIndex ?? '—'}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {localError ? (
+              <div style={{ fontSize: 12, color: 'var(--danger)' }}>{localError}</div>
+            ) : null}
+            {noIndexesLeft ? (
+              <div style={{ fontSize: 12, color: 'var(--danger)' }}>
+                This treasury has no available vault indexes (0–255 all used).
+              </div>
+            ) : null}
+          </div>
+          <div className="dialog-foot">
+            <button
+              type="submit"
+              className="btn btn-primary"
+              style={{ flex: 1 }}
+              disabled={mutation.isPending || noIndexesLeft}
+              aria-busy={mutation.isPending}
+            >
+              {mutation.isPending ? 'Adding…' : 'Add vault'}
+            </button>
+            <button type="button" className="btn btn-secondary" onClick={onClose}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

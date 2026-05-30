@@ -96,9 +96,13 @@ export function WalletsPage({ session: _session }: { session: AuthenticatedSessi
     enabled: Boolean(organizationId),
   });
   const treasuryWalletMetaById = useMemo(() => {
-    const map = new Map<string, { source: string; sourceRef: string | null }>();
+    const map = new Map<string, { source: string; sourceRef: string | null; sourceVaultIndex: number | null }>();
     for (const w of treasuryWalletsQuery.data?.items ?? []) {
-      map.set(w.treasuryWalletId, { source: w.source, sourceRef: w.sourceRef });
+      map.set(w.treasuryWalletId, {
+        source: w.source,
+        sourceRef: w.sourceRef,
+        sourceVaultIndex: w.sourceVaultIndex,
+      });
     }
     return map;
   }, [treasuryWalletsQuery.data]);
@@ -146,6 +150,86 @@ export function WalletsPage({ session: _session }: { session: AuthenticatedSessi
   );
   const isInitialLoading = balancesQuery.isLoading && rows.length === 0;
 
+  // Group rows by multisig — every Squads vault under the same multisig
+  // PDA collapses into ONE display row showing the team-of-signers + summed
+  // balance + vault count. Non-Squads wallets stay one-row-per-wallet.
+  // The display row points to the lowest-vault-index treasuryWalletId so
+  // "click row to open" lands on the canonical/base treasury detail.
+  type GroupedRow = {
+    key: string;
+    primaryTreasuryWalletId: string;
+    displayName: string;
+    isSquads: boolean;
+    vaultCount: number;
+    usdcRawSum: string;
+    isActive: boolean;
+    rpcError: string | null;
+  };
+  const groupedRows = useMemo<GroupedRow[]>(() => {
+    const groups = new Map<string, GroupedRow & { _vaultIndexes: Array<{ id: string; index: number | null; name: string | null }> }>();
+    for (const row of rows) {
+      const meta = treasuryWalletMetaById.get(row.treasuryWalletId);
+      const isSquads = meta?.source === 'squads_v4';
+      const key = isSquads && meta?.sourceRef ? `squads:${meta.sourceRef}` : `wallet:${row.treasuryWalletId}`;
+      const existing = groups.get(key);
+      if (existing) {
+        existing.vaultCount += 1;
+        try {
+          existing.usdcRawSum = (BigInt(existing.usdcRawSum) + BigInt(row.usdcRaw ?? '0')).toString();
+        } catch {
+          // skip malformed amount
+        }
+        existing.isActive = existing.isActive && row.isActive;
+        existing._vaultIndexes.push({
+          id: row.treasuryWalletId,
+          index: meta?.sourceVaultIndex ?? null,
+          name: row.displayName,
+        });
+      } else {
+        groups.set(key, {
+          key,
+          primaryTreasuryWalletId: row.treasuryWalletId,
+          displayName: row.displayName ?? 'Untitled treasury',
+          isSquads,
+          vaultCount: 1,
+          usdcRawSum: row.usdcRaw ?? '0',
+          isActive: row.isActive,
+          rpcError: row.rpcError,
+          _vaultIndexes: [{
+            id: row.treasuryWalletId,
+            index: meta?.sourceVaultIndex ?? null,
+            name: row.displayName,
+          }],
+        });
+      }
+    }
+    // For Squads groups, pick the lowest-vault-index entry as the canonical
+    // landing point + use its name as the group display name.
+    return Array.from(groups.values()).map((g) => {
+      if (g.isSquads) {
+        const sorted = [...g._vaultIndexes].sort((a, b) => (a.index ?? 999) - (b.index ?? 999));
+        const base = sorted[0]!;
+        return {
+          key: g.key,
+          primaryTreasuryWalletId: base.id,
+          displayName: base.name ?? 'Untitled treasury',
+          isSquads: true,
+          vaultCount: g.vaultCount,
+          usdcRawSum: g.usdcRawSum,
+          isActive: g.isActive,
+          rpcError: g.rpcError,
+        };
+      }
+      return g;
+    });
+  }, [rows, treasuryWalletMetaById]);
+
+  // Metric counts derive from groups, not raw rows — one Squads multisig
+  // with 3 vaults reads as "1 account, 3 vaults".
+  const accountCount = groupedRows.length;
+  const vaultCount = groupedRows.reduce((acc, g) => acc + g.vaultCount, 0);
+  const activeAccountCount = groupedRows.filter((g) => g.isActive).length;
+
   if (!organizationId) {
     return (
       <main className="page-frame">
@@ -160,12 +244,6 @@ export function WalletsPage({ session: _session }: { session: AuthenticatedSessi
   // Sum balances across all treasuries — surfaces in the "Total balance"
   // metric. Compact USDC display since amounts can be six figures+.
   const totalBalanceDisplay = formatRawUsdcCompact(totalUsdcRaw);
-  const accountCount = rows.length;
-  // Until the data model exposes vaults, every treasury == one vault, so
-  // the count matches the row count. When we surface real vaults, swap
-  // for a per-treasury aggregation.
-  const vaultCount = rows.length;
-  const activeCount = rows.filter((r) => r.isActive).length;
 
   return (
     <div className="page">
@@ -194,12 +272,16 @@ export function WalletsPage({ session: _session }: { session: AuthenticatedSessi
           <div className="metric">
             <div className="m-label">Accounts</div>
             <div className="m-value">{accountCount}</div>
-            <div className="m-sub">{activeCount === accountCount ? 'all active' : `${activeCount} active`}</div>
+            <div className="m-sub">
+              {accountCount === 0 ? '—' : activeAccountCount === accountCount ? 'all active' : `${activeAccountCount} active`}
+            </div>
           </div>
           <div className="metric">
             <div className="m-label">Vaults</div>
             <div className="m-value">{vaultCount}</div>
-            <div className="m-sub">{vaultCount === 1 ? 'across 1 account' : `across ${accountCount} accounts`}</div>
+            <div className="m-sub">
+              {vaultCount === 0 ? '—' : accountCount === 1 ? 'across 1 account' : `across ${accountCount} accounts`}
+            </div>
           </div>
         </div>
 
@@ -210,7 +292,7 @@ export function WalletsPage({ session: _session }: { session: AuthenticatedSessi
               <div className="skeleton" style={{ height: 48, marginBottom: 6 }} />
               <div className="skeleton" style={{ height: 48 }} />
             </div>
-          ) : rows.length === 0 ? (
+          ) : groupedRows.length === 0 ? (
             <div className="empty">
               <div className="empty-icon"><Ico.treasury w={22} /></div>
               <h4>Set up your first treasury</h4>
@@ -237,50 +319,42 @@ export function WalletsPage({ session: _session }: { session: AuthenticatedSessi
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => {
-                  const meta = treasuryWalletMetaById.get(row.treasuryWalletId);
-                  const isSquads = meta?.source === 'squads_v4';
-                  return (
-                    <tr
-                      key={row.treasuryWalletId}
-                      onClick={() => navigate(`/organizations/${organizationId}/wallets/${row.treasuryWalletId}`)}
-                    >
-                      <td>
-                        <div className="treas-cell">
-                          <span className="tc-icon"><Ico.treasury w={17} /></span>
-                          <div className="col">
-                            <span className="tc-name">{row.displayName ?? 'Untitled treasury'}</span>
-                            <span className="tc-sub" style={{ fontFamily: 'var(--font-body)' }}>
-                              {isSquads ? 'Team-approved · multi-signer' : 'Single signer'}
-                            </span>
-                          </div>
+                {groupedRows.map((g) => (
+                  <tr
+                    key={g.key}
+                    onClick={() => navigate(`/organizations/${organizationId}/wallets/${g.primaryTreasuryWalletId}`)}
+                  >
+                    <td>
+                      <div className="treas-cell">
+                        <span className="tc-icon"><Ico.treasury w={17} /></span>
+                        <div className="col">
+                          <span className="tc-name">{g.displayName}</span>
+                          <span className="tc-sub" style={{ fontFamily: 'var(--font-body)' }}>
+                            {g.isSquads ? 'Team-approved · multi-signer' : 'Single signer'}
+                          </span>
                         </div>
-                      </td>
-                      <td className="td-num">
-                        {row.usdcRaw === null ? (
-                          <span style={{ color: 'var(--text-faint)' }}>—</span>
-                        ) : (
-                          <>{formatRawUsdcCompact(row.usdcRaw)} <span style={{ color: 'var(--text-faint)' }}>USDC</span></>
-                        )}
-                      </td>
-                      <td>
-                        <span className="vault-count">
-                          <span className="vk-icon"><Ico.vault w={15} /></span>
-                          1 vault
-                        </span>
-                      </td>
-                      <td>
-                        <SignerStack treasuryWalletId={row.treasuryWalletId} />
-                      </td>
-                      <td>
-                        <span className={`pill ${row.isActive ? 'pill-success' : 'pill-neutral'}`}>
-                          <span className="dot" />{row.isActive ? 'Active' : 'Inactive'}
-                        </span>
-                      </td>
-                      <td><span className="row-arrow"><Ico.chevRight w={16} /></span></td>
-                    </tr>
-                  );
-                })}
+                      </div>
+                    </td>
+                    <td className="td-num">
+                      {formatRawUsdcCompact(g.usdcRawSum)} <span style={{ color: 'var(--text-faint)' }}>USDC</span>
+                    </td>
+                    <td>
+                      <span className="vault-count">
+                        <span className="vk-icon"><Ico.vault w={15} /></span>
+                        {g.vaultCount} {g.vaultCount === 1 ? 'vault' : 'vaults'}
+                      </span>
+                    </td>
+                    <td>
+                      <SignerStack treasuryWalletId={g.primaryTreasuryWalletId} />
+                    </td>
+                    <td>
+                      <span className={`pill ${g.isActive ? 'pill-success' : 'pill-neutral'}`}>
+                        <span className="dot" />{g.isActive ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
+                    <td><span className="row-arrow"><Ico.chevRight w={16} /></span></td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           )}
