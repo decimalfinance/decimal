@@ -245,17 +245,15 @@ html body {
    so it scales with the type. */
 .hero h1 .accent { font-style: italic; font-weight: 600; }
 .hero h1 .accent.pink { color: var(--pink); }
-/* Single hand-drawn underline spanning the word width — looks more like
-   a marker swoop than a sine-wave tile. The SVG stretches with the
-   word via preserveAspectRatio='none' + background-size: 100%. */
+/* Tiled sine-wave underline — reads as a hand-drawn squiggle. */
 .hero h1 .squiggle {
   position: relative;
   display: inline-block;
-  padding-bottom: 0.12em;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 14' preserveAspectRatio='none'><path d='M3 9 C 50 2, 120 14, 197 6' fill='none' stroke='%23e6005c' stroke-width='2.5' stroke-linecap='round'/></svg>");
-  background-repeat: no-repeat;
+  padding-bottom: 0.18em;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 8' preserveAspectRatio='none'><path d='M0 4 Q 10 0 20 4 T 40 4 T 60 4 T 80 4' fill='none' stroke='%23e6005c' stroke-width='2' stroke-linecap='round'/></svg>");
+  background-repeat: repeat-x;
   background-position: 0 100%;
-  background-size: 100% 0.34em;
+  background-size: 1.4em 0.28em;
 }
 .hero-actions {
   display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
@@ -312,13 +310,13 @@ html body {
   position: relative;
   aspect-ratio: 1 / 1;
   width: 100%;
-  max-width: 560px;
+  max-width: 440px;
   justify-self: end;
   display: grid;
   place-items: center;
 }
 @media (max-width: 1080px) {
-  .hero-visual { justify-self: center; max-width: 420px; }
+  .hero-visual { justify-self: center; max-width: 340px; }
 }
 .orb-stage {
   position: relative;
