@@ -1111,11 +1111,17 @@ html body {
 .l-dot { width: 11px; height: 11px; border-radius: 50%; background: #D6CFBF; }
 .l-url { margin-left: 16px; font-family: var(--font-mono); font-size: 12px; color: var(--l-faint);
   background: #fff; border: 1px solid var(--l-border); border-radius: 6px; padding: 4px 14px; white-space: nowrap; }
-.l-screen { position: relative; width: 100%; overflow: hidden; background: var(--l-canvas); }
+/* Scale the entire embedded product down 20% (per the design's host-
+   driven scaling pattern). The .lp-pay inside is rendered at full size
+   but visually compressed by transform: scale(0.8). The width: 125%
+   on .lp-pay compensates for the horizontal shrink, and .l-screen
+   uses an aspect-ratio crop so the empty space below the scaled
+   content doesn't leave a tall blank band. */
+.l-screen { position: relative; width: 100%; overflow: hidden; background: var(--l-canvas); aspect-ratio: 1280 / 720; }
 
 /* Faithful Payments product preview — static mock styled to match the
    real product, scoped to .lp-pay so .dec rules don't leak in. */
-.lp-pay { color: var(--l-ink); font-family: var(--font-body); display: flex; align-items: stretch; min-height: 720px; }
+.lp-pay { color: var(--l-ink); font-family: var(--font-body); display: flex; align-items: stretch; min-height: 720px; transform: scale(0.8); transform-origin: top left; width: 125%; }
 .lp-pay-main { flex: 1; min-width: 0; padding: 26px 28px; }
 
 /* Sidebar */
@@ -1384,7 +1390,8 @@ html body {
   .lp-pay .met { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 860px) {
-  .lp-pay { min-height: 0; }
+  .lp-pay { min-height: 0; transform: none; width: 100%; }
+  .l-screen { aspect-ratio: auto; }
   .lp-pay-sb { display: none; }
   .lp-pay-main { padding: 20px; }
 }
