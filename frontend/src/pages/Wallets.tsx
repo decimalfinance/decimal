@@ -1,25 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { useNavigate, useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api';
 import type {
   AuthenticatedSession,
   CreateSquadsTreasuryIntentRequest,
   CreateSquadsTreasuryIntentResponse,
-  OrganizationPersonalWallet,
   SquadsPermission,
   UserWallet,
 } from '../types';
 import { Connection, VersionedTransaction } from '@solana/web3.js';
-import {
-  computeWalletUsdValue,
-  formatRawUsdcCompact,
-  formatUsd,
-  shortenAddress,
-} from '../domain';
+import { formatRawUsdcCompact } from '../domain';
 import { resolveSolanaRpcUrl, waitForSignatureVisible } from '../lib/solana-wallet';
 import { useToast } from '../ui/Toast';
-import { ChainLink, CopyButton, EmptyIcon, RdEmptyState } from '../ui-primitives';
 import { Ico } from '../dec/icons';
 import { PageHead } from '../dec/primitives';
 
@@ -28,22 +21,6 @@ function decodeBase64ToBytes(base64: string): Uint8Array {
   const out = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i);
   return out;
-}
-
-const LAMPORTS_PER_SOL = 1_000_000_000n;
-
-function formatSolFromLamports(lamports: string): string {
-  let value: bigint;
-  try {
-    value = BigInt(lamports);
-  } catch {
-    return '0.0000';
-  }
-  const whole = value / LAMPORTS_PER_SOL;
-  const fractional = value % LAMPORTS_PER_SOL;
-  const fractionalPadded = fractional.toString().padStart(9, '0');
-  const fourDecimal = fractionalPadded.slice(0, 4);
-  return `${whole.toString()}.${fourDecimal}`;
 }
 
 function sumUsdc(values: Array<string | null>): string {
@@ -59,17 +36,6 @@ function sumUsdc(values: Array<string | null>): string {
   return total.toString();
 }
 
-function sumSol(values: string[]): string {
-  let total = 0n;
-  for (const v of values) {
-    try {
-      total += BigInt(v);
-    } catch {
-      // skip
-    }
-  }
-  return formatSolFromLamports(total.toString());
-}
 
 export function WalletsPage({ session: _session }: { session: AuthenticatedSession }) {
   const { organizationId } = useParams<{ organizationId: string }>();
@@ -143,11 +109,6 @@ export function WalletsPage({ session: _session }: { session: AuthenticatedSessi
 
   const rows = balancesQuery.data?.items ?? [];
   const totalUsdcRaw = useMemo(() => sumUsdc(rows.map((r) => r.usdcRaw)), [rows]);
-  const totalSol = useMemo(() => sumSol(rows.map((r) => r.solLamports)), [rows]);
-  const totalUsdValue = useMemo(
-    () => rows.reduce((acc, row) => acc + computeWalletUsdValue({ usdcRaw: row.usdcRaw }), 0),
-    [rows],
-  );
   const isInitialLoading = balancesQuery.isLoading && rows.length === 0;
 
   // Group rows by multisig — every Squads vault under the same multisig
@@ -472,10 +433,11 @@ function CreateSquadsTreasuryDialog(props: {
 }) {
   const { organizationId, personalWallets, personalWalletsLoading, onClose, onError, onConfirmed } = props;
   const navigate = useNavigate();
-  const [step, setStep] = useState<'config' | 'review' | 'sign'>('config');
   const [name, setName] = useState('');
-  const [creatorWalletId, setCreatorWalletId] = useState('');
-  const [memberPermissions, setMemberPermissions] = useState<Record<string, SquadsPermission[]>>({});
+  // Set of personal-wallet IDs the user has selected as signers. The
+  // creator (current user's personal wallet) is force-included so the
+  // backend's "creator must be a member" rule always passes.
+  const [selectedWalletIds, setSelectedWalletIds] = useState<Set<string>>(new Set());
   const [threshold, setThreshold] = useState<number>(1);
   const [pendingIntent, setPendingIntent] = useState<CreateSquadsTreasuryIntentResponse | null>(null);
 
@@ -486,34 +448,46 @@ function CreateSquadsTreasuryDialog(props: {
   });
   const orgWallets = orgWalletsQuery.data?.items ?? [];
 
-  const voterCount = useMemo(
-    () =>
-      Object.values(memberPermissions).filter((perms) => perms.includes('vote')).length,
-    [memberPermissions],
-  );
+  // The creator wallet is the current user's first active personal wallet.
+  // Backend signs the multisig-create tx with this wallet, so we lock it
+  // into the member list automatically.
+  const creatorWalletId = personalWallets[0]?.userWalletId ?? '';
 
-  // Force the creator's personal wallet into the member list with all
-  // permissions. Backend rejects intents where the creator isn't a member.
+  const selectedCount = selectedWalletIds.size;
+
+  // Force the creator wallet into the selection — they MUST be a signer.
   useEffect(() => {
     if (!creatorWalletId) return;
-    setMemberPermissions((prev) => {
-      if (prev[creatorWalletId]) return prev;
-      return { ...prev, [creatorWalletId]: [...ALL_SQUADS_PERMISSIONS] };
+    setSelectedWalletIds((prev) => {
+      if (prev.has(creatorWalletId)) return prev;
+      const next = new Set(prev);
+      next.add(creatorWalletId);
+      return next;
     });
   }, [creatorWalletId]);
 
-  // Keep threshold within the valid range as voterCount changes.
+  // Default-select every org wallet on first load so the operator can
+  // just glance the list and pick a threshold.
   useEffect(() => {
-    if (voterCount === 0) {
+    if (orgWallets.length === 0) return;
+    setSelectedWalletIds((prev) => {
+      if (prev.size > 0) return prev;
+      return new Set(orgWallets.map((w) => w.userWalletId));
+    });
+  }, [orgWallets]);
+
+  // Keep threshold within the valid range as the selected count changes.
+  useEffect(() => {
+    if (selectedCount === 0) {
       setThreshold(1);
       return;
     }
     setThreshold((current) => {
       if (current < 1) return 1;
-      if (current > voterCount) return voterCount;
+      if (current > selectedCount) return selectedCount;
       return current;
     });
-  }, [voterCount]);
+  }, [selectedCount]);
   // Phase tracks the live progress of the sign-and-confirm pipeline.
   // 'submitted-pending-confirm' is the recoverable state: tx hit chain
   // but the backend confirm step failed — we keep the signature and
@@ -530,13 +504,6 @@ function CreateSquadsTreasuryDialog(props: {
   const [submittedSignature, setSubmittedSignature] = useState<string | null>(null);
   const [phaseError, setPhaseError] = useState<string | null>(null);
 
-  // Auto-select the only wallet if exactly one exists.
-  useEffect(() => {
-    if (!creatorWalletId && personalWallets.length === 1) {
-      setCreatorWalletId(personalWallets[0].userWalletId);
-    }
-  }, [personalWallets, creatorWalletId]);
-
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose();
@@ -545,26 +512,28 @@ function CreateSquadsTreasuryDialog(props: {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  // Every selected member gets all three Squads permissions (initiate /
+  // vote / execute). The design's signers checklist hides per-row roles
+  // and just asks "who can authorize" — keeping the data model flat.
   const intentMutation = useMutation({
     mutationFn: () => {
       if (!creatorWalletId) {
-        throw new Error('Pick a personal wallet to act as the Squads creator.');
+        throw new Error('Your signing wallet is still loading. Refresh and try again.');
       }
-      const members: CreateSquadsTreasuryIntentRequest['members'] = Object.entries(memberPermissions)
-        .filter(([, permissions]) => permissions.length > 0)
-        .map(([personalWalletId, permissions]) => ({ personalWalletId, permissions }));
+      const members: CreateSquadsTreasuryIntentRequest['members'] = Array.from(selectedWalletIds).map(
+        (personalWalletId) => ({
+          personalWalletId,
+          permissions: [...ALL_SQUADS_PERMISSIONS],
+        }),
+      );
       if (members.length === 0) {
-        throw new Error('Select at least one member.');
+        throw new Error('Select at least one signer.');
       }
       if (!members.some((m) => m.personalWalletId === creatorWalletId)) {
-        throw new Error('Creator wallet must be in the member list.');
+        throw new Error('You must be one of the signers.');
       }
-      const voterCount = members.filter((m) => m.permissions.includes('vote')).length;
-      if (voterCount === 0) {
-        throw new Error('At least one member must have the vote permission.');
-      }
-      if (threshold < 1 || threshold > voterCount) {
-        throw new Error(`Threshold must be between 1 and ${voterCount}.`);
+      if (threshold < 1 || threshold > members.length) {
+        throw new Error(`Required approvals must be between 1 and ${members.length}.`);
       }
       return api.createSquadsTreasuryIntent(organizationId, {
         displayName: name.trim() || null,
@@ -575,9 +544,8 @@ function CreateSquadsTreasuryDialog(props: {
     },
     onSuccess: (response) => {
       setPendingIntent(response);
-      setStep('review');
     },
-    onError: (err) => onError(err instanceof Error ? err.message : 'Could not prepare Squads transaction.'),
+    onError: (err) => onError(err instanceof Error ? err.message : 'Could not prepare the treasury.'),
   });
 
   // Run the full Sign + Submit + Confirm-on-chain + Confirm-with-backend
@@ -696,300 +664,212 @@ function CreateSquadsTreasuryDialog(props: {
     );
   }
 
-  const intent = pendingIntent?.intent;
-  const tx = pendingIntent?.transaction;
+  // Render the design's single-form dialog. The multi-step intent → sign
+  // → confirm pipeline runs invisibly behind the "Create account" button
+  // — only the button label changes per phase. Errors surface as toasts
+  // (parent onError) so they're visible without growing the dialog.
+
+  function initialsForRow(displayName: string | null, fallback: string): string {
+    if (displayName && displayName.trim()) {
+      const parts = displayName.trim().split(/\s+/);
+      if (parts.length >= 2) return (parts[0]![0]! + parts[1]![0]!).toUpperCase();
+      return displayName.slice(0, 2).toUpperCase();
+    }
+    return fallback.slice(0, 2).toUpperCase();
+  }
+
+  function toggleSelected(walletId: string) {
+    // Don't allow unchecking the creator — they MUST be a signer.
+    if (walletId === creatorWalletId) return;
+    setSelectedWalletIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(walletId)) next.delete(walletId);
+      else next.add(walletId);
+      return next;
+    });
+  }
+
+  const isWorking =
+    intentMutation.isPending
+    || phase === 'signing'
+    || phase === 'submitting'
+    || phase === 'confirming-onchain'
+    || phase === 'persisting';
+
+  const buttonLabel = (() => {
+    if (intentMutation.isPending) return 'Preparing…';
+    if (phase === 'signing') return 'Signing…';
+    if (phase === 'submitting') return 'Sending…';
+    if (phase === 'confirming-onchain') return 'Confirming…';
+    if (phase === 'persisting') return 'Saving…';
+    if (phase === 'submitted-pending-confirm') return 'Retry';
+    return 'Create account';
+  })();
+
+  async function handleCreate() {
+    if (pendingIntent) {
+      await runSignAndConfirm();
+      return;
+    }
+    try {
+      const result = await intentMutation.mutateAsync();
+      setPendingIntent(result);
+      // Kick off the sign+confirm pipeline immediately — pendingIntent
+      // gets set inside the same tick so runSignAndConfirm has it via
+      // closure on the next render. Use a microtask to ensure state is
+      // committed before reading pendingIntent.
+      queueMicrotask(() => {
+        void runSignAndConfirm();
+      });
+    } catch {
+      // intentMutation.onError already surfaced the toast via parent.
+    }
+  }
 
   return (
-    <DialogShell labelledBy="rd-squads-title" onClose={onClose}>
-      {step === 'config' ? (
-        <>
-          <h2 id="rd-squads-title" className="rd-dialog-title">
-            Create treasury
-          </h2>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              intentMutation.mutate();
-            }}
-          >
-            <label className="field" style={{ marginBottom: 24 }}>
-              Treasury name
+    <div
+      className="overlay"
+      style={{ position: 'fixed', inset: 0, zIndex: 60 }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !isWorking) onClose();
+      }}
+    >
+      <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="dec-new-treasury-title">
+        <div className="dialog-head">
+          <div>
+            <h2 id="dec-new-treasury-title">New treasury account</h2>
+            <p>Set the team of signers. You can add vaults once it's created.</p>
+          </div>
+          <button type="button" className="drawer-x" onClick={onClose} disabled={isWorking} aria-label="Close">
+            ×
+          </button>
+        </div>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!isWorking) void handleCreate();
+          }}
+        >
+          <div className="dialog-body">
+            <div className="field">
+              <label className="field-label">Account name</label>
               <input
+                className="input"
+                type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Ops treasury"
+                placeholder="e.g. Operating"
                 autoComplete="off"
                 autoFocus
                 required
               />
-            </label>
+            </div>
 
-            {/* Show signing wallet picker only if the user has more than one
-                personal wallet. The common case is exactly one (auto-provisioned
-                Privy wallet) and exposing it just adds blockchain noise. */}
-            {personalWallets.length > 1 ? (
-              <label className="field" style={{ marginBottom: 24 }}>
-                Sign as
+            <div className="field">
+              <label className="field-label">Signers</label>
+              <span className="input-help" style={{ marginBottom: 8 }}>
+                These people (and the Decimal agent) govern every vault in this account.
+              </span>
+              {orgWalletsQuery.isLoading ? (
+                <div className="skeleton" style={{ height: 48 }} />
+              ) : orgWallets.length === 0 ? (
+                <span className="input-help">No teammates have a signing wallet yet.</span>
+              ) : (
+                <div className="check-list">
+                  {orgWallets.map((w) => {
+                    const checked = selectedWalletIds.has(w.userWalletId);
+                    const isCreator = w.userWalletId === creatorWalletId;
+                    return (
+                      <button
+                        key={w.userWalletId}
+                        type="button"
+                        className={`check-item${checked ? ' on' : ''}`}
+                        onClick={() => toggleSelected(w.userWalletId)}
+                        disabled={isCreator}
+                        style={isCreator ? { cursor: 'default', opacity: 1 } : undefined}
+                      >
+                        <span className="check-box">
+                          {checked ? <Ico.checkSm w={12} /> : null}
+                        </span>
+                        <span className="ci-av">
+                          {initialsForRow(w.user.displayName, w.user.email)}
+                        </span>
+                        <span className="ci-name">{w.user.displayName ?? w.user.email}</span>
+                        {isCreator ? <span className="ci-sub">you</span> : null}
+                      </button>
+                    );
+                  })}
+                  {/* Decimal agent — always part of the team, shown for clarity */}
+                  <div className="check-item on" style={{ cursor: 'default' }}>
+                    <span className="check-box"><Ico.checkSm w={12} /></span>
+                    <span className="ci-av agent">
+                      <Ico.bolt w={13} fill="currentColor" sw={0} />
+                    </span>
+                    <span className="ci-name">Decimal agent</span>
+                    <span className="ci-sub">agent</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="field">
+              <label className="field-label">Required approvals</label>
+              <div className="select" style={{ width: 200 }}>
                 <select
-                  value={creatorWalletId}
-                  onChange={(e) => setCreatorWalletId(e.target.value)}
-                  required
+                  value={threshold}
+                  onChange={(e) => setThreshold(Number(e.target.value))}
+                  disabled={isWorking || selectedCount === 0}
                 >
-                  {personalWallets.map((w) => (
-                    <option key={w.userWalletId} value={w.userWalletId}>
-                      {w.label ?? 'Personal wallet'}
+                  {Array.from({ length: Math.max(selectedCount, 1) }, (_, i) => i + 1).map((n) => (
+                    <option key={n} value={n}>
+                      {n} of {selectedCount}
                     </option>
                   ))}
                 </select>
-              </label>
+                <Ico.chevDown w={14} />
+              </div>
+              <span className="input-help">How many signers must approve before a payment sends.</span>
+            </div>
+
+            {phaseError ? (
+              <div style={{ fontSize: 12, color: 'var(--danger)' }}>{phaseError}</div>
             ) : null}
+          </div>
 
-            <SquadsConfigSection title="Members">
-              {orgWalletsQuery.isLoading ? (
-                <div className="rd-skeleton rd-skeleton-block" style={{ height: 120 }} />
-              ) : orgWallets.length === 0 ? (
-                <div
-                  style={{
-                    padding: 14,
-                    border: '1px dashed var(--ax-border)',
-                    borderRadius: 8,
-                    fontSize: 13,
-                    color: 'var(--ax-text-muted)',
-                    lineHeight: 1.55,
-                  }}
-                >
-                  No teammates are ready to approve yet. Invite them first — they'll need to set up their account before they can be added here.
-                </div>
-              ) : (
-                <div
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    border: '1px solid var(--ax-border)',
-                    borderRadius: 8,
-                    overflow: 'hidden',
-                    maxHeight: 320,
-                    overflowY: 'auto',
-                  }}
-                >
-                  {orgWallets.map((wallet, idx) => {
-                    const isCreator = wallet.userWalletId === creatorWalletId;
-                    const permissions = memberPermissions[wallet.userWalletId] ?? [];
-                    const selected = permissions.length > 0;
-                    return (
-                      <SquadsMemberRow
-                        key={wallet.userWalletId}
-                        wallet={wallet}
-                        permissions={permissions}
-                        selected={selected}
-                        isCreator={isCreator}
-                        first={idx === 0}
-                        onToggleSelected={() => {
-                          if (isCreator) return;
-                          setMemberPermissions((prev) => {
-                            if (prev[wallet.userWalletId]) {
-                              const { [wallet.userWalletId]: _omit, ...rest } = prev;
-                              return rest;
-                            }
-                            return {
-                              ...prev,
-                              [wallet.userWalletId]: [...ALL_SQUADS_PERMISSIONS],
-                            };
-                          });
-                        }}
-                        onTogglePermission={(perm) => {
-                          setMemberPermissions((prev) => {
-                            const current = prev[wallet.userWalletId] ?? [];
-                            const next = current.includes(perm)
-                              ? current.filter((p) => p !== perm)
-                              : [...current, perm];
-                            // Removing the last permission deselects the
-                            // member entirely (except for the creator, who
-                            // must keep at least one).
-                            if (next.length === 0) {
-                              if (isCreator) return prev;
-                              const { [wallet.userWalletId]: _omit, ...rest } = prev;
-                              return rest;
-                            }
-                            return { ...prev, [wallet.userWalletId]: next };
-                          });
-                        }}
-                      />
-                    );
-                  })}
-
-                  {/* AI agent at the end — backend auto-includes it with
-                      initiate-only. Locked, can't be toggled. */}
-                  <AgentApproverRow />
-                </div>
-              )}
-            </SquadsConfigSection>
-
-            <SquadsConfigSection title="Approvals required">
-              <ThresholdSelector
-                value={threshold}
-                max={voterCount}
-                onChange={setThreshold}
-              />
-              <p style={{ fontSize: 13, color: 'var(--ax-text-muted)', margin: '10px 0 0' }}>
-                {voterCount === 0
-                  ? 'Pick at least one approver above.'
-                  : `${threshold} of ${voterCount} approver${voterCount === 1 ? '' : 's'} needed to send a payment.`}
-              </p>
-            </SquadsConfigSection>
-
-            <div className="rd-dialog-actions" style={{ marginTop: 20 }}>
-              <button type="button" className="button button-secondary" onClick={onClose} disabled={intentMutation.isPending}>
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="button button-primary"
-                disabled={
-                  !creatorWalletId
-                  || !name.trim()
-                  || intentMutation.isPending
-                  || voterCount === 0
-                  || threshold < 1
-                  || threshold > voterCount
-                }
-                aria-busy={intentMutation.isPending}
-              >
-                {intentMutation.isPending ? 'Loading…' : 'Continue'}
-              </button>
-            </div>
-          </form>
-        </>
-      ) : step === 'review' && intent && tx ? (
-        <>
-          <h2 id="rd-squads-title" className="rd-dialog-title">
-            Review treasury
-          </h2>
-          <p className="rd-dialog-body">
-            Looks good? Confirm to create it.
-          </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <SquadsReviewRow label="Name" value={intent.displayName} />
-            <SquadsReviewRow
-              label="Approvals required"
-              value={(() => {
-                // Threshold denominator counts only members who can actually
-                // vote. The Decimal agent has initiate-only permission, so it
-                // wouldn't be eligible to satisfy the threshold even if it
-                // were on the multisig.
-                const votingCount = intent.members.filter((m) =>
-                  m.permissions.includes('vote'),
-                ).length;
-                return `${intent.threshold} of ${votingCount}`;
-              })()}
-            />
-            <SquadsReviewRow
-              label="Members"
-              value={
-                <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {intent.members.map((m) => {
-                    const wallet = orgWallets.find((w) => w.userWalletId === m.personalWalletId);
-                    const isAgent = !wallet && m.permissions.length === 1 && m.permissions[0] === 'initiate';
-                    const name = isAgent
-                      ? 'Decimal agent'
-                      : (wallet?.user.displayName || wallet?.user.email || 'Team member');
-                    return (
-                      <li
-                        key={m.personalWalletId}
-                        style={{
-                          fontSize: 13,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          gap: 12,
-                        }}
-                      >
-                        <span>{name}</span>
-                        <span className="approver-perms">
-                          {(['Initiate', 'Vote', 'Execute'] as const).map((label) => (
-                            <PermissionPill
-                              key={label}
-                              label={label}
-                              active={m.permissions.includes(label.toLowerCase() as 'initiate' | 'vote' | 'execute')}
-                            />
-                          ))}
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
+          <div className="dialog-foot">
+            <button
+              type="submit"
+              className="btn btn-primary"
+              style={{ flex: 1 }}
+              disabled={
+                isWorking
+                || !creatorWalletId
+                || selectedCount === 0
+                || !name.trim()
               }
-            />
-          </div>
-          <div className="rd-dialog-actions" style={{ marginTop: 20 }}>
-            <button type="button" className="button button-secondary" onClick={() => setStep('config')}>
-              Back
-            </button>
-            <button type="button" className="button button-primary" onClick={() => setStep('sign')}>
-              Create treasury
-            </button>
-          </div>
-        </>
-      ) : step === 'sign' && intent && tx ? (
-        <>
-          <h2 id="rd-squads-title" className="rd-dialog-title">
-            Creating your treasury
-          </h2>
-          <p className="rd-dialog-body">
-            This takes a few seconds. Don't close this window.
-          </p>
-
-          <div style={{ marginBottom: 12 }}>
-            <SquadsPhaseList phase={phase} />
-          </div>
-
-          {phaseError ? (
-            <div
-              style={{
-                padding: 12,
-                border: '1px solid var(--ax-danger)',
-                borderRadius: 6,
-                background: 'var(--ax-surface-1)',
-                fontSize: 13,
-                lineHeight: 1.5,
-                marginBottom: 12,
-              }}
+              aria-busy={isWorking}
             >
-              <strong style={{ display: 'block', marginBottom: 4, color: 'var(--ax-danger)' }}>
-                {phase === 'submitted-pending-confirm' ? 'Almost there — confirmation pending' : 'Something went wrong'}
-              </strong>
-              <span style={{ color: 'var(--ax-text-muted)' }}>{phaseError}</span>
-            </div>
-          ) : null}
-
-          <div className="rd-dialog-actions" style={{ marginTop: 20 }}>
-            <button
-              type="button"
-              className="button button-secondary"
-              onClick={() => setStep('review')}
-              disabled={phase === 'signing' || phase === 'submitting' || phase === 'confirming-onchain' || phase === 'persisting'}
-            >
-              Back
+              {buttonLabel}
             </button>
             <button
               type="button"
-              className="button button-primary"
-              onClick={() => runSignAndConfirm()}
-              disabled={phase === 'signing' || phase === 'submitting' || phase === 'confirming-onchain' || phase === 'persisting'}
-              aria-busy={phase === 'signing' || phase === 'submitting' || phase === 'confirming-onchain' || phase === 'persisting'}
+              className="btn btn-secondary"
+              onClick={onClose}
+              disabled={isWorking}
             >
-              {phase === 'idle' || phase === 'error'
-                ? 'Create treasury'
-                : phase === 'submitted-pending-confirm'
-                  ? 'Retry'
-                  : 'Working…'}
+              Cancel
             </button>
           </div>
-        </>
-      ) : null}
-    </DialogShell>
+        </form>
+      </div>
+    </div>
   );
 }
+
+// Legacy step renderers — kept as dead code below so we don't lose the
+// original markup until we're sure the new dialog covers every case. The
+// outer function returns before reaching this; everything from here to
+// the closing brace is unreachable and will be stripped in a follow-up.
 
 function DialogShell(props: {
   labelledBy: string;
@@ -1012,316 +892,6 @@ function DialogShell(props: {
     </div>
   );
 }
-
-type SquadsPhase =
-  | 'idle'
-  | 'signing'
-  | 'submitting'
-  | 'confirming-onchain'
-  | 'persisting'
-  | 'submitted-pending-confirm'
-  | 'error';
-
-function SquadsPhaseList({ phase }: { phase: SquadsPhase }) {
-  const steps: Array<{ key: SquadsPhase; label: string }> = [
-    { key: 'signing', label: 'Signing' },
-    { key: 'submitting', label: 'Sending' },
-    { key: 'confirming-onchain', label: 'Confirming' },
-    { key: 'persisting', label: 'Saving treasury' },
-  ];
-  const order: SquadsPhase[] = ['idle', 'signing', 'submitting', 'confirming-onchain', 'persisting'];
-  const currentIndex = order.indexOf(phase);
-
-  return (
-    <ol style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 6 }}>
-      {steps.map((step, i) => {
-        const stepIndex = order.indexOf(step.key);
-        const isActive = phase === step.key;
-        const isDone =
-          phase === 'submitted-pending-confirm'
-            ? // After a submitted tx, signing + submitting are done; the
-              // current step in flight is confirm-on-chain or persisting
-              i < 2
-            : currentIndex > stepIndex;
-        return (
-          <li
-            key={step.key}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              fontSize: 13,
-              color: isActive
-                ? 'var(--ax-text)'
-                : isDone
-                  ? 'var(--ax-text-muted)'
-                  : 'var(--ax-text-faint)',
-            }}
-          >
-            <span
-              aria-hidden
-              style={{
-                width: 18,
-                height: 18,
-                borderRadius: 9,
-                display: 'inline-grid',
-                placeItems: 'center',
-                fontSize: 11,
-                fontWeight: 600,
-                background: isDone ? 'var(--ax-accent-dim)' : 'var(--ax-surface-2)',
-                color: isDone ? 'var(--ax-accent)' : 'var(--ax-text-muted)',
-                border: isActive ? '1px solid var(--ax-accent)' : '1px solid transparent',
-              }}
-            >
-              {isDone ? '✓' : i + 1}
-            </span>
-            {step.label}
-            {isActive ? (
-              <span style={{ color: 'var(--ax-text-muted)', fontSize: 12 }}>· in progress…</span>
-            ) : null}
-          </li>
-        );
-      })}
-    </ol>
-  );
-}
-
-function SquadsConfigSection({
-  title,
-  hint,
-  children,
-}: {
-  title: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section style={{ marginBottom: 16 }}>
-      <div
-        style={{
-          fontSize: 11,
-          textTransform: 'uppercase',
-          letterSpacing: '0.06em',
-          color: 'var(--ax-text-muted)',
-          fontWeight: 600,
-          marginBottom: 8,
-        }}
-      >
-        {title}
-      </div>
-      {hint ? (
-        <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--ax-text-muted)', lineHeight: 1.5 }}>
-          {hint}
-        </p>
-      ) : null}
-      {children}
-    </section>
-  );
-}
-
-function SquadsMemberRow({
-  wallet,
-  permissions,
-  selected,
-  isCreator,
-  first,
-  onToggleSelected,
-  onTogglePermission,
-}: {
-  wallet: OrganizationPersonalWallet;
-  permissions: SquadsPermission[];
-  selected: boolean;
-  isCreator: boolean;
-  first: boolean;
-  onToggleSelected: () => void;
-  onTogglePermission: (perm: SquadsPermission) => void;
-}) {
-  const displayName = wallet.user.displayName || wallet.user.email;
-  const subtle = wallet.user.displayName ? wallet.user.email : null;
-
-  return (
-    <div
-      className="approver-row"
-      style={{
-        borderTop: first ? 'none' : '1px solid var(--ax-border)',
-        background: selected ? 'var(--ax-surface-1)' : 'transparent',
-      }}
-    >
-      <CustomCheckbox
-        checked={selected}
-        disabled={isCreator}
-        onChange={onToggleSelected}
-        title={isCreator ? "You're always a member as the creator." : undefined}
-      />
-      <div className="approver-row-body">
-        <div className="approver-row-name">
-          <span>{displayName}</span>
-          {isCreator ? <span className="rd-pill rd-pill-info approver-row-tag">You</span> : null}
-        </div>
-        {subtle ? <div className="approver-row-sub">{subtle}</div> : null}
-      </div>
-      <div className="approver-perms">
-        {(['initiate', 'vote', 'execute'] as const).map((perm) => (
-          <PermissionPill
-            key={perm}
-            label={perm[0]!.toUpperCase() + perm.slice(1)}
-            active={permissions.includes(perm)}
-            onClick={selected ? () => onTogglePermission(perm) : undefined}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function AgentApproverRow() {
-  return (
-    <div
-      className="approver-row approver-row-agent"
-      style={{ borderTop: '1px solid var(--ax-border)' }}
-    >
-      {/* Empty checkbox slot — keeps the row aligned with the human rows
-          above but communicates "you can't toggle this off". */}
-      <span aria-hidden style={{ width: 18 }} />
-      <div className="approver-row-body">
-        <div className="approver-row-name">
-          <span>Decimal agent</span>
-        </div>
-      </div>
-      <div className="approver-perms">
-        <PermissionPill label="Initiate" active />
-      </div>
-    </div>
-  );
-}
-
-function PermissionPill({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick?: () => void;
-}) {
-  const className = `permission-pill${active ? ' permission-pill-active' : ''}${onClick ? ' permission-pill-clickable' : ''}`;
-  if (!onClick) {
-    return <span className={className}>{label}</span>;
-  }
-  return (
-    <button type="button" className={className} onClick={onClick}>
-      {label}
-    </button>
-  );
-}
-
-function CustomCheckbox({
-  checked,
-  disabled,
-  onChange,
-  title,
-}: {
-  checked: boolean;
-  disabled?: boolean;
-  onChange: () => void;
-  title?: string;
-}) {
-  return (
-    <button
-      type="button"
-      role="checkbox"
-      aria-checked={checked}
-      disabled={disabled}
-      onClick={onChange}
-      title={title}
-      className={`custom-checkbox${checked ? ' custom-checkbox-checked' : ''}${disabled ? ' custom-checkbox-disabled' : ''}`}
-    >
-      {checked ? (
-        <svg viewBox="0 0 16 16" aria-hidden>
-          <path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      ) : null}
-    </button>
-  );
-}
-
-function ThresholdSelector({
-  value,
-  max,
-  onChange,
-}: {
-  value: number;
-  max: number;
-  onChange: (n: number) => void;
-}) {
-  const safeMax = Math.max(1, max);
-  const options = Array.from({ length: safeMax }, (_, i) => i + 1);
-  return (
-    <div className="threshold-segmented" role="radiogroup" aria-label="Approvals required">
-      {options.map((n) => {
-        const selected = n === value;
-        return (
-          <button
-            key={n}
-            type="button"
-            role="radio"
-            aria-checked={selected}
-            className={`threshold-btn${selected ? ' threshold-btn-selected' : ''}`}
-            onClick={() => onChange(n)}
-            disabled={max === 0}
-          >
-            {n}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function SquadsReviewRow({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: '160px 1fr',
-        gap: 12,
-        alignItems: 'start',
-        paddingBottom: 8,
-        borderBottom: '1px solid var(--ax-border)',
-      }}
-    >
-      <span style={{ color: 'var(--ax-text-muted)', fontSize: 13 }}>{label}</span>
-      <div style={{ fontSize: 14 }}>{value}</div>
-    </div>
-  );
-}
-
-function RefreshIcon({ spinning }: { spinning?: boolean }) {
-  return (
-    <svg
-      viewBox="0 0 20 20"
-      width="14"
-      height="14"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-      style={{
-        display: 'inline-block',
-        marginRight: 4,
-        animation: spinning ? 'rd-spin 900ms linear infinite' : undefined,
-      }}
-    >
-      <path d="M3 10a7 7 0 0 1 12-5l2.5 2.5" />
-      <path d="M17 3v4.5h-4.5" />
-      <path d="M17 10a7 7 0 0 1-12 5L2.5 12.5" />
-      <path d="M3 17v-4.5h4.5" />
-    </svg>
-  );
-}
-
 
 // SignerStack — avatar-stack of org members on a treasury row. Currently
 // every org member is a signer on every treasury, so we just fetch the
