@@ -6,11 +6,11 @@ import '../styles/landing.css';
 const ACCENT = '#e6005c';
 
 const HERO = {
-  eyebrow: 'The finance operator for modern companies',
-  line1: 'Finance,',
-  line1Tail: 'automated.',
-  line2: 'Treasury,',
-  line2Tail: 'controlled.',
+  eyebrow: 'Decimal — finance for global teams',
+  line1: 'Reducing',
+  line1Tail: 'friction',
+  line2: 'for businesses paying',
+  line2Tail: 'globally.',
   lede:
     'Decimal turns the documents your finance team already handles into ready-to-sign payouts on a multisig you control. From document to vendor bank account — without the keying, the wire fees, or the bank cutoffs.',
 } as const;
