@@ -813,7 +813,7 @@ function CreateSquadsTreasuryDialog(props: {
             <div className="field">
               <label className="field-label">Signers</label>
               <span className="input-help" style={{ marginBottom: 8 }}>
-                These people (and the Decimal agent) govern every vault in this account.
+                These people govern every vault in this account.
               </span>
               {orgWalletsQuery.isLoading ? (
                 <div className="skeleton" style={{ height: 48 }} />
@@ -854,11 +854,11 @@ function CreateSquadsTreasuryDialog(props: {
                         >
                           {checked ? <Ico.checkSm w={12} /> : null}
                         </span>
-                        <span className="ci-av">
-                          {initialsForRow(w.user.displayName, w.user.email)}
-                        </span>
+                        <SignerAvatar
+                          avatarUrl={w.user.avatarUrl}
+                          initials={initialsForRow(w.user.displayName, w.user.email)}
+                        />
                         <span className="ci-name">{w.user.displayName ?? w.user.email}</span>
-                        {isCreator ? <span className="ci-sub" style={{ marginRight: 4 }}>you</span> : null}
                         {/* Per-row role segment. One container, three cells.
                             Only visible when the row is checked — keeps
                             unchecked rows scannable. */}
@@ -1067,5 +1067,30 @@ function PermSegment({
         </button>
       ))}
     </div>
+  );
+}
+
+// Avatar inside the New Treasury signers list — shows the Google profile
+// photo when present, falls back to initials. Google's CDN blocks
+// requests with unfamiliar Referer headers so we set referrerPolicy
+// no-referrer; if the load still fails, we swap to initials.
+function SignerAvatar({ avatarUrl, initials }: { avatarUrl: string | null; initials: string }) {
+  const [failed, setFailed] = useState(false);
+  if (!avatarUrl || failed) {
+    return <span className="ci-av">{initials}</span>;
+  }
+  return (
+    <span
+      className="ci-av"
+      style={{ padding: 0, overflow: 'hidden', background: 'transparent' }}
+    >
+      <img
+        src={avatarUrl}
+        alt=""
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+      />
+    </span>
   );
 }
