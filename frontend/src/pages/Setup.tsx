@@ -1,9 +1,14 @@
+// First-run onboarding — "Create your organization" full-bleed page.
+// Implements PageSetup from the design handoff (pages-onboard.jsx).
+// Treasury creation + invites happen inside the workspace on Overview.
+
+import { useState } from 'react';
 import { Navigate, useNavigate } from 'react-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, type AuthenticatedSession } from '../api';
 import { useToast } from '../ui/Toast';
-import { PageFrame, SectionHeader } from '../ui-primitives';
 import { getOrganizations, queryKeys } from '../lib/app-helpers';
+import { Ico } from '../dec/icons';
 
 export function HomeRedirect({ session }: { session: AuthenticatedSession }) {
   const [first] = getOrganizations(session);
@@ -24,13 +29,13 @@ export function SetupPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { success, error: toastError } = useToast();
+  const [name, setName] = useState('');
+
   const createOrganizationMutation = useMutation({
-    mutationFn: async (formData: FormData) => {
-      const organizationName = String(formData.get('organizationName') ?? '').trim();
-      if (!organizationName) {
-        throw new Error('Company name is required.');
-      }
-      return api.createOrganization({ organizationName });
+    mutationFn: async (organizationName: string) => {
+      const trimmed = organizationName.trim();
+      if (!trimmed) throw new Error('Organization name is required.');
+      return api.createOrganization({ organizationName: trimmed });
     },
     onSuccess: async (organization) => {
       // Backend auto-provisions the owner's personal wallet + a default
@@ -53,55 +58,89 @@ export function SetupPage() {
       await queryClient.invalidateQueries({ queryKey: queryKeys().session });
       navigate(`/organizations/${organization.organizationId}`, { replace: true });
     },
-    onError: (err) => toastError(err instanceof Error ? err.message : 'Unable to set up workspace.'),
+    onError: (err) =>
+      toastError(err instanceof Error ? err.message : 'Unable to set up workspace.'),
   });
+
+  const pending = createOrganizationMutation.isPending;
+
   return (
-    <PageFrame
-      eyebrow="Welcome"
-      title="Name your company"
-      description="This is what teammates and vendors will see. You can change it later in settings."
-    >
-      <div className="split-panels">
-        <section className="panel">
-          <form
-            className="form-stack"
-            onSubmit={(event) => {
-              event.preventDefault();
-              createOrganizationMutation.mutate(new FormData(event.currentTarget));
-            }}
-          >
-            <label className="field">
-              Company name
+    <div className="setup">
+      <div className="setup-word">
+        <span className="sw-g">D</span>Decimal
+      </div>
+      <div className="setup-card">
+        <h1>Create your organization</h1>
+        <p className="setup-sub">
+          This is the workspace your team signs into. You'll set up a treasury and invite people once you're in.
+        </p>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            createOrganizationMutation.mutate(name);
+          }}
+        >
+          <div className="row" style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+            {/* Logo upload is a future affordance — the dashed square is the
+                design's placeholder. Click does nothing yet. */}
+            <div
+              className="logo-drop"
+              role="button"
+              tabIndex={-1}
+              aria-label="Upload logo (coming soon)"
+            >
+              <Ico.plus w={18} />
+            </div>
+            <div className="field" style={{ flex: 1 }}>
+              <label className="field-label" htmlFor="dec-org-name">
+                Organization name
+              </label>
               <input
+                id="dec-org-name"
+                className="input"
                 name="organizationName"
                 placeholder="Acme Corp"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
                 autoComplete="organization"
                 autoFocus
+                required
               />
-            </label>
+              <span className="input-help">Add a logo later from settings.</span>
+            </div>
+          </div>
+          <div className="setup-foot">
             <button
-              className="button button-primary"
-              disabled={createOrganizationMutation.isPending}
               type="submit"
-              aria-busy={createOrganizationMutation.isPending}
+              className="btn btn-primary"
+              style={{ flex: 1 }}
+              disabled={pending || !name.trim()}
+              aria-busy={pending}
             >
-              {createOrganizationMutation.isPending ? 'Setting up your workspace…' : 'Continue'}
+              {pending ? 'Setting up your workspace…' : (
+                <>
+                  Create organization
+                  <Ico.arrowRight w={15} />
+                </>
+              )}
             </button>
-            <p className="form-help">
-              We'll set up your workspace in the background. You can invite teammates after.
-            </p>
-          </form>
-        </section>
-        <section className="panel">
-          <SectionHeader
-            title="Have an invite?"
-            description="Open the link your admin sent while signed in with the email it was sent to."
-          />
-          <p className="form-help">
-            Invites are accepted by opening the link directly — there's nothing to enter here.
-          </p>
-        </section>
+          </div>
+        </form>
       </div>
-    </PageFrame>
+
+      {/* Lightweight reassurance about invites — moved to a low-key card
+          below the main one rather than a full side panel, since first-run
+          users are creating, not joining. */}
+      <div
+        className="setup-card"
+        style={{ marginTop: 16, background: 'var(--bg-canvas)', borderStyle: 'dashed' }}
+      >
+        <h1 style={{ fontSize: 16, marginBottom: 4 }}>Have an invite?</h1>
+        <p className="setup-sub" style={{ marginBottom: 0 }}>
+          Open the link your admin sent while signed in with the email it was sent to —
+          there's nothing to enter here.
+        </p>
+      </div>
+    </div>
   );
 }
