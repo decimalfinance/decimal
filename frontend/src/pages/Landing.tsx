@@ -174,52 +174,92 @@ function PaymentsSection() {
           </div>
           <div className="l-screen">
             <div className="lp-pay">
+              {/* Page head — eyebrow + title + 3 toolbar buttons */}
               <div className="hd">
                 <div>
                   <div className="eyebrow">PAYMENTS</div>
                   <h3>All payments</h3>
                   <p>Every payment and batch payout in this organization.</p>
                 </div>
-                <button type="button" className="pay-btn">+ Upload invoice</button>
+                <div className="hd-actions">
+                  <button type="button" className="pay-btn secondary"><PlusMini />Upload invoice</button>
+                  <button type="button" className="pay-btn secondary"><PlusMini />Import CSV</button>
+                  <button type="button" className="pay-btn">+ New payment</button>
+                </div>
               </div>
+
+              {/* 4 metric tiles — third one is the alert variant */}
               <div className="met">
                 <div className="m">
-                  <div className="ml">Awaiting approval</div>
+                  <div className="ml">Awaiting your approval</div>
                   <div className="mv">3</div>
-                  <div className="ms">2 need your vote</div>
+                  <div className="ms">payments</div>
                 </div>
                 <div className="m">
                   <div className="ml">Auto-paid this month</div>
-                  <div className="mv">12</div>
+                  <div className="mv">7</div>
                   <div className="ms">18,420.00 USDC</div>
+                </div>
+                <div className="m alert">
+                  <div className="ml">Needs review</div>
+                  <div className="mv">2</div>
+                  <div className="ms">vendors unreviewed</div>
                 </div>
                 <div className="m">
                   <div className="ml">Settled this month</div>
-                  <div className="mv">38</div>
-                  <div className="ms">84,210.18 USDC</div>
-                </div>
-                <div className="m">
-                  <div className="ml">Needs review</div>
-                  <div className="mv">1</div>
-                  <div className="ms">flagged by agent</div>
+                  <div className="mv">12</div>
+                  <div className="ms">42,176.67 USDC</div>
                 </div>
               </div>
+
+              {/* Filter bar — tabs + search + treasury select */}
+              <div className="fb">
+                <div className="tabs">
+                  {[
+                    ['All', 10, true],
+                    ['Active', 5, false],
+                    ['Settled', 3, false],
+                    ['Needs review', 2, false],
+                  ].map(([label, count, on]) => (
+                    <button
+                      type="button"
+                      key={String(label)}
+                      className={`tab${on ? ' on' : ''}`}
+                    >
+                      {label}<span className="tab-count">{count}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="fb-right">
+                  <div className="fb-search">
+                    <SearchMini />
+                    <input type="text" placeholder="Vendor, address, invoice #" readOnly />
+                  </div>
+                  <div className="fb-select">
+                    All treasuries
+                    <ChevronMini />
+                  </div>
+                </div>
+              </div>
+
+              {/* 10-row table */}
               <div className="pt">
                 <table>
                   <thead>
                     <tr>
-                      <th style={{ width: '28%' }}>Vendor</th>
-                      <th style={{ width: '18%' }}>Source</th>
-                      <th className="num" style={{ width: '18%' }}>Amount</th>
+                      <th style={{ width: '22%' }}>Vendor</th>
+                      <th style={{ width: '14%' }}>Source</th>
+                      <th className="num" style={{ width: '15%' }}>Amount</th>
                       <th style={{ width: '14%' }}>Origin</th>
-                      <th>Status</th>
+                      <th style={{ width: '20%' }}>Status</th>
+                      <th style={{ width: 28 }}></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {PAYMENT_ROWS.map((r) => (
-                      <tr key={r.vendor + r.amount}>
+                    {PAYMENT_ROWS.map((r, i) => (
+                      <tr key={i}>
                         <td><span className="vn">{r.vendor}</span></td>
-                        <td><span className="so">⌂ {r.source}</span></td>
+                        <td><span className="so"><TreasuryMini />{r.source}</span></td>
                         <td className="num">{r.amount} <span style={{ color: '#9D9893' }}>USDC</span></td>
                         <td><span className="po">{r.origin}</span></td>
                         <td>
@@ -228,10 +268,23 @@ function PaymentsSection() {
                             {r.sl ? <span className="pl-sl"><BoltMini />SL</span> : null}
                           </span>
                         </td>
+                        <td><span className="ra">›</span></td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                <div className="tf">
+                  <span className="tf-count">Showing 10 of 48 payments</span>
+                  <div className="pager">
+                    <button type="button" aria-label="Previous">‹</button>
+                    <button type="button" className="on">1</button>
+                    <button type="button">2</button>
+                    <button type="button">3</button>
+                    <button type="button">4</button>
+                    <button type="button">5</button>
+                    <button type="button" aria-label="Next">›</button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -241,22 +294,52 @@ function PaymentsSection() {
   );
 }
 
+// Mock data lifted from design_handoff_landing/decimal/pages-shell.jsx so
+// the screenshot matches the design exactly — same vendors, amounts,
+// origins, and statuses.
 const PAYMENT_ROWS: Array<{
   vendor: string;
   source: string;
   amount: string;
   origin: string;
   status: string;
-  tone: 'ok' | 'wa' | 'in';
+  tone: 'ok' | 'wa' | 'in' | 'ne' | 'da';
   sl: boolean;
 }> = [
   { vendor: 'Bangalore Ops Pvt Ltd', source: 'Operating', amount: '2,176.67', origin: 'Single', status: 'Signing', tone: 'wa', sl: false },
   { vendor: 'Lumen Cloud Inc', source: 'Operating', amount: '940.00', origin: 'Apr cloud', status: 'Settled', tone: 'ok', sl: true },
+  { vendor: 'Río Diseño SA', source: 'Operating', amount: '3,500.00', origin: 'Single', status: 'Received', tone: 'ne', sl: false },
+  { vendor: 'Praxis Legal LLP', source: 'Payroll reserve', amount: '1,250.00', origin: 'Single', status: 'Exception', tone: 'da', sl: false },
   { vendor: 'Northwind Hosting', source: 'Operating', amount: '610.40', origin: 'Apr cloud', status: 'Settled', tone: 'ok', sl: true },
-  { vendor: 'Praxis Legal LLP', source: 'Operating', amount: '1,250.00', origin: 'Single', status: 'Reviewed', tone: 'in', sl: false },
-  { vendor: 'Cobalt Studio', source: 'Operating', amount: '5,200.00', origin: 'Single', status: 'Signing', tone: 'wa', sl: false },
+  { vendor: 'Meridian Translations', source: 'Operating', amount: '480.00', origin: 'Single', status: 'Reviewed', tone: 'in', sl: false },
+  { vendor: 'Cobalt Studio', source: 'Operating', amount: '5,200.00', origin: 'Single', status: 'Send', tone: 'in', sl: false },
+  { vendor: 'Atlas Freight Co', source: 'Operating', amount: '1,845.20', origin: 'Q1 logistics', status: 'Settled', tone: 'ok', sl: false },
   { vendor: 'Verde Energy', source: 'Operating', amount: '320.00', origin: 'Apr cloud', status: 'Settled', tone: 'ok', sl: true },
+  { vendor: 'Sundial Media', source: 'Payroll reserve', amount: '2,750.00', origin: 'Single', status: 'Cancelled', tone: 'ne', sl: false },
 ];
+
+function PlusMini() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+function SearchMini() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.5-3.5" />
+    </svg>
+  );
+}
+function ChevronMini() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  );
+}
 
 function BoltMini() {
   return (
