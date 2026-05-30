@@ -434,10 +434,13 @@ function CreateSquadsTreasuryDialog(props: {
   const { organizationId, personalWallets, personalWalletsLoading, onClose, onError, onConfirmed } = props;
   const navigate = useNavigate();
   const [name, setName] = useState('');
-  // Set of personal-wallet IDs the user has selected as signers. The
-  // creator (current user's personal wallet) is force-included so the
-  // backend's "creator must be a member" rule always passes.
-  const [selectedWalletIds, setSelectedWalletIds] = useState<Set<string>>(new Set());
+  // Per-member Squads permission map. Empty array = not a signer.
+  // Non-empty array = signer with those exact roles. The checkbox at the
+  // start of each row toggles between "not a signer" (empty) and "all
+  // three roles" (default). The role pills toggle individual perms.
+  // The creator's wallet is force-included with all roles so the backend's
+  // "creator must be a voting member" rule always passes.
+  const [memberPermissions, setMemberPermissions] = useState<Record<string, SquadsPermission[]>>({});
   const [threshold, setThreshold] = useState<number>(1);
   const [pendingIntent, setPendingIntent] = useState<CreateSquadsTreasuryIntentResponse | null>(null);
 
@@ -453,41 +456,50 @@ function CreateSquadsTreasuryDialog(props: {
   // into the member list automatically.
   const creatorWalletId = personalWallets[0]?.userWalletId ?? '';
 
-  const selectedCount = selectedWalletIds.size;
+  // Derived counts off the permission map.
+  const selectedWalletIds = useMemo(
+    () => Object.entries(memberPermissions).filter(([, p]) => p.length > 0).map(([id]) => id),
+    [memberPermissions],
+  );
+  const selectedCount = selectedWalletIds.length;
+  const voterCount = useMemo(
+    () => Object.values(memberPermissions).filter((p) => p.includes('vote')).length,
+    [memberPermissions],
+  );
 
-  // Force the creator wallet into the selection — they MUST be a signer.
+  // Force the creator wallet into the selection with all 3 roles.
+  // The backend's "creator must be a voting member" check requires this.
   useEffect(() => {
     if (!creatorWalletId) return;
-    setSelectedWalletIds((prev) => {
-      if (prev.has(creatorWalletId)) return prev;
-      const next = new Set(prev);
-      next.add(creatorWalletId);
-      return next;
+    setMemberPermissions((prev) => {
+      if (prev[creatorWalletId] && prev[creatorWalletId].length > 0) return prev;
+      return { ...prev, [creatorWalletId]: [...ALL_SQUADS_PERMISSIONS] };
     });
   }, [creatorWalletId]);
 
-  // Default-select every org wallet on first load so the operator can
-  // just glance the list and pick a threshold.
+  // Default-select every org wallet with all 3 roles on first load.
   useEffect(() => {
     if (orgWallets.length === 0) return;
-    setSelectedWalletIds((prev) => {
-      if (prev.size > 0) return prev;
-      return new Set(orgWallets.map((w) => w.userWalletId));
+    setMemberPermissions((prev) => {
+      if (Object.keys(prev).length > 0) return prev;
+      const next: Record<string, SquadsPermission[]> = {};
+      for (const w of orgWallets) next[w.userWalletId] = [...ALL_SQUADS_PERMISSIONS];
+      return next;
     });
   }, [orgWallets]);
 
-  // Keep threshold within the valid range as the selected count changes.
+  // Keep threshold within [1, voterCount] as roles change.
   useEffect(() => {
-    if (selectedCount === 0) {
+    if (voterCount === 0) {
       setThreshold(1);
       return;
     }
     setThreshold((current) => {
       if (current < 1) return 1;
-      if (current > selectedCount) return selectedCount;
+      if (current > voterCount) return voterCount;
       return current;
     });
-  }, [selectedCount]);
+  }, [voterCount]);
   // Phase tracks the live progress of the sign-and-confirm pipeline.
   // 'submitted-pending-confirm' is the recoverable state: tx hit chain
   // but the backend confirm step failed — we keep the signature and
@@ -512,28 +524,34 @@ function CreateSquadsTreasuryDialog(props: {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  // Every selected member gets all three Squads permissions (initiate /
-  // vote / execute). The design's signers checklist hides per-row roles
-  // and just asks "who can authorize" — keeping the data model flat.
+  // Build members from the per-wallet permission map. Backend rules:
+  //   * at least one signer
+  //   * creator must be present + must have 'vote'
+  //   * threshold ≤ count of members with 'vote'
   const intentMutation = useMutation({
     mutationFn: () => {
       if (!creatorWalletId) {
         throw new Error('Your signing wallet is still loading. Refresh and try again.');
       }
-      const members: CreateSquadsTreasuryIntentRequest['members'] = Array.from(selectedWalletIds).map(
-        (personalWalletId) => ({
-          personalWalletId,
-          permissions: [...ALL_SQUADS_PERMISSIONS],
-        }),
-      );
+      const members: CreateSquadsTreasuryIntentRequest['members'] = Object.entries(memberPermissions)
+        .filter(([, permissions]) => permissions.length > 0)
+        .map(([personalWalletId, permissions]) => ({ personalWalletId, permissions }));
       if (members.length === 0) {
         throw new Error('Select at least one signer.');
       }
-      if (!members.some((m) => m.personalWalletId === creatorWalletId)) {
+      const creatorMember = members.find((m) => m.personalWalletId === creatorWalletId);
+      if (!creatorMember) {
         throw new Error('You must be one of the signers.');
       }
-      if (threshold < 1 || threshold > members.length) {
-        throw new Error(`Required approvals must be between 1 and ${members.length}.`);
+      if (!creatorMember.permissions.includes('vote')) {
+        throw new Error('You must keep Approver on your own row — the creator must be a voting member.');
+      }
+      const voters = members.filter((m) => m.permissions.includes('vote'));
+      if (voters.length === 0) {
+        throw new Error('At least one signer must have the Approver role.');
+      }
+      if (threshold < 1 || threshold > voters.length) {
+        throw new Error(`Required approvals must be between 1 and ${voters.length}.`);
       }
       return api.createSquadsTreasuryIntent(organizationId, {
         displayName: name.trim() || null,
@@ -678,14 +696,41 @@ function CreateSquadsTreasuryDialog(props: {
     return fallback.slice(0, 2).toUpperCase();
   }
 
+  function isSelected(walletId: string): boolean {
+    return (memberPermissions[walletId]?.length ?? 0) > 0;
+  }
+
+  function hasPerm(walletId: string, perm: SquadsPermission): boolean {
+    return memberPermissions[walletId]?.includes(perm) ?? false;
+  }
+
   function toggleSelected(walletId: string) {
-    // Don't allow unchecking the creator — they MUST be a signer.
+    // Creator must stay selected — backend rejects intents without them.
     if (walletId === creatorWalletId) return;
-    setSelectedWalletIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(walletId)) next.delete(walletId);
-      else next.add(walletId);
+    setMemberPermissions((prev) => {
+      const current = prev[walletId] ?? [];
+      const next = { ...prev };
+      if (current.length > 0) delete next[walletId];
+      else next[walletId] = [...ALL_SQUADS_PERMISSIONS];
       return next;
+    });
+  }
+
+  function togglePerm(walletId: string, perm: SquadsPermission) {
+    // Block disabling the creator's 'vote' — backend rule.
+    if (walletId === creatorWalletId && perm === 'vote') return;
+    setMemberPermissions((prev) => {
+      const current = prev[walletId] ?? [];
+      if (current.length === 0) return prev; // can't toggle a role on someone who isn't a signer
+      const has = current.includes(perm);
+      const nextPerms = has ? current.filter((p) => p !== perm) : [...current, perm];
+      // If the user disables every role, treat that as unchecking the row.
+      if (nextPerms.length === 0) {
+        if (walletId === creatorWalletId) return prev; // can't fully clear creator
+        const { [walletId]: _, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [walletId]: nextPerms };
     });
   }
 
@@ -777,34 +822,55 @@ function CreateSquadsTreasuryDialog(props: {
               ) : (
                 <div className="check-list">
                   {orgWallets.map((w) => {
-                    const checked = selectedWalletIds.has(w.userWalletId);
+                    const checked = isSelected(w.userWalletId);
                     const isCreator = w.userWalletId === creatorWalletId;
                     return (
                       <div
                         key={w.userWalletId}
                         className={`check-item${checked ? ' on' : ''}`}
-                        onClick={() => toggleSelected(w.userWalletId)}
-                        onKeyDown={(e) => {
-                          if (isCreator) return;
-                          if (e.key === ' ' || e.key === 'Enter') {
-                            e.preventDefault();
-                            toggleSelected(w.userWalletId);
-                          }
-                        }}
-                        role="checkbox"
-                        aria-checked={checked}
-                        aria-disabled={isCreator}
-                        tabIndex={isCreator ? -1 : 0}
-                        style={isCreator ? { cursor: 'default' } : undefined}
+                        role="group"
+                        aria-label={`Signer ${w.user.displayName ?? w.user.email}`}
                       >
-                        <span className="check-box">
+                        {/* Checkbox: clicking the box (not the rest of the row)
+                            toggles whether this person is a signer at all. */}
+                        <span
+                          className="check-box"
+                          role="checkbox"
+                          aria-checked={checked}
+                          aria-disabled={isCreator}
+                          tabIndex={isCreator ? -1 : 0}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleSelected(w.userWalletId);
+                          }}
+                          onKeyDown={(e) => {
+                            if (isCreator) return;
+                            if (e.key === ' ' || e.key === 'Enter') {
+                              e.preventDefault();
+                              toggleSelected(w.userWalletId);
+                            }
+                          }}
+                          style={{ cursor: isCreator ? 'default' : 'pointer' }}
+                        >
                           {checked ? <Ico.checkSm w={12} /> : null}
                         </span>
                         <span className="ci-av">
                           {initialsForRow(w.user.displayName, w.user.email)}
                         </span>
                         <span className="ci-name">{w.user.displayName ?? w.user.email}</span>
-                        {isCreator ? <span className="ci-sub">you</span> : null}
+                        {isCreator ? <span className="ci-sub" style={{ marginRight: 4 }}>you</span> : null}
+                        {/* Per-row role pills. Only visible when the row is
+                            checked — hiding them on unchecked rows keeps
+                            the list scannable. */}
+                        {checked ? (
+                          <PermPills
+                            initiator={hasPerm(w.userWalletId, 'initiate')}
+                            approver={hasPerm(w.userWalletId, 'vote')}
+                            executor={hasPerm(w.userWalletId, 'execute')}
+                            disabledApprover={isCreator}
+                            onToggle={(perm) => togglePerm(w.userWalletId, perm)}
+                          />
+                        ) : null}
                       </div>
                     );
                   })}
@@ -946,4 +1012,60 @@ function initialsFromUser(name: string | null, email: string): string {
   }
   const local = email.split('@')[0] ?? '?';
   return local.slice(0, 2).toUpperCase();
+}
+
+// Per-signer role pills — reuses the design's .perm pill style from the
+// Treasury Detail members table so the visual language is consistent
+// across "edit signer roles" surfaces. Three roles: Initiator (can start
+// proposals), Approver (counts toward threshold), Executor (can broadcast).
+function PermPills({
+  initiator,
+  approver,
+  executor,
+  disabledApprover,
+  onToggle,
+}: {
+  initiator: boolean;
+  approver: boolean;
+  executor: boolean;
+  disabledApprover: boolean;
+  onToggle: (perm: SquadsPermission) => void;
+}) {
+  return (
+    <div className="perm-pills" style={{ marginLeft: 'auto' }}>
+      <PermPill on={initiator} label="Initiator" onClick={() => onToggle('initiate')} />
+      <PermPill on={approver} label="Approver" onClick={() => onToggle('vote')} disabled={disabledApprover} title={disabledApprover ? 'You must keep Approver — the creator has to be a voting member.' : undefined} />
+      <PermPill on={executor} label="Executor" onClick={() => onToggle('execute')} />
+    </div>
+  );
+}
+
+function PermPill({
+  on,
+  label,
+  onClick,
+  disabled,
+  title,
+}: {
+  on: boolean;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      className={`perm${on ? ' on' : ''}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (!disabled) onClick();
+      }}
+      disabled={disabled}
+      title={title}
+      style={{ cursor: disabled ? 'default' : 'pointer' }}
+    >
+      {label}
+    </button>
+  );
 }
