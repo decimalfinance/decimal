@@ -27,6 +27,8 @@ import {
 } from '../status-labels';
 import { useToast } from '../ui/Toast';
 import { EmptyIcon, RdEmptyState, RdFilterBar } from '../ui-primitives';
+import { Ico } from '../dec/icons';
+import { PageHead, Pill, SLPill, OriginPill } from '../dec/primitives';
 
 // Every row is a PaymentOrder now. Batched orders carry an inputBatchLabel
 // rendered as a small chip, but they live in the same list as standalone
@@ -178,192 +180,187 @@ export function PaymentsPage() {
 
   const isLoading = paymentOrdersQuery.isLoading;
 
+  // Auto-paid this month: rows with an SL execution.
+  const autoPaidThisMonth = rows.filter((r) => r.routedViaSpendingLimit).length;
+  const settledThisMonth = rows.filter((r) => r.tone === 'success').length;
+
   return (
-    <main className="page-frame">
-      <header className="page-header">
-        <div>
-          <p className="eyebrow">Payments</p>
-          <h1>All payments</h1>
-          <p>
-            Every single payment and batch payout in this organization. Create one, import many, and follow
-            each from intent to proof.
-          </p>
-        </div>
-        <div className="page-actions">
-          <button type="button" className="button button-secondary" onClick={() => setUploadDocOpen(true)}>
-            Upload invoice
-          </button>
-          <button type="button" className="button button-secondary" onClick={() => setImportOpen(true)}>
-            Import CSV
-          </button>
-          <button type="button" className="button button-primary" onClick={() => setCreateOpen(true)}>
-            New payment
-            <span className="rd-btn-arrow" aria-hidden>→</span>
-          </button>
-        </div>
-      </header>
-
-        <div className="rd-metrics">
-          <div className="rd-metric">
-            <span className="rd-metric-label">Awaiting approval</span>
-            <span className="rd-metric-value" data-tone={awaiting > 0 ? 'warning' : undefined}>
-              {awaiting}
-            </span>
-          </div>
-          <div className="rd-metric">
-            <span className="rd-metric-label">Ready to sign</span>
-            <span className="rd-metric-value" data-tone={readyToSign > 0 ? 'warning' : undefined}>
-              {readyToSign}
-            </span>
-          </div>
-          <div className="rd-metric">
-            <span className="rd-metric-label">Settled</span>
-            <span className="rd-metric-value" data-tone="success">
-              {settled}
-            </span>
-          </div>
-          <div className="rd-metric">
-            <span className="rd-metric-label">Needs review</span>
-            <span className="rd-metric-value" data-tone={needsReview > 0 ? 'danger' : undefined}>
-              {needsReview}
-            </span>
-          </div>
-        </div>
-
-        <RdFilterBar
-          search={{
-            value: search,
-            onChange: setSearch,
-            placeholder: 'Search destinations',
-            ariaLabel: 'Search payments',
-          }}
-          tabs={(['all', 'active', 'settled', 'needs_review'] as const).map((key) => ({
-            id: key,
-            label: key === 'needs_review' ? 'Needs review' : key.charAt(0).toUpperCase() + key.slice(1),
-            active: filter === key,
-            onClick: () => setFilter(key),
-          }))}
-          rightMeta={`${filteredRows.length} of ${rows.length}`}
+    <div className="page">
+      <div className="stack stack-24">
+        <PageHead
+          eyebrow="PAYMENTS"
+          title="All payments"
+          desc="Every payment and batch payout in this organization."
+          actions={
+            <>
+              <button type="button" className="btn btn-secondary" onClick={() => setUploadDocOpen(true)}>
+                <Ico.upload w={15} />Upload invoice
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={() => setImportOpen(true)}>
+                <Ico.csv w={15} />Import CSV
+              </button>
+              <button type="button" className="btn btn-primary" onClick={() => setCreateOpen(true)}>
+                <Ico.plus w={15} />New payment
+              </button>
+            </>
+          }
         />
 
-        <div className="rd-table-shell">
-          <table className="rd-table">
+        <div className="metrics">
+          <div className="metric">
+            <div className="m-label">Awaiting your approval</div>
+            <div className="m-value">{awaiting}</div>
+            <div className="m-sub">{awaiting === 1 ? 'payment' : 'payments'}</div>
+          </div>
+          <div className="metric">
+            <div className="m-label">Auto-paid this month</div>
+            <div className="m-value">{autoPaidThisMonth}</div>
+            <div className="m-sub">via spending limits</div>
+          </div>
+          <div className={`metric${needsReview > 0 ? ' is-alert' : ''}`}>
+            <div className="m-label">Needs review</div>
+            <div className="m-value">{needsReview}</div>
+            <div className="m-sub">{needsReview === 1 ? 'vendor unreviewed' : 'vendors unreviewed'}</div>
+          </div>
+          <div className="metric">
+            <div className="m-label">Settled this month</div>
+            <div className="m-value">{settledThisMonth}</div>
+            <div className="m-sub">{settledThisMonth === 1 ? 'payment' : 'payments'}</div>
+          </div>
+        </div>
+
+        <div className="filterbar">
+          <div className="tabs">
+            {([
+              ['all', 'All', rows.length] as const,
+              ['active', 'Active', rows.filter((r) => r.tone === 'warning' || r.tone === 'neutral').length] as const,
+              ['settled', 'Settled', rows.filter((r) => r.tone === 'success').length] as const,
+              ['needs_review', 'Needs review', needsReview] as const,
+            ]).map(([key, label, count]) => (
+              <button
+                key={key}
+                className={`tab${filter === key ? ' on' : ''}`}
+                onClick={() => setFilter(key)}
+                type="button"
+              >
+                {label}<span className="tab-count">{count}</span>
+              </button>
+            ))}
+          </div>
+          <div className="filter-right">
+            <div className="input-search">
+              <Ico.search w={15} />
+              <input
+                className="input"
+                placeholder="Vendor or invoice #"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+            <div className="select">
+              <select defaultValue="all" disabled>
+                <option value="all">All treasuries</option>
+              </select>
+              <Ico.chevDown w={14} />
+            </div>
+          </div>
+        </div>
+
+        <div className="tbl-card">
+          <table className="tbl">
             <thead>
               <tr>
-                <th style={{ width: '20%' }}>Recipient / Run</th>
-                <th style={{ width: '14%' }}>Counterparty</th>
-                <th style={{ width: '14%' }}>Destination</th>
-                <th style={{ width: '12%' }}>Source</th>
-                <th className="rd-num" style={{ width: '12%' }}>
-                  Amount
-                </th>
-                <th style={{ width: '10%' }}>Origin</th>
-                <th style={{ width: '12%' }}>Status</th>
-                <th aria-label="Actions" style={{ width: '6%' }} />
+                <th style={{ width: '28%' }}>Vendor</th>
+                <th style={{ width: '18%' }}>Source</th>
+                <th className="num" style={{ width: '18%' }}>Amount</th>
+                <th style={{ width: '16%' }}>Origin</th>
+                <th style={{ width: '20%' }}>Status</th>
+                <th style={{ width: 28 }}></th>
               </tr>
             </thead>
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={8} className="rd-empty-cell">
-                    <div className="rd-skeleton rd-skeleton-block" style={{ height: 80 }} />
+                  <td colSpan={6} style={{ padding: 16 }}>
+                    <div className="skeleton" style={{ height: 48 }} />
                   </td>
                 </tr>
               ) : filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={8} style={{ padding: 0 }}>
+                  <td colSpan={6}>
                     {rows.length === 0 ? (
-                      <RdEmptyState
-                        icon={<EmptyIcon kind="receipt" />}
-                        title="No payments yet"
-                        description="Drop a vendor invoice and we'll extract every payment in it, or upload a CSV batch."
-                        primary={{ label: 'Upload invoice', onClick: () => setUploadDocOpen(true) }}
-                        secondary={{ label: 'New payment', onClick: () => setCreateOpen(true) }}
-                      />
+                      <div className="empty">
+                        <div className="empty-icon"><Ico.inbox w={22} /></div>
+                        <h4>No payments yet</h4>
+                        <p>Upload an invoice and the agent will extract the payable for you.</p>
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={() => setUploadDocOpen(true)}
+                          style={{ marginTop: 8 }}
+                        >
+                          <Ico.upload w={13} />Upload invoice
+                        </button>
+                      </div>
                     ) : (
-                      <RdEmptyState
-                        title="Nothing matches that filter"
-                        description="Clear the search or change the filter to see more."
-                      />
+                      <div className="no-match">
+                        <div className="nm-title">No payments match that filter</div>
+                        <div className="nm-sub">Clear the search or change the tab to see more.</div>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => {
+                            setSearch('');
+                            setFilter('all');
+                          }}
+                        >
+                          Clear filters
+                        </button>
+                      </div>
                     )}
                   </td>
                 </tr>
               ) : (
                 filteredRows.map((row) => (
-                  <tr
-                    key={`${row.kind}:${row.id}`}
-                    onClick={() => navigate(row.to)}
-                    style={{ cursor: 'pointer' }}
-                  >
+                  <tr key={`${row.kind}:${row.id}`} onClick={() => navigate(row.to)}>
                     <td>
-                      <div className="rd-recipient-main">
-                        <span className="rd-recipient-name">{row.name}</span>
-                        <span className="rd-recipient-ref">{formatRelativeTime(row.createdAt)}</span>
+                      <div className="cell-vendor">
+                        <span className="v-name">
+                          {row.counterpartyName ?? row.name}
+                        </span>
                       </div>
                     </td>
                     <td>
-                      {row.counterpartyName ? (
-                        <span className="rd-origin" data-kind="run">
-                          {row.counterpartyName}
-                        </span>
-                      ) : (
-                        <span className="rd-empty-mark" data-mono="true">—</span>
-                      )}
+                      <span className="cell-source">
+                        <Ico.treasury w={15} />
+                        {row.source === '—' ? '—' : row.source}
+                      </span>
+                    </td>
+                    <td className="td-num">{row.amountLabel}</td>
+                    <td>
+                      <OriginPill>
+                        {row.origin === 'batch' ? (row.originLabel ?? 'Batch') : 'Single'}
+                      </OriginPill>
                     </td>
                     <td>
-                      {row.kind === 'single' ? (
-                        row.destinationLabel ? (
-                          <span style={{ color: 'var(--ax-text)', fontWeight: 500 }}>
-                            {row.destinationLabel}
-                          </span>
-                        ) : (
-                          <span className="rd-addr">{shortenAddress(row.destination, 4, 4)}</span>
-                        )
-                      ) : (
-                        <span style={{ color: 'var(--ax-text-muted)', fontSize: 12 }}>{row.destination}</span>
-                      )}
-                    </td>
-                    <td>
-                      {row.source === '—' ? (
-                        <span className="rd-empty-mark">—</span>
-                      ) : (
-                        <span className="rd-source-label">{row.source}</span>
-                      )}
-                    </td>
-                    <td className="rd-num">{row.amountLabel}</td>
-                    <td>
-                      <span className="rd-origin" data-kind={row.origin === 'batch' ? 'run' : undefined}>
-                        {row.origin === 'batch' ? row.originLabel ?? 'Batch' : 'Single'}
+                      <span className="status-cell">
+                        <Pill>{row.state}</Pill>
+                        {row.routedViaSpendingLimit ? <SLPill /> : null}
                       </span>
                     </td>
                     <td>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                        <span className="rd-pill" data-tone={toneToPill(row.tone)}>
-                          <span className="rd-pill-dot" aria-hidden />
-                          {row.state}
-                        </span>
-                        {row.routedViaSpendingLimit ? (
-                          <span
-                            className="rd-pill"
-                            data-tone="info"
-                            title="Auto-paid by the Decimal agent under an active spending limit policy."
-                            style={{ fontSize: 11 }}
-                          >
-                            SL
-                          </span>
-                        ) : null}
-                      </span>
-                    </td>
-                    <td>
-                      <span className="rd-btn-arrow" style={{ color: 'var(--ax-text-muted)' }} aria-hidden>
-                        →
-                      </span>
+                      <span className="row-arrow"><Ico.chevRight w={16} /></span>
                     </td>
                   </tr>
                 ))
               )}
             </tbody>
           </table>
+          {filteredRows.length > 0 ? (
+            <div className="tbl-foot">
+              <span className="tf-count">Showing {filteredRows.length} of {rows.length} payments</span>
+            </div>
+          ) : null}
         </div>
 
       {createOpen ? (
@@ -419,7 +416,8 @@ export function PaymentsPage() {
           onError={(message) => toastError(message)}
         />
       ) : null}
-    </main>
+      </div>
+    </div>
   );
 }
 

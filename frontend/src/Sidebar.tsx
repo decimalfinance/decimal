@@ -1,126 +1,15 @@
+// Sidebar — implements the Decimal design (handoff: pages-shell.jsx +
+// components.css .sidebar). Hosts the wordmark, org switcher, 3 nav groups
+// (Operations / Registry / Governance), theme segment, and user chip.
+// All visual classes are namespaced under .dec — AppShell wraps in .dec.
+
 import { useEffect, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
-import { Link, NavLink, useNavigate } from 'react-router';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router';
 import type { AuthenticatedSession, OrganizationMembership } from './api';
+import { Ico } from './dec/icons';
 
 type OrganizationContext = {
   organization: OrganizationMembership;
-};
-
-function SvgIcon({ children, className }: { children: ReactNode; className?: string }) {
-  return (
-    <svg
-      className={className ?? 'ax-nav-link-icon'}
-      viewBox="0 0 20 20"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      {children}
-    </svg>
-  );
-}
-
-const icons = {
-  overview: (
-    <SvgIcon>
-      <rect x="3" y="3" width="6" height="6" rx="1.5" />
-      <rect x="11" y="3" width="6" height="6" rx="1.5" />
-      <rect x="3" y="11" width="6" height="6" rx="1.5" />
-      <rect x="11" y="11" width="6" height="6" rx="1.5" />
-    </SvgIcon>
-  ),
-  payments: (
-    <SvgIcon>
-      <rect x="2.5" y="5" width="15" height="10" rx="1.5" />
-      <path d="M2.5 8h15" />
-      <path d="M5.5 12.5h2" />
-    </SvgIcon>
-  ),
-  collections: (
-    <SvgIcon>
-      <path d="M10 3v9" />
-      <path d="M6 8.5 10 12.5 14 8.5" />
-      <path d="M3 14.5h14v2H3z" />
-    </SvgIcon>
-  ),
-  wallet: (
-    <SvgIcon>
-      <rect x="2.5" y="5" width="15" height="11" rx="2" />
-      <path d="M2.5 8h15" />
-      <circle cx="14" cy="12.5" r="1" fill="currentColor" />
-    </SvgIcon>
-  ),
-  counterparty: (
-    <SvgIcon>
-      <circle cx="10" cy="7" r="3" />
-      <path d="M4 16.5a6 6 0 0 1 12 0" />
-    </SvgIcon>
-  ),
-  members: (
-    <SvgIcon>
-      <circle cx="7.5" cy="8" r="2.5" />
-      <circle cx="14" cy="8.5" r="2" />
-      <path d="M3 16.5a4.5 4.5 0 0 1 9 0" />
-      <path d="M12.5 16.5a4 4 0 0 1 5 0" />
-    </SvgIcon>
-  ),
-  proposals: (
-    <SvgIcon>
-      <path d="M5 2.5h6L15 6.5v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1Z" />
-      <path d="M11 2.5v4h4" />
-      <path d="M7 11l1.5 1.5L13 8" />
-    </SvgIcon>
-  ),
-  spendingLimit: (
-    <SvgIcon>
-      <path d="M10 2.5 3.5 5v4.5c0 4 2.7 6.8 6.5 8 3.8-1.2 6.5-4 6.5-8V5L10 2.5Z" />
-      <path d="M10 7v3" />
-      <path d="M10 13h.01" />
-    </SvgIcon>
-  ),
-  chevron: (
-    <SvgIcon className="ax-ws-button-chev">
-      <path d="M5 7.5 10 12.5 15 7.5" />
-    </SvgIcon>
-  ),
-  check: (
-    <SvgIcon className="ax-ws-menu-item-check">
-      <path d="M4.5 10.5 8 14l7.5-8" />
-    </SvgIcon>
-  ),
-  sun: (
-    <SvgIcon className="ax-theme-option-icon">
-      <circle cx="10" cy="10" r="3.5" />
-      <path d="M10 2v2M10 16v2M2 10h2M16 10h2M4.5 4.5 6 6M14 14l1.5 1.5M4.5 15.5 6 14M14 6l1.5-1.5" />
-    </SvgIcon>
-  ),
-  moon: (
-    <SvgIcon className="ax-theme-option-icon">
-      <path d="M16.5 12A7 7 0 1 1 8 3.5a5.5 5.5 0 0 0 8.5 8.5Z" />
-    </SvgIcon>
-  ),
-  logout: (
-    <SvgIcon className="ax-user-menu-icon" >
-      <path d="M8 4.5H5a1.5 1.5 0 0 0-1.5 1.5v8A1.5 1.5 0 0 0 5 15.5h3" />
-      <path d="M12 6.5 15.5 10 12 13.5" />
-      <path d="M15.5 10H8" />
-    </SvgIcon>
-  ),
-  user: (
-    <SvgIcon className="ax-user-menu-icon">
-      <circle cx="10" cy="7" r="3" />
-      <path d="M4 16.5a6 6 0 0 1 12 0" />
-    </SvgIcon>
-  ),
-  plus: (
-    <SvgIcon className="ax-ws-menu-item-check">
-      <path d="M10 4v12M4 10h12" />
-    </SvgIcon>
-  ),
 };
 
 function initialsFromEmail(email: string) {
@@ -158,22 +47,19 @@ function useOutsideClick<T extends HTMLElement>(enabled: boolean, onClose: () =>
   return ref;
 }
 
+// Theme — toggles data-theme on <html>. The design CSS keys off
+// [data-theme="light"|"dark"]. Persists in localStorage.
 function useTheme(): { theme: 'light' | 'dark'; setTheme: (next: 'light' | 'dark') => void } {
   const [theme, setLocalTheme] = useState<'light' | 'dark'>(() =>
     document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light',
   );
   function setTheme(next: 'light' | 'dark') {
-    if (next === theme) return;
     setLocalTheme(next);
-    if (next === 'dark') {
-      document.documentElement.setAttribute('data-theme', 'dark');
-    } else {
-      document.documentElement.removeAttribute('data-theme');
-    }
+    document.documentElement.setAttribute('data-theme', next);
     try {
       window.localStorage.setItem('decimal.theme', next);
     } catch {
-      // storage may be unavailable; that's fine
+      // storage unavailable; fine
     }
   }
   return { theme, setTheme };
@@ -199,51 +85,64 @@ export function AppSidebar({
   onLogout: () => void;
 }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const activeContext =
-    organizationContexts.find((ctx) => ctx.organization.organizationId === activeOrganizationId) ?? organizationContexts[0];
+    organizationContexts.find((ctx) => ctx.organization.organizationId === activeOrganizationId) ??
+    organizationContexts[0];
   const activeOrganization = activeContext?.organization;
 
   const [wsMenuOpen, setWsMenuOpen] = useState(false);
   const wsRef = useOutsideClick<HTMLDivElement>(wsMenuOpen, () => setWsMenuOpen(false));
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userRef = useOutsideClick<HTMLDivElement>(userMenuOpen, () => setUserMenuOpen(false));
   const { theme, setTheme } = useTheme();
 
   const base = activeOrganization ? `/organizations/${activeOrganization.organizationId}` : null;
+  const onProfilePage = location.pathname === '/profile';
 
   return (
-    <aside className="ax-sidebar" aria-label="Application">
-      <div className="ax-sidebar-brand">
-        <img
-          src="/favicon.svg"
-          alt=""
-          aria-hidden
-          className="ax-sidebar-brand-mark"
-        />
-        <div className="ax-sidebar-brand-text">
-          <strong>Decimal</strong>
+    <div className="sidebar">
+      {/* Wordmark — D glyph + name */}
+      <div className="sb-top">
+        <div className="sb-wordmark">
+          <span className="glyph">D</span>
+          Decimal
         </div>
       </div>
 
+      {/* Org switcher chip */}
       {organizationContexts.length ? (
-        <div className="ax-ws-switcher" ref={wsRef}>
+        <div ref={wsRef} style={{ position: 'relative' }}>
           <button
             type="button"
-            className="ax-ws-button"
+            className="sb-org"
+            style={{ width: 'calc(100% - 32px)', cursor: 'pointer', background: 'transparent' }}
+            onClick={() => setWsMenuOpen((v) => !v)}
             aria-haspopup="menu"
             aria-expanded={wsMenuOpen}
-            onClick={() => setWsMenuOpen((v) => !v)}
           >
-            <span className="ax-ws-button-avatar" aria-hidden>
+            <span className="org-initials">
               {initialsFromName(activeOrganization?.organizationName ?? '?')}
             </span>
-            <span className="ax-ws-button-text">
-              <span className="ax-ws-button-org">Organization</span>
-              <span className="ax-ws-button-name">{activeOrganization?.organizationName ?? 'Select organization'}</span>
-            </span>
-            {icons.chevron}
+            <span className="org-name">{activeOrganization?.organizationName ?? 'Select organization'}</span>
+            <Ico.chevDown w={14} className="org-chev" />
           </button>
 
           {wsMenuOpen ? (
-            <div className="ax-ws-menu" role="menu">
+            <div
+              role="menu"
+              style={{
+                position: 'absolute',
+                top: 'calc(100% + 6px)',
+                left: 16,
+                right: 16,
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--r-sm)',
+                padding: 4,
+                zIndex: 30,
+              }}
+            >
               {organizationContexts.map(({ organization }) => {
                 const isActive = organization.organizationId === activeOrganizationId;
                 return (
@@ -251,153 +150,220 @@ export function AppSidebar({
                     key={organization.organizationId}
                     type="button"
                     role="menuitem"
-                    className={`ax-ws-menu-item${isActive ? ' ax-ws-menu-item-active' : ''}`}
                     onClick={() => {
                       setWsMenuOpen(false);
                       if (!isActive) onOrganizationSwitch(organization.organizationId);
                     }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      width: '100%',
+                      padding: '8px 10px',
+                      border: 'none',
+                      background: isActive ? 'var(--bg-surface-2)' : 'transparent',
+                      color: 'var(--text-primary)',
+                      fontSize: 13,
+                      textAlign: 'left',
+                      borderRadius: 'var(--r-xs)',
+                      cursor: 'pointer',
+                    }}
                   >
-                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {organization.organizationName}
                     </span>
-                    {isActive ? icons.check : null}
+                    {isActive ? <Ico.check w={14} /> : null}
                   </button>
                 );
               })}
-              <div className="ax-ws-menu-sep" />
+              <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
               <button
                 type="button"
-                className="ax-ws-menu-item ax-ws-menu-new"
                 role="menuitem"
                 onClick={() => {
                   setWsMenuOpen(false);
                   navigate('/setup');
                 }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  width: '100%',
+                  padding: '8px 10px',
+                  border: 'none',
+                  background: 'transparent',
+                  color: 'var(--accent)',
+                  fontSize: 13,
+                  textAlign: 'left',
+                  borderRadius: 'var(--r-xs)',
+                  cursor: 'pointer',
+                }}
               >
-                {icons.plus}
+                <Ico.plus w={14} />
                 <span>New organization</span>
               </button>
             </div>
           ) : null}
         </div>
       ) : (
-        <div className="ax-ws-switcher">
-          <Link to="/setup" className="ax-ws-button" style={{ gap: 10 }}>
-            <span className="ax-ws-button-avatar" aria-hidden>
-              +
-            </span>
-            <span className="ax-ws-button-text">
-              <span className="ax-ws-button-name">Create organization</span>
-              <span className="ax-ws-button-org">Get started</span>
-            </span>
-          </Link>
-        </div>
+        <Link to="/setup" className="sb-org" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <span className="org-initials">+</span>
+          <span className="org-name">Create organization</span>
+        </Link>
       )}
 
-      <nav className="ax-nav" aria-label="Organization navigation">
+      {/* Nav groups */}
+      <div className="sb-nav">
         {base ? (
           <>
-            <div className="ax-nav-group">
-              <div className="ax-nav-group-label">Operations</div>
-              <NavLinkItem to={base} end icon={icons.overview} label="Overview" />
-              <NavLinkItem
-                to={`${base}/payments`}
-                icon={icons.payments}
-                label="Payments"
-                badge={paymentsIncompleteCount}
-              />
-              <NavLinkItem
-                to={`${base}/collections`}
-                icon={icons.collections}
-                label="Collections"
-                badge={collectionsOpenCount}
-              />
-            </div>
+            <div className="sb-group-label">Operations</div>
+            <NavItem to={base} end icon={<Ico.grid w={16} />} label="Overview" />
+            <NavItem
+              to={`${base}/payments`}
+              icon={<Ico.payments w={16} />}
+              label="Payments"
+              badge={paymentsIncompleteCount}
+            />
+            <NavItem
+              to={`${base}/collections`}
+              icon={<Ico.collections w={16} />}
+              label="Collections"
+              badge={collectionsOpenCount}
+            />
 
-            <div className="ax-nav-group">
-              <div className="ax-nav-group-label">Registry</div>
-              <NavLinkItem to={`${base}/wallets`} icon={icons.wallet} label="Treasury accounts" />
-              <NavLinkItem to={`${base}/members`} icon={icons.members} label="Members" />
-              <NavLinkItem
-                to={`${base}/counterparties`}
-                icon={icons.counterparty}
-                label="Address book"
-                badge={unreviewedWalletsCount}
-              />
-            </div>
+            <div className="sb-group-label">Registry</div>
+            <NavItem to={`${base}/wallets`} icon={<Ico.treasury w={16} />} label="Treasury accounts" />
+            <NavItem to={`${base}/members`} icon={<Ico.members w={16} />} label="Members" />
+            <NavItem
+              to={`${base}/counterparties`}
+              icon={<Ico.address w={16} />}
+              label="Address book"
+              badge={unreviewedWalletsCount}
+            />
 
-            <div className="ax-nav-group">
-              <div className="ax-nav-group-label">Governance</div>
-              <NavLinkItem to={`${base}/proposals`} icon={icons.proposals} label="Proposals" />
-              <NavLinkItem to={`${base}/spending-limits`} icon={icons.spendingLimit} label="Spending limits" />
-            </div>
-
+            <div className="sb-group-label">Governance</div>
+            <NavItem to={`${base}/proposals`} icon={<Ico.proposals w={16} />} label="Proposals" />
+            <NavItem to={`${base}/spending-limits`} icon={<Ico.shield w={16} />} label="Spending limits" />
           </>
         ) : null}
-      </nav>
+      </div>
 
-      <div className="ax-footer">
-        <div className="ax-theme-toggle" role="radiogroup" aria-label="Theme">
+      {/* Footer — theme segment + user chip */}
+      <div className="sb-footer">
+        <div className="theme-seg" role="radiogroup" aria-label="Theme">
           <button
             type="button"
             role="radio"
             aria-checked={theme === 'light'}
-            aria-pressed={theme === 'light'}
-            className="ax-theme-option"
+            className={theme === 'light' ? 'on' : ''}
             onClick={() => setTheme('light')}
           >
-            {icons.sun}
+            <Ico.sun w={13} />
             <span>Light</span>
           </button>
           <button
             type="button"
             role="radio"
             aria-checked={theme === 'dark'}
-            aria-pressed={theme === 'dark'}
-            className="ax-theme-option"
+            className={theme === 'dark' ? 'on' : ''}
             onClick={() => setTheme('dark')}
           >
-            {icons.moon}
+            <Ico.moon w={13} />
             <span>Dark</span>
           </button>
         </div>
 
-        <div className="ax-user-card">
-          <span className="ax-user-avatar" aria-hidden>
-            {initialsFromEmail(session.user.email)}
-          </span>
-          <span className="ax-user-text">
-            <div className="ax-user-email" title={session.user.email}>
-              {session.user.email}
+        <div ref={userRef} style={{ position: 'relative' }}>
+          <button
+            type="button"
+            className={`sb-user${onProfilePage ? ' is-active-user' : ''}`}
+            style={{ width: '100%', border: 'none', background: 'transparent', cursor: 'pointer' }}
+            onClick={() => setUserMenuOpen((v) => !v)}
+            aria-haspopup="menu"
+            aria-expanded={userMenuOpen}
+          >
+            <span className="avatar">{initialsFromEmail(session.user.email)}</span>
+            <div className="col" style={{ flex: 1, minWidth: 0, alignItems: 'flex-start' }}>
+              <span className="u-name">{session.user.displayName ?? session.user.email.split('@')[0]}</span>
+              <span className="u-mail">{session.user.email}</span>
             </div>
-            <div className="ax-user-sub">{session.user.displayName || 'Signed in'}</div>
-          </span>
-        </div>
-        <div className="ax-user-actions">
-          <button
-            type="button"
-            className="ax-user-action"
-            onClick={() => navigate('/profile')}
-          >
-            {icons.user}
-            <span>Profile</span>
+            <Ico.chevDown w={14} style={{ color: 'var(--text-faint)' }} />
           </button>
-          <button
-            type="button"
-            className="ax-user-action"
-            data-tone="danger"
-            onClick={onLogout}
-          >
-            {icons.logout}
-            <span>Sign out</span>
-          </button>
+
+          {userMenuOpen ? (
+            <div
+              role="menu"
+              style={{
+                position: 'absolute',
+                bottom: 'calc(100% + 6px)',
+                left: 0,
+                right: 0,
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--r-sm)',
+                padding: 4,
+                zIndex: 30,
+              }}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setUserMenuOpen(false);
+                  navigate('/profile');
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  width: '100%',
+                  padding: '8px 10px',
+                  border: 'none',
+                  background: 'transparent',
+                  color: 'var(--text-primary)',
+                  fontSize: 13,
+                  textAlign: 'left',
+                  borderRadius: 'var(--r-xs)',
+                  cursor: 'pointer',
+                }}
+              >
+                <Ico.members w={14} />
+                <span>Profile</span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setUserMenuOpen(false);
+                  onLogout();
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  width: '100%',
+                  padding: '8px 10px',
+                  border: 'none',
+                  background: 'transparent',
+                  color: 'var(--danger)',
+                  fontSize: 13,
+                  textAlign: 'left',
+                  borderRadius: 'var(--r-xs)',
+                  cursor: 'pointer',
+                }}
+              >
+                <Ico.external w={14} />
+                <span>Sign out</span>
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
-    </aside>
+    </div>
   );
 }
 
-function NavLinkItem({
+function NavItem({
   to,
   end,
   icon,
@@ -406,7 +372,7 @@ function NavLinkItem({
 }: {
   to: string;
   end?: boolean;
-  icon: ReactNode;
+  icon: React.ReactNode;
   label: string;
   badge?: number;
 }) {
@@ -414,15 +380,12 @@ function NavLinkItem({
     <NavLink
       to={to}
       end={end}
-      className={({ isActive }) => `ax-nav-link${isActive ? ' ax-nav-link-active' : ''}`}
+      className={({ isActive }) => `sb-item${isActive ? ' is-active' : ''}`}
+      style={{ textDecoration: 'none' }}
     >
-      <span className="ax-nav-link-icon">{icon}</span>
-      <span className="ax-nav-link-label">{label}</span>
-      {badge && badge > 0 ? (
-        <span className="ax-nav-link-badge" aria-label={`${badge} pending`}>
-          {badge}
-        </span>
-      ) : null}
+      {icon}
+      <span className="sb-label">{label}</span>
+      {badge && badge > 0 ? <span className="sb-badge">{badge}</span> : null}
     </NavLink>
   );
 }

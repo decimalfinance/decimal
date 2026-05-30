@@ -150,19 +150,24 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
     navigate('/', { replace: true });
   }
 
+  // Shell follows the design handoff: .dec namespace → .app flex container →
+  // sidebar + .app-main → .app-scroll for page content. All .dec * styles
+  // (from frontend/src/styles/decimal/) only activate inside this wrapper.
   return (
-    <div className="app-shell">
-      <AppSidebar
-        session={session}
-        organizationContexts={organizations}
-        activeOrganizationId={activeOrganizationId}
-        paymentsIncompleteCount={paymentsIncompleteCount}
-        collectionsOpenCount={collectionsOpenCount}
-        unreviewedWalletsCount={unreviewedWalletsCount}
-        onOrganizationSwitch={(organizationId) => navigate(`/organizations/${organizationId}`)}
-        onLogout={logout}
-      />
-      <main className="main-surface">
+    <div className="dec" style={{ height: '100vh' }}>
+      <div className="app">
+        <AppSidebar
+          session={session}
+          organizationContexts={organizations}
+          activeOrganizationId={activeOrganizationId}
+          paymentsIncompleteCount={paymentsIncompleteCount}
+          collectionsOpenCount={collectionsOpenCount}
+          unreviewedWalletsCount={unreviewedWalletsCount}
+          onOrganizationSwitch={(organizationId) => navigate(`/organizations/${organizationId}`)}
+          onLogout={logout}
+        />
+        <div className="app-main">
+          <div className="app-scroll" style={{ overflowY: 'auto' }}>
         {shouldShowTreasuryGate ? (
           <TreasurySetupGate organizationId={activeOrganizationId!} />
         ) : (
@@ -190,7 +195,9 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
             </Routes>
           </Suspense>
         )}
-      </main>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
