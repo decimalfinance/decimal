@@ -742,7 +742,11 @@ function periodSentence(period: string | undefined): string {
   if (period === 'month') return 'per month, resets the 1st';
   if (period === 'week') return 'per week, resets every Monday';
   if (period === 'day') return 'per day, resets at midnight';
-  if (period === 'one_time') return 'one-time — single use';
+  // Squads' Period::OneTime means the cap never resets — it's a total
+  // budget the agent can spend across any number of payments until
+  // exhausted, NOT "one payment then done". (See Squads IDL:
+  // "the remaining amount is reset, unless it's Period::OneTime".)
+  if (period === 'one_time') return 'total budget — does not reset';
   return `per ${period ?? 'period'}`;
 }
 
@@ -750,7 +754,7 @@ function periodTitle(period: string | undefined): string {
   if (period === 'month') return 'Monthly';
   if (period === 'week') return 'Weekly';
   if (period === 'day') return 'Daily';
-  if (period === 'one_time') return 'One-time';
+  if (period === 'one_time') return 'One-time budget';
   return period ?? '—';
 }
 
@@ -844,7 +848,9 @@ function periodLabel(period: string | undefined): string {
   if (period === 'month') return 'per month';
   if (period === 'week') return 'per week';
   if (period === 'day') return 'per day';
-  if (period === 'one_time') return 'one-time';
+  // 'total' rather than 'one-time' — the Squads OneTime period is a
+  // total budget that never resets, not a single payment cap.
+  if (period === 'one_time') return 'total';
   return period ?? 'per period';
 }
 

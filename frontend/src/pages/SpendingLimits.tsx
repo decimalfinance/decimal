@@ -36,7 +36,9 @@ const STATUS_TONE: Record<SpendingLimitPolicyStatus, PillTone> = {
 };
 
 const PERIOD_LABEL: Record<string, string> = {
-  one_time: 'per payment',
+  // Squads' OneTime is a non-resetting total budget, not a per-payment
+  // cap (see Squads IDL + SpendingLimitDetail.tsx for the longer note).
+  one_time: 'total',
   day: 'per day',
   week: 'per week',
   month: 'per month',

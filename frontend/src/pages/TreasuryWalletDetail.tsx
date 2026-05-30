@@ -1482,7 +1482,9 @@ const SPENDING_LIMIT_STATUS_TONE: Record<SpendingLimitPolicyStatus, 'success' | 
 };
 
 const SPENDING_LIMIT_PERIOD_LABEL: Record<string, string> = {
-  one_time: 'one-time',
+  // Squads' OneTime is a non-resetting total budget — see
+  // SpendingLimitDetail.tsx for the longer note.
+  one_time: 'total',
   day: 'per day',
   week: 'per week',
   month: 'per month',
@@ -1691,7 +1693,10 @@ type CreateSpendingLimitPhase =
   | 'error';
 
 const PERIOD_OPTIONS: Array<{ key: 'one_time' | 'day' | 'week' | 'month'; label: string }> = [
-  { key: 'one_time', label: 'One-time' },
+  // "Total (no reset)" so the segmented control matches Squads' actual
+  // OneTime semantics — a non-resetting budget the agent draws down
+  // across however many payments fit, not a single-payment cap.
+  { key: 'one_time', label: 'Total (no reset)' },
   { key: 'day', label: 'Per day' },
   { key: 'week', label: 'Per week' },
   { key: 'month', label: 'Per month' },

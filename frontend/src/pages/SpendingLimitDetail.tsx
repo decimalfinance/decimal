@@ -41,14 +41,17 @@ const STATUS_TONE: Record<SpendingLimitPolicyStatus, PillTone> = {
 };
 
 const PERIOD_LABEL: Record<string, string> = {
-  one_time: 'per payment',
+  // Squads' Period::OneTime never resets — the amount is a total budget
+  // the agent draws down across however many payments fit. "per payment"
+  // was wrong; "total" reads as "5,000 USDC total".
+  one_time: 'total',
   day: 'per day',
   week: 'per week',
   month: 'per month',
 };
 
 const PERIOD_NOUN: Record<string, string> = {
-  one_time: 'this policy',
+  one_time: 'overall',
   day: 'today',
   week: 'this week',
   month: 'this month',
@@ -340,7 +343,7 @@ function periodStart(period: string, now: Date): Date {
 }
 
 function periodResetLabel(period: string, now: Date): string {
-  if (period === 'one_time') return 'single-use policy';
+  if (period === 'one_time') return 'does not reset';
   if (period === 'month') {
     const next = new Date(now.getFullYear(), now.getMonth() + 1, 1);
     return `resets ${next.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
