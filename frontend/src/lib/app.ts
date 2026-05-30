@@ -101,7 +101,12 @@ export function shortenAddress(value: string | null | undefined, prefix = 6, suf
     return value;
   }
 
-  return `${value.slice(0, prefix)}...${value.slice(-suffix)}`;
+  // Use the single ellipsis glyph (U+2026) rather than three literal
+  // periods — three dots crowd next to mono characters at small sizes
+  // (Geist Mono renders the trailing "." as if it joined the next
+  // letter, making "B1E4...jbUA" read as "B1E4. jbUA"). Matches the
+  // copy-chip + design's xxxx…yyyy convention.
+  return `${value.slice(0, prefix)}…${value.slice(-suffix)}`;
 }
 
 export function orbTransactionUrl(signature: string) {
