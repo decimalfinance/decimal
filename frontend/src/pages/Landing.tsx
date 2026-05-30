@@ -641,39 +641,13 @@ function ClosingCTA({ googleHref }: { googleHref: string }) {
 
 function Foot() {
   return (
-    <footer className="l-footer">
-      <div className="l-wrap">
-        <div className="l-foot-top">
-          <div className="l-foot-brand">
-            <Link to="/" className="l-brand">
-              <img src="/decimal-logo.png" alt="Decimal" />
-              <span>Decimal</span>
-            </Link>
-            <p>The finance operator for global teams. Your money, your team, your keys.</p>
-          </div>
-          <div className="l-foot-cols">
-            <div className="l-foot-col">
-              <h5>Product</h5>
-              <a href="#payments">Payments</a>
-              <a href="#limits">Spending limits</a>
-              <a href="#how">How it works</a>
-            </div>
-            <div className="l-foot-col">
-              <h5>Company</h5>
-              <a href="mailto:hello@decimal.finance">Contact</a>
-              <a href="https://github.com/anthropics/claude-code/issues" target="_blank" rel="noreferrer">Feedback</a>
-            </div>
-            <div className="l-foot-col">
-              <h5>Get started</h5>
-              <Link to="/login">Sign in</Link>
-              <Link to="/register">Create account</Link>
-            </div>
-          </div>
-        </div>
-        <div className="l-foot-bottom">
-          <span className="fb-copy">© {new Date().getFullYear()} Decimal</span>
-          <span className="fb-note">Operator finance built on a multisig you own. We propose; your team disposes.</span>
-        </div>
+    <footer className="l-footer l-footer-min">
+      <div className="l-wrap l-foot-row">
+        <Link to="/" className="l-brand">
+          <img src="/decimal-logo.png" alt="Decimal" />
+          <span>Decimal</span>
+        </Link>
+        <span className="fb-copy">© {new Date().getFullYear()} Decimal</span>
       </div>
     </footer>
   );
