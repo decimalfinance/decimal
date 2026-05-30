@@ -439,3 +439,18 @@
 .dec .spec-note { font-size: 11px; color: var(--text-faint); line-height: 1.5; }
 .dec .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .dec .col { display: flex; flex-direction: column; }
+
+/* "Create organization" chip — circular, accent-tinted, not the solid black
+   used for actual org initials. The plus icon fills the chip properly so
+   it doesn't read as a tiny dot in a big square. */
+.dec .sb-org .org-initials.is-create {
+  background: transparent;
+  color: var(--accent);
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 60%, var(--border-strong));
+  border-radius: 999px;
+}
+.dec .sb-org .org-initials.is-create svg { width: 14px; height: 14px; }
+.dec .sb-org:hover .org-initials.is-create {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}

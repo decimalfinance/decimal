@@ -207,7 +207,9 @@ export function AppSidebar({
         </div>
       ) : (
         <Link to="/setup" className="sb-org" style={{ textDecoration: 'none', color: 'inherit' }}>
-          <span className="org-initials">+</span>
+          <span className="org-initials is-create" aria-hidden>
+            <Ico.plus w={14} />
+          </span>
           <span className="org-name">Create organization</span>
         </Link>
       )}
