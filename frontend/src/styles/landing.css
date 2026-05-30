@@ -1299,7 +1299,7 @@ html body {
 .l-cta-actions { display: inline-flex; gap: 12px; margin-top: 30px; }
 .l-cta-g { background: var(--l-ink); color: #fff; border-radius: 999px; padding: 14px 22px; font-weight: 500; font-size: 15px; display: inline-flex; align-items: center; gap: 10px; text-decoration: none; transition: background .15s; }
 .l-cta-g:hover { background: var(--l-pink); }
-.l-cta-g .gw { width: 22px; height: 22px; background: #fff; border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; }
+.l-cta-g .gw { width: 22px; height: 22px; background: #fff; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; }
 .l-cta-g .gw svg { width: 14px; height: 14px; }
 .l-cta-ghost { background: transparent; color: var(--l-ink); border: 1px solid rgba(10,10,10,.18); border-radius: 999px; padding: 14px 22px; font-weight: 500; font-size: 15px; text-decoration: none; transition: border-color .15s; }
 .l-cta-ghost:hover { border-color: var(--l-ink); }
