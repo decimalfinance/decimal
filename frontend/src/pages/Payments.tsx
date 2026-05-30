@@ -439,6 +439,13 @@ function CreatePaymentDialog(props: {
   onError: (message: string) => void;
 }) {
   const { organizationId, destinations, addresses, onClose, onSuccess, onError } = props;
+  const [counterpartyWalletId, setCounterpartyWalletId] = useState('');
+  const [amount, setAmount] = useState('');
+  const [memo, setMemo] = useState('');
+  const [externalReference, setExternalReference] = useState('');
+  const [sourceTreasuryWalletId, setSourceTreasuryWalletId] = useState('');
+  const [dueAt, setDueAt] = useState('');
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose();
@@ -447,22 +454,53 @@ function CreatePaymentDialog(props: {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const mutation = useMutation({
-    mutationFn: async (form: FormData) => {
-      const counterpartyWalletId = String(form.get('counterpartyWalletId') ?? '');
-      const amount = String(form.get('amount') ?? '').trim();
-      const reason = String(form.get('reason') ?? '').trim();
-      if (!counterpartyWalletId || !amount || !reason) {
-        throw new Error('Destination, amount, and reason are required.');
+  // Group active treasuries by multisig (sourceRef) — that's the "Treasury
+  // account", and each row under it is a vault. Lets the user pick at
+  // either level (the design has separate Treasury + Vault selects).
+  const treasuryAccounts = useMemo(() => {
+    const map = new Map<string, { name: string; vaults: TreasuryWallet[] }>();
+    for (const a of addresses) {
+      if (!a.isActive) continue;
+      const key = a.source === 'squads_v4' && a.sourceRef ? a.sourceRef : a.treasuryWalletId;
+      const existing = map.get(key);
+      const name = a.displayName ?? 'Untitled';
+      if (existing) {
+        existing.vaults.push(a);
+      } else {
+        map.set(key, { name, vaults: [a] });
       }
-      // Create the PaymentOrder directly and ask the agent to route it
-      // through a spending limit or Squads proposal server-side.
+    }
+    // Sort vaults inside each account by vault index.
+    for (const acc of map.values()) {
+      acc.vaults.sort((a, b) => (a.sourceVaultIndex ?? 999) - (b.sourceVaultIndex ?? 999));
+      // Use the primary vault's displayName as the account label.
+      acc.name = acc.vaults[0]?.displayName ?? acc.name;
+    }
+    return Array.from(map.entries()).map(([key, v]) => ({ key, ...v }));
+  }, [addresses]);
+
+  const selectedAccountKey = useMemo(() => {
+    const selected = addresses.find((a) => a.treasuryWalletId === sourceTreasuryWalletId);
+    if (!selected) return '';
+    return selected.source === 'squads_v4' && selected.sourceRef
+      ? selected.sourceRef
+      : selected.treasuryWalletId;
+  }, [sourceTreasuryWalletId, addresses]);
+
+  const selectedAccount = treasuryAccounts.find((a) => a.key === selectedAccountKey);
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      if (!counterpartyWalletId || !amount.trim()) {
+        throw new Error('Destination and amount are required.');
+      }
       return api.createPaymentOrder(organizationId, {
         counterpartyWalletId,
         amountRaw: usdcToRaw(amount),
-        memo: reason,
-        externalReference: String(form.get('externalReference') ?? '') || undefined,
-        sourceTreasuryWalletId: String(form.get('sourceTreasuryWalletId') ?? '') || undefined,
+        memo: memo.trim() || undefined,
+        externalReference: externalReference.trim() || undefined,
+        sourceTreasuryWalletId: sourceTreasuryWalletId || undefined,
+        dueAt: dueAt.trim() ? new Date(dueAt).toISOString() : undefined,
         autoAdvance: true,
       });
     },
@@ -472,102 +510,192 @@ function CreatePaymentDialog(props: {
 
   return (
     <div
-      className="rd-dialog-backdrop"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="rd-create-title"
+      className="overlay"
+      style={{ position: 'fixed', inset: 0, zIndex: 60 }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !mutation.isPending) onClose();
+      }}
     >
-      <div className="rd-dialog" style={{ maxWidth: 520 }}>
-        <h2 id="rd-create-title" className="rd-dialog-title">
-          New payment
-        </h2>
-        <p className="rd-dialog-body">
-          One payment, one destination. Decimal routes it through a spending limit or Squads proposal automatically.
-        </p>
+      <div
+        className="dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="dec-new-payment-title"
+        style={{ maxWidth: 560 }}
+      >
+        <div className="dialog-head">
+          <div>
+            <h2 id="dec-new-payment-title">New payment</h2>
+            <p>Pay a verified vendor from one of your treasury vaults.</p>
+          </div>
+          <button
+            type="button"
+            className="drawer-x"
+            onClick={onClose}
+            disabled={mutation.isPending}
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            mutation.mutate(new FormData(e.currentTarget));
+            mutation.mutate();
           }}
         >
-          <div className="rd-form-grid">
-            <label className="rd-field" style={{ gridColumn: '1 / -1' }}>
-              <span className="rd-field-label">Destination</span>
-              <select name="counterpartyWalletId" required className="rd-select" defaultValue="">
-                <option value="" disabled>
-                  Select destination
-                </option>
-                {destinations
-                  .filter((d) => d.isActive)
-                  .map((d) => (
-                    <option key={d.counterpartyWalletId} value={d.counterpartyWalletId}>
-                      {d.label} · {d.trustState}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label className="rd-field">
-              <span className="rd-field-label">Amount (USDC)</span>
+          <div className="dialog-body">
+            <div className="field">
+              <label className="field-label" htmlFor="dec-np-vendor">Vendor</label>
+              <div className="select">
+                <select
+                  id="dec-np-vendor"
+                  value={counterpartyWalletId}
+                  onChange={(e) => setCounterpartyWalletId(e.target.value)}
+                  required
+                >
+                  <option value="" disabled>
+                    Select a vendor
+                  </option>
+                  {destinations
+                    .filter((d) => d.isActive)
+                    .map((d) => (
+                      <option key={d.counterpartyWalletId} value={d.counterpartyWalletId}>
+                        {d.label} · {d.trustState === 'trusted' ? 'Verified' : d.trustState}
+                      </option>
+                    ))}
+                </select>
+                <Ico.chevDown w={14} />
+              </div>
+              <span className="input-help">Only verified vendors can be paid without review.</span>
+            </div>
+            <div className="field">
+              <label className="field-label" htmlFor="dec-np-amt">Amount</label>
+              <div className="amount-input">
+                <input
+                  id="dec-np-amt"
+                  type="text"
+                  inputMode="decimal"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+                  placeholder="2,176.67"
+                  required
+                />
+                <span className="ai-cur">USDC</span>
+              </div>
+            </div>
+            <div className="row" style={{ display: 'flex', gap: 12 }}>
+              <div className="field" style={{ flex: 1 }}>
+                <label className="field-label" htmlFor="dec-np-treasury">Treasury</label>
+                <div className="select">
+                  <select
+                    id="dec-np-treasury"
+                    value={selectedAccountKey}
+                    onChange={(e) => {
+                      const acc = treasuryAccounts.find((t) => t.key === e.target.value);
+                      const first = acc?.vaults[0];
+                      setSourceTreasuryWalletId(first?.treasuryWalletId ?? '');
+                    }}
+                  >
+                    <option value="">Set later</option>
+                    {treasuryAccounts.map((acc) => (
+                      <option key={acc.key} value={acc.key}>
+                        {acc.name}
+                      </option>
+                    ))}
+                  </select>
+                  <Ico.chevDown w={14} />
+                </div>
+              </div>
+              <div className="field" style={{ flex: 1 }}>
+                <label className="field-label" htmlFor="dec-np-vault">Vault</label>
+                <div className="select">
+                  <select
+                    id="dec-np-vault"
+                    value={sourceTreasuryWalletId}
+                    onChange={(e) => setSourceTreasuryWalletId(e.target.value)}
+                    disabled={!selectedAccount}
+                  >
+                    {!selectedAccount ? (
+                      <option value="">Pick a treasury first</option>
+                    ) : (
+                      selectedAccount.vaults.map((v) => (
+                        <option key={v.treasuryWalletId} value={v.treasuryWalletId}>
+                          {v.displayName ?? 'Untitled vault'}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                  <Ico.chevDown w={14} />
+                </div>
+              </div>
+            </div>
+            <div className="field">
+              <label className="field-label" htmlFor="dec-np-memo">Memo</label>
               <input
-                name="amount"
-                required
-                placeholder="10.00"
-                className="rd-input"
-                inputMode="decimal"
-                autoComplete="off"
+                id="dec-np-memo"
+                className="input"
+                value={memo}
+                onChange={(e) => setMemo(e.target.value)}
+                placeholder="Invoice INV-1001 · April retainer"
               />
-            </label>
-            <label className="rd-field">
-              <span className="rd-field-label">Reference</span>
-              <input
-                name="externalReference"
-                placeholder="INV-1001"
-                className="rd-input"
-                autoComplete="off"
-              />
-            </label>
-            <label className="rd-field" style={{ gridColumn: '1 / -1' }}>
-              <span className="rd-field-label">Reason</span>
-              <input
-                name="reason"
-                required
-                placeholder="Pay vendor for April services"
-                className="rd-input"
-                autoComplete="off"
-              />
-            </label>
-            <label className="rd-field">
-              <span className="rd-field-label">Source wallet (optional)</span>
-              <select name="sourceTreasuryWalletId" className="rd-select" defaultValue="">
-                <option value="">Set later</option>
-                {addresses
-                  .filter((a) => a.isActive)
-                  .map((a) => (
-                    <option key={a.treasuryWalletId} value={a.treasuryWalletId}>
-                      {walletLabel(a)}
-                    </option>
-                  ))}
-              </select>
-            </label>
+            </div>
+            <div className="row" style={{ display: 'flex', gap: 12 }}>
+              <div className="field" style={{ flex: 1 }}>
+                <label className="field-label" htmlFor="dec-np-ref">Reference</label>
+                <input
+                  id="dec-np-ref"
+                  className="input mono"
+                  value={externalReference}
+                  onChange={(e) => setExternalReference(e.target.value)}
+                  placeholder="INV-1001"
+                />
+              </div>
+              <div className="field" style={{ flex: 1 }}>
+                <label className="field-label" htmlFor="dec-np-due">
+                  Due date{' '}
+                  <span style={{ color: 'var(--text-faint)', fontWeight: 400 }}>· optional</span>
+                </label>
+                <input
+                  id="dec-np-due"
+                  type="date"
+                  className="input mono"
+                  value={dueAt}
+                  onChange={(e) => setDueAt(e.target.value)}
+                />
+              </div>
+            </div>
+            {destinations.filter((d) => d.isActive).length === 0 ? (
+              <div style={{ fontSize: 12, color: 'var(--warning)' }}>
+                Add a vendor in Counterparties before creating a payment.
+              </div>
+            ) : null}
           </div>
-          <div className="rd-dialog-actions" style={{ marginTop: 24 }}>
-            <button type="button" className="rd-btn rd-btn-secondary" onClick={onClose}>
-              Cancel
-            </button>
+          <div className="dialog-foot">
             <button
               type="submit"
-              className="rd-btn rd-btn-primary"
-              disabled={mutation.isPending || destinations.length === 0}
+              className="btn btn-primary"
+              style={{ flex: 1 }}
+              disabled={
+                mutation.isPending ||
+                !counterpartyWalletId ||
+                !amount.trim()
+              }
               aria-busy={mutation.isPending}
             >
-              {mutation.isPending ? 'Creating…' : 'Create payment'}
+              {mutation.isPending ? 'Creating…' : (
+                <>Create &amp; send for approval<Ico.arrowRight w={14} /></>
+              )}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={onClose}
+              disabled={mutation.isPending}
+            >
+              Cancel
             </button>
           </div>
-          {destinations.length === 0 ? (
-            <p className="rd-field-err" style={{ marginTop: 12 }}>
-              Add a destination in the Address book before creating a payment.
-            </p>
-          ) : null}
         </form>
       </div>
     </div>
@@ -628,68 +756,142 @@ function ImportCsvDialog(props: {
   });
 
   return (
-    <div className="rd-dialog-backdrop" role="dialog" aria-modal="true" aria-labelledby="rd-import-title">
+    <div
+      className="overlay"
+      style={{ position: 'fixed', inset: 0, zIndex: 60 }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !importMutation.isPending) onClose();
+      }}
+    >
       <div
-        className="rd-dialog"
+        className="dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="dec-import-title"
         style={{
           maxWidth: step === 'preview' ? 'min(1040px, 96vw)' : 720,
           width: step === 'preview' ? 'min(1040px, 96vw)' : undefined,
         }}
       >
-        <h2 id="rd-import-title" className="rd-dialog-title">
-          Import CSV batch
-        </h2>
-        <p className="rd-dialog-body">
-          Columns: <span className="rd-mono">counterparty, destination, amount, reference, due_date</span>.
-        </p>
-
-        {step === 'edit' ? (
-          <>
-            <div className="rd-form-grid" style={{ marginBottom: 16 }}>
-              <label className="rd-field">
-                <span className="rd-field-label">Batch name</span>
-                <input
-                  value={runName}
-                  onChange={(e) => setRunName(e.target.value)}
-                  placeholder="April contributor payouts"
-                  className="rd-input"
+        <div className="dialog-head">
+          <div>
+            <h2 id="dec-import-title">Import CSV batch</h2>
+            <p>
+              Columns:{' '}
+              <span className="mono" style={{ color: 'var(--text-primary)' }}>
+                counterparty, destination, amount, reference, due_date
+              </span>
+            </p>
+          </div>
+          <button
+            type="button"
+            className="drawer-x"
+            onClick={onClose}
+            disabled={importMutation.isPending}
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <div className="dialog-body">
+          {step === 'edit' ? (
+            <>
+              <div className="row" style={{ display: 'flex', gap: 12 }}>
+                <div className="field" style={{ flex: 1 }}>
+                  <label className="field-label" htmlFor="dec-csv-name">Batch name</label>
+                  <input
+                    id="dec-csv-name"
+                    className="input"
+                    value={runName}
+                    onChange={(e) => setRunName(e.target.value)}
+                    placeholder="April contributor payouts"
+                  />
+                </div>
+                <div className="field" style={{ flex: 1 }}>
+                  <label className="field-label" htmlFor="dec-csv-source">
+                    Source wallet{' '}
+                    <span style={{ color: 'var(--text-faint)', fontWeight: 400 }}>· optional</span>
+                  </label>
+                  <div className="select">
+                    <select
+                      id="dec-csv-source"
+                      value={sourceAddressId}
+                      onChange={(e) => setSourceAddressId(e.target.value)}
+                    >
+                      <option value="">Set later</option>
+                      {addresses
+                        .filter((a) => a.isActive)
+                        .map((a) => (
+                          <option key={a.treasuryWalletId} value={a.treasuryWalletId}>
+                            {walletLabel(a)}
+                          </option>
+                        ))}
+                    </select>
+                    <Ico.chevDown w={14} />
+                  </div>
+                </div>
+              </div>
+              <div className="field">
+                <label className="field-label" htmlFor="dec-csv-body">CSV</label>
+                <textarea
+                  id="dec-csv-body"
+                  className="input mono"
+                  value={csvText}
+                  onChange={(e) => setCsvText(e.target.value)}
+                  rows={10}
+                  placeholder={
+                    'counterparty,destination,amount,reference,due_date\nAcme Corp,8cZ65A8ERdVsXq3YnEdMNimwG7DhGe1tPszysJwh43Zx,10.00,INV-1001,2026-05-01'
+                  }
+                  style={{ resize: 'vertical', fontSize: 12 }}
                 />
-              </label>
-              <label className="rd-field">
-                <span className="rd-field-label">Source wallet (optional)</span>
-                <select
-                  value={sourceAddressId}
-                  onChange={(e) => setSourceAddressId(e.target.value)}
-                  className="rd-select"
-                >
-                  <option value="">Set later</option>
-                  {addresses
-                    .filter((a) => a.isActive)
-                    .map((a) => (
-                      <option key={a.treasuryWalletId} value={a.treasuryWalletId}>
-                        {walletLabel(a)}
-                      </option>
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                <strong style={{ color: 'var(--text-primary)' }}>{preview.rowCount}</strong> row
+                {preview.rowCount === 1 ? '' : 's'} · showing first {preview.rows.length} ·{' '}
+                {runName.trim() || '(unnamed batch)'}
+              </div>
+              <div
+                className="tbl-card"
+                style={{ maxHeight: 320, overflowY: 'auto', overflowX: 'auto' }}
+              >
+                <table className="tbl" style={{ minWidth: 760 }}>
+                  <thead>
+                    <tr>
+                      {preview.headers.map((h) => (
+                        <th key={h} style={{ whiteSpace: 'nowrap' }}>
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.rows.map((row, ri) => (
+                      <tr key={ri}>
+                        {preview.headers.map((_, ci) => (
+                          <td key={ci} style={{ whiteSpace: 'nowrap' }}>
+                            <span className="mono" style={{ fontSize: 12 }}>
+                              {row[ci] ?? ''}
+                            </span>
+                          </td>
+                        ))}
+                      </tr>
                     ))}
-                </select>
-              </label>
-            </div>
-            <label className="rd-field">
-              <span className="rd-field-label">CSV</span>
-              <textarea
-                value={csvText}
-                onChange={(e) => setCsvText(e.target.value)}
-                rows={10}
-                placeholder={`counterparty,destination,amount,reference,due_date\nAcme Corp,8cZ65A8ERdVsXq3YnEdMNimwG7DhGe1tPszysJwh43Zx,10.00,INV-1001,2026-05-01`}
-                className="rd-textarea"
-              />
-            </label>
-            <div className="rd-dialog-actions" style={{ marginTop: 20 }}>
-              <button type="button" className="rd-btn rd-btn-secondary" onClick={onClose}>
-                Cancel
-              </button>
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+        <div className="dialog-foot">
+          {step === 'edit' ? (
+            <>
               <button
                 type="button"
-                className="rd-btn rd-btn-primary"
+                className="btn btn-primary"
+                style={{ flex: 1 }}
                 disabled={!csvText.trim()}
                 onClick={() => {
                   const p = parseCsvPreview(csvText);
@@ -704,62 +906,37 @@ function ImportCsvDialog(props: {
                   setStep('preview');
                 }}
               >
-                Review
+                Review<Ico.arrowRight w={14} />
               </button>
-            </div>
-          </>
-        ) : (
-          <>
-            <p style={{ fontSize: 13, color: 'var(--ax-text-secondary)', marginBottom: 12 }}>
-              <strong style={{ color: 'var(--ax-text)' }}>{preview.rowCount}</strong> row
-              {preview.rowCount === 1 ? '' : 's'} · showing first {preview.rows.length} ·{' '}
-              {runName.trim() || '(unnamed batch)'}
-            </p>
-            <div
-              className="rd-table-shell"
-              style={{ maxHeight: 320, overflowY: 'auto', overflowX: 'auto' }}
-            >
-              <table className="rd-table" style={{ minWidth: 760 }}>
-                <thead>
-                  <tr>
-                    {preview.headers.map((h) => (
-                      <th key={h} style={{ whiteSpace: 'nowrap' }}>
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {preview.rows.map((row, ri) => (
-                    <tr key={ri}>
-                      {preview.headers.map((_, ci) => (
-                        <td key={ci} style={{ whiteSpace: 'nowrap' }}>
-                          <span className="rd-mono" style={{ fontSize: 12 }}>
-                            {row[ci] ?? ''}
-                          </span>
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="rd-dialog-actions" style={{ marginTop: 20 }}>
-              <button type="button" className="rd-btn rd-btn-secondary" onClick={() => setStep('edit')}>
-                Back
+              <button type="button" className="btn btn-secondary" onClick={onClose}>
+                Cancel
               </button>
+            </>
+          ) : (
+            <>
               <button
                 type="button"
-                className="rd-btn rd-btn-primary"
+                className="btn btn-primary"
+                style={{ flex: 1 }}
                 disabled={importMutation.isPending}
                 onClick={() => importMutation.mutate()}
                 aria-busy={importMutation.isPending}
               >
-                {importMutation.isPending ? 'Importing…' : 'Confirm import'}
+                {importMutation.isPending ? 'Importing…' : (
+                  <>Confirm import<Ico.arrowRight w={14} /></>
+                )}
               </button>
-            </div>
-          </>
-        )}
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setStep('edit')}
+                disabled={importMutation.isPending}
+              >
+                Back
+              </button>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -823,118 +1000,202 @@ function UploadDocumentDialog(props: {
     setFile(null);
   };
 
-  return (
-    <div className="rd-dialog-backdrop" role="dialog" aria-modal="true" aria-labelledby="rd-upload-doc-title">
-      <div className="rd-dialog upload-dialog" style={{ maxWidth: result ? 640 : 480 }}>
-        <h2 id="rd-upload-doc-title" className="rd-dialog-title" style={{ marginBottom: 4 }}>
-          Upload invoice
-        </h2>
+  // Three-step layout matching design's UploadDrawer: picker (file
+  // pick) → processing (extracting…) → result (per-row outcomes). The
+  // header copy + footer button change per step.
+  const step: 'picker' | 'processing' | 'error' | 'result' = result
+    ? 'result'
+    : error
+      ? 'error'
+      : running
+        ? 'processing'
+        : 'picker';
 
-        {/* Pre-run: dropzone + Process button */}
-        {!running && !result && !error ? (
-          <>
-            <p className="rd-dialog-body" style={{ margin: '0 0 20px' }}>
-              Drop a PDF or image. The agent extracts, drafts, and routes proposal-ready rows.
-            </p>
+  const headTitle = {
+    picker: 'Upload an invoice',
+    processing: 'Extracting…',
+    error: 'Couldn\'t process',
+    result: 'Created',
+  }[step];
+  const headSub = {
+    picker: 'PDF or image. The agent extracts vendor, amount and due date.',
+    processing: 'Reading vendor, amount, due date, and invoice number.',
+    error: 'Something went wrong.',
+    result: 'The agent drafted payables from your file.',
+  }[step];
+
+  return (
+    <div
+      className="overlay"
+      style={{ position: 'fixed', inset: 0, zIndex: 60 }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !running) onClose();
+      }}
+    >
+      <div
+        className="dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="dec-upload-title"
+        style={{ maxWidth: step === 'result' ? 640 : 520 }}
+      >
+        <div className="dialog-head">
+          <div>
+            <h2 id="dec-upload-title">{headTitle}</h2>
+            <p>{headSub}</p>
+          </div>
+          <button
+            type="button"
+            className="drawer-x"
+            onClick={onClose}
+            disabled={running}
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <div className="dialog-body">
+          {step === 'picker' ? (
             <div
+              className="dropzone"
+              data-dragging={isDragging || undefined}
               onDragOver={(e) => {
                 e.preventDefault();
                 setIsDragging(true);
               }}
               onDragLeave={() => setIsDragging(false)}
               onDrop={onDrop}
-              className="upload-dropzone"
-              data-dragging={isDragging || undefined}
-              data-has-file={file ? true : undefined}
-              onClick={() => document.getElementById('rd-upload-doc-input')?.click()}
+              onClick={() => document.getElementById('dec-upload-input')?.click()}
               role="button"
               tabIndex={0}
+              style={{ cursor: 'pointer' }}
             >
               <input
-                id="rd-upload-doc-input"
+                id="dec-upload-input"
                 type="file"
                 accept=".pdf,application/pdf,image/*"
                 onChange={(e) => setFile(e.target.files?.[0] ?? null)}
                 style={{ display: 'none' }}
               />
+              <Ico.upload w={34} />
               {file ? (
-                <div className="upload-dropzone-file">
-                  <span className="upload-dropzone-filename">{file.name}</span>
-                  <span className="upload-dropzone-meta">{(file.size / 1024).toFixed(0)} KB</span>
-                </div>
+                <>
+                  <span className="dz-main">{file.name}</span>
+                  <span className="dz-sub">{(file.size / 1024).toFixed(0)} KB · click to swap</span>
+                </>
               ) : (
-                <div className="upload-dropzone-empty">
-                  <div className="upload-dropzone-primary">Drop a file or click to browse</div>
-                  <div className="upload-dropzone-meta">PDF, PNG, JPG · up to 10 pages</div>
-                </div>
+                <>
+                  <span className="dz-main">Drag a PDF here, or click to browse</span>
+                  <span className="dz-sub">Up to 10 MB · PDF or image</span>
+                </>
               )}
             </div>
+          ) : null}
 
-            <div className="rd-dialog-actions" style={{ marginTop: 20 }}>
-              <button type="button" className="rd-btn rd-btn-secondary" onClick={onClose}>
-                Cancel
-              </button>
+          {step === 'processing' ? (
+            <>
+              <div
+                className="dropzone"
+                style={{ height: 96, cursor: 'default', borderStyle: 'solid' }}
+              >
+                <span className="dz-main" style={{ color: 'var(--text-muted)' }}>
+                  {file?.name ?? 'Invoice'}
+                </span>
+                <span className="dz-sub">
+                  {file ? `${(file.size / 1024).toFixed(0)} KB · reading…` : 'reading…'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div className="field">
+                  <span className="field-label">Vendor</span>
+                  <div className="skeleton" style={{ width: '78%', height: 14 }} />
+                </div>
+                <div className="field">
+                  <span className="field-label">Amount</span>
+                  <div className="skeleton" style={{ width: '46%', height: 14 }} />
+                </div>
+                <div className="field">
+                  <span className="field-label">Due date</span>
+                  <div className="skeleton" style={{ width: '58%', height: 14 }} />
+                </div>
+              </div>
+            </>
+          ) : null}
+
+          {step === 'error' ? (
+            <div
+              className="sl-banner"
+              style={{
+                background: 'color-mix(in srgb, var(--danger) 8%, transparent)',
+                borderColor: 'color-mix(in srgb, var(--danger) 30%, transparent)',
+              }}
+            >
+              <span
+                className="slb-icon"
+                style={{
+                  color: 'var(--danger)',
+                  borderColor: 'color-mix(in srgb, var(--danger) 35%, var(--border))',
+                }}
+              >
+                !
+              </span>
+              <span className="slb-text">
+                <b>Couldn't process the invoice.</b>
+                <div style={{ marginTop: 4, color: 'var(--text-muted)' }}>{error}</div>
+              </span>
+            </div>
+          ) : null}
+
+          {step === 'result' && result ? (
+            <UploadResultPanel
+              organizationId={organizationId}
+              result={result}
+              onClose={onClose}
+              onUploadAnother={reset}
+            />
+          ) : null}
+        </div>
+        <div className="dialog-foot">
+          {step === 'picker' ? (
+            <>
               <button
                 type="button"
-                className="rd-btn rd-btn-primary"
+                className="btn btn-primary"
+                style={{ flex: 1 }}
                 disabled={!file}
                 onClick={start}
               >
-                Process invoice
+                Process invoice<Ico.arrowRight w={14} />
               </button>
-            </div>
-          </>
-        ) : null}
-
-        {/* During run: simple spinner. The /invoices/upload endpoint is
-            synchronous, no SSE — usually 5-15s with gpt-4.1-mini. */}
-        {running ? (
-          <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, padding: '32px 0' }}>
-            <span
-              aria-label="processing"
-              style={{
-                width: 28,
-                height: 28,
-                borderRadius: '50%',
-                border: '3px solid var(--ax-accent)',
-                borderTopColor: 'transparent',
-                animation: 'rd-spin 0.8s linear infinite',
-              }}
-            />
-            <div style={{ fontSize: 14, color: 'var(--ax-text-secondary)' }}>
-              Reading the invoice, drafting payments, and asking the agent to route them…
-            </div>
-            {file ? (
-              <div style={{ fontSize: 12, color: 'var(--ax-text-muted)' }}>
-                {file.name} · {(file.size / 1024).toFixed(0)} KB
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-
-        {/* Hard error during the call */}
-        {error && !result ? (
-          <div style={{ marginTop: 20 }}>
-            <div className="rd-callout" data-tone="danger" style={{ marginBottom: 14 }}>
-              <strong>Couldn't process the invoice.</strong>
-              <div style={{ marginTop: 4, fontSize: 13 }}>{error}</div>
-            </div>
-            <div className="rd-dialog-actions">
-              <button type="button" className="rd-btn rd-btn-secondary" onClick={onClose}>Close</button>
-              <button type="button" className="rd-btn rd-btn-primary" onClick={() => { setError(null); start(); }}>Retry</button>
-            </div>
-          </div>
-        ) : null}
-
-        {/* Results: per-row outcomes from the automation array */}
-        {result ? (
-          <UploadResultPanel
-            organizationId={organizationId}
-            result={result}
-            onClose={onClose}
-            onUploadAnother={reset}
-          />
-        ) : null}
+              <button type="button" className="btn btn-secondary" onClick={onClose}>
+                Cancel
+              </button>
+            </>
+          ) : null}
+          {step === 'processing' ? (
+            <button type="button" className="btn btn-secondary" style={{ flex: 1 }} disabled>
+              Extracting…
+            </button>
+          ) : null}
+          {step === 'error' ? (
+            <>
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ flex: 1 }}
+                onClick={() => {
+                  setError(null);
+                  void start();
+                }}
+              >
+                Retry<Ico.arrowRight w={14} />
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={onClose}>
+                Close
+              </button>
+            </>
+          ) : null}
+        </div>
       </div>
     </div>
   );
@@ -962,8 +1223,8 @@ function UploadResultPanel(props: {
   const reviewCount = result.paymentOrders.filter((p) => p.decision === 'needs_review').length;
 
   return (
-    <div style={{ marginTop: 16 }}>
-      <div style={{ fontSize: 13, color: 'var(--ax-text-secondary)', marginBottom: 12 }}>
+    <>
+      <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
         {result.createdCount} payment order{result.createdCount === 1 ? '' : 's'} created
         {submittedCount > 0 ? ` · ${submittedCount} auto-submitted` : null}
         {executedCount > 0 ? ` · ${executedCount} auto-executed` : null}
@@ -971,7 +1232,7 @@ function UploadResultPanel(props: {
         {result.skippedCount > 0 ? ` · ${result.skippedCount} skipped` : null}
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {result.paymentOrders.map(({ paymentOrder }) => (
           <UploadResultRow
             key={paymentOrder.paymentOrderId}
@@ -985,15 +1246,15 @@ function UploadResultPanel(props: {
         ))}
       </div>
 
-      <div className="rd-dialog-actions">
-        <button type="button" className="rd-btn rd-btn-secondary" onClick={onUploadAnother}>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button type="button" className="btn btn-primary" style={{ flex: 1 }} onClick={onClose}>
+          Done
+        </button>
+        <button type="button" className="btn btn-secondary" onClick={onUploadAnother}>
           Upload another
         </button>
-        <button type="button" className="rd-btn rd-btn-primary" onClick={onClose}>
-          Close
-        </button>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -1031,6 +1292,8 @@ function UploadResultRow(props: {
   const statusLabel = labelForAutomationStatus(status);
   const showRetry = status === 'failed' || status === 'blocked' || status === 'needs_source_treasury' || status === 'unsupported_source_treasury';
 
+  const pillTone =
+    tone === 'success' ? 'success' : tone === 'warning' ? 'warning' : tone === 'danger' ? 'danger' : 'neutral';
   return (
     <div
       style={{
@@ -1039,24 +1302,25 @@ function UploadResultRow(props: {
         gap: 12,
         alignItems: 'center',
         padding: '12px 14px',
-        background: 'var(--ax-bg-elevated, #f6f6f6)',
-        borderRadius: 10,
+        background: 'var(--bg-surface-2)',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--r-sm)',
       }}
     >
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--ax-text)' }}>
-          {counterpartyLabel} <span style={{ color: 'var(--ax-text-muted)', fontWeight: 400 }}>· {amountLabel}{reference ? ` · ${reference}` : ''}</span>
-        </div>
-        <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span className="rd-pill" data-tone={tone}>
-            <span className="rd-pill-dot" aria-hidden />
-            {statusLabel}
+        <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text-primary)' }}>
+          {counterpartyLabel}{' '}
+          <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>
+            · {amountLabel}{reference ? ` · ${reference}` : ''}
           </span>
+        </div>
+        <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Pill tone={pillTone}>{statusLabel}</Pill>
           {automation?.reason && status !== 'proposal_submitted' ? (
-            <span style={{ fontSize: 12, color: 'var(--ax-text-muted)' }}>{automation.reason}</span>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{automation.reason}</span>
           ) : null}
           {retryError ? (
-            <span style={{ fontSize: 12, color: 'var(--ax-danger)' }}>{retryError}</span>
+            <span style={{ fontSize: 12, color: 'var(--danger)' }}>{retryError}</span>
           ) : null}
         </div>
       </div>
@@ -1064,20 +1328,19 @@ function UploadResultRow(props: {
         {showRetry ? (
           <button
             type="button"
-            className="rd-btn rd-btn-secondary"
+            className="btn btn-sm btn-secondary"
             onClick={retry}
             disabled={retrying}
-            style={{ padding: '6px 12px', fontSize: 13 }}
           >
             {retrying ? 'Retrying…' : 'Retry'}
           </button>
         ) : null}
         <Link
           to={`/organizations/${organizationId}/payments/${order.paymentOrderId}`}
-          className="rd-btn rd-btn-secondary"
-          style={{ padding: '6px 12px', fontSize: 13, textDecoration: 'none' }}
+          className="btn btn-sm btn-secondary"
+          style={{ textDecoration: 'none' }}
         >
-          {status === 'needs_review' ? 'Review' : 'Open'}
+          {status === 'needs_review' ? 'Review' : 'Open'}<Ico.arrowRight w={13} />
         </Link>
       </div>
     </div>
@@ -1093,20 +1356,21 @@ function SkippedRowDisplay(props: { row: InvoiceIntakeSkippedRow }) {
         gridTemplateColumns: '1fr',
         gap: 4,
         padding: '12px 14px',
-        background: 'var(--ax-bg-elevated, #f6f6f6)',
-        borderRadius: 10,
+        background: 'var(--bg-surface-2)',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--r-sm)',
         opacity: 0.85,
       }}
     >
-      <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--ax-text)' }}>
-        {row.counterparty} <span style={{ color: 'var(--ax-text-muted)', fontWeight: 400 }}>· {row.amount} {row.currency}{row.reference ? ` · ${row.reference}` : ''}</span>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span className="rd-pill" data-tone="danger">
-          <span className="rd-pill-dot" aria-hidden />
-          Skipped
+      <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text-primary)' }}>
+        {row.counterparty}{' '}
+        <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>
+          · {row.amount} {row.currency}{row.reference ? ` · ${row.reference}` : ''}
         </span>
-        <span style={{ fontSize: 12, color: 'var(--ax-text-muted)' }}>{row.message}</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+        <Pill tone="danger">Skipped</Pill>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{row.message}</span>
       </div>
     </div>
   );
