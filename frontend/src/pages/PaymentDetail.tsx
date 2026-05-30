@@ -755,14 +755,32 @@ function Approver({
   init,
   done,
   title,
+  avatarUrl,
 }: {
   init: string;
   done: boolean;
   title?: string;
+  avatarUrl?: string | null;
 }) {
+  const [failed, setFailed] = useState(false);
+  const showImage = Boolean(avatarUrl) && !failed;
   return (
-    <span className={`ab-appr${done ? '' : ' pending'}`} title={title}>
-      {init}
+    <span
+      className={`ab-appr${done ? '' : ' pending'}`}
+      title={title}
+      style={showImage ? { padding: 0, overflow: 'hidden', background: 'transparent' } : undefined}
+    >
+      {showImage ? (
+        <img
+          src={avatarUrl!}
+          alt=""
+          referrerPolicy="no-referrer"
+          onError={() => setFailed(true)}
+          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+        />
+      ) : (
+        init
+      )}
       {done ? (
         <span className="ab-badge">
           <Ico.checkSm w={9} />
@@ -890,13 +908,19 @@ function ActionBar(props: {
   }
 
   if (variant === 'ready_to_propose') {
+    // Agent owns proposal creation — we don't ask the user to pick a
+    // signing key or hit "Send for approval" anymore. The page polls
+    // every few seconds; once the agent posts the proposal the variant
+    // flips to proposal_in_progress. If the agent's first attempt
+    // returned a retryable confirm error, the existing pendingProposal-
+    // Confirmation state lets the user retry just the confirm leg.
     if (pendingProposalConfirmation) {
       return (
         <ActionBarShell
           tone="neutral"
           eyebrow="Awaiting confirmation"
           title="Submitted on chain"
-          body="Don't recreate — your signature is in flight. Retry confirmation in a few seconds."
+          body="Your signature is in flight. Retry confirmation in a few seconds."
           controls={
             <>
               <ChainSig signature={pendingProposalConfirmation.signature} />
@@ -916,47 +940,13 @@ function ActionBar(props: {
         />
       );
     }
-    const hasPersonalWallets = ownPersonalWallets.length > 0;
     return (
       <ActionBarShell
         tone="neutral"
-        eyebrow="Ready to send"
-        title="Ready for approval"
-        body="Pick the signing key you'll use to start the approval."
-        controls={
-          hasPersonalWallets ? (
-            <>
-              <div className="select">
-                <select
-                  value={proposalCreatorWalletId}
-                  onChange={(e) => onSelectProposalCreator(e.target.value)}
-                >
-                  {ownPersonalWallets.map((w) => (
-                    <option key={w.userWalletId} value={w.userWalletId}>
-                      {w.label ?? 'Personal'} · {shortenAddress(w.walletAddress, 4, 4)}
-                    </option>
-                  ))}
-                </select>
-                <Ico.chevDown w={14} />
-              </div>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={onCreateSquadsProposal}
-                disabled={proposing || !proposalCreatorWalletId}
-                aria-busy={proposing}
-              >
-                {proposing ? 'Creating proposal…' : (
-                  <>Send for approval<Ico.arrowRight w={14} /></>
-                )}
-              </button>
-            </>
-          ) : (
-            <span style={{ fontSize: 12, color: 'var(--warning)' }}>
-              Create a personal wallet on /profile first.
-            </span>
-          )
-        }
+        eyebrow="Routing"
+        title="Agent is creating the proposal"
+        body="This refreshes automatically. The proposal will appear here once it's on chain."
+        controls={<span />}
       />
     );
   }
@@ -994,6 +984,7 @@ function ActionBar(props: {
             init={initialsFromMember(d.organizationMembership?.user) ?? shortenAddress(d.walletAddress, 2, 0).slice(0, 2).toUpperCase()}
             done
             title={d.organizationMembership?.user.displayName ?? d.walletAddress}
+            avatarUrl={d.organizationMembership?.user.avatarUrl ?? null}
           />
         ))}
         {voting.pendingVoters.map((v) => (
@@ -1002,6 +993,7 @@ function ActionBar(props: {
             init={initialsFromMember(v.organizationMembership?.user) ?? shortenAddress(v.walletAddress, 2, 0).slice(0, 2).toUpperCase()}
             done={false}
             title={v.organizationMembership?.user.displayName ?? v.walletAddress}
+            avatarUrl={v.organizationMembership?.user.avatarUrl ?? null}
           />
         ))}
       </div>
