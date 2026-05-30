@@ -1006,6 +1006,19 @@ async function createSquadsPaymentProposalIntentForCreator(args: {
   const sourceTokenAccount = wallet.usdcAtaAddress ?? deriveUsdcAtaForWallet(vaultPda.toBase58());
   const destinationTokenAccount = paymentOrder.counterpartyWallet.tokenAccountAddress
     ?? deriveUsdcAtaForWallet(paymentOrder.counterpartyWallet.walletAddress);
+  // Fail fast if the vault's USDC ATA hasn't been initialised on chain or
+  // has insufficient funds. Without this check, the vault transaction
+  // moves through create → approve → execute and then dies at execute
+  // with a cryptic Token program "InvalidAccountData" (missing ATA) or
+  // "InsufficientFunds" — wasting signers' time and rent. The ATA only
+  // exists once USDC has been deposited; until then a transfer
+  // referencing it can't succeed.
+  await assertVaultHasUsdcForPayment({
+    sourceTokenAccount,
+    amountRaw: paymentOrder.amountRaw.toString(),
+    vaultAddress: vaultPda.toBase58(),
+    treasuryDisplayName: wallet.displayName,
+  });
   // Skip the destination ATA-create here. It can't run inside the vault
   // inner transaction because the vault PDA pays no rent (no native SOL).
   // The wrapping vaultTransactionExecute will prepend a paid-by-executor
@@ -1239,6 +1252,17 @@ export async function createSquadsBatchedPaymentProposalIntent(
   }
 
   const sourceTokenAccount = wallet.usdcAtaAddress ?? deriveUsdcAtaForWallet(vaultPda.toBase58());
+  // Sum the batch up-front and check the vault can cover it. See the
+  // single-payment path for the rationale.
+  const totalRaw = paymentOrders
+    .reduce((acc, order) => acc + BigInt(order.amountRaw.toString()), 0n)
+    .toString();
+  await assertVaultHasUsdcForPayment({
+    sourceTokenAccount,
+    amountRaw: totalRaw,
+    vaultAddress: vaultPda.toBase58(),
+    treasuryDisplayName: wallet.displayName,
+  });
   const orderPayloads = paymentOrders.map((order, index) => {
     const transferRequest = order.transferRequests[0]!;
     const destinationTokenAccount = order.counterpartyWallet.tokenAccountAddress
@@ -3780,6 +3804,65 @@ async function verifyRpcSignatureConfirmed(signature: string, purpose: string) {
       purpose,
       seen: visible.seen,
     });
+  }
+}
+
+// Read the vault's USDC ATA balance and throw a clear error if the
+// account is missing or short of `amountRaw`. Without this guard a
+// payment proposal can be created, voted on, and then die at execute
+// time with a cryptic Token program "InvalidAccountData" (ATA absent)
+// or "InsufficientFunds". The check is best-effort — if RPC is
+// unavailable we let the proposal through and rely on settlement
+// verification to surface the failure later.
+async function assertVaultHasUsdcForPayment(args: {
+  sourceTokenAccount: string;
+  amountRaw: string;
+  vaultAddress: string;
+  treasuryDisplayName: string | null;
+}) {
+  if (config.nodeEnv === 'test') return;
+  const required = BigInt(args.amountRaw);
+  if (required <= 0n) return;
+  let observedRaw: bigint | null = null;
+  try {
+    const account = await getSolanaConnection().getTokenAccountBalance(
+      new PublicKey(args.sourceTokenAccount),
+    );
+    observedRaw = BigInt(account.value.amount);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    // "could not find account" / "Invalid param: could not find account" →
+    // the ATA hasn't been initialised, which on Solana means no USDC has
+    // ever been deposited here. Fail fast with a clear, operator-facing
+    // message.
+    if (/could not find account|invalid param/i.test(message)) {
+      const label = args.treasuryDisplayName ? `"${args.treasuryDisplayName}"` : 'this vault';
+      throw badRequest(
+        `${label} has no USDC balance yet. Send USDC to the vault address before creating a payment.`,
+        {
+          vaultAddress: args.vaultAddress,
+          sourceTokenAccount: args.sourceTokenAccount,
+        },
+      );
+    }
+    logger.warn('squads.proposal_create_balance_check_rpc_error', {
+      vaultAddress: args.vaultAddress,
+      sourceTokenAccount: args.sourceTokenAccount,
+      error: message,
+    });
+    return;
+  }
+  if (observedRaw < required) {
+    const label = args.treasuryDisplayName ? `"${args.treasuryDisplayName}"` : 'This vault';
+    throw badRequest(
+      `${label} doesn't have enough USDC for this payment. Need ${required.toString()} raw, on hand ${observedRaw.toString()} raw.`,
+      {
+        vaultAddress: args.vaultAddress,
+        sourceTokenAccount: args.sourceTokenAccount,
+        requiredRaw: required.toString(),
+        observedRaw: observedRaw.toString(),
+      },
+    );
   }
 }
 
