@@ -281,7 +281,7 @@ export function PaymentsPage() {
               <tr>
                 <th style={{ width: '28%' }}>Vendor</th>
                 <th style={{ width: '18%' }}>Source</th>
-                <th className="num" style={{ width: '18%' }}>Amount</th>
+                <th className="num" style={{ width: '18%', paddingRight: 48 }}>Amount</th>
                 <th style={{ width: '16%' }}>Origin</th>
                 <th style={{ width: '20%' }}>Status</th>
                 <th style={{ width: 28 }}></th>
@@ -345,7 +345,7 @@ export function PaymentsPage() {
                         {row.source === '—' ? '—' : row.source}
                       </span>
                     </td>
-                    <td className="td-num" style={{ paddingRight: 28 }}>{row.amountLabel}</td>
+                    <td className="td-num" style={{ paddingRight: 48 }}>{row.amountLabel}</td>
                     <td>
                       <OriginPill>
                         {row.origin === 'batch' ? (row.originLabel ?? 'Batch') : 'Single'}
