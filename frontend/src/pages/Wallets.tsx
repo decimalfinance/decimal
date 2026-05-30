@@ -296,7 +296,7 @@ export function WalletsPage({ session: _session }: { session: AuthenticatedSessi
                         </div>
                       </div>
                     </td>
-                    <td className="td-num">
+                    <td className="td-num" style={{ paddingRight: 28 }}>
                       {formatRawUsdcCompact(g.usdcRawSum)} <span style={{ color: 'var(--text-faint)' }}>USDC</span>
                     </td>
                     <td>
@@ -977,20 +977,39 @@ function SignerStack({ treasuryWalletId: _treasuryWalletId }: { treasuryWalletId
   });
   const members = membersQuery.data?.items ?? [];
   const activeMembers = members.filter((m) => m.status === 'active');
-  const total = activeMembers.length + 1; // +1 for the Decimal agent
 
   return (
     <div className="avatar-stack">
       {activeMembers.slice(0, 3).map((m) => (
-        <span key={m.membershipId} className="as-dot">
-          {initialsFromUser(m.user.displayName, m.user.email)}
-        </span>
+        <StackAvatar
+          key={m.membershipId}
+          avatarUrl={m.user.avatarUrl}
+          initials={initialsFromUser(m.user.displayName, m.user.email)}
+        />
       ))}
-      <span className="as-dot agent" title="Decimal agent">
-        <Ico.bolt w={12} fill="currentColor" sw={0} />
-      </span>
-      <span className="as-more">{total}</span>
+      <span className="as-more">{activeMembers.length}</span>
     </div>
+  );
+}
+
+// Inline avatar variant for `.as-dot` stacks — Google profile photo when
+// available, initials fallback otherwise (the load can fail if the user's
+// CDN URL is stale, so we keep an onError fallback).
+function StackAvatar({ avatarUrl, initials }: { avatarUrl: string | null | undefined; initials: string }) {
+  const [failed, setFailed] = useState(false);
+  if (!avatarUrl || failed) {
+    return <span className="as-dot">{initials}</span>;
+  }
+  return (
+    <span className="as-dot" style={{ padding: 0, overflow: 'hidden', background: 'transparent' }}>
+      <img
+        src={avatarUrl}
+        alt=""
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+      />
+    </span>
   );
 }
 

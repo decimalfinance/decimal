@@ -18,6 +18,8 @@ import { signAndSubmitIntent } from '../lib/squads-pipeline';
 import { useToast } from '../ui/Toast';
 import { ProposalsTable, type ProposalsTableBusy } from '../ui/ProposalsTable';
 import type { DecimalProposal } from '../types';
+import { Ico } from '../dec/icons';
+import { Pill } from '../dec/primitives';
 
 const ALL_PERMISSIONS: SquadsPermission[] = ['initiate', 'vote', 'execute'];
 
@@ -242,153 +244,237 @@ export function TreasuryWalletDetailPage({ session }: { session: AuthenticatedSe
   const detail = detailQuery.data;
   const detailError = detailQuery.error;
 
+  // Sibling vaults — every TreasuryWallet sharing the same multisig PDA is
+  // a vault under this "treasury account". Includes the current one.
+  const siblingVaults = useMemo(() => {
+    const all = treasuryListQuery.data?.items ?? [];
+    if (!wallet || wallet.source !== 'squads_v4' || !wallet.sourceRef) return [];
+    return all
+      .filter((w) => w.source === 'squads_v4' && w.sourceRef === wallet.sourceRef)
+      .sort((a, b) => (a.sourceVaultIndex ?? 999) - (b.sourceVaultIndex ?? 999));
+  }, [treasuryListQuery.data, wallet]);
+
+  // Balance map keyed by treasuryWalletId — used by the Vaults table.
+  const balanceByWalletId = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const b of balancesQuery.data?.items ?? []) {
+      map.set(b.treasuryWalletId, b.usdcRaw);
+    }
+    return map;
+  }, [balancesQuery.data]);
+
+  // Account-level totals — sum across all sibling vaults.
+  const accountTotalRaw = useMemo(() => {
+    let total = 0n;
+    for (const v of siblingVaults) {
+      const raw = balanceByWalletId.get(v.treasuryWalletId);
+      if (raw) total += BigInt(raw);
+    }
+    return total.toString();
+  }, [siblingVaults, balanceByWalletId]);
+  const vaultCount = siblingVaults.length;
+
+  // Threshold + approver counts for the .sig-callout.
+  const voterCount = detail?.squads.members.filter((m) => m.permissions.includes('vote')).length ?? 0;
+  const threshold = detail?.squads.threshold ?? 0;
+
   return (
-    <main className="page-frame">
-      <header className="page-header">
+    <div className="page">
+      <div
+        className="crumb"
+        onClick={() => navigate(`/organizations/${organizationId}/wallets`)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') navigate(`/organizations/${organizationId}/wallets`);
+        }}
+      >
+        <Ico.chevRight w={15} style={{ transform: 'rotate(180deg)' }} />Treasury accounts
+      </div>
+
+      <div className="stack stack-32">
+        {/* Page head — account name, balance/vault/status summary, actions. */}
         <div>
-          <p className="eyebrow">
-            <Link to={`/organizations/${organizationId}/wallets`}>← Treasury accounts</Link>
-          </p>
-          <h1 style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            {wallet.displayName || 'Untitled treasury'}
-            {!wallet.isActive ? <span className="rd-pill rd-pill-info">Inactive</span> : null}
-          </h1>
-          {wallet.notes ? <p style={{ margin: '4px 0 0' }}>{wallet.notes}</p> : null}
-        </div>
-        {isSquads ? (
-          <div className="page-actions">
-            {isCurrentUserSquadsMember ? (
-              <button
-                type="button"
-                className="button button-secondary"
-                onClick={() =>
-                  navigate(`/organizations/${organizationId}/proposals?treasuryWalletId=${treasuryWalletId}`)
-                }
-              >
-                Proposals
-              </button>
-            ) : null}
-            {isAdmin ? (
-              <>
+          <div className="eyebrow" style={{ marginBottom: 10 }}>TREASURY ACCOUNT</div>
+          <div className="pagehead" style={{ paddingBottom: 18 }}>
+            <div className="ph-titles">
+              <h1>{wallet.displayName || 'Untitled treasury'}</h1>
+              <p className="ph-desc">
+                <span
+                  className="mono"
+                  style={{ fontSize: 18, color: 'var(--text-primary)', fontWeight: 500 }}
+                >
+                  {formatRawUsdcCompact(accountTotalRaw)} USDC
+                </span>
+                &nbsp;<span style={{ color: 'var(--text-faint)' }}>·</span>&nbsp;
+                {vaultCount} {vaultCount === 1 ? 'vault' : 'vaults'}
+                {isSquads ? (
+                  <>
+                    &nbsp;
+                    <span style={{ verticalAlign: 'middle' }}>
+                      <Pill tone={wallet.isActive ? 'success' : 'neutral'}>
+                        {wallet.isActive ? 'Active' : 'Inactive'}
+                      </Pill>
+                    </span>
+                  </>
+                ) : null}
+              </p>
+            </div>
+            <div className="ph-actions">
+              {isSquads && isCurrentUserSquadsMember ? (
                 <button
                   type="button"
-                  className="button button-secondary"
-                  onClick={() => setOpenDialog('add-vault')}
+                  className="btn btn-secondary"
+                  onClick={() =>
+                    navigate(`/organizations/${organizationId}/proposals?treasuryWalletId=${treasuryWalletId}`)
+                  }
                 >
-                  + Add vault
+                  Proposals
                 </button>
-                <button
-                  type="button"
-                  className="button button-secondary"
-                  onClick={() => setOpenDialog('change-threshold')}
-                >
-                  Change threshold
-                </button>
-                <button
-                  type="button"
-                  className="button button-primary"
-                  onClick={() => setOpenDialog('add-member')}
-                >
-                  + Add member
-                </button>
-              </>
-            ) : null}
-          </div>
-        ) : null}
-      </header>
-
-      {isSquads ? (
-        <div className="rd-metrics">
-          <div className="rd-metric">
-            <span className="rd-metric-label">Balance</span>
-            <span className="rd-metric-value">
-              {balanceForThisWallet?.usdcRaw
-                ? formatRawUsdcCompact(balanceForThisWallet.usdcRaw)
-                : balancesQuery.isLoading
-                  ? '—'
-                  : '0.00'}
-            </span>
-            <span className="rd-metric-sub">USDC</span>
+              ) : null}
+              {isSquads && isAdmin ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setOpenDialog('add-member')}
+                  >
+                    <Ico.members w={15} />Add member
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setOpenDialog('change-threshold')}
+                  >
+                    Change required signatures
+                  </button>
+                </>
+              ) : null}
+            </div>
           </div>
         </div>
-      ) : null}
 
-      {!isSquads ? (
-        <section className="rd-section" style={{ marginTop: 8 }}>
-          <div className="rd-empty-cell" style={{ padding: '32px 24px' }}>
-            <strong>Externally registered wallet</strong>
-            <p style={{ margin: 0 }}>
-              This treasury wallet was added by address. Squads-specific detail isn't available.
+        {!isSquads ? (
+          <div className="tbl-card" style={{ padding: 32 }}>
+            <strong style={{ display: 'block', marginBottom: 4 }}>Externally registered wallet</strong>
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>
+              This treasury wallet was added by address. Team-approval detail isn't available.
             </p>
           </div>
-        </section>
-      ) : detailQuery.isLoading ? (
-        <section className="rd-section" style={{ marginTop: 8 }}>
-          <div className="rd-skeleton rd-skeleton-block" style={{ height: 180, marginBottom: 8 }} />
-          <div className="rd-skeleton rd-skeleton-block" style={{ height: 240 }} />
-        </section>
-      ) : detailError ? (
-        <section className="rd-section" style={{ marginTop: 8 }}>
-          <div className="rd-empty-cell" style={{ padding: '32px 24px' }}>
-            <strong>Couldn't load Squads detail</strong>
-            <p style={{ margin: 0 }}>
+        ) : detailQuery.isLoading ? (
+          <>
+            <div className="skeleton" style={{ height: 180, borderRadius: 12 }} />
+            <div className="skeleton" style={{ height: 240, borderRadius: 12 }} />
+          </>
+        ) : detailError ? (
+          <div className="tbl-card" style={{ padding: 32 }}>
+            <strong style={{ display: 'block', marginBottom: 4 }}>Couldn't load team detail</strong>
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>
               {detailError instanceof ApiError || detailError instanceof Error
                 ? detailError.message
                 : 'Unknown error.'}
             </p>
           </div>
-        </section>
-      ) : detail ? (
-        <SquadsDetailContent detail={detail} />
-      ) : null}
-
-      {detail && isSquads ? (
-        <SpendingLimitsSection
-          organizationId={organizationId}
-          treasuryWalletId={treasuryWalletId}
-        />
-      ) : null}
-
-      {detail && isCurrentUserSquadsMember ? (
-        <section className="rd-section" style={{ marginTop: 24 }}>
-          <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 500 }}>Pending proposals</h2>
-            <Link
-              to={`/organizations/${organizationId}/proposals?treasuryWalletId=${treasuryWalletId}`}
-              style={{ fontSize: 13, color: 'var(--ax-accent)', textDecoration: 'none' }}
-            >
-              View all proposals →
-            </Link>
-          </header>
-          {treasuryProposalsQuery.isLoading ? (
-            <div className="rd-skeleton rd-skeleton-block" style={{ height: 80 }} />
-          ) : treasuryProposalsQuery.error ? (
-            <div className="rd-empty-cell" style={{ padding: '24px' }}>
-              <span style={{ fontSize: 13, color: 'var(--ax-text-muted)' }}>
-                Couldn't load proposals.
-              </span>
+        ) : detail ? (
+          <>
+            {/* Team & signers — the people who approve money movement. */}
+            <div>
+              <div className="sec-head">
+                <div className="sh-titles">
+                  <h2>Team &amp; signers</h2>
+                  <p className="sh-desc">
+                    People who authorize money. These signers govern <b>every vault</b> in this account.
+                  </p>
+                </div>
+              </div>
+              <div className="sig-callout">
+                <span className="sc-badge">{threshold} of {voterCount}</span>
+                <span className="sc-text">
+                  <b>{threshold} of {voterCount}</b> approvals required to send a payment from any vault.
+                </span>
+              </div>
+              <MembersTable members={detail.squads.members} />
             </div>
-          ) : (
-            <ProposalsTable
-              proposals={treasuryProposals}
-              ownPersonalWallets={ownPersonalWallets}
-              currentUserId={session.user.userId}
-              organizationId={organizationId}
-              busy={proposalsBusy}
-              showTreasuryColumn={false}
-              emptyHint="No pending proposals for this treasury."
-              onApprove={(proposal, signerWalletId) => {
-                setProposalsBusy({ decimalProposalId: proposal.decimalProposalId, action: 'approve' });
-                proposalApproveMutation.mutate({ proposal, signerWalletId });
-              }}
-              onExecute={(proposal, signerWalletId) => {
-                setProposalsBusy({ decimalProposalId: proposal.decimalProposalId, action: 'execute' });
-                proposalExecuteMutation.mutate({ proposal, signerWalletId });
-              }}
-            />
-          )}
-        </section>
-      ) : null}
+
+            {/* Vaults — sibling wallets sharing this team. */}
+            <div>
+              <div className="sec-head">
+                <div className="sh-titles">
+                  <h2>Vaults</h2>
+                  <p className="sh-desc">
+                    Separate wallets under this account — each with its own balance and spending limits,
+                    all secured by the same signers above.
+                  </p>
+                </div>
+                {isAdmin ? (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setOpenDialog('add-vault')}
+                  >
+                    <Ico.plus w={14} />New vault
+                  </button>
+                ) : null}
+              </div>
+              <VaultsTable
+                vaults={siblingVaults}
+                balanceByWalletId={balanceByWalletId}
+                currentWalletId={treasuryWalletId}
+                organizationId={organizationId}
+              />
+            </div>
+          </>
+        ) : null}
+
+        {detail && isSquads ? (
+          <SpendingLimitsSection
+            organizationId={organizationId}
+            treasuryWalletId={treasuryWalletId}
+          />
+        ) : null}
+
+        {detail && isCurrentUserSquadsMember ? (
+          <div>
+            <div className="sec-head">
+              <div className="sh-titles">
+                <h2>Pending proposals</h2>
+                <p className="sh-desc">Anything waiting on a team approval shows up here.</p>
+              </div>
+              <Link
+                to={`/organizations/${organizationId}/proposals?treasuryWalletId=${treasuryWalletId}`}
+                className="link"
+                style={{ fontSize: 13, textDecoration: 'none', color: 'var(--text-muted)' }}
+              >
+                View all<Ico.arrowRight w={13} />
+              </Link>
+            </div>
+            {treasuryProposalsQuery.isLoading ? (
+              <div className="skeleton" style={{ height: 80, borderRadius: 12 }} />
+            ) : treasuryProposalsQuery.error ? (
+              <div className="tbl-card" style={{ padding: 24 }}>
+                <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Couldn't load proposals.</span>
+              </div>
+            ) : (
+              <ProposalsTable
+                proposals={treasuryProposals}
+                ownPersonalWallets={ownPersonalWallets}
+                currentUserId={session.user.userId}
+                organizationId={organizationId}
+                busy={proposalsBusy}
+                showTreasuryColumn={false}
+                emptyHint="No pending proposals for this treasury."
+                onApprove={(proposal, signerWalletId) => {
+                  setProposalsBusy({ decimalProposalId: proposal.decimalProposalId, action: 'approve' });
+                  proposalApproveMutation.mutate({ proposal, signerWalletId });
+                }}
+                onExecute={(proposal, signerWalletId) => {
+                  setProposalsBusy({ decimalProposalId: proposal.decimalProposalId, action: 'execute' });
+                  proposalExecuteMutation.mutate({ proposal, signerWalletId });
+                }}
+              />
+            )}
+          </div>
+        ) : null}
 
       {detail && openDialog === 'add-member' ? (
         <AddMemberDialog
@@ -440,142 +526,208 @@ export function TreasuryWalletDetailPage({ session }: { session: AuthenticatedSe
           onError={(message) => toastError(message)}
         />
       ) : null}
-    </main>
+      </div>
+    </div>
   );
 }
 
-function SquadsDetailContent({
-  detail,
-}: {
-  detail: SquadsTreasuryDetail;
-}) {
-  const { squads } = detail;
+// ─── MembersTable ────────────────────────────────────────────────────────
+// Renders the team & signers list per the design's MembersTable: avatar,
+// name + email, three permission pills, and a row-arrow affordance. The
+// Decimal agent row uses the accent-bordered .m-avatar.agent variant and
+// shows the bolt glyph in place of initials.
 
+function MembersTable({ members }: { members: SquadsDetailMember[] }) {
   return (
-    <>
-      {!squads.localStateMatchesChain ? (
-        <section
-          className="rd-section"
-          style={{
-            marginTop: 8,
-            border: '1px solid rgba(220, 170, 60, 0.45)',
-            borderRadius: 12,
-            padding: 16,
-            background: 'rgba(220, 170, 60, 0.08)',
-          }}
-        >
-          <strong>Local cache differs from on-chain state.</strong>
-          <p style={{ margin: '4px 0 0', fontSize: 13, opacity: 0.85 }}>
-            Some fields on this page were read live from chain. The treasury wallet record will be reconciled the next time the wallet is updated.
-          </p>
-        </section>
-      ) : null}
-
-      <section className="rd-section" style={{ marginTop: 24 }}>
-        <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12, gap: 12 }}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 500 }}>Members</h2>
-          <p style={{ margin: 0, fontSize: 13, color: 'var(--ax-text-muted)' }}>
-            {squads.threshold} of{' '}
-            {squads.members.filter((m) => m.permissions.includes('vote')).length} approvals needed
-          </p>
-        </header>
-        <div className="rd-table-shell">
-          <table className="rd-table">
-            <thead>
-              <tr>
-                <th>Member</th>
-                <th style={{ width: 260, textAlign: 'right' }}>Permissions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {squads.members.map((member) => (
-                <MemberRow key={member.walletAddress} member={member} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </>
+    <div className="tbl-card">
+      <table className="tbl">
+        <thead>
+          <tr>
+            <th style={{ width: '42%' }}>Member</th>
+            <th>Permissions</th>
+            <th className="num" style={{ width: 60 }}></th>
+          </tr>
+        </thead>
+        <tbody>
+          {members.map((member) => (
+            <MemberRow key={member.walletAddress} member={member} />
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
 function MemberRow({ member }: { member: SquadsDetailMember }) {
   const isAgent = Boolean(member.agentWallet || member.automationAgent);
   const linked = member.organizationMembership;
+  const displayName = isAgent
+    ? 'Decimal agent'
+    : linked?.user.displayName || linked?.user.email || 'Unknown signer';
+  const subtext = isAgent
+    ? 'Automation — bounded by spending limits'
+    : linked?.user.email && linked?.user.displayName
+      ? linked.user.email
+      : shortenAddress(member.walletAddress);
+  const initials = isAgent
+    ? ''
+    : linked
+      ? initialsFromName(linked.user.displayName, linked.user.email)
+      : '??';
 
   return (
     <tr>
       <td>
-        {isAgent ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <DecimalAgentAvatar />
-            <div style={{ fontWeight: 500 }}>Decimal agent</div>
-          </div>
-        ) : linked ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Avatar
-              avatarUrl={linked.user.avatarUrl}
-              fallback={linked.user.displayName || linked.user.email}
-            />
-            <div>
-              <div style={{ fontWeight: 500 }}>
-                {linked.user.displayName || linked.user.email}
-              </div>
-              {linked.user.displayName ? (
-                <div style={{ fontSize: 12, color: 'var(--ax-text-muted)' }}>{linked.user.email}</div>
-              ) : null}
-            </div>
-          </div>
-        ) : (
-          <span style={{ color: 'var(--ax-text-muted)' }}>Unknown signer</span>
-        )}
-      </td>
-      <td style={{ textAlign: 'right' }}>
-        <div style={{ display: 'inline-flex', gap: 5, flexWrap: 'nowrap', justifyContent: 'flex-end' }}>
-          {member.permissions.length === 0 ? (
-            <span style={{ color: 'var(--ax-text-muted)', fontSize: 11 }}>None</span>
+        <div className="member-cell">
+          {isAgent ? (
+            <span className="m-avatar agent" aria-hidden>
+              <Ico.bolt w={15} fill="currentColor" sw={0} />
+            </span>
           ) : (
-            (['initiate', 'vote', 'execute'] as const).map((p) => {
-              const active = member.permissions.includes(p);
-              return (
-                <span
-                  key={p}
-                  className={`permission-pill${active ? ' permission-pill-active' : ''}`}
-                >
-                  {PERMISSION_LABEL[p]}
-                </span>
-              );
-            })
+            <MemberAvatar avatarUrl={linked?.user.avatarUrl ?? null} initials={initials} />
           )}
+          <div className="col">
+            <span className="m-name">{displayName}</span>
+            <span className="m-sub">{subtext}</span>
+          </div>
         </div>
+      </td>
+      <td>
+        <div className="perm-pills">
+          {(['initiate', 'vote', 'execute'] as const).map((p) => {
+            const active = member.permissions.includes(p);
+            return (
+              <span key={p} className={`perm${active ? ' on' : ''}`}>
+                {PERMISSION_LABEL[p]}
+              </span>
+            );
+          })}
+        </div>
+      </td>
+      <td>
+        <span className="row-arrow" style={{ opacity: 0.5 }}>
+          <Ico.chevRight w={15} />
+        </span>
       </td>
     </tr>
   );
 }
 
-function DecimalAgentAvatar() {
+// Avatar that fits inside `.m-avatar` — shows the Google profile photo
+// when present, falls back to initials. Google's CDN blocks unfamiliar
+// referers so we strip the header; the onError fallback covers stale or
+// removed URLs.
+function MemberAvatar({ avatarUrl, initials }: { avatarUrl: string | null; initials: string }) {
+  const [failed, setFailed] = useState(false);
+  if (!avatarUrl || failed) {
+    return <span className="m-avatar">{initials}</span>;
+  }
   return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: 32,
-        height: 32,
-        borderRadius: '50%',
-        background: 'white',
-        border: '1px solid var(--ax-border)',
-        overflow: 'hidden',
-        flexShrink: 0,
-      }}
-      aria-hidden
-    >
+    <span className="m-avatar" style={{ padding: 0, overflow: 'hidden', background: 'transparent' }}>
       <img
-        src="/decimal-logo.png"
+        src={avatarUrl}
         alt=""
-        style={{ width: '75%', height: '75%', objectFit: 'contain' }}
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
       />
     </span>
+  );
+}
+
+function initialsFromName(name: string | null, email: string): string {
+  if (name && name.trim()) {
+    const parts = name.trim().split(/\s+/);
+    if (parts.length >= 2) return (parts[0]![0]! + parts[1]![0]!).toUpperCase();
+    return name.slice(0, 2).toUpperCase();
+  }
+  const local = email.split('@')[0] ?? '?';
+  return local.slice(0, 2).toUpperCase();
+}
+
+// ─── VaultsTable ─────────────────────────────────────────────────────────
+// Sibling vaults (TreasuryWallet rows sharing the same multisig PDA). The
+// current vault is included but tagged with "This vault" so users know
+// where they are. Spending-limit counts aren't fetched here — surfacing
+// them per-row would require a query per vault; the section above this
+// table already shows the org-wide policies list.
+
+function VaultsTable({
+  vaults,
+  balanceByWalletId,
+  currentWalletId,
+  organizationId,
+}: {
+  vaults: TreasuryWallet[];
+  balanceByWalletId: Map<string, string | null>;
+  currentWalletId: string;
+  organizationId: string;
+}) {
+  const navigate = useNavigate();
+
+  if (vaults.length === 0) {
+    return (
+      <div className="tbl-card" style={{ padding: 24 }}>
+        <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>No vaults yet.</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="tbl-card">
+      <table className="tbl">
+        <thead>
+          <tr>
+            <th style={{ width: '50%' }}>Vault</th>
+            <th className="num">Balance</th>
+            <th className="num" style={{ width: 140 }}></th>
+          </tr>
+        </thead>
+        <tbody>
+          {vaults.map((v) => {
+            const raw = balanceByWalletId.get(v.treasuryWalletId);
+            const isCurrent = v.treasuryWalletId === currentWalletId;
+            return (
+              <tr key={v.treasuryWalletId}>
+                <td>
+                  <div className="treas-cell">
+                    <span className="tc-icon"><Ico.vault w={17} /></span>
+                    <div className="col">
+                      <span className="tc-name">{v.displayName || 'Untitled vault'}</span>
+                      <span className="tc-sub">
+                        index {v.sourceVaultIndex ?? '—'}
+                        {isCurrent ? ' · this vault' : ''}
+                      </span>
+                    </div>
+                  </div>
+                </td>
+                <td className="td-num" style={{ paddingRight: 28 }}>
+                  {raw ? formatRawUsdcCompact(raw) : '0.00'}{' '}
+                  <span style={{ color: 'var(--text-faint)' }}>USDC</span>
+                </td>
+                <td>
+                  <div className="row-actions">
+                    {isCurrent ? (
+                      <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>—</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-secondary"
+                        onClick={() =>
+                          navigate(`/organizations/${organizationId}/wallets/${v.treasuryWalletId}`)
+                        }
+                      >
+                        Manage<Ico.arrowRight w={13} />
+                      </button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
