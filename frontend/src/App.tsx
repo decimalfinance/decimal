@@ -140,20 +140,6 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
   // Shell follows the design handoff: .dec namespace → .app flex container →
   // sidebar + .app-main → .app-scroll for page content. All .dec * styles
   // (from frontend/src/styles/decimal/) only activate inside this wrapper.
-  // Onboarding (/setup) is full-bleed — no sidebar — per the design's
-  // PageSetup. Once an org exists, normal routing takes over.
-  if (location.pathname === '/setup') {
-    return (
-      <div className="dec" style={{ height: '100vh', overflowY: 'auto' }}>
-        <Suspense fallback={<RouteFallback />}>
-          <Routes>
-            <Route path="/setup" element={<SetupPage />} />
-            <Route path="*" element={<Navigate to="/setup" replace />} />
-          </Routes>
-        </Suspense>
-      </div>
-    );
-  }
   return (
     <div className="dec" style={{ height: '100vh' }}>
       <div className="app">
@@ -172,6 +158,7 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
           <Suspense fallback={<RouteFallback />}>
             <Routes>
               <Route path="/" element={<HomeRedirect session={session} />} />
+              <Route path="/setup" element={<SetupPage />} />
               <Route path="/profile" element={<ProfilePage session={session} />} />
               <Route path="/organizations/:organizationId" element={<InboxPage session={session} />} />
               <Route path="/organizations/:organizationId/wallets" element={<WalletsPage session={session} />} />
