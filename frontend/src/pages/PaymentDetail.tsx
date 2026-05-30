@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { useNavigate, useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api';
 import type {
   AuthenticatedSession,
   DecimalProposal,
   PaymentOrder,
+  PaymentOrderEvent,
 } from '../types';
 import {
   assetSymbol,
@@ -24,10 +25,12 @@ import {
 } from '../lib/settlement';
 import { useSquadsProposalActions } from '../lib/squads-actions';
 import { buildSquadsPaymentLifecycle } from '../lib/lifecycle';
-import { ChainLink, DetailEntry, DetailPageSkeleton, DetailPageState, RdPageHeader, RdPrimaryCard } from '../ui-primitives';
-import { LifecycleRail, type LifecycleStage, type StageState } from '../ui/LifecycleRail';
+import { type LifecycleStage, type StageState } from '../ui/LifecycleRail';
 import { useToast } from '../ui/Toast';
 import type { UserWallet } from '../types';
+import { Ico } from '../dec/icons';
+import { Pill, SLPill, OriginPill, type PillTone } from '../dec/primitives';
+import { orbTransactionUrl } from '../lib/app';
 
 type ActionVariant =
   | 'needs_review'
@@ -308,34 +311,51 @@ export function PaymentDetailPage() {
 
   if (!organizationId || !paymentOrderId) {
     return (
-      <DetailPageState
-        title="Payment unavailable"
-        body="Pick a payment from the list."
-      />
+      <div className="page">
+        <div className="empty">
+          <h4>Payment unavailable</h4>
+          <p>Pick a payment from the list.</p>
+        </div>
+      </div>
     );
   }
 
   if (orderQuery.isLoading) {
-    return <DetailPageSkeleton />;
+    return (
+      <div className="page">
+        <div className="detail-col">
+          <div className="stack stack-16">
+            <div className="skeleton" style={{ height: 80, borderRadius: 12 }} />
+            <div className="skeleton" style={{ height: 60, borderRadius: 12 }} />
+            <div className="skeleton" style={{ height: 120, borderRadius: 12 }} />
+            <div className="skeleton" style={{ height: 280, borderRadius: 12 }} />
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (orderQuery.isError || !orderQuery.data) {
     return (
-      <DetailPageState
-        title="Couldn't load this payment"
-        body={orderQuery.error instanceof Error ? orderQuery.error.message : 'Something went wrong.'}
-        back={
-          <Link to={`/organizations/${organizationId}/payments`} className="rd-back">
-            <span className="rd-back-arrow">←</span>
-            <span>Payments</span>
-          </Link>
-        }
-        action={
-          <button className="rd-btn rd-btn-secondary" type="button" onClick={() => void orderQuery.refetch()}>
-            Try again
-          </button>
-        }
-      />
+      <div className="page">
+        <div className="detail-col">
+          <div
+            className="crumb"
+            onClick={() => navigate(`/organizations/${organizationId}/payments`)}
+            role="button"
+            tabIndex={0}
+          >
+            <Ico.chevRight w={15} style={{ transform: 'rotate(180deg)' }} />All payments
+          </div>
+          <div className="empty" style={{ marginTop: 24 }}>
+            <h4>Couldn't load this payment</h4>
+            <p>{orderQuery.error instanceof Error ? orderQuery.error.message : 'Something went wrong.'}</p>
+            <button className="btn btn-secondary" type="button" onClick={() => void orderQuery.refetch()}>
+              Try again
+            </button>
+          </div>
+        </div>
+      </div>
     );
   }
 
@@ -346,226 +366,417 @@ export function PaymentDetailPage() {
   const variant = determineVariant(order);
   const statusTone = statusToneForPayment(order.derivedState);
   const latestExec = order.reconciliationDetail?.latestExecution ?? null;
-  const match = order.reconciliationDetail?.match ?? null;
+  const submittedSig =
+    latestExec?.submittedSignature ??
+    order.squadsLifecycle?.executedSignature ??
+    order.squadsLifecycle?.submittedSignature ??
+    null;
+  const sourceBadge = order.spendingLimitExecution ? 'Auto-paid' : 'Single payment';
 
   return (
-    <main className="page-frame" data-layout="rd">
-      <div className="rd-page-container">
-        <Link to={`/organizations/${organizationId}/payments`} className="rd-back">
-          <span className="rd-back-arrow" aria-hidden>
-            ←
-          </span>
-          <span>Payments</span>
-        </Link>
+    <div className="page">
+      <div className="detail-col">
+        <div
+          className="crumb"
+          onClick={() => navigate(`/organizations/${organizationId}/payments`)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ')
+              navigate(`/organizations/${organizationId}/payments`);
+          }}
+        >
+          <Ico.chevRight w={15} style={{ transform: 'rotate(180deg)' }} />All payments
+        </div>
 
-        <RdPageHeader
-          eyebrow="Payment"
-          title={recipientName}
-          meta={
-            <>
-              <span className="rd-mono">{amountLabel}</span>
-              <span className="rd-meta-sep">·</span>
-              <ChainLink address={order.counterpartyWallet.walletAddress} prefix={4} suffix={4} />
-              {order.externalReference || order.invoiceNumber ? (
-                <>
-                  <span className="rd-meta-sep">·</span>
-                  <span className="rd-mono">{order.externalReference ?? order.invoiceNumber}</span>
-                </>
-              ) : null}
-              <span className="rd-meta-sep">·</span>
-              <span>Created {formatRelativeTime(order.createdAt)}</span>
-            </>
-          }
-          side={
-            <span className="rd-pill" data-tone={toneToPill(statusTone)}>
-              <span className="rd-pill-dot" aria-hidden />
-              {displayPaymentStatus(order.derivedState)}
-            </span>
-          }
-        />
-
-        <LifecycleRail stages={lifecycle} ariaLabel="Payment lifecycle" />
-
-        <PrimaryAction
-          variant={variant}
-          order={order}
-          amountLabel={amountLabel}
-          submittedSignature={latestExec?.submittedSignature ?? order.squadsLifecycle?.executedSignature ?? order.squadsLifecycle?.submittedSignature ?? null}
-          matchedAt={match?.matchedAt ?? null}
-          routing={routeMutation.isPending}
-          approvingReview={clearReviewMutation.isPending}
-          exporting={proofMutation.isPending}
-          cancelling={cancelMutation.isPending}
-          onRoute={() => routeMutation.mutate()}
-          onApproveReview={() => clearReviewMutation.mutate()}
-          onExportProof={() => proofMutation.mutate()}
-          onCancel={() => cancelMutation.mutate()}
-          ownPersonalWallets={ownPersonalWallets}
-          proposalCreatorWalletId={proposalCreatorWalletId}
-          onSelectProposalCreator={setProposalCreatorWalletId}
-          proposing={createProposalMutation.isPending}
-          onCreateSquadsProposal={() => createProposalMutation.mutate()}
-          pendingProposalConfirmation={pendingProposalConfirmation}
-          retryingProposalConfirmation={retryProposalConfirmationMutation.isPending}
-          onRetryProposalConfirmation={() => retryProposalConfirmationMutation.mutate()}
-          linkedProposal={linkedProposal}
-          proposalPendingVoterWalletId={proposalPendingVoterWalletId}
-          proposalExecuteWalletId={proposalExecuteWalletId}
-          proposalApproving={proposalActions.approving}
-          proposalExecuting={proposalActions.executing}
-          onApproveProposal={(signerWalletId) => proposalActions.approve(signerWalletId)}
-          onExecuteProposal={(signerWalletId) => proposalActions.execute(signerWalletId)}
-        />
-
-        <section className="rd-section">
-          <div className="rd-section-head">
-            <div>
-              <h2 className="rd-section-title">Details</h2>
-              <p className="rd-section-sub">Source, destination, references.</p>
+        <div className="stack stack-16">
+          <div>
+            <div className="eyebrow" style={{ marginBottom: 10 }}>PAYMENT</div>
+            <div className="pagehead" style={{ paddingBottom: 16 }}>
+              <div className="ph-titles">
+                <h1>{recipientName}</h1>
+                <p className="ph-desc">
+                  {order.invoiceNumber || order.externalReference ? (
+                    <>
+                      {order.invoiceNumber ?? order.externalReference}
+                      &nbsp;<span style={{ color: 'var(--text-faint)' }}>·</span>&nbsp;
+                    </>
+                  ) : null}
+                  {order.memo ? (
+                    <>
+                      {order.memo}
+                      &nbsp;<span style={{ color: 'var(--text-faint)' }}>·</span>&nbsp;
+                    </>
+                  ) : null}
+                  Created {formatRelativeTime(order.createdAt)}
+                </p>
+              </div>
+              <div className="head-status">
+                <Pill tone={toneToPill(statusTone) as PillTone}>
+                  {displayPaymentStatus(order.derivedState)}
+                </Pill>
+                {order.spendingLimitExecution ? <SLPill /> : null}
+              </div>
             </div>
           </div>
-          <div className="rd-card">
-            <dl
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                gap: 20,
-                margin: 0,
-              }}
-            >
-              <DetailEntry label="From">
-                {order.sourceTreasuryWallet?.address ? (
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                    {order.sourceTreasuryWallet.displayName ? (
-                      <>
-                        <span>{order.sourceTreasuryWallet.displayName}</span>
-                        <span className="rd-meta-sep">·</span>
-                      </>
-                    ) : null}
-                    <ChainLink address={order.sourceTreasuryWallet.address} prefix={4} suffix={4} />
-                  </span>
-                ) : (
-                  <span style={{ color: 'var(--ax-text-muted)' }}>Not set</span>
-                )}
-              </DetailEntry>
-              <DetailEntry label="To">
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                  <span>{order.counterpartyWallet.label}</span>
-                  <span className="rd-meta-sep">·</span>
-                  <ChainLink address={order.counterpartyWallet.walletAddress} prefix={4} suffix={4} />
-                </span>
-              </DetailEntry>
-              <DetailEntry label="Trust">
-                <span
-                  style={{
-                    fontSize: 12,
-                    color:
-                      order.counterpartyWallet.trustState === 'trusted'
-                        ? 'var(--ax-accent)'
-                        : order.counterpartyWallet.trustState === 'restricted' || order.counterpartyWallet.trustState === 'blocked'
-                          ? 'var(--ax-danger)'
-                          : 'var(--ax-warning)',
-                  }}
-                >
-                  {order.counterpartyWallet.trustState}
-                </span>
-              </DetailEntry>
-              <DetailEntry label="Signature">
-                {latestExec?.submittedSignature ? (
-                  <ChainLink signature={latestExec.submittedSignature} />
-                ) : (
-                  <span style={{ color: 'var(--ax-text-muted)' }}>Not signed</span>
-                )}
-              </DetailEntry>
-              {order.memo ? (
-                <DetailEntry label="Memo">
-                  <span>{order.memo}</span>
-                </DetailEntry>
-              ) : null}
-              {order.dueAt ? (
-                <DetailEntry label="Due">
-                  <span>{formatTimestamp(order.dueAt)}</span>
-                </DetailEntry>
-              ) : null}
-            </dl>
-          </div>
-        </section>
 
-        <section className="rd-section">
-          <div className="rd-section-head">
-            <div>
-              <h2 className="rd-section-title">Timeline</h2>
-              <p className="rd-section-sub">Every recorded event for this payment.</p>
-            </div>
-          </div>
-          <div className="rd-card">
-            <div className="rd-timeline-shared">
-              <TimelineRow
-                title="Payment requested"
-                meta={formatTimestamp(order.createdAt)}
-                body={`Created by ${order.createdByUser?.email ?? 'System'}.`}
-                state="complete"
-              />
-              {latestExec?.submittedSignature ? (
-                <TimelineRow
-                  title="Executed on-chain"
-                  meta={formatTimestamp(latestExec.submittedAt ?? latestExec.createdAt)}
-                  body={<ChainLink signature={latestExec.submittedSignature} prefix={8} suffix={8} />}
-                  state="complete"
-                />
-              ) : null}
-              {match?.matchedAt ? (
-                <TimelineRow
-                  title={`Settlement · ${match.matchStatus.replaceAll('_', ' ')}`}
-                  meta={formatTimestamp(match.matchedAt)}
-                  body={match.explanation || 'Observed and matched on-chain.'}
-                  state={['settled', 'closed'].includes(order.derivedState) ? 'complete' : 'pending'}
-                />
-              ) : null}
-              {['settled', 'closed'].includes(order.derivedState) ? (
-                <TimelineRow
-                  title="Proof ready"
-                  meta={formatTimestamp(order.updatedAt)}
-                  body="Canonical proof packet can be exported."
-                  state="complete"
-                />
-              ) : null}
-            </div>
-          </div>
-        </section>
+          <Rail stages={lifecycle} />
+
+          <ActionBar
+            variant={variant}
+            order={order}
+            amountLabel={amountLabel}
+            submittedSignature={submittedSig}
+            routing={routeMutation.isPending}
+            approvingReview={clearReviewMutation.isPending}
+            exporting={proofMutation.isPending}
+            cancelling={cancelMutation.isPending}
+            onRoute={() => routeMutation.mutate()}
+            onApproveReview={() => clearReviewMutation.mutate()}
+            onExportProof={() => proofMutation.mutate()}
+            onCancel={() => cancelMutation.mutate()}
+            ownPersonalWallets={ownPersonalWallets}
+            proposalCreatorWalletId={proposalCreatorWalletId}
+            onSelectProposalCreator={setProposalCreatorWalletId}
+            proposing={createProposalMutation.isPending}
+            onCreateSquadsProposal={() => createProposalMutation.mutate()}
+            pendingProposalConfirmation={pendingProposalConfirmation}
+            retryingProposalConfirmation={retryProposalConfirmationMutation.isPending}
+            onRetryProposalConfirmation={() => retryProposalConfirmationMutation.mutate()}
+            linkedProposal={linkedProposal}
+            proposalPendingVoterWalletId={proposalPendingVoterWalletId}
+            proposalExecuteWalletId={proposalExecuteWalletId}
+            proposalApproving={proposalActions.approving}
+            proposalExecuting={proposalActions.executing}
+            onApproveProposal={(signerWalletId) => proposalActions.approve(signerWalletId)}
+            onExecuteProposal={(signerWalletId) => proposalActions.execute(signerWalletId)}
+          />
+
+          <PaySummary order={order} sourceBadge={sourceBadge} submittedSignature={submittedSig} />
+
+          <ActivityAcc events={order.events ?? []} createdByEmail={order.createdByUser?.email ?? null} />
+        </div>
       </div>
-    </main>
-  );
-}
-
-function TimelineRow({
-  title,
-  meta,
-  body,
-  state,
-}: {
-  title: string;
-  meta: string;
-  body: React.ReactNode;
-  state: StageState;
-}) {
-  return (
-    <div className="rd-timeline-row" data-state={state}>
-      <div className="rd-timeline-head-row">
-        <strong>{title}</strong>
-        <span className="rd-timeline-meta">{meta}</span>
-      </div>
-      <p className="rd-timeline-sub">{body}</p>
     </div>
   );
 }
 
-function PrimaryAction(props: {
+// ─── Rail (.rail) ────────────────────────────────────────────────────────
+// Renders the lifecycle as a 5-node horizontal progress rail. Maps our
+// internal StageState onto the design's .done / .current / amber classes.
+
+function Rail({ stages }: { stages: LifecycleStage[] }) {
+  return (
+    <div className="rail">
+      {stages.map((s, i) => {
+        const isDone = s.state === 'complete';
+        const isCurrent = s.state === 'current';
+        const isBlocked = s.state === 'blocked';
+        const cls = [
+          'rail-stage',
+          isDone ? 'done' : '',
+          isCurrent ? 'current' : '',
+          isBlocked ? 'amber' : '',
+        ]
+          .filter(Boolean)
+          .join(' ');
+        return (
+          <div className={cls} key={s.id ?? i}>
+            <div className="rs-top">
+              <span className="rs-node">{isDone ? <Ico.checkSm w={12} /> : i + 1}</span>
+              <span className="rs-line" />
+            </div>
+            <span className="rs-label">{s.label}</span>
+            <span className="rs-sub">{s.sub}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── PaySummary (.pay-summary) ──────────────────────────────────────────
+// Record sheet: big amount on top, From → To route, then a defs grid
+// (trust / signature / invoice / due / memo). Mirrors the design's
+// PaySummary 1:1.
+
+function PaySummary({
+  order,
+  sourceBadge,
+  submittedSignature,
+}: {
+  order: PaymentOrder;
+  sourceBadge: string;
+  submittedSignature: string | null;
+}) {
+  const amountWhole = formatRawUsdcCompact(order.amountRaw);
+  const trustState = order.counterpartyWallet.trustState;
+  const trustLabel =
+    trustState === 'trusted'
+      ? 'Trusted'
+      : trustState.charAt(0).toUpperCase() + trustState.slice(1);
+  const trustTone: PillTone =
+    trustState === 'trusted'
+      ? 'success'
+      : trustState === 'restricted' || trustState === 'blocked'
+        ? 'danger'
+        : 'warning';
+
+  const sigLabel = submittedSignature ? 'Signed' : 'Not signed';
+  const sigTone: PillTone = submittedSignature ? 'info' : 'neutral';
+
+  const sourceName = order.sourceTreasuryWallet?.displayName ?? '—';
+  const sourceSub = order.sourceTreasuryWallet?.address
+    ? shortenAddress(order.sourceTreasuryWallet.address, 4, 4)
+    : 'No source set';
+  const recipientName = order.counterpartyWallet.label;
+  const recipientSub = order.invoiceNumber
+    ? `Invoice ${order.invoiceNumber}`
+    : order.externalReference ?? shortenAddress(order.counterpartyWallet.walletAddress, 4, 4);
+
+  return (
+    <div className="pay-summary">
+      <div className="ps-amount-row">
+        <div>
+          <div className="ps-lab">Amount</div>
+          <div className="ps-amount">
+            {amountWhole}
+            <small>{assetSymbol(order.asset)}</small>
+          </div>
+        </div>
+        <OriginPill>{sourceBadge}</OriginPill>
+      </div>
+
+      <div className="ps-route">
+        <div className="ps-endpoint">
+          <span className="pe-lab">From</span>
+          <span className="pe-name">{sourceName}</span>
+          <span className="pe-sub">{sourceSub}</span>
+        </div>
+        <Ico.arrowRight w={18} />
+        <div className="ps-endpoint">
+          <span className="pe-lab">To</span>
+          <span className="pe-name">{recipientName}</span>
+          <span className="pe-sub">{recipientSub}</span>
+        </div>
+      </div>
+
+      <div className="ps-defs">
+        <div className="ps-def">
+          <span className="pd-lab">Trust</span>
+          <span style={{ width: 'fit-content' }}>
+            <Pill tone={trustTone}>{trustLabel}</Pill>
+          </span>
+        </div>
+        <div className="ps-def">
+          <span className="pd-lab">Signature</span>
+          <span style={{ width: 'fit-content' }}>
+            <Pill tone={sigTone}>{sigLabel}</Pill>
+          </span>
+        </div>
+        {order.invoiceNumber || order.externalReference ? (
+          <div className="ps-def">
+            <span className="pd-lab">Invoice</span>
+            <span className="pd-val mono">{order.invoiceNumber ?? order.externalReference}</span>
+          </div>
+        ) : null}
+        {order.dueAt ? (
+          <div className="ps-def">
+            <span className="pd-lab">Due date</span>
+            <span className="pd-val mono">{formatTimestamp(order.dueAt)}</span>
+          </div>
+        ) : null}
+        {order.memo ? (
+          <div className="ps-def full">
+            <span className="pd-lab">Memo</span>
+            <span className="pd-val" style={{ fontWeight: 400 }}>{order.memo}</span>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+// ─── ActivityAcc (.activity-acc) ────────────────────────────────────────
+// Collapsed accordion of payment events. Opens to show a vertical
+// timeline. Event labels lifted from eventType strings — humanised
+// inline to avoid a lookup table.
+
+function ActivityAcc({
+  events,
+  createdByEmail,
+}: {
+  events: PaymentOrderEvent[];
+  createdByEmail: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const sorted = useMemo(
+    () =>
+      [...events].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()),
+    [events],
+  );
+  const count = sorted.length;
+  return (
+    <div className="activity-acc">
+      <div
+        className="aa-head"
+        onClick={() => setOpen((o) => !o)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setOpen((o) => !o);
+          }
+        }}
+        style={{ cursor: 'pointer' }}
+      >
+        <span className="aa-title">
+          <Ico.proposals w={15} />Activity
+        </span>
+        <span className="aa-right">
+          <span className="aa-meta">
+            {count} {count === 1 ? 'event' : 'events'}
+          </span>
+          <span className="aa-chev" style={{ transform: open ? 'rotate(180deg)' : 'none' }}>
+            <Ico.chevDown w={16} />
+          </span>
+        </span>
+      </div>
+      {open ? (
+        <div className="aa-body">
+          <div className="timeline" style={{ marginTop: 14 }}>
+            {sorted.length === 0 ? (
+              <div style={{ padding: 12, fontSize: 13, color: 'var(--text-muted)' }}>
+                No recorded events yet.
+              </div>
+            ) : (
+              sorted.map((e) => {
+                const title = humanizeEventType(e.eventType);
+                const actor = describeActor(e, createdByEmail);
+                const time = formatRelativeTime(e.createdAt);
+                return (
+                  <div className="tl-event done" key={e.paymentOrderEventId}>
+                    <div className="tl-rail">
+                      <span className="tl-dot" />
+                      <span className="tl-line" />
+                    </div>
+                    <div className="tl-body">
+                      <span className="tl-title">{title}</span>
+                      <span className="tl-meta">
+                        <span className="tl-actor">{actor}</span> · {time}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function humanizeEventType(type: string): string {
+  const map: Record<string, string> = {
+    payment_created: 'Payment created',
+    payment_reviewed: 'Reviewed',
+    payment_review_cleared: 'Reviewed',
+    payment_proposed: 'Proposed for approval',
+    proposal_approved: 'Approved',
+    proposal_executed: 'Executed',
+    payment_settled: 'Settled',
+    payment_cancelled: 'Cancelled',
+    spending_limit_executed: 'Auto-paid by agent',
+  };
+  if (map[type]) return map[type]!;
+  return type
+    .split('_')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+function describeActor(e: PaymentOrderEvent, createdByEmail: string | null): string {
+  if (e.actorType === 'agent') return 'Decimal agent';
+  if (e.actorType === 'user' && createdByEmail) return createdByEmail;
+  if (e.actorType === 'system') return 'System';
+  return e.actorType ?? 'System';
+}
+
+// ─── ActionBar (.action-bar) ────────────────────────────────────────────
+// Compact horizontal action bar driven by the payment's variant. Each
+// variant has its own tone (amber for needs_review, neutral for ready /
+// signing, success for autopaid / settled) and an inline control set.
+
+function ActionBarShell({
+  tone,
+  eyebrow,
+  title,
+  body,
+  controls,
+}: {
+  tone: 'amber' | 'neutral' | 'success' | 'danger';
+  eyebrow: string;
+  title: React.ReactNode;
+  body?: React.ReactNode;
+  controls: React.ReactNode;
+}) {
+  return (
+    <div className={`action-bar tone-${tone}`}>
+      <div className="ab-text">
+        <span className="ab-eyebrow">{eyebrow}</span>
+        <h3 className="ab-title">{title}</h3>
+        {body ? <p className="ab-body">{body}</p> : null}
+      </div>
+      <div className="ab-controls">{controls}</div>
+    </div>
+  );
+}
+
+function ChainSig({ signature }: { signature: string }) {
+  const short = `${signature.slice(0, 4)}…${signature.slice(-4)}`;
+  return (
+    <a
+      href={orbTransactionUrl(signature)}
+      target="_blank"
+      rel="noreferrer"
+      className="chainlink"
+      style={{ textDecoration: 'none' }}
+    >
+      <Ico.link w={14} />
+      <span className="sig">{short}</span>
+      <Ico.external w={13} />
+    </a>
+  );
+}
+
+function Approver({
+  init,
+  done,
+  title,
+}: {
+  init: string;
+  done: boolean;
+  title?: string;
+}) {
+  return (
+    <span className={`ab-appr${done ? '' : ' pending'}`} title={title}>
+      {init}
+      {done ? (
+        <span className="ab-badge">
+          <Ico.checkSm w={9} />
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function ActionBar(props: {
   variant: ActionVariant;
   order: PaymentOrder;
   amountLabel: string;
   submittedSignature: string | null;
-  matchedAt: string | null;
   routing: boolean;
   approvingReview: boolean;
   exporting: boolean;
@@ -618,147 +829,135 @@ function PrimaryAction(props: {
     onExecuteProposal,
   } = props;
 
+
   if (variant === 'needs_review') {
-    // Agent flagged this invoice during AP intake. The user decides whether to
-    // proceed (which creates the on-chain proposal) or reject (which closes
-    // the payment without any chain activity). No multisig signing yet — that
-    // happens after Approve advances the payment to `ready_to_propose`.
     return (
-      <RdPrimaryCard
-        emphasis="action"
+      <ActionBarShell
+        tone="amber"
         eyebrow="Needs your review"
         title="Decide whether to proceed"
-        body="Agent flagged this invoice. Approve to send it on chain, or reject to close it."
-      >
-        <div className="rd-actions">
-          <button
-            type="button"
-            className="rd-btn rd-btn-primary"
-            onClick={onApproveReview}
-            disabled={approvingReview}
-            aria-busy={approvingReview}
-          >
-            {approvingReview ? 'Approving…' : 'Approve & continue'}
-          </button>
-          <button
-            type="button"
-            className="rd-btn rd-btn-secondary"
-            onClick={props.onCancel}
-            disabled={props.cancelling}
-          >
-            {props.cancelling ? 'Rejecting…' : 'Reject'}
-          </button>
-        </div>
-      </RdPrimaryCard>
+        body="The agent flagged this invoice — counterparty wallet isn't trusted yet."
+        controls={
+          <>
+            <button
+              type="button"
+              className="btn btn-danger-ghost"
+              onClick={props.onCancel}
+              disabled={props.cancelling}
+              aria-busy={props.cancelling}
+            >
+              {props.cancelling ? 'Rejecting…' : 'Reject'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={onApproveReview}
+              disabled={approvingReview}
+              aria-busy={approvingReview}
+            >
+              {approvingReview ? 'Approving…' : (
+                <>Approve &amp; continue<Ico.arrowRight w={14} /></>
+              )}
+            </button>
+          </>
+        }
+      />
     );
   }
 
   if (variant === 'needs_route') {
     return (
-      <RdPrimaryCard
-        emphasis="action"
+      <ActionBarShell
+        tone="neutral"
         eyebrow="Route"
         title="Ready for agent routing"
-        body="Ask the Decimal agent to use an active spending limit or create a Squads proposal."
-      >
-        <div className="rd-actions">
+        body="Ask the Decimal agent to use an active spending limit or open a Squads proposal."
+        controls={
           <button
             type="button"
-            className="rd-btn rd-btn-primary"
+            className="btn btn-primary"
             onClick={onRoute}
             disabled={routing}
             aria-busy={routing}
           >
-            {routing ? 'Routing…' : 'Route payment'}
+            {routing ? 'Routing…' : (
+              <>Route payment<Ico.arrowRight w={14} /></>
+            )}
           </button>
-        </div>
-      </RdPrimaryCard>
+        }
+      />
     );
   }
 
   if (variant === 'ready_to_propose') {
-    // If the create-proposal tx was signed and submitted but RPC hasn't seen
-    // the signature yet, show a retry-confirmation banner instead of the
-    // create form. Recreating the proposal would either land a duplicate or
-    // fail backend's 409 guard — neither is what the user wants.
     if (pendingProposalConfirmation) {
       return (
-        <RdPrimaryCard
-          emphasis="action"
+        <ActionBarShell
+          tone="neutral"
           eyebrow="Awaiting confirmation"
           title="Submitted on chain"
           body="Don't recreate — your signature is in flight. Retry confirmation in a few seconds."
-        >
-          <p style={{ fontSize: 12, color: 'var(--ax-text-muted)', margin: '0 0 12px', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontFamily: 'monospace' }}>sig</span>
-            <ChainLink signature={pendingProposalConfirmation.signature} />
-          </p>
-          <div className="rd-actions">
-            <button
-              type="button"
-              className="rd-btn rd-btn-primary"
-              onClick={onRetryProposalConfirmation}
-              disabled={retryingProposalConfirmation}
-              aria-busy={retryingProposalConfirmation}
-            >
-              {retryingProposalConfirmation ? 'Retrying confirmation…' : 'Retry confirmation'}
-              {!retryingProposalConfirmation ? <span className="rd-btn-arrow" aria-hidden>→</span> : null}
-            </button>
-          </div>
-        </RdPrimaryCard>
+          controls={
+            <>
+              <ChainSig signature={pendingProposalConfirmation.signature} />
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={onRetryProposalConfirmation}
+                disabled={retryingProposalConfirmation}
+                aria-busy={retryingProposalConfirmation}
+              >
+                {retryingProposalConfirmation ? 'Retrying…' : (
+                  <>Retry confirmation<Ico.arrowRight w={14} /></>
+                )}
+              </button>
+            </>
+          }
+        />
       );
     }
-
     const hasPersonalWallets = ownPersonalWallets.length > 0;
     return (
-      <RdPrimaryCard
-        emphasis="action"
-        eyebrow="Create proposal"
-        title={
-          <>
-            <span className="rd-mono">{amountLabel}</span> ready for multisig
-          </>
-        }
-        body="Pick the wallet that will initiate signing."
-      >
-        <div className="rd-primary-grid">
-          <label className="rd-field">
-            <span className="rd-field-label">Initiating wallet</span>
-            {hasPersonalWallets ? (
-              <select
-                className="rd-select"
-                value={proposalCreatorWalletId}
-                onChange={(e) => onSelectProposalCreator(e.target.value)}
+      <ActionBarShell
+        tone="neutral"
+        eyebrow="Ready to send"
+        title="Ready for approval"
+        body="Pick the signing key you'll use to start the approval."
+        controls={
+          hasPersonalWallets ? (
+            <>
+              <div className="select">
+                <select
+                  value={proposalCreatorWalletId}
+                  onChange={(e) => onSelectProposalCreator(e.target.value)}
+                >
+                  {ownPersonalWallets.map((w) => (
+                    <option key={w.userWalletId} value={w.userWalletId}>
+                      {w.label ?? 'Personal'} · {shortenAddress(w.walletAddress, 4, 4)}
+                    </option>
+                  ))}
+                </select>
+                <Ico.chevDown w={14} />
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={onCreateSquadsProposal}
+                disabled={proposing || !proposalCreatorWalletId}
+                aria-busy={proposing}
               >
-                {ownPersonalWallets.map((w) => (
-                  <option key={w.userWalletId} value={w.userWalletId}>
-                    {(w.label ?? 'Untitled')} · {shortenAddress(w.walletAddress, 4, 4)}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <span className="rd-field-label" style={{ color: 'var(--ax-warning)' }}>
-                Create a personal wallet on /profile first.
-              </span>
-            )}
-          </label>
-        </div>
-        <p style={{ fontSize: 12, color: 'var(--ax-text-muted)', margin: '0 0 12px' }}>
-          Must be one of your personal wallets that's an on-chain Squads member with the <strong>Initiate</strong> permission. Your signature counts as the first approval.
-        </p>
-        <div className="rd-actions">
-          <button
-            type="button"
-            className="rd-btn rd-btn-primary"
-            onClick={onCreateSquadsProposal}
-            disabled={proposing || !hasPersonalWallets || !proposalCreatorWalletId}
-            aria-busy={proposing}
-          >
-            {proposing ? 'Creating proposal…' : 'Create Squads proposal'}
-            {!proposing ? <span className="rd-btn-arrow" aria-hidden>→</span> : null}
-          </button>
-        </div>
-      </RdPrimaryCard>
+                {proposing ? 'Creating proposal…' : (
+                  <>Send for approval<Ico.arrowRight w={14} /></>
+                )}
+              </button>
+            </>
+          ) : (
+            <span style={{ fontSize: 12, color: 'var(--warning)' }}>
+              Create a personal wallet on /profile first.
+            </span>
+          )
+        }
+      />
     );
   }
 
@@ -774,222 +973,198 @@ function PrimaryAction(props: {
     const eyebrow = isExecuted
       ? 'Settling'
       : isApproved
-        ? 'Send'
-        : proposalPendingVoterWalletId
-          ? 'Your turn to sign'
-          : 'Signing';
+        ? 'Ready to send'
+        : 'Awaiting approvals';
     const title = isExecuted
       ? 'Sent on chain — verifying'
       : isApproved
-        ? `Threshold met — ready to send`
-        : `${approvalCount} of ${threshold} signed · ${pendingCount} pending`;
+        ? 'Threshold met — execute when ready'
+        : `${approvalCount} of ${threshold} approved`;
+    const body = isExecuted
+      ? 'Verifying the transfer landed.'
+      : isApproved
+        ? 'A member with execute permission needs to send it.'
+        : `Team members approve on their own time. ${pendingCount} pending.`;
+
+    const approverChips = voting ? (
+      <div className="ab-approvers">
+        {voting.approvals.map((d) => (
+          <Approver
+            key={`a-${d.walletAddress}`}
+            init={initialsFromMember(d.organizationMembership?.user) ?? shortenAddress(d.walletAddress, 2, 0).slice(0, 2).toUpperCase()}
+            done
+            title={d.organizationMembership?.user.displayName ?? d.walletAddress}
+          />
+        ))}
+        {voting.pendingVoters.map((v) => (
+          <Approver
+            key={`p-${v.walletAddress}`}
+            init={initialsFromMember(v.organizationMembership?.user) ?? shortenAddress(v.walletAddress, 2, 0).slice(0, 2).toUpperCase()}
+            done={false}
+            title={v.organizationMembership?.user.displayName ?? v.walletAddress}
+          />
+        ))}
+      </div>
+    ) : null;
+
     return (
-      <RdPrimaryCard
-        emphasis={isApproved && proposalExecuteWalletId ? 'action' : undefined}
+      <ActionBarShell
+        tone="neutral"
         eyebrow={eyebrow}
         title={title}
-        body={
-          isExecuted
-            ? 'Verifying the transfer landed.'
-            : isApproved
-              ? 'A member with execute permission needs to send it.'
-              : 'Voters sign on their own time.'
+        body={body}
+        controls={
+          <>
+            {approverChips}
+            {proposalPendingVoterWalletId && !isApproved && !isExecuted ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => onApproveProposal(proposalPendingVoterWalletId)}
+                disabled={proposalApproving || proposalExecuting}
+                aria-busy={proposalApproving}
+              >
+                {proposalApproving ? 'Approving…' : 'Approve'}
+              </button>
+            ) : null}
+            {isApproved && proposalExecuteWalletId ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => onExecuteProposal(proposalExecuteWalletId)}
+                disabled={proposalApproving || proposalExecuting}
+                aria-busy={proposalExecuting}
+              >
+                {proposalExecuting ? 'Executing…' : 'Execute payment'}
+              </button>
+            ) : null}
+          </>
         }
-      >
-        {voting ? (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '12px 0' }}>
-            {voting.approvals.map((d) => (
-              <span
-                key={`a-${d.walletAddress}`}
-                title={d.walletAddress}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 6,
-                  padding: '4px 10px', fontSize: 12, borderRadius: 999,
-                  background: 'rgba(60, 180, 110, 0.18)', color: 'rgb(120, 220, 160)',
-                }}
-              >
-                <span aria-hidden>✓</span>
-                {d.organizationMembership?.user.displayName
-                  ?? d.organizationMembership?.user.email
-                  ?? shortenAddress(d.walletAddress, 4, 4)}
-              </span>
-            ))}
-            {voting.pendingVoters.map((v) => (
-              <span
-                key={`p-${v.walletAddress}`}
-                title={v.walletAddress}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 6,
-                  padding: '4px 10px', fontSize: 12, borderRadius: 999,
-                  background: 'transparent', color: 'var(--ax-text-muted)',
-                  border: '1px dashed var(--ax-border)',
-                }}
-              >
-                <span aria-hidden>○</span>
-                {v.organizationMembership?.user.displayName
-                  ?? v.organizationMembership?.user.email
-                  ?? shortenAddress(v.walletAddress, 4, 4)}
-              </span>
-            ))}
-          </div>
-        ) : null}
-
-        {order.squadsLifecycle?.transactionIndex || order.squadsLifecycle?.executedSignature ? (
-          <p style={{ fontSize: 12, color: 'var(--ax-text-muted)', margin: '4px 0 12px', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            {order.squadsLifecycle.transactionIndex ? (
-              <span style={{ fontFamily: 'monospace' }}>Tx index #{order.squadsLifecycle.transactionIndex}</span>
-            ) : null}
-            {order.squadsLifecycle.transactionIndex && order.squadsLifecycle.executedSignature ? <span>·</span> : null}
-            {order.squadsLifecycle.executedSignature ? (
-              <>
-                <span style={{ fontFamily: 'monospace' }}>exec</span>
-                <ChainLink signature={order.squadsLifecycle.executedSignature} />
-              </>
-            ) : null}
-          </p>
-        ) : null}
-
-        <div className="rd-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {proposalPendingVoterWalletId && !isApproved && !isExecuted ? (
-            <button
-              type="button"
-              className="rd-btn rd-btn-primary"
-              onClick={() => onApproveProposal(proposalPendingVoterWalletId)}
-              disabled={proposalApproving || proposalExecuting}
-              aria-busy={proposalApproving}
-            >
-              {proposalApproving ? 'Approving…' : 'Approve proposal'}
-              {!proposalApproving ? <span className="rd-btn-arrow" aria-hidden>→</span> : null}
-            </button>
-          ) : null}
-          {isApproved && proposalExecuteWalletId ? (
-            <button
-              type="button"
-              className="rd-btn rd-btn-primary"
-              onClick={() => onExecuteProposal(proposalExecuteWalletId)}
-              disabled={proposalApproving || proposalExecuting}
-              aria-busy={proposalExecuting}
-            >
-              {proposalExecuting ? 'Executing…' : 'Execute proposal'}
-              {!proposalExecuting ? <span className="rd-btn-arrow" aria-hidden>→</span> : null}
-            </button>
-          ) : null}
-        </div>
-      </RdPrimaryCard>
+      />
     );
   }
 
-  if (variant === 'spending_limit_in_flight') {
+  if (variant === 'spending_limit_in_flight' || variant === 'spending_limit_settled') {
     const exec = order.spendingLimitExecution;
     const policyName = exec?.spendingLimitPolicy?.policyName ?? 'spending limit policy';
     const execSignature = exec?.signature ?? submittedSignature;
+    const isSettled = variant === 'spending_limit_settled';
     return (
-      <RdPrimaryCard
-        eyebrow="Auto-paid by agent"
-        title={`Paid via ${policyName}`}
-        body="The agent executed this payment directly under an active spending limit. Verifying settlement."
-      >
-        {execSignature ? (
-          <div style={{ marginTop: 8 }}>
-            <ChainLink signature={execSignature} prefix={8} suffix={8} />
-          </div>
-        ) : null}
-      </RdPrimaryCard>
-    );
-  }
-
-  if (variant === 'spending_limit_settled') {
-    const exec = order.spendingLimitExecution;
-    const policyName = exec?.spendingLimitPolicy?.policyName ?? 'spending limit policy';
-    const execSignature = exec?.signature ?? submittedSignature;
-    return (
-      <RdPrimaryCard
-        eyebrow="Settled · auto-paid"
-        title={`Paid via ${policyName}`}
-        body="The agent settled this payment under an active spending limit. Proof packet is ready."
-      >
-        {execSignature ? (
-          <div style={{ marginBottom: 12 }}>
-            <ChainLink signature={execSignature} prefix={8} suffix={8} />
-          </div>
-        ) : null}
-        <div className="rd-actions">
-          <button
-            type="button"
-            className="rd-btn rd-btn-primary"
-            onClick={onExportProof}
-            disabled={exporting}
-            aria-busy={exporting}
-          >
-            {exporting ? 'Exporting…' : 'Download proof (JSON)'}
-          </button>
-        </div>
-      </RdPrimaryCard>
+      <ActionBarShell
+        tone="success"
+        eyebrow={isSettled ? 'Settled · auto-paid' : 'Auto-paid by agent'}
+        title={
+          <>
+            Paid via <span className="serif" style={{ fontStyle: 'italic' }}>{policyName}</span>
+          </>
+        }
+        body={
+          isSettled
+            ? 'The agent settled this payment under an active spending limit. Proof packet is ready.'
+            : 'Executed directly under an active spending limit — no team vote needed.'
+        }
+        controls={
+          <>
+            {execSignature ? <ChainSig signature={execSignature} /> : null}
+            {isSettled ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={onExportProof}
+                disabled={exporting}
+                aria-busy={exporting}
+              >
+                <Ico.download w={15} />
+                {exporting ? 'Exporting…' : 'Download proof'}
+              </button>
+            ) : null}
+          </>
+        }
+      />
     );
   }
 
   if (variant === 'in_flight') {
     return (
-      <RdPrimaryCard
+      <ActionBarShell
+        tone="neutral"
         eyebrow="Settling"
         title="Sent on chain — verifying"
         body="Confirming the transfer landed. This refreshes automatically."
-      >
-        {submittedSignature ? (
-          <ChainLink signature={submittedSignature} prefix={8} suffix={8} />
-        ) : null}
-      </RdPrimaryCard>
+        controls={submittedSignature ? <ChainSig signature={submittedSignature} /> : <span />}
+      />
     );
   }
 
   if (variant === 'settled') {
     return (
-      <RdPrimaryCard
+      <ActionBarShell
+        tone="success"
         eyebrow="Settled"
         title="Settled · proof ready"
         body="The payment landed and matched intent."
-      >
-        <div className="rd-actions">
-          <button
-            type="button"
-            className="rd-btn rd-btn-primary"
-            onClick={onExportProof}
-            disabled={exporting}
-            aria-busy={exporting}
-          >
-            {exporting ? 'Exporting…' : 'Download proof (JSON)'}
-          </button>
-        </div>
-      </RdPrimaryCard>
+        controls={
+          <>
+            {submittedSignature ? <ChainSig signature={submittedSignature} /> : null}
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={onExportProof}
+              disabled={exporting}
+              aria-busy={exporting}
+            >
+              <Ico.download w={15} />
+              {exporting ? 'Exporting…' : 'Download proof'}
+            </button>
+          </>
+        }
+      />
     );
   }
 
   if (variant === 'exception') {
     return (
-      <RdPrimaryCard
-        emphasis="blocked"
+      <ActionBarShell
+        tone="danger"
         eyebrow="Attention needed"
         title="Settlement didn't match expected"
         body="The observed transfer did not fully match this payment. Check the timeline for the exception detail."
+        controls={<span />}
       />
     );
   }
 
   if (variant === 'cancelled') {
     return (
-      <RdPrimaryCard
+      <ActionBarShell
+        tone="neutral"
         eyebrow="Cancelled"
         title="This payment was cancelled"
         body="It will not be executed. Kept here for audit."
+        controls={<span />}
       />
     );
   }
 
   return (
-    <RdPrimaryCard
+    <ActionBarShell
+      tone="neutral"
       eyebrow="No action"
       title="Nothing to do right now"
       body="Check back as state changes."
+      controls={<span />}
     />
   );
+}
+
+function initialsFromMember(user: { displayName?: string; email?: string } | undefined): string | null {
+  if (!user) return null;
+  const name = user.displayName?.trim();
+  if (name) {
+    const parts = name.split(/\s+/);
+    if (parts.length >= 2) return (parts[0]![0]! + parts[1]![0]!).toUpperCase();
+    return name.slice(0, 2).toUpperCase();
+  }
+  if (user.email) return user.email.slice(0, 2).toUpperCase();
+  return null;
 }
