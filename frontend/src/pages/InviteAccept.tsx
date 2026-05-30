@@ -1,9 +1,16 @@
+// Join via invite — implements the design (pages-auth.jsx PageJoin).
+// Reuses the AuthLayout (BrandPanel + form column) and renders a
+// state-driven inner card: loading / invalid / terminal / not-signed-in /
+// wrong-email / ready. The "ready" state matches the design exactly with
+// a locked email (.input-lock) + verified check + accept button.
+
 import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../api';
-import { AuthDivider, OAuthButton } from '../ui/AuthButtons';
 import type { AuthenticatedSession, PublicInvite, UserWallet } from '../types';
+import { Ico } from '../dec/icons';
+import { AuthLayout } from './auth';
 
 export function InviteAcceptPage() {
   const { inviteToken } = useParams<{ inviteToken: string }>();
@@ -56,31 +63,40 @@ export function InviteAcceptPage() {
   const sessionEmail = sessionQuery.data?.user.email ?? null;
   const invite = previewQuery.data;
 
-  const status = useMemo(() => deriveStatus({
-    inviteToken,
-    previewQuery,
-    sessionQuery,
-    sessionEmail,
-    invite,
-  }), [inviteToken, previewQuery, sessionQuery, sessionEmail, invite]);
+  const status = useMemo(
+    () =>
+      deriveStatus({
+        inviteToken,
+        previewQuery,
+        sessionQuery,
+        sessionEmail,
+        invite,
+      }),
+    [inviteToken, previewQuery, sessionQuery, sessionEmail, invite],
+  );
+
+  const orgName = invite?.organization.organizationName ?? 'this workspace';
+  const tagline =
+    status.kind === 'ready' || status.kind === 'wrong-email'
+      ? `You've been invited to ${orgName}. Finish setting up your account.`
+      : status.kind === 'not-signed-in'
+        ? `You've been invited to ${orgName}. Sign in to accept.`
+        : "Hang tight — we're checking your invite.";
 
   return (
-    <main className="login-shell">
-      <section className="login-panel" style={{ width: 'min(100%, 560px)' }}>
-        {renderContent({
-          status,
-          invite,
-          sessionEmail,
-          error,
-          accepting: acceptMutation.isPending,
-          onAccept: () => {
-            setError(null);
-            acceptMutation.mutate();
-          },
-          inviteToken,
-        })}
-      </section>
-    </main>
+    <AuthLayout tagline={tagline}>
+      <InviteCard
+        status={status}
+        invite={invite}
+        error={error}
+        accepting={acceptMutation.isPending}
+        inviteToken={inviteToken}
+        onAccept={() => {
+          setError(null);
+          acceptMutation.mutate();
+        }}
+      />
+    </AuthLayout>
   );
 }
 
@@ -122,29 +138,38 @@ function deriveStatus(args: {
   return { kind: 'ready' };
 }
 
-function renderContent(args: {
+function InviteCard({
+  status,
+  invite,
+  error,
+  accepting,
+  inviteToken,
+  onAccept,
+}: {
   status: InviteScreenStatus;
   invite: PublicInvite | undefined;
-  sessionEmail: string | null;
   error: string | null;
   accepting: boolean;
-  onAccept: () => void;
   inviteToken: string | undefined;
+  onAccept: () => void;
 }) {
-  const { status, invite, error, accepting, onAccept, inviteToken } = args;
-
   if (status.kind === 'loading') {
-    return <p style={{ margin: 0 }}>Loading invite…</p>;
+    return (
+      <>
+        <h1>Checking your invite…</h1>
+        <p className="auth-sub">One moment.</p>
+      </>
+    );
   }
 
   if (status.kind === 'invalid') {
     return (
       <>
         <h1>Invite unavailable</h1>
-        <p>{status.message}</p>
-        <p style={{ fontSize: 13 }}>
-          <a href="/">Back to home</a>
-        </p>
+        <p className="auth-sub">{status.message}</p>
+        <a className="btn btn-primary" href="/" style={{ marginTop: 14, width: '100%', height: 46 }}>
+          Back to home
+        </a>
       </>
     );
   }
@@ -158,15 +183,15 @@ function renderContent(args: {
     return (
       <>
         <h1>Invite unavailable</h1>
-        <p>{copy}</p>
+        <p className="auth-sub">{copy}</p>
         {invite ? (
-          <p style={{ fontSize: 13 }}>
-            <strong>Organization:</strong> {invite.organization.organizationName}
+          <p className="auth-sub">
+            Organization: <b style={{ color: 'var(--text-primary)' }}>{invite.organization.organizationName}</b>
           </p>
         ) : null}
-        <p style={{ fontSize: 13 }}>
-          <a href="/">Back to home</a>
-        </p>
+        <a className="btn btn-secondary" href="/" style={{ marginTop: 14, width: '100%', height: 46 }}>
+          Back to home
+        </a>
       </>
     );
   }
@@ -178,22 +203,41 @@ function renderContent(args: {
     const returnToParam = encodeURIComponent(returnPath);
     return (
       <>
-        <h1>You're invited to {invite.organization.organizationName}</h1>
-        <p>
-          {invite.invitedByUser.displayName || invite.invitedByUser.email} invited{' '}
-          <strong>{invite.invitedEmail}</strong> to join as a{' '}
-          <strong>{invite.role}</strong>. Sign in with that email to accept.
+        <h1>Join {invite.organization.organizationName}</h1>
+        <p className="auth-sub">
+          You were invited as a <b style={{ color: 'var(--text-primary)' }}>{invite.role.charAt(0).toUpperCase() + invite.role.slice(1)}</b>.
+          Sign in or create an account with <b style={{ color: 'var(--text-primary)' }}>{invite.invitedEmail}</b> to accept.
         </p>
-        <OAuthButton mode="login" returnTo={returnPath} />
-        <AuthDivider />
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <a className="button button-primary" href={`/login?returnTo=${returnToParam}`}>
-            Sign in with email
-          </a>
-          <a className="button button-secondary" href={`/register?returnTo=${returnToParam}`}>
-            Create account
-          </a>
+
+        <button
+          type="button"
+          className="btn-google"
+          onClick={() => window.location.assign(api.getGoogleOAuthStartUrl(returnPath))}
+        >
+          <Ico.google w={18} />Continue with Google
+        </button>
+        <div className="auth-divider">or</div>
+
+        <div className="stack-field">
+          <div className="field">
+            <label className="field-label">Email</label>
+            <div className="input-lock">
+              <Ico.mail w={15} />{invite.invitedEmail}
+              <span className="il-check"><Ico.checkSm w={15} /></span>
+            </div>
+          </div>
         </div>
+
+        <a
+          className="btn btn-primary"
+          href={`/register?returnTo=${returnToParam}`}
+          style={{ marginTop: 14, width: '100%', height: 46 }}
+        >
+          Create account &amp; join<Ico.arrowRight w={15} />
+        </a>
+        <p className="auth-switch">
+          Already have an account? <a href={`/login?returnTo=${returnToParam}`}>Log in</a>
+        </p>
       </>
     );
   }
@@ -202,16 +246,17 @@ function renderContent(args: {
     const returnPath = `/invites/${inviteToken ?? ''}`;
     return (
       <>
-        <h1>Wrong email</h1>
-        <p>
-          This invite was sent to <strong>{status.expected}</strong>, but you're
-          signed in as <strong>{status.current}</strong>. Sign out and sign back
-          in with the invited email to accept.
+        <h1>Wrong account</h1>
+        <p className="auth-sub">
+          This invite was sent to <b style={{ color: 'var(--text-primary)' }}>{status.expected}</b>, but you're
+          signed in as <b style={{ color: 'var(--text-primary)' }}>{status.current}</b>. Sign out and sign back in
+          with the invited email to accept.
         </p>
+
         <button
           type="button"
-          className="button button-secondary"
-          style={{ marginBottom: 12 }}
+          className="btn btn-primary"
+          style={{ marginTop: 14, width: '100%', height: 46 }}
           onClick={async () => {
             try {
               await api.logout();
@@ -219,59 +264,48 @@ function renderContent(args: {
               // ignore
             }
             api.clearSessionToken();
-            window.location.assign(
-              `/login?returnTo=${encodeURIComponent(returnPath)}`,
-            );
+            window.location.assign(`/login?returnTo=${encodeURIComponent(returnPath)}`);
           }}
         >
           Sign out and switch accounts
-        </button>
-        <AuthDivider />
-        <p style={{ fontSize: 13, opacity: 0.75, margin: '0 0 12px' }}>
-          Or sign out and sign in with Google as <strong>{status.expected}</strong>:
-        </p>
-        <button
-          type="button"
-          className="button button-secondary oauth-button"
-          onClick={async () => {
-            try {
-              await api.logout();
-            } catch {
-              // ignore
-            }
-            api.clearSessionToken();
-            window.location.assign(api.getGoogleOAuthStartUrl(returnPath));
-          }}
-        >
-          <span className="oauth-button-mark" aria-hidden>
-            G
-          </span>
-          Sign in with Google
         </button>
       </>
     );
   }
 
+  // ready: user is signed in with the right email — just one button to accept.
   return (
     <>
       <h1>Join {invite.organization.organizationName}</h1>
-      <p>
-        {invite.invitedByUser.displayName || invite.invitedByUser.email} invited
-        you to join <strong>{invite.organization.organizationName}</strong> as a{' '}
-        <strong>{invite.role}</strong>.
+      <p className="auth-sub">
+        You were invited by <b style={{ color: 'var(--text-primary)' }}>{invite.invitedByUser.displayName || invite.invitedByUser.email}</b>
+        {' '}as a <b style={{ color: 'var(--text-primary)' }}>{invite.role.charAt(0).toUpperCase() + invite.role.slice(1)}</b>.
       </p>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <button
-          type="button"
-          className="button button-primary"
-          onClick={onAccept}
-          disabled={accepting}
-          aria-busy={accepting}
-        >
-          {accepting ? 'Accepting…' : 'Accept invite'}
-        </button>
+
+      <div className="stack-field">
+        <div className="field">
+          <label className="field-label">Email</label>
+          <div className="input-lock">
+            <Ico.mail w={15} />{invite.invitedEmail}
+            <span className="il-check"><Ico.checkSm w={15} /></span>
+          </div>
+        </div>
       </div>
-      {error ? <p className="form-error" style={{ marginTop: 14 }}>{error}</p> : null}
+
+      {error ? (
+        <div style={{ marginTop: 12, fontSize: 12, color: 'var(--danger)' }}>{error}</div>
+      ) : null}
+
+      <button
+        type="button"
+        className="btn btn-primary"
+        style={{ marginTop: 14, width: '100%', height: 46 }}
+        onClick={onAccept}
+        disabled={accepting}
+        aria-busy={accepting}
+      >
+        {accepting ? 'Joining…' : <>Accept invite<Ico.arrowRight w={15} /></>}
+      </button>
     </>
   );
 }

@@ -1,10 +1,15 @@
+// Auth pages — implements the design (pages-auth.jsx): two-column .auth
+// grid with a pink BrandPanel on the left and a form column on the right.
+// Each page wraps its surface in <div className="dec"> so the design CSS
+// activates (the auth pages live outside the AppShell's .dec wrapper).
+
 import type { FormEvent } from 'react';
 import { useEffect, useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, type AuthenticatedSession } from '../api';
-import { AuthDivider, OAuthButton } from '../ui/AuthButtons';
 import { queryKeys, toAuthenticatedSession } from '../lib/app-helpers';
+import { Ico } from '../dec/icons';
 
 function readSafeReturnTo(search: string): string | null {
   const params = new URLSearchParams(search);
@@ -24,32 +29,81 @@ function authErrorMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
 }
 
-function AuthTabs({ active }: { active: 'login' | 'register' }) {
+// Pink brand panel on the left of every auth screen. Tagline switches per
+// screen so the messaging matches the action ("Pay vendors globally" for
+// login, "Create an account..." for signup, "You've been invited..." for
+// the join screen). Exported so InviteAccept reuses it.
+export function BrandPanel({ tagline }: { tagline: string }) {
   return (
-    <div className="auth-tabs" role="tablist" aria-label="Authentication mode">
-      <Link
-        to="/login"
-        role="tab"
-        aria-selected={active === 'login'}
-        data-active={active === 'login'}
-        className="auth-tab"
-        replace
-      >
-        Sign in
-      </Link>
-      <Link
-        to="/register"
-        role="tab"
-        aria-selected={active === 'register'}
-        data-active={active === 'register'}
-        className="auth-tab"
-        replace
-      >
-        Create account
-      </Link>
+    <div className="auth-brand">
+      <div className="ab-word">
+        <span className="ab-glyph">D</span>
+        Decimal
+      </div>
+      <div className="ab-mid">
+        <h2>Finance &amp; accounting, run by an agent you control.</h2>
+        <p className="ab-tag">{tagline}</p>
+      </div>
+      <div className="ab-feats">
+        <div className="ab-feat">
+          <span className="af-ic"><Ico.bolt w={14} fill="currentColor" sw={0} /></span>
+          Auto-pay routine bills under spending limits — no vote each time
+        </div>
+        <div className="ab-feat">
+          <span className="af-ic"><Ico.shield w={14} /></span>
+          Multi-signer approvals for everything above your limits
+        </div>
+        <div className="ab-feat">
+          <span className="af-ic"><Ico.doc w={14} /></span>
+          A downloadable proof packet for every payment
+        </div>
+      </div>
     </div>
   );
 }
+
+function GoogleButton({ mode, returnTo }: { mode: 'login' | 'register'; returnTo?: string | null }) {
+  const [redirecting, setRedirecting] = useState(false);
+  return (
+    <button
+      type="button"
+      className="btn-google"
+      disabled={redirecting}
+      onClick={() => {
+        setRedirecting(true);
+        window.location.assign(api.getGoogleOAuthStartUrl(returnTo ?? '/setup'));
+      }}
+    >
+      <Ico.google w={18} />
+      {redirecting
+        ? 'Opening Google…'
+        : mode === 'login'
+          ? 'Continue with Google'
+          : 'Sign up with Google'}
+    </button>
+  );
+}
+
+// Wrapper for any auth screen — provides the .dec namespace + viewport
+// height + the two-column split (.auth).
+export function AuthLayout({ tagline, children }: { tagline: string; children: React.ReactNode }) {
+  return (
+    <div className="dec" style={{ height: '100vh' }}>
+      <div className="auth">
+        <BrandPanel tagline={tagline} />
+        <div className="auth-form">
+          <div className="auth-card">{children}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── OAuth callback ─────────────────────────────────────────────────────
+// Lands here after Google redirect. Reads the session_token from the URL
+// fragment, primes the session query, and redirects to /setup (or the
+// original returnTo). On error we render a minimal screen inside the
+// AuthLayout so it doesn't look like a broken page.
 
 export function OAuthCallbackPage() {
   const queryClient = useQueryClient();
@@ -89,22 +143,21 @@ export function OAuthCallbackPage() {
   }, [navigate, queryClient]);
 
   return (
-    <main className="login-shell">
-      <section className="login-panel">
-        <div className="panel-kicker">Google OAuth</div>
-        <h1 className="auth-title">{error ? 'Sign-in failed' : 'Finishing sign-in'}</h1>
-        <p className="muted-copy">
-          {error ?? 'Creating your Decimal session and loading your organizations.'}
-        </p>
-        {error ? (
-          <Link className="button button-primary" to="/login" replace>
-            Back to sign in
-          </Link>
-        ) : null}
-      </section>
-    </main>
+    <AuthLayout tagline="Hang tight — we're loading your workspace.">
+      <h1>{error ? 'Sign-in failed' : 'Finishing sign-in'}</h1>
+      <p className="auth-sub">
+        {error ?? 'Creating your Decimal session and loading your organizations.'}
+      </p>
+      {error ? (
+        <a className="btn btn-primary" href="/login" style={{ width: '100%', height: 46, marginTop: 14 }}>
+          Back to log in
+        </a>
+      ) : null}
+    </AuthLayout>
   );
 }
+
+// ─── Log in ─────────────────────────────────────────────────────────────
 
 export function LoginPage() {
   const queryClient = useQueryClient();
@@ -114,6 +167,7 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+
   const loginMutation = useMutation({
     mutationFn: (input: { email: string; password: string }) => {
       // Always start login from a clean auth state so stale tokens cannot win.
@@ -157,49 +211,69 @@ export function LoginPage() {
   }
 
   return (
-    <main className="login-shell">
-      <section className="login-panel">
-        <AuthTabs active="login" />
-        <OAuthButton mode="login" returnTo={returnTo} />
-        <AuthDivider />
-        <form className="login-form" onSubmit={handleSubmit}>
-          <label>
-            Email
-            <input
-              name="email"
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="ops@company.com"
-              autoComplete="email"
-              autoCorrect="off"
-              autoCapitalize="off"
-              spellCheck={false}
-              inputMode="email"
-              required
-            />
-          </label>
-          <label>
-            Password
-            <input
-              name="password"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="Your password"
-              autoComplete="current-password"
-              required
-            />
-          </label>
-          <button className="button button-primary" disabled={loginMutation.isPending} type="submit">
-            {loginMutation.isPending ? 'Signing in...' : 'Sign in'}
-          </button>
-        </form>
-        {error ? <p className="form-error">{error}</p> : null}
-      </section>
-    </main>
+    <AuthLayout tagline="Pay vendors globally, set bounded autonomy for routine bills, and keep every approval on your team's keys.">
+      <h1>Log in to Decimal</h1>
+      <p className="auth-sub">Welcome back. Use your work account to continue.</p>
+
+      <GoogleButton mode="login" returnTo={returnTo} />
+      <div className="auth-divider">or</div>
+
+      <form className="stack-field" onSubmit={handleSubmit}>
+        <div className="field">
+          <label className="field-label">Work email</label>
+          <input
+            className="input"
+            type="email"
+            name="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@company.com"
+            autoComplete="email"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            inputMode="email"
+            required
+          />
+        </div>
+        <div className="field">
+          <div className="field-label-row">
+            <label className="field-label">Password</label>
+            <span className="field-link">Forgot password?</span>
+          </div>
+          <input
+            className="input"
+            type="password"
+            name="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password"
+            required
+          />
+        </div>
+
+        {error ? (
+          <div style={{ fontSize: 12, color: 'var(--danger)' }}>{error}</div>
+        ) : null}
+
+        <button
+          type="submit"
+          className="btn btn-primary"
+          disabled={loginMutation.isPending}
+          aria-busy={loginMutation.isPending}
+        >
+          {loginMutation.isPending ? 'Logging in…' : <>Log in<Ico.arrowRight w={15} /></>}
+        </button>
+      </form>
+
+      <p className="auth-switch">
+        New to Decimal? <a href="/register">Create an account</a>
+      </p>
+    </AuthLayout>
   );
 }
+
+// ─── Sign up (public — creates a new account, which then creates an org) ──
 
 export function RegisterPage() {
   const queryClient = useQueryClient();
@@ -253,66 +327,82 @@ export function RegisterPage() {
   }
 
   return (
-    <main className="login-shell">
-      <section className="login-panel">
-        <AuthTabs active="register" />
-        <OAuthButton mode="register" returnTo={returnTo} />
-        <AuthDivider />
-        <form className="login-form" onSubmit={handleSubmit}>
-          <label>
-            Email
-            <input
-              name="email"
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="ops@company.com"
-              autoComplete="email"
-              autoCorrect="off"
-              autoCapitalize="off"
-              spellCheck={false}
-              inputMode="email"
-              required
-            />
-          </label>
-          <label>
-            Password
-            <input
-              name="password"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="At least 8 characters"
-              autoComplete="new-password"
-              minLength={8}
-              maxLength={128}
-              required
-            />
-          </label>
-          <label>
-            Name <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>(optional)</span>
-            <input
-              name="displayName"
-              type="text"
-              value={displayName}
-              onChange={(event) => setDisplayName(event.target.value)}
-              placeholder="Ops"
-              autoComplete="name"
-            />
-          </label>
-          <button
-            className="button button-primary"
-            disabled={registerMutation.isPending}
-            type="submit"
-          >
-            {registerMutation.isPending ? 'Creating account...' : 'Create account'}
-          </button>
-        </form>
-        {error ? <p className="form-error">{error}</p> : null}
-      </section>
-    </main>
+    <AuthLayout tagline="Create an account to set up your organization, connect a treasury, and let the agent start paying vendors.">
+      <h1>Create your account</h1>
+      <p className="auth-sub">Start running finance with Decimal in minutes.</p>
+
+      <GoogleButton mode="register" returnTo={returnTo} />
+      <div className="auth-divider">or</div>
+
+      <form className="stack-field" onSubmit={handleSubmit}>
+        <div className="field">
+          <label className="field-label">Full name</label>
+          <input
+            className="input"
+            type="text"
+            name="displayName"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            placeholder="Jordan Keil"
+            autoComplete="name"
+          />
+        </div>
+        <div className="field">
+          <label className="field-label">Work email</label>
+          <input
+            className="input"
+            type="email"
+            name="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@company.com"
+            autoComplete="email"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            inputMode="email"
+            required
+          />
+        </div>
+        <div className="field">
+          <label className="field-label">Password</label>
+          <input
+            className="input"
+            type="password"
+            name="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="new-password"
+            minLength={8}
+            maxLength={128}
+            required
+          />
+          <span className="input-help">At least 8 characters.</span>
+        </div>
+
+        {error ? (
+          <div style={{ fontSize: 12, color: 'var(--danger)' }}>{error}</div>
+        ) : null}
+
+        <button
+          type="submit"
+          className="btn btn-primary"
+          disabled={registerMutation.isPending}
+          aria-busy={registerMutation.isPending}
+        >
+          {registerMutation.isPending ? 'Creating…' : <>Create account<Ico.arrowRight w={15} /></>}
+        </button>
+      </form>
+
+      <p className="auth-switch">
+        Already have an account? <a href="/login">Log in</a>
+      </p>
+    </AuthLayout>
   );
 }
+
+// ─── Verify email ───────────────────────────────────────────────────────
+// Lands here after register or after login with an unverified email.
 
 export function VerifyEmailPage({ session }: { session: AuthenticatedSession }) {
   const queryClient = useQueryClient();
@@ -323,6 +413,7 @@ export function VerifyEmailPage({ session }: { session: AuthenticatedSession }) 
   const [devCode, setDevCode] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
   const verifyMutation = useMutation({
     mutationFn: () => api.verifyEmail({ code: code.trim() }),
     onSuccess: async () => {
@@ -331,10 +422,14 @@ export function VerifyEmailPage({ session }: { session: AuthenticatedSession }) 
         navigate(returnTo, { replace: true });
         return;
       }
-      navigate(session.organizations[0] ? `/organizations/${session.organizations[0].organizationId}` : '/setup', { replace: true });
+      navigate(
+        session.organizations[0] ? `/organizations/${session.organizations[0].organizationId}` : '/setup',
+        { replace: true },
+      );
     },
     onError: (err) => setError(err instanceof Error ? err.message : 'Unable to verify email.'),
   });
+
   const resendMutation = useMutation({
     mutationFn: () => api.resendVerification(),
     onSuccess: (result) => {
@@ -352,41 +447,60 @@ export function VerifyEmailPage({ session }: { session: AuthenticatedSession }) 
   });
 
   return (
-    <main className="login-shell">
-      <section className="login-panel">
-        <div className="panel-kicker">Verify email</div>
-        <h1 className="auth-title">Confirm your account</h1>
-        <p className="muted-copy">Enter the verification code for {session.user.email}.</p>
-        <form
-          className="login-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setError(null);
-            verifyMutation.mutate();
-          }}
+    <AuthLayout tagline="One quick step before we hand you the keys to your workspace.">
+      <h1>Confirm your account</h1>
+      <p className="auth-sub">
+        Enter the verification code we sent to <b style={{ color: 'var(--text-primary)' }}>{session.user.email}</b>.
+      </p>
+
+      <form
+        className="stack-field"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setError(null);
+          verifyMutation.mutate();
+        }}
+      >
+        <div className="field">
+          <label className="field-label">Verification code</label>
+          <input
+            className="input"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            placeholder="123456"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            required
+          />
+        </div>
+
+        {error ? <div style={{ fontSize: 12, color: 'var(--danger)' }}>{error}</div> : null}
+        {statusMessage ? <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{statusMessage}</div> : null}
+        {devCode ? (
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            Dev code (no email provider configured): <b style={{ color: 'var(--text-primary)' }}>{devCode}</b>
+          </div>
+        ) : null}
+
+        <button
+          type="submit"
+          className="btn btn-primary"
+          disabled={verifyMutation.isPending}
+          aria-busy={verifyMutation.isPending}
         >
-          <label>
-            Verification code
-            <input
-              value={code}
-              onChange={(event) => setCode(event.target.value)}
-              placeholder="123456"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              required
-            />
-          </label>
-          <button className="button button-primary" disabled={verifyMutation.isPending} type="submit">
-            {verifyMutation.isPending ? 'Verifying...' : 'Verify email'}
-          </button>
-        </form>
-        <button className="button button-secondary" disabled={resendMutation.isPending} onClick={() => resendMutation.mutate()} type="button">
-          {resendMutation.isPending ? 'Sending...' : 'Resend code'}
+          {verifyMutation.isPending ? 'Verifying…' : <>Verify email<Ico.arrowRight w={15} /></>}
         </button>
-        {statusMessage ? <p className="muted-copy">{statusMessage}</p> : null}
-        {devCode ? <p className="muted-copy">Dev code (no email provider configured): <strong>{devCode}</strong></p> : null}
-        {error ? <p className="form-error">{error}</p> : null}
-      </section>
-    </main>
+      </form>
+
+      <button
+        type="button"
+        className="btn btn-secondary"
+        style={{ marginTop: 12, width: '100%', height: 46 }}
+        disabled={resendMutation.isPending}
+        onClick={() => resendMutation.mutate()}
+      >
+        {resendMutation.isPending ? 'Sending…' : 'Resend code'}
+      </button>
+    </AuthLayout>
   );
 }
