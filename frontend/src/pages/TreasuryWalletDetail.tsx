@@ -231,12 +231,12 @@ export function TreasuryWalletDetailPage({ session }: { session: AuthenticatedSe
                 >
                   {formatRawUsdcCompact(accountTotalRaw)} USDC
                 </span>
-                &nbsp;<span style={{ color: 'var(--text-faint)' }}>·</span>&nbsp;
+                &nbsp;&nbsp;<span style={{ color: 'var(--text-faint)' }}>·</span>&nbsp;&nbsp;
                 {vaultCount} {vaultCount === 1 ? 'vault' : 'vaults'}
                 {isSquads ? (
                   <>
-                    &nbsp;
-                    <span style={{ verticalAlign: 'middle' }}>
+                    &nbsp;&nbsp;<span style={{ color: 'var(--text-faint)' }}>·</span>&nbsp;&nbsp;
+                    <span style={{ verticalAlign: 'middle', marginLeft: 2 }}>
                       <Pill tone={wallet.isActive ? 'success' : 'neutral'}>
                         {wallet.isActive ? 'Active' : 'Inactive'}
                       </Pill>

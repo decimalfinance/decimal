@@ -573,8 +573,12 @@ function CreateSquadsTreasuryDialog(props: {
   //   - confirm-on-chain or confirm-with-backend fail AFTER chain
   //     accepted -> we keep the signature in state so the next click
   //     skips signing and resumes from confirmation
-  async function runSignAndConfirm() {
-    if (!pendingIntent) return;
+  async function runSignAndConfirm(intentOverride?: CreateSquadsTreasuryIntentResponse) {
+    // The state `pendingIntent` only matters for the retry path; on the
+    // first run after we create the intent, React hasn't committed the
+    // setPendingIntent yet, so we must accept it as an argument.
+    const intent = intentOverride ?? pendingIntent;
+    if (!intent) return;
     if (!creatorWalletId) {
       setPhase('error');
       setPhaseError('Creator wallet missing.');
@@ -591,7 +595,7 @@ function CreateSquadsTreasuryDialog(props: {
         // Step 1: backend signs with the user's Privy wallet.
         setPhase('signing');
         const signed = await api.signPersonalWalletVersionedTransaction(creatorWalletId, {
-          serializedTransactionBase64: pendingIntent.transaction.serializedTransaction,
+          serializedTransactionBase64: intent.transaction.serializedTransaction,
         });
 
         // Step 2: submit the now-fully-signed tx to chain.
@@ -634,10 +638,10 @@ function CreateSquadsTreasuryDialog(props: {
       setPhase('persisting');
       await api.confirmSquadsTreasury(organizationId, {
         signature: signatureToConfirm!,
-        displayName: pendingIntent.intent.displayName,
-        createKey: pendingIntent.intent.createKey,
-        multisigPda: pendingIntent.intent.multisigPda,
-        vaultIndex: pendingIntent.intent.vaultIndex,
+        displayName: intent.intent.displayName,
+        createKey: intent.intent.createKey,
+        multisigPda: intent.intent.multisigPda,
+        vaultIndex: intent.intent.vaultIndex,
       });
 
       await onConfirmed();
@@ -759,13 +763,10 @@ function CreateSquadsTreasuryDialog(props: {
     try {
       const result = await intentMutation.mutateAsync();
       setPendingIntent(result);
-      // Kick off the sign+confirm pipeline immediately — pendingIntent
-      // gets set inside the same tick so runSignAndConfirm has it via
-      // closure on the next render. Use a microtask to ensure state is
-      // committed before reading pendingIntent.
-      queueMicrotask(() => {
-        void runSignAndConfirm();
-      });
+      // Pass the fresh intent directly — setPendingIntent hasn't committed
+      // yet at this point, so reading state inside runSignAndConfirm would
+      // see null. The state still matters for the retry path.
+      await runSignAndConfirm(result);
     } catch {
       // intentMutation.onError already surfaced the toast via parent.
     }
