@@ -20,6 +20,7 @@ import { ProposalsTable, type ProposalsTableBusy } from '../ui/ProposalsTable';
 import type { DecimalProposal } from '../types';
 import { Ico } from '../dec/icons';
 import { Pill } from '../dec/primitives';
+import { CopyAddress } from './Wallets';
 
 const ALL_PERMISSIONS: SquadsPermission[] = ['initiate', 'vote', 'execute'];
 
@@ -566,7 +567,8 @@ function VaultsTable({
       <table className="tbl">
         <thead>
           <tr>
-            <th style={{ width: '40%' }}>Vault</th>
+            <th style={{ width: '32%' }}>Vault</th>
+            <th style={{ width: '16%' }}>Address</th>
             <th className="num">Balance</th>
             <th>Spending limits</th>
             <th className="num" style={{ width: 130 }}></th>
@@ -583,6 +585,9 @@ function VaultsTable({
                     <span className="tc-icon"><Ico.vault w={17} /></span>
                     <span className="tc-name">{v.displayName || 'Untitled vault'}</span>
                   </div>
+                </td>
+                <td>
+                  <CopyAddress address={v.address} />
                 </td>
                 <td className="td-num" style={{ paddingRight: 28 }}>
                   {raw ? formatRawUsdcCompact(raw) : '0.00'}{' '}

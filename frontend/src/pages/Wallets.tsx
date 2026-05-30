@@ -62,12 +62,13 @@ export function WalletsPage({ session: _session }: { session: AuthenticatedSessi
     enabled: Boolean(organizationId),
   });
   const treasuryWalletMetaById = useMemo(() => {
-    const map = new Map<string, { source: string; sourceRef: string | null; sourceVaultIndex: number | null }>();
+    const map = new Map<string, { source: string; sourceRef: string | null; sourceVaultIndex: number | null; address: string }>();
     for (const w of treasuryWalletsQuery.data?.items ?? []) {
       map.set(w.treasuryWalletId, {
         source: w.source,
         sourceRef: w.sourceRef,
         sourceVaultIndex: w.sourceVaultIndex,
+        address: w.address,
       });
     }
     return map;
@@ -119,6 +120,7 @@ export function WalletsPage({ session: _session }: { session: AuthenticatedSessi
   type GroupedRow = {
     key: string;
     primaryTreasuryWalletId: string;
+    primaryAddress: string;
     displayName: string;
     isSquads: boolean;
     vaultCount: number;
@@ -127,7 +129,7 @@ export function WalletsPage({ session: _session }: { session: AuthenticatedSessi
     rpcError: string | null;
   };
   const groupedRows = useMemo<GroupedRow[]>(() => {
-    const groups = new Map<string, GroupedRow & { _vaultIndexes: Array<{ id: string; index: number | null; name: string | null }> }>();
+    const groups = new Map<string, GroupedRow & { _vaultIndexes: Array<{ id: string; index: number | null; name: string | null; address: string }> }>();
     for (const row of rows) {
       const meta = treasuryWalletMetaById.get(row.treasuryWalletId);
       const isSquads = meta?.source === 'squads_v4';
@@ -145,11 +147,13 @@ export function WalletsPage({ session: _session }: { session: AuthenticatedSessi
           id: row.treasuryWalletId,
           index: meta?.sourceVaultIndex ?? null,
           name: row.displayName,
+          address: meta?.address ?? row.address ?? '',
         });
       } else {
         groups.set(key, {
           key,
           primaryTreasuryWalletId: row.treasuryWalletId,
+          primaryAddress: meta?.address ?? row.address ?? '',
           displayName: row.displayName ?? 'Untitled treasury',
           isSquads,
           vaultCount: 1,
@@ -160,12 +164,13 @@ export function WalletsPage({ session: _session }: { session: AuthenticatedSessi
             id: row.treasuryWalletId,
             index: meta?.sourceVaultIndex ?? null,
             name: row.displayName,
+            address: meta?.address ?? row.address ?? '',
           }],
         });
       }
     }
     // For Squads groups, pick the lowest-vault-index entry as the canonical
-    // landing point + use its name as the group display name.
+    // landing point + use its name + address as the group display row.
     return Array.from(groups.values()).map((g) => {
       if (g.isSquads) {
         const sorted = [...g._vaultIndexes].sort((a, b) => (a.index ?? 999) - (b.index ?? 999));
@@ -173,6 +178,7 @@ export function WalletsPage({ session: _session }: { session: AuthenticatedSessi
         return {
           key: g.key,
           primaryTreasuryWalletId: base.id,
+          primaryAddress: base.address,
           displayName: base.name ?? 'Untitled treasury',
           isSquads: true,
           vaultCount: g.vaultCount,
@@ -271,10 +277,11 @@ export function WalletsPage({ session: _session }: { session: AuthenticatedSessi
             <table className="tbl">
               <thead>
                 <tr>
-                  <th style={{ width: '34%' }}>Account</th>
-                  <th className="num" style={{ width: '18%' }}>Balance</th>
-                  <th style={{ width: '14%' }}>Vaults</th>
-                  <th style={{ width: '20%' }}>Signers</th>
+                  <th style={{ width: '28%' }}>Account</th>
+                  <th style={{ width: '16%' }}>Address</th>
+                  <th className="num" style={{ width: '16%' }}>Balance</th>
+                  <th style={{ width: '12%' }}>Vaults</th>
+                  <th style={{ width: '18%' }}>Signers</th>
                   <th>Status</th>
                   <th style={{ width: 28 }}></th>
                 </tr>
@@ -295,6 +302,9 @@ export function WalletsPage({ session: _session }: { session: AuthenticatedSessi
                           </span>
                         </div>
                       </div>
+                    </td>
+                    <td>
+                      <CopyAddress address={g.primaryAddress} />
                     </td>
                     <td className="td-num" style={{ paddingRight: 28 }}>
                       {formatRawUsdcCompact(g.usdcRawSum)} <span style={{ color: 'var(--text-faint)' }}>USDC</span>
@@ -1112,5 +1122,50 @@ function SignerAvatar({ avatarUrl, initials }: { avatarUrl: string | null; initi
         style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
       />
     </span>
+  );
+}
+
+// Truncated address with click-to-copy. Uses Ico.address as a visual
+// hint, falls back to alt-text "Copy" tooltip. Click stops propagation
+// so the row's navigate() handler doesn't also fire.
+export function CopyAddress({ address }: { address: string }) {
+  const { success: toastSuccess, error: toastError } = useToast();
+  const [copied, setCopied] = useState(false);
+  if (!address) {
+    return <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>—</span>;
+  }
+  const short = `${address.slice(0, 4)}…${address.slice(-4)}`;
+  return (
+    <button
+      type="button"
+      onClick={async (e) => {
+        e.stopPropagation();
+        try {
+          await navigator.clipboard.writeText(address);
+          setCopied(true);
+          toastSuccess('Address copied.');
+          setTimeout(() => setCopied(false), 1500);
+        } catch {
+          toastError('Copy failed.');
+        }
+      }}
+      title={copied ? 'Copied' : `Copy ${address}`}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '4px 9px',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--r-sm)',
+        background: 'var(--bg-surface)',
+        color: 'var(--text-muted)',
+        fontFamily: 'var(--font-mono)',
+        fontSize: 11,
+        cursor: 'pointer',
+      }}
+    >
+      {short}
+      {copied ? <Ico.checkSm w={12} /> : <Ico.copy w={12} />}
+    </button>
   );
 }
