@@ -134,10 +134,15 @@ export function PaymentDetailPage() {
 
   // Manual sync — for the case where the on-chain side moved past what
   // the local cache reflects (e.g. the user double-clicked Execute, the
-  // first sig landed but confirm never ran, or the auto-retry hook is
-  // off because no signature was recorded). Best-effort: if we have a
-  // recorded sig, re-run confirm; otherwise just poke advancePaymentOrder
-  // to nudge the agent router. Always invalidates the cache.
+  // first sig landed but confirm never ran). Two paths:
+  //   1. If we have a recorded sig anywhere, poll RPC directly from the
+  //      browser first (longer window than the backend's 20s) so we know
+  //      it's actually on chain, then call confirmProposalExecution. The
+  //      backend now stores the sig even when only 'seen' — the FE RPC
+  //      poll bridges the gap when the backend's RPC view is flaky.
+  //   2. If the order is still in draft, poke advancePaymentOrder to
+  //      nudge the agent router.
+  // Always invalidates the cache.
   const syncMutation = useMutation({
     mutationFn: async () => {
       const fresh = orderQuery.data;
@@ -149,25 +154,32 @@ export function PaymentDetailPage() {
         ?? fresh?.squadsLifecycle?.submittedSignature
         ?? fresh?.reconciliationDetail?.latestExecution?.submittedSignature
         ?? null;
-      let didSomething = false;
       if (proposal && sig) {
+        // Direct RPC poll — if the backend's confirm is going to fail
+        // because RPC hasn't propagated yet, at least we tried browser-
+        // side first. 45s timeout (vs backend's 20s).
+        try {
+          const { Connection } = await import('@solana/web3.js');
+          const { resolveSolanaRpcUrl, waitForSignatureVisible } = await import('../lib/solana-wallet');
+          const connection = new Connection(resolveSolanaRpcUrl(), 'confirmed');
+          await waitForSignatureVisible(connection, sig, { timeoutMs: 45_000 });
+        } catch {
+          // RPC poll failures aren't fatal — backend confirm has its own
+          // RPC check and may see different node state.
+        }
         try {
           await api.confirmProposalExecution(organizationId!, proposal.decimalProposalId, { signature: sig });
-          didSomething = true;
         } catch {
-          // Backend confirm may say "already settled" — that's fine, the
-          // invalidate below will pull the fresh state.
+          // Backend may say "already settled" — fine, invalidate below.
         }
       }
       if (fresh?.derivedState === 'draft') {
         try {
           await api.advancePaymentOrder(organizationId!, paymentOrderId!);
-          didSomething = true;
         } catch {
           // ignore — agent may be blocked; refresh anyway
         }
       }
-      return { didSomething };
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['payment-order', organizationId, paymentOrderId] });

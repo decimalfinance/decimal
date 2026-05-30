@@ -189,6 +189,11 @@ export type CreateSquadsTreasuryIntentInput = {
   members: SquadsTreasuryMemberInput[];
 };
 
+export type RegisterSquadsTreasuryVaultInput = {
+  displayName?: string | null;
+  vaultIndex: number;
+};
+
 export type CreateSquadsAddMemberProposalInput = {
   creatorPersonalWalletId: string;
   newMemberPersonalWalletId: string;
@@ -286,7 +291,7 @@ export async function createSquadsTreasuryIntent(
     index: normalized.vaultIndex,
     programId,
   });
-  await assertSquadsTreasuryAvailable(organizationId, multisigPda, vaultPda);
+  await assertSquadsVaultAvailable(organizationId, multisigPda, vaultPda, normalized.vaultIndex);
 
   const [programTreasury, latestBlockhash] = await Promise.all([
     runtime.getProgramTreasury(programId),
@@ -1767,7 +1772,13 @@ export async function confirmDecimalProposalExecution(
 ) {
   await getDecimalProposal(organizationId, actorUserId, decimalProposalId);
   const signature = input.signature.trim();
-  await verifyRpcSignatureConfirmed(signature, 'proposal_execution');
+  // Lenient: store the signature even if RPC hasn't promoted it to
+  // 'confirmed' yet, as long as the tx was actually seen on chain. The
+  // old verifyRpcSignatureConfirmed would throw when sig was 'processed'
+  // but not 'confirmed', which discarded the signature entirely and
+  // left the proposal orphaned (the FE auto-retry hook gates on
+  // proposal.executedSignature, so no signature → no retry).
+  const visible = await checkRpcSignatureStatus(signature, 'proposal_execution');
   const currentForSettlement = await prisma.decimalProposal.findFirstOrThrow({
     where: { organizationId, decimalProposalId },
   });
@@ -1788,7 +1799,12 @@ export async function confirmDecimalProposalExecution(
     });
   }
 
-  const settlementVerification = await verifySquadsProposalSettlement(currentForSettlement, signature);
+  // Settlement verification needs a confirmed tx to inspect transfers.
+  // If the sig is only 'seen' (not yet confirmed), mark settlement as
+  // pending so the auto-retry hook re-runs this endpoint.
+  const settlementVerification: SquadsSettlementVerification = visible.confirmed
+    ? await verifySquadsProposalSettlement(currentForSettlement, signature)
+    : { status: 'pending', signature, checkedAt: new Date().toISOString(), reason: 'awaiting on-chain confirmation' };
   const settled = isSettlementSettled(settlementVerification);
 
   const updated = await prisma.$transaction(async (tx) => {
@@ -2293,7 +2309,7 @@ export async function confirmSquadsTreasuryCreation(
 
   const vaultIndex = normalizeVaultIndex(input.vaultIndex);
   const vaultPda = multisig.getVaultPda({ multisigPda, index: vaultIndex, programId })[0];
-  await assertSquadsTreasuryAvailable(organizationId, multisigPda, vaultPda);
+  await assertSquadsVaultAvailable(organizationId, multisigPda, vaultPda, vaultIndex);
 
   const multisigAccount = await runtime.loadMultisig(multisigPda);
   if (!publicKeysEqual(multisigAccount.createKey, createKey)) {
@@ -2325,6 +2341,7 @@ export async function confirmSquadsTreasuryCreation(
         usdcAtaAddress,
         source: SQUADS_SOURCE,
         sourceRef: multisigPda.toBase58(),
+        sourceVaultIndex: vaultIndex,
         displayName,
         propertiesJson: {
           usdcAtaAddress,
@@ -2413,6 +2430,153 @@ export async function confirmSquadsTreasuryCreation(
   return serializeSquadsTreasuryWallet(wallet);
 }
 
+export async function registerSquadsTreasuryVault(
+  organizationId: string,
+  actorUserId: string,
+  treasuryWalletId: string,
+  input: RegisterSquadsTreasuryVaultInput,
+) {
+  const baseWallet = await prisma.treasuryWallet.findFirst({
+    where: {
+      organizationId,
+      treasuryWalletId,
+      source: SQUADS_SOURCE,
+      isActive: true,
+    },
+  });
+  if (!baseWallet || !baseWallet.sourceRef) {
+    throw notFound('Squads treasury wallet not found');
+  }
+
+  const displayName =
+    normalizeOptionalText(input.displayName)
+    ?? `${baseWallet.displayName ?? 'Squads treasury'} vault ${input.vaultIndex}`;
+  const vaultIndex = normalizeVaultIndex(input.vaultIndex);
+  const programId = new PublicKey(config.squadsProgramId);
+  const multisigPda = new PublicKey(baseWallet.sourceRef);
+  const vaultPda = multisig.getVaultPda({ multisigPda, index: vaultIndex, programId })[0];
+  await assertSquadsVaultAvailable(organizationId, multisigPda, vaultPda, vaultIndex);
+
+  const multisigAccount = await runtime.loadMultisig(multisigPda);
+  if (!publicKeysEqual(multisigAccount.configAuthority, PublicKey.default)) {
+    throw badRequest('Only autonomous Squads treasuries are supported.');
+  }
+
+  const onchainMembers = serializeOnchainMembers(multisigAccount.members);
+  const linkedMembers = await loadMembersByWalletAddresses(organizationId, onchainMembers.map((member) => member.walletAddress));
+  if (linkedMembers.length !== onchainMembers.length) {
+    throw badRequest('Every Squads member must be either an active Decimal personal wallet or an active Decimal agent wallet in this organization.');
+  }
+
+  const creatorWallet = linkedMembers.find((member) => member.memberType === 'personal' && member.userId === actorUserId);
+  if (!creatorWallet) {
+    throw badRequest('The registering user must control one of the Squads member wallets.');
+  }
+
+  const baseMetadata = readSquadsMetadata(baseWallet.propertiesJson);
+  const usdcAtaAddress = deriveUsdcAtaForWallet(vaultPda.toBase58());
+  const wallet = await prisma.$transaction(async (tx) => {
+    const created = await tx.treasuryWallet.create({
+      data: {
+        organizationId,
+        chain: SOLANA_CHAIN,
+        address: vaultPda.toBase58(),
+        assetScope: USDC_ASSET,
+        usdcAtaAddress,
+        source: SQUADS_SOURCE,
+        sourceRef: multisigPda.toBase58(),
+        sourceVaultIndex: vaultIndex,
+        displayName,
+        propertiesJson: {
+          usdcAtaAddress,
+          squads: {
+            programId: programId.toBase58(),
+            multisigPda: multisigPda.toBase58(),
+            vaultPda: vaultPda.toBase58(),
+            vaultIndex,
+            createKey: baseMetadata?.createKey ?? null,
+            threshold: Number(multisigAccount.threshold),
+            timeLockSeconds: Number(multisigAccount.timeLock),
+            transactionIndex: multisigAccount.transactionIndex.toString(),
+            staleTransactionIndex: multisigAccount.staleTransactionIndex.toString(),
+            registeredFromTreasuryWalletId: baseWallet.treasuryWalletId,
+            members: onchainMembers,
+          },
+        } satisfies Prisma.InputJsonObject,
+      },
+    });
+
+    for (const member of linkedMembers.filter((linkedMember) => linkedMember.memberType === 'personal')) {
+      const onchainMember = onchainMembers.find((item) => item.walletAddress === member.walletAddress);
+      await tx.organizationWalletAuthorization.upsert({
+        where: {
+          organizationId_treasuryWalletId_userWalletId_role: {
+            organizationId,
+            treasuryWalletId: created.treasuryWalletId,
+            userWalletId: member.personalWalletId,
+            role: 'squads_member',
+          },
+        },
+        create: {
+          organizationId,
+          treasuryWalletId: created.treasuryWalletId,
+          userWalletId: member.personalWalletId,
+          membershipId: member.membershipId,
+          role: 'squads_member',
+          scope: 'treasury_wallet',
+          metadataJson: {
+            provider: SQUADS_SOURCE,
+            permissions: onchainMember?.permissions ?? [],
+            multisigPda: multisigPda.toBase58(),
+            vaultPda: vaultPda.toBase58(),
+            vaultIndex,
+          } satisfies Prisma.InputJsonObject,
+        },
+        update: {
+          membershipId: member.membershipId,
+          status: 'active',
+          revokedAt: null,
+          metadataJson: {
+            provider: SQUADS_SOURCE,
+            permissions: onchainMember?.permissions ?? [],
+            multisigPda: multisigPda.toBase58(),
+            vaultPda: vaultPda.toBase58(),
+            vaultIndex,
+          } satisfies Prisma.InputJsonObject,
+        },
+      });
+    }
+
+    return created;
+  });
+
+  const funding = await fundNewDevnetWalletIfConfigured(wallet.address)
+    .catch((error) => {
+      const reason = error instanceof Error ? error.message : 'devnet_funding_failed';
+      logger.warn('devnet_funding.treasury_wallet_failed', {
+        organizationId,
+        treasuryWalletId: wallet.treasuryWalletId,
+        walletAddress: wallet.address,
+        reason,
+      });
+      return { status: 'skipped' as const, reason };
+    });
+
+  if (funding.status === 'funded' || funding.status === 'already_funded') {
+    const updatedWallet = await prisma.treasuryWallet.update({
+      where: { treasuryWalletId: wallet.treasuryWalletId },
+      data: {
+        propertiesJson: mergeSquadsMetadata(wallet.propertiesJson, {
+          devnetFunding: funding as unknown as Prisma.InputJsonObject,
+        }),
+      },
+    });
+    return serializeSquadsTreasuryWallet(updatedWallet);
+  }
+
+  return serializeSquadsTreasuryWallet(wallet);
+}
+
 export async function getSquadsTreasuryStatus(organizationId: string, treasuryWalletId: string) {
   const wallet = await prisma.treasuryWallet.findFirst({
     where: { organizationId, treasuryWalletId },
@@ -2428,7 +2592,7 @@ export async function getSquadsTreasuryStatus(organizationId: string, treasuryWa
   const multisigPda = new PublicKey(wallet.sourceRef);
   const multisigAccount = await runtime.loadMultisig(multisigPda);
   const metadata = readSquadsMetadata(wallet.propertiesJson);
-  const vaultIndex = typeof metadata?.vaultIndex === 'number' ? metadata.vaultIndex : config.squadsDefaultVaultIndex;
+  const vaultIndex = readTreasuryWalletVaultIndex(wallet, metadata);
   const vaultPda = multisig.getVaultPda({ multisigPda, index: vaultIndex, programId })[0];
   const members = serializeOnchainMembers(multisigAccount.members);
 
@@ -2466,7 +2630,7 @@ export async function getSquadsTreasuryDetail(organizationId: string, treasuryWa
   const multisigPda = new PublicKey(wallet.sourceRef);
   const multisigAccount = await runtime.loadMultisig(multisigPda);
   const metadata = readSquadsMetadata(wallet.propertiesJson);
-  const vaultIndex = typeof metadata?.vaultIndex === 'number' ? metadata.vaultIndex : config.squadsDefaultVaultIndex;
+  const vaultIndex = readTreasuryWalletVaultIndex(wallet, metadata);
   const vaultPda = multisig.getVaultPda({ multisigPda, index: vaultIndex, programId })[0];
   const onchainMembers = serializeOnchainMembers(multisigAccount.members);
   const linkedMembers = await loadDetailedMembersByWalletAddresses(
@@ -3117,6 +3281,7 @@ export function serializeSquadsTreasuryWallet(wallet: {
   isActive: boolean;
   source: string;
   sourceRef: string | null;
+  sourceVaultIndex: number | null;
   displayName: string | null;
   notes: string | null;
   propertiesJson: Prisma.JsonValue;
@@ -3133,6 +3298,7 @@ export function serializeSquadsTreasuryWallet(wallet: {
     isActive: wallet.isActive,
     source: wallet.source,
     sourceRef: wallet.sourceRef,
+    sourceVaultIndex: wallet.sourceVaultIndex,
     displayName: wallet.displayName,
     notes: wallet.notes,
     propertiesJson: wallet.propertiesJson,
@@ -3562,9 +3728,18 @@ async function findActiveSquadsBatchedPaymentProposal(organizationId: string, pa
   ) ?? null;
 }
 
-async function verifyRpcSignatureConfirmed(signature: string, purpose: string) {
+// Returns { confirmed: true } when RPC has the sig at confirmed/finalized.
+// Returns { confirmed: false, seen: true } when the sig is in the mempool /
+// processed (callers should still store it — see the comment in
+// confirmDecimalProposalExecution). Throws only when the tx truly never
+// landed (RPC has no record after the poll window) or when chain reports
+// it errored.
+async function checkRpcSignatureStatus(
+  signature: string,
+  purpose: string,
+): Promise<{ confirmed: boolean; seen: boolean }> {
   if (config.nodeEnv === 'test') {
-    return;
+    return { confirmed: true, seen: true };
   }
   if (!isSolanaSignatureLike(signature)) {
     throw badRequest('Invalid Solana transaction signature.', { signature, purpose });
@@ -3584,6 +3759,21 @@ async function verifyRpcSignatureConfirmed(signature: string, purpose: string) {
     });
   }
 
+  if (!visible.seen) {
+    throw badRequest('Transaction signature has not landed on chain.', {
+      signature,
+      purpose,
+    });
+  }
+
+  return visible;
+}
+
+// Strict variant kept for callers that genuinely need a fully-confirmed
+// signature before proceeding (e.g. proposal submission where we can't
+// reason about a half-landed state).
+async function verifyRpcSignatureConfirmed(signature: string, purpose: string) {
+  const visible = await checkRpcSignatureStatus(signature, purpose);
   if (!visible.confirmed) {
     throw badRequest('Transaction signature is not confirmed yet. Retry confirmation after the transaction lands.', {
       signature,
@@ -3970,7 +4160,7 @@ async function loadSquadsTreasury(organizationId: string, treasuryWalletId: stri
   const multisigPda = new PublicKey(wallet.sourceRef);
   const multisigAccount = await runtime.loadMultisig(multisigPda);
   const metadata = readSquadsMetadata(wallet.propertiesJson);
-  const vaultIndex = typeof metadata?.vaultIndex === 'number' ? metadata.vaultIndex : config.squadsDefaultVaultIndex;
+  const vaultIndex = readTreasuryWalletVaultIndex(wallet, metadata);
   const vaultPda = multisig.getVaultPda({ multisigPda, index: vaultIndex, programId })[0];
 
   return {
@@ -3993,19 +4183,28 @@ async function resolveSquadsProgramTreasury(programId: PublicKey) {
   return programConfig.treasury as PublicKey;
 }
 
-async function assertSquadsTreasuryAvailable(organizationId: string, multisigPda: PublicKey, vaultPda: PublicKey) {
+async function assertSquadsVaultAvailable(
+  organizationId: string,
+  multisigPda: PublicKey,
+  vaultPda: PublicKey,
+  vaultIndex: number,
+) {
   const existing = await prisma.treasuryWallet.findFirst({
     where: {
       organizationId,
       OR: [
         { address: vaultPda.toBase58() },
-        { sourceRef: multisigPda.toBase58() },
+        {
+          source: SQUADS_SOURCE,
+          sourceRef: multisigPda.toBase58(),
+          sourceVaultIndex: vaultIndex,
+        },
       ],
     },
     select: { treasuryWalletId: true },
   });
   if (existing) {
-    throw badRequest('Squads treasury wallet already exists in this organization.');
+    throw badRequest('Squads vault already exists in this organization.');
   }
 }
 
@@ -4386,7 +4585,18 @@ function readSquadsMetadata(value: unknown) {
     multisigPda?: string;
     vaultPda?: string;
     vaultIndex?: number;
+    createKey?: string | null;
   };
+}
+
+function readTreasuryWalletVaultIndex(
+  wallet: { sourceVaultIndex?: number | null },
+  metadata: ReturnType<typeof readSquadsMetadata>,
+) {
+  if (typeof wallet.sourceVaultIndex === 'number') {
+    return wallet.sourceVaultIndex;
+  }
+  return typeof metadata?.vaultIndex === 'number' ? metadata.vaultIndex : config.squadsDefaultVaultIndex;
 }
 
 function publicKeysEqual(left: PublicKey, right: PublicKey) {
