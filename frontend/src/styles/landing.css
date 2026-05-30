@@ -95,7 +95,7 @@ html body {
   margin: 0;
 }
 
-.h-xxl { font-size: clamp(32px, 3.8vw, 58px); line-height: 1.04; letter-spacing: -0.035em; }
+.h-xxl { font-size: clamp(28px, 3.2vw, 48px); line-height: 1.05; letter-spacing: -0.035em; }
 .h-xl  { font-size: clamp(32px, 4.2vw, 64px); line-height: 1.04; }
 .h-l   { font-size: clamp(30px, 4vw, 56px); }
 .h-m   { font-size: clamp(24px, 3vw, 40px); }
@@ -245,14 +245,17 @@ html body {
    so it scales with the type. */
 .hero h1 .accent { font-style: italic; font-weight: 600; }
 .hero h1 .accent.pink { color: var(--pink); }
+/* Single hand-drawn underline spanning the word width — looks more like
+   a marker swoop than a sine-wave tile. The SVG stretches with the
+   word via preserveAspectRatio='none' + background-size: 100%. */
 .hero h1 .squiggle {
   position: relative;
   display: inline-block;
-  padding-bottom: 0.18em;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 8' preserveAspectRatio='none'><path d='M0 4 Q 10 0 20 4 T 40 4 T 60 4 T 80 4' fill='none' stroke='%23e6005c' stroke-width='2' stroke-linecap='round'/></svg>");
-  background-repeat: repeat-x;
+  padding-bottom: 0.12em;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 14' preserveAspectRatio='none'><path d='M3 9 C 50 2, 120 14, 197 6' fill='none' stroke='%23e6005c' stroke-width='2.5' stroke-linecap='round'/></svg>");
+  background-repeat: no-repeat;
   background-position: 0 100%;
-  background-size: 1.4em 0.28em;
+  background-size: 100% 0.34em;
 }
 .hero-actions {
   display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
