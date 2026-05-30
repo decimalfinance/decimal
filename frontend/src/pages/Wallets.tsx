@@ -717,16 +717,16 @@ function CreateSquadsTreasuryDialog(props: {
   }
 
   function togglePerm(walletId: string, perm: SquadsPermission) {
-    // Block disabling the creator's 'vote' — backend rule.
-    if (walletId === creatorWalletId && perm === 'vote') return;
     setMemberPermissions((prev) => {
       const current = prev[walletId] ?? [];
       if (current.length === 0) return prev; // can't toggle a role on someone who isn't a signer
       const has = current.includes(perm);
       const nextPerms = has ? current.filter((p) => p !== perm) : [...current, perm];
-      // If the user disables every role, treat that as unchecking the row.
+      // If the user disables every role, treat that as unchecking the row
+      // (except the creator — they MUST stay; the mutation will surface
+      // a friendlier error if they cleared their Approver role too).
       if (nextPerms.length === 0) {
-        if (walletId === creatorWalletId) return prev; // can't fully clear creator
+        if (walletId === creatorWalletId) return { ...prev, [walletId]: [] };
         const { [walletId]: _, ...rest } = prev;
         return rest;
       }
@@ -859,30 +859,20 @@ function CreateSquadsTreasuryDialog(props: {
                         </span>
                         <span className="ci-name">{w.user.displayName ?? w.user.email}</span>
                         {isCreator ? <span className="ci-sub" style={{ marginRight: 4 }}>you</span> : null}
-                        {/* Per-row role pills. Only visible when the row is
-                            checked — hiding them on unchecked rows keeps
-                            the list scannable. */}
+                        {/* Per-row role segment. One container, three cells.
+                            Only visible when the row is checked — keeps
+                            unchecked rows scannable. */}
                         {checked ? (
-                          <PermPills
+                          <PermSegment
                             initiator={hasPerm(w.userWalletId, 'initiate')}
                             approver={hasPerm(w.userWalletId, 'vote')}
                             executor={hasPerm(w.userWalletId, 'execute')}
-                            disabledApprover={isCreator}
                             onToggle={(perm) => togglePerm(w.userWalletId, perm)}
                           />
                         ) : null}
                       </div>
                     );
                   })}
-                  {/* Decimal agent — always part of the team, shown for clarity */}
-                  <div className="check-item on" style={{ cursor: 'default' }} aria-disabled>
-                    <span className="check-box"><Ico.checkSm w={12} /></span>
-                    <span className="ci-av agent">
-                      <Ico.bolt w={13} fill="currentColor" sw={0} />
-                    </span>
-                    <span className="ci-name">Decimal agent</span>
-                    <span className="ci-sub">agent</span>
-                  </div>
                 </div>
               )}
             </div>
@@ -1014,58 +1004,68 @@ function initialsFromUser(name: string | null, email: string): string {
   return local.slice(0, 2).toUpperCase();
 }
 
-// Per-signer role pills — reuses the design's .perm pill style from the
-// Treasury Detail members table so the visual language is consistent
-// across "edit signer roles" surfaces. Three roles: Initiator (can start
-// proposals), Approver (counts toward threshold), Executor (can broadcast).
-function PermPills({
+// Per-signer role segment — a single rounded container divided into 3
+// cells (Initiator / Approver / Executor). Each cell is independently
+// toggleable so a signer can hold any combination of roles. Inline
+// styles because there's no design pre-existing multi-select segment.
+function PermSegment({
   initiator,
   approver,
   executor,
-  disabledApprover,
   onToggle,
 }: {
   initiator: boolean;
   approver: boolean;
   executor: boolean;
-  disabledApprover: boolean;
   onToggle: (perm: SquadsPermission) => void;
 }) {
+  const cells: Array<{ on: boolean; label: string; perm: SquadsPermission; tip: string }> = [
+    { on: initiator, label: 'Initiator', perm: 'initiate', tip: 'Can start new proposals' },
+    { on: approver, label: 'Approver', perm: 'vote', tip: 'Counts toward the approval threshold' },
+    { on: executor, label: 'Executor', perm: 'execute', tip: 'Can broadcast approved proposals on chain' },
+  ];
   return (
-    <div className="perm-pills" style={{ marginLeft: 'auto' }}>
-      <PermPill on={initiator} label="Initiator" onClick={() => onToggle('initiate')} />
-      <PermPill on={approver} label="Approver" onClick={() => onToggle('vote')} disabled={disabledApprover} title={disabledApprover ? 'You must keep Approver — the creator has to be a voting member.' : undefined} />
-      <PermPill on={executor} label="Executor" onClick={() => onToggle('execute')} />
-    </div>
-  );
-}
-
-function PermPill({
-  on,
-  label,
-  onClick,
-  disabled,
-  title,
-}: {
-  on: boolean;
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-  title?: string;
-}) {
-  return (
-    <button
-      type="button"
-      className={`perm${on ? ' on' : ''}`}
-      onClick={(e) => {
-        e.stopPropagation();
-        if (!disabled) onClick();
+    <div
+      style={{
+        marginLeft: 'auto',
+        display: 'inline-flex',
+        alignItems: 'stretch',
+        border: '1px solid var(--border-strong)',
+        borderRadius: 'var(--r-pill)',
+        background: 'var(--bg-surface)',
+        overflow: 'hidden',
+        height: 26,
+        flex: '0 0 auto',
       }}
-      disabled={disabled}
-      title={title}
-      style={{ cursor: disabled ? 'default' : 'pointer' }}
+      role="group"
+      aria-label="Signer roles"
     >
-      {label}
-    </button>
+      {cells.map((c, i) => (
+        <button
+          key={c.perm}
+          type="button"
+          title={c.tip}
+          aria-pressed={c.on}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggle(c.perm);
+          }}
+          style={{
+            padding: '0 11px',
+            border: 'none',
+            borderLeft: i === 0 ? 'none' : '1px solid var(--border)',
+            background: c.on ? 'var(--accent)' : 'transparent',
+            color: c.on ? 'var(--accent-contrast)' : 'var(--text-muted)',
+            fontFamily: 'var(--font-body)',
+            fontSize: 11,
+            fontWeight: c.on ? 600 : 500,
+            cursor: 'pointer',
+            transition: 'background .12s, color .12s',
+          }}
+        >
+          {c.label}
+        </button>
+      ))}
+    </div>
   );
 }
