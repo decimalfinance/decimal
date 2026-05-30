@@ -1692,7 +1692,7 @@ const PERIOD_OPTIONS: Array<{ key: 'one_time' | 'day' | 'week' | 'month'; label:
   { key: 'month', label: 'Per month' },
 ];
 
-function CreateSpendingLimitDialog({
+export function CreateSpendingLimitDialog({
   organizationId,
   treasuryWalletId,
   onClose,
