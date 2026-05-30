@@ -95,7 +95,7 @@ html body {
   margin: 0;
 }
 
-.h-xxl { font-size: clamp(36px, 4.6vw, 72px); line-height: 1.04; letter-spacing: -0.035em; }
+.h-xxl { font-size: clamp(32px, 3.8vw, 58px); line-height: 1.04; letter-spacing: -0.035em; }
 .h-xl  { font-size: clamp(32px, 4.2vw, 64px); line-height: 1.04; }
 .h-l   { font-size: clamp(30px, 4vw, 56px); }
 .h-m   { font-size: clamp(24px, 3vw, 40px); }
@@ -239,6 +239,21 @@ html body {
 }
 .hero h1 .strike-thru { position: relative; display: inline-block; }
 .hero h1 .arch-mark { display: inline-flex; align-items: center; }
+
+/* "Friction" and "globally" — italic Bricolage variant for editorial
+   accent. The squiggle under "globally" is an inline SVG background
+   so it scales with the type. */
+.hero h1 .accent { font-style: italic; font-weight: 600; }
+.hero h1 .accent.pink { color: var(--pink); }
+.hero h1 .squiggle {
+  position: relative;
+  display: inline-block;
+  padding-bottom: 0.18em;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 8' preserveAspectRatio='none'><path d='M0 4 Q 10 0 20 4 T 40 4 T 60 4 T 80 4' fill='none' stroke='%23e6005c' stroke-width='2' stroke-linecap='round'/></svg>");
+  background-repeat: repeat-x;
+  background-position: 0 100%;
+  background-size: 1.4em 0.28em;
+}
 .hero-actions {
   display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
 }

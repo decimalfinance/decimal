@@ -86,10 +86,10 @@ function Hero({ googleHref }: { googleHref: string }) {
 
             <h1 className="display h-xxl">
               <span className="line">
-                {HERO.line1} <span className="pink">{HERO.line1Tail}</span>
+                {HERO.line1} <span className="accent pink">{HERO.line1Tail}</span>
               </span>
               <span className="line">
-                {HERO.line2} {HERO.line2Tail}
+                {HERO.line2} <span className="accent squiggle">{HERO.line2Tail}</span>
               </span>
             </h1>
 
