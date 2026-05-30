@@ -353,7 +353,7 @@ export function PaymentsPage() {
                     </td>
                     <td>
                       <span className="status-cell">
-                        <Pill>{row.state}</Pill>
+                        <Pill tone={row.tone === 'neutral' ? 'info' : row.tone}>{row.state}</Pill>
                         {row.routedViaSpendingLimit ? <SLPill /> : null}
                       </span>
                     </td>

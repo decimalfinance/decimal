@@ -558,135 +558,174 @@ function SpendingLimitProposalSummary({
   policy: SpendingLimitPolicy | null;
   action: 'add' | 'remove' | 'replace';
 }) {
-  // Pull amount/period/destinations from the policy when available;
-  // fall back to the raw config-action payload (covers the edge case
-  // where the policy row hasn't synced or was deleted).
+  // Pull amount / period / destinations from the policy when we can
+  // resolve it; fall back to the raw config-action payload otherwise.
   const payload = proposal.semanticPayloadJson as { actions?: unknown };
   const firstAction =
     (Array.isArray(payload?.actions) ? (payload.actions[0] as Record<string, unknown> | undefined) : undefined) ?? {};
   const amountRaw = policy?.amountRaw ?? (firstAction.amountRaw as string | undefined);
   const period = policy?.period ?? (firstAction.period as string | undefined);
-  const policyName = policy?.policyName;
+  const policyName = policy?.policyName ?? null;
+  const treasuryName = proposal.treasuryWallet?.displayName ?? null;
   const destinations = policy?.destinations ?? [];
-
-  const headlineCopy = (() => {
-    if (action === 'remove') {
-      return 'Remove this spending-limit policy. The agent will no longer be able to auto-pay these vendors.';
-    }
-    if (action === 'replace') {
-      return 'Replace the policy with the new amount, period, and vendor list below.';
-    }
-    return 'When approved, the agent will be able to pay these vendors automatically up to the cap below — no team vote needed for each payment.';
-  })();
+  const rawDestinationAddresses = Array.isArray(firstAction.destinations)
+    ? (firstAction.destinations as string[])
+    : [];
+  const vendorCount = destinations.length || rawDestinationAddresses.length;
+  const actionLabel = action === 'add' ? 'New limit' : action === 'remove' ? 'Removing' : 'Updating';
 
   return (
-    <div>
-      <div className="sec-head">
-        <div className="sh-titles">
-          <h2>What this changes</h2>
-          <p className="sh-desc">{headlineCopy}</p>
-        </div>
-      </div>
-
-      {/* Hero number — the actual cap. Mirrors the .cap-card pattern
-          on the spending-limit detail page so operators read it the
-          same way everywhere. */}
-      <div className="cap-card" style={{ marginBottom: 14 }}>
-        <div className="cap-top">
-          <div className="cap-spent">
-            <span className="cs-lab">{action === 'remove' ? 'Current cap' : 'Cap'}</span>
-            <span className="cs-amt">
+    <div className="stack stack-16">
+      {/* Summary sheet — same .pay-summary pattern used on Payment
+          Detail. Top: the amount + period as the hero number; right:
+          a pill tagging the change type. Then a Policy → Vault route,
+          and a defs grid for the at-a-glance facts. */}
+      <div className="pay-summary">
+        <div className="ps-amount-row">
+          <div>
+            <div className="ps-lab">Cap</div>
+            <div className="ps-amount">
               {amountRaw ? formatRawAmount(amountRaw, 6) : '—'}
               <small>USDC</small>
-            </span>
-            <span className="cs-of">{periodSentence(period)}</span>
-          </div>
-          {policyName ? (
-            <div className="cap-right">
-              <span className="cr-lab">Policy</span>
-              <span className="cr-rem" style={{ fontFamily: 'var(--font-body)' }}>
-                {policyName}
-              </span>
             </div>
-          ) : null}
+            <div style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginTop: 6 }}>
+              {periodSentence(period)}
+            </div>
+          </div>
+          <span className="pill-origin" style={{ marginTop: 4 }}>{actionLabel}</span>
+        </div>
+
+        <div className="ps-route">
+          <div className="ps-endpoint">
+            <span className="pe-lab">Policy</span>
+            <span className="pe-name">{policyName ?? 'Untitled policy'}</span>
+            <span className="pe-sub">{action === 'add' ? 'will be created' : action === 'remove' ? 'will be removed' : 'will be updated'}</span>
+          </div>
+          <Ico.arrowRight w={18} />
+          <div className="ps-endpoint">
+            <span className="pe-lab">Vault</span>
+            <span className="pe-name">{treasuryName ?? '—'}</span>
+            <span className="pe-sub">
+              {vendorCount} verified {vendorCount === 1 ? 'vendor' : 'vendors'}
+            </span>
+          </div>
+        </div>
+
+        <div className="ps-defs">
+          <div className="ps-def">
+            <span className="pd-lab">Period</span>
+            <span className="pd-val">{periodTitle(period)}</span>
+          </div>
+          <div className="ps-def">
+            <span className="pd-lab">Vendors</span>
+            <span className="pd-val">{vendorCount}</span>
+          </div>
+          <div className="ps-def">
+            <span className="pd-lab">Effect</span>
+            <span className="pd-val">
+              {action === 'remove'
+                ? 'Agent stops auto-paying'
+                : 'Agent can auto-pay these vendors'}
+            </span>
+          </div>
+          <div className="ps-def">
+            <span className="pd-lab">Approval needed</span>
+            <span className="pd-val">Treasury signers</span>
+          </div>
         </div>
       </div>
 
-      {/* Vendors covered. List by name first (from the linked policy),
-          fall back to truncated wallet addresses when the policy row
-          isn't resolvable. */}
-      <div className="tbl-card">
-        <table className="tbl">
-          <thead>
-            <tr>
-              <th style={{ width: '50%' }}>Vendor</th>
-              <th>Trust</th>
-              <th>Wallet</th>
-            </tr>
-          </thead>
-          <tbody>
-            {destinations.length > 0 ? (
-              destinations.map((d) => {
-                const label =
-                  d.counterpartyWallet?.label ??
-                  d.counterpartyWallet?.counterparty?.displayName ??
-                  shortenAddress(d.walletAddress, 4, 4);
-                const trust = d.counterpartyWallet?.trustState ?? 'unreviewed';
-                const trustTone: PillTone =
-                  trust === 'trusted'
-                    ? 'success'
-                    : trust === 'blocked' || trust === 'restricted'
-                      ? 'danger'
-                      : 'warning';
-                const trustLabel =
-                  trust === 'trusted'
-                    ? 'Verified'
-                    : trust.charAt(0).toUpperCase() + trust.slice(1);
-                return (
-                  <tr key={d.spendingLimitPolicyDestinationId}>
+      {/* Vendors covered. List by name when the linked policy is
+          resolvable; fall back to truncated wallet addresses
+          otherwise so something still renders. */}
+      <div>
+        <div className="sec-head">
+          <div className="sh-titles">
+            <h2>Vendors covered</h2>
+            <p className="sh-desc">
+              {action === 'remove'
+                ? 'These vendors will no longer be auto-payable under this policy.'
+                : 'The agent can pay these vendors automatically — no team vote needed per payment.'}
+            </p>
+          </div>
+        </div>
+        <div className="tbl-card">
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th style={{ width: '55%' }}>Vendor</th>
+                <th>Trust</th>
+                <th>Wallet</th>
+              </tr>
+            </thead>
+            <tbody>
+              {destinations.length > 0 ? (
+                destinations.map((d) => {
+                  const label =
+                    d.counterpartyWallet?.label ??
+                    d.counterpartyWallet?.counterparty?.displayName ??
+                    shortenAddress(d.walletAddress, 4, 4);
+                  const trust = d.counterpartyWallet?.trustState ?? 'unreviewed';
+                  const trustTone: PillTone =
+                    trust === 'trusted'
+                      ? 'success'
+                      : trust === 'blocked' || trust === 'restricted'
+                        ? 'danger'
+                        : 'warning';
+                  const trustLabel =
+                    trust === 'trusted'
+                      ? 'Verified'
+                      : trust.charAt(0).toUpperCase() + trust.slice(1);
+                  return (
+                    <tr key={d.spendingLimitPolicyDestinationId}>
+                      <td>
+                        <div className="member-cell">
+                          <span className="m-avatar">{vendorInitials(label)}</span>
+                          <span className="m-name">{label}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <Pill tone={trustTone}>{trustLabel}</Pill>
+                      </td>
+                      <td>
+                        <span className="mono" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                          {shortenAddress(d.walletAddress, 4, 4)}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : rawDestinationAddresses.length > 0 ? (
+                rawDestinationAddresses.map((addr) => (
+                  <tr key={addr}>
                     <td>
                       <div className="member-cell">
-                        <span className="m-avatar">{vendorInitials(label)}</span>
-                        <span className="m-name">{label}</span>
+                        <span className="m-avatar">??</span>
+                        <span className="m-name" style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>
+                          {shortenAddress(addr, 4, 4)}
+                        </span>
                       </div>
                     </td>
                     <td>
-                      <Pill tone={trustTone}>{trustLabel}</Pill>
+                      <Pill tone="neutral">Unknown</Pill>
                     </td>
                     <td>
-                      <span className="mono" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                        {shortenAddress(d.walletAddress, 4, 4)}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })
-            ) : (
-              // Fallback: raw action.destinations carries just wallet
-              // addresses. Better than nothing — at least the operator
-              // sees how many vendors are covered.
-              (Array.isArray(firstAction.destinations) ? (firstAction.destinations as string[]) : []).map(
-                (addr) => (
-                  <tr key={addr}>
-                    <td colSpan={3}>
                       <span className="mono" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                         {shortenAddress(addr, 4, 4)}
                       </span>
                     </td>
                   </tr>
-                ),
-              )
-            )}
-            {destinations.length === 0 &&
-            (!Array.isArray(firstAction.destinations) || firstAction.destinations.length === 0) ? (
-              <tr>
-                <td colSpan={3} style={{ padding: 18, color: 'var(--text-muted)', fontSize: 13 }}>
-                  No vendors on this policy yet.
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={3} style={{ padding: 18, color: 'var(--text-muted)', fontSize: 13 }}>
+                    No vendors on this policy yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
@@ -705,6 +744,14 @@ function periodSentence(period: string | undefined): string {
   if (period === 'day') return 'per day, resets at midnight';
   if (period === 'one_time') return 'one-time — single use';
   return `per ${period ?? 'period'}`;
+}
+
+function periodTitle(period: string | undefined): string {
+  if (period === 'month') return 'Monthly';
+  if (period === 'week') return 'Weekly';
+  if (period === 'day') return 'Daily';
+  if (period === 'one_time') return 'One-time';
+  return period ?? '—';
 }
 
 function ConfigActionsSummary({ proposal }: { proposal: DecimalProposal }) {
