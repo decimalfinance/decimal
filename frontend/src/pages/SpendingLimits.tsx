@@ -1,9 +1,10 @@
 import { Link, useParams } from 'react-router';
-import { useQuery } from '@tanstack/react-query';
-import { api } from '../api';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { api, ApiError } from '../api';
 import type { SpendingLimitPolicy, SpendingLimitPolicyStatus } from '../types';
 import { formatRawUsdcCompact } from '../domain';
 import { EmptyIcon, RdEmptyState } from '../ui-primitives';
+import { useToast } from '../ui/Toast';
 
 // Cross-treasury Spending Limits page. The per-treasury view at
 // /wallets/:id has the same data but scoped to one treasury and bundles
@@ -40,10 +41,30 @@ const PERIOD_LABEL: Record<string, string> = {
 
 export function SpendingLimitsPage() {
   const { organizationId } = useParams<{ organizationId: string }>();
+  const queryClient = useQueryClient();
+  const { success, error: toastError } = useToast();
   const policiesQuery = useQuery({
     queryKey: ['spending-limit-policies', organizationId, 'all'] as const,
     queryFn: () => api.listSpendingLimitPolicies(organizationId!),
     enabled: Boolean(organizationId),
+  });
+
+  // Manual sync — pulls live state from the on-chain SpendingLimit account
+  // and updates the local row. Needed when the proposal execution succeeded
+  // but the auto-sync hook missed (e.g. RPC was flaky at confirm-execution
+  // time, or an older proposal landed before the auto-sync hook existed).
+  const syncMutation = useMutation({
+    mutationFn: (spendingLimitPolicyId: string) =>
+      api.syncSpendingLimitPolicy(organizationId!, spendingLimitPolicyId),
+    onSuccess: async () => {
+      success('Policy synced from chain.');
+      await queryClient.invalidateQueries({
+        queryKey: ['spending-limit-policies', organizationId, 'all'],
+      });
+    },
+    onError: (err) => {
+      toastError(err instanceof ApiError || err instanceof Error ? err.message : 'Sync failed.');
+    },
   });
 
   if (!organizationId) {
@@ -122,6 +143,8 @@ export function SpendingLimitsPage() {
                     key={policy.spendingLimitPolicyId}
                     organizationId={organizationId}
                     policy={policy}
+                    onSync={() => syncMutation.mutate(policy.spendingLimitPolicyId)}
+                    syncing={syncMutation.isPending && syncMutation.variables === policy.spendingLimitPolicyId}
                   />
                 ))}
               </tbody>
@@ -136,9 +159,13 @@ export function SpendingLimitsPage() {
 function PolicyRow({
   organizationId,
   policy,
+  onSync,
+  syncing,
 }: {
   organizationId: string;
   policy: SpendingLimitPolicy;
+  onSync: () => void;
+  syncing: boolean;
 }) {
   const status = policy.status as SpendingLimitPolicyStatus;
   const statusLabel = STATUS_LABEL[status] ?? policy.status;
@@ -181,25 +208,43 @@ function PolicyRow({
         </span>
       </td>
       <td style={{ textAlign: 'right' }}>
-        {hasPendingProposal ? (
-          <Link
-            to={`/organizations/${organizationId}/proposals/${policy.decimalProposalId}`}
-            className="button button-primary"
-            style={{ padding: '4px 12px', fontSize: 12 }}
-          >
-            View proposal →
-          </Link>
-        ) : status === 'active' ? (
-          <Link
-            to={`/organizations/${organizationId}/wallets/${policy.treasuryWalletId}#spending-limits`}
-            className="button button-secondary"
-            style={{ padding: '4px 12px', fontSize: 12 }}
-          >
-            Manage →
-          </Link>
-        ) : (
-          <span style={{ color: 'var(--ax-text-faint)', fontSize: 12 }}>—</span>
-        )}
+        <span style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+          {hasPendingProposal ? (
+            <Link
+              to={`/organizations/${organizationId}/proposals/${policy.decimalProposalId}`}
+              className="button button-primary"
+              style={{ padding: '4px 12px', fontSize: 12 }}
+            >
+              View proposal →
+            </Link>
+          ) : status === 'active' ? (
+            <Link
+              to={`/organizations/${organizationId}/wallets/${policy.treasuryWalletId}#spending-limits`}
+              className="button button-secondary"
+              style={{ padding: '4px 12px', fontSize: 12 }}
+            >
+              Manage →
+            </Link>
+          ) : null}
+          {/*
+            Manual Sync is always available — if local state thinks the policy
+            is still `proposed` but the on-chain proposal has already executed,
+            this pulls the SpendingLimit account and flips the row to `active`.
+            Same endpoint the backend auto-calls after proposal execution.
+          */}
+          {status !== 'revoked' && status !== 'failed' ? (
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={onSync}
+              disabled={syncing}
+              aria-busy={syncing}
+              style={{ padding: '4px 12px', fontSize: 12 }}
+            >
+              {syncing ? 'Syncing…' : 'Sync'}
+            </button>
+          ) : null}
+        </span>
       </td>
     </tr>
   );

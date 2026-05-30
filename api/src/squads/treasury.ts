@@ -1841,7 +1841,61 @@ export async function confirmDecimalProposalExecution(
     }
     return row;
   });
+
+  // Spending-limit config proposals (add / remove / replace): the on-chain
+  // SpendingLimit account was created or torn down by configTransactionExecute,
+  // but the local SpendingLimitPolicy row still says `proposed` /
+  // `revocation_proposed` / `replacement_proposed`. Sync it from chain so the
+  // router can immediately see (or stop seeing) the policy as active.
+  // We do this OUTSIDE the proposal-update tx because it hits Solana RPC and
+  // we don't want a flaky RPC to block the proposal-confirm path.
+  if (
+    updated.semanticType === 'add_spending_limit'
+    || updated.semanticType === 'remove_spending_limit'
+    || updated.semanticType === 'replace_spending_limit'
+  ) {
+    const linkedPolicyIds = await collectSpendingLimitPolicyIdsForProposal(updated);
+    for (const policyId of linkedPolicyIds) {
+      try {
+        await syncSpendingLimitPolicy(organizationId, policyId);
+      } catch (error) {
+        // Sync failure shouldn't fail the proposal confirm. The user can
+        // retry via the manual Sync button on the Spending Limits page.
+        logger.warn('spending_limit.auto_sync_after_proposal_execute_failed', {
+          organizationId,
+          decimalProposalId,
+          spendingLimitPolicyId: policyId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
   return serializeDecimalProposal(updated);
+}
+
+// Find every SpendingLimitPolicy row touched by a config-transaction
+// proposal so we can sync them from chain after the proposal executes.
+// Create proposals: the policy points to the proposal via decimalProposalId.
+// Remove / replace proposals: the proposal carries the policy id in
+// metadataJson.spendingLimitPolicyId (replace also adds a replacementPolicyId).
+async function collectSpendingLimitPolicyIdsForProposal(
+  proposal: { decimalProposalId: string; metadataJson: Prisma.JsonValue },
+): Promise<string[]> {
+  const ids = new Set<string>();
+  const created = await prisma.spendingLimitPolicy.findMany({
+    where: { decimalProposalId: proposal.decimalProposalId },
+    select: { spendingLimitPolicyId: true },
+  });
+  for (const row of created) ids.add(row.spendingLimitPolicyId);
+
+  if (isRecordLike(proposal.metadataJson)) {
+    const metaPolicyId = proposal.metadataJson.spendingLimitPolicyId;
+    if (typeof metaPolicyId === 'string') ids.add(metaPolicyId);
+    const replacementPolicyId = proposal.metadataJson.replacementSpendingLimitPolicyId;
+    if (typeof replacementPolicyId === 'string') ids.add(replacementPolicyId);
+  }
+  return [...ids];
 }
 
 export async function createDecimalProposalApprovalIntent(
