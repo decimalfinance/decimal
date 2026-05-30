@@ -487,13 +487,58 @@ function InviteMemberDialog({
               </div>
               <div className="field">
                 <label className="field-label">Invite link</label>
-                <div className="copy-field">
+                {/* Custom unified copy bar — input + button share one
+                    rounded border with no visible seam. Inline styles
+                    because the design's .copy-field rule loses to the
+                    .btn pill-radius default in the cascade and ships a
+                    disconnected look. */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'stretch',
+                    border: '1px solid var(--border-strong)',
+                    borderRadius: 'var(--r-sm)',
+                    overflow: 'hidden',
+                    background: 'var(--bg-surface-2)',
+                    height: 40,
+                  }}
+                >
                   <input
                     readOnly
                     value={createdInvite!.inviteLink}
                     onFocus={(e) => e.currentTarget.select()}
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      border: 'none',
+                      outline: 'none',
+                      background: 'transparent',
+                      padding: '0 12px',
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 12,
+                      color: 'var(--text-primary)',
+                    }}
                   />
-                  <button type="button" className="btn btn-primary" onClick={handleCopy}>
+                  <button
+                    type="button"
+                    onClick={handleCopy}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '0 16px',
+                      border: 'none',
+                      borderLeft: '1px solid var(--border-strong)',
+                      borderRadius: 0,
+                      background: 'var(--primary)',
+                      color: 'var(--primary-contrast)',
+                      fontFamily: 'var(--font-body)',
+                      fontSize: 13,
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                      flex: '0 0 auto',
+                    }}
+                  >
                     <Ico.copy w={14} />{copied ? 'Copied' : 'Copy'}
                   </button>
                 </div>
