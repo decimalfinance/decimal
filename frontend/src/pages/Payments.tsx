@@ -345,7 +345,7 @@ export function PaymentsPage() {
                         {row.source === '—' ? '—' : row.source}
                       </span>
                     </td>
-                    <td className="td-num">{row.amountLabel}</td>
+                    <td className="td-num" style={{ paddingRight: 28 }}>{row.amountLabel}</td>
                     <td>
                       <OriginPill>
                         {row.origin === 'batch' ? (row.originLabel ?? 'Batch') : 'Single'}
