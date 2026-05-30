@@ -14,7 +14,6 @@ import type {
 import {
   assetSymbol,
   formatRawUsdcCompact,
-  formatRelativeTime,
   shortenAddress,
   walletLabel,
 } from '../domain';
@@ -23,10 +22,8 @@ import {
   displayPaymentStatus,
   hasRealWalletLabel,
   statusToneForPayment,
-  toneToPill,
 } from '../status-labels';
 import { useToast } from '../ui/Toast';
-import { EmptyIcon, RdEmptyState, RdFilterBar } from '../ui-primitives';
 import { Ico } from '../dec/icons';
 import { PageHead, Pill, SLPill, OriginPill } from '../dec/primitives';
 
@@ -174,8 +171,6 @@ export function PaymentsPage() {
   // Metrics: count actual payments (orders), not batches. A run is a grouping,
   // not a payment — counting both double-counts the same transfer.
   const awaiting = orders.filter((o) => o.derivedState === 'draft').length;
-  const readyToSign = orders.filter((o) => o.derivedState === 'proposed').length;
-  const settled = orders.filter((o) => o.derivedState === 'settled').length;
   const needsReview = orders.filter(orderNeedsReview).length;
 
   const isLoading = paymentOrdersQuery.isLoading;

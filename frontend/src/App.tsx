@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo } from 'react';
-import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router';
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AppSidebar } from './Sidebar';
 import { api } from './api';
@@ -123,23 +123,9 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
   const collectionsOpenCount = organizationSummaryQuery.data?.collectionsOpenCount ?? 0;
   const unreviewedWalletsCount = organizationSummaryQuery.data?.unreviewedWalletsCount ?? 0;
 
-  // Treasury gate: payments / collections / overview are useless without a
-  // treasury to send money from. When the active org has no treasury, replace
-  // the page content with a full-page setup CTA. We don't gate /wallets,
-  // /members, /counterparties, /profile, or /setup — those work standalone.
-  const treasuryWalletsQuery = useQuery({
-    queryKey: ['treasury-wallets', activeOrganizationId] as const,
-    queryFn: () => api.listTreasuryWallets(activeOrganizationId!),
-    enabled: Boolean(activeOrganizationId),
-  });
-  const treasuryCheckResolved =
-    treasuryWalletsQuery.isSuccess || treasuryWalletsQuery.isError;
-  const hasTreasury = (treasuryWalletsQuery.data?.items?.length ?? 0) > 0;
-  const shouldShowTreasuryGate =
-    Boolean(activeOrganizationId) &&
-    treasuryCheckResolved &&
-    !hasTreasury &&
-    pathRequiresTreasury(location.pathname);
+  // Treasury gate removed — per the design handoff, Overview itself shows
+  // a "Finish setting up" checklist when the org has no treasury yet, instead
+  // of a full-page interruption. Other pages render their own empty states.
 
   async function logout() {
     await queryClient.cancelQueries();
@@ -168,9 +154,6 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
         />
         <div className="app-main">
           <div className="app-scroll" style={{ overflowY: 'auto' }}>
-        {shouldShowTreasuryGate ? (
-          <TreasurySetupGate organizationId={activeOrganizationId!} />
-        ) : (
           <Suspense fallback={<RouteFallback />}>
             <Routes>
               <Route path="/" element={<HomeRedirect session={session} />} />
@@ -194,7 +177,6 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
               <Route path="/organizations/:organizationId/payers" element={<Navigate to="../counterparties" replace />} />
             </Routes>
           </Suspense>
-        )}
           </div>
         </div>
       </div>
@@ -202,71 +184,3 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
   );
 }
 
-// Pages that need a treasury to function. Treasury setup itself, members,
-// address book, and profile remain accessible because they don't require
-// money movement.
-const TREASURY_GATED_ROUTE_PATTERNS = [
-  /^\/organizations\/[^/]+$/, // overview / inbox
-  /^\/organizations\/[^/]+\/payments(\/.*)?$/,
-  /^\/organizations\/[^/]+\/collections(\/.*)?$/,
-  /^\/organizations\/[^/]+\/collection-runs(\/.*)?$/,
-  /^\/organizations\/[^/]+\/proposals(\/.*)?$/,
-];
-
-function pathRequiresTreasury(pathname: string): boolean {
-  return TREASURY_GATED_ROUTE_PATTERNS.some((r) => r.test(pathname));
-}
-
-function TreasurySetupGate({ organizationId }: { organizationId: string }) {
-  return (
-    <div className="treasury-gate">
-      <div className="treasury-gate-card">
-        <div className="treasury-gate-intro">
-          <div className="treasury-gate-icon" aria-hidden>
-            <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="8" y="14" width="32" height="24" rx="3" />
-              <path d="M8 20h32" />
-              <path d="M14 28h6" />
-              <path d="M24 28h10" />
-              <path d="M14 32h20" />
-              <path d="M16 14V10a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v4" />
-            </svg>
-          </div>
-          <h1 className="treasury-gate-title">Get started</h1>
-          <p className="treasury-gate-body">
-            Two quick steps and you'll be ready to process your first invoice.
-          </p>
-        </div>
-
-        <ol className="treasury-gate-steps">
-          <li className="treasury-gate-step">
-            <span className="treasury-gate-step-num">1</span>
-            <div className="treasury-gate-step-body">
-              <div className="treasury-gate-step-title">Invite team members</div>
-              <div className="treasury-gate-step-sub">The people who'll approve payments before they go out.</div>
-            </div>
-            <Link
-              to={`/organizations/${organizationId}/members`}
-              className="button button-primary treasury-gate-step-cta"
-            >
-              Invite
-            </Link>
-          </li>
-          <li className="treasury-gate-step">
-            <span className="treasury-gate-step-num">2</span>
-            <div className="treasury-gate-step-body">
-              <div className="treasury-gate-step-title">Create a programmable treasury</div>
-              <div className="treasury-gate-step-sub">A secure account that holds funds for vendor payments.</div>
-            </div>
-            <Link
-              to={`/organizations/${organizationId}/wallets`}
-              className="button button-primary treasury-gate-step-cta"
-            >
-              Create
-            </Link>
-          </li>
-        </ol>
-      </div>
-    </div>
-  );
-}

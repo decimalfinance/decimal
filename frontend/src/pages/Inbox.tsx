@@ -156,8 +156,16 @@ export function InboxPage({ session }: { session: AuthenticatedSession }) {
   const approvalCount = approval.length;
   const autopaidCount = autopaid.length;
   const reviewCount = review.length;
+  const treasuryCount = treasuries.length;
+  // First-run: org exists but no treasury yet. Per the design (pages-onboard
+  // → FirstRunDashboard), Overview replaces the 3-column grid with a
+  // "Finish setting up" checklist + an empty treasury snapshot.
+  const isFirstRun = treasuryCount === 0;
 
   const orgBase = `/organizations/${organizationId}`;
+  const orgName =
+    session.organizations.find((o) => o.organizationId === organizationId)?.organizationName
+    ?? 'your workspace';
 
   return (
     <div className="page">
@@ -165,15 +173,88 @@ export function InboxPage({ session }: { session: AuthenticatedSession }) {
         {/* Hero greeting */}
         <div className="ov-hero">
           <div className="eyebrow" style={{ marginBottom: 10 }}>WORKSPACE</div>
-          <h1>{greeting}, {firstName}</h1>
+          <h1>
+            {isFirstRun
+              ? `Welcome to ${orgName}, ${firstName}`
+              : `${greeting}, ${firstName}`}
+          </h1>
           <p className="ov-summary">
-            <b>{approvalCount} payment{approvalCount === 1 ? '' : 's'}</b>{' '}
-            {approvalCount === 0 ? 'waiting on your approval' : (approvalCount === 1 ? 'is waiting on your approval' : 'are waiting on your approval')}.
-            This month your agent auto-paid <b>{autopaidCount} bill{autopaidCount === 1 ? '' : 's'}</b> on its own
-            and flagged <b>{reviewCount}</b> for review.
+            {isFirstRun ? (
+              <>Two quick steps and your agent can start paying vendors. Knock these out whenever you're ready — nothing's blocking you.</>
+            ) : (
+              <>
+                <b>{approvalCount} payment{approvalCount === 1 ? '' : 's'}</b>{' '}
+                {approvalCount === 0 ? 'waiting on your approval' : (approvalCount === 1 ? 'is waiting on your approval' : 'are waiting on your approval')}.
+                This month your agent auto-paid <b>{autopaidCount} bill{autopaidCount === 1 ? '' : 's'}</b> on its own
+                and flagged <b>{reviewCount}</b> for review.
+              </>
+            )}
           </p>
         </div>
 
+        {isFirstRun ? (
+          <>
+            <div className="surface">
+              <div className="snap-head">Finish setting up</div>
+              <GetStartedRow
+                n="1"
+                done
+                title={`Create your organization`}
+                desc={`${orgName} is live.`}
+                cta={<span className="pill pill-success"><span className="dot" />Done</span>}
+              />
+              <GetStartedRow
+                n="2"
+                title="Create your first treasury"
+                desc="Hold funds and set the team of signers who approve payments."
+                cta={
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => navigate(`${orgBase}/wallets`)}
+                  >
+                    <Ico.plus w={14} />New treasury
+                  </button>
+                }
+              />
+              <GetStartedRow
+                n="3"
+                title="Invite your team"
+                desc="Add the people who'll review and approve payments."
+                cta={
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => navigate(`${orgBase}/members`)}
+                  >
+                    <Ico.userPlus w={14} />Invite member
+                  </button>
+                }
+              />
+            </div>
+
+            <div className="snap">
+              <div className="snap-head">Treasury snapshot</div>
+              <div className="empty" style={{ padding: '40px 24px' }}>
+                <div className="empty-icon"><Ico.treasury w={22} /></div>
+                <h4>No treasuries yet</h4>
+                <p>Create a treasury to hold funds and let the agent pay vendors on your terms.</p>
+                <div style={{ marginTop: 6 }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => navigate(`${orgBase}/wallets`)}
+                  >
+                    <Ico.plus w={15} />New treasury
+                  </button>
+                </div>
+              </div>
+            </div>
+          </>
+        ) : null}
+
+        {!isFirstRun ? (
+        <>
         {/* Three-column actionable grid */}
         <div className="ov-grid">
           <InboxColumn
@@ -256,7 +337,7 @@ export function InboxPage({ session }: { session: AuthenticatedSession }) {
         ) : null}
 
         {/* Treasury snapshot */}
-        {treasuries.length > 0 ? (
+        {treasuries.length > 0 && !isFirstRun ? (
           <div className="snap">
             <div className="snap-head">Treasury snapshot</div>
             {treasuries.map((t) => {
@@ -287,7 +368,41 @@ export function InboxPage({ session }: { session: AuthenticatedSession }) {
             })}
           </div>
         ) : null}
+        </>
+        ) : null}
       </div>
+    </div>
+  );
+}
+
+function GetStartedRow({
+  n,
+  done,
+  title,
+  desc,
+  cta,
+}: {
+  n: string;
+  done?: boolean;
+  title: string;
+  desc: string;
+  cta: React.ReactNode;
+}) {
+  return (
+    <div className="set-row">
+      <div className="sr-info" style={{ flexDirection: 'row', alignItems: 'center', gap: 13 }}>
+        <span
+          className="gs-num"
+          style={done ? { background: 'var(--accent)', borderColor: 'var(--accent)', color: 'var(--accent-contrast)' } : undefined}
+        >
+          {done ? <Ico.checkSm w={12} /> : n}
+        </span>
+        <div className="col" style={{ gap: 3 }}>
+          <span className="sr-title">{title}</span>
+          <span className="sr-desc">{desc}</span>
+        </div>
+      </div>
+      <div className="sr-action">{cta}</div>
     </div>
   );
 }
