@@ -75,6 +75,13 @@ const icons = {
       <path d="M7 11l1.5 1.5L13 8" />
     </SvgIcon>
   ),
+  spendingLimit: (
+    <SvgIcon>
+      <path d="M10 2.5 3.5 5v4.5c0 4 2.7 6.8 6.5 8 3.8-1.2 6.5-4 6.5-8V5L10 2.5Z" />
+      <path d="M10 7v3" />
+      <path d="M10 13h.01" />
+    </SvgIcon>
+  ),
   chevron: (
     <SvgIcon className="ax-ws-button-chev">
       <path d="M5 7.5 10 12.5 15 7.5" />
@@ -317,6 +324,12 @@ export function AppSidebar({
                 label="Address book"
                 badge={unreviewedWalletsCount}
               />
+            </div>
+
+            <div className="ax-nav-group">
+              <div className="ax-nav-group-label">Governance</div>
+              <NavLinkItem to={`${base}/proposals`} icon={icons.proposals} label="Proposals" />
+              <NavLinkItem to={`${base}/spending-limits`} icon={icons.spendingLimit} label="Spending limits" />
             </div>
 
           </>

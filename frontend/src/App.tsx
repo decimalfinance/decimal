@@ -25,6 +25,7 @@ const LandingPageV2 = lazy(() => import('./pages/Landing').then((m) => ({ defaul
 const MembersPage = lazy(() => import('./pages/Members').then((m) => ({ default: m.MembersPage })));
 const TreasuryWalletDetailPage = lazy(() => import('./pages/TreasuryWalletDetail').then((m) => ({ default: m.TreasuryWalletDetailPage })));
 const OrganizationProposalsPage = lazy(() => import('./pages/OrganizationProposals').then((m) => ({ default: m.OrganizationProposalsPage })));
+const SpendingLimitsPage = lazy(() => import('./pages/SpendingLimits').then((m) => ({ default: m.SpendingLimitsPage })));
 const OrganizationProposalDetailPage = lazy(() => import('./pages/OrganizationProposalDetail').then((m) => ({ default: m.OrganizationProposalDetailPage })));
 const InviteAcceptPage = lazy(() => import('./pages/InviteAccept').then((m) => ({ default: m.InviteAcceptPage })));
 const LoginPage = lazy(() => import('./pages/auth').then((m) => ({ default: m.LoginPage })));
@@ -174,6 +175,7 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
               <Route path="/organizations/:organizationId/wallets" element={<WalletsPage session={session} />} />
               <Route path="/organizations/:organizationId/wallets/:treasuryWalletId" element={<TreasuryWalletDetailPage session={session} />} />
               <Route path="/organizations/:organizationId/proposals" element={<OrganizationProposalsPage session={session} />} />
+              <Route path="/organizations/:organizationId/spending-limits" element={<SpendingLimitsPage />} />
               <Route path="/organizations/:organizationId/proposals/:decimalProposalId" element={<ProposalRedirectPage />} />
               <Route path="/organizations/:organizationId/proposals/:decimalProposalId/legacy" element={<OrganizationProposalDetailPage session={session} />} />
               <Route path="/organizations/:organizationId/members" element={<MembersPage session={session} />} />
