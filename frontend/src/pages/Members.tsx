@@ -23,6 +23,7 @@ type RosterRow =
       id: string;
       name: string | null;
       email: string;
+      avatarUrl: string | null;
       role: string;
       status: string;
       joined: string;
@@ -136,6 +137,7 @@ export function MembersPage({ session }: { session: AuthenticatedSession }) {
       id: m.membershipId,
       name: m.user.displayName,
       email: m.user.email,
+      avatarUrl: m.user.avatarUrl ?? null,
       role: m.role.charAt(0).toUpperCase() + m.role.slice(1),
       status: m.status === 'active' ? 'Active' : m.status,
       joined: '—', // OrganizationMember doesn't carry joinedAt; surface "—" until backend exposes it
@@ -293,7 +295,7 @@ function RosterTableRow({
       <tr>
         <td>
           <div className="member-cell">
-            <span className="m-avatar">{row.initials}</span>
+            <MemberAvatar avatarUrl={row.avatarUrl} initials={row.initials} />
             <div className="col">
               <span className="m-name">{row.name ?? row.email}</span>
               {row.name ? (
@@ -354,6 +356,30 @@ function RosterTableRow({
         </div>
       </td>
     </tr>
+  );
+}
+
+// Real-photo avatar with initials fallback. Google profile photos block
+// requests with an unfamiliar Referer header, so we set
+// referrerPolicy="no-referrer" and fall back to initials if the image fails.
+function MemberAvatar({ avatarUrl, initials }: { avatarUrl: string | null; initials: string }) {
+  const [failed, setFailed] = useState(false);
+  if (!avatarUrl || failed) {
+    return <span className="m-avatar">{initials}</span>;
+  }
+  return (
+    <span
+      className="m-avatar"
+      style={{ padding: 0, overflow: 'hidden', background: 'transparent' }}
+    >
+      <img
+        src={avatarUrl}
+        alt=""
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+      />
+    </span>
   );
 }
 
@@ -472,8 +498,21 @@ function InviteMemberDialog({
           <div className="dialog-body">
             <div className="field">
               <label className="field-label">Email address</label>
-              <div className="input-search">
-                <Ico.mail w={15} />
+              <div className="input-search" style={{ position: 'relative' }}>
+                <span
+                  aria-hidden
+                  style={{
+                    position: 'absolute',
+                    left: 11,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    color: 'var(--text-faint)',
+                    pointerEvents: 'none',
+                    display: 'inline-flex',
+                  }}
+                >
+                  <Ico.mail w={15} />
+                </span>
                 <input
                   className="input"
                   type="email"
@@ -486,6 +525,7 @@ function InviteMemberDialog({
                   placeholder="teammate@company.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  style={{ paddingLeft: 34 }}
                 />
               </div>
             </div>
