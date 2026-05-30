@@ -1,6 +1,13 @@
+// One proposal in full — implements the design's detail pattern
+// (PROPOSAL eyebrow + title + status pill, .action-bar driven by who
+// can do what, member-cell rows for voters with verified-style badges,
+// detail-grid for the on-chain primitives, semantic-specific summary
+// cards). Reuses useSquadsProposalActions + useAutoRetryProposal-
+// Verification so the action wiring matches every other surface.
+
 import { useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router';
-import { useQuery } from '@tanstack/react-query';
+import { useNavigate, useParams } from 'react-router';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../api';
 import type {
   AuthenticatedSession,
@@ -9,25 +16,39 @@ import type {
   SquadsProposalPendingVoter,
 } from '../types';
 import { useAutoRetryProposalVerification } from '../lib/settlement';
-import { useSquadsProposalActions, type SquadsProposalActionTarget } from '../lib/squads-actions';
+import { useSquadsProposalActions } from '../lib/squads-actions';
 import { shortenAddress } from '../domain';
-import { ChainLink, InfoRow } from '../ui-primitives';
-import { SettlementBanner } from '../ui/SettlementBanner';
+import { orbAccountUrl, orbTransactionUrl } from '../lib/app';
 import { useToast } from '../ui/Toast';
 import {
-  DecisionPill,
-  PendingVoterPill,
-  StatusPill,
-  TypePill,
   proposalTypeLabel,
   summarizeProposal,
 } from '../ui/DecimalProposalCard';
+import { Ico } from '../dec/icons';
+import { Pill, type PillTone } from '../dec/primitives';
+
+const STATUS_TONE: Record<string, PillTone> = {
+  active: 'warning',
+  approved: 'info',
+  executed: 'success',
+  cancelled: 'neutral',
+  rejected: 'danger',
+};
+const STATUS_LABEL: Record<string, string> = {
+  active: 'Awaiting votes',
+  approved: 'Ready to execute',
+  executed: 'Executed',
+  cancelled: 'Cancelled',
+  rejected: 'Rejected',
+};
 
 export function OrganizationProposalDetailPage({ session }: { session: AuthenticatedSession }) {
   const { organizationId, decimalProposalId } = useParams<{
     organizationId: string;
     decimalProposalId: string;
   }>();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const toast = useToast();
 
   const ownPersonalWalletsQuery = useQuery({
@@ -75,381 +96,500 @@ export function OrganizationProposalDetailPage({ session }: { session: Authentic
     ],
   });
 
+  // Manual sync — same pattern as the payment detail's Sync. Re-runs
+  // confirm-execution against any stored signature so a stuck proposal
+  // can reconcile after a flaky RPC window.
+  const syncMutation = useMutation({
+    mutationFn: async () => {
+      const fresh = proposalQuery.data;
+      if (!fresh) return;
+      const sig = fresh.executedSignature ?? fresh.submittedSignature ?? null;
+      if (sig) {
+        try {
+          await api.confirmProposalExecution(organizationId!, fresh.decimalProposalId, { signature: sig });
+        } catch {
+          // Backend may say "already settled" — that's fine, the invalidate
+          // below will pull the fresh state regardless.
+        }
+      }
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['organization-proposal', organizationId, decimalProposalId] });
+      await queryClient.invalidateQueries({ queryKey: ['organization-proposals', organizationId] });
+      toast.success('Synced from chain.');
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'Sync failed.'),
+  });
+
   if (!organizationId || !decimalProposalId) {
     return (
-      <main className="page-frame">
-        <div className="rd-state">
-          <h2 className="rd-state-title">Proposal unavailable</h2>
-          <p className="rd-state-body">Missing route parameters.</p>
+      <div className="page">
+        <div className="empty">
+          <h4>Proposal unavailable</h4>
+          <p>Missing route parameters.</p>
         </div>
-      </main>
+      </div>
+    );
+  }
+
+  const proposalError = proposalQuery.error;
+  const isForbidden = proposalError instanceof ApiError && proposalError.code === 'not_squads_member';
+  const isMissing = proposalError instanceof ApiError && proposalError.status === 404;
+
+  if (proposalQuery.isLoading) {
+    return (
+      <div className="page">
+        <div className="detail-col">
+          <div className="stack stack-16">
+            <div className="skeleton" style={{ height: 80, borderRadius: 12 }} />
+            <div className="skeleton" style={{ height: 60, borderRadius: 12 }} />
+            <div className="skeleton" style={{ height: 240, borderRadius: 12 }} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isForbidden || isMissing || !proposalQuery.data) {
+    return (
+      <div className="page">
+        <div className="detail-col">
+          <Crumb
+            onBack={() => navigate(`/organizations/${organizationId}/proposals`)}
+          />
+          <div className="empty" style={{ marginTop: 24 }}>
+            <h4>
+              {isForbidden
+                ? 'Not a signer here'
+                : isMissing
+                  ? 'Proposal not found'
+                  : "Couldn't load proposal"}
+            </h4>
+            <p>
+              {isForbidden
+                ? "You're not a signer on the treasury this proposal targets, so its detail isn't visible to you."
+                : isMissing
+                  ? "This proposal doesn't exist in this organization."
+                  : proposalError instanceof Error
+                    ? proposalError.message
+                    : 'Something went wrong.'}
+            </p>
+          </div>
+        </div>
+      </div>
     );
   }
 
   const proposal = proposalQuery.data;
-  const proposalError = proposalQuery.error;
-  const isForbidden =
-    proposalError instanceof ApiError && proposalError.code === 'not_squads_member';
-  const isMissing = proposalError instanceof ApiError && proposalError.status === 404;
-
   return (
-    <main className="page-frame">
-      <header className="page-header">
-        <div>
-          <p className="eyebrow">
-            <Link to={`/organizations/${organizationId}/proposals`}>← Proposals</Link>
-          </p>
-          <h1 style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
-            {proposal ? summarizeProposal(proposal) : 'Proposal'}
-            {proposal ? <StatusPill status={proposal.status} /> : null}
-          </h1>
-          <p style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            {proposal ? <TypePill label={proposalTypeLabel(proposal)} /> : null}
-            {proposal?.treasuryWallet ? (
-              <Link
-                to={`/organizations/${organizationId}/wallets/${proposal.treasuryWallet.treasuryWalletId}`}
-                style={{ color: 'inherit', textDecoration: 'underline', textDecorationColor: 'rgba(255,255,255,0.25)' }}
-              >
-                {proposal.treasuryWallet.displayName ?? 'Treasury'}
-              </Link>
-            ) : null}
-            {proposal?.squads.transactionIndex ? (
-              <span style={{ fontSize: 12, color: 'var(--ax-text-muted)' }}>
-                · #{proposal.squads.transactionIndex}
-              </span>
-            ) : null}
-          </p>
-        </div>
-        <div className="page-actions">
-          <button
-            type="button"
-            className="button button-secondary"
-            onClick={() => proposalQuery.refetch()}
-            disabled={proposalQuery.isFetching}
-            aria-busy={proposalQuery.isFetching}
-          >
-            {proposalQuery.isFetching ? 'Refreshing…' : 'Refresh'}
-          </button>
-        </div>
-      </header>
-
-      {isForbidden ? (
-        <section className="rd-section">
-          <div className="rd-empty-cell" style={{ padding: '48px 24px' }}>
-            <strong>Not a Squads member</strong>
-            <p style={{ margin: 0 }}>
-              You're not a signer on the treasury this proposal targets, so its detail isn't visible to you.
-            </p>
-          </div>
-        </section>
-      ) : isMissing ? (
-        <section className="rd-section">
-          <div className="rd-empty-cell" style={{ padding: '48px 24px' }}>
-            <strong>Proposal not found</strong>
-            <p style={{ margin: 0 }}>The proposal record doesn't exist.</p>
-          </div>
-        </section>
-      ) : proposalQuery.isLoading ? (
-        <section className="rd-section">
-          <div className="rd-skeleton rd-skeleton-block" style={{ height: 80, marginBottom: 8 }} />
-          <div className="rd-skeleton rd-skeleton-block" style={{ height: 200 }} />
-        </section>
-      ) : proposalError ? (
-        <section className="rd-section">
-          <div className="rd-empty-cell" style={{ padding: '48px 24px' }}>
-            <strong>Couldn't load proposal</strong>
-            <p style={{ margin: 0 }}>
-              {proposalError instanceof Error ? proposalError.message : 'Unknown error.'}
-            </p>
-          </div>
-        </section>
-      ) : proposal ? (
-        <ProposalDetailBody proposal={proposal} actions={actions} />
-      ) : null}
-    </main>
+    <div className="page">
+      <div className="detail-col">
+        <Crumb onBack={() => navigate(`/organizations/${organizationId}/proposals`)} />
+        <ProposalBody
+          proposal={proposal}
+          organizationId={organizationId}
+          actions={actions}
+          syncing={syncMutation.isPending}
+          onSync={() => syncMutation.mutate()}
+          onTreasuryClick={(treasuryWalletId) =>
+            navigate(`/organizations/${organizationId}/wallets/${treasuryWalletId}`)
+          }
+        />
+      </div>
+    </div>
   );
 }
 
-function ProposalDetailBody({
+function Crumb({ onBack }: { onBack: () => void }) {
+  return (
+    <div
+      className="crumb"
+      onClick={onBack}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') onBack();
+      }}
+    >
+      <Ico.chevRight w={15} style={{ transform: 'rotate(180deg)' }} />Proposals
+    </div>
+  );
+}
+
+// ─── Body ────────────────────────────────────────────────────────────────
+
+function ProposalBody({
   proposal,
+  organizationId,
   actions,
+  syncing,
+  onSync,
+  onTreasuryClick,
 }: {
   proposal: DecimalProposal;
-  actions: SquadsProposalActionTarget;
+  organizationId: string;
+  actions: ReturnType<typeof useSquadsProposalActions>;
+  syncing: boolean;
+  onSync: () => void;
+  onTreasuryClick: (treasuryWalletId: string) => void;
 }) {
-  const isReadyToExecute = proposal.status === 'approved';
-  const isClosed =
-    proposal.status === 'executed'
-    || proposal.status === 'cancelled'
-    || proposal.status === 'rejected';
-  // Squads' proposalApprove / proposalReject only accept proposals in
-  // status === 'active'. Once threshold is met or the proposal moves on,
-  // late voters cannot change the outcome — hide the action even if
-  // pendingVoters still lists them.
-  const { pendingVoterWallet, executeWallet, busy, approving, rejecting, executing } = actions;
+  const { pendingVoterWallet, executeWallet, approving, rejecting, executing } = actions;
   const canCastVote = pendingVoterWallet !== null && proposal.status === 'active';
-  const voting = proposal.voting;
+  const canExecute = proposal.status === 'approved' && executeWallet !== null;
+  const statusKey =
+    proposal.status === 'active' && canCastVote ? 'needs_vote' : proposal.status;
+  const statusTone =
+    statusKey === 'needs_vote' ? 'warning' : STATUS_TONE[proposal.status] ?? 'neutral';
+  const statusLabel =
+    statusKey === 'needs_vote' ? 'Needs your vote' : STATUS_LABEL[proposal.status] ?? proposal.status;
+
+  const treasuryName = proposal.treasuryWallet?.displayName ?? null;
+  const txIndex = proposal.squads.transactionIndex;
+  const busy = approving || rejecting || executing;
+  const isClosed =
+    proposal.status === 'executed' ||
+    proposal.status === 'cancelled' ||
+    proposal.status === 'rejected';
 
   function handleReject(signerWalletId: string) {
-    if (!window.confirm(
+    const ok = window.confirm(
       'Reject this proposal? This casts an on-chain rejection vote and cannot be undone.',
-    )) return;
+    );
+    if (!ok) return;
     actions.reject(signerWalletId);
   }
 
   return (
-    <>
-      {!isClosed ? (
-        <section
-          className="rd-section"
-          style={{ marginTop: 8, padding: 16, border: '1px solid var(--ax-border)', borderRadius: 12 }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <div>
-              <strong style={{ fontSize: 14 }}>
-                {canCastVote
-                  ? 'Your signature is needed'
-                  : isReadyToExecute && executeWallet
-                    ? 'Threshold met — you can execute'
-                    : isReadyToExecute
-                      ? 'Threshold met — awaiting execute'
-                      : 'Awaiting other signers'}
-              </strong>
-              <div style={{ fontSize: 12, color: 'var(--ax-text-muted)', marginTop: 4 }}>
-                {canCastVote && pendingVoterWallet
-                  ? `Approve as ${shortenAddress(pendingVoterWallet.walletAddress, 4, 4)}`
-                  : isReadyToExecute && executeWallet
-                    ? `Execute as ${shortenAddress(executeWallet.walletAddress, 4, 4)}`
-                    : isReadyToExecute
-                      ? 'A member with execute permission needs to submit the execute transaction.'
-                      : voting
-                        ? `${voting.threshold - voting.approvals.length} more approval${voting.threshold - voting.approvals.length === 1 ? '' : 's'} required.`
-                        : 'Voting state not yet available.'}
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {pendingVoterWallet && proposal.status === 'active' ? (
+    <div className="stack stack-16">
+      {/* Header */}
+      <div>
+        <div className="eyebrow" style={{ marginBottom: 10 }}>PROPOSAL</div>
+        <div className="pagehead" style={{ paddingBottom: 16 }}>
+          <div className="ph-titles">
+            <h1>{summarizeProposal(proposal)}</h1>
+            <p className="ph-desc">
+              {proposalTypeLabel(proposal)}
+              {treasuryName ? (
                 <>
-                  <button
-                    type="button"
-                    className="button button-primary"
-                    onClick={() => actions.approve(pendingVoterWallet.userWalletId)}
-                    disabled={busy}
-                    aria-busy={approving}
+                  &nbsp;&nbsp;<span style={{ color: 'var(--text-faint)' }}>·</span>&nbsp;&nbsp;
+                  <span
+                    className="cell-source"
+                    style={{ display: 'inline-flex', verticalAlign: 'middle', cursor: 'pointer' }}
+                    onClick={() =>
+                      proposal.treasuryWallet && onTreasuryClick(proposal.treasuryWallet.treasuryWalletId)
+                    }
+                    role="link"
+                    tabIndex={0}
                   >
-                    {approving ? 'Approving…' : 'Approve'}
-                  </button>
-                  <button
-                    type="button"
-                    className="button button-secondary"
-                    onClick={() => handleReject(pendingVoterWallet.userWalletId)}
-                    disabled={busy}
-                    aria-busy={rejecting}
-                    style={{
-                      color: 'rgb(240, 130, 130)',
-                      borderColor: 'rgba(220, 80, 80, 0.45)',
-                    }}
-                  >
-                    {rejecting ? 'Rejecting…' : 'Reject'}
-                  </button>
+                    <Ico.treasury w={15} />{treasuryName}
+                  </span>
                 </>
               ) : null}
-              {isReadyToExecute && executeWallet ? (
-                <button
-                  type="button"
-                  className="button button-primary"
-                  onClick={() => actions.execute(executeWallet.userWalletId)}
-                  disabled={busy}
-                  aria-busy={executing}
-                >
-                  {executing ? 'Executing…' : 'Execute proposal'}
-                </button>
+              {txIndex ? (
+                <>
+                  &nbsp;&nbsp;<span style={{ color: 'var(--text-faint)' }}>·</span>&nbsp;&nbsp;
+                  <span className="mono" style={{ fontSize: 12 }}>#{txIndex}</span>
+                </>
               ) : null}
+            </p>
+          </div>
+          <div className="ph-actions" style={{ alignItems: 'center' }}>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={onSync}
+              disabled={syncing}
+              aria-busy={syncing}
+              title="Reconcile on-chain state"
+            >
+              <Ico.download w={13} style={{ transform: 'rotate(180deg)' }} />
+              {syncing ? 'Syncing…' : 'Sync'}
+            </button>
+            <div className="head-status">
+              <Pill tone={statusTone}>{statusLabel}</Pill>
             </div>
           </div>
-        </section>
+        </div>
+      </div>
+
+      {/* Action bar */}
+      {!isClosed ? (
+        <ActionBar
+          proposal={proposal}
+          canCastVote={canCastVote}
+          canExecute={canExecute}
+          pendingVoterAddress={pendingVoterWallet?.walletAddress ?? null}
+          executeAddress={executeWallet?.walletAddress ?? null}
+          busy={busy}
+          approving={approving}
+          rejecting={rejecting}
+          executing={executing}
+          onApprove={() => pendingVoterWallet && actions.approve(pendingVoterWallet.userWalletId)}
+          onReject={() => pendingVoterWallet && handleReject(pendingVoterWallet.userWalletId)}
+          onExecute={() => executeWallet && actions.execute(executeWallet.userWalletId)}
+        />
       ) : null}
 
-      <SettlementBanner proposal={proposal} />
+      {/* Semantic-specific summary */}
+      <SemanticSummary proposal={proposal} organizationId={organizationId} />
 
-      {proposal.semanticType === 'send_payment' ? (
-        <PaymentSummary proposal={proposal} />
-      ) : proposal.semanticType === 'send_payment_run' ? (
-        <PaymentRunSummary proposal={proposal} />
-      ) : (
-        <SemanticSummary proposal={proposal} />
-      )}
+      {/* Approvals */}
+      <ApprovalsSection proposal={proposal} />
 
-      <section className="rd-section" style={{ marginTop: 24 }}>
-        <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12 }}>
-          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 500 }}>Approvals</h2>
-          {voting ? (
-            <span style={{ fontSize: 12, color: 'var(--ax-text-muted)' }}>
-              {voting.approvals.length} of {voting.threshold} required
-            </span>
-          ) : null}
-        </header>
-        {voting ? (
-          <div className="rd-table-shell">
-            <table className="rd-table">
-              <thead>
-                <tr>
-                  <th>Voter</th>
-                  <th>Wallet</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[
-                  ...voting.approvals.map((d) => ({ kind: 'approval' as const, decision: d })),
-                  ...voting.rejections.map((d) => ({ kind: 'rejection' as const, decision: d })),
-                  ...voting.cancellations.map((d) => ({ kind: 'cancellation' as const, decision: d })),
-                ].map(({ kind, decision }) => (
-                  <DecisionRow key={`${kind}-${decision.walletAddress}`} kind={kind} decision={decision} />
-                ))}
-                {voting.pendingVoters.map((voter) => (
-                  <PendingRow key={`pending-${voter.walletAddress}`} voter={voter} />
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="rd-empty-cell" style={{ padding: '24px' }}>
-            Voting state not yet available.
-          </div>
-        )}
-      </section>
-
-      <section className="rd-section" style={{ marginTop: 24 }}>
-        <header style={{ marginBottom: 12 }}>
-          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 500 }}>On-chain</h2>
-        </header>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-            gap: '14px 24px',
-          }}
-        >
-          {proposal.squads.proposalPda ? (
-            <InfoRow label={<LabelWithInfo label="Proposal account" info="The Squads proposal PDA — the on-chain account that records this proposal and tracks each member's approve/reject vote." />}>
-              <ChainLink address={proposal.squads.proposalPda} />
-            </InfoRow>
-          ) : null}
-          {proposal.squads.transactionPda ? (
-            <InfoRow label={<LabelWithInfo label="Squads transaction" info="The Squads transaction PDA — holds the actual instructions (e.g. USDC transfer) that will run if this proposal is approved and executed." />}>
-              <ChainLink address={proposal.squads.transactionPda} />
-            </InfoRow>
-          ) : null}
-          {proposal.squads.multisigPda ? (
-            <InfoRow label={<LabelWithInfo label="Multisig" info="The Squads multisig PDA — the governance account that defines the members and the approval threshold. Owns the source vault." />}>
-              <ChainLink address={proposal.squads.multisigPda} />
-            </InfoRow>
-          ) : null}
-          {proposal.squads.transactionIndex ? (
-            <InfoRow label={<LabelWithInfo label="Tx index" info="Sequence number of this transaction within the multisig. Squads transactions execute in order — gaps block later transactions." />}>{proposal.squads.transactionIndex}</InfoRow>
-          ) : null}
-          <InfoRow label={<LabelWithInfo label="Proposal type" info="vault_transaction = move funds out of the vault. config_transaction = change the multisig (members or threshold)." />}>{proposal.proposalType}</InfoRow>
-          <InfoRow label={<LabelWithInfo label="Local status" info="Decimal's view of the proposal lifecycle. May briefly differ from on-chain state during sync." />}>{proposal.localStatus}</InfoRow>
-          {proposal.submittedSignature ? (
-            <InfoRow label={<LabelWithInfo label="Submitted sig" info="Solana transaction signature for the create-proposal transaction — proof the proposal was published on-chain." />}>
-              <ChainLink signature={proposal.submittedSignature} />
-            </InfoRow>
-          ) : null}
-          {proposal.executedSignature ? (
-            <InfoRow label={<LabelWithInfo label="Executed sig" info="Solana transaction signature for the execute-proposal transaction — proof the funds actually moved on-chain." />}>
-              <ChainLink signature={proposal.executedSignature} />
-            </InfoRow>
-          ) : null}
-          {proposal.createdAt ? (
-            <InfoRow label={<LabelWithInfo label="Created" info="When the proposal was first recorded in Decimal." />}>{new Date(proposal.createdAt).toLocaleString()}</InfoRow>
-          ) : null}
-        </div>
-      </section>
-    </>
+      {/* On-chain detail grid */}
+      <OnChainSection proposal={proposal} />
+    </div>
   );
 }
 
-function PaymentSummary({ proposal }: { proposal: DecimalProposal }) {
+// ─── Action bar ─────────────────────────────────────────────────────────
+
+function ActionBar({
+  proposal,
+  canCastVote,
+  canExecute,
+  pendingVoterAddress,
+  executeAddress,
+  busy,
+  approving,
+  rejecting,
+  executing,
+  onApprove,
+  onReject,
+  onExecute,
+}: {
+  proposal: DecimalProposal;
+  canCastVote: boolean;
+  canExecute: boolean;
+  pendingVoterAddress: string | null;
+  executeAddress: string | null;
+  busy: boolean;
+  approving: boolean;
+  rejecting: boolean;
+  executing: boolean;
+  onApprove: () => void;
+  onReject: () => void;
+  onExecute: () => void;
+}) {
+  const voting = proposal.voting;
+  const remaining = voting ? Math.max(0, voting.threshold - voting.approvals.length) : 0;
+
+  const tone: 'amber' | 'neutral' | 'success' = canCastVote
+    ? 'amber'
+    : canExecute
+      ? 'amber'
+      : 'neutral';
+
+  let eyebrow: string;
+  let title: React.ReactNode;
+  let body: React.ReactNode;
+  let controls: React.ReactNode;
+
+  if (canCastVote) {
+    eyebrow = 'Needs your vote';
+    title = 'Your signature is needed';
+    body = pendingVoterAddress
+      ? `Approve as ${shortenAddress(pendingVoterAddress, 4, 4)}.`
+      : 'Cast your approval on chain.';
+    controls = (
+      <>
+        <button
+          type="button"
+          className="btn btn-danger-ghost"
+          onClick={onReject}
+          disabled={busy}
+          aria-busy={rejecting}
+        >
+          {rejecting ? 'Rejecting…' : 'Reject'}
+        </button>
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={onApprove}
+          disabled={busy}
+          aria-busy={approving}
+        >
+          {approving ? 'Approving…' : <>Approve<Ico.arrowRight w={14} /></>}
+        </button>
+      </>
+    );
+  } else if (proposal.status === 'approved' && canExecute) {
+    eyebrow = 'Ready to send';
+    title = 'Threshold met — execute when ready';
+    body = executeAddress
+      ? `Execute as ${shortenAddress(executeAddress, 4, 4)}.`
+      : 'A member with execute permission needs to send it.';
+    controls = (
+      <button
+        type="button"
+        className="btn btn-primary"
+        onClick={onExecute}
+        disabled={busy}
+        aria-busy={executing}
+      >
+        {executing ? 'Executing…' : (
+          <>
+            <Ico.bolt w={14} fill="currentColor" sw={0} />
+            Execute
+          </>
+        )}
+      </button>
+    );
+  } else if (proposal.status === 'approved') {
+    eyebrow = 'Ready to send';
+    title = 'Threshold met — awaiting execute';
+    body = 'A member with execute permission needs to submit the execute transaction.';
+    controls = <span />;
+  } else {
+    eyebrow = 'Awaiting others';
+    title = voting
+      ? `${voting.approvals.length} of ${voting.threshold} approved`
+      : 'Voting state not yet available';
+    body = voting
+      ? remaining > 0
+        ? `${remaining} more approval${remaining === 1 ? '' : 's'} required.`
+        : 'All approvals in — settling.'
+      : 'Voting state not yet available.';
+    controls = <span />;
+  }
+
+  return (
+    <div className={`action-bar tone-${tone}`}>
+      <div className="ab-text">
+        <span className="ab-eyebrow">{eyebrow}</span>
+        <h3 className="ab-title">{title}</h3>
+        {body ? <p className="ab-body">{body}</p> : null}
+      </div>
+      <div className="ab-controls">{controls}</div>
+    </div>
+  );
+}
+
+// ─── Semantic summary ───────────────────────────────────────────────────
+
+function SemanticSummary({
+  proposal,
+  organizationId,
+}: {
+  proposal: DecimalProposal;
+  organizationId: string;
+}) {
+  const semantic = proposal.semanticType ?? '';
+
+  if (semantic === 'send_payment') {
+    return <PaymentSummary proposal={proposal} organizationId={organizationId} />;
+  }
+  if (semantic === 'send_payment_run') {
+    return <PaymentRunSummary proposal={proposal} organizationId={organizationId} />;
+  }
+  if (semantic === 'add_member') return <AddMemberSummary proposal={proposal} />;
+  if (semantic === 'remove_member') return <RemoveMemberSummary proposal={proposal} />;
+  if (semantic === 'change_threshold') return <ChangeThresholdSummary proposal={proposal} />;
+  return null;
+}
+
+function PaymentSummary({
+  proposal,
+  organizationId,
+}: {
+  proposal: DecimalProposal;
+  organizationId: string;
+}) {
   const payload = proposal.semanticPayloadJson as {
     amountRaw?: string;
     asset?: string;
     destinationWalletAddress?: string;
-    destinationTokenAccountAddress?: string;
     sourceWalletAddress?: string;
-    token?: { symbol?: string; mint?: string; decimals?: number };
+    token?: { symbol?: string; decimals?: number };
     reference?: string | null;
     memo?: string | null;
   };
   const order = proposal.paymentOrder;
+  const navigate = useNavigate();
+  const amountLabel = payload?.amountRaw
+    ? `${formatRawAmount(payload.amountRaw, payload.token?.decimals ?? 6)} ${payload.token?.symbol ?? payload.asset?.toUpperCase() ?? ''}`
+    : '—';
   return (
-    <section className="rd-section" style={{ marginTop: 16 }}>
-      <header style={{ marginBottom: 12 }}>
-        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 500 }}>Payment details</h2>
-      </header>
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-          gap: '14px 24px',
-        }}
-      >
-        <InfoRow label="Amount">
-          {payload?.amountRaw ? (
-            <span>
-              {formatRawAmount(payload.amountRaw, payload.token?.decimals ?? 6)}{' '}
-              {payload.token?.symbol ?? payload.asset?.toUpperCase() ?? ''}
-            </span>
-          ) : (
-            '—'
-          )}
-        </InfoRow>
+    <div>
+      <div className="sec-head">
+        <div className="sh-titles"><h2>Payment</h2></div>
+      </div>
+      <div className="review-card">
+        <div className="rv-row">
+          <span className="rv-k">Amount</span>
+          <span className="rv-v mono">{amountLabel}</span>
+        </div>
         {payload?.destinationWalletAddress ? (
-          <InfoRow label="Destination">
-            <ChainLink address={payload.destinationWalletAddress} />
-            {order?.counterpartyWallet?.label ? (
-              <div style={{ fontSize: 11, opacity: 0.7 }}>{order.counterpartyWallet.label}</div>
-            ) : null}
-          </InfoRow>
+          <div className="rv-row">
+            <span className="rv-k">Destination</span>
+            <span className="rv-v">
+              {order?.counterpartyWallet?.label ? `${order.counterpartyWallet.label} · ` : ''}
+              <a
+                href={orbAccountUrl(payload.destinationWalletAddress)}
+                target="_blank"
+                rel="noreferrer"
+                className="mono"
+                style={{ color: 'var(--text-muted)', textDecoration: 'none' }}
+              >
+                {shortenAddress(payload.destinationWalletAddress, 4, 4)}
+              </a>
+            </span>
+          </div>
         ) : null}
         {payload?.sourceWalletAddress ? (
-          <InfoRow label={<LabelWithInfo label="Source vault" info="The Squads vault PDA the funds are sent FROM. Owned by the multisig — every transfer out needs the threshold of approvals." />}>
-            <ChainLink address={payload.sourceWalletAddress} />
-          </InfoRow>
+          <div className="rv-row">
+            <span className="rv-k">Source vault</span>
+            <span className="rv-v mono">
+              {shortenAddress(payload.sourceWalletAddress, 4, 4)}
+            </span>
+          </div>
         ) : null}
         {order ? (
-          <InfoRow label="Payment order">
-            <Link
-              to={`/organizations/${proposal.organizationId}/payments/${order.paymentOrderId}`}
-              style={{ color: 'inherit', textDecoration: 'underline', textDecorationColor: 'rgba(255,255,255,0.25)' }}
+          <div className="rv-row">
+            <span className="rv-k">Payment order</span>
+            <span
+              className="rv-v"
+              onClick={() => navigate(`/organizations/${organizationId}/payments/${order.paymentOrderId}`)}
+              style={{ cursor: 'pointer', textDecoration: 'underline', color: 'var(--text-muted)' }}
             >
               {order.invoiceNumber ?? order.externalReference ?? shortenAddress(order.paymentOrderId, 4, 4)}
-            </Link>
-          </InfoRow>
+            </span>
+          </div>
         ) : null}
-        {payload?.reference ? <InfoRow label="Reference">{payload.reference}</InfoRow> : null}
-        {payload?.memo ? <InfoRow label="Memo">{payload.memo}</InfoRow> : null}
+        {payload?.reference ? (
+          <div className="rv-row">
+            <span className="rv-k">Reference</span>
+            <span className="rv-v">{payload.reference}</span>
+          </div>
+        ) : null}
+        {payload?.memo ? (
+          <div className="rv-row">
+            <span className="rv-k">Memo</span>
+            <span className="rv-v">{payload.memo}</span>
+          </div>
+        ) : null}
       </div>
-    </section>
+    </div>
   );
 }
 
-function PaymentRunSummary({ proposal }: { proposal: DecimalProposal }) {
+function PaymentRunSummary({
+  proposal,
+  organizationId,
+}: {
+  proposal: DecimalProposal;
+  organizationId: string;
+}) {
   const payload = proposal.semanticPayloadJson as {
-    inputBatchId?: string;
     inputBatchLabel?: string;
-    paymentOrderIds?: string[];
-    sourceWalletAddress?: string;
-    sourceTokenAccountAddress?: string;
     totalAmountRaw?: string;
     orderCount?: number;
     asset?: string;
+    sourceWalletAddress?: string;
     orders?: Array<{
       index: number;
       paymentOrderId: string;
-      counterpartyWalletId: string;
       destinationWalletAddress: string;
-      destinationTokenAccountAddress: string;
       amountRaw: string;
       asset: string;
       reference: string | null;
@@ -457,52 +597,55 @@ function PaymentRunSummary({ proposal }: { proposal: DecimalProposal }) {
     }>;
   };
   const orders = payload?.orders ?? [];
-  const totalDecimals = 6; // USDC for now
   const symbol = (payload?.asset ?? 'usdc').toUpperCase();
-
+  const navigate = useNavigate();
   return (
     <>
-      <section className="rd-section" style={{ marginTop: 16 }}>
-        <header style={{ marginBottom: 12 }}>
-          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 500 }}>Batch summary</h2>
-        </header>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-            gap: '14px 24px',
-          }}
-        >
+      <div>
+        <div className="sec-head">
+          <div className="sh-titles"><h2>Batch</h2></div>
+        </div>
+        <div className="review-card">
           {payload?.inputBatchLabel ? (
-            <InfoRow label="Batch">{payload.inputBatchLabel}</InfoRow>
+            <div className="rv-row">
+              <span className="rv-k">Label</span>
+              <span className="rv-v">{payload.inputBatchLabel}</span>
+            </div>
           ) : null}
           {payload?.totalAmountRaw ? (
-            <InfoRow label="Total amount">
-              <span>
-                {formatRawAmount(payload.totalAmountRaw, totalDecimals)} {symbol}
+            <div className="rv-row">
+              <span className="rv-k">Total</span>
+              <span className="rv-v mono">
+                {formatRawAmount(payload.totalAmountRaw, 6)} {symbol}
               </span>
-            </InfoRow>
+            </div>
           ) : null}
-          <InfoRow label="Rows">{payload?.orderCount ?? orders.length}</InfoRow>
+          <div className="rv-row">
+            <span className="rv-k">Rows</span>
+            <span className="rv-v">{payload?.orderCount ?? orders.length}</span>
+          </div>
           {payload?.sourceWalletAddress ? (
-            <InfoRow label={<LabelWithInfo label="Source vault" info="The Squads vault PDA the funds are sent FROM. Owned by the multisig — every transfer out needs the threshold of approvals." />}>
-              <ChainLink address={payload.sourceWalletAddress} />
-            </InfoRow>
+            <div className="rv-row">
+              <span className="rv-k">Source vault</span>
+              <span className="rv-v mono">
+                {shortenAddress(payload.sourceWalletAddress, 4, 4)}
+              </span>
+            </div>
           ) : null}
         </div>
-      </section>
+      </div>
       {orders.length > 0 ? (
-        <section className="rd-section" style={{ marginTop: 16 }}>
-          <header style={{ marginBottom: 12 }}>
-            <h2 style={{ margin: 0, fontSize: 16, fontWeight: 500 }}>Rows ({orders.length})</h2>
-          </header>
-          <div className="rd-table-shell">
-            <table className="rd-table">
+        <div>
+          <div className="sec-head">
+            <div className="sh-titles"><h2>Rows ({orders.length})</h2></div>
+          </div>
+          <div className="tbl-card">
+            <table className="tbl">
               <thead>
                 <tr>
                   <th style={{ width: 40 }}>#</th>
                   <th>Destination</th>
-                  <th className="rd-num">Amount</th>
+                  <th className="num">Amount</th>
                   <th>Reference</th>
                 </tr>
               </thead>
@@ -510,20 +653,21 @@ function PaymentRunSummary({ proposal }: { proposal: DecimalProposal }) {
                 {orders.map((row) => (
                   <tr
                     key={row.paymentOrderId}
-                    onClick={() => {
-                      window.location.href = `/organizations/${proposal.organizationId}/payments/${row.paymentOrderId}`;
-                    }}
+                    onClick={() => navigate(`/organizations/${organizationId}/payments/${row.paymentOrderId}`)}
                     style={{ cursor: 'pointer' }}
                   >
-                    <td style={{ color: 'var(--ax-text-muted)', fontSize: 12 }}>{row.index + 1}</td>
-                    <td onClick={(e) => e.stopPropagation()}>
-                      <ChainLink address={row.destinationWalletAddress} prefix={4} suffix={4} />
+                    <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>{row.index + 1}</td>
+                    <td>
+                      <span className="mono" style={{ fontSize: 12 }}>
+                        {shortenAddress(row.destinationWalletAddress, 4, 4)}
+                      </span>
                     </td>
-                    <td className="rd-num">
-                      {formatRawAmount(row.amountRaw, totalDecimals)} {row.asset.toUpperCase()}
+                    <td className="td-num">
+                      {formatRawAmount(row.amountRaw, 6)}{' '}
+                      <span style={{ color: 'var(--text-faint)' }}>{row.asset.toUpperCase()}</span>
                     </td>
                     <td>
-                      <span style={{ fontSize: 12, color: 'var(--ax-text-muted)' }}>
+                      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                         {row.reference ?? row.memo ?? '—'}
                       </span>
                     </td>
@@ -532,64 +676,149 @@ function PaymentRunSummary({ proposal }: { proposal: DecimalProposal }) {
               </tbody>
             </table>
           </div>
-        </section>
+        </div>
       ) : null}
     </>
   );
 }
 
-function SemanticSummary({ proposal }: { proposal: DecimalProposal }) {
-  const semantic = proposal.semanticType ?? '';
-  const payload = proposal.semanticPayloadJson as Record<string, unknown>;
-
-  if (semantic === 'add_member') {
-    const walletAddress = (payload.walletAddress as string | undefined) ?? null;
-    const permissions = (payload.permissions as string[] | undefined) ?? [];
-    const newThreshold = payload.newThreshold as number | undefined;
-    return (
-      <section className="rd-section" style={{ marginTop: 16 }}>
-        <header style={{ marginBottom: 12 }}>
-          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 500 }}>Action: Add member</h2>
-        </header>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-            gap: '14px 24px',
-          }}
-        >
-          {walletAddress ? (
-            <InfoRow label="New member">
-              <ChainLink address={walletAddress} />
-            </InfoRow>
-          ) : null}
-          <InfoRow label="Permissions">
-            {permissions.length ? permissions.join(' / ') : '—'}
-          </InfoRow>
-          {newThreshold !== undefined ? (
-            <InfoRow label="Threshold (after)">{newThreshold}</InfoRow>
-          ) : null}
+function AddMemberSummary({ proposal }: { proposal: DecimalProposal }) {
+  const payload = proposal.semanticPayloadJson as {
+    walletAddress?: string;
+    permissions?: string[];
+    newThreshold?: number;
+  };
+  return (
+    <div>
+      <div className="sec-head">
+        <div className="sh-titles"><h2>Add member</h2></div>
+      </div>
+      <div className="review-card">
+        {payload.walletAddress ? (
+          <div className="rv-row">
+            <span className="rv-k">New member</span>
+            <span className="rv-v mono">{shortenAddress(payload.walletAddress, 4, 4)}</span>
+          </div>
+        ) : null}
+        <div className="rv-row">
+          <span className="rv-k">Permissions</span>
+          <span className="rv-v">{payload.permissions?.length ? payload.permissions.join(' / ') : '—'}</span>
         </div>
-      </section>
-    );
-  }
-
-  if (semantic === 'change_threshold') {
-    const newThreshold = payload.newThreshold as number | undefined;
-    return (
-      <section className="rd-section" style={{ marginTop: 16 }}>
-        <header style={{ marginBottom: 12 }}>
-          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 500 }}>Action: Change threshold</h2>
-        </header>
-        <div style={{ fontSize: 14 }}>
-          New threshold: <strong>{newThreshold ?? '—'}</strong>
-        </div>
-      </section>
-    );
-  }
-
-  return null;
+        {payload.newThreshold !== undefined ? (
+          <div className="rv-row">
+            <span className="rv-k">Threshold (after)</span>
+            <span className="rv-v">{payload.newThreshold}</span>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
 }
+
+function RemoveMemberSummary({ proposal }: { proposal: DecimalProposal }) {
+  const payload = proposal.semanticPayloadJson as {
+    walletAddress?: string;
+    newThreshold?: number;
+  };
+  return (
+    <div>
+      <div className="sec-head">
+        <div className="sh-titles"><h2>Remove member</h2></div>
+      </div>
+      <div className="review-card">
+        {payload.walletAddress ? (
+          <div className="rv-row">
+            <span className="rv-k">Member</span>
+            <span className="rv-v mono">{shortenAddress(payload.walletAddress, 4, 4)}</span>
+          </div>
+        ) : null}
+        {payload.newThreshold !== undefined ? (
+          <div className="rv-row">
+            <span className="rv-k">Threshold (after)</span>
+            <span className="rv-v">{payload.newThreshold}</span>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function ChangeThresholdSummary({ proposal }: { proposal: DecimalProposal }) {
+  const payload = proposal.semanticPayloadJson as { newThreshold?: number };
+  return (
+    <div>
+      <div className="sec-head">
+        <div className="sh-titles"><h2>Change required approvals</h2></div>
+      </div>
+      <div className="review-card">
+        <div className="rv-row">
+          <span className="rv-k">New threshold</span>
+          <span className="rv-v">{payload.newThreshold ?? '—'}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Approvals ──────────────────────────────────────────────────────────
+
+function ApprovalsSection({ proposal }: { proposal: DecimalProposal }) {
+  const voting = proposal.voting;
+  return (
+    <div>
+      <div className="sec-head">
+        <div className="sh-titles">
+          <h2>Approvals</h2>
+        </div>
+        {voting ? (
+          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+            {voting.approvals.length} of {voting.threshold} required
+          </span>
+        ) : null}
+      </div>
+      {!voting ? (
+        <div className="tbl-card" style={{ padding: 20 }}>
+          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Voting state not yet available.</span>
+        </div>
+      ) : (
+        <div className="tbl-card">
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th style={{ width: '50%' }}>Signer</th>
+                <th>Wallet</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[
+                ...voting.approvals.map((d) => ({ kind: 'approval' as const, decision: d })),
+                ...voting.rejections.map((d) => ({ kind: 'rejection' as const, decision: d })),
+                ...voting.cancellations.map((d) => ({ kind: 'cancellation' as const, decision: d })),
+              ].map(({ kind, decision }) => (
+                <DecisionRow key={`${kind}-${decision.walletAddress}`} kind={kind} decision={decision} />
+              ))}
+              {voting.pendingVoters.map((v) => (
+                <PendingRow key={`pending-${v.walletAddress}`} voter={v} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const DECISION_TONE: Record<'approval' | 'rejection' | 'cancellation', PillTone> = {
+  approval: 'success',
+  rejection: 'danger',
+  cancellation: 'neutral',
+};
+const DECISION_LABEL: Record<'approval' | 'rejection' | 'cancellation', string> = {
+  approval: 'Approved',
+  rejection: 'Rejected',
+  cancellation: 'Cancelled',
+};
 
 function DecisionRow({
   kind,
@@ -598,122 +827,196 @@ function DecisionRow({
   kind: 'approval' | 'rejection' | 'cancellation';
   decision: SquadsProposalDecision;
 }) {
-  const name = decision.organizationMembership?.user.displayName
-    ?? decision.organizationMembership?.user.email
-    ?? '—';
-  const email = decision.organizationMembership?.user.email ?? null;
+  const user = decision.organizationMembership?.user;
   return (
     <tr>
       <td>
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
-          <span style={{ fontWeight: 500 }}>{name}</span>
-          {email && email !== name ? (
-            <span style={{ fontSize: 11, color: 'var(--ax-text-muted)' }}>{email}</span>
-          ) : null}
-        </div>
+        <SignerCell user={user} fallbackAddress={decision.walletAddress} />
       </td>
       <td>
-        <ChainLink address={decision.walletAddress} prefix={4} suffix={4} />
+        <span className="mono" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+          {shortenAddress(decision.walletAddress, 4, 4)}
+        </span>
       </td>
       <td>
-        <DecisionPill kind={kind} decision={decision} />
+        <Pill tone={DECISION_TONE[kind]}>{DECISION_LABEL[kind]}</Pill>
       </td>
     </tr>
   );
 }
 
 function PendingRow({ voter }: { voter: SquadsProposalPendingVoter }) {
-  const name = voter.organizationMembership?.user.displayName
-    ?? voter.organizationMembership?.user.email
-    ?? '—';
-  const email = voter.organizationMembership?.user.email ?? null;
+  const user = voter.organizationMembership?.user;
   return (
     <tr>
       <td>
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
-          <span style={{ fontWeight: 500 }}>{name}</span>
-          {email && email !== name ? (
-            <span style={{ fontSize: 11, color: 'var(--ax-text-muted)' }}>{email}</span>
-          ) : null}
-        </div>
+        <SignerCell user={user} fallbackAddress={voter.walletAddress} />
       </td>
       <td>
-        <ChainLink address={voter.walletAddress} prefix={4} suffix={4} />
+        <span className="mono" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+          {shortenAddress(voter.walletAddress, 4, 4)}
+        </span>
       </td>
       <td>
-        <PendingVoterPill voter={voter} />
+        <Pill tone="neutral">Pending</Pill>
       </td>
     </tr>
   );
 }
 
-// Inline label + hover-tooltip used to demystify the on-chain Squads /
-// PDA jargon on this page. Scoped here on purpose — the rest of the app
-// doesn't need this density of explanation, but a proposal page exposes
-// enough Solana primitives that operators benefit from per-field hints.
-function LabelWithInfo({ label, info }: { label: string; info: string }) {
-  const [open, setOpen] = useState(false);
+function SignerCell({
+  user,
+  fallbackAddress,
+}: {
+  user: { displayName: string; email: string; avatarUrl: string | null } | undefined;
+  fallbackAddress: string;
+}) {
+  const name = user?.displayName || user?.email || shortenAddress(fallbackAddress, 4, 4);
+  const sub = user?.email && user.email !== name ? user.email : '';
+  const initials = computeInitials(user?.displayName ?? null, user?.email ?? fallbackAddress);
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, position: 'relative' }}>
-      <span>{label}</span>
-      <button
-        type="button"
-        aria-label={`What is ${label}?`}
-        onMouseEnter={() => setOpen(true)}
-        onMouseLeave={() => setOpen(false)}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setOpen(false)}
-        onClick={(e) => {
-          e.preventDefault();
-          setOpen((v) => !v);
-        }}
-        style={{
-          background: 'transparent',
-          border: 'none',
-          padding: 0,
-          margin: 0,
-          cursor: 'help',
-          color: 'currentColor',
-          opacity: 0.7,
-          display: 'inline-flex',
-          alignItems: 'center',
-          lineHeight: 0,
-        }}
-      >
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="10" />
-          <line x1="12" y1="16" x2="12" y2="12" />
-          <line x1="12" y1="8" x2="12.01" y2="8" />
-        </svg>
-      </button>
-      {open ? (
-        <span
-          role="tooltip"
-          style={{
-            position: 'absolute',
-            top: 'calc(100% + 6px)',
-            left: 0,
-            zIndex: 50,
-            width: 280,
-            padding: '8px 10px',
-            background: 'var(--ax-surface-3)',
-            border: '1px solid var(--ax-border-strong)',
-            borderRadius: 6,
-            fontSize: 12,
-            lineHeight: 1.45,
-            color: 'var(--ax-text)',
-            textTransform: 'none',
-            letterSpacing: 'normal',
-            fontWeight: 400,
-            opacity: 1,
-            boxShadow: '0 12px 32px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(0, 0, 0, 0.4)',
-            pointerEvents: 'none',
-          }}
-        >
-          {info}
-        </span>
-      ) : null}
+    <div className="member-cell">
+      <SignerAvatar avatarUrl={user?.avatarUrl ?? null} initials={initials} />
+      <div className="col">
+        <span className="m-name">{name}</span>
+        {sub ? <span className="m-sub" style={{ fontFamily: 'var(--font-body)', color: 'var(--text-faint)' }}>{sub}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+function SignerAvatar({ avatarUrl, initials }: { avatarUrl: string | null; initials: string }) {
+  const [failed, setFailed] = useState(false);
+  if (!avatarUrl || failed) {
+    return <span className="m-avatar">{initials}</span>;
+  }
+  return (
+    <span className="m-avatar" style={{ padding: 0, overflow: 'hidden', background: 'transparent' }}>
+      <img
+        src={avatarUrl}
+        alt=""
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+      />
     </span>
+  );
+}
+
+function computeInitials(name: string | null, fallback: string): string {
+  if (name && name.trim()) {
+    const parts = name.trim().split(/\s+/);
+    if (parts.length >= 2) return (parts[0]![0]! + parts[1]![0]!).toUpperCase();
+    return name.slice(0, 2).toUpperCase();
+  }
+  return fallback.slice(0, 2).toUpperCase();
+}
+
+// ─── On-chain ───────────────────────────────────────────────────────────
+
+function OnChainSection({ proposal }: { proposal: DecimalProposal }) {
+  const cells: Array<{ label: string; value: React.ReactNode; sub?: string }> = [];
+  if (proposal.squads.proposalPda) {
+    cells.push({
+      label: 'Proposal account',
+      value: <AddrLink address={proposal.squads.proposalPda} />,
+    });
+  }
+  if (proposal.squads.transactionPda) {
+    cells.push({
+      label: 'Squads transaction',
+      value: <AddrLink address={proposal.squads.transactionPda} />,
+    });
+  }
+  if (proposal.squads.multisigPda) {
+    cells.push({
+      label: 'Multisig',
+      value: <AddrLink address={proposal.squads.multisigPda} />,
+    });
+  }
+  if (proposal.squads.transactionIndex) {
+    cells.push({
+      label: 'Tx index',
+      value: <span className="mono">#{proposal.squads.transactionIndex}</span>,
+    });
+  }
+
+  const row2: Array<{ label: string; value: React.ReactNode; sub?: string }> = [];
+  if (proposal.submittedSignature) {
+    row2.push({
+      label: 'Submitted',
+      value: <SigLink signature={proposal.submittedSignature} />,
+      sub: proposal.submittedAt ? new Date(proposal.submittedAt).toLocaleString() : undefined,
+    });
+  }
+  if (proposal.executedSignature) {
+    row2.push({
+      label: 'Executed',
+      value: <SigLink signature={proposal.executedSignature} />,
+      sub: proposal.executedAt ? new Date(proposal.executedAt).toLocaleString() : undefined,
+    });
+  }
+
+  return (
+    <div>
+      <div className="sec-head">
+        <div className="sh-titles"><h2>On-chain</h2></div>
+      </div>
+      {cells.length > 0 ? (
+        <div className="detail-grid" style={{ gridTemplateColumns: `repeat(${Math.min(cells.length, 4)}, 1fr)` }}>
+          {cells.map((c) => (
+            <div className="detail-cell" key={c.label}>
+              <span className="d-label">{c.label}</span>
+              <span className="d-value">{c.value}</span>
+              {c.sub ? <span className="d-sub">{c.sub}</span> : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {row2.length > 0 ? (
+        <div className="detail-row2" style={{ gridTemplateColumns: `repeat(${Math.min(row2.length, 2)}, 1fr)` }}>
+          {row2.map((c) => (
+            <div className="detail-cell" key={c.label}>
+              <span className="d-label">{c.label}</span>
+              <span className="d-value">{c.value}</span>
+              {c.sub ? <span className="d-sub">{c.sub}</span> : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AddrLink({ address }: { address: string }) {
+  return (
+    <a
+      href={orbAccountUrl(address)}
+      target="_blank"
+      rel="noreferrer"
+      className="chainlink"
+      style={{ textDecoration: 'none', padding: '5px 9px', fontSize: 11 }}
+    >
+      <Ico.link w={13} />
+      <span className="sig">{shortenAddress(address, 4, 4)}</span>
+      <Ico.external w={12} />
+    </a>
+  );
+}
+
+function SigLink({ signature }: { signature: string }) {
+  return (
+    <a
+      href={orbTransactionUrl(signature)}
+      target="_blank"
+      rel="noreferrer"
+      className="chainlink"
+      style={{ textDecoration: 'none', padding: '5px 9px', fontSize: 11 }}
+    >
+      <Ico.link w={13} />
+      <span className="sig">{shortenAddress(signature, 4, 4)}</span>
+      <Ico.external w={12} />
+    </a>
   );
 }
 
