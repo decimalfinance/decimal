@@ -415,3 +415,27 @@
 .dec .approved-by { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--success); font-weight: 500; }
 .dec .approved-by svg { width: 14px; height: 14px; }
 .dec .auto-ok { font-size: 12px; color: var(--text-faint); }
+
+/* Spending Limit Detail — cap usage card + per-vendor mini bar.
+   Lifted verbatim from design_handoff_spending_limit_detail/decimal/pages.css */
+.dec .cap-card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-md); padding: 20px 22px; }
+.dec .cap-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 16px; }
+.dec .cap-spent { display: flex; flex-direction: column; gap: 4px; }
+.dec .cap-spent .cs-lab { font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-muted); }
+.dec .cap-spent .cs-amt { font-family: var(--font-mono); font-size: 30px; font-weight: 500; letter-spacing: -0.02em; line-height: 1; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.dec .cap-spent .cs-amt small { font-size: 14px; color: var(--text-faint); font-weight: 400; margin-left: 6px; }
+.dec .cap-spent .cs-of { font-size: 13px; color: var(--text-muted); font-family: var(--font-mono); }
+.dec .cap-right { text-align: right; display: flex; flex-direction: column; gap: 4px; }
+.dec .cap-right .cr-rem { font-family: var(--font-mono); font-size: 18px; font-weight: 500; color: var(--text-primary); }
+.dec .cap-right .cr-lab { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+.dec .cap-right .cr-reset { font-size: 12px; color: var(--text-faint); font-family: var(--font-mono); margin-top: 2px; }
+.dec .cap-meter { height: 9px; border-radius: 999px; background: var(--bg-surface-2); overflow: hidden; border: 1px solid var(--border); }
+.dec .cap-meter .cm-fill { height: 100%; background: var(--accent); border-radius: 999px; }
+.dec .cap-meter .cm-fill.warn { background: var(--warning); }
+.dec .cap-foot { display: flex; align-items: center; gap: 16px; margin-top: 12px; font-size: 12px; color: var(--text-muted); }
+.dec .cap-foot .cf-item { display: flex; align-items: center; gap: 6px; }
+.dec .cap-foot .cf-item .mono { font-family: var(--font-mono); color: var(--text-primary); font-weight: 500; }
+.dec .cap-foot .cf-sep { width: 1px; height: 12px; background: var(--border-strong); }
+
+.dec .paid-bar { width: 90px; height: 6px; border-radius: 999px; background: var(--bg-surface-2); overflow: hidden; display: inline-block; vertical-align: middle; margin-right: 8px; }
+.dec .paid-bar .pb-fill { height: 100%; background: var(--accent); border-radius: 999px; display: block; }

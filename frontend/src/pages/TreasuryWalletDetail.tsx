@@ -2079,7 +2079,7 @@ type RemoveSpendingLimitPhase =
   | 'persisting'
   | 'error';
 
-function RemoveSpendingLimitDialog({
+export function RemoveSpendingLimitDialog({
   organizationId,
   policy,
   onClose,

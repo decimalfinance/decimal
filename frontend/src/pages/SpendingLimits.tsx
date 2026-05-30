@@ -371,7 +371,7 @@ function PolicyRow({
               type="button"
               className="btn btn-sm btn-secondary"
               onClick={() =>
-                navigate(`/organizations/${organizationId}/wallets/${policy.treasuryWalletId}`)
+                navigate(`/organizations/${organizationId}/spending-limits/${policy.spendingLimitPolicyId}`)
               }
             >
               Manage<Ico.arrowRight w={13} />
