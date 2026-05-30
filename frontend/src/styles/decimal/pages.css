@@ -439,3 +439,13 @@
 
 .dec .paid-bar { width: 90px; height: 6px; border-radius: 999px; background: var(--bg-surface-2); overflow: hidden; display: inline-block; vertical-align: middle; margin-right: 8px; }
 .dec .paid-bar .pb-fill { height: 100%; background: var(--accent); border-radius: 999px; display: block; }
+
+/* Vault detail — breadcrumb separator + inherited-signers callout.
+   Lifted from design_handoff_vault_detail/decimal/pages.css */
+.dec .crumb .cb-sep { color: var(--border-strong); margin: 0 8px; }
+.dec .crumb .cb-mid { color: var(--text-muted); }
+.dec .vault-signers { display: flex; align-items: center; justify-content: space-between; gap: 20px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-md); padding: 16px 18px; }
+.dec .vault-signers .vs-left { display: flex; align-items: center; gap: 14px; }
+.dec .vault-signers .vs-text .vs-title { font-size: 13.5px; color: var(--text-primary); }
+.dec .vault-signers .vs-text .vs-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; max-width: 52ch; }
+.dec .vault-signers .vs-right { display: flex; align-items: center; gap: 16px; flex: 0 0 auto; }

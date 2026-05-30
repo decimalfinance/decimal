@@ -600,7 +600,7 @@ function VaultsTable({
                       type="button"
                       className="btn btn-sm btn-secondary"
                       onClick={() =>
-                        navigate(`/organizations/${organizationId}/wallets/${v.treasuryWalletId}`)
+                        navigate(`/organizations/${organizationId}/vaults/${v.treasuryWalletId}`)
                       }
                     >
                       Manage<Ico.arrowRight w={13} />
