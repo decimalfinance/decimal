@@ -780,13 +780,22 @@ function CreateSquadsTreasuryDialog(props: {
                     const checked = selectedWalletIds.has(w.userWalletId);
                     const isCreator = w.userWalletId === creatorWalletId;
                     return (
-                      <button
+                      <div
                         key={w.userWalletId}
-                        type="button"
                         className={`check-item${checked ? ' on' : ''}`}
                         onClick={() => toggleSelected(w.userWalletId)}
-                        disabled={isCreator}
-                        style={isCreator ? { cursor: 'default', opacity: 1 } : undefined}
+                        onKeyDown={(e) => {
+                          if (isCreator) return;
+                          if (e.key === ' ' || e.key === 'Enter') {
+                            e.preventDefault();
+                            toggleSelected(w.userWalletId);
+                          }
+                        }}
+                        role="checkbox"
+                        aria-checked={checked}
+                        aria-disabled={isCreator}
+                        tabIndex={isCreator ? -1 : 0}
+                        style={isCreator ? { cursor: 'default' } : undefined}
                       >
                         <span className="check-box">
                           {checked ? <Ico.checkSm w={12} /> : null}
@@ -796,11 +805,11 @@ function CreateSquadsTreasuryDialog(props: {
                         </span>
                         <span className="ci-name">{w.user.displayName ?? w.user.email}</span>
                         {isCreator ? <span className="ci-sub">you</span> : null}
-                      </button>
+                      </div>
                     );
                   })}
                   {/* Decimal agent — always part of the team, shown for clarity */}
-                  <div className="check-item on" style={{ cursor: 'default' }}>
+                  <div className="check-item on" style={{ cursor: 'default' }} aria-disabled>
                     <span className="check-box"><Ico.checkSm w={12} /></span>
                     <span className="ci-av agent">
                       <Ico.bolt w={13} fill="currentColor" sw={0} />
@@ -813,20 +822,26 @@ function CreateSquadsTreasuryDialog(props: {
             </div>
 
             <div className="field">
-              <label className="field-label">Required approvals</label>
-              <div className="select" style={{ width: 200 }}>
-                <select
-                  value={threshold}
-                  onChange={(e) => setThreshold(Number(e.target.value))}
-                  disabled={isWorking || selectedCount === 0}
-                >
-                  {Array.from({ length: Math.max(selectedCount, 1) }, (_, i) => i + 1).map((n) => (
-                    <option key={n} value={n}>
-                      {n} of {selectedCount}
-                    </option>
-                  ))}
-                </select>
-                <Ico.chevDown w={14} />
+              <label className="field-label">
+                Required approvals
+                {selectedCount > 0 ? (
+                  <span style={{ color: 'var(--text-faint)', fontWeight: 400, marginLeft: 6 }}>
+                    · of {selectedCount}
+                  </span>
+                ) : null}
+              </label>
+              <div className="seg-pick">
+                {Array.from({ length: Math.max(selectedCount, 1) }, (_, i) => i + 1).map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    className={threshold === n ? 'on' : ''}
+                    onClick={() => setThreshold(n)}
+                    disabled={isWorking || selectedCount === 0}
+                  >
+                    {n}
+                  </button>
+                ))}
               </div>
               <span className="input-help">How many signers must approve before a payment sends.</span>
             </div>
