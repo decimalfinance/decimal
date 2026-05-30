@@ -498,36 +498,19 @@ function InviteMemberDialog({
           <div className="dialog-body">
             <div className="field">
               <label className="field-label">Email address</label>
-              <div className="input-search" style={{ position: 'relative' }}>
-                <span
-                  aria-hidden
-                  style={{
-                    position: 'absolute',
-                    left: 11,
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    color: 'var(--text-faint)',
-                    pointerEvents: 'none',
-                    display: 'inline-flex',
-                  }}
-                >
-                  <Ico.mail w={15} />
-                </span>
-                <input
-                  className="input"
-                  type="email"
-                  required
-                  autoFocus
-                  autoComplete="off"
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  placeholder="teammate@company.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  style={{ paddingLeft: 34 }}
-                />
-              </div>
+              <input
+                className="input"
+                type="email"
+                required
+                autoFocus
+                autoComplete="off"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                placeholder="teammate@company.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
             </div>
             <div className="field">
               <label className="field-label">Role</label>

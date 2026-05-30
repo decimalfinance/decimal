@@ -31,6 +31,7 @@ opsRouter.get('/organizations/:organizationId/members', async (req, res, next) =
             userId: true,
             email: true,
             displayName: true,
+            avatarUrl: true,
           },
         },
       },
