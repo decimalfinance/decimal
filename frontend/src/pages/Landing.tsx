@@ -1,12 +1,4 @@
-import {
-  type CSSProperties,
-  type MouseEvent,
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { api } from '../api';
 import '../styles/landing.css';
@@ -45,12 +37,10 @@ export function LandingPage() {
       <Nav googleHref={googleHref} />
       <Hero googleHref={googleHref} />
       <Marquee />
-      <Pillars />
+      <PaymentsSection />
+      <SpendingLimitsSection />
       <HowItWorks />
-      <BuiltOn />
-      <WhyDecimal />
-      <FAQ />
-      <FootCTA googleHref={googleHref} />
+      <ClosingCTA googleHref={googleHref} />
       <Foot />
     </>
   );
@@ -60,24 +50,21 @@ export function LandingPage() {
 
 function Nav({ googleHref }: { googleHref: string }) {
   return (
-    <header className="nav">
-      <div className="container nav-inner">
-        <Link to="/" className="nav-brand">
+    <header className="l-nav">
+      <div className="l-nav-inner">
+        <Link to="/" className="l-brand">
           <img src="/decimal-logo.png" alt="Decimal" />
           <span>Decimal</span>
         </Link>
-        <nav className="nav-links">
+        <nav className="l-nav-links">
+          <a href="#payments">Payments</a>
+          <a href="#limits">Spending limits</a>
           <a href="#how">How it works</a>
-          <a href="#built">Built on</a>
-          <a href="#why">Why Decimal</a>
-          <a href="#faq">FAQ</a>
         </nav>
-        <div className="nav-cta">
-          <Link to="/login" style={{ color: 'var(--ink-2)', textDecoration: 'none', fontSize: 14 }}>
-            Sign in
-          </Link>
-          <a className="btn btn-primary btn-sm" href={googleHref}>
-            Continue with Google →
+        <div className="l-nav-cta">
+          <Link to="/login" className="l-signin">Sign in</Link>
+          <a className="l-btn l-btn-primary l-btn-sm" href={googleHref}>
+            Get started
           </a>
         </div>
       </div>
@@ -189,38 +176,91 @@ function Marquee() {
   );
 }
 
-/* ───────────────── Pillars ───────────────── */
+/* ───────────────── Payments section ───────────────── */
+// Static rendering of the Payments product UI inside a browser frame.
+// Faithful to the real /payments page (heading + 4 metrics + table)
+// but scoped to .lp-pay so .dec styles don't leak in. Per the design
+// handoff we'd ideally scale-mount the real product UI; for a marketing
+// page a clean static composition reads better and stays maintainable.
 
-function Pillars() {
+function PaymentsSection() {
   return (
-    <section className="section pillars-section is-pink">
-      <div className="container">
-        <div className="pillars">
-          <div className="pillar">
-            <div className="pillar-num">01 / Automation</div>
-            <h3>The product that handles the busywork.</h3>
-            <p>
-              Forward a document, paste a payment request, drop a CSV of vendors. Decimal extracts
-              amounts, recipients, due dates, and the right approver — then queues each payout for
-              sign-off.
-            </p>
-            <p>
-              No more re-keying numbers from PDFs. No more{' '}
-              <em style={{ fontStyle: 'normal' }}>"is this the right account?"</em> Slack threads.
-            </p>
+    <section id="payments" className="l-section">
+      <div className="l-wrap">
+        <div className="l-prod-head">
+          <div className="l-kicker">PAYMENTS</div>
+          <h2>Run payments across the globe.</h2>
+          <p>Pay any vendor, in any currency, from one place.</p>
+        </div>
+        <div className="l-browser">
+          <div className="l-browser-bar">
+            <span className="l-dot" />
+            <span className="l-dot" />
+            <span className="l-dot" />
+            <span className="l-url">app.decimal.finance/payments</span>
           </div>
-          <div className="pillar">
-            <div className="pillar-num">02 / Treasury</div>
-            <h3>A treasury you actually own.</h3>
-            <p>
-              Decimal accounts are Squads multisigs on Solana — the same program securing the
-              largest treasuries in the ecosystem. You set the signers. You set the threshold. We
-              never touch your keys.
-            </p>
-            <p>
-              Decimal <em style={{ fontStyle: 'normal' }}>proposes</em>. Your multisig{' '}
-              <em style={{ fontStyle: 'normal' }}>disposes</em>.
-            </p>
+          <div className="l-screen">
+            <div className="lp-pay">
+              <div className="hd">
+                <div>
+                  <div className="eyebrow">PAYMENTS</div>
+                  <h3>All payments</h3>
+                  <p>Every payment and batch payout in this organization.</p>
+                </div>
+                <button type="button" className="pay-btn">+ Upload invoice</button>
+              </div>
+              <div className="met">
+                <div className="m">
+                  <div className="ml">Awaiting approval</div>
+                  <div className="mv">3</div>
+                  <div className="ms">2 need your vote</div>
+                </div>
+                <div className="m">
+                  <div className="ml">Auto-paid this month</div>
+                  <div className="mv">12</div>
+                  <div className="ms">18,420.00 USDC</div>
+                </div>
+                <div className="m">
+                  <div className="ml">Settled this month</div>
+                  <div className="mv">38</div>
+                  <div className="ms">84,210.18 USDC</div>
+                </div>
+                <div className="m">
+                  <div className="ml">Needs review</div>
+                  <div className="mv">1</div>
+                  <div className="ms">flagged by agent</div>
+                </div>
+              </div>
+              <div className="pt">
+                <table>
+                  <thead>
+                    <tr>
+                      <th style={{ width: '28%' }}>Vendor</th>
+                      <th style={{ width: '18%' }}>Source</th>
+                      <th className="num" style={{ width: '18%' }}>Amount</th>
+                      <th style={{ width: '14%' }}>Origin</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {PAYMENT_ROWS.map((r) => (
+                      <tr key={r.vendor + r.amount}>
+                        <td><span className="vn">{r.vendor}</span></td>
+                        <td><span className="so">⌂ {r.source}</span></td>
+                        <td className="num">{r.amount} <span style={{ color: '#9D9893' }}>USDC</span></td>
+                        <td><span className="po">{r.origin}</span></td>
+                        <td>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                            <span className={`pl s-${r.tone}`}><span className="d" />{r.status}</span>
+                            {r.sl ? <span className="pl-sl"><BoltMini />SL</span> : null}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -228,653 +268,438 @@ function Pillars() {
   );
 }
 
-/* ───────────────── How it works (scroll-driven) ───────────────── */
+const PAYMENT_ROWS: Array<{
+  vendor: string;
+  source: string;
+  amount: string;
+  origin: string;
+  status: string;
+  tone: 'ok' | 'wa' | 'in';
+  sl: boolean;
+}> = [
+  { vendor: 'Bangalore Ops Pvt Ltd', source: 'Operating', amount: '2,176.67', origin: 'Single', status: 'Signing', tone: 'wa', sl: false },
+  { vendor: 'Lumen Cloud Inc', source: 'Operating', amount: '940.00', origin: 'Apr cloud', status: 'Settled', tone: 'ok', sl: true },
+  { vendor: 'Northwind Hosting', source: 'Operating', amount: '610.40', origin: 'Apr cloud', status: 'Settled', tone: 'ok', sl: true },
+  { vendor: 'Praxis Legal LLP', source: 'Operating', amount: '1,250.00', origin: 'Single', status: 'Reviewed', tone: 'in', sl: false },
+  { vendor: 'Cobalt Studio', source: 'Operating', amount: '5,200.00', origin: 'Single', status: 'Signing', tone: 'wa', sl: false },
+  { vendor: 'Verde Energy', source: 'Operating', amount: '320.00', origin: 'Apr cloud', status: 'Settled', tone: 'ok', sl: true },
+];
 
-const HOW_STEPS = [
-  {
-    n: '01',
-    h: 'Invoice in.',
-    p: 'Forward a document, paste a payment request, or drop a vendor CSV. Decimal watches the inbox so your AP team doesn’t have to.',
-  },
-  {
-    n: '02',
-    h: 'Agent drafts.',
-    p: 'The Decimal agent extracts amount, recipient, due date, and memo — then drafts a payout routed to the right multisig.',
-  },
-  {
-    n: '03',
-    h: 'Multisig votes.',
-    p: 'The proposal lands in your Squads multisig. Signers approve from anywhere. We never touch your keys.',
-  },
-  {
-    n: '04',
-    h: 'Vendor paid.',
-    p: 'USDC arrives in seconds. Or it converts to a deposit in your vendor’s local bank. Either way — a clean confirmation, no follow-up emails.',
-  },
-] as const;
+function BoltMini() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M13 2 4 14h6l-1 8 9-12h-6z" />
+    </svg>
+  );
+}
+
+/* ───────────────── Spending limits section ───────────────── */
+
+function SpendingLimitsSection() {
+  return (
+    <section id="limits" className="l-section">
+      <div className="l-wrap">
+        <div className="l-prod-head">
+          <div className="l-kicker">SPENDING LIMITS</div>
+          <h2>Automate recurring payments.</h2>
+          <p>Set spending limits and Decimal handles the process for you.</p>
+        </div>
+        <div className="l-limit-grid">
+          <div className="l-vig">
+            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: '100%', gap: 18 }}>
+              <div className="l-vig-title">
+                <span className="vt-name">Cloud Bills</span>
+                <span className="pill-ok"><span className="d" />Active</span>
+              </div>
+              <div className="cap-vert">
+                <div className="cv-lead">
+                  <span className="cs-lab">Spent this month</span>
+                  <span className="cs-amt">2,940.00<small>USDC</small></span>
+                  <span className="cs-of">of 5,000.00 monthly limit</span>
+                </div>
+                <div className="cap-meter"><span className="cm-fill" style={{ width: '59%' }} /></div>
+                <div className="cv-rows">
+                  <div className="cv-row"><span className="cv-k">Remaining</span><span className="cv-v">2,060.00 USDC</span></div>
+                  <div className="cv-row"><span className="cv-k">Cap used</span><span className="cv-v">59%</span></div>
+                  <div className="cv-row"><span className="cv-k">Per-vendor cap</span><span className="cv-v">2,000.00</span></div>
+                  <div className="cv-row"><span className="cv-k">Resets</span><span className="cv-v">May 1</span></div>
+                </div>
+              </div>
+              <div className="l-covers">
+                <div className="l-covers-head">
+                  <span className="lbl">Covered vendors</span>
+                  <span className="l-covers-cap">cap 2,000 each</span>
+                </div>
+                <div className="l-cover-chips">
+                  {['Vercel', 'AWS', 'Cloudflare', 'Datadog', 'GitHub', 'Twilio'].map((c) => (
+                    <span className="l-chip" key={c}>{c}</span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="l-vig">
+            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: '100%', gap: 12 }}>
+              <div>
+                <div className="l-autopay-label">
+                  <BoltMini />AUTO-PAID THIS MONTH
+                </div>
+                <div className="l-autopay">
+                  {AUTOPAY_ROWS.map((r) => (
+                    <div className="l-autopay-row" key={r.name}>
+                      <span className="ap-v">{r.name}</span>
+                      <span className="ap-right">
+                        <span className="pill-sl"><BoltMini />SL</span>
+                        <span className="ap-amt">{r.amt}</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="l-autopay-foot">
+                <BoltMini />
+                Paid automatically — <b>no team vote needed.</b>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const AUTOPAY_ROWS = [
+  { name: 'Vercel', amt: '940.00' },
+  { name: 'Amazon Web Services', amt: '610.40' },
+  { name: 'Cloudflare', amt: '320.00' },
+  { name: 'Datadog', amt: '520.00' },
+  { name: 'GitHub', amt: '360.00' },
+  { name: 'Twilio', amt: '189.60' },
+];
+
+/* ───────────────── How it works (3 animated cards) ───────────────── */
 
 function HowItWorks() {
-  const trackRef = useRef<HTMLDivElement>(null);
-  const [activeIdx, setActiveIdx] = useState(0);
+  const [step, setStep] = useState(0); // 0..2 = active card
 
   useEffect(() => {
-    const onScroll = () => {
-      const el = trackRef.current;
-      if (!el) return;
-      if (window.innerWidth < 1080) {
-        setActiveIdx(0);
-        return;
-      }
-      const rect = el.getBoundingClientRect();
-      const total = el.offsetHeight - window.innerHeight;
-      if (total <= 0) {
-        setActiveIdx(0);
-        return;
-      }
-      const scrolled = Math.max(0, Math.min(total, -rect.top));
-      const progress = scrolled / total;
-      const idx = Math.min(
-        HOW_STEPS.length - 1,
-        Math.floor(progress * HOW_STEPS.length),
-      );
-      setActiveIdx(idx);
-    };
-    onScroll();
-    window.addEventListener('scroll', onScroll, { passive: true });
-    window.addEventListener('resize', onScroll);
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      setStep(2);
+      return;
+    }
+    // Loop: card 1 (4.5s) → card 2 (5.5s) → card 3 (4s) → 1.5s pause → repeat
+    const order = [0, 1, 2];
+    const durations = [4500, 5500, 4000, 1500];
+    let i = 0;
+    let timeoutId: number | null = null;
+    function tick() {
+      const idx = i % order.length;
+      setStep(order[idx]!);
+      timeoutId = window.setTimeout(tick, durations[idx]!);
+      i += 1;
+    }
+    tick();
     return () => {
-      window.removeEventListener('scroll', onScroll);
-      window.removeEventListener('resize', onScroll);
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
     };
   }, []);
 
   return (
-    <section className="section how-section" id="how">
-      <div className="container">
-        <div className="section-head">
-          <div className="eyebrow">
-            <span className="dot" />
-            How it works
-          </div>
-          <h2>From document to settlement, in four steps.</h2>
-          <p>
-            Decimal does the keying. You do the deciding. Scroll through one payout — invoice in
-            your inbox to dollars in your vendor's bank.
-          </p>
+    <section id="how" className="l-section">
+      <div className="l-wrap">
+        <div className="l-prod-head">
+          <div className="l-kicker">HOW IT WORKS</div>
+          <h2>From your inbox to your vendor's bank.</h2>
         </div>
-      </div>
-      <div className="how-pin-track" ref={trackRef}>
-        <div className="how-pinned">
-          <div className="container">
-            <div className="how-grid how-grid-scroll">
-              <div className="steps-scroll">
-                {HOW_STEPS.map((s, i) => (
-                  <div
-                    key={s.n}
-                    className={`step ${activeIdx === i ? 'active' : 'dim'}`}
-                  >
-                    <div className="step-n">{s.n}</div>
-                    <div>
-                      <h4>{s.h}</h4>
-                      <p>{s.p}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="how-sticky">
-                <PaymentDemo controlledStep={activeIdx} />
-              </div>
-            </div>
-          </div>
+        <div className="l-how-grid">
+          <Card1 active={step === 0} />
+          <Card2 active={step === 1} />
+          <Card3 active={step === 2} />
         </div>
       </div>
     </section>
   );
 }
 
-/* ───────────────── Payment Demo ───────────────── */
-
-const DEMO_STEPS = [
-  { key: 'inbox', label: 'Invoice in' },
-  { key: 'extract', label: 'Agent drafts' },
-  { key: 'sign', label: 'Multisig vote' },
-  { key: 'paid', label: 'Paid' },
-] as const;
-
-const DEMO_DURATIONS = [2400, 2800, 3200, 2800];
-
-function PaymentDemo({ controlledStep }: { controlledStep: number }) {
-  const stepIdx = controlledStep;
-  const [parsedKeys, setParsedKeys] = useState(0);
-  const [signerCount, setSignerCount] = useState(0);
-
-  useEffect(() => {
-    setParsedKeys(0);
-    setSignerCount(0);
-    if (stepIdx === 1) {
-      let n = 0;
-      const id = setInterval(() => {
-        n += 1;
-        setParsedKeys(n);
-        if (n >= 5) clearInterval(id);
-      }, 380);
-      return () => clearInterval(id);
-    }
-    if (stepIdx === 2) {
-      let n = 0;
-      const id = setInterval(() => {
-        n += 1;
-        setSignerCount(n);
-        if (n >= 2) clearInterval(id);
-      }, 900);
-      return () => clearInterval(id);
-    }
-    return undefined;
-  }, [stepIdx]);
-
+function CardShell({
+  active,
+  step,
+  title,
+  dim,
+  children,
+  panelClass,
+}: {
+  active: boolean;
+  step: string;
+  title: string;
+  dim?: string;
+  children: ReactNode;
+  panelClass?: string;
+}) {
   return (
-    <div
-      className="demo-shell"
-      role="img"
-      aria-label="Animated demo: invoice received, agent drafts payout, multisig signs, vendor paid."
-    >
-      <div className="demo-tabs">
-        {DEMO_STEPS.map((s, i) => (
-          <div
-            key={s.key}
-            className={`demo-tab ${i === stepIdx ? 'is-active' : ''} ${i < stepIdx ? 'is-done' : ''}`}
-          >
-            <span style={{ opacity: 0.55, marginRight: 6 }}>0{i + 1}</span>
-            {s.label}
-            <span
-              className="bar"
-              style={{
-                width: i <= stepIdx ? '100%' : '0%',
-                transition:
-                  i === stepIdx ? `width ${DEMO_DURATIONS[i]}ms linear` : 'width .25s ease',
-              }}
-            />
+    <div className={`l-how-card${active ? ' is-active' : ''}`}>
+      <div className="l-how-head">
+        <div className="l-how-step">{step}</div>
+        <div className="l-how-title">
+          {title}
+          {dim ? <> <span className="dim">{dim}</span></> : null}
+        </div>
+      </div>
+      <div className={`l-how-panel${panelClass ? ` ${panelClass}` : ''}`}>{children}</div>
+    </div>
+  );
+}
+
+function Card1({ active }: { active: boolean }) {
+  // Three internal phases mapped to a single elapsed-time signal so the
+  // sequence (upload → scan → extracted fields) restarts every time the
+  // card becomes the active one.
+  const [phase, setPhase] = useState<'idle' | 'uploading' | 'scanning' | 'done'>('idle');
+  const [revealCount, setRevealCount] = useState(0); // 0..3 fields shown
+  useEffect(() => {
+    if (!active) {
+      setPhase('idle');
+      setRevealCount(0);
+      return;
+    }
+    setPhase('uploading');
+    setRevealCount(0);
+    const t1 = window.setTimeout(() => setPhase('scanning'), 1200);
+    const t2 = window.setTimeout(() => setPhase('done'), 2200);
+    const t3 = window.setTimeout(() => setRevealCount(1), 2600);
+    const t4 = window.setTimeout(() => setRevealCount(2), 3000);
+    const t5 = window.setTimeout(() => setRevealCount(3), 3400);
+    return () => [t1, t2, t3, t4, t5].forEach((t) => window.clearTimeout(t));
+  }, [active]);
+  return (
+    <CardShell active={active} step="01" title="Upload an invoice." dim="The agent reads it." panelClass="c1">
+      <div className={`c1-doczone${phase === 'scanning' ? ' scanning' : ''}${phase === 'done' ? ' done' : ''}`}>
+        <div className="c1-doc">
+          <div className="c1-scan" />
+          <div className="dl" />
+          <div className="dl s" />
+          <div className="dl" />
+          <div className="dl s" />
+          <div className="dl" />
+        </div>
+        <div className="c1-upmeta">
+          <div className="c1-upname">invoice-2048.pdf</div>
+          <div className="c1-upcap">
+            {phase === 'uploading' ? 'Uploading…' : phase === 'scanning' ? 'Reading invoice…' : phase === 'done' || revealCount > 0 ? 'Extracted ✓' : '1.2 MB'}
+          </div>
+          <div className="c1-prog">
+            <div className="c1-prog-fill" style={{ width: phase === 'uploading' ? '60%' : phase === 'scanning' || phase === 'done' ? '100%' : '0%' }} />
+          </div>
+        </div>
+      </div>
+
+      <div className={`c1-exlabel${revealCount > 0 ? ' on' : ''}`}>
+        <BoltMini />Extracted by agent
+      </div>
+      <div className="c1-fields">
+        {[
+          { k: 'Vendor', v: 'Meridian Studio', mono: false },
+          { k: 'Amount', v: '2,176.67 USDC', mono: true },
+          { k: 'Due date', v: 'Apr 30, 2026', mono: true },
+        ].map((f, i) => (
+          <div key={f.k} className={`c1-row${revealCount > i ? ' on' : ''}`}>
+            <span className="c1-k">{f.k}</span>
+            <span className={`c1-val${f.mono ? ' mono' : ''}`}>
+              {f.v}
+              <span className="c1-chk"><CheckMini /></span>
+            </span>
           </div>
         ))}
       </div>
-
-      <div className="demo-stage">
-        {/* Step 1 — Inbox */}
-        <div className={`demo-frame ${stepIdx === 0 ? 'is-on' : ''}`}>
-          <div className="label">Inbox · ap@yourco.com</div>
-          <div
-            className="idoc"
-            style={{ borderColor: stepIdx === 0 ? 'var(--pink)' : 'var(--hair)' }}
-          >
-            <div className="idoc-row">
-              <span className="from">FROM billing@northwind-design.com</span>
-              <span className="from">10:42</span>
-            </div>
-            <div className="subj">Invoice #NW-2049 — October retainer</div>
-            <div className="preview">
-              Hi team — attached our October invoice. Net-30. Wire to our usual account, or USDC if
-              easier this month.
-            </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-              <span
-                className="bo-tag"
-                style={{
-                  background: '#fafafa',
-                  padding: '4px 8px',
-                  borderRadius: 6,
-                  border: '1px solid var(--hair)',
-                }}
-              >
-                📎 invoice-NW-2049.pdf
-              </span>
-            </div>
-          </div>
-          <div className="idoc" style={{ opacity: 0.55 }}>
-            <div className="idoc-row">
-              <span className="from">FROM hello@cypress-legal.com</span>
-              <span className="from">09:18</span>
-            </div>
-            <div className="subj">Q4 retainer + filing fees</div>
-            <div className="preview">Three line items, payable to our trust account…</div>
-          </div>
-          <div className="idoc" style={{ opacity: 0.32 }}>
-            <div className="idoc-row">
-              <span className="from">FROM contractors@ledger-payroll.app</span>
-              <span className="from">Tue</span>
-            </div>
-            <div className="subj">14 contractors ready to pay (CSV)</div>
-            <div className="preview">Auto-generated batch from this week's timesheets.</div>
-          </div>
-        </div>
-
-        {/* Step 2 — Agent extracts */}
-        <div className={`demo-frame ${stepIdx === 1 ? 'is-on' : ''}`}>
-          <div className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: 999,
-                background: 'var(--pink)',
-                animation: 'demo-pulse 1.2s ease-in-out infinite',
-              }}
-            />
-            Decimal agent · reading invoice-NW-2049.pdf
-          </div>
-          <div className="parsed">
-            <h5>Extracted</h5>
-            {(
-              [
-                ['Vendor', 'Northwind Design Co.'],
-                ['Amount', <span className="amount">$8,420.00 USDC</span>],
-                ['Due', 'Nov 14, 2025'],
-                ['Memo', 'Oct retainer · INV NW-2049'],
-                ['Recipient', '7Hk…q9Fz · routes to vendor bank'],
-              ] as Array<[string, ReactNode]>
-            )
-              .slice(0, parsedKeys)
-              .map(([k, v]) => (
-                <div
-                  className="parsed-row"
-                  key={k}
-                  style={{ animation: 'demo-fade-in .3s ease both' }}
-                >
-                  <span className="k">{k}</span>
-                  <span className={`v ${k === 'Amount' ? 'pink' : ''}`}>{v}</span>
-                </div>
-              ))}
-            {parsedKeys >= 5 && (
-              <div
-                style={{
-                  marginTop: 8,
-                  paddingTop: 12,
-                  borderTop: '1px solid var(--hair)',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}
-              >
-                <span className="bo-tag" style={{ color: 'var(--pink)' }}>
-                  ✓ Drafted payout · routed to multisig
-                </span>
-                <span className="bo-tag">approver: cfo@</span>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Step 3 — Multisig vote */}
-        <div className={`demo-frame ${stepIdx === 2 ? 'is-on' : ''}`}>
-          <div className="label">Squads multisig · proposal #318 · m-of-n</div>
-          <div className="parsed" style={{ padding: '12px 14px' }}>
-            <div className="parsed-row">
-              <span className="k">Send</span>
-              <span className="v amount pink">$8,420.00 USDC</span>
-            </div>
-            <div className="parsed-row">
-              <span className="k">To</span>
-              <span className="v">Northwind Design Co.</span>
-            </div>
-          </div>
-          <div className="signers">
-            {[
-              { nm: 'Maya R.', em: 'cfo@yourco.com', ini: 'M' },
-              { nm: 'Diego A.', em: 'ceo@yourco.com', ini: 'D' },
-              { nm: 'Cold key', em: 'hardware · ledger', ini: '○' },
-            ].map((s, i) => (
-              <div key={s.nm} className={`signer ${i < signerCount ? 'signed' : ''}`}>
-                <div
-                  className="avatar"
-                  style={{ background: i < signerCount ? 'var(--pink)' : 'var(--ink)' }}
-                >
-                  {s.ini}
-                </div>
-                <div style={{ flex: 1, display: 'grid' }}>
-                  <span className="nm">{s.nm}</span>
-                  <span className="em">{s.em}</span>
-                </div>
-                <span className="stat">
-                  {i < signerCount ? 'Signed' : i === signerCount ? '· · ·' : 'Idle'}
-                </span>
-              </div>
-            ))}
-          </div>
-          {signerCount >= 2 && (
-            <div
-              className="bo-tag"
-              style={{ textAlign: 'center', color: 'var(--pink)', marginTop: 4 }}
-            >
-              Threshold reached — broadcasting
-            </div>
-          )}
-        </div>
-
-        {/* Step 4 — Paid */}
-        <div
-          className={`demo-frame ${stepIdx === 3 ? 'is-on' : ''}`}
-          style={{ alignContent: 'center' }}
-        >
-          <div className="sent-card">
-            <div className="sent-check">
-              <svg
-                width="22"
-                height="22"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.4"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M4 12.5l5 5 11-11" />
-              </svg>
-            </div>
-            <div className="sent-amount">$8,420.00</div>
-            <div className="sent-meta">USDC · sent in 412 ms</div>
-            <div style={{ height: 1, width: 64, background: 'var(--hair)', margin: '4px 0' }} />
-            <div
-              className="sent-meta"
-              style={{ textTransform: 'none', letterSpacing: 0.02, color: 'var(--ink-2)' }}
-            >
-              Northwind Design Co. → vendor bank
-            </div>
-            <div className="sent-link">tx · 5fT…hP9q · solana mainnet</div>
-          </div>
-        </div>
-      </div>
-
-      <div className="demo-foot">
-        <span>scroll-driven · {DEMO_STEPS[stepIdx]?.label ?? ''}</span>
-      </div>
-
-      <style>{`
-        @keyframes demo-pulse { 0%, 100% { opacity: 1; transform: scale(1);} 50% {opacity: 0.4; transform: scale(1.4);} }
-        @keyframes demo-fade-in { from { opacity: 0; transform: translateY(4px);} to { opacity: 1; transform: none;} }
-      `}</style>
-    </div>
+    </CardShell>
   );
 }
 
-/* ───────────────── Built on ───────────────── */
+function Card2({ active }: { active: boolean }) {
+  const [voted, setVoted] = useState(0); // 0..2 (JK, then AO)
+  const [exec, setExec] = useState<'idle' | 'ready' | 'pressed' | 'done'>('idle');
+  useEffect(() => {
+    if (!active) {
+      setVoted(0);
+      setExec('idle');
+      return;
+    }
+    const t1 = window.setTimeout(() => setVoted(1), 900);
+    const t2 = window.setTimeout(() => setVoted(2), 1900);
+    const t3 = window.setTimeout(() => setExec('ready'), 2700);
+    const t4 = window.setTimeout(() => setExec('pressed'), 3700);
+    const t5 = window.setTimeout(() => setExec('done'), 4100);
+    return () => [t1, t2, t3, t4, t5].forEach((t) => window.clearTimeout(t));
+  }, [active]);
 
-function BuiltOn() {
+  const members = [
+    { init: 'JK', name: 'Jordan Keil', voted: voted >= 1 },
+    { init: 'AO', name: 'Amara Osei', voted: voted >= 2 },
+    { init: 'DP', name: 'Devin Park', voted: false },
+  ];
+  const meterPct = voted === 0 ? 0 : voted === 1 ? 50 : 100;
   return (
-    <section className="section builton-section is-pink" id="built">
-      <div className="container">
-        <div className="section-head">
-          <div className="eyebrow">
-            <span className="dot" />
-            Built on
+    <CardShell active={active} step="02" title="Your team signs off." panelClass="c2">
+      <div className="c2-head">
+        <span className="c2-ttl">APPROVALS</span>
+        <span className="c2-count">{voted} of 2</span>
+      </div>
+      <div className="c2-list">
+        {members.map((m) => (
+          <div key={m.init} className={`c2-row${m.voted ? ' voted' : ''}`}>
+            <span className="c2-av">{m.init}</span>
+            <span className="c2-nm">{m.name}</span>
+            <span className="c2-vt">{m.voted ? 'Approved' : 'Pending'}</span>
+            <span className="c2-vstate">
+              <span className="pend" />
+              <span className="pop"><CheckMini /></span>
+            </span>
           </div>
-          <h2>The strongest infrastructure in stablecoin payments.</h2>
+        ))}
+      </div>
+      <div className="c2-meter"><span className="c2-meter-fill" style={{ width: `${meterPct}%` }} /></div>
+      <div className="c2-meta">
+        {voted < 2
+          ? <>2 of 3 signers required</>
+          : <><b>Threshold met</b> — ready to execute</>}
+      </div>
+      <button type="button" className={`c2-exec${exec === 'ready' ? ' ready' : ''}${exec === 'pressed' ? ' pressed' : ''}${exec === 'done' ? ' done' : ''}`}>
+        <BoltMini />
+        {exec === 'idle' ? 'Execute' : exec === 'ready' ? 'Execute' : exec === 'pressed' ? 'Executing…' : 'Executed ✓'}
+      </button>
+    </CardShell>
+  );
+}
+
+function Card3({ active }: { active: boolean }) {
+  const [running, setRunning] = useState(false);
+  const [spent, setSpent] = useState(false);
+  const [paid, setPaid] = useState(false);
+  useEffect(() => {
+    if (!active) {
+      setRunning(false);
+      setSpent(false);
+      setPaid(false);
+      return;
+    }
+    const t1 = window.setTimeout(() => setRunning(true), 400);
+    const t2 = window.setTimeout(() => setSpent(true), 1400);
+    const t3 = window.setTimeout(() => setPaid(true), 2000);
+    return () => [t1, t2, t3].forEach((t) => window.clearTimeout(t));
+  }, [active]);
+  return (
+    <CardShell active={active} step="03" title="The vendor gets paid." panelClass="c3">
+      <div className={`c3-node trez${spent ? ' spent' : ''}`}>
+        <span className="c3-ico"><TreasuryMini /></span>
+        <div className="c3-lab">
+          <div className="c3-nt">Operating treasury</div>
+          <div className="c3-ns">vault · USDC</div>
         </div>
-        <div className="builton-grid">
-          <BuiltOnCell tag="Treasury" name="Squads" mark={<SquadsLogo />}>
-            Multisig program securing billions on Solana. Formally verified. The standard the
-            largest treasuries trust.
-          </BuiltOnCell>
-          <BuiltOnCell tag="Wallets" name="Privy" mark={<PrivyLogo />}>
-            Embedded wallets so anyone can sign up. No extension, no seed phrase, no friction at
-            the door.
-          </BuiltOnCell>
-          <BuiltOnCell tag="Asset" name="USDC" mark={<USDCLogo />}>
-            The most liquid digital dollar. One dollar, always — regulated, fully-reserved,
-            portable everywhere.
-          </BuiltOnCell>
-          <BuiltOnCell tag="Network" name="Solana" mark={<SolanaLogo />}>
-            Sub-second settlement. Fees in fractions of a cent. The strongest stablecoin ecosystem
-            on-chain.
-          </BuiltOnCell>
+        <div className="c3-bal">{spent ? '126,263.51' : '128,440.18'}</div>
+      </div>
+      <div className={`c3-track${running ? ' run' : ''}`}>
+        <span className="c3-line" />
+        <span className="c3-coin"><DownArrowMini /></span>
+        <span className="c3-amt">−2,176.67</span>
+      </div>
+      <div className={`c3-node bank${paid ? ' paid' : ''}`}>
+        <span className="c3-ico"><BankMini /></span>
+        <div className="c3-lab">
+          <div className="c3-nt">Vendor bank account</div>
+          <div className="c3-ns">Meridian Studio</div>
+        </div>
+        <div className="c3-recv">+2,176.67</div>
+      </div>
+    </CardShell>
+  );
+}
+
+function CheckMini() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M5 12.5 10 17 19 6.5" />
+    </svg>
+  );
+}
+function TreasuryMini() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 9.5 12 4l9 5.5M5 10v8M19 10v8M9 10v8M15 10v8M3.5 20.5h17" />
+    </svg>
+  );
+}
+function BankMini() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="9" width="18" height="11" rx="1" />
+      <path d="M3 9 12 3l9 6M7 20v-7M12 20v-7M17 20v-7" />
+    </svg>
+  );
+}
+function DownArrowMini() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 5v14M5 12l7 7 7-7" />
+    </svg>
+  );
+}
+
+/* ───────────────── Closing CTA + Footer ───────────────── */
+
+function ClosingCTA({ googleHref }: { googleHref: string }) {
+  return (
+    <section className="l-cta">
+      <div className="l-wrap">
+        <img className="l-cta-mark" src="/decimal-logo.png" alt="" />
+        <h2>Run your finance on Decimal.</h2>
+        <p>Replace QuickBooks Bill Pay and wires with one surface. Protected by code, controlled by your team.</p>
+        <div className="l-cta-actions">
+          <a className="l-cta-g" href={googleHref}>
+            <span className="gw"><GoogleG /></span>
+            Continue with Google
+          </a>
+          <Link to="/login" className="l-cta-ghost">Sign in</Link>
         </div>
       </div>
     </section>
   );
 }
-
-function BuiltOnCell({
-  tag,
-  name,
-  mark,
-  children,
-}: {
-  tag: string;
-  name: string;
-  mark: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <div className="bo-cell">
-      <div className="bo-tag">{tag}</div>
-      <div className="bo-name">
-        {mark}
-        {name}
-      </div>
-      <div className="bo-blurb" style={{ fontSize: 17 }}>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function SquadsLogo() {
-  return <img src="/squads.svg" alt="" className="bo-mark-img" />;
-}
-
-function PrivyLogo() {
-  return <img src="/privy-black.svg" alt="" className="bo-mark-img" />;
-}
-
-function USDCLogo() {
-  return <img src="/usdc.svg" alt="" className="bo-mark-img" />;
-}
-
-function SolanaLogo() {
-  return <img src="/solana.svg" alt="" className="bo-mark-img" />;
-}
-
-/* ───────────────── Why Decimal ───────────────── */
-
-function WhyDecimal() {
-  return (
-    <section className="section" id="why">
-      <div className="container">
-        <div className="section-head">
-          <div className="eyebrow">
-            <span className="dot" />
-            Why Decimal
-          </div>
-          <h2>The work runs itself.</h2>
-        </div>
-        <div className="why-body">
-          <p>
-            Modern finance teams spend most of their week pushing paper between systems. Invoices
-            arrive in email. Numbers get copied into accounting software. Wires get requested from
-            bank portals. Statements get reconciled with vendors.
-          </p>
-          <p>That work is structured, repetitive, and done badly because nobody likes doing it.</p>
-          <p>
-            Decimal puts AI on top of stablecoin rails so that work runs itself. The product{' '}
-            <em className="em">extracts</em> the data. The team <em className="em">approves</em>{' '}
-            the decisions. The money moves on-chain — at the speed of software, not the speed of
-            bank cutoffs.
-          </p>
-          <p style={{ color: 'var(--ink-2)' }}>
-            No bank branches. No $25 wire fees. No{' '}
-            <em style={{ fontStyle: 'normal', color: 'var(--ink)' }}>
-              "the system is down for maintenance."
-            </em>{' '}
-            Just the work, done.
-          </p>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-/* ───────────────── FAQ ───────────────── */
-
-const FAQ_ITEMS = [
-  {
-    q: 'Do I need to understand crypto?',
-    a: 'No. If you can use Mercury or Ramp, you can use Decimal. Privy wallets onboard like a normal email signup — no browser extension, no seed phrase to write down.',
-  },
-  {
-    q: 'Where do my funds actually live?',
-    a: 'In a Squads multisig on Solana that you control. Decimal never touches the keys. We propose; your signers dispose.',
-  },
-  {
-    q: 'What happens if Decimal shuts down?',
-    a: "Your money is on-chain. You can move it with any Squads-compatible tool. We're a layer on top, not a custodian.",
-  },
-  {
-    q: 'What does Decimal actually do?',
-    a: "Reads documents and contracts, extracts payment details, drafts payouts, flags anomalies, and learns your team's approval patterns. It proposes; you and your multisig dispose.",
-  },
-  {
-    q: 'Can my vendors get paid in their local bank account?',
-    a: 'Yes. They can receive USDC directly, or you can deliver a bank deposit in their preferred currency.',
-  },
-  {
-    q: 'Why stablecoins?',
-    a: "USDC is a digital dollar. It doesn't move in price. It moves faster and costs less than a bank wire — pennies instead of $25, seconds instead of days.",
-  },
-  {
-    q: 'Why Solana?',
-    a: 'Sub-second settlement, fees measured in fractions of a cent, and the strongest stablecoin ecosystem on-chain.',
-  },
-];
-
-function FAQ() {
-  const [openIdx, setOpenIdx] = useState<number | null>(0);
-
-  const onToggle = useCallback(
-    (i: number) => (event: MouseEvent<HTMLElement>) => {
-      event.preventDefault();
-      setOpenIdx((current) => (current === i ? null : i));
-    },
-    [],
-  );
-
-  return (
-    <section className="section is-pink" id="faq">
-      <div className="container">
-        <div className="section-head">
-          <div className="eyebrow">
-            <span className="dot" />
-            FAQ
-          </div>
-          <h2>Questions, asked plainly.</h2>
-        </div>
-        <div className="faq">
-          {FAQ_ITEMS.map((it, i) => {
-            const isOpen = openIdx === i;
-            return (
-              <details key={it.q} open={isOpen}>
-                <summary onClick={onToggle(i)}>
-                  <span>{it.q}</span>
-                  <span className="plus">+</span>
-                </summary>
-                <div className="ans">{it.a}</div>
-              </details>
-            );
-          })}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-/* ───────────────── Foot CTA ───────────────── */
-
-function FootCTA({ googleHref }: { googleHref: string }) {
-  return (
-    <section className="footcta footcta-pink">
-      <div className="container">
-        <div className="footcta-grid">
-          <div>
-            <div className="eyebrow">
-              <span className="dot" />
-              Get started
-            </div>
-            <h2 style={{ marginTop: 20 }}>
-              Stop pushing paper.
-              <br />
-              Start <span className="pink">approving</span> it.
-            </h2>
-            <p className="lede" style={{ marginBottom: 32, maxWidth: '52ch' } as CSSProperties}>
-              Decimal is the finance operator for the next generation of companies. Sign up in
-              10 seconds. Spin up a multisig treasury in one screen.
-            </p>
-            <div className="footcta-actions">
-              <a className="gbtn" href={googleHref} style={{ fontFamily: '"Bricolage Grotesque"' }}>
-                <span className="g">
-                  <GoogleG />
-                </span>
-                Continue with Google
-              </a>
-              <Link to="/login" className="btn btn-ghost">
-                Sign in →
-              </Link>
-            </div>
-          </div>
-          <div className="footcta-orb-wrap">
-            <div className="glow" aria-hidden="true" />
-            <img src="/decimal-logo.png" alt="" />
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-/* ───────────────── Foot ───────────────── */
 
 function Foot() {
   return (
-    <footer className="foot">
-      <div className="container foot-row">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#fff' }}>
-          <img
-            src="/decimal-logo.png"
-            alt=""
-            style={{ width: 22, height: 22, borderRadius: '50%' }}
-          />
-          <span style={{ textTransform: 'none', letterSpacing: 0 }}>
-            <strong
-              style={{
-                fontFamily: "'Bricolage Grotesque', sans-serif",
-                fontWeight: 600,
-                fontSize: 14,
-              }}
-            >
-              Decimal
-            </strong>
-            <span style={{ color: 'rgba(255,255,255,0.85)' }}>
-              {' '}
-              — finance, automated. Treasury, in your hands.
-            </span>
-          </span>
+    <footer className="l-footer">
+      <div className="l-wrap">
+        <div className="l-foot-top">
+          <div className="l-foot-brand">
+            <Link to="/" className="l-brand">
+              <img src="/decimal-logo.png" alt="Decimal" />
+              <span>Decimal</span>
+            </Link>
+            <p>The finance operator for global teams. Your money, your team, your keys.</p>
+          </div>
+          <div className="l-foot-cols">
+            <div className="l-foot-col">
+              <h5>Product</h5>
+              <a href="#payments">Payments</a>
+              <a href="#limits">Spending limits</a>
+              <a href="#how">How it works</a>
+            </div>
+            <div className="l-foot-col">
+              <h5>Company</h5>
+              <a href="mailto:hello@decimal.finance">Contact</a>
+              <a href="https://github.com/anthropics/claude-code/issues" target="_blank" rel="noreferrer">Feedback</a>
+            </div>
+            <div className="l-foot-col">
+              <h5>Get started</h5>
+              <Link to="/login">Sign in</Link>
+              <Link to="/register">Create account</Link>
+            </div>
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: 24 }}>
-          <a
-            href="https://x.com/decimalfinance"
-            target="_blank"
-            rel="noreferrer"
-            style={{ color: 'inherit', textDecoration: 'none' }}
-          >
-            X
-          </a>
-          <a
-            href="https://github.com/decimalfinance/decimal"
-            target="_blank"
-            rel="noreferrer"
-            style={{ color: 'inherit', textDecoration: 'none' }}
-          >
-            GitHub
-          </a>
-          <a href="#why" style={{ color: 'inherit', textDecoration: 'none' }}>
-            colosseum '25
-          </a>
+        <div className="l-foot-bottom">
+          <span className="fb-copy">© {new Date().getFullYear()} Decimal</span>
+          <span className="fb-note">Operator finance built on a multisig you own. We propose; your team disposes.</span>
         </div>
       </div>
     </footer>
