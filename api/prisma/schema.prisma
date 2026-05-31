@@ -182,6 +182,7 @@ model TreasuryWallet {
   isActive                 Boolean           @default(true) @map("is_active")
   source                   String            @default("manual")
   sourceRef                String?           @map("source_ref")
+  sourceVaultIndex         Int?              @map("source_vault_index")
   displayName              String?           @map("display_name")
   notes                    String?
   propertiesJson           Json              @default("{}") @map("properties_json")
@@ -198,6 +199,7 @@ model TreasuryWallet {
   spendingLimitExecutions  SpendingLimitExecution[]
 
   @@unique([organizationId, address])
+  @@index([organizationId, source, sourceRef, sourceVaultIndex])
   @@map("treasury_wallets")
 }
 

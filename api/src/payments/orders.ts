@@ -1083,6 +1083,7 @@ function serializeTreasuryWallet(address: TreasuryWallet) {
     isActive: address.isActive,
     source: address.source,
     sourceRef: address.sourceRef,
+    sourceVaultIndex: address.sourceVaultIndex,
     displayName: address.displayName,
     notes: address.notes,
     propertiesJson: address.propertiesJson,

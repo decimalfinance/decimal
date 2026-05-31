@@ -144,6 +144,7 @@ CREATE TABLE IF NOT EXISTS treasury_wallets
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   source TEXT NOT NULL DEFAULT 'manual',
   source_ref TEXT,
+  source_vault_index INTEGER,
   display_name TEXT,
   notes TEXT,
   properties_json JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -207,6 +208,15 @@ CREATE TABLE IF NOT EXISTS agent_wallets
 
 ALTER TABLE treasury_wallets
   ADD COLUMN IF NOT EXISTS usdc_ata_address TEXT;
+
+ALTER TABLE treasury_wallets
+  ADD COLUMN IF NOT EXISTS source_vault_index INTEGER;
+
+UPDATE treasury_wallets
+SET source_vault_index = ((properties_json #>> '{squads,vaultIndex}')::INTEGER)
+WHERE source = 'squads_v4'
+  AND source_vault_index IS NULL
+  AND (properties_json #>> '{squads,vaultIndex}') ~ '^[0-9]+$';
 
 ALTER TABLE treasury_wallets
   ADD COLUMN IF NOT EXISTS display_name TEXT;
@@ -808,6 +818,9 @@ CREATE INDEX IF NOT EXISTS idx_organizations_status_created_at ON organizations(
 CREATE INDEX IF NOT EXISTS idx_treasury_wallets_organization_id ON treasury_wallets(organization_id);
 CREATE INDEX IF NOT EXISTS idx_treasury_wallets_address ON treasury_wallets(address);
 CREATE INDEX IF NOT EXISTS idx_treasury_wallets_usdc_ata ON treasury_wallets(usdc_ata_address);
+CREATE INDEX IF NOT EXISTS idx_treasury_wallets_source_ref_vault ON treasury_wallets(organization_id, source, source_ref, source_vault_index);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_treasury_wallets_unique_squads_vault ON treasury_wallets(organization_id, source, source_ref, source_vault_index)
+  WHERE source = 'squads_v4' AND source_ref IS NOT NULL AND source_vault_index IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_wallet_authorizations_org_status
   ON organization_wallet_authorizations(organization_id, status);
 CREATE INDEX IF NOT EXISTS idx_wallet_authorizations_user_wallet_status

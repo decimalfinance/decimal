@@ -9,6 +9,7 @@ export type CreateTreasuryWalletInput = {
   assetScope?: string;
   source?: string;
   sourceRef?: string | null;
+  sourceVaultIndex?: number | null;
   notes?: string | null;
   properties?: Record<string, unknown>;
 };
@@ -47,6 +48,7 @@ export async function createTreasuryWallet(organizationId: string, input: Create
       usdcAtaAddress,
       source: input.source ?? 'manual',
       sourceRef: input.sourceRef,
+      sourceVaultIndex: input.sourceVaultIndex,
       displayName,
       notes: normalizeOptionalText(input.notes),
       propertiesJson: {
@@ -157,6 +159,7 @@ function serializeTreasuryWallet(wallet: {
   isActive: boolean;
   source: string;
   sourceRef: string | null;
+  sourceVaultIndex: number | null;
   displayName: string | null;
   notes: string | null;
   propertiesJson: Prisma.JsonValue;
@@ -173,6 +176,7 @@ function serializeTreasuryWallet(wallet: {
     isActive: wallet.isActive,
     source: wallet.source,
     sourceRef: wallet.sourceRef,
+    sourceVaultIndex: wallet.sourceVaultIndex,
     displayName: wallet.displayName,
     notes: wallet.notes,
     propertiesJson: wallet.propertiesJson,
