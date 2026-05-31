@@ -240,10 +240,10 @@ html body {
 .hero h1 .strike-thru { position: relative; display: inline-block; }
 .hero h1 .arch-mark { display: inline-flex; align-items: center; }
 
-/* "Friction" and "globally" — italic Bricolage variant for editorial
-   accent. The squiggle under "globally" is an inline SVG background
-   so it scales with the type. */
-.hero h1 .accent { font-style: italic; font-weight: 600; }
+/* "Friction" and "globally" — accent variant inherits the display
+   weight; pink coloring + squiggle handle the emphasis on their own
+   without the italic. */
+.hero h1 .accent { font-weight: inherit; }
 .hero h1 .accent.pink { color: var(--pink); }
 /* Tiled sine-wave underline — reads as a hand-drawn squiggle. */
 .hero h1 .squiggle {
