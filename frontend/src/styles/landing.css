@@ -226,8 +226,12 @@ html body {
 }
 .hero-headline {
   display: grid;
-  gap: clamp(14px, 1.4vw, 20px);
+  gap: clamp(6px, 0.7vw, 10px);
 }
+/* Pull the lede in tight under the headline specifically, while
+   leaving a bit more air between the lede and the action buttons. */
+.hero-headline h1 + .lede { margin-top: -2px; }
+.hero-headline .lede + .hero-actions { margin-top: clamp(14px, 1.4vw, 22px); }
 .hero-headline h1 {
   /* lines styled per element */
 }
