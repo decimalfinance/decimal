@@ -750,6 +750,7 @@ test('Squads treasury creation prepares a signable transaction and persists the 
 
   assert.equal(treasuryWallet.source, 'squads_v4');
   assert.equal(treasuryWallet.sourceRef, intent.intent.multisigPda);
+  assert.equal(treasuryWallet.sourceVaultIndex, intent.intent.vaultIndex);
   assert.equal(treasuryWallet.address, intent.intent.vaultPda);
   assert.equal(treasuryWallet.propertiesJson.squads.threshold, 2);
   assert.equal(treasuryWallet.propertiesJson.squads.members.length, 3);
@@ -795,6 +796,54 @@ test('Squads treasury creation prepares a signable transaction and persists the 
   assert.equal(agentDetail.agentWallet.agentWalletId, agentWallet.agentWalletId);
   assert.equal(agentDetail.automationAgent.agentType, 'decimal_operations');
   assert.deepEqual(agentDetail.permissions, ['initiate']);
+
+  const [payrollVaultPda] = multisig.getVaultPda({
+    multisigPda: publicKeyFromString(intent.intent.multisigPda),
+    index: 1,
+    programId: new PublicKey(config.squadsProgramId),
+  });
+  const payrollVault = await post(
+    `/organizations/${organization.organizationId}/treasury-wallets/${treasuryWallet.treasuryWalletId}/squads/vaults`,
+    {
+      displayName: 'Payroll Vault',
+      vaultIndex: 1,
+    },
+    register.sessionToken,
+  );
+  assert.equal(payrollVault.source, 'squads_v4');
+  assert.equal(payrollVault.sourceRef, treasuryWallet.sourceRef);
+  assert.equal(payrollVault.sourceVaultIndex, 1);
+  assert.equal(payrollVault.address, payrollVaultPda.toBase58());
+  assert.equal(payrollVault.propertiesJson.squads.vaultIndex, 1);
+  assert.equal(payrollVault.propertiesJson.squads.multisigPda, intent.intent.multisigPda);
+
+  const payrollAuthorizations = await get(
+    `/organizations/${organization.organizationId}/wallet-authorizations?treasuryWalletId=${payrollVault.treasuryWalletId}`,
+    register.sessionToken,
+  );
+  assert.equal(payrollAuthorizations.items.length, 2);
+
+  const payrollStatus = await get(
+    `/organizations/${organization.organizationId}/treasury-wallets/${payrollVault.treasuryWalletId}/squads/status`,
+    register.sessionToken,
+  );
+  assert.equal(payrollStatus.multisigPda, intent.intent.multisigPda);
+  assert.equal(payrollStatus.vaultIndex, 1);
+  assert.equal(payrollStatus.vaultPda, payrollVaultPda.toBase58());
+  assert.equal(payrollStatus.localStateMatchesChain, true);
+
+  const duplicateVaultResponse = await fetch(
+    `${baseUrl}/organizations/${organization.organizationId}/treasury-wallets/${treasuryWallet.treasuryWalletId}/squads/vaults`,
+    {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...authHeaders(register.sessionToken),
+      },
+      body: JSON.stringify({ displayName: 'Duplicate Payroll Vault', vaultIndex: 1 }),
+    },
+  );
+  assert.equal(duplicateVaultResponse.status, 400);
 
   const invitedMember = await post('/auth/register', {
     email: 'squads-new-member@example.com',
