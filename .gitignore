@@ -74,3 +74,10 @@ rektoff.png
 ikea.png
 mastercard.webp
 100xdevs.jpeg
+
+# Internal research, design handoffs, and pitch material — local only
+/outputs/
+/design/
+/decimal_agents/
+/payment_run_ai_agent.json
+/*.zip
