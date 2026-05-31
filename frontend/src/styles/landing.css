@@ -1421,3 +1421,51 @@ html body {
   .lp-pay-sb { display: none; }
   .lp-pay-main { padding: 20px; }
 }
+
+/* ====================================================================
+   Mobile (≤ 720px) — let long lines wrap, stack inline rows, scroll
+   the wide product table instead of letting it blow out the viewport.
+   ==================================================================== */
+@media (max-width: 720px) {
+  /* Hero headline + section headings: drop nowrap so they wrap */
+  .hero h1 .line { white-space: normal; }
+  .l-prod-head h2 { white-space: normal; }
+
+  /* Hero buttons stack full-width */
+  .hero-actions { flex-direction: column; align-items: stretch; }
+  .hero-actions .gbtn,
+  .hero-actions .btn { width: 100%; justify-content: center; }
+
+  /* Closing CTA buttons stack */
+  .l-cta-actions { flex-direction: column; align-items: stretch; width: 100%; }
+  .l-cta-actions .l-cta-g,
+  .l-cta-actions .l-cta-ghost { justify-content: center; }
+
+  /* Payments preview header — toolbar stacks below the title block */
+  .lp-pay .hd { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .lp-pay .hd-actions { flex-wrap: wrap; }
+  .lp-pay .hd-actions .pay-btn { flex: 1; min-width: 0; }
+
+  /* Payments preview filter bar — tabs row, then search+select row */
+  .lp-pay .fb { flex-direction: column; align-items: stretch; gap: 10px; }
+  .lp-pay .fb .tabs { flex-wrap: wrap; }
+  .lp-pay .fb-right { flex-direction: column; gap: 8px; align-items: stretch; }
+  .lp-pay .fb-search { min-width: 0; width: 100%; }
+  .lp-pay .fb-select { width: 100%; }
+
+  /* Payments preview table — let it scroll horizontally inside the
+     card rather than expanding the viewport. Keeps the screenshot
+     usable on a phone. */
+  .lp-pay .pt { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .lp-pay .pt table { min-width: 620px; }
+}
+
+@media (max-width: 540px) {
+  /* Tiny phones — shrink the cap-vert hero number so it fits */
+  .cap-vert .cv-lead .cs-amt { font-size: 32px; }
+  /* L-wrap padding tighter so cards don't crowd the viewport edge */
+  .l-wrap { padding: 0 18px; }
+}
+
+/* Belt-and-suspenders: nothing horizontally scrolls the page itself. */
+html, body { overflow-x: hidden; }
