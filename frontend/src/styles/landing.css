@@ -226,7 +226,7 @@ html body {
 }
 .hero-headline {
   display: grid;
-  gap: clamp(24px, 2.5vw, 36px);
+  gap: clamp(14px, 1.4vw, 20px);
 }
 .hero-headline h1 {
   /* lines styled per element */
