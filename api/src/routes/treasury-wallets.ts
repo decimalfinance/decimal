@@ -16,6 +16,7 @@ import {
   getSquadsTreasuryStatus,
   listOrganizationSquadsProposals,
   listSquadsConfigProposals,
+  registerSquadsTreasuryVault,
   syncSquadsTreasuryMembers,
 } from '../squads/treasury.js';
 import { createTreasuryWallet, listTreasuryWallets, updateTreasuryWallet } from '../wallets/treasury.js';
@@ -64,6 +65,11 @@ const confirmSquadsTreasurySchema = z.object({
   createKey: z.string().min(1),
   multisigPda: z.string().min(1),
   vaultIndex: z.number().int().min(0).max(255).optional(),
+});
+
+const registerSquadsTreasuryVaultSchema = z.object({
+  displayName: z.string().optional().nullable(),
+  vaultIndex: z.number().int().min(0).max(255),
 });
 
 const createSquadsAddMemberProposalSchema = z.object({
@@ -183,6 +189,16 @@ treasuryWalletsRouter.post(
     await assertOrganizationAdmin(organizationId, req.auth!);
     const input = confirmSquadsTreasurySchema.parse(req.body);
     sendCreated(res, await confirmSquadsTreasuryCreation(organizationId, req.auth!.userId, input));
+  }),
+);
+
+treasuryWalletsRouter.post(
+  '/organizations/:organizationId/treasury-wallets/:treasuryWalletId/squads/vaults',
+  asyncRoute(async (req, res) => {
+    const { organizationId, treasuryWalletId } = treasuryWalletParamsSchema.parse(req.params);
+    await assertOrganizationAdmin(organizationId, req.auth!);
+    const input = registerSquadsTreasuryVaultSchema.parse(req.body);
+    sendCreated(res, await registerSquadsTreasuryVault(organizationId, req.auth!.userId, treasuryWalletId, input));
   }),
 );
 
