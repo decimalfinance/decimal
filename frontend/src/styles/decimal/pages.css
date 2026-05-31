@@ -16,7 +16,10 @@
 
 /* ---- Filter bar (tabs + search + dropdown) ---- */
 .dec .filterbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.dec .tabs { display: flex; gap: 2px; background: var(--bg-surface-2); border: 1px solid var(--border); border-radius: var(--r-pill); padding: 3px; }
+.dec .tabs { display: flex; align-items: center; gap: 2px; background: var(--bg-surface-2); border: 1px solid var(--border); border-radius: var(--r-pill); padding: 3px; }
+/* When the tabs sit in a filterbar next to a 36px input + select, lock the
+   pill container to the same 36px so the row aligns horizontally. */
+.dec .filterbar .tabs { height: 36px; padding: 0 3px; }
 .dec .tab { height: 30px; padding: 0 16px; border: none; background: transparent; color: var(--text-muted); font-family: var(--font-body); font-size: 13px; font-weight: 500; border-radius: var(--r-pill); cursor: pointer; display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
 .dec .tab:hover { color: var(--text-primary); }
 .dec .tab.on { background: var(--bg-surface); color: var(--text-primary); box-shadow: 0 1px 2px rgba(0,0,0,.06); font-weight: 600; }
