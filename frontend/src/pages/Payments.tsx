@@ -243,27 +243,13 @@ export function PaymentsPage() {
             ))}
           </div>
           <div className="filter-right">
-            <div className="input-search" style={{ position: 'relative' }}>
-              <span
-                aria-hidden
-                style={{
-                  position: 'absolute',
-                  left: 11,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  color: 'var(--text-faint)',
-                  pointerEvents: 'none',
-                  display: 'inline-flex',
-                }}
-              >
-                <Ico.search w={15} />
-              </span>
+            <div className="input-search">
+              <Ico.search w={14} />
               <input
                 className="input"
                 placeholder="Vendor or invoice #"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                style={{ paddingLeft: 34 }}
               />
             </div>
             <div className="select">

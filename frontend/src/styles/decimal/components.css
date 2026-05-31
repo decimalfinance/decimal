@@ -178,8 +178,8 @@
 .dec .input[disabled] { background: var(--bg-surface-2); color: var(--text-faint); cursor: not-allowed; }
 
 .dec .input-search { position: relative; }
-.dec .input-search .input { padding-left: 34px; }
-.dec .input-search svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; color: var(--text-faint); pointer-events: none; }
+.dec .input-search .input { padding-left: 38px; }
+.dec .input-search svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: var(--text-faint); pointer-events: none; }
 
 .dec .select { position: relative; }
 .dec .select select {
