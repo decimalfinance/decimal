@@ -12,7 +12,7 @@ const HERO = {
   line2: 'for businesses paying',
   line2Tail: 'globally.',
   lede:
-    'Decimal turns the documents your finance team already handles into ready-to-sign payouts on a multisig you control. From document to vendor bank account — without the keying, the wire fees, or the bank cutoffs.',
+    'AI-powered cross-border AP: vendors paid in their currency, your team controlling every approval and every limit.',
 } as const;
 
 export function LandingPage() {
