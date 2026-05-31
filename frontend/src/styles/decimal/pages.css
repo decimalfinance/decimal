@@ -20,8 +20,14 @@
 /* Compact filter row — every element locks to 32px so tabs, search,
    and select sit on the same horizontal line. Scoped to .filterbar
    so the global .tabs/.input/.select sizes (used in forms, auth, etc.)
-   don't change. */
-.dec .filterbar .tabs { height: 32px; padding: 0 3px; }
+   don't change.
+
+   The `margin: 0` on .tabs is critical: the global `.tabs` rule in
+   styles.css applies `margin-bottom: var(--space-5)`, and inside a
+   flex row with `align-items: center` that bottom margin pushes the
+   tab pill visually upward, which is why the tabs were sitting
+   above the search/select even after their heights matched. */
+.dec .filterbar .tabs { height: 32px; padding: 0 3px; margin: 0; }
 .dec .filterbar .tab { height: 28px; }
 .dec .filterbar .input { height: 32px; }
 .dec .filterbar .select select { height: 32px; }
