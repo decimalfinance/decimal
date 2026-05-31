@@ -95,14 +95,14 @@ html body {
   margin: 0;
 }
 
-.h-xxl { font-size: clamp(28px, 3.2vw, 48px); line-height: 1.05; letter-spacing: -0.035em; }
+.h-xxl { font-size: clamp(30px, 3.5vw, 54px); line-height: 1.05; letter-spacing: -0.035em; }
 .h-xl  { font-size: clamp(32px, 4.2vw, 64px); line-height: 1.04; }
 .h-l   { font-size: clamp(30px, 4vw, 56px); }
 .h-m   { font-size: clamp(24px, 3vw, 40px); }
 .h-s   { font-size: clamp(20px, 1.8vw, 24px); font-weight: 500; line-height: 1.1; }
 
 .lede {
-  font-size: clamp(16px, 1.15vw, 18px);
+  font-size: clamp(18px, 1.4vw, 22px);
   line-height: 1.5;
   color: var(--ink-2);
   max-width: 56ch;
@@ -310,13 +310,13 @@ html body {
   position: relative;
   aspect-ratio: 1 / 1;
   width: 100%;
-  max-width: 440px;
+  max-width: 560px;
   justify-self: end;
   display: grid;
   place-items: center;
 }
 @media (max-width: 1080px) {
-  .hero-visual { justify-self: center; max-width: 340px; }
+  .hero-visual { justify-self: center; max-width: 420px; }
 }
 .orb-stage {
   position: relative;
