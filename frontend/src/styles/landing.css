@@ -211,7 +211,7 @@ html body {
 /* ---------- Hero ---------- */
 .hero {
   padding-top: clamp(40px, 5vw, 80px);
-  padding-bottom: clamp(20px, 2.4vw, 36px);
+  padding-bottom: clamp(8px, 1vw, 16px);
   position: relative;
 }
 .hero-grid {
@@ -1087,6 +1087,9 @@ html body {
 
 .l-wrap { max-width: var(--l-maxw); margin: 0 auto; padding: 0 32px; }
 .l-section { padding: 88px 0; border-top: 1px solid var(--l-border); }
+/* The first section under the hero uses a smaller top pad so the
+   hero ↔ payments transition doesn't leave a big visual gap. */
+.hero + .l-section { padding-top: 48px; }
 .l-kicker { font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--l-pink); }
 .serif { font-family: var(--font-display); }
 
