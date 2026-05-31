@@ -1250,7 +1250,9 @@ html body {
 .cap-vert .cv-lead .cs-amt small { margin-left: 7px; font-size: 14px; color: var(--l-faint); font-weight: 400; }
 .cap-vert .cv-lead .cs-of { font-size: 13px; color: var(--l-muted); font-family: var(--font-mono); }
 .cap-meter { height: 9px; border-radius: 999px; background: color-mix(in srgb, var(--l-ink) 7%, transparent); overflow: hidden; }
-.cap-meter .cm-fill { height: 100%; background: var(--l-pink); border-radius: 999px; }
+/* display: block so the inline-width style on the span is actually
+   respected — otherwise the bar reads as empty. */
+.cap-meter .cm-fill { display: block; height: 100%; background: var(--l-pink); border-radius: 999px; }
 .cv-rows { display: flex; flex-direction: column; }
 .cv-row { display: flex; align-items: center; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid var(--l-border); }
 .cv-row:last-child { border-bottom: none; }
