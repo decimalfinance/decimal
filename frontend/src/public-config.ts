@@ -1,4 +1,7 @@
-import frontendPublicConfig from '../../config/frontend.public.json';
+// Lives inside frontend/src/ so Vercel (project root = frontend/) can
+// resolve it during build. Keep this in sync with the repo-root
+// config/frontend.public.json that other entry points read.
+import frontendPublicConfig from './public-config.json';
 import { getRuntimeSolanaRpcUrl } from './solana-network';
 
 type PublicConfig = {
