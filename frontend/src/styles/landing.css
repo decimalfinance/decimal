@@ -1469,3 +1469,67 @@ html body {
 
 /* Belt-and-suspenders: nothing horizontally scrolls the page itself. */
 html, body { overflow-x: hidden; }
+
+/* ── Landing v2 — new sections: feature cards, trust strip, FAQ ── */
+.l-feat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 16px;
+  margin-top: 28px;
+}
+.l-feat-card {
+  border-radius: 14px;
+  background: var(--l-surface);
+  border: 1px solid var(--l-border);
+  box-shadow: 0 18px 40px -28px rgba(11, 11, 11, .20), 0 6px 16px -12px rgba(11, 11, 11, .08);
+  padding: 22px 24px;
+}
+.l-feat-card h3 {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--l-ink);
+  margin: 0 0 7px;
+}
+.l-feat-card p {
+  margin: 0;
+  color: var(--l-muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.l-trust {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  justify-content: center;
+  align-items: center;
+}
+.l-trust .t {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--l-muted);
+}
+.l-trust .sep { color: var(--l-faint); opacity: .55; }
+
+.l-faq { margin-top: 24px; max-width: 760px; }
+.l-faq details { border-bottom: 1px solid var(--l-border); padding: 18px 0; }
+.l-faq summary {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 17px;
+  color: var(--l-ink);
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.l-faq summary::-webkit-details-marker { display: none; }
+.l-faq summary::after { content: "+"; color: var(--l-faint); font-weight: 400; font-size: 22px; line-height: 1; }
+.l-faq details[open] summary::after { content: "\2212"; }
+.l-faq details p { margin: 12px 0 0; color: var(--l-muted); font-size: 15px; line-height: 1.65; }
