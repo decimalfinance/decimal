@@ -6,13 +6,12 @@ import '../styles/landing.css';
 const ACCENT = '#e6005c';
 
 const HERO = {
-  eyebrow: 'Decimal — finance for global teams',
-  line1: 'Reducing',
-  line1Tail: 'friction',
-  line2: 'for businesses paying',
-  line2Tail: 'globally.',
+  line1: 'Hand AI the',
+  line1Tail: 'work,',
+  line2: 'not the',
+  line2Tail: 'keys.',
   lede:
-    'AI-powered cross-border AP: vendors paid in their currency, your team controlling every approval and every limit.',
+    'AI-powered accounts payable for teams that pay vendors worldwide, automating every bill from capture and coding to approval, payment, and reconciliation.',
 } as const;
 
 export function LandingPage() {
@@ -36,9 +35,16 @@ export function LandingPage() {
     <>
       <Nav googleHref={googleHref} />
       <Hero googleHref={googleHref} />
+      <TrustStrip />
+      <HowItWorks />
+      <CrossBorderSection />
+      <SecuritySection />
+      <BooksSection />
+      <MultiEntitySection />
       <PaymentsSection />
       <SpendingLimitsSection />
-      <HowItWorks />
+      <FeatureGrid />
+      <FAQSection />
       <ClosingCTA googleHref={googleHref} />
       <Foot />
     </>
@@ -56,9 +62,10 @@ function Nav({ googleHref }: { googleHref: string }) {
           <span>Decimal</span>
         </Link>
         <nav className="l-nav-links">
-          <a href="#payments">Payments</a>
-          <a href="#limits">Spending limits</a>
-          <a href="#how">How it works</a>
+          <a href="#product">Product</a>
+          <a href="#global">Cross-border</a>
+          <a href="#security">Security</a>
+          <a href="#faq">FAQ</a>
         </nav>
         <div className="l-nav-cta">
           <Link to="/login" className="l-signin">Sign in</Link>
@@ -79,11 +86,6 @@ function Hero({ googleHref }: { googleHref: string }) {
       <div className="container">
         <div className="hero-grid">
           <div className="hero-headline">
-            <div className="eyebrow">
-              <span className="dot" />
-              {HERO.eyebrow}
-            </div>
-
             <h1 className="display h-xxl">
               <span className="line">
                 {HERO.line1} <span className="accent pink">{HERO.line1Tail}</span>
@@ -162,8 +164,8 @@ function PaymentsSection() {
       <div className="l-wrap">
         <div className="l-prod-head">
           <div className="l-kicker">PAYMENTS</div>
-          <h2>Run payments across the globe.</h2>
-          <p>Pay any vendor, in any currency, from one place.</p>
+          <h2>Paid and reconciled, anywhere.</h2>
+          <p>Approved bills get paid in USDC from your own account, then matched back into your books.</p>
         </div>
         <div className="l-browser">
           <div className="l-browser-bar">
@@ -316,13 +318,12 @@ function PaymentsSidebar() {
         <div className="sb-group">OPERATIONS</div>
         <SbItem icon={<GridMini />} label="Overview" />
         <SbItem icon={<PaymentsIco />} label="Payments" active count="3" />
-        <SbItem icon={<CollectionsIco />} label="Collections" />
         <div className="sb-group">REGISTRY</div>
         <SbItem icon={<TreasuryMini />} label="Treasury accounts" />
         <SbItem icon={<MembersIco />} label="Members" />
         <SbItem icon={<AddressIco />} label="Address book" count="2" />
-        <div className="sb-group">GOVERNANCE</div>
-        <SbItem icon={<ProposalsIco />} label="Proposals" />
+        <div className="sb-group">CONTROLS</div>
+        <SbItem icon={<ProposalsIco />} label="Approvals" />
         <SbItem icon={<ShieldIco />} label="Spending limits" />
       </div>
       <div className="sb-user">
@@ -376,13 +377,6 @@ function PaymentsIco() {
     </svg>
   );
 }
-function CollectionsIco() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 3v18M5 8l7-5 7 5M5 8v8l7 5 7-5V8" />
-    </svg>
-  );
-}
 function MembersIco() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -427,7 +421,7 @@ const PAYMENT_ROWS: Array<{
   tone: 'ok' | 'wa' | 'in' | 'ne' | 'da';
   sl: boolean;
 }> = [
-  { vendor: 'Bangalore Ops Pvt Ltd', source: 'Operating', amount: '2,176.67', origin: 'Single', status: 'Signing', tone: 'wa', sl: false },
+  { vendor: 'Bangalore Ops Pvt Ltd', source: 'Operating', amount: '2,176.67', origin: 'Single', status: 'Approving', tone: 'wa', sl: false },
   { vendor: 'Lumen Cloud Inc', source: 'Operating', amount: '940.00', origin: 'Apr cloud', status: 'Settled', tone: 'ok', sl: true },
   { vendor: 'Río Diseño SA', source: 'Operating', amount: '3,500.00', origin: 'Single', status: 'Received', tone: 'ne', sl: false },
   { vendor: 'Praxis Legal LLP', source: 'Payroll reserve', amount: '1,250.00', origin: 'Single', status: 'Exception', tone: 'da', sl: false },
@@ -478,8 +472,8 @@ function SpendingLimitsSection() {
       <div className="l-wrap">
         <div className="l-prod-head">
           <div className="l-kicker">SPENDING LIMITS</div>
-          <h2>Automate recurring payments.</h2>
-          <p>Set spending limits and Decimal handles the process for you.</p>
+          <h2>Approve once, pay every month.</h2>
+          <p>Set a monthly limit for vendors like AWS or Vercel, and Decimal pays them within it.</p>
         </div>
         <div className="l-limit-grid">
           <div className="l-vig">
@@ -536,7 +530,7 @@ function SpendingLimitsSection() {
               </div>
               <div className="l-autopay-foot">
                 <BoltMini />
-                Paid automatically — <b>no team vote needed.</b>
+                Paid automatically, <b>no approval needed each time.</b>
               </div>
             </div>
           </div>
@@ -586,7 +580,7 @@ function HowItWorks() {
     <section id="how" className="l-section">
       <div className="l-wrap">
         <div className="l-prod-head">
-          <div className="l-kicker">HOW IT WORKS</div>
+          <div className="l-kicker">IN ACTION</div>
           <h2>From your inbox to your vendor's bank.</h2>
         </div>
         <div className="l-how-grid">
@@ -650,7 +644,7 @@ function Card1({ active }: { active: boolean }) {
     return () => [t1, t2, t3, t4, t5].forEach((t) => window.clearTimeout(t));
   }, [active]);
   return (
-    <CardShell active={active} step="01" title="Upload an invoice." dim="The agent reads it." panelClass="c1">
+    <CardShell active={active} step="01" title="Upload an invoice." dim="The AI reads it." panelClass="c1">
       <div className={`c1-doczone${phase === 'scanning' ? ' scanning' : ''}${phase === 'done' ? ' done' : ''}`}>
         <div className="c1-doc">
           <div className="c1-scan" />
@@ -672,7 +666,7 @@ function Card1({ active }: { active: boolean }) {
       </div>
 
       <div className={`c1-exlabel${revealCount > 0 ? ' on' : ''}`}>
-        <BoltMini />Extracted by agent
+        <BoltMini />Extracted by AI
       </div>
       <div className="c1-fields">
         {[
@@ -738,12 +732,12 @@ function Card2({ active }: { active: boolean }) {
       <div className="c2-meter"><span className="c2-meter-fill" style={{ width: `${meterPct}%` }} /></div>
       <div className="c2-meta">
         {voted < 2
-          ? <>2 of 3 signers required</>
-          : <><b>Threshold met</b> — ready to execute</>}
+          ? <>2 of 3 approvers required</>
+          : <><b>All approvals in</b>, ready to pay</>}
       </div>
       <button type="button" className={`c2-exec${exec === 'ready' ? ' ready' : ''}${exec === 'pressed' ? ' pressed' : ''}${exec === 'done' ? ' done' : ''}`}>
         <BoltMini />
-        {exec === 'idle' ? 'Execute' : exec === 'ready' ? 'Execute' : exec === 'pressed' ? 'Executing…' : 'Executed ✓'}
+        {exec === 'idle' ? 'Pay' : exec === 'ready' ? 'Pay' : exec === 'pressed' ? 'Paying…' : 'Paid ✓'}
       </button>
     </CardShell>
   );
@@ -771,7 +765,7 @@ function Card3({ active }: { active: boolean }) {
         <span className="c3-ico"><TreasuryMini /></span>
         <div className="c3-lab">
           <div className="c3-nt">Operating treasury</div>
-          <div className="c3-ns">vault · USDC</div>
+          <div className="c3-ns">USDC</div>
         </div>
         <div className="c3-bal">{spent ? '126,263.51' : '128,440.18'}</div>
       </div>
@@ -822,6 +816,203 @@ function DownArrowMini() {
   );
 }
 
+/* ───────────────── Security ───────────────── */
+
+function SecuritySection() {
+  return (
+    <section id="security" className="l-section">
+      <div className="l-wrap">
+        <div className="l-prod-head">
+          <div className="l-kicker">SECURED BY CODE</div>
+          <h2>Your money never leaves your control.</h2>
+          <p>
+            Your cash stays in an account only your team can move. Decimal pays your
+            bills from it, but it can never hold it, freeze it, or send a dollar
+            anywhere you did not allow. Your limits, approvers, and rules are enforced
+            by code that no one can override, not the AI, not an employee, not us.
+            That is why you can hand the AI the work: it never gets the keys.
+          </p>
+        </div>
+        <FeatRow
+          items={[
+            ['Self-custodial', 'The money sits in your own account, not ours.'],
+            ['Un-overridable', 'The rules live in code, not a setting someone can flip.'],
+            ['No float', 'We never hold your money, so we never earn a cent while you wait.'],
+          ]}
+        />
+      </div>
+    </section>
+  );
+}
+
+/* ───────────────── Shared feature row ───────────────── */
+
+function FeatRow({ items }: { items: string[][] }) {
+  return (
+    <div className="l-feat-grid">
+      {items.map(([h, p]) => (
+        <div key={h} className="l-feat-card">
+          <h3>{h}</h3>
+          <p>{p}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ───────────────── Trust strip ───────────────── */
+
+function TrustStrip() {
+  const items = ['Built on Solana', 'Secured by Squads', 'Syncs with QuickBooks', 'Settles in USDC'];
+  return (
+    <section className="l-section" style={{ paddingTop: 8, paddingBottom: 8 }}>
+      <div className="l-wrap">
+        <div className="l-trust">
+          {items.map((it) => (
+            <span key={it} className="t">{it}</span>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ───────────────── Cross-border ───────────────── */
+
+function CrossBorderSection() {
+  return (
+    <section id="global" className="l-section">
+      <div className="l-wrap">
+        <div className="l-prod-head">
+          <div className="l-kicker">CROSS-BORDER</div>
+          <h2>Pay any vendor, anywhere on earth.</h2>
+          <p>
+            Pay a contractor in Lagos as fast as one across the street. Decimal settles
+            in USDC in seconds, or in local currency where you need it. No multi-day
+            wires, no correspondent banks, no three percent FX buried in the rate.
+          </p>
+        </div>
+        <FeatRow
+          items={[
+            ['Seconds, not days', 'USDC settles instantly, around the clock, no banking hours.'],
+            ['Anywhere USDC reaches', 'Pay vendors in any country, no local bank account required.'],
+            ['Local currency too', "Cash out to a vendor's bank in supported corridors."],
+          ]}
+        />
+      </div>
+    </section>
+  );
+}
+
+/* ───────────────── Accounting ───────────────── */
+
+function BooksSection() {
+  return (
+    <section id="books" className="l-section">
+      <div className="l-wrap">
+        <div className="l-prod-head">
+          <div className="l-kicker">ACCOUNTING</div>
+          <h2>Your books close themselves.</h2>
+          <p>
+            Every bill is coded into QuickBooks on the way in and matched back to its
+            payment after it clears. No re-typing, no month-end scramble.
+          </p>
+        </div>
+        <FeatRow
+          items={[
+            ['Coded on the way in', 'Each bill maps to the right account before anyone touches it.'],
+            ['Reconciled on the way out', 'Every payment matches back to its invoice, automatically.'],
+          ]}
+        />
+      </div>
+    </section>
+  );
+}
+
+/* ───────────────── Multi-entity ───────────────── */
+
+function MultiEntitySection() {
+  return (
+    <section className="l-section">
+      <div className="l-wrap">
+        <div className="l-prod-head">
+          <div className="l-kicker">MULTI-ENTITY</div>
+          <h2>Run every entity from one place.</h2>
+          <p>
+            One login for all your companies. One person can run twenty entities
+            without re-logging in.
+          </p>
+        </div>
+        <FeatRow
+          items={[
+            ['Isolated by entity', 'Each company keeps its own treasury, signers, and limits.'],
+            ['Consolidated in one view', 'See cash and bills across the whole group at a glance.'],
+          ]}
+        />
+      </div>
+    </section>
+  );
+}
+
+/* ───────────────── Feature grid ───────────────── */
+
+function FeatureGrid() {
+  return (
+    <section id="product" className="l-section">
+      <div className="l-wrap">
+        <div className="l-prod-head">
+          <div className="l-kicker">THE PRODUCT</div>
+          <h2>Everything accounts payable needs, in one place.</h2>
+        </div>
+        <FeatRow
+          items={[
+            ['Email intake', 'Vendors email invoices straight to your Decimal inbox.'],
+            ['AI coding', 'Every bill coded to the right account, learning your books.'],
+            ['Code-enforced approvals', 'Limits and approvers no one, not even us, can override.'],
+            ['Instant USDC payments', 'Settle in seconds from your own treasury.'],
+            ['Cross-border payouts', 'Pay vendors anywhere, in USDC or local currency.'],
+            ['Auto reconciliation', 'Payments matched back into QuickBooks, automatically.'],
+            ['Multi-entity', 'Run every company from one console.'],
+            ['Spending limits', 'Recurring vendors paid within a cap you set once.'],
+            ['On-chain audit trail', 'Every action recorded, immutable, always verifiable.'],
+          ]}
+        />
+      </div>
+    </section>
+  );
+}
+
+/* ───────────────── FAQ ───────────────── */
+
+function FAQSection() {
+  const faqs: string[][] = [
+    ['Is my money custodial?', 'No. Your funds stay in an account only your team controls. Decimal never holds, freezes, or moves your money on its own.'],
+    ["How do I know the AI won't pay the wrong vendor?", "It can't. The AI drafts payments, but your approvers and spending limits are enforced by code on-chain. Nothing leaves without your sign-off."],
+    ['Does it work with my accounting software?', 'Decimal syncs with QuickBooks. Bills come in coded and post back reconciled.'],
+    ['How fast are payments?', 'USDC settles in seconds, anywhere in the world. Local-currency payouts go through licensed partners in supported corridors.'],
+    ['Do my vendors need crypto?', 'No. Pay them in USDC to a wallet, or in their local currency to their bank account.'],
+    ['What does it cost?', 'A simple subscription. We never hold your money or earn interest on it while it sits.'],
+  ];
+  return (
+    <section id="faq" className="l-section">
+      <div className="l-wrap">
+        <div className="l-prod-head">
+          <div className="l-kicker">FAQ</div>
+          <h2>Questions, answered.</h2>
+        </div>
+        <div className="l-faq">
+          {faqs.map(([q, a]) => (
+            <details key={q}>
+              <summary>{q}</summary>
+              <p>{a}</p>
+            </details>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /* ───────────────── Closing CTA + Footer ───────────────── */
 
 function ClosingCTA({ googleHref }: { googleHref: string }) {
@@ -829,8 +1020,8 @@ function ClosingCTA({ googleHref }: { googleHref: string }) {
     <section className="l-cta">
       <div className="l-wrap">
         <img className="l-cta-mark" src="/decimal-logo.png" alt="" />
-        <h2>Run your finance on Decimal.</h2>
-        <p>Replace QuickBooks Bill Pay and wires with one surface. Protected by code, controlled by your team.</p>
+        <h2>Let Decimal pay your bills.</h2>
+        <p>Connect QuickBooks, forward your first invoice, and watch it get coded, approved, and paid, from an account only you control.</p>
         <div className="l-cta-actions">
           <a className="l-cta-g" href={googleHref}>
             <span className="gw"><GoogleG /></span>
@@ -851,7 +1042,14 @@ function Foot() {
           <img src="/decimal-logo.png" alt="Decimal" />
           <span>Decimal</span>
         </Link>
-        <span className="fb-copy">© {new Date().getFullYear()} Decimal</span>
+        <nav style={{ display: 'flex', gap: 18, flexWrap: 'wrap', fontSize: 14, opacity: 0.8 }}>
+          <a href="#product">Product</a>
+          <a href="#global">Cross-border</a>
+          <a href="#security">Security</a>
+          <a href="#faq">FAQ</a>
+          <Link to="/login">Sign in</Link>
+        </nav>
+        <span className="fb-copy">© {new Date().getFullYear()} Decimal · Pay everyone. Touch nothing.</span>
       </div>
     </footer>
   );
