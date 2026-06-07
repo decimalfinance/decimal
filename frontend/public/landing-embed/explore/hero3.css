@@ -1,0 +1,33 @@
+/* ============================================================
+   DECIMAL — Globe hero additions (loads on top of hero2.css)
+   ============================================================ */
+.block.dream { background: #0A0A0A; }
+
+/* a whisper of depth behind the globe — restrained, not neon */
+.block.dream::before {
+  content: ""; position: absolute; inset: 0; z-index: 0;
+  background: radial-gradient(60% 46% at 56% 50%, rgba(230,0,92,.10), transparent 70%);
+}
+.globe-canvas { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+
+/* floating reach chips (composition B) */
+.reach {
+  position: absolute; z-index: 4; display: flex; align-items: center; gap: 11px;
+  background: rgba(20,20,20,.66); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,.12); border-radius: 14px; padding: 12px 16px 12px 13px;
+  box-shadow: 0 18px 44px -22px rgba(0,0,0,.8);
+}
+.reach > svg { width: 19px; height: 19px; color: var(--pink); flex: none; }
+.reach .rt { font-size: 13.5px; font-weight: 650; color: #fff; letter-spacing: -0.01em; white-space: nowrap; }
+.reach .rs { font-size: 11.5px; color: rgba(255,255,255,.55); margin-top: 2px; white-space: nowrap; }
+.reach.r-1 { top: 150px; right: 40px; }
+.reach.r-2 { top: 384px; left: 28px; }
+.reach.r-3 { bottom: 150px; right: 56px; }
+
+/* foot whisper sits above the canvas */
+.block.dream .block-foot { z-index: 5; }
+
+/* ---- light variant: globe on white, no block ---- */
+.block.light { background: transparent; }
+.block.light .block-foot.dark { z-index: 5; color: var(--faint); }
+.block.light .block-foot.dark .bf-line { background: var(--line-2); }
