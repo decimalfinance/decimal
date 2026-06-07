@@ -1,0 +1,234 @@
+/* ============================================================
+   DECIMAL — hero, single-visual concepts
+   Institutional. Black block · white product object · magenta punctuation.
+   ============================================================ */
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,200..800&family=Geist:wght@300..700&family=Geist+Mono:wght@400..600&display=swap');
+
+:root {
+  --ink:    #0A0A0A;
+  --muted:  #5E5B57;
+  --faint:  #9A9690;
+  --cream:  #F8F5EF;
+  --paper:  #FFFFFF;
+  --line:   #EAE8E4;
+  --line-2: #DCD9D3;
+  --pink:   #E6005C;
+  --pink-soft: #FFE3EE;
+  --pink-deep: #A8003F;
+  --success: #15A86B;
+  --success-soft: #E2F5EC;
+  --info: #1B5F8C;
+
+  --display: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
+  --body:    'Geist', ui-sans-serif, system-ui, sans-serif;
+  --mono:    'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --block: #0A0A0A;   /* the right-hand block */
+}
+
+/* ---------- frame ---------- */
+.hero {
+  position: relative;
+  width: 1360px; height: 840px; overflow: hidden;
+  background: var(--paper); color: var(--ink);
+  font-family: var(--body); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+}
+.hero *, .hero *::before, .hero *::after { box-sizing: border-box; }
+.hero .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+
+/* ---------- nav ---------- */
+.hnav {
+  position: absolute; inset: 0 0 auto 0; z-index: 30;
+  display: flex; align-items: center; justify-content: space-between; padding: 34px 56px;
+}
+.hnav .hlinks { position: absolute; left: 50%; transform: translateX(-50%); }
+.hnav-left { display: flex; align-items: center; gap: 46px; }
+.hbrand { display: flex; align-items: center; gap: 11px; text-decoration: none; color: var(--ink); }
+.hbrand img { width: 28px; height: 28px; display: block; }
+.hbrand span { font-family: var(--display); font-weight: 600; font-size: 21px; letter-spacing: -0.02em; }
+.hlinks { display: flex; gap: 30px; }
+.hlinks a { font-size: 15px; font-weight: 500; color: var(--ink); text-decoration: none; opacity: .8; white-space: nowrap; }
+.hnav-right { display: flex; align-items: center; gap: 22px; }
+.hnav-right .signin { font-size: 15px; font-weight: 500; text-decoration: none; color: var(--ink); }
+.nav-pill {
+  font-size: 14px; font-weight: 600; letter-spacing: -0.01em;
+  padding: 11px 22px; border-radius: 999px; background: var(--pink); color: #fff; text-decoration: none;
+}
+
+/* ---------- copy column ---------- */
+.h-col { position: absolute; left: 56px; top: 430px; transform: translateY(-50%); width: 660px; z-index: 20; }
+.eyebrow {
+  font-size: 12px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--pink); margin-bottom: 26px; display: inline-flex; align-items: center; gap: 9px;
+}
+.eyebrow::before { content: ""; width: 22px; height: 2px; background: currentColor; display: inline-block; }
+.dsp {
+  font-family: var(--display); font-weight: 640; letter-spacing: -0.035em; line-height: 1.0; margin: 0;
+  font-size: 56px;
+}
+.dsp em { font-style: normal; color: var(--pink); }
+/* Tiled sine-wave underline — reads as a hand-drawn squiggle (from the prior landing). */
+.dsp .squiggle {
+  position: relative;
+  display: inline-block;
+  padding-bottom: 0.18em;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 8' preserveAspectRatio='none'><path d='M0 4 Q 10 0 20 4 T 40 4 T 60 4 T 80 4' fill='none' stroke='%23e6005c' stroke-width='2' stroke-linecap='round'/></svg>");
+  background-repeat: repeat-x;
+  background-position: 0 100%;
+  background-size: 1.4em 0.28em;
+}
+.sub { font-size: 19px; line-height: 1.5; color: var(--muted); max-width: 30em; margin: 28px 0 0; }
+
+.cta-row { display: flex; align-items: center; gap: 13px; margin-top: 38px; }
+.btn-primary {
+  display: inline-flex; align-items: center; gap: 9px; height: 58px; padding: 0 30px;
+  background: var(--pink); color: #fff; border: none; border-radius: 999px; cursor: pointer;
+  font-family: var(--body); font-size: 16px; font-weight: 600; letter-spacing: -0.01em; text-decoration: none;
+}
+.btn-primary svg { width: 18px; height: 18px; }
+.btn-secondary {
+  display: inline-flex; align-items: center; height: 58px; padding: 0 28px;
+  background: transparent; color: var(--ink); border: 1px solid var(--line-2); border-radius: 999px;
+  font-size: 16px; font-weight: 600; letter-spacing: -0.01em; text-decoration: none;
+}
+.trustline { display: flex; align-items: center; gap: 14px; margin-top: 30px; font-size: 13.5px; color: var(--faint); font-weight: 500; }
+.trustline b { color: var(--muted); font-weight: 600; }
+.trustline .dot { color: var(--line-2); }
+
+/* ---------- the block ---------- */
+.block { position: absolute; right: 0; top: 0; width: 600px; height: 100%; background: var(--block); z-index: 10; overflow: hidden; }
+.block-grid {
+  position: absolute; inset: 0; opacity: .5;
+  background-image: linear-gradient(rgba(255,255,255,.04) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px);
+  background-size: 44px 44px;
+  -webkit-mask-image: radial-gradient(120% 90% at 60% 40%, #000 40%, transparent 78%);
+          mask-image: radial-gradient(120% 90% at 60% 40%, #000 40%, transparent 78%);
+}
+.block-stage { position: absolute; inset: 0; display: grid; place-items: center; z-index: 5; }
+
+/* tiny brand whisper on the block */
+.block-foot {
+  position: absolute; left: 40px; right: 40px; bottom: 34px; z-index: 6;
+  display: flex; align-items: center; gap: 11px; color: rgba(255,255,255,.5);
+  font-size: 13px; font-weight: 500;
+}
+.block-foot .bf-line { flex: 1; height: 1px; background: rgba(255,255,255,.12); }
+
+/* ---------- product object — shared ---------- */
+.obj {
+  width: 408px; background: #fff; border-radius: 22px;
+  box-shadow: 0 40px 90px -30px rgba(0,0,0,.6), 0 8px 24px -10px rgba(0,0,0,.4);
+  position: relative;
+}
+.obj-pad { padding: 26px 26px 24px; }
+.row { display: flex; align-items: center; }
+.spacer { margin-left: auto; }
+
+.mono-amt { font-family: var(--mono); font-weight: 600; letter-spacing: -0.02em; color: var(--ink); }
+
+.chip {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; white-space: nowrap;
+  border-radius: 999px; font-size: 12.5px; font-weight: 600; letter-spacing: -0.01em;
+}
+.chip svg { width: 13px; height: 13px; }
+.chip.ai   { background: var(--pink-soft); color: var(--pink); }
+.chip.paid { background: var(--success-soft); color: var(--success); }
+.chip.qb   { background: #E9F0FB; color: var(--info); }
+.chip.ghost{ background: var(--cream); color: var(--muted); }
+
+.mono-tag { font-family: var(--mono); font-size: 12px; color: var(--faint); letter-spacing: 0; white-space: nowrap; }
+
+.avs { display: flex; }
+.avs img { width: 30px; height: 30px; border-radius: 999px; border: 2px solid #fff; object-fit: cover; }
+.avs img + img { margin-left: -9px; }
+
+.divider { height: 1px; background: var(--line); margin: 0; }
+
+.vlogo {
+  width: 38px; height: 38px; border-radius: 11px; flex: none; display: grid; place-items: center;
+  background: var(--ink); color: #fff; font-family: var(--display); font-weight: 600; font-size: 17px;
+}
+.vlogo.alt { background: var(--pink); }
+
+/* ============================================================
+   CONCEPT 1 — "Ready to pay" authorization card
+   ============================================================ */
+.c1 .obj { width: 416px; }
+.c1 .v-head { gap: 13px; margin-bottom: 22px; }
+.c1 .v-name { font-weight: 650; font-size: 16px; letter-spacing: -0.01em; }
+.c1 .v-meta { font-size: 12.5px; color: var(--faint); margin-top: 2px; }
+.c1 .amt { font-size: 46px; line-height: 1; margin: 4px 0 16px; }
+.c1 .coded { display: flex; align-items: center; gap: 9px; margin-bottom: 22px; }
+.c1 .coded .gl { font-size: 13.5px; color: var(--muted); }
+.c1 .lockwrap { display: flex; gap: 13px; padding: 16px 0 20px; }
+.c1 .lockico {
+  width: 34px; height: 34px; border-radius: 10px; flex: none; display: grid; place-items: center;
+  background: var(--ink); color: #fff;
+}
+.c1 .lockico svg { width: 17px; height: 17px; }
+.c1 .lock-t { font-size: 14px; font-weight: 600; color: var(--ink); }
+.c1 .lock-s { font-size: 13px; color: var(--muted); margin-top: 3px; line-height: 1.4; }
+.c1 .act { display: flex; align-items: center; gap: 14px; padding-top: 18px; }
+.c1 .approve {
+  flex: 1; height: 50px; border: none; border-radius: 999px; background: var(--pink); color: #fff;
+  font-family: var(--body); font-size: 15px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+}
+.c1 .approve svg { width: 16px; height: 16px; }
+.c1 .by { font-size: 12.5px; color: var(--faint); text-align: right; line-height: 1.35; white-space: nowrap; }
+.c1 .by b { color: var(--muted); font-weight: 600; }
+/* floating "coded by AI" satellite */
+.c1 .sat {
+  position: absolute; left: 24px; bottom: 132px; z-index: 7;
+  background: #fff; border-radius: 14px; padding: 12px 16px;
+  box-shadow: 0 20px 50px -20px rgba(0,0,0,.5);
+  display: flex; align-items: center; gap: 10px; white-space: nowrap;
+}
+.c1 .sat .d { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; background: var(--pink-soft); color: var(--pink); }
+.c1 .sat .d svg { width: 16px; height: 16px; }
+.c1 .sat .t { font-size: 13px; font-weight: 600; color: var(--ink); }
+.c1 .sat .s { font-size: 11.5px; color: var(--faint); margin-top: 1px; }
+
+/* ============================================================
+   CONCEPT 2 — "All handled" overview surface
+   ============================================================ */
+.c2 .obj { width: 432px; }
+.c2 .v-head { gap: 12px; padding: 22px 24px 18px; }
+.c2 .v-title { font-weight: 650; font-size: 16px; letter-spacing: -0.01em; }
+.c2 .period { font-family: var(--mono); font-size: 12px; color: var(--faint); }
+.c2 .summary { padding: 0 24px 16px; }
+.c2 .sum-big { font-family: var(--display); font-weight: 600; font-size: 30px; letter-spacing: -0.03em; }
+.c2 .sum-sub { font-size: 13.5px; color: var(--muted); margin-top: 3px; }
+.c2 .sum-sub b { color: var(--pink); font-weight: 600; }
+.c2 .list { padding: 6px 0; }
+.c2 .li { display: flex; align-items: center; gap: 13px; padding: 11px 24px; }
+.c2 .li + .li { border-top: 1px solid var(--line); }
+.c2 .li .nm { font-size: 14.5px; font-weight: 550; color: var(--ink); }
+.c2 .li .amt { font-family: var(--mono); font-size: 14px; color: var(--muted); margin-left: auto; margin-right: 14px; }
+.c2 .st { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.c2 .st svg { width: 14px; height: 14px; }
+.c2 .st.ok { color: var(--success); }
+.c2 .st.auto { color: var(--info); }
+.c2 .foot { display: flex; align-items: center; gap: 9px; padding: 16px 24px; background: var(--cream); border-radius: 0 0 22px 22px; font-size: 13px; color: var(--muted); font-weight: 500; }
+.c2 .foot svg { width: 15px; height: 15px; color: var(--ink); }
+.c2 .foot b { color: var(--ink); font-weight: 600; }
+
+/* ============================================================
+   CONCEPT 3 — "Your money, untouched"
+   ============================================================ */
+.c3 .obj { width: 420px; }
+.c3 .top { padding: 26px 28px 22px; }
+.c3 .acct-l { font-size: 13px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; color: var(--faint); }
+.c3 .bal { font-family: var(--mono); font-weight: 600; font-size: 44px; letter-spacing: -0.03em; color: var(--ink); margin-top: 8px; }
+.c3 .owntag { display: inline-flex; align-items: center; gap: 7px; margin-top: 14px; font-size: 12.5px; font-weight: 600; color: var(--ink); background: var(--cream); border: 1px solid var(--line); padding: 6px 12px; border-radius: 999px; white-space: nowrap; }
+.c3 .owntag svg { width: 13px; height: 13px; }
+.c3 .rules { padding: 8px 28px 24px; display: flex; flex-direction: column; gap: 2px; }
+.c3 .rule { display: flex; gap: 13px; padding: 14px 0; }
+.c3 .rule + .rule { border-top: 1px solid var(--line); }
+.c3 .rule .ic { width: 34px; height: 34px; border-radius: 10px; flex: none; display: grid; place-items: center; }
+.c3 .rule .ic svg { width: 17px; height: 17px; }
+.c3 .rule .ic.pink { background: var(--pink-soft); color: var(--pink); }
+.c3 .rule .ic.ink  { background: var(--ink); color: #fff; }
+.c3 .rule .rt { font-size: 14px; font-weight: 600; color: var(--ink); }
+.c3 .rule .rs { font-size: 13px; color: var(--muted); margin-top: 3px; line-height: 1.4; }
