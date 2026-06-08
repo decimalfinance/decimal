@@ -1,0 +1,62 @@
+/* ============================================================
+   Landing v3 — responsive (tablet + phone).
+   Desktop-first base lives in hero2/hero3/sections.css; these are
+   the stacking/scaling overrides. Loaded last so they win.
+   ============================================================ */
+
+/* ---------- Tablet and below ---------- */
+@media (max-width: 960px) {
+  /* hero: stack to a text hero; the globe is JS-sized and not mobile-fit yet, so hide it */
+  .hero { width: 100%; height: auto; overflow: visible; }
+  .hnav { position: relative; padding: 18px 22px; }
+  .hnav .hlinks { display: none; }
+  .h-col { position: static; transform: none; width: auto; max-width: 640px; margin: 0 auto; padding: 44px 22px 56px; }
+  .dsp { font-size: 40px; }
+  .sub { font-size: 16px; max-width: none; }
+  .cta-row { margin-top: 28px; }
+  .block { display: none; }
+
+  /* sections: tighter padding, single-column split layouts */
+  .sec { padding: 76px 24px; }
+  .sec-title { font-size: 34px !important; }
+  .faq-title { font-size: 34px !important; }
+  .secgrid2 { grid-template-columns: 1fr !important; gap: 40px; }
+  .secgrid2 .sec-copy { order: -1; }           /* copy sits above the visual */
+  .codepanel, .limit-panel { padding: 32px; }
+
+  /* payments product shot */
+  .pay-head { grid-template-columns: 1fr; gap: 20px; }
+  .pay-stage { height: auto; padding: 32px 18px 0; }
+  .pay-browser { height: 420px; }
+  .pay-frame { height: 388px; }
+  .anno { display: none; }                     /* floating annotation cards overlap on small screens */
+
+  /* cross-border */
+  .xb-stats { grid-template-columns: 1fr; gap: 16px; }
+
+  /* feature grid 3 -> 2 cols */
+  .fg-grid { grid-template-columns: 1fr 1fr; }
+
+  /* faq */
+  .faq-q { padding: 20px; }
+  .faq-a-inner p { margin-left: 24px; margin-right: 20px; }
+
+  /* closing cta */
+  .sec-cta { padding: 72px 24px; }
+  .cta-title { font-size: 32px !important; white-space: normal !important; }
+  .cta-inner { max-width: 100%; }
+
+  /* footer 3 -> 1 col */
+  .ft-grid { grid-template-columns: 1fr; gap: 32px; padding-bottom: 40px; }
+}
+
+/* ---------- Phones ---------- */
+@media (max-width: 560px) {
+  .dsp { font-size: 32px; }
+  .sec-title { font-size: 27px !important; }
+  .faq-title { font-size: 27px !important; }
+  .cta-title { font-size: 26px !important; }
+  .fg-grid { grid-template-columns: 1fr; }     /* single column */
+  .ft-bottom { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .trust-track { gap: 40px; }
+}
