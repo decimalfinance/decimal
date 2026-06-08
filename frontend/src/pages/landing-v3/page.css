@@ -5,6 +5,9 @@ html { scroll-behavior: smooth; }
    edges; white sections blend into the white gutters. Section content stays
    centered via each section's own .sec-wrap / inner max-width container. */
 .lpv3-page { width: 100%; background: #fff; overflow-x: hidden; }
+/* brand-pink text selection instead of the default browser blue */
+.lpv3-page ::selection { background: #E6005C; color: #fff; }
+.lpv3-page ::-moz-selection { background: #E6005C; color: #fff; }
 /* Hero stays a fixed 1360px column, centered — keeps the globe exactly in place. */
 .lpv3-page .hero { width: 1360px; max-width: 100%; margin: 0 auto; }
 
