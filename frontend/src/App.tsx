@@ -22,6 +22,7 @@ const CollectionRunDetailPage = lazy(() => import('./pages/CollectionRunDetail')
 const WalletsPage = lazy(() => import('./pages/Wallets').then((m) => ({ default: m.WalletsPage })));
 const CounterpartiesPage = lazy(() => import('./pages/Counterparties').then((m) => ({ default: m.CounterpartiesPage })));
 const LandingPageV2 = lazy(() => import('./pages/Landing').then((m) => ({ default: m.LandingPage })));
+const LandingPageV3 = lazy(() => import('./pages/landing-v3').then((m) => ({ default: m.LandingPage })));
 const MembersPage = lazy(() => import('./pages/Members').then((m) => ({ default: m.MembersPage })));
 const TreasuryWalletDetailPage = lazy(() => import('./pages/TreasuryWalletDetail').then((m) => ({ default: m.TreasuryWalletDetailPage })));
 const VaultDetailPage = lazy(() => import('./pages/VaultDetail').then((m) => ({ default: m.VaultDetailPage })));
@@ -71,7 +72,7 @@ export function App() {
   return (
     <Suspense fallback={<RouteFallback />}>
       <Routes>
-        <Route path="/" element={<LandingPageV2 />} />
+        <Route path="/" element={<LandingPageV3 />} />
         <Route path="/landing" element={<LandingPageV2 />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
