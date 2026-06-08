@@ -1,0 +1,32 @@
+/* Landing v3 — page frame + scroll-reveal (ported from design handoff home.html) */
+html { scroll-behavior: smooth; }
+
+/* Full-width page: gradient bands (trust strip, closing CTA) reach the viewport
+   edges; white sections blend into the white gutters. Section content stays
+   centered via each section's own .sec-wrap / inner max-width container. */
+.lpv3-page { width: 100%; background: #fff; overflow-x: hidden; }
+/* Hero stays a fixed 1360px column, centered — keeps the globe exactly in place. */
+.lpv3-page .hero { width: 1360px; max-width: 100%; margin: 0 auto; }
+
+/* nav-target offset */
+.lpv3-page [id^="sec-"] { scroll-margin-top: 12px; }
+
+/* scroll-driven reveal (gated on .reveal-on so content is visible if JS fails) */
+.reveal-on .sec-coding .sec-copy, .reveal-on .sec-approvals .sec-copy, .reveal-on .sec-security .sec-copy, .reveal-on .sec-limits .sec-copy,
+.reveal-on .sec-coding .codepanel, .reveal-on .sec-approvals .codepanel, .reveal-on .sec-security .codepanel, .reveal-on .sec-limits .limit-panel {
+  opacity: 0; transition: opacity .8s cubic-bezier(.2,.7,.2,1), transform .8s cubic-bezier(.2,.7,.2,1); will-change: opacity, transform;
+}
+.reveal-on .sec-coding .sec-copy, .reveal-on .sec-approvals .sec-copy, .reveal-on .sec-security .sec-copy, .reveal-on .sec-limits .sec-copy { transform: translateY(28px); }
+.reveal-on .sec-coding .codepanel, .reveal-on .sec-security .codepanel { transform: translateX(48px); }
+.reveal-on .sec-approvals .codepanel, .reveal-on .sec-limits .limit-panel { transform: translateX(-48px); }
+.reveal-on .sec-coding.in .sec-copy, .reveal-on .sec-approvals.in .sec-copy, .reveal-on .sec-security.in .sec-copy, .reveal-on .sec-limits.in .sec-copy,
+.reveal-on .sec-coding.in .codepanel, .reveal-on .sec-approvals.in .codepanel, .reveal-on .sec-security.in .codepanel, .reveal-on .sec-limits.in .limit-panel {
+  opacity: 1; transform: none;
+}
+.reveal-on .sec-coding.in .sec-copy, .reveal-on .sec-approvals.in .sec-copy, .reveal-on .sec-security.in .sec-copy, .reveal-on .sec-limits.in .sec-copy { transition-delay: .08s; }
+@media (prefers-reduced-motion: reduce) {
+  .reveal-on .sec-coding .sec-copy, .reveal-on .sec-approvals .sec-copy, .reveal-on .sec-security .sec-copy, .reveal-on .sec-limits .sec-copy,
+  .reveal-on .sec-coding .codepanel, .reveal-on .sec-approvals .codepanel, .reveal-on .sec-security .codepanel, .reveal-on .sec-limits .limit-panel {
+    opacity: 1 !important; transform: none !important; transition: none !important;
+  }
+}
