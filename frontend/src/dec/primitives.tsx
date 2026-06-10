@@ -48,7 +48,7 @@ export function SLPill() {
   return (
     <span className="pill-sl">
       <Ico.bolt w={10} fill="currentColor" sw={0} />
-      SL
+      Auto-paid
     </span>
   );
 }
