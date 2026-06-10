@@ -78,7 +78,7 @@ export function SpendingLimitsPage() {
     mutationFn: (spendingLimitPolicyId: string) =>
       api.syncSpendingLimitPolicy(organizationId!, spendingLimitPolicyId),
     onSuccess: async () => {
-      success('Policy synced from chain.');
+      success('Rule synced from chain.');
       await queryClient.invalidateQueries({
         queryKey: ['spending-limit-policies', organizationId, 'all'],
       });
@@ -154,11 +154,11 @@ export function SpendingLimitsPage() {
       <div className="stack stack-24">
         <PageHead
           eyebrow="GOVERNANCE"
-          title="Spending limits"
-          desc="Bounded autonomy for the Decimal agent. Each policy lets the agent pay specific vendors up to a cap without a team vote on every payment."
+          title="Auto-pay"
+          desc="What the AI agent can pay on its own. Your team approves each rule once; after that the agent pays matching invoices automatically, with no vote per payment."
           actions={
             <button type="button" className="btn btn-primary" onClick={openNewPolicy}>
-              <Ico.plus w={15} />New spending limit
+              <Ico.plus w={15} />New auto-pay rule
             </button>
           }
         />
@@ -167,7 +167,7 @@ export function SpendingLimitsPage() {
           <div className="metric">
             <div className="m-label">Active</div>
             <div className="m-value">{activeCount}</div>
-            <div className="m-sub">policies</div>
+            <div className="m-sub">rules</div>
           </div>
           <div className={`metric${pendingCount > 0 ? ' is-alert' : ''}`}>
             <div className="m-label">Awaiting vote</div>
@@ -177,7 +177,7 @@ export function SpendingLimitsPage() {
           <div className="metric">
             <div className="m-label">Total</div>
             <div className="m-value">{policies.length}</div>
-            <div className="m-sub">policies</div>
+            <div className="m-sub">rules</div>
           </div>
           <div className="metric">
             <div className="m-label">Auto-paid this month</div>
@@ -262,10 +262,10 @@ function PoliciesTable({
       <div className="tbl-card">
         <div className="empty">
           <div className="empty-icon"><Ico.shield w={22} /></div>
-          <h4>No spending limits yet</h4>
+          <h4>No auto-pay rules yet</h4>
           <p>
-            Open a treasury account and create one. The agent can then pay vetted vendors for
-            routine bills without a team vote each time.
+            Open a treasury account and create one. Your team approves it once, then the
+            agent pays vetted vendors for routine bills on its own, no vote each time.
           </p>
         </div>
       </div>
@@ -276,7 +276,7 @@ function PoliciesTable({
       <table className="tbl">
         <thead>
           <tr>
-            <th style={{ width: '22%' }}>Policy</th>
+            <th style={{ width: '22%' }}>Rule</th>
             <th>Treasury</th>
             <th>Limit</th>
             <th>Vendors</th>
@@ -448,7 +448,7 @@ function RecentExecutions({
           </div>
         ) : recent.length === 0 ? (
           <div style={{ padding: '20px 16px', fontSize: 13, color: 'var(--text-muted)' }}>
-            No agent payments yet. They'll show up here once a spending limit fires.
+            No agent payments yet. They'll show up here once an auto-pay rule fires.
           </div>
         ) : (
           recent.map((e) => {
@@ -524,7 +524,7 @@ function PickTreasuryDialog({
         <div className="dialog-head">
           <div>
             <h2 id="dec-pick-treasury-title">Choose a treasury</h2>
-            <p>Each spending limit is scoped to one treasury account. Pick which one this policy belongs to.</p>
+            <p>Each auto-pay rule is scoped to one treasury account. Pick which one this rule belongs to.</p>
           </div>
           <button type="button" className="drawer-x" onClick={onClose} aria-label="Close">
             ×

@@ -245,7 +245,7 @@ export function AppSidebar({
 
             <div className="sb-group-label">Governance</div>
             <NavItem to={`${base}/proposals`} icon={<Ico.proposals w={16} />} label="Proposals" />
-            <NavItem to={`${base}/spending-limits`} icon={<Ico.shield w={16} />} label="Spending limits" />
+            <NavItem to={`${base}/spending-limits`} icon={<Ico.shield w={16} />} label="Auto-pay" />
           </>
         ) : null}
       </div>
