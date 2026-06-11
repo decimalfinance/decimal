@@ -1,32 +1,43 @@
 # Decimal
 
-Decimal is a Solana USDC treasury operations product.
+AI-powered accounts payable on Solana. Live on devnet at [decimal.finance](https://decimal.finance).
 
-It helps teams create payment requests, route them into Squads multisig proposals, verify execution through Solana RPC, and export deterministic JSON proof packets.
+Drop in a vendor invoice and Decimal reads it, turns it into a structured payment order, routes it for approval, pays it in USDC, and produces an on-chain proof of payment. The money sits in the team's own Squads v4 multisig, and payment rules are enforced on-chain, so the AI does the work but can never move money outside policy.
 
-## What Works
+## How a bill gets paid
 
-- Email/password and Google OAuth auth.
-- Invite-only organizations.
-- User-owned personal wallets, including Privy-managed embedded wallets.
-- Organization treasury accounts, including Squads v4 vaults.
-- Squads treasury creation with selected members and threshold.
-- Squads config proposals for member and threshold changes.
+1. An operator uploads a vendor invoice. A vision model extracts the payable into a structured payment order (Zod-validated, with retries).
+2. New counterparty wallets go through a trust review before anything can be paid to them.
+3. A router decides the path for every payment:
+   - `agent_executed` — vendor and amount fit an active spending-limit policy, so the agent pays directly under a Squads spending-limit instruction.
+   - `proposal_created` — anything outside policy becomes a Squads multisig proposal for member approval.
+   - `needs_review` — flagged for human eyes.
+4. USDC settles on Solana. The backend verifies settlement over RPC and emits a deterministic JSON proof packet.
+
+Spending limits are bounded autonomy: a vendor allowlist, an amount cap, and a period. The policy lifecycle is itself multisig-gated, so creating, replacing, or removing a limit goes through a Squads config proposal. The program enforces the rules, not the backend. [diagram.md](diagram.md) walks through the routing in detail.
+
+## What works today
+
+- Invoice upload with vision-model extraction into structured payment orders.
 - Single payment orders and CSV payment runs.
-- Squads payment proposals for single payments and payment runs.
+- Counterparty wallet trust review.
+- The payment router: agent execution under Squads spending limits, multisig proposals, or human review.
+- Spending-limit policies created, replaced, and removed through Squads config proposals.
+- Squads v4 treasury creation with selected members and threshold, plus config proposals for member and threshold changes.
 - RPC confirmation for proposal submission and execution.
 - RPC settlement verification for app-originated USDC payments.
-- JSON proof packets for payment orders and payment runs.
+- Deterministic JSON proof packets for payment orders and payment runs.
+- Email/password and Google OAuth auth, invite-only organizations, Privy-managed embedded personal wallets.
 - Audit log and API/OpenAPI surfaces.
 
-## Current Architecture
+## Architecture
 
 ```text
-frontend/  React + Vite operator UI
-api/       Express + Prisma API
-postgres/  local bootstrap SQL
-config/    committed non-secret runtime config
-outputs/   handoffs, research notes, scorecards
+frontend/        React + Vite + TanStack Query operator UI
+api/             Express + Prisma API on PostgreSQL
+decimal_agents/  payment-automation agent service (Vercel AI SDK) with its own eval suite
+postgres/        local bootstrap SQL
+config/          committed non-secret runtime config
 ```
 
 Runtime dependencies:
@@ -35,8 +46,7 @@ Runtime dependencies:
 - Solana RPC verifies Squads transactions and USDC settlement deltas.
 - Privy creates and signs with embedded personal wallets.
 - Squads v4 is the on-chain multisig treasury layer.
-
-The old Yellowstone/ClickHouse indexer stack has been removed from the active product. Decimal now verifies app-originated payments by RPC instead of storing the global USDC stream.
+- A vision model handles invoice extraction.
 
 ## Local Development
 
@@ -110,14 +120,14 @@ Secrets never belong in committed config files.
 
 ## Status
 
-Decimal is currently a non-custodial Squads treasury workflow and proof layer.
+Pre-launch. Settlement runs on Solana devnet today. Decimal is non-custodial: the treasury is the team's own Squads multisig, and Decimal never holds funds.
 
-Not built:
+Not built yet:
 
-- fiat rails
-- custody
+- QuickBooks sync and reconciliation (next milestones)
+- fiat on/off-ramps (planned via PSP partners)
+- custody (never)
 - card issuing
-- accounting sync
 - private transactions
 - automatic inbound collection watching
 
