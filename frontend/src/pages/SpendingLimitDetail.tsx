@@ -95,7 +95,7 @@ export function SpendingLimitDetailPage() {
   const syncMutation = useMutation({
     mutationFn: () => api.syncSpendingLimitPolicy(organizationId!, spendingLimitPolicyId!),
     onSuccess: async () => {
-      success('Policy synced from chain.');
+      success('Rule synced from chain.');
       await queryClient.invalidateQueries({
         queryKey: ['spending-limit-policy', organizationId, spendingLimitPolicyId],
       });
@@ -113,7 +113,7 @@ export function SpendingLimitDetailPage() {
       <div className="page">
         <div className="empty">
           <h4>Policy unavailable</h4>
-          <p>Pick a spending limit from the list.</p>
+          <p>Pick an auto-pay rule from the list.</p>
         </div>
       </div>
     );
@@ -140,14 +140,14 @@ export function SpendingLimitDetailPage() {
           role="button"
           tabIndex={0}
         >
-          <Ico.chevRight w={15} style={{ transform: 'rotate(180deg)' }} />Spending limits
+          <Ico.chevRight w={15} style={{ transform: 'rotate(180deg)' }} />Auto-pay
         </div>
         <div className="empty" style={{ marginTop: 24 }}>
           <h4>Policy unavailable</h4>
           <p>
             {policyQuery.error instanceof Error
               ? policyQuery.error.message
-              : 'We couldn\'t load this spending limit.'}
+              : 'We couldn\'t load this auto-pay rule.'}
           </p>
         </div>
       </div>
@@ -180,13 +180,13 @@ export function SpendingLimitDetailPage() {
             navigate(`/organizations/${organizationId}/spending-limits`);
         }}
       >
-        <Ico.chevRight w={15} style={{ transform: 'rotate(180deg)' }} />Spending limits
+        <Ico.chevRight w={15} style={{ transform: 'rotate(180deg)' }} />Auto-pay
       </div>
 
       <div className="stack stack-32">
         {/* Header */}
         <div>
-          <div className="eyebrow" style={{ marginBottom: 10 }}>SPENDING LIMIT</div>
+          <div className="eyebrow" style={{ marginBottom: 10 }}>AUTO-PAY RULE</div>
           <div className="pagehead" style={{ paddingBottom: 18 }}>
             <div className="ph-titles">
               <h1>{policy.policyName}</h1>
@@ -316,12 +316,12 @@ function PolicyBanner({
         <Ico.bolt w={16} fill="currentColor" sw={0} />
       </span>
       <span className="slb-text">
-        The agent can pay <b>{vendorCount} verified {vendorCount === 1 ? 'vendor' : 'vendors'}</b>
+        Your team approved this rule. The agent now pays <b>{vendorCount} verified {vendorCount === 1 ? 'vendor' : 'vendors'}</b>
         {' '}up to{' '}
         <b>
           {formatRawUsdcCompact(policy.amountRaw)} USDC {periodLabel}
         </b>
-        {' '}from {treasuryName} — <b>no team vote needed</b> for each payment.
+        {' '}from {treasuryName} on its own, <b>no vote per payment</b>.
       </span>
     </div>
   );
@@ -415,7 +415,7 @@ function CapSection({
         <div className="sh-titles">
           <h2>Cap used {periodNoun}</h2>
           <p className="sh-desc">
-            How much of the {periodLabel.replace('per ', '')}ly limit the agent has spent.
+            How much of the {periodLabel.replace('per ', '')}ly cap the agent has spent.
             {policy.period !== 'one_time' ? ` ${resetLabel.charAt(0).toUpperCase()}${resetLabel.slice(1)}.` : ''}
           </p>
         </div>
@@ -507,7 +507,7 @@ function VendorsSection({
       <div className="sec-head">
         <div className="sh-titles">
           <h2>Vendors</h2>
-          <p className="sh-desc">Only these verified vendors can be auto-paid under this policy.</p>
+          <p className="sh-desc">Only these verified vendors can be auto-paid under this rule.</p>
         </div>
         <button type="button" className="btn btn-secondary btn-sm" onClick={onAdd}>
           <Ico.plus w={14} />Add vendor
@@ -624,13 +624,13 @@ function RecentExecutionsSection({ executions }: { executions: SpendingLimitExec
       <div className="sec-head">
         <div className="sh-titles">
           <h2>Recent executions</h2>
-          <p className="sh-desc">Payments the agent made automatically under this policy.</p>
+          <p className="sh-desc">Payments the agent made automatically under this rule.</p>
         </div>
       </div>
       <div className="surface">
         {recent.length === 0 ? (
           <div style={{ padding: '20px 16px', fontSize: 13, color: 'var(--text-muted)' }}>
-            No agent payments yet under this policy.
+            No agent payments yet under this rule.
           </div>
         ) : (
           recent.map((e) => {
@@ -719,7 +719,7 @@ function PolicyDetails({
     <div>
       <div className="sec-head">
         <div className="sh-titles">
-          <h2>Policy details</h2>
+          <h2>Rule details</h2>
         </div>
       </div>
       <div className="detail-grid">
