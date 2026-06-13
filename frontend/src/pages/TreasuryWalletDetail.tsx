@@ -332,7 +332,7 @@ export function TreasuryWalletDetailPage({ session }: { session: AuthenticatedSe
                 <div className="sh-titles">
                   <h2>Vaults</h2>
                   <p className="sh-desc">
-                    Separate wallets under this account — each with its own balance and spending limits,
+                    Separate wallets under this account — each with its own balance and auto-pay rules,
                     all secured by the same signers above.
                   </p>
                 </div>
@@ -445,7 +445,7 @@ function MemberRow({ member }: { member: SquadsDetailMember }) {
     ? 'Decimal agent'
     : linked?.user.displayName || linked?.user.email || 'Unknown signer';
   const subtext = isAgent
-    ? 'Automation — bounded by spending limits'
+    ? 'Automation — bounded by auto-pay rules'
     : linked?.user.email && linked?.user.displayName
       ? linked.user.email
       : shortenAddress(member.walletAddress);
@@ -570,7 +570,7 @@ function VaultsTable({
             <th style={{ width: '32%' }}>Vault</th>
             <th style={{ width: '16%' }}>Address</th>
             <th className="num">Balance</th>
-            <th>Spending limits</th>
+            <th>Auto-pay</th>
             <th className="num" style={{ width: 130 }}></th>
           </tr>
         </thead>
@@ -1457,7 +1457,7 @@ function Avatar({ avatarUrl, fallback }: { avatarUrl: string | null; fallback: s
 }
 
 // ─── Spending limits ───────────────────────────────────────────────────────
-// "Spending limit" is the user-facing term for a Squads spending-limit policy.
+// "Auto-pay rule" is the user-facing term for a Squads spending-limit policy.
 // Each policy lets the Decimal agent pay vetted vendors up to an amount per
 // period without going through the multisig vote for every single payment.
 
@@ -1522,7 +1522,7 @@ function SpendingLimitsSection({
         }}
       >
         <div>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 500 }}>Spending limits</h2>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 500 }}>Auto-pay</h2>
           <p
             style={{
               margin: '4px 0 0',
@@ -1539,7 +1539,7 @@ function SpendingLimitsSection({
           className="button button-primary"
           onClick={() => setCreateOpen(true)}
         >
-          + New spending limit
+          + New auto-pay rule
         </button>
       </header>
       <div className="rd-table-shell">
@@ -1563,7 +1563,7 @@ function SpendingLimitsSection({
               <tr>
                 <td colSpan={4} className="rd-empty-cell" style={{ padding: '28px 24px' }}>
                   <strong style={{ display: 'block', marginBottom: 4 }}>
-                    No spending limits yet
+                    No auto-pay rules yet
                   </strong>
                   <p style={{ margin: 0, fontSize: 13, color: 'var(--ax-text-muted)', lineHeight: 1.55 }}>
                     Add one so the Decimal agent can pay vetted vendors for routine bills without
@@ -1846,10 +1846,10 @@ export function CreateSpendingLimitDialog({
         signature: sig,
       });
       setPhase('idle');
-      success('Spending limit submitted — needs team approval to activate.');
+      success('Auto-pay rule submitted — needs team approval to activate.');
       await onCreated();
     } catch (err) {
-      const message = err instanceof ApiError || err instanceof Error ? err.message : 'Could not create the spending limit.';
+      const message = err instanceof ApiError || err instanceof Error ? err.message : 'Could not create the auto-pay rule.';
       setPhase('error');
       setPhaseError(message);
     }
@@ -1925,7 +1925,7 @@ export function CreateSpendingLimitDialog({
       >
         <div className="dialog-head">
           <div>
-            <h2 id="dec-new-sl-title">New spending limit</h2>
+            <h2 id="dec-new-sl-title">New auto-pay rule</h2>
             <p>Let the agent pay specific vendors up to a cap without a team vote each time.</p>
           </div>
           <button
@@ -2339,7 +2339,7 @@ export function RemoveSpendingLimitDialog({
     <DialogShell labelledBy="rd-remove-spending-title" onClose={isWorking ? () => undefined : onClose}>
       {step === 'confirm' ? (
         <>
-          <h2 id="rd-remove-spending-title" className="rd-dialog-title">Remove spending limit</h2>
+          <h2 id="rd-remove-spending-title" className="rd-dialog-title">Remove auto-pay rule</h2>
           <p className="rd-dialog-body">
             The agent will stop being able to pay these vendors automatically. New invoices to them
             will go through the normal multisig vote instead.
@@ -2401,13 +2401,13 @@ export function RemoveSpendingLimitDialog({
               onClick={runSignAndConfirm}
               disabled={!personalWallet}
             >
-              Remove spending limit
+              Remove auto-pay rule
             </button>
           </div>
         </>
       ) : (
         <>
-          <h2 id="rd-remove-spending-title" className="rd-dialog-title">Removing spending limit</h2>
+          <h2 id="rd-remove-spending-title" className="rd-dialog-title">Removing auto-pay rule</h2>
           <p className="rd-dialog-body">This takes a few seconds. Don't close this window.</p>
           <ol style={{ listStyle: 'none', padding: 0, margin: '12px 0', display: 'grid', gap: 6 }}>
             {[

@@ -273,7 +273,7 @@ export function VaultDetailPage() {
                 className="btn btn-secondary"
                 onClick={() => setCreateSLOpen(true)}
               >
-                <Ico.shield w={15} />New spending limit
+                <Ico.shield w={15} />New auto-pay rule
               </button>
               <button
                 type="button"
@@ -296,7 +296,7 @@ export function VaultDetailPage() {
             <div className="m-sub">USDC</div>
           </div>
           <div className="metric">
-            <div className="m-label">Spending limits</div>
+            <div className="m-label">Auto-pay</div>
             <div className="m-value">{activePoliciesCount}</div>
             <div className="m-sub">active {activePoliciesCount === 1 ? 'policy' : 'policies'}</div>
           </div>
@@ -334,7 +334,7 @@ export function VaultDetailPage() {
         <div>
           <div className="sec-head">
             <div className="sh-titles">
-              <h2>Spending limits</h2>
+              <h2>Auto-pay</h2>
               <p className="sh-desc">
                 Policies that let the agent pay from this vault without a team vote.
               </p>
@@ -344,7 +344,7 @@ export function VaultDetailPage() {
               className="btn btn-secondary btn-sm"
               onClick={() => setCreateSLOpen(true)}
             >
-              <Ico.plus w={14} />New spending limit
+              <Ico.plus w={14} />New auto-pay rule
             </button>
           </div>
           <ScopedSpendingLimitsTable
@@ -520,7 +520,7 @@ function ScopedSpendingLimitsTable({
       <div className="tbl-card">
         <div className="empty">
           <div className="empty-icon"><Ico.shield w={22} /></div>
-          <h4>No spending limits on this vault</h4>
+          <h4>No auto-pay rules on this vault</h4>
           <p>Add one so the agent can pay vetted vendors without a team vote each time.</p>
         </div>
       </div>
