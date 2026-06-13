@@ -210,7 +210,7 @@ export function PaymentsPage() {
           <div className="metric">
             <div className="m-label">Auto-paid this month</div>
             <div className="m-value">{autoPaidThisMonth}</div>
-            <div className="m-sub">via spending limits</div>
+            <div className="m-sub">via auto-pay</div>
           </div>
           <div className={`metric${needsReview > 0 ? ' is-alert' : ''}`}>
             <div className="m-label">Needs review</div>

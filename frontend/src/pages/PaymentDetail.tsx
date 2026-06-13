@@ -204,7 +204,7 @@ export function PaymentDetailPage() {
       if (automation?.status === 'proposal_submitted') {
         success('Approved. Agent created the proposal on chain.');
       } else if (automation?.status === 'spending_limit_executed') {
-        success('Approved. Agent executed the payment through a spending limit.');
+        success('Approved. Agent paid it under an auto-pay rule.');
       } else if (automation?.status === 'already_has_proposal') {
         success('Approved. Proposal was already on chain.');
       } else if (automation?.status === 'already_has_spending_limit_execution') {
@@ -973,7 +973,7 @@ function ActionBar(props: {
         tone="neutral"
         eyebrow="Route"
         title="Ready for agent routing"
-        body="Ask the Decimal agent to use an active spending limit or open a Squads proposal."
+        body="Ask the Decimal agent to use an active auto-pay rule or open a Squads proposal."
         controls={
           <button
             type="button"
@@ -1122,7 +1122,7 @@ function ActionBar(props: {
 
   if (variant === 'spending_limit_in_flight' || variant === 'spending_limit_settled') {
     const exec = order.spendingLimitExecution;
-    const policyName = exec?.spendingLimitPolicy?.policyName ?? 'spending limit policy';
+    const policyName = exec?.spendingLimitPolicy?.policyName ?? 'auto-pay rule';
     const execSignature = exec?.signature ?? submittedSignature;
     const isSettled = variant === 'spending_limit_settled';
     return (
@@ -1136,8 +1136,8 @@ function ActionBar(props: {
         }
         body={
           isSettled
-            ? 'The agent settled this payment under an active spending limit. Proof packet is ready.'
-            : 'Executed directly under an active spending limit — no team vote needed.'
+            ? 'The agent settled this payment under an active auto-pay rule. Proof packet is ready.'
+            : 'Paid automatically under an active auto-pay rule — no team vote needed.'
         }
         controls={
           <>
