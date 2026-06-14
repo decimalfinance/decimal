@@ -300,7 +300,7 @@ const FEATURES = [
   ["Bill capture", "Email, upload, or forward. We read it all.", "doc"],
   ["AI coding", "Vendor, GL, and amount, filled in automatically.", "spark"],
   ["Approval flows", "Route by amount, vendor, or entity.", "flow"],
-  ["Spending limits", "Set a cap, let the rest run.", "gauge"],
+  ["Auto-pay", "The agent pays approved vendors on its own.", "gauge"],
   ["Global payments", "USDC or local rails, 100+ countries.", "globe"],
   ["QuickBooks sync", "Two-way, real time.", "sync"],
   ["Audit trail", "Every action logged and exportable.", "list"],
