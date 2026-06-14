@@ -112,7 +112,7 @@ export function InboxPage({ session }: { session: AuthenticatedSession }) {
           id: o.paymentOrderId,
           vendor: vendorName(o),
           amt: `${formatRawUsdcCompact(o.amountRaw)} USDC`,
-          policy: o.spendingLimitExecution?.spendingLimitPolicy?.policyName ?? 'spending limit',
+          policy: o.spendingLimitExecution?.spendingLimitPolicy?.policyName ?? 'auto-pay rule',
         })),
     [orders],
   );
@@ -283,7 +283,7 @@ export function InboxPage({ session }: { session: AuthenticatedSession }) {
             icon={<Ico.bolt w={15} />}
             count={autopaidCount}
             footerHref={`${orgBase}/spending-limits`}
-            footerLabel="View spending limits"
+            footerLabel="View auto-pay"
             empty="No autonomous payments yet"
           >
             {autopaid.map((r) => (
@@ -328,10 +328,10 @@ export function InboxPage({ session }: { session: AuthenticatedSession }) {
             </span>
             <span className="ag-copy">
               Your agent auto-paid <b>{autopaidCount} bill{autopaidCount === 1 ? '' : 's'}</b> this month
-              {' '}— moved under active spending limits, with <b>no team vote needed</b>.
+              {' '}— paid under auto-pay rules your team approved, with <b>no vote needed</b>.
             </span>
             <Link to={`${orgBase}/spending-limits`} className="link ag-link">
-              View spending limits<Ico.arrowRight w={13} />
+              View auto-pay<Ico.arrowRight w={13} />
             </Link>
           </div>
         ) : null}
@@ -356,7 +356,7 @@ export function InboxPage({ session }: { session: AuthenticatedSession }) {
                   <div className="col" style={{ flex: 1 }}>
                     <span className="sn-name">{t.displayName ?? 'Untitled treasury'}</span>
                     <span className="sn-meta">
-                      {limits > 0 ? `${limits} active ${limits === 1 ? 'limit' : 'limits'}` : 'no spending limits'}
+                      {limits > 0 ? `${limits} active ${limits === 1 ? 'rule' : 'rules'}` : 'no auto-pay rules'}
                     </span>
                   </div>
                   <span className="sn-bal">{bal}<small>USDC</small></span>

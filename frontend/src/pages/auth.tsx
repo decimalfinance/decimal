@@ -47,7 +47,7 @@ export function BrandPanel({ tagline }: { tagline: string }) {
       <div className="ab-feats">
         <div className="ab-feat">
           <span className="af-ic"><Ico.bolt w={14} fill="currentColor" sw={0} /></span>
-          Auto-pay routine bills under spending limits — no vote each time
+          Auto-pay routine bills your team approved — no vote each time
         </div>
         <div className="ab-feat">
           <span className="af-ic"><Ico.shield w={14} /></span>

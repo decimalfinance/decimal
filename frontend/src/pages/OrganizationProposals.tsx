@@ -238,7 +238,7 @@ export function OrganizationProposalsPage({ session }: { session: AuthenticatedS
         <PageHead
           eyebrow="GOVERNANCE"
           title="Proposals"
-          desc="Team decisions that need signer approval — new spending limits, members, and changes to how money moves."
+          desc="Team decisions that need signer approval — new auto-pay rules, members, and changes to how money moves."
         />
 
         <div className="metrics" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>

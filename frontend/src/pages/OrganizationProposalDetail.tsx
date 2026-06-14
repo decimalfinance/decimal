@@ -804,7 +804,7 @@ function ConfigActionsSummary({ proposal }: { proposal: DecimalProposal }) {
             const period = action.period as string | undefined;
             const destinations = (action.destinations as string[] | undefined) ?? [];
             return (
-              <RvRow key={i} label="New spending limit">
+              <RvRow key={i} label="New auto-pay rule">
                 <span className="mono">
                   {amount ? formatRawAmount(amount, 6) : '—'} USDC
                 </span>
@@ -817,7 +817,7 @@ function ConfigActionsSummary({ proposal }: { proposal: DecimalProposal }) {
           }
           if (kind === 'remove_spending_limit') {
             return (
-              <RvRow key={i} label="Remove spending limit">
+              <RvRow key={i} label="Remove auto-pay rule">
                 <span style={{ color: 'var(--text-muted)' }}>
                   The agent can no longer pay vendors automatically under this policy.
                 </span>
@@ -1280,13 +1280,13 @@ function friendlyTitle(
   const semantic = proposal.semanticType ?? '';
   const policyName = linkedSpendingLimitPolicy?.policyName;
   if (semantic === 'add_spending_limit') {
-    return policyName ? `New spending limit · ${policyName}` : 'New spending-limit policy';
+    return policyName ? `New auto-pay rule · ${policyName}` : 'New auto-pay rule';
   }
   if (semantic === 'remove_spending_limit') {
-    return policyName ? `Remove spending limit · ${policyName}` : 'Remove spending-limit policy';
+    return policyName ? `Remove auto-pay rule · ${policyName}` : 'Remove auto-pay rule';
   }
   if (semantic === 'replace_spending_limit') {
-    return policyName ? `Update spending limit · ${policyName}` : 'Update spending-limit policy';
+    return policyName ? `Update auto-pay rule · ${policyName}` : 'Update auto-pay rule';
   }
   if (semantic === 'add_agent_member') return 'Add agent as signer';
   return summarizeProposal(proposal);
@@ -1294,8 +1294,8 @@ function friendlyTitle(
 
 function friendlySubtitle(proposal: DecimalProposal): string {
   const semantic = proposal.semanticType ?? '';
-  if (semantic.startsWith('add_spending_limit')) return 'Spending limit';
-  if (semantic === 'remove_spending_limit' || semantic === 'replace_spending_limit') return 'Spending limit';
+  if (semantic.startsWith('add_spending_limit')) return 'Auto-pay rule';
+  if (semantic === 'remove_spending_limit' || semantic === 'replace_spending_limit') return 'Auto-pay rule';
   if (semantic === 'add_member' || semantic === 'remove_member' || semantic === 'add_agent_member')
     return 'Team membership';
   if (semantic === 'change_threshold') return 'Required approvals';
