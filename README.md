@@ -6,6 +6,8 @@ Drop in a vendor invoice and Decimal reads it, turns it into a structured paymen
 
 ## How a bill gets paid
 
+![Decimal payment routing: one router decides between auto-pay, multisig proposal, and human review, with both paths reconverging at RPC settlement verification.](system_explained/payment-flow.png)
+
 1. An operator uploads a vendor invoice. A vision model extracts the payable into a structured payment order (Zod-validated, with retries).
 2. New counterparty wallets go through a trust review before anything can be paid to them.
 3. A router decides the path for every payment:
@@ -14,7 +16,7 @@ Drop in a vendor invoice and Decimal reads it, turns it into a structured paymen
    - `needs_review` — flagged for human eyes.
 4. USDC settles on Solana. The backend verifies settlement over RPC and emits a deterministic JSON proof packet.
 
-Spending limits are bounded autonomy: a vendor allowlist, an amount cap, and a period. The policy lifecycle is itself multisig-gated, so creating, replacing, or removing a limit goes through a Squads config proposal. The program enforces the rules, not the backend. [diagram.md](diagram.md) walks through the routing in detail.
+Spending limits are bounded autonomy: a vendor allowlist, an amount cap, and a period. The policy lifecycle is itself multisig-gated, so creating, replacing, or removing a limit goes through a Squads config proposal. The program enforces the rules, not the backend. [system_explained/07-payment-routing-algorithm.md](system_explained/07-payment-routing-algorithm.md) walks through the routing in detail, verified against the code.
 
 ## What works today
 
