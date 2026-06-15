@@ -60,6 +60,22 @@ export function setSpendingLimitExecutionRuntimeForTests(nextRuntime: Partial<Sp
   runtime = nextRuntime ? { ...defaultRuntime, ...nextRuntime } : defaultRuntime;
 }
 
+/**
+ * Read the live on-chain remaining amount for a spending limit's current period.
+ * Returns null when the on-chain account does not exist yet (for example, the config
+ * proposal has not executed/synced). Other RPC errors propagate to the caller.
+ *
+ * Used by the routing fit-check so a payment that exceeds the remaining period budget
+ * falls back to a Squads proposal instead of hard-failing at execution time.
+ */
+export async function loadOnchainSpendingLimitRemaining(spendingLimitPda: string): Promise<bigint | null> {
+  const account = await runtime.loadSpendingLimit(new PublicKey(spendingLimitPda));
+  if (!account) {
+    return null;
+  }
+  return BigInt(account.remainingAmount.toString());
+}
+
 const spendingLimitExecutionInclude = {
   spendingLimitPolicy: {
     select: {

@@ -13,7 +13,7 @@ import {
   type PaymentRoutingContext,
   type SpendingLimitFitDecision,
 } from '../payments/algorithm.js';
-import { executePaymentOrderWithSpendingLimit } from './spending-limit-execution.js';
+import { executePaymentOrderWithSpendingLimit, loadOnchainSpendingLimitRemaining } from './spending-limit-execution.js';
 
 type AgentPaymentOrder = PaymentOrder & {
   counterpartyWallet: CounterpartyWallet;
@@ -393,6 +393,25 @@ async function canUseSpendingLimit(paymentOrder: AgentPaymentOrder, spendingLimi
       reason: { code: 'agent_wallet_unavailable', message: 'Spending limit agent wallet is not available for signing.' },
     };
   }
+
+  // Period budget. The static cap (amountRaw) is not the spendable balance: the on-chain
+  // SpendingLimit tracks how much remains for the current period. A payment that fits the
+  // cap but exceeds the remaining budget must fall back to a Squads proposal, not hard-fail
+  // at execution. This is the same outcome an over-cap payment already gets.
+  const remainingAmount = await loadOnchainSpendingLimitRemaining(policy.spendingLimitPda);
+  if (remainingAmount === null) {
+    return {
+      status: 'not_applicable',
+      reason: { code: 'spending_limit_not_synced', message: 'Onchain spending limit is not available yet; routing to Squads voting.' },
+    };
+  }
+  if (paymentOrder.amountRaw > remainingAmount) {
+    return {
+      status: 'does_not_fit',
+      reason: { code: 'period_budget_exhausted', message: 'Auto-pay budget for the current period is exhausted; routing to Squads voting.' },
+    };
+  }
+
   return { status: 'pass' };
 }
 
