@@ -2,6 +2,7 @@ import { config } from './config.js';
 import { prisma } from './infra/prisma.js';
 import { createApp } from './app.js';
 import { USDC_MINT } from './solana.js';
+import { startSettlementReconciler } from './agents/settlement-reconciler.js';
 import { errorToLogFields, logger } from './infra/logger.js';
 
 async function main() {
@@ -19,8 +20,11 @@ async function main() {
     });
   });
 
+  const stopSettlementReconciler = startSettlementReconciler();
+
   const shutdown = async () => {
     logger.info('api.shutdown.started');
+    stopSettlementReconciler();
     server.close(async () => {
       await prisma.$disconnect();
       logger.info('api.shutdown.completed');

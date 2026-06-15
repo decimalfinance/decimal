@@ -78,6 +78,8 @@ type DecimalConfig = {
   devnetAutoFundWallets: boolean;
   devnetFunderKeypairPath: string;
   devnetAutoFundLamports: number;
+  settlementReconcilerEnabled: boolean;
+  settlementReconcilerIntervalMs: number;
 };
 
 export type SolanaNetwork = 'devnet' | 'mainnet';
@@ -143,6 +145,13 @@ function buildConfig(): DecimalConfig {
         ),
     devnetFunderKeypairPath: (process.env.DEVNET_FUNDER_KEYPAIR_PATH ?? '').trim(),
     devnetAutoFundLamports: Number(process.env.DEVNET_AUTO_FUND_LAMPORTS ?? 5_000_000),
+    settlementReconcilerEnabled: getBooleanConfig(
+      process.env.SETTLEMENT_RECONCILER_ENABLED,
+      nodeEnv !== 'test',
+    ),
+    settlementReconcilerIntervalMs: Number(
+      process.env.SETTLEMENT_RECONCILER_INTERVAL_MS ?? 30_000,
+    ),
   };
 
   validateConfig(nextConfig);
