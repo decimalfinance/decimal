@@ -1,6 +1,14 @@
 SHELL := /bin/zsh
 
+# Separate databases per surface, all in the one local docker Postgres.
+#   prod  -> usdc_ops        (make prod-backend, serving decimal.finance)
+#   local -> usdc_ops_local  (make dev)
+#   test  -> usdc_ops_test   (make test-api; truncate-based tests live here only)
 POSTGRES_URL ?= postgresql://usdc_ops:usdc_ops@127.0.0.1:54329/usdc_ops?schema=public
+POSTGRES_LOCAL_URL ?= postgresql://usdc_ops:usdc_ops@127.0.0.1:54329/usdc_ops_local?schema=public
+POSTGRES_TEST_URL ?= postgresql://usdc_ops:usdc_ops@127.0.0.1:54329/usdc_ops_test?schema=public
+# Target database for schema sync / backup. Override per target (e.g. DB=usdc_ops_local).
+DB ?= usdc_ops
 PSQL_QUIET := PGOPTIONS='-c client_min_messages=warning' psql -v ON_ERROR_STOP=1 -q
 
 .SILENT:
@@ -13,9 +21,7 @@ infra-up:
 	set -euo pipefail && docker compose up -d --remove-orphans postgres && $(MAKE) sync-postgres-schema
 
 sync-postgres-schema:
-	set -euo pipefail && \
-	docker compose up -d --remove-orphans postgres && \
-	docker compose exec -T postgres sh -lc "$(PSQL_QUIET) -U usdc_ops -d usdc_ops -f /docker-entrypoint-initdb.d/001-control-plane.sql" >/dev/null
+	set -euo pipefail && ./scripts/db-setup.sh $(DB)
 
 infra-down:
 	set -euo pipefail && docker compose down --remove-orphans
@@ -23,8 +29,8 @@ infra-down:
 reset-data:
 	set -euo pipefail && \
 	docker compose up -d --remove-orphans postgres && \
-	docker compose exec -T postgres sh -lc "$(PSQL_QUIET) -U usdc_ops -d usdc_ops -c \"TRUNCATE TABLE auth_sessions, user_wallets, organization_memberships, collection_request_events, collection_requests, collection_runs, counterparty_wallets, transfer_requests, treasury_wallets, organizations, users RESTART IDENTITY CASCADE;\"" >/dev/null && \
-	echo "Application data cleared from Postgres."
+	docker compose exec -T postgres sh -lc "$(PSQL_QUIET) -U usdc_ops -d usdc_ops_local -c \"TRUNCATE TABLE auth_sessions, user_wallets, organization_memberships, collection_request_events, collection_requests, collection_runs, counterparty_wallets, transfer_requests, treasury_wallets, organizations, users RESTART IDENTITY CASCADE;\"" >/dev/null && \
+	echo "Local application data cleared (usdc_ops_local)."
 
 dev:
 	set -euo pipefail && \
@@ -36,8 +42,8 @@ dev:
 	elif [[ "$${NETWORK_SELECTOR}" == "mainnet" ]]; then \
 	  export SOLANA_NETWORK=mainnet; \
 	fi && \
-	export DATABASE_URL="$${DATABASE_URL:-$(POSTGRES_URL)}" && \
-	$(MAKE) sync-postgres-schema && \
+	export DATABASE_URL="$(POSTGRES_LOCAL_URL)" && \
+	$(MAKE) sync-postgres-schema DB=usdc_ops_local && \
 	(cd api && npm run prisma:generate >/dev/null) && \
 	typeset -a pids && \
 	(cd api && exec npm run dev) & \
@@ -56,9 +62,8 @@ test: test-api test-frontend
 
 test-api:
 	set -euo pipefail && \
-	export DATABASE_URL="$${DATABASE_URL:-$(POSTGRES_URL)}" && \
-	docker compose up -d --remove-orphans postgres && \
-	docker compose exec -T postgres sh -lc "$(PSQL_QUIET) -U usdc_ops -d usdc_ops -f /docker-entrypoint-initdb.d/001-control-plane.sql" >/dev/null && \
+	export DATABASE_URL="$(POSTGRES_TEST_URL)" && \
+	$(MAKE) sync-postgres-schema DB=usdc_ops_test && \
 	cd api && \
 	npm run prisma:generate >/dev/null && \
 	npm test
@@ -108,9 +113,10 @@ _prod-backend-shared:
 	  exit 1; \
 	fi && \
 	set -a && source api/.env && set +a && \
+	export DATABASE_URL="$(POSTGRES_URL)" && \
 	if [[ -n "$${FORCE_SOLANA_NETWORK:-}" ]]; then export SOLANA_NETWORK="$${FORCE_SOLANA_NETWORK}"; fi && \
 	if [[ "$${SOLANA_NETWORK:-}" == "devnet" ]]; then export SOLANA_RPC_URL="$${SOLANA_DEVNET_RPC_URL:-https://api.devnet.solana.com}"; fi && \
-	$(MAKE) sync-postgres-schema && \
+	$(MAKE) sync-postgres-schema DB=usdc_ops && \
 	(cd api && npm run prisma:generate >/dev/null) && \
 	pkill -f "cloudflared tunnel run decimal-api" >/dev/null 2>&1 || true && \
 	typeset -a pids && \
@@ -138,17 +144,17 @@ backup-db:
 	set -euo pipefail && \
 	mkdir -p backups && \
 	docker compose up -d --remove-orphans postgres >/dev/null && \
-	OUT="backups/usdc_ops-$$(date +%Y%m%d-%H%M%S).sql" && \
-	docker compose exec -T postgres pg_dump -U usdc_ops -d usdc_ops --clean --if-exists --no-owner > "$$OUT" && \
+	OUT="backups/$(DB)-$$(date +%Y%m%d-%H%M%S).sql" && \
+	docker compose exec -T postgres pg_dump -U usdc_ops -d $(DB) --clean --if-exists --no-owner > "$$OUT" && \
 	echo "Backup written to $$OUT ($$(du -h "$$OUT" | cut -f1))"
 
 restore-db:
 	set -euo pipefail && \
-	if [[ -z "$${FILE:-}" ]]; then echo "Usage: make restore-db FILE=backups/<name>.sql"; exit 1; fi && \
+	if [[ -z "$${FILE:-}" ]]; then echo "Usage: make restore-db FILE=backups/<name>.sql [DB=usdc_ops]"; exit 1; fi && \
 	if [[ ! -f "$${FILE}" ]]; then echo "File not found: $${FILE}"; exit 1; fi && \
 	docker compose up -d --remove-orphans postgres >/dev/null && \
-	docker compose exec -T postgres psql -U usdc_ops -d usdc_ops < "$${FILE}" >/dev/null && \
-	echo "Restored from $${FILE}"
+	docker compose exec -T postgres psql -U usdc_ops -d $(DB) < "$${FILE}" >/dev/null && \
+	echo "Restored $(DB) from $${FILE}"
 
 list-backups:
 	@ls -lh backups/ 2>/dev/null || echo "No backups yet. Run: make backup-db"
@@ -175,11 +181,11 @@ help:
 	@echo "    prod-backend-mainnet API + tunnel on mainnet, serving https://decimal.finance"
 	@echo "    prod-backend-devnet  API + tunnel on devnet"
 	@echo ""
-	@echo "  Data"
-	@echo "    reset-data         Truncate local docker postgres"
+	@echo "  Data (separate DBs: usdc_ops=prod, usdc_ops_local=dev, usdc_ops_test=tests)"
+	@echo "    reset-data         Truncate the local dev DB (usdc_ops_local)"
 	@echo "    reset-prod-data    Truncate Postgres (DATABASE_URL, prompts)"
-	@echo "    backup-db          pg_dump local postgres -> backups/<timestamp>.sql"
-	@echo "    restore-db         Restore from backup: make restore-db FILE=backups/<name>.sql"
+	@echo "    backup-db          pg_dump -> backups/<db>-<timestamp>.sql (DB=usdc_ops default)"
+	@echo "    restore-db         Restore: make restore-db FILE=backups/<name>.sql [DB=usdc_ops]"
 	@echo "    list-backups       List existing backups"
 	@echo ""
 	@echo "  Tests"
