@@ -231,7 +231,7 @@ async function findExistingRoute(paymentOrder: AgentPaymentOrder): Promise<Exist
     where: {
       organizationId: paymentOrder.organizationId,
       paymentOrderId: paymentOrder.paymentOrderId,
-      status: { in: ['submitted', 'settled'] },
+      status: { in: ['prepared', 'submitted', 'settled', 'mismatch'] },
     },
     orderBy: { createdAt: 'desc' },
   });

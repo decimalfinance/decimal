@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import * as multisig from '@sqds/multisig';
 import { PublicKey, TransactionMessage, VersionedTransaction } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
@@ -220,7 +220,7 @@ export async function executePaymentOrderWithSpendingLimit(
     where: {
       organizationId,
       paymentOrderId,
-      status: { in: ['submitted', 'settled'] },
+      status: { in: ['prepared', 'submitted', 'settled', 'mismatch'] },
     },
   });
   if (existing) {
@@ -248,6 +248,41 @@ export async function executePaymentOrderWithSpendingLimit(
   if (!['approved', 'ready_for_execution', 'submitted_onchain'].includes(transferRequest.status)) {
     throw badRequest(`Payment order cannot be executed while transfer request is ${transferRequest.status}.`);
   }
+
+  // Reservation / double-pay guard. Claim this payment order with a 'prepared' row BEFORE
+  // any on-chain send. A racing concurrent advance hits the unique partial index
+  // (uq_spending_limit_executions_active_payment_order) on this insert and is rejected
+  // here, so a second payment is never sent.
+  const now = new Date();
+  const reservation = await prisma.spendingLimitExecution
+    .create({
+      data: {
+        organizationId,
+        spendingLimitPolicyId: policy.spendingLimitPolicyId,
+        treasuryWalletId: policy.treasuryWalletId,
+        automationAgentId: policy.automationAgentId,
+        agentWalletId: policy.agentWalletId,
+        paymentOrderId: paymentOrder.paymentOrderId,
+        counterpartyWalletId: paymentOrder.counterpartyWalletId,
+        amountRaw: paymentOrder.amountRaw,
+        asset: paymentOrder.asset,
+        destinationWalletAddress: paymentOrder.counterpartyWallet.walletAddress,
+        status: 'prepared',
+        metadataJson: {
+          transferRequestId: transferRequest.transferRequestId,
+          actorUserId,
+          provider: SQUADS_SOURCE,
+        },
+      },
+    })
+    .catch((error: unknown) => {
+      if (isUniqueConstraintError(error)) {
+        throw conflict('Payment order already has a spending-limit execution in progress.', {
+          paymentOrderId: paymentOrder.paymentOrderId,
+        });
+      }
+      throw error;
+    });
 
   const latestBlockhash = await runtime.getLatestBlockhash();
   const agentPublicKey = new PublicKey(policy.agentWallet.walletAddress);
@@ -281,14 +316,35 @@ export async function executePaymentOrderWithSpendingLimit(
       instructions,
     }).compileToV0Message(),
   );
-  const signed = await runtime.signTransaction({
-    providerWalletId: policy.agentWallet.providerWalletId,
-    serializedTransactionBase64: Buffer.from(transaction.serialize()).toString('base64'),
-  });
-  const signature = await runtime.sendRawTransaction(Buffer.from(signed.signedTransactionBase64, 'base64'));
-  await runtime.waitForSignature(signature);
+  let sentSignature: string;
+  try {
+    const signed = await runtime.signTransaction({
+      providerWalletId: policy.agentWallet.providerWalletId,
+      serializedTransactionBase64: Buffer.from(transaction.serialize()).toString('base64'),
+    });
+    sentSignature = await runtime.sendRawTransaction(Buffer.from(signed.signedTransactionBase64, 'base64'));
+  } catch (error) {
+    // Pre-send failure: no money moved, so release the claim and let the order be retried.
+    await prisma.spendingLimitExecution
+      .update({
+        where: { spendingLimitExecutionId: reservation.spendingLimitExecutionId },
+        data: { status: 'failed' },
+      })
+      .catch(() => { /* best-effort release */ });
+    throw error;
+  }
 
-  const verification = await verifySettlementSoft(signature, {
+  // Money has moved. Record the signature immediately, before verification, so a crash
+  // here cannot orphan the payment: the reconciler finalizes any 'submitted' row by its
+  // signature, and the claim is never released once a payment exists.
+  await prisma.spendingLimitExecution.update({
+    where: { spendingLimitExecutionId: reservation.spendingLimitExecutionId },
+    data: { signature: sentSignature, status: 'submitted', submittedAt: now },
+  });
+
+  await runtime.waitForSignature(sentSignature);
+
+  const verification = await verifySettlementSoft(sentSignature, {
     destinationWalletAddress: paymentOrder.counterpartyWallet.walletAddress,
     destinationTokenAccountAddress: destinationTokenAccount,
     amountRaw: paymentOrder.amountRaw,
@@ -298,30 +354,15 @@ export async function executePaymentOrderWithSpendingLimit(
     : verification.status === 'mismatch'
       ? 'mismatch'
       : 'submitted';
-  const now = new Date();
   const execution = await prisma.$transaction(async (tx) => {
-    const row = await tx.spendingLimitExecution.create({
+    const row = await tx.spendingLimitExecution.update({
+      where: { spendingLimitExecutionId: reservation.spendingLimitExecutionId },
       data: {
-        organizationId,
-        spendingLimitPolicyId: policy.spendingLimitPolicyId,
-        treasuryWalletId: policy.treasuryWalletId,
-        automationAgentId: policy.automationAgentId,
-        agentWalletId: policy.agentWalletId,
-        paymentOrderId: paymentOrder.paymentOrderId,
-        counterpartyWalletId: paymentOrder.counterpartyWalletId,
-        amountRaw: paymentOrder.amountRaw,
-        asset: paymentOrder.asset,
-        destinationWalletAddress: paymentOrder.counterpartyWallet.walletAddress,
-        signature,
+        signature: sentSignature,
         status: finalStatus,
         verificationJson: verification as Prisma.InputJsonValue,
         submittedAt: now,
         executedAt: verification.status === 'settled' ? now : null,
-        metadataJson: {
-          transferRequestId: transferRequest.transferRequestId,
-          actorUserId,
-          provider: SQUADS_SOURCE,
-        },
       },
     });
 
@@ -343,7 +384,7 @@ export async function executePaymentOrderWithSpendingLimit(
         beforeState: paymentOrder.state,
         afterState: finalStatus === 'settled' ? 'settled' : 'executed',
         linkedTransferRequestId: transferRequest.transferRequestId,
-        linkedSignature: signature,
+        linkedSignature: sentSignature,
         payloadJson: {
           spendingLimitPolicyId: policy.spendingLimitPolicyId,
           agentWalletId: policy.agentWalletId,
@@ -361,7 +402,7 @@ export async function executePaymentOrderWithSpendingLimit(
         eventSource: 'agent',
         beforeState: transferRequest.status,
         afterState: finalStatus === 'settled' ? 'matched' : 'submitted_onchain',
-        linkedSignature: signature,
+        linkedSignature: sentSignature,
         linkedPaymentId: paymentOrder.paymentOrderId,
         linkedTransferIds: [],
         payloadJson: {
@@ -381,7 +422,7 @@ export async function executePaymentOrderWithSpendingLimit(
         lastSyncedAt: now,
         metadataJson: {
           ...(isRecordLike(policy.metadataJson) ? policy.metadataJson : {}),
-          lastExecutionSignature: signature,
+          lastExecutionSignature: sentSignature,
           onchain: {
             ...(readRecord(policy.metadataJson, 'onchain')),
             preExecutionRemainingAmountRaw: account.remainingAmount.toString(),
@@ -551,6 +592,10 @@ async function verifySettlementSoft(
       reason: error instanceof Error ? error.message : 'Settlement verification unavailable',
     } as const;
   }
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
 }
 
 function safeNumber(value: bigint, fieldName: string) {

@@ -885,6 +885,14 @@ CREATE INDEX IF NOT EXISTS idx_spending_limit_executions_policy_created_at
   ON spending_limit_executions(spending_limit_policy_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_spending_limit_executions_payment_order_created_at
   ON spending_limit_executions(payment_order_id, created_at DESC);
+-- Double-pay guard: at most one in-flight or completed auto-pay execution per payment
+-- order. A racing second agent advance hits this on the reservation insert and is rejected
+-- before any second on-chain payment is sent. 'failed' rows are excluded so a genuinely
+-- failed (never-sent) attempt can be retried.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_spending_limit_executions_active_payment_order
+  ON spending_limit_executions(payment_order_id)
+  WHERE payment_order_id IS NOT NULL
+    AND status IN ('prepared', 'submitted', 'settled', 'mismatch');
 CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_unique_active_reference
   ON payment_orders(organization_id, counterparty_wallet_id, amount_raw, lower(coalesce(external_reference, invoice_number)))
   WHERE coalesce(external_reference, invoice_number) IS NOT NULL
