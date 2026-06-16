@@ -9,9 +9,9 @@ import type {
   SquadsPermission,
   UserWallet,
 } from '../types';
-import { Connection, VersionedTransaction } from '@solana/web3.js';
+import { VersionedTransaction } from '@solana/web3.js';
 import { formatRawUsdcCompact } from '../domain';
-import { resolveSolanaRpcUrl, waitForSignatureVisible } from '../lib/solana-wallet';
+import { createSolanaConnection, waitForSignatureVisible } from '../lib/solana-wallet';
 import { useToast } from '../ui/Toast';
 import { Ico } from '../dec/icons';
 import { PageHead } from '../dec/primitives';
@@ -599,7 +599,7 @@ function CreateSquadsTreasuryDialog(props: {
     let signatureToConfirm = submittedSignature;
 
     try {
-      const connection = new Connection(resolveSolanaRpcUrl(), 'confirmed');
+      const connection = createSolanaConnection('confirmed');
 
       if (!signatureToConfirm) {
         // Step 1: backend signs with the user's Privy wallet.

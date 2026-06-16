@@ -1,10 +1,10 @@
-import { Connection, VersionedTransaction } from '@solana/web3.js';
+import { VersionedTransaction } from '@solana/web3.js';
 import { api } from '../api';
 import type {
   DecimalProposalIntentResponse,
   SquadsConfigProposalIntentResponse,
 } from '../types';
-import { resolveSolanaRpcUrl, waitForSignatureVisible } from './solana-wallet';
+import { createSolanaConnection, waitForSignatureVisible } from './solana-wallet';
 
 // Both shapes carry the same transaction sub-object — just widen here so any
 // caller can hand us either an old config-proposal intent or a new generic
@@ -35,7 +35,7 @@ export async function signAndSubmitIntent(args: {
   const signed = await api.signPersonalWalletVersionedTransaction(signerPersonalWalletId, {
     serializedTransactionBase64: intent.transaction.serializedTransaction,
   });
-  const connection = new Connection(resolveSolanaRpcUrl(), 'confirmed');
+  const connection = createSolanaConnection('confirmed');
   const bytes = decodeBase64ToBytes(signed.signedTransactionBase64);
   VersionedTransaction.deserialize(bytes);
   const sig = await connection.sendRawTransaction(bytes, {

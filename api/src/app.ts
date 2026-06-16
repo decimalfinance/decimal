@@ -8,6 +8,7 @@ import { capabilitiesRouter } from './routes/capabilities.js';
 import { collectionsRouter } from './routes/collections.js';
 import { config } from './config.js';
 import { counterpartyWalletsRouter } from './routes/counterparty-wallets.js';
+import { eventsRouter } from './routes/events.js';
 import { authRouter } from './routes/auth.js';
 import { automationAgentsRouter } from './routes/automation-agents.js';
 import { healthRouter } from './routes/health.js';
@@ -20,6 +21,7 @@ import { opsRouter } from './routes/ops.js';
 import { paymentOrdersRouter } from './routes/payment-orders.js';
 import { proposalsRouter } from './routes/proposals.js';
 import { publicRateLimitMiddleware } from './infra/rate-limit.js';
+import { solanaRpcRouter } from './routes/solana-rpc.js';
 import { treasuryWalletsRouter } from './routes/treasury-wallets.js';
 import { userWalletsRouter } from './routes/user-wallets.js';
 import { walletAuthorizationsRouter } from './routes/wallet-authorizations.js';
@@ -56,7 +58,7 @@ export function createApp() {
 
       res.setHeader('Vary', 'Origin');
       res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Headers', 'content-type,authorization,idempotency-key,x-request-id');
+      res.setHeader('Access-Control-Allow-Headers', 'content-type,authorization,idempotency-key,x-request-id,solana-client');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
       res.setHeader('Access-Control-Expose-Headers', 'content-disposition,x-request-id');
     }
@@ -81,6 +83,11 @@ export function createApp() {
   app.use(authRouter);
   app.use(publicOrganizationInvitesRouter);
   app.use(requireAuth());
+  // SSE stream is authed but long-lived; mount it before idempotency so that
+  // middleware (built for mutations) never wraps the open response.
+  app.use(eventsRouter);
+  // Authed Solana RPC proxy — keeps the paid RPC key out of the browser.
+  app.use(solanaRpcRouter);
   app.use(idempotencyMiddleware());
   app.use(userWalletsRouter);
   app.use(automationAgentsRouter);

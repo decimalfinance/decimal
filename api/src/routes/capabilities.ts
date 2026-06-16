@@ -12,7 +12,9 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
     solana: {
       network: config.solanaNetwork,
       usdcMint: USDC_MINT.toBase58(),
-      rpcUrl: config.solanaRpcUrl,
+      // Frontend-safe public RPC, never the paid keyed endpoint (this is
+      // exposed in every browser). The backend keeps using solanaRpcUrl.
+      rpcUrl: config.solanaPublicRpcUrl,
     },
     auth: {
       user: 'Authorization: Bearer <sessionToken>',

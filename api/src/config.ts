@@ -32,6 +32,13 @@ type DecimalConfig = {
   solanaNetwork: SolanaNetwork;
   solanaRpcUrl: string;
   /**
+   * Frontend-safe RPC URL advertised to browsers (via /capabilities) for
+   * client-side signing/submission. Must NOT be a paid keyed endpoint —
+   * it is exposed in every browser. Defaults to the network's public RPC;
+   * override with SOLANA_PUBLIC_RPC_URL (e.g. a domain-restricted key).
+   */
+  solanaPublicRpcUrl: string;
+  /**
    * Always-devnet RPC URL. Used for devnet reads (balances, signature
    * status) regardless of which network the rest of the app is
    * configured for. Typically a paid provider (Alchemy / Helius) for
@@ -93,6 +100,8 @@ function buildConfig(): DecimalConfig {
   const fileConfig = loadApiFileConfig();
   const solanaNetwork = getSolanaNetwork();
   const solanaRpcUrl = (process.env.SOLANA_RPC_URL?.trim() || defaultSolanaRpcUrl(solanaNetwork));
+  // Frontend-safe RPC: never the paid keyed endpoint. Public RPC by default.
+  const solanaPublicRpcUrl = (process.env.SOLANA_PUBLIC_RPC_URL?.trim() || defaultSolanaRpcUrl(solanaNetwork));
   const solanaDevnetRpcUrl = (process.env.SOLANA_DEVNET_RPC_URL?.trim() || 'https://api.devnet.solana.com');
   const solanaAirdropRpcUrl = (process.env.SOLANA_AIRDROP_RPC_URL?.trim() || 'https://api.devnet.solana.com');
 
@@ -105,6 +114,7 @@ function buildConfig(): DecimalConfig {
     publicFrontendUrl: normalizeOptionalUrl(fileConfig.publicFrontendUrl),
     solanaNetwork,
     solanaRpcUrl,
+    solanaPublicRpcUrl,
     solanaDevnetRpcUrl,
     solanaAirdropRpcUrl,
     corsOrigins: normalizeStringArray(fileConfig.corsOrigins),
