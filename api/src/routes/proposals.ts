@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { assertOrganizationAccess } from '../auth/organization-access.js';
+import { publishOrgEvent } from '../infra/event-bus.js';
 import {
   confirmDecimalProposalExecution,
   confirmDecimalProposalSubmission,
@@ -9,6 +10,7 @@ import {
   createDecimalProposalRejectIntent,
   getDecimalProposal,
   listDecimalProposals,
+  reconcileDecimalProposalFromChain,
 } from '../squads/treasury.js';
 import { asyncRoute, sendCreated, sendJson, sendList, unwrapItems } from '../infra/route-helpers.js';
 
@@ -55,14 +57,28 @@ proposalsRouter.post('/organizations/:organizationId/proposals/:decimalProposalI
   const { organizationId, decimalProposalId } = proposalParamsSchema.parse(req.params);
   const input = signatureSchema.parse(req.body);
   await assertOrganizationAccess(organizationId, req.auth!);
-  sendJson(res, await confirmDecimalProposalSubmission(organizationId, req.auth!.userId, decimalProposalId, input));
+  const result = await confirmDecimalProposalSubmission(organizationId, req.auth!.userId, decimalProposalId, input);
+  // A signature landed — notify co-signers' open screens to refetch now.
+  publishOrgEvent(organizationId, { type: 'proposal.updated', decimalProposalId });
+  sendJson(res, result);
 }));
 
 proposalsRouter.post('/organizations/:organizationId/proposals/:decimalProposalId/confirm-execution', asyncRoute(async (req, res) => {
   const { organizationId, decimalProposalId } = proposalParamsSchema.parse(req.params);
   const input = signatureSchema.parse(req.body);
   await assertOrganizationAccess(organizationId, req.auth!);
-  sendJson(res, await confirmDecimalProposalExecution(organizationId, req.auth!.userId, decimalProposalId, input));
+  const result = await confirmDecimalProposalExecution(organizationId, req.auth!.userId, decimalProposalId, input);
+  // Proposal executed/settled — notify co-signers' open screens to refetch now.
+  publishOrgEvent(organizationId, { type: 'proposal.updated', decimalProposalId });
+  sendJson(res, result);
+}));
+
+proposalsRouter.post('/organizations/:organizationId/proposals/:decimalProposalId/reconcile', asyncRoute(async (req, res) => {
+  const { organizationId, decimalProposalId } = proposalParamsSchema.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  const result = await reconcileDecimalProposalFromChain(organizationId, req.auth!.userId, decimalProposalId);
+  publishOrgEvent(organizationId, { type: 'proposal.updated', decimalProposalId });
+  sendJson(res, result);
 }));
 
 proposalsRouter.post('/organizations/:organizationId/proposals/:decimalProposalId/approve-intent', asyncRoute(async (req, res) => {

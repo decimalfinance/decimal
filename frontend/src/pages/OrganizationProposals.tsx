@@ -87,7 +87,8 @@ export function OrganizationProposalsPage({ session }: { session: AuthenticatedS
       return { items: results.flatMap((r) => r.items) };
     },
     enabled: Boolean(organizationId),
-    refetchInterval: 20_000,
+    refetchInterval: 8_000,
+    refetchOnWindowFocus: true,
   });
 
   const allItems = proposalsQuery.data?.items ?? [];

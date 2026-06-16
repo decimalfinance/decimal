@@ -7,6 +7,7 @@ import type { AuthenticatedSession } from './api';
 import { setRuntimeSolanaConfig } from './solana-network';
 import { ScreenState } from './ui-primitives';
 import { getOrganizations, queryKeys } from './lib/app-helpers';
+import { useLiveOrgEvents } from './lib/use-live-org-events';
 
 // Lazy-loaded route pages. Each becomes its own chunk, so the main bundle
 // only ships the shell + the first matched page. Notably keeps Three.js
@@ -115,6 +116,9 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
     const match = location.pathname.match(/^\/organizations\/([^/]+)/);
     return match?.[1];
   }, [location.pathname]);
+  // Live updates: stream this org's changes over SSE and invalidate queries so
+  // a co-signer's screen reflects a new signature/execution the instant it lands.
+  useLiveOrgEvents(activeOrganizationId);
   const organizationSummaryQuery = useQuery({
     queryKey: ['organization-summary', activeOrganizationId] as const,
     queryFn: () => api.getOrganizationSummary(activeOrganizationId!),

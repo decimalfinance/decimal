@@ -69,7 +69,16 @@ export function OrganizationProposalDetailPage({ session }: { session: Authentic
     queryKey: ['organization-proposal', organizationId, decimalProposalId] as const,
     queryFn: () => api.getOrganizationProposal(organizationId!, decimalProposalId!),
     enabled: Boolean(organizationId && decimalProposalId),
-    refetchInterval: 15_000,
+    // Live updates come over SSE (see useLiveOrgEvents), so this poll is just a
+    // fallback if the stream drops: refetch while the proposal is live, and stop
+    // once it reaches a terminal state. refetchOnWindowFocus also catches a
+    // missed update the moment you switch back to this tab.
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      if (status === 'executed' || status === 'cancelled' || status === 'rejected') return false;
+      return 15_000;
+    },
+    refetchOnWindowFocus: true,
   });
 
   // Pull all SL policies for this org so spending-limit proposals can
@@ -127,22 +136,15 @@ export function OrganizationProposalDetailPage({ session }: { session: Authentic
     ],
   });
 
-  // Manual sync — same pattern as the payment detail's Sync. Re-runs
-  // confirm-execution against any stored signature so a stuck proposal
-  // can reconcile after a flaky RPC window.
+  // Manual sync — reconcile the proposal from chain. The backend finds the real
+  // on-chain execution signature (even one the app never recorded), stores it,
+  // and re-runs settlement verification across clusters. This fixes proposals
+  // stuck at "submitted"/"executed but unverified" after an RPC/cluster mismatch.
   const syncMutation = useMutation({
     mutationFn: async () => {
       const fresh = proposalQuery.data;
-      if (!fresh) return;
-      const sig = fresh.executedSignature ?? fresh.submittedSignature ?? null;
-      if (sig) {
-        try {
-          await api.confirmProposalExecution(organizationId!, fresh.decimalProposalId, { signature: sig });
-        } catch {
-          // Backend may say "already settled" — that's fine, the invalidate
-          // below will pull the fresh state regardless.
-        }
-      }
+      if (!fresh || !organizationId) return;
+      await api.reconcileProposalFromChain(organizationId, fresh.decimalProposalId);
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['organization-proposal', organizationId, decimalProposalId] });

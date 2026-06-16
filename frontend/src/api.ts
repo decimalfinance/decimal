@@ -158,6 +158,9 @@ export const api = {
   hasSessionToken() {
     return Boolean(sessionToken);
   },
+  getSessionToken() {
+    return sessionToken;
+  },
   setSessionToken(nextToken: string) {
     sessionToken = nextToken;
     window.localStorage.setItem(AUTH_STORAGE_KEY, nextToken);
@@ -716,6 +719,12 @@ export const api = {
     return request<DecimalProposal>(
       `/organizations/${organizationId}/proposals/${decimalProposalId}/confirm-execution`,
       { method: 'POST', body: JSON.stringify(input) },
+    );
+  },
+  reconcileProposalFromChain(organizationId: string, decimalProposalId: string) {
+    return request<DecimalProposal>(
+      `/organizations/${organizationId}/proposals/${decimalProposalId}/reconcile`,
+      { method: 'POST' },
     );
   },
   createProposalApprovalIntent(

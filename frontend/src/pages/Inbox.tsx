@@ -46,7 +46,8 @@ export function InboxPage({ session }: { session: AuthenticatedSession }) {
     queryKey: ['organization-proposals', organizationId, 'pending'] as const,
     queryFn: () => api.listOrganizationProposals(organizationId!, { status: 'pending' }),
     enabled: Boolean(organizationId),
-    refetchInterval: 15_000,
+    refetchInterval: 8_000,
+    refetchOnWindowFocus: true,
   });
 
   // All payment orders — used to compute auto-paid, review, and to join

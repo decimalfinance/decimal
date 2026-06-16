@@ -132,46 +132,19 @@ export function PaymentDetailPage() {
     onError: (err) => toastError(err instanceof Error ? err.message : 'Could not cancel.'),
   });
 
-  // Manual sync — for the case where the on-chain side moved past what
-  // the local cache reflects (e.g. the user double-clicked Execute, the
-  // first sig landed but confirm never ran). Two paths:
-  //   1. If we have a recorded sig anywhere, poll RPC directly from the
-  //      browser first (longer window than the backend's 20s) so we know
-  //      it's actually on chain, then call confirmProposalExecution. The
-  //      backend now stores the sig even when only 'seen' — the FE RPC
-  //      poll bridges the gap when the backend's RPC view is flaky.
-  //   2. If the order is still in draft, poke advancePaymentOrder to
-  //      nudge the agent router.
-  // Always invalidates the cache.
+  // Manual sync — reconcile the payment's proposal from chain. The backend
+  // finds the real on-chain execution signature (even one the app never
+  // recorded), stores it, and verifies USDC settlement across clusters. This
+  // replaces the old client-side RPC poll + confirm against whatever signature
+  // we happened to have — which fell back to the proposal-creation tx (no
+  // transfer) and could never settle. If the order is still a draft with no
+  // proposal yet, nudge the agent router instead.
   const syncMutation = useMutation({
     mutationFn: async () => {
       const fresh = orderQuery.data;
       const proposal = fresh?.squadsPaymentProposal ?? null;
-      const sig =
-        proposal?.executedSignature
-        ?? proposal?.submittedSignature
-        ?? fresh?.squadsLifecycle?.executedSignature
-        ?? fresh?.squadsLifecycle?.submittedSignature
-        ?? fresh?.reconciliationDetail?.latestExecution?.submittedSignature
-        ?? null;
-      if (proposal && sig) {
-        // Direct RPC poll — if the backend's confirm is going to fail
-        // because RPC hasn't propagated yet, at least we tried browser-
-        // side first. 45s timeout (vs backend's 20s).
-        try {
-          const { Connection } = await import('@solana/web3.js');
-          const { resolveSolanaRpcUrl, waitForSignatureVisible } = await import('../lib/solana-wallet');
-          const connection = new Connection(resolveSolanaRpcUrl(), 'confirmed');
-          await waitForSignatureVisible(connection, sig, { timeoutMs: 45_000 });
-        } catch {
-          // RPC poll failures aren't fatal — backend confirm has its own
-          // RPC check and may see different node state.
-        }
-        try {
-          await api.confirmProposalExecution(organizationId!, proposal.decimalProposalId, { signature: sig });
-        } catch {
-          // Backend may say "already settled" — fine, invalidate below.
-        }
+      if (proposal) {
+        await api.reconcileProposalFromChain(organizationId!, proposal.decimalProposalId);
       }
       if (fresh?.derivedState === 'draft') {
         try {
