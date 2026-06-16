@@ -66,6 +66,72 @@ export function getSolanaAirdropConnection(): Connection {
 }
 
 /**
+ * Connections to probe when a signature/transaction could live on either the
+ * primary network or devnet. The backend runs one network at a time, but the
+ * database can hold devnet treasuries created during a devnet run — so a tx we
+ * need to read (settlement verification, signature status) may be on devnet even
+ * when the primary RPC is mainnet. Probing both (primary first, devnet fallback)
+ * lets those reads succeed regardless of the mismatch. When the primary RPC IS
+ * the devnet RPC (a devnet backend) there's only one connection, no extra calls.
+ */
+export function candidateSettlementConnections(): Connection[] {
+  const primary = getSolanaConnection();
+  if (config.solanaRpcUrl === config.solanaDevnetRpcUrl) return [primary];
+  return [primary, getSolanaDevnetConnection()];
+}
+
+async function getParsedTransactionAcrossClusters(signature: string) {
+  for (const connection of candidateSettlementConnections()) {
+    const tx = await connection
+      .getParsedTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 })
+      .catch(() => null);
+    if (tx) return tx;
+  }
+  return null;
+}
+
+/**
+ * Like waitForSignatureVisible, but checks every candidate cluster each round so
+ * a devnet signature is still "seen" when the primary RPC is mainnet.
+ */
+export async function waitForSignatureVisibleAcrossClusters(
+  signature: string,
+  options: { timeoutMs?: number; pollIntervalMs?: number } = {},
+): Promise<{ confirmed: boolean; seen: boolean }> {
+  const connections = candidateSettlementConnections();
+  const timeoutMs = options.timeoutMs ?? 10_000;
+  const pollIntervalMs = options.pollIntervalMs ?? 1000;
+  const deadline = Date.now() + timeoutMs;
+  let everSeen = false;
+  while (Date.now() < deadline) {
+    const statuses = await Promise.all(
+      connections.map((connection) =>
+        connection
+          // searchTransactionHistory: without it, getSignatureStatuses only
+          // returns signatures from the last few minutes, so an older but
+          // finalized tx (e.g. reconciling/confirming a payment well after it
+          // executed) reads back as null and looks like it "never landed".
+          .getSignatureStatuses([signature], { searchTransactionHistory: true })
+          .then((r) => r.value[0])
+          .catch(() => null),
+      ),
+    );
+    for (const status of statuses) {
+      if (!status) continue;
+      everSeen = true;
+      if (status.err) {
+        throw new Error(`On-chain error: ${JSON.stringify(status.err)}`);
+      }
+      if (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized') {
+        return { confirmed: true, seen: true };
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+  return { confirmed: false, seen: everSeen };
+}
+
+/**
  * Poll getSignatureStatuses until the signature is at least 'confirmed'
  * (or 'finalized'), or until the timeout elapses. Blockhash-agnostic
  * alternative to Connection.confirmTransaction(strategy) — doesn't fail
@@ -298,10 +364,9 @@ export async function verifyUsdcSettlementFromSignature(args: {
     };
   }
 
-  const tx = await getSolanaConnection().getParsedTransaction(args.signature, {
-    commitment: 'confirmed',
-    maxSupportedTransactionVersion: 0,
-  });
+  // Probe primary + devnet so a devnet settlement still verifies when the
+  // backend's primary RPC is mainnet (see candidateSettlementConnections).
+  const tx = await getParsedTransactionAcrossClusters(args.signature);
   if (!tx) {
     throw new Error('Confirmed transaction is not yet available from RPC. Retry settlement verification shortly.');
   }

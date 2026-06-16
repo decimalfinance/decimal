@@ -13,6 +13,7 @@ import { signPrivySolanaTransaction } from '../wallets/personal.js';
 import {
   buildDestinationAtaCreateInstruction,
   buildUsdcTransferTransactionInstructions,
+  candidateSettlementConnections,
   deriveUsdcAtaForWallet,
   getSolanaConnection,
   isSolanaSignatureLike,
@@ -23,6 +24,7 @@ import {
   USDC_MINT,
   verifyUsdcSettlementFromSignature,
   waitForSignatureVisible,
+  waitForSignatureVisibleAcrossClusters,
   type ExpectedUsdcSettlement,
 } from '../solana.js';
 import {
@@ -1914,6 +1916,73 @@ export async function confirmDecimalProposalExecution(
   return serializeDecimalProposal(updated);
 }
 
+// Recover a proposal whose on-chain execution the app never recorded. This
+// happens when the execute transaction landed on a cluster the backend wasn't
+// reading at the time (e.g. a devnet treasury while the backend ran mainnet),
+// so confirm-execution threw "signature has not landed" and the row is stuck at
+// `submitted` with no executedSignature. We find the real VaultTransactionExecute
+// signature from chain and feed it back through confirm-execution, which records
+// it and runs the (now cluster-robust) settlement verification.
+export async function reconcileDecimalProposalFromChain(
+  organizationId: string,
+  actorUserId: string,
+  decimalProposalId: string,
+) {
+  const proposal = await prisma.decimalProposal.findFirstOrThrow({
+    where: { organizationId, decimalProposalId },
+  });
+
+  // Already have the execution signature — just re-run confirm so settlement
+  // re-verifies against the right cluster.
+  if (proposal.executedSignature) {
+    return confirmDecimalProposalExecution(organizationId, actorUserId, decimalProposalId, {
+      signature: proposal.executedSignature,
+    });
+  }
+
+  if (!proposal.squadsMultisigPda || proposal.transactionIndex === null) {
+    throw badRequest('Proposal is missing on-chain coordinates to reconcile against.', { decimalProposalId });
+  }
+
+  const executionSignature = await findVaultExecuteSignatureOnChain(
+    new PublicKey(proposal.squadsMultisigPda),
+    BigInt(proposal.transactionIndex),
+  );
+  if (!executionSignature) {
+    throw badRequest(
+      'No on-chain execution transaction found for this proposal yet. Approve and execute it first, then sync.',
+      { decimalProposalId },
+    );
+  }
+
+  return confirmDecimalProposalExecution(organizationId, actorUserId, decimalProposalId, {
+    signature: executionSignature,
+  });
+}
+
+// Scan the proposal account's transaction history (across candidate clusters)
+// for the VaultTransactionExecute that settled it. Returns the newest matching
+// signature, or null if the proposal hasn't been executed on chain yet.
+async function findVaultExecuteSignatureOnChain(
+  multisigPda: PublicKey,
+  transactionIndex: bigint,
+): Promise<string | null> {
+  const [proposalPda] = multisig.getProposalPda({ multisigPda, transactionIndex });
+  for (const connection of candidateSettlementConnections()) {
+    const infos = await connection.getSignaturesForAddress(proposalPda, { limit: 40 }).catch(() => []);
+    for (const info of infos) {
+      if (info.err) continue;
+      const tx = await connection
+        .getParsedTransaction(info.signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 })
+        .catch(() => null);
+      if ((tx?.meta?.logMessages ?? []).some((line) => line.includes('VaultTransactionExecute'))) {
+        return info.signature;
+      }
+    }
+  }
+  return null;
+}
+
 // Find every SpendingLimitPolicy row touched by a config-transaction
 // proposal so we can sync them from chain after the proposal executes.
 // Create proposals: the policy points to the proposal via decimalProposalId.
@@ -3769,9 +3838,9 @@ async function checkRpcSignatureStatus(
     throw badRequest('Invalid Solana transaction signature.', { signature, purpose });
   }
 
-  let visible: Awaited<ReturnType<typeof waitForSignatureVisible>>;
+  let visible: Awaited<ReturnType<typeof waitForSignatureVisibleAcrossClusters>>;
   try {
-    visible = await waitForSignatureVisible(getSolanaConnection(), signature, {
+    visible = await waitForSignatureVisibleAcrossClusters(signature, {
       timeoutMs: 20_000,
       pollIntervalMs: 1_000,
     });
