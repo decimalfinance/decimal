@@ -88,17 +88,26 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, init?: RequestInit & { includeAuth?: boolean }): Promise<T> {
   const includeAuth = init?.includeAuth ?? true;
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      'content-type': 'application/json',
-      ...(includeAuth && sessionToken ? { authorization: `Bearer ${sessionToken}` } : {}),
-      ...(init?.headers ?? {}),
-    },
-    ...init,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      headers: {
+        'content-type': 'application/json',
+        ...(includeAuth && sessionToken ? { authorization: `Bearer ${sessionToken}` } : {}),
+        ...(init?.headers ?? {}),
+      },
+      ...init,
+    });
+  } catch {
+    // Network-level failure (server unreachable, DNS, CORS, offline). The raw
+    // browser message is "Failed to fetch" — never show that to a user.
+    throw new ApiError("Can't reach the server. Check your connection and try again.", 0, 'network');
+  }
 
   if (!response.ok) {
-    let message = `${response.status} ${response.statusText}`;
+    // Prefer the server's own message (it's written to be read). Only fall back
+    // to a friendly generic — never the raw "500 Internal Server Error" line.
+    let message: string | null = null;
     let code: string | null = null;
     try {
       const body = await response.json();
@@ -109,11 +118,21 @@ async function request<T>(path: string, init?: RequestInit & { includeAuth?: boo
         code = body.code;
       }
     } catch {
-      // keep default
+      // no JSON body — keep the generic fallback below
     }
 
     if (response.status === 401) {
       clearSessionToken();
+      if (!message) {
+        message = 'Your session has expired. Please sign in again.';
+      }
+    }
+
+    if (!message) {
+      message =
+        response.status >= 500
+          ? 'Something went wrong on our end. Please try again in a moment.'
+          : 'That request could not be completed. Please try again.';
     }
 
     throw new ApiError(message, response.status, code);

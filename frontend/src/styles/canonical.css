@@ -998,6 +998,8 @@ table.csv-preview-table {
   border-radius: var(--ax-r-md);
   background: var(--ax-surface-1);
   border: 1px solid var(--ax-border-strong);
+  border-left-width: 3px;
+  border-left-color: var(--ax-border-strong);
   box-shadow: var(--ax-shadow-lg);
   pointer-events: auto;
   min-width: 280px;
@@ -1023,33 +1025,26 @@ table.csv-preview-table {
   }
 }
 
+/* Neutral card; tone shows only on the icon + the left rail (Mercury-clean,
+   not a fully-tinted alert box). Title stays primary text, message muted. */
 .ax-toast[data-tone='success'] {
-  border-color: transparent;
-  background: var(--ax-accent-dim);
-  color: var(--ax-accent);
+  border-left-color: var(--ax-accent);
 }
-.ax-toast[data-tone='success'] .ax-toast-title,
-.ax-toast[data-tone='success'] .ax-toast-message {
+.ax-toast[data-tone='success'] .ax-toast-icon {
   color: var(--ax-accent);
 }
 
 .ax-toast[data-tone='danger'] {
-  border-color: transparent;
-  background: var(--ax-danger-dim);
-  color: var(--ax-danger);
+  border-left-color: var(--ax-danger);
 }
-.ax-toast[data-tone='danger'] .ax-toast-title,
-.ax-toast[data-tone='danger'] .ax-toast-message {
+.ax-toast[data-tone='danger'] .ax-toast-icon {
   color: var(--ax-danger);
 }
 
 .ax-toast[data-tone='info'] {
-  border-color: transparent;
-  background: var(--ax-info-dim);
-  color: var(--ax-info);
+  border-left-color: var(--ax-info);
 }
-.ax-toast[data-tone='info'] .ax-toast-title,
-.ax-toast[data-tone='info'] .ax-toast-message {
+.ax-toast[data-tone='info'] .ax-toast-icon {
   color: var(--ax-info);
 }
 
@@ -1075,6 +1070,7 @@ table.csv-preview-table {
   font-size: 13px;
   line-height: 1.4;
   word-break: break-word;
+  color: var(--ax-text-secondary);
 }
 
 .ax-toast-close {
