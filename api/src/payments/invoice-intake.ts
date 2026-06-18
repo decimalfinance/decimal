@@ -4,6 +4,7 @@ import { prisma } from '../infra/prisma.js';
 import { deriveUsdcAtaForWallet, SOLANA_CHAIN, USDC_ASSET, USDC_DECIMALS } from '../solana.js';
 import { createPaymentOrder } from './orders.js';
 import { extractPaymentRowsFromDocument, type ExtractedRow } from './document-extract.js';
+import { INVOICE_IMPORT_REVIEW_NOTE } from '../counterparty-wallets.js';
 
 const NEW_COUNTERPARTY_REVIEW_THRESHOLD_RAW = 1_000n * 10n ** BigInt(USDC_DECIMALS);
 const LOW_CONFIDENCE_OVERALL_THRESHOLD = 0.72;
@@ -102,10 +103,20 @@ export async function uploadInvoiceToPaymentOrders(args: {
         continue;
       }
 
+      const vendorAddressContext = await computeVendorAddressContext({
+        organizationId: args.organizationId,
+        wallet: counterpartyWallet,
+      });
+      const nearDuplicate = await computeNearDuplicateAddress({
+        organizationId: args.organizationId,
+        wallet: counterpartyWallet,
+      });
       const triggeredRules = deriveReviewRules({
         row,
         amountRaw,
         counterpartyWallet,
+        vendorAddressContext,
+        nearDuplicate,
       });
       const decision = triggeredRules.length ? 'needs_review' : 'drafted';
 
@@ -253,6 +264,9 @@ async function resolveInvoiceCounterpartyWallet(args: {
         { counterparty: { displayName: { contains: counterpartyName, mode: 'insensitive' } } },
       ],
     },
+    // An invoice that names the vendor but carries no address routes to the
+    // vendor's designated primary (default) payout address, not an arbitrary row.
+    orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
     include: { counterparty: true },
   });
 }
@@ -311,7 +325,7 @@ async function createInvoiceCounterpartyWalletFromAddress(args: {
         walletType: 'invoice_imported',
         trustState: 'unreviewed',
         label,
-        notes: 'Created from invoice upload. Human review is required before payment execution.',
+        notes: INVOICE_IMPORT_REVIEW_NOTE,
         isInternal: false,
         isActive: true,
         metadataJson: {
@@ -349,10 +363,106 @@ async function findOrCreateCounterparty(
   });
 }
 
+type VendorAddressContext = {
+  otherAddressCount: number;
+  otherTrustedAddressCount: number;
+};
+
+// Look up the OTHER active payout addresses the org already holds for the same
+// vendor as `wallet` — matched by linked counterparty and by label (the address
+// book is a flat list of labeled wallets; many rows have no counterparty link),
+// excluding the routed address itself. Computed fresh on every intake so the
+// account-change check is robust to re-uploads and pre-existing rows.
+async function computeVendorAddressContext(args: {
+  organizationId: string;
+  wallet: Pick<CounterpartyWallet, 'walletAddress' | 'label' | 'counterpartyId'> & { counterparty: Counterparty | null };
+}): Promise<VendorAddressContext> {
+  const vendorName = args.wallet.counterparty?.displayName ?? args.wallet.label;
+  const matchers: Prisma.CounterpartyWalletWhereInput[] = [
+    { label: { equals: vendorName, mode: 'insensitive' } },
+    { counterparty: { displayName: { equals: vendorName, mode: 'insensitive' } } },
+  ];
+  if (args.wallet.counterpartyId) {
+    matchers.push({ counterpartyId: args.wallet.counterpartyId });
+  }
+
+  const others = await prisma.counterpartyWallet.findMany({
+    where: {
+      organizationId: args.organizationId,
+      isActive: true,
+      walletAddress: { not: args.wallet.walletAddress },
+      OR: matchers,
+    },
+    select: { trustState: true },
+  });
+
+  return {
+    otherAddressCount: others.length,
+    otherTrustedAddressCount: others.filter((w) => w.trustState === 'trusted').length,
+  };
+}
+
+type NearDuplicateAddress = { address: string; label: string };
+
+// Bounded Levenshtein — bails out to max+1 as soon as it's clearly over budget.
+function boundedEditDistance(a: string, b: string, max: number): number {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i += 1) {
+    const cur = [i];
+    let rowBest = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      const v = Math.min(prev[j]! + 1, cur[j - 1]! + 1, prev[j - 1]! + cost);
+      cur[j] = v;
+      if (v < rowBest) rowBest = v;
+    }
+    if (rowBest > max) return max + 1;
+    prev = cur;
+  }
+  return prev[b.length]!;
+}
+
+// Two DIFFERENT addresses that look almost identical: a case-only difference
+// (base58 is case-sensitive, so this is a real but near-invisible change) or
+// within one or two characters. This is the OCR/transcription corruption class
+// — e.g. an invoice address read back with a single character's case flipped.
+function isNearDuplicateAddress(a: string, b: string): boolean {
+  if (a === b) return false;
+  if (a.toLowerCase() === b.toLowerCase()) return true;
+  return boundedEditDistance(a, b, 2) <= 2;
+}
+
+// Find an existing active address in the org that the routed address is a
+// near-duplicate of. Checks ALL vendors, not just the matched one — look-alike
+// corruption and typo-squatting aren't limited to the same vendor. Org address
+// counts are small today; at scale this moves to an indexed pre-filter.
+async function computeNearDuplicateAddress(args: {
+  organizationId: string;
+  wallet: Pick<CounterpartyWallet, 'walletAddress'>;
+}): Promise<NearDuplicateAddress | null> {
+  const others = await prisma.counterpartyWallet.findMany({
+    where: {
+      organizationId: args.organizationId,
+      isActive: true,
+      walletAddress: { not: args.wallet.walletAddress },
+    },
+    select: { walletAddress: true, label: true },
+  });
+  for (const o of others) {
+    if (isNearDuplicateAddress(args.wallet.walletAddress, o.walletAddress)) {
+      return { address: o.walletAddress, label: o.label };
+    }
+  }
+  return null;
+}
+
 function deriveReviewRules(args: {
   row: ExtractedRow;
   amountRaw: bigint;
   counterpartyWallet: Pick<CounterpartyWallet, 'trustState' | 'label' | 'walletAddress'> & { counterparty: Counterparty | null };
+  vendorAddressContext: VendorAddressContext;
+  nearDuplicate: NearDuplicateAddress | null;
 }) {
   const rules: Array<{ rule: string; reason: string }> = [];
 
@@ -391,6 +501,37 @@ function deriveReviewRules(args: {
     rules.push({
       rule: 'known_counterparty_wallet_changed',
       reason: `Invoice wallet ${shortenAddress(extractedWalletAddress)} differs from the matched wallet for ${args.counterpartyWallet.counterparty.displayName}.`,
+    });
+  }
+
+  // The invoice routes to an address that is NOT this vendor's established
+  // (trusted) one, while the vendor already has other known address(es) — the
+  // classic account-change (BEC) fraud signal. Computed live per intake (see
+  // computeVendorAddressContext) so it fires for re-uploads and rows that
+  // predate this check, not just at first creation. Only surfaced while the
+  // routed address is still unverified — once trusted, the operator has already
+  // confirmed it, so we stop flagging it on every future invoice.
+  const { otherAddressCount, otherTrustedAddressCount } = args.vendorAddressContext;
+  if (args.counterpartyWallet.trustState !== 'trusted' && otherAddressCount > 0) {
+    const vendorName = args.counterpartyWallet.counterparty?.displayName ?? args.counterpartyWallet.label;
+    rules.push({
+      rule: 'known_counterparty_wallet_changed',
+      reason:
+        `"${vendorName}" already has ${otherAddressCount} other known payout address${otherAddressCount === 1 ? '' : 'es'}` +
+        `${otherTrustedAddressCount > 0 ? ` (${otherTrustedAddressCount} trusted)` : ''}. This invoice routes to a ` +
+        `different, unverified address ${shortenAddress(args.counterpartyWallet.walletAddress)} — confirm the vendor ` +
+        `actually changed accounts before paying.`,
+    });
+  }
+
+  if (args.nearDuplicate) {
+    rules.push({
+      rule: 'near_duplicate_address',
+      reason:
+        `This address ${shortenAddress(args.counterpartyWallet.walletAddress)} is almost identical to an existing ` +
+        `address for "${args.nearDuplicate.label}" (${shortenAddress(args.nearDuplicate.address)}) — they differ by only ` +
+        `a character or two. base58 is case-sensitive, so a look-alike like this is usually an OCR/transcription error ` +
+        `pointing at the wrong wallet. Confirm the address is exactly correct before paying.`,
     });
   }
 
