@@ -227,6 +227,7 @@ async function resolveCsvCounterpartyWallet(args: {
       notes: null,
       isInternal: false,
       isActive: true,
+      isPrimary: false,
       metadataJson: { inputSource: 'csv_import_preview' },
       createdAt: new Date(),
       updatedAt: new Date(),

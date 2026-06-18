@@ -13,6 +13,7 @@ import type {
   TreasuryWallet,
 } from '@prisma/client';
 import { prisma } from '../infra/prisma.js';
+import { autoPromotePrimaryIfNone } from '../counterparty-wallets.js';
 import { getReconciliationDetail } from '../transfer-requests/settlement-read-model.js';
 import { createTransferRequestEvent } from '../transfer-requests/events.js';
 import { getPrimaryTransferRequest } from '../transfer-requests/helpers.js';
@@ -449,6 +450,13 @@ export async function clearPaymentOrderReview(args: PaymentActorInput & {
             reviewedByUserId: args.actorUserId,
           },
         },
+      });
+      // First verified address for this vendor becomes its default payout address.
+      await autoPromotePrimaryIfNone(tx, {
+        counterpartyWalletId: current.counterpartyWalletId,
+        organizationId: args.organizationId,
+        counterpartyId: current.counterpartyWallet.counterpartyId,
+        label: current.counterpartyWallet.label,
       });
     }
 

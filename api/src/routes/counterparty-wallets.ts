@@ -85,6 +85,7 @@ const updateCounterpartyWalletSchema = z.object({
   notes: z.string().trim().max(5000).nullable().optional(),
   isInternal: z.boolean().optional(),
   isActive: z.boolean().optional(),
+  isPrimary: z.boolean().optional(),
 }).refine(
   (value) =>
     value.counterpartyId !== undefined
@@ -96,7 +97,8 @@ const updateCounterpartyWalletSchema = z.object({
     || value.label !== undefined
     || value.notes !== undefined
     || value.isInternal !== undefined
-    || value.isActive !== undefined,
+    || value.isActive !== undefined
+    || value.isPrimary !== undefined,
   'At least one field must be updated',
 );
 

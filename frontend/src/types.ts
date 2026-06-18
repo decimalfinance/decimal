@@ -758,6 +758,7 @@ export type CounterpartyWallet = {
   notes: string | null;
   isInternal: boolean;
   isActive: boolean;
+  isPrimary: boolean;
   metadataJson: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;

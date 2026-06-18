@@ -2,6 +2,13 @@ import type { Counterparty, CounterpartyWallet, Prisma } from '@prisma/client';
 import { prisma } from './infra/prisma.js';
 import { deriveUsdcAtaForWallet, SOLANA_CHAIN, USDC_ASSET } from './solana.js';
 
+// Auto-note stamped on wallets created by invoice intake. It's only true while
+// the address is unreviewed; once reviewed we clear it (see updateCounterpartyWallet)
+// so it doesn't linger as stale text. Kept here so intake and the clear-on-review
+// path reference the exact same string.
+export const INVOICE_IMPORT_REVIEW_NOTE =
+  'Created from invoice upload. Human review is required before payment execution.';
+
 export type CreateCounterpartyInput = {
   displayName: string;
   category?: string;
@@ -42,7 +49,43 @@ export type UpdateCounterpartyWalletInput = {
   notes?: string | null;
   isInternal?: boolean;
   isActive?: boolean;
+  isPrimary?: boolean;
 };
+
+// All wallets that belong to the same vendor as `wallet`. Vendor identity is the
+// linked counterparty when present, else the label — matching how the address
+// book groups wallets.
+function vendorGroupWhere(wallet: {
+  organizationId: string;
+  counterpartyId: string | null;
+  label: string;
+}): Prisma.CounterpartyWalletWhereInput {
+  return wallet.counterpartyId
+    ? { organizationId: wallet.organizationId, counterpartyId: wallet.counterpartyId }
+    : {
+        organizationId: wallet.organizationId,
+        counterpartyId: null,
+        label: { equals: wallet.label, mode: 'insensitive' },
+      };
+}
+
+// If the vendor has no primary (default) payout address yet, make this one it.
+// Used when an address becomes trusted, so the first verified address a vendor
+// gets becomes its default automatically.
+export async function autoPromotePrimaryIfNone(
+  tx: Prisma.TransactionClient,
+  wallet: { counterpartyWalletId: string; organizationId: string; counterpartyId: string | null; label: string },
+): Promise<void> {
+  const existingPrimary = await tx.counterpartyWallet.findFirst({
+    where: { ...vendorGroupWhere(wallet), isPrimary: true },
+    select: { counterpartyWalletId: true },
+  });
+  if (existingPrimary) return;
+  await tx.counterpartyWallet.update({
+    where: { counterpartyWalletId: wallet.counterpartyWalletId },
+    data: { isPrimary: true },
+  });
+}
 
 export async function listCounterparties(organizationId: string, options?: { limit?: number }) {
   const organization = await getOrganization(organizationId);
@@ -140,25 +183,40 @@ export async function createCounterpartyWallet(organizationId: string, input: Cr
   await assertCounterpartyWalletWalletAvailable(organizationId, input.walletAddress);
   const tokenAccountAddress = normalizeOptionalText(input.tokenAccountAddress) ?? deriveUsdcAtaForWallet(input.walletAddress);
 
-  const wallet = await prisma.counterpartyWallet.create({
-    data: {
-      organizationId,
-      counterpartyId: input.counterpartyId,
-      chain: input.chain ?? SOLANA_CHAIN,
-      asset: input.asset ?? USDC_ASSET,
-      walletAddress: input.walletAddress,
-      tokenAccountAddress,
-      walletType: input.walletType ?? 'wallet',
-      trustState: input.trustState ?? 'unreviewed',
-      label: input.label,
-      notes: normalizeOptionalText(input.notes),
-      isInternal: input.isInternal ?? false,
-      isActive: input.isActive ?? true,
-      metadataJson: (input.metadataJson ?? {}) as Prisma.InputJsonValue,
-    },
-    include: {
-      counterparty: true,
-    },
+  const wallet = await prisma.$transaction(async (tx) => {
+    const created = await tx.counterpartyWallet.create({
+      data: {
+        organizationId,
+        counterpartyId: input.counterpartyId,
+        chain: input.chain ?? SOLANA_CHAIN,
+        asset: input.asset ?? USDC_ASSET,
+        walletAddress: input.walletAddress,
+        tokenAccountAddress,
+        walletType: input.walletType ?? 'wallet',
+        trustState: input.trustState ?? 'unreviewed',
+        label: input.label,
+        notes: normalizeOptionalText(input.notes),
+        isInternal: input.isInternal ?? false,
+        isActive: input.isActive ?? true,
+        metadataJson: (input.metadataJson ?? {}) as Prisma.InputJsonValue,
+      },
+      include: { counterparty: true },
+    });
+
+    // A vendor added straight as verified becomes its own default.
+    if ((input.trustState ?? 'unreviewed') === 'trusted') {
+      await autoPromotePrimaryIfNone(tx, {
+        counterpartyWalletId: created.counterpartyWalletId,
+        organizationId: created.organizationId,
+        counterpartyId: created.counterpartyId,
+        label: created.label,
+      });
+      return tx.counterpartyWallet.findUniqueOrThrow({
+        where: { counterpartyWalletId: created.counterpartyWalletId },
+        include: { counterparty: true },
+      });
+    }
+    return created;
   });
 
   return serializeCounterpartyWallet(wallet);
@@ -246,22 +304,74 @@ export async function updateCounterpartyWallet(
       ?? deriveUsdcAtaForWallet(nextWalletAddress ?? current.walletAddress)
     : undefined;
 
-  const updated = await prisma.counterpartyWallet.update({
-    where: { counterpartyWalletId },
-    data: {
-      counterpartyId: input.counterpartyId !== undefined ? input.counterpartyId : undefined,
-      walletAddress: nextWalletAddress,
-      tokenAccountAddress,
-      walletType: input.walletType,
-      trustState: input.trustState,
-      label: input.label,
-      notes: input.notes !== undefined ? normalizeOptionalText(input.notes) : undefined,
-      isInternal: input.isInternal,
-      isActive: input.isActive,
-    },
-    include: {
-      counterparty: true,
-    },
+  // Drop the auto-generated "review required" note once the address has been
+  // reviewed — it's no longer true and shouldn't linger. Only the exact
+  // auto-note is cleared; a note the user wrote is left untouched.
+  const effectiveTrustState = input.trustState ?? current.trustState;
+  let notesUpdate: string | null | undefined =
+    input.notes !== undefined ? normalizeOptionalText(input.notes) : undefined;
+  const effectiveNotes = notesUpdate !== undefined ? notesUpdate : current.notes;
+  if (effectiveTrustState !== 'unreviewed' && effectiveNotes === INVOICE_IMPORT_REVIEW_NOTE) {
+    notesUpdate = null;
+  }
+
+  // Primary (default) payout address handling.
+  const trusted = effectiveTrustState === 'trusted';
+  let nextIsPrimary: boolean | undefined;
+  if (input.isPrimary === true) {
+    if (!trusted) {
+      throw new Error('Only a verified address can be set as the primary payout address.');
+    }
+    nextIsPrimary = true;
+  } else if (input.isPrimary === false) {
+    nextIsPrimary = false;
+  } else if (!trusted && current.isPrimary) {
+    // A no-longer-trusted address must not remain the default.
+    nextIsPrimary = false;
+  }
+
+  const group = {
+    counterpartyWalletId,
+    organizationId,
+    counterpartyId: input.counterpartyId !== undefined ? input.counterpartyId : current.counterpartyId,
+    label: input.label ?? current.label,
+  };
+
+  const updated = await prisma.$transaction(async (tx) => {
+    if (nextIsPrimary === true) {
+      // Exactly one primary per vendor — clear it on the others first.
+      await tx.counterpartyWallet.updateMany({
+        where: { ...vendorGroupWhere(group), counterpartyWalletId: { not: counterpartyWalletId } },
+        data: { isPrimary: false },
+      });
+    }
+
+    const row = await tx.counterpartyWallet.update({
+      where: { counterpartyWalletId },
+      data: {
+        counterpartyId: input.counterpartyId !== undefined ? input.counterpartyId : undefined,
+        walletAddress: nextWalletAddress,
+        tokenAccountAddress,
+        walletType: input.walletType,
+        trustState: input.trustState,
+        label: input.label,
+        notes: notesUpdate,
+        isInternal: input.isInternal,
+        isActive: input.isActive,
+        isPrimary: nextIsPrimary,
+      },
+      include: { counterparty: true },
+    });
+
+    // First verified address for a vendor becomes its default automatically.
+    if (trusted && nextIsPrimary === undefined && !row.isPrimary) {
+      await autoPromotePrimaryIfNone(tx, group);
+      return tx.counterpartyWallet.findUniqueOrThrow({
+        where: { counterpartyWalletId },
+        include: { counterparty: true },
+      });
+    }
+    return row;
   });
 
   return serializeCounterpartyWallet(updated);
@@ -351,6 +461,7 @@ export function serializeCounterpartyWallet(wallet: CounterpartyWallet & {
     notes: wallet.notes,
     isInternal: wallet.isInternal,
     isActive: wallet.isActive,
+    isPrimary: wallet.isPrimary,
     metadataJson: wallet.metadataJson,
     createdAt: wallet.createdAt,
     updatedAt: wallet.updatedAt,

@@ -525,6 +525,7 @@ export const api = {
       notes?: string | null;
       isInternal?: boolean;
       isActive?: boolean;
+      isPrimary?: boolean;
     },
   ) {
     return request<CounterpartyWallet>(
