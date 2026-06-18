@@ -321,6 +321,7 @@ model CounterpartyWallet {
   notes                String?
   isInternal           Boolean           @default(false) @map("is_internal")
   isActive             Boolean           @default(true) @map("is_active")
+  isPrimary            Boolean           @default(false) @map("is_primary")
   metadataJson         Json              @default("{}") @map("metadata_json")
   createdAt            DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)

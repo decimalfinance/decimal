@@ -372,6 +372,7 @@ CREATE TABLE IF NOT EXISTS counterparty_wallets
   notes TEXT,
   is_internal BOOLEAN NOT NULL DEFAULT FALSE,
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  is_primary BOOLEAN NOT NULL DEFAULT FALSE,
   metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -712,6 +713,10 @@ ALTER TABLE counterparty_wallets
     trust_state IN ('unreviewed', 'trusted', 'restricted', 'blocked')
   );
 
+-- Designated default payout address per vendor. Added for existing DBs.
+ALTER TABLE counterparty_wallets
+  ADD COLUMN IF NOT EXISTS is_primary BOOLEAN NOT NULL DEFAULT FALSE;
+
 ALTER TABLE automation_agents
   DROP CONSTRAINT IF EXISTS chk_automation_agents_status;
 
@@ -893,6 +898,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_spending_limit_executions_active_payment_or
   ON spending_limit_executions(payment_order_id)
   WHERE payment_order_id IS NOT NULL
     AND status IN ('prepared', 'submitted', 'settled', 'mismatch');
+-- Self-heal pre-rename drift: an earlier version of this index used the old terminal
+-- state name 'closed' in its partial predicate. CREATE UNIQUE INDEX IF NOT EXISTS never
+-- updates an existing index, so drifted databases kept enforcing uniqueness on settled
+-- rows and rejected re-paying a previously settled invoice reference (the dedup pre-check
+-- in payments/orders.ts excludes 'settled', so pre-check and index disagreed and a raw
+-- constraint error leaked). Drop the stale variant so the corrected predicate applies.
+-- No-op on correct or fresh databases.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_indexes
+    WHERE indexname = 'idx_payment_orders_unique_active_reference'
+      AND indexdef LIKE '%closed%'
+  ) THEN
+    DROP INDEX idx_payment_orders_unique_active_reference;
+  END IF;
+END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_unique_active_reference
   ON payment_orders(organization_id, counterparty_wallet_id, amount_raw, lower(coalesce(external_reference, invoice_number)))
   WHERE coalesce(external_reference, invoice_number) IS NOT NULL
