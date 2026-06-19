@@ -66,12 +66,9 @@ export async function buildPaymentOrderProofPacket(organizationId: string, payme
       } : null,
     },
     approval: {
+      // Approval is the Squads multisig vote on-chain; there are no separate
+      // pre-Squads decision records.
       state: reconciliation?.approvalState ?? detail.derivedState,
-      // Pre-Squads approval decisions are no longer recorded — Squads
-      // multisig is the on-chain approval ceremony. The proof packet keeps
-      // an empty decisions array so the JSON shape stays stable for
-      // downstream consumers.
-      decisions: [],
     },
     execution: {
       state: latestExecution?.state ?? null,
@@ -90,7 +87,6 @@ export async function buildPaymentOrderProofPacket(organizationId: string, payme
       amountVarianceRaw: match?.amountVarianceRaw ?? null,
       amountVarianceUsdc: match?.amountVarianceRaw ? formatRawUsdc(match.amountVarianceRaw) : null,
       signature: match?.signature ?? latestExecution?.submittedSignature ?? null,
-      observedEventTime: match?.observedEventTime ?? null,
       matchedAt: match?.matchedAt ?? null,
       confidenceBand: match?.confidenceBand ?? null,
       reconciliationOutcome: reconciliationExplanation?.outcome ?? null,
@@ -113,8 +109,6 @@ export async function buildPaymentOrderProofPacket(organizationId: string, payme
       paymentOrderEvents: detail.events,
       transferRequestEvents: reconciliation?.events ?? [],
       executionRecords: reconciliation?.executionRecords ?? [],
-      observedTransfers: reconciliation?.linkedObservedTransfers ?? [],
-      observedPayment: reconciliation?.linkedObservedPayment ?? null,
     },
     agentSummary: {
       recommendedAction: reconciliationExplanation?.recommendedAction ?? readiness.recommendedAction,
