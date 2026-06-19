@@ -1,39 +1,49 @@
 # 01 Current Product
 
-Decimal is a non-custodial Solana USDC treasury operations product.
+Decimal is an AI-powered accounts-payable product on Solana: it ingests invoices, and an agent
+pays approved bills in USDC from a non-custodial Squads treasury — automatically when policy
+allows, or through member approval when it doesn't.
 
-The active wedge is:
+The active wedge (outbound AP / auto-pay):
 
 ```text
-Organization intent
-  -> Squads treasury proposal
-  -> member approval/rejection
-  -> on-chain execution
-  -> RPC settlement verification
+Invoice in (PDF/image, CSV, or manual)
+  -> AI extraction into payment orders
+  -> review gate (vendor address trusted? changed? look-alike?)
+  -> route:
+       auto-pay  (agent spends within an on-chain Squads spending limit)   OR
+       proposal  (Squads members approve/reject, then execute)
+  -> RPC settlement verification (USDC token-account deltas)
   -> JSON proof packet
 ```
 
 ## Built
 
-- Users sign in with email/password or Google OAuth.
-- Users create or join organizations through invite links.
-- Users create personal signing wallets through Privy embedded wallets.
-- Organizations create Squads v4 treasury vaults.
-- Organizations manage Squads members and thresholds through config proposals.
-- Organizations maintain a unified counterparty wallet registry for payees, payers, and internal collection receivers.
-- Operators create single payments, import payment runs from CSV, or import a PDF/image invoice into a draft payment run.
-- Payment orders and payment runs become Squads vault proposals.
-- Proposal submission and execution signatures are confirmed by Solana RPC.
-- Executed USDC payments are verified by parsed transaction token-account deltas.
-- Payment proof packets are deterministic JSON.
-- Collection requests and collection runs exist as expected inbound records and can export JSON proof packets, but they are not yet auto-verified on-chain.
+- Users sign in with email/password or Google OAuth, and join organizations via invite links.
+- Users hold personal signing wallets through Privy embedded wallets.
+- Organizations create Squads v4 treasury vaults and manage members/thresholds via config
+  proposals.
+- A **vendor address book** (`counterparty_wallets`): one vendor (counterparty) can hold several
+  payout addresses. Each address has a `trust_state` (unreviewed/trusted/restricted/blocked) and
+  the vendor has one `is_primary` default. Addresses can be added, verified, set as default,
+  archived, or removed.
+- **Invoice intake**: a PDF/image or CSV becomes payment orders; OpenAI vision extracts the rows.
+- **A review gate that catches the AP-fraud cases**: a new/changed payout address for a known
+  vendor (account-change / BEC signal) and a near-duplicate look-alike address (OCR/transcription
+  corruption) are flagged to `needs_review` before any money can move.
+- **Auto-pay**: the agent pays an approved bill on its own, gated by a Squads **spending limit**
+  (destinations + cap enforced on-chain by the SVM). Built on the agent wallet + a delegated
+  spending limit. See [07 Payment Routing Algorithm](./07-payment-routing-algorithm.md).
+- **Proposal path**: anything that doesn't qualify for auto-pay becomes a Squads voting proposal;
+  members approve/reject, then it executes.
+- Proposal submission and execution signatures are confirmed by Solana RPC (proxied through the
+  backend so the RPC key stays server-side). Executed USDC payments are verified by parsed
+  token-account deltas. Payment proof packets are deterministic JSON.
 
 ## Intentionally Not Active
 
-- The product no longer indexes the global USDC stream.
-- The product no longer runs a Yellowstone worker.
-- The product no longer uses ClickHouse.
-- Inbound collections do not auto-settle unless a future collection verifier is built.
-- Decimal does not custody private keys.
-- Decimal does not provide fiat rails.
-- Decimal does not currently do accounting-system sync, tax reporting, or fiat on/off-ramp execution.
+- No global USDC stream indexing, no Yellowstone worker, no ClickHouse.
+- Inbound collections exist as expected-inbound intent/proof records only; they do not
+  auto-settle on-chain, and inbound is not the active direction (the wedge is outbound AP).
+- Decimal does not custody private keys, provide fiat rails, or (yet) sync to an accounting
+  system / general ledger (GL sync is planned).
