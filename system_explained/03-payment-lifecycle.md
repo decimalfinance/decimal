@@ -75,8 +75,24 @@ app-originated payments.
 
 ## Failure Modes
 
-- RPC can't find the parsed transaction yet: the proposal stays executed with verification
-  pending; the client can retry confirmation.
-- RPC deltas don't match: the payment becomes review-worthy via
-  `metadata_json.rpcSettlementVerification.status = "mismatch"`.
+- RPC can't find the parsed transaction yet: the payment stays in a non-terminal state with
+  verification pending. The background reconciler retries automatically (see below).
+- RPC deltas don't match (a **mismatch** — the tx landed but moved the wrong amount): the order is
+  stamped `metadata_json.settlementMismatch`, a `settlement_mismatch` audit event is written, and a
+  warning is logged. This is the dangerous case (money moved incorrectly), so it is never silent.
 - A different execution signature is submitted later: the API returns a conflict.
+
+## Automatic Recovery (Self-Healing)
+
+`agents/settlement-reconciler.ts` runs a background loop (default 30s, enabled in prod) that drives
+stuck settlements to a terminal state without any human action. It sweeps **both** paths:
+
+- auto-pay executions stuck at `submitted` (RPC was slow at execution time), and
+- payment proposals that are `submitted`-but-unrecorded (executed on-chain but the app never caught
+  the execution signature — the classic "executed but stuck unverified" incident) or
+  `executed`-but-settlement-`pending`.
+
+For each, it re-verifies by signature (cross-cluster + full history, recovering the on-chain execute
+signature when missing) and promotes to `settled`, or surfaces a `mismatch`. `settled` and `mismatch`
+are terminal — only `pending` is re-swept — so a mismatch can't cause an alert storm. The invariant:
+**every executed payment reaches a terminal state automatically, on both pay paths.**

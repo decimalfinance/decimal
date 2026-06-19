@@ -33,8 +33,10 @@ laptop API + Cloudflare tunnel + the three docker Postgres DBs).
   vote, reject, and execute transactions, plus spending-limit (auto-pay) config proposals.
 - `agents/*`: the auto-pay layer. `payment-automation.ts` owns the routing decision
   (`advancePaymentOrderWithAgent` / `routePayment`); `spending-limit-execution.ts` builds and
-  submits the `spendingLimitUse` transaction via the Privy agent wallet; `automation.ts`,
-  `settlement-reconciler.ts`, and `payment-markers.ts` support it.
+  submits the `spendingLimitUse` transaction via the Privy agent wallet; `payment-markers.ts`
+  writes per-stage state. `settlement-reconciler.ts` is the background loop (default 30s) that
+  drives stuck settlements to terminal — it sweeps **both** auto-pay executions and payment
+  proposals, re-verifying by signature so nothing depends on a human clicking "Sync".
 - `payments/orders.ts`: single-payment commands and read models (create, cancel, clear-review).
 - `payments/invoice-intake.ts` and `payments/csv-intake.ts`: invoice and CSV import into
   payment orders (these replaced the old `runs.ts`). `payments/document-extract.ts` extracts
