@@ -3,6 +3,8 @@ import { config } from '../config.js';
 import { errorToLogFields, logger } from '../infra/logger.js';
 import { prisma } from '../infra/prisma.js';
 import { deriveUsdcAtaForWallet, verifyUsdcSettlementFromSignature } from '../solana.js';
+import { reconcileDecimalProposalFromChain } from '../squads/treasury.js';
+import { raiseSettlementMismatch } from '../payments/settlement-alerts.js';
 
 // Background settlement reconciler.
 //
@@ -88,6 +90,12 @@ export async function reconcilePendingSettlements(
         summary.settled += 1;
       } else {
         await applyExecutionStatus(exec.spendingLimitExecutionId, 'mismatch', verification);
+        await raiseSettlementMismatch({
+          organizationId: exec.organizationId,
+          paymentOrderId: exec.paymentOrderId,
+          signature: exec.signature,
+          source: 'auto_pay',
+        });
         summary.mismatch += 1;
       }
     } catch (error) {
@@ -107,6 +115,61 @@ export async function reconcilePendingSettlements(
     data: { status: 'failed' },
   });
   summary.reclaimed = reclaimed.count;
+
+  return summary;
+}
+
+export type ProposalReconcileSummary = { reconciled: number; pending: number; failed: number };
+
+// Proposal-path settlement reconciler (the counterpart to the auto-pay sweep
+// above). A multisig-vote payment that executed on-chain but failed verification
+// at execution time would otherwise stay stuck until a human clicks Sync. This
+// sweeps payment proposals that aren't settlement-verified and drives them to a
+// terminal state via the same chain-recovery path Sync uses, as the system actor.
+export async function reconcilePendingProposals(): Promise<ProposalReconcileSummary> {
+  const summary: ProposalReconcileSummary = { reconciled: 0, pending: 0, failed: 0 };
+
+  const candidates = await prisma.decimalProposal.findMany({
+    where: {
+      semanticType: { in: ['send_payment', 'send_payment_run'] },
+      OR: [
+        // never recorded execution (the "executed but stuck submitted" incident)
+        { status: 'submitted' },
+        // executed, but settlement verification is still pending (seen, not yet
+        // confirmed). 'settled' and 'mismatch' are terminal — don't re-sweep them.
+        {
+          status: 'executed',
+          metadataJson: { path: ['rpcSettlementVerification', 'status'], equals: 'pending' },
+        },
+      ],
+    },
+    orderBy: { updatedAt: 'asc' },
+    take: BATCH,
+    select: { decimalProposalId: true, organizationId: true },
+  });
+
+  for (const proposal of candidates) {
+    try {
+      // actorUserId is unused under actorIsSystem (access check skipped, writes
+      // attributed to the system actor).
+      await reconcileDecimalProposalFromChain(proposal.organizationId, '', proposal.decimalProposalId, {
+        actorIsSystem: true,
+      });
+      summary.reconciled += 1;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      // Not executed on chain yet / no coordinates / not landed → still in flight; retry next tick.
+      if (/no on-chain execution|missing on-chain coordinates|has not landed/i.test(message)) {
+        summary.pending += 1;
+      } else {
+        summary.failed += 1;
+        logger.warn('settlement_reconciler.proposal_failed', {
+          decimalProposalId: proposal.decimalProposalId,
+          error: message,
+        });
+      }
+    }
+  }
 
   return summary;
 }
@@ -201,14 +264,24 @@ export function startSettlementReconciler(deps: SettlementReconcilerDeps = defau
       return;
     }
     running = true;
-    void reconcilePendingSettlements(deps)
-      .then((summary) => {
-        if (summary.settled || summary.mismatch || summary.failed || summary.reclaimed) {
-          logger.info('settlement_reconciler.tick', summary);
+    void Promise.allSettled([reconcilePendingSettlements(deps), reconcilePendingProposals()])
+      .then(([settlements, proposals]) => {
+        if (settlements.status === 'fulfilled') {
+          const s = settlements.value;
+          if (s.settled || s.mismatch || s.failed || s.reclaimed) {
+            logger.info('settlement_reconciler.tick', s);
+          }
+        } else {
+          logger.warn('settlement_reconciler.tick_failed', errorToLogFields(settlements.reason));
         }
-      })
-      .catch((error) => {
-        logger.warn('settlement_reconciler.tick_failed', errorToLogFields(error));
+        if (proposals.status === 'fulfilled') {
+          const p = proposals.value;
+          if (p.reconciled || p.failed) {
+            logger.info('settlement_reconciler.proposal_tick', p);
+          }
+        } else {
+          logger.warn('settlement_reconciler.proposal_tick_failed', errorToLogFields(proposals.reason));
+        }
       })
       .finally(() => {
         running = false;
