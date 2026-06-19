@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import * as multisig from '@sqds/multisig';
+import { raiseSettlementMismatch } from '../payments/settlement-alerts.js';
 import { PublicKey, TransactionMessage, VersionedTransaction } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { badRequest, conflict, notFound } from '../infra/api-errors.js';
@@ -434,6 +435,16 @@ export async function executePaymentOrderWithSpendingLimit(
     });
     return row;
   });
+
+  // Landed but moved the wrong delta at execution time — never silent.
+  if (finalStatus === 'mismatch') {
+    await raiseSettlementMismatch({
+      organizationId,
+      paymentOrderId: paymentOrder.paymentOrderId,
+      signature: sentSignature,
+      source: 'auto_pay',
+    });
+  }
 
   return {
     ...serializeSpendingLimitExecution({
