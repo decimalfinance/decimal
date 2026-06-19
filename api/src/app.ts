@@ -4,6 +4,7 @@ import { ZodError } from 'zod';
 import { mapKnownError, normalizeErrorCode } from './infra/api-errors.js';
 import { errorToLogFields, logger, requestLoggerMiddleware } from './infra/logger.js';
 import { requireAuth } from './auth/sessions.js';
+import { accountingRouter, publicAccountingRouter } from './routes/accounting.js';
 import { capabilitiesRouter } from './routes/capabilities.js';
 import { collectionsRouter } from './routes/collections.js';
 import { config } from './config.js';
@@ -82,6 +83,8 @@ export function createApp() {
   app.use(openApiRouter);
   app.use(authRouter);
   app.use(publicOrganizationInvitesRouter);
+  // QuickBooks OAuth callback — Intuit redirects here with no auth header.
+  app.use(publicAccountingRouter);
   app.use(requireAuth());
   // SSE stream is authed but long-lived; mount it before idempotency so that
   // middleware (built for mutations) never wraps the open response.
@@ -101,6 +104,7 @@ export function createApp() {
   app.use(paymentOrdersRouter);
   app.use(proposalsRouter);
   app.use(collectionsRouter);
+  app.use(accountingRouter);
 
   app.use((error: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
     if (error instanceof ZodError) {
