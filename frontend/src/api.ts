@@ -536,6 +536,12 @@ export const api = {
       },
     );
   },
+  removeCounterpartyWallet(organizationId: string, counterpartyWalletId: string) {
+    return request<{ removed: 'deleted' | 'archived' }>(
+      `/organizations/${organizationId}/counterparty-wallets/${counterpartyWalletId}`,
+      { method: 'DELETE' },
+    );
+  },
   createTreasuryWallet(
     organizationId: string,
     input: {

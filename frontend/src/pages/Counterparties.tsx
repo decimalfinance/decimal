@@ -167,6 +167,17 @@ export function CounterpartiesPage({ session: _session }: { session: Authenticat
     onError: (err) => toastError(err instanceof Error ? err.message : 'Unable to update vendor.'),
   });
 
+  const removeMutation = useMutation({
+    mutationFn: (counterpartyWalletId: string) =>
+      api.removeCounterpartyWallet(organizationId!, counterpartyWalletId),
+    onSuccess: async (res) => {
+      success(res.removed === 'deleted' ? 'Address removed.' : 'Address archived.');
+      setEditing(null);
+      await invalidate();
+    },
+    onError: (err) => toastError(err instanceof Error ? err.message : 'Could not remove address.'),
+  });
+
   if (!organizationId) {
     return (
       <div className="page">
@@ -502,6 +513,18 @@ export function CounterpartiesPage({ session: _session }: { session: Authenticat
                                         onClick={() => setEditing(w)}
                                       >
                                         Edit
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="btn btn-danger-ghost btn-sm"
+                                        disabled={removeMutation.isPending}
+                                        onClick={() => {
+                                          if (window.confirm(`Remove this address from "${g.name}"?`)) {
+                                            removeMutation.mutate(w.counterpartyWalletId);
+                                          }
+                                        }}
+                                      >
+                                        Remove
                                       </button>
                                     </div>
                                   </div>

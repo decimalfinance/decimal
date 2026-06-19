@@ -6,6 +6,7 @@ import {
   createCounterpartyWallet,
   listCounterparties,
   listCounterpartyWallets,
+  removeCounterpartyWallet,
   updateCounterparty,
   updateCounterpartyWallet,
 } from '../counterparty-wallets.js';
@@ -192,4 +193,10 @@ counterpartyWalletsRouter.patch('/organizations/:organizationId/destinations/:co
     ...input,
     walletType: input.destinationType ?? input.walletType,
   }));
+}));
+
+counterpartyWalletsRouter.delete('/organizations/:organizationId/counterparty-wallets/:counterpartyWalletId', asyncRoute(async (req, res) => {
+  const { organizationId, counterpartyWalletId } = counterpartyWalletParamsSchema.parse(req.params);
+  await assertOrganizationAdmin(organizationId, req.auth!);
+  sendJson(res, await removeCounterpartyWallet(organizationId, counterpartyWalletId));
 }));

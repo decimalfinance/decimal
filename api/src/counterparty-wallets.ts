@@ -377,6 +377,44 @@ export async function updateCounterpartyWallet(
   return serializeCounterpartyWallet(updated);
 }
 
+// Remove an address from the book. Hard-deletes when nothing references it;
+// otherwise archives (isActive=false) so payment/transfer history is preserved
+// (those FKs are ON DELETE RESTRICT). Blocks removal of an address that is a
+// live spending-limit destination — that would hide an address the on-chain
+// allowlist still lets the agent pay; it must be removed from the limit first.
+export async function removeCounterpartyWallet(organizationId: string, counterpartyWalletId: string) {
+  await prisma.counterpartyWallet.findFirstOrThrow({
+    where: { organizationId, counterpartyWalletId },
+  });
+
+  const onSpendingLimit = await prisma.spendingLimitPolicyDestination.findFirst({
+    where: { counterpartyWalletId },
+    select: { counterpartyWalletId: true },
+  });
+  if (onSpendingLimit) {
+    throw new Error(
+      'This address is on an active spending limit. Remove it from the spending limit before removing the address.',
+    );
+  }
+
+  try {
+    await prisma.counterpartyWallet.delete({ where: { counterpartyWalletId } });
+    return { removed: 'deleted' as const, counterpartyWalletId };
+  } catch (error) {
+    // P2003 = foreign key constraint failed → it has history, so archive instead.
+    if ((error as { code?: string }).code !== 'P2003') {
+      throw error;
+    }
+  }
+
+  const updated = await prisma.counterpartyWallet.update({
+    where: { counterpartyWalletId },
+    data: { isActive: false, isPrimary: false },
+    include: { counterparty: true },
+  });
+  return { removed: 'archived' as const, wallet: serializeCounterpartyWallet(updated) };
+}
+
 /**
  * Look up an existing wallet for a payer, or create one. A wallet has no
  * direction, so the same record is reused for outbound and inbound flows;
