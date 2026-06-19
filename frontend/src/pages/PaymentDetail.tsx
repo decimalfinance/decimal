@@ -396,6 +396,11 @@ export function PaymentDetailPage() {
   const lifecycle = buildLifecycle(order, verificationStatus);
   const variant = determineVariant(order);
   const statusTone = statusToneForPayment(order.derivedState);
+  const mismatchRaw = order.metadataJson?.settlementMismatch;
+  const settlementMismatch =
+    mismatchRaw && typeof mismatchRaw === 'object' && !Array.isArray(mismatchRaw)
+      ? (mismatchRaw as { signature?: string; source?: string; at?: string })
+      : null;
   const latestExec = order.reconciliationDetail?.latestExecution ?? null;
   const submittedSig =
     latestExec?.submittedSignature ??
@@ -463,6 +468,44 @@ export function PaymentDetailPage() {
               </div>
             </div>
           </div>
+
+          {settlementMismatch ? (
+            <div
+              role="alert"
+              style={{
+                margin: '0 0 16px',
+                padding: '12px 14px',
+                borderRadius: 8,
+                border: '1px solid var(--danger)',
+                background: 'var(--ax-danger-dim, rgba(185, 28, 28, 0.08))',
+                color: 'var(--danger)',
+                fontSize: 13,
+                lineHeight: 1.5,
+                display: 'flex',
+                gap: 10,
+                alignItems: 'flex-start',
+              }}
+            >
+              <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}>
+                <path d="M10 2.5 18 16H2L10 2.5Z" />
+                <path d="M10 8v3" />
+                <circle cx="10" cy="13.5" r="0.7" fill="currentColor" />
+              </svg>
+              <div>
+                <strong>Settlement mismatch.</strong> The payment transaction landed on-chain but
+                moved a different USDC amount than expected. Verify the on-chain transfer before
+                treating this as paid.
+                {settlementMismatch.signature ? (
+                  <>
+                    {' '}Signature{' '}
+                    <code style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
+                      {`${settlementMismatch.signature.slice(0, 8)}…${settlementMismatch.signature.slice(-8)}`}
+                    </code>.
+                  </>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
 
           <Rail stages={lifecycle} />
 
