@@ -124,7 +124,11 @@ export function PaymentsPage() {
   const destinations = destinationsQuery.data?.items ?? [];
 
   const rows = useMemo<UnifiedRow[]>(() => {
-    const list: UnifiedRow[] = orders.map<UnifiedRow>((o) => ({
+    // Discarded (cancelled) payments are hidden from the list — they stay in
+    // the DB for audit but shouldn't clutter the operator's view.
+    const list: UnifiedRow[] = orders
+      .filter((o) => o.derivedState !== 'cancelled')
+      .map<UnifiedRow>((o) => ({
       kind: 'single',
       id: o.paymentOrderId,
       name: o.counterpartyWallet.label,
