@@ -130,37 +130,46 @@ export function AccountingPage({ session }: { session: AuthenticatedSession }) {
         />
 
         {/* Connection */}
-        <div className="tbl-card" style={{ padding: 18 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <div
+          className="tbl-card"
+          style={{ padding: 18, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}
+        >
+          <div style={{ minWidth: 0 }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <img src="/quickbooks.svg" alt="" style={{ width: 18, height: 18 }} />
               <strong style={{ fontSize: 14 }}>QuickBooks Online</strong>
             </span>
-            {connected ? <Pill tone="success">Connected</Pill> : <Pill tone="neutral">Not connected</Pill>}
-          </div>
-          {connected ? (
-            <p style={{ ...muted, margin: '10px 0 0' }}>
-              Company realm <span className="mono">{status?.realmId}</span> · {status?.environment} environment.
-            </p>
-          ) : (
-            <>
-              <p style={{ ...muted, margin: '10px 0 14px' }}>
-                Connect your QuickBooks company so settled payments flow into your books automatically.
-              </p>
-              {isAdmin ? (
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() => connectMutation.mutate()}
-                  disabled={connectMutation.isPending}
-                >
-                  Connect QuickBooks
-                </button>
+            <p style={{ ...muted, margin: '8px 0 0' }}>
+              {connected ? (
+                <>
+                  Company realm <span className="mono">{status?.realmId}</span> · {status?.environment} environment.
+                </>
+              ) : isAdmin ? (
+                'Connect your QuickBooks company so settled payments flow into your books automatically.'
               ) : (
-                <p style={muted}>Ask an organization admin to connect QuickBooks.</p>
+                'Ask an organization admin to connect QuickBooks.'
               )}
-            </>
-          )}
+            </p>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+            {connected ? (
+              <Pill tone="success">Connected</Pill>
+            ) : (
+              <>
+                <Pill tone="neutral">Not connected</Pill>
+                {isAdmin ? (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => connectMutation.mutate()}
+                    disabled={connectMutation.isPending}
+                  >
+                    Connect QuickBooks
+                  </button>
+                ) : null}
+              </>
+            )}
+          </div>
         </div>
 
         {/* Account mapping */}
