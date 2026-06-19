@@ -154,7 +154,7 @@ export function AccountingPage({ session }: { session: AuthenticatedSession }) {
                   onClick={() => connectMutation.mutate()}
                   disabled={connectMutation.isPending}
                 >
-                  <img src="/quickbooks.svg" alt="" style={{ width: 16, height: 16 }} />Connect QuickBooks
+                  Connect QuickBooks
                 </button>
               ) : (
                 <p style={muted}>Ask an organization admin to connect QuickBooks.</p>
