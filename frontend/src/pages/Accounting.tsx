@@ -135,9 +135,12 @@ export function AccountingPage({ session }: { session: AuthenticatedSession }) {
           style={{ padding: 18, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}
         >
           <div style={{ minWidth: 0 }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <img src="/quickbooks.svg" alt="" style={{ width: 18, height: 18 }} />
-              <strong style={{ fontSize: 14 }}>QuickBooks Online</strong>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <img src="/quickbooks.svg" alt="" style={{ width: 18, height: 18 }} />
+                <strong style={{ fontSize: 14 }}>QuickBooks Online</strong>
+              </span>
+              {connected ? <Pill tone="success">Connected</Pill> : <Pill tone="neutral">Not connected</Pill>}
             </span>
             <p style={{ ...muted, margin: '8px 0 0' }}>
               {connected ? (
@@ -151,25 +154,17 @@ export function AccountingPage({ session }: { session: AuthenticatedSession }) {
               )}
             </p>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-            {connected ? (
-              <Pill tone="success">Connected</Pill>
-            ) : (
-              <>
-                <Pill tone="neutral">Not connected</Pill>
-                {isAdmin ? (
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    onClick={() => connectMutation.mutate()}
-                    disabled={connectMutation.isPending}
-                  >
-                    Connect QuickBooks
-                  </button>
-                ) : null}
-              </>
-            )}
-          </div>
+          {!connected && isAdmin ? (
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{ flexShrink: 0 }}
+              onClick={() => connectMutation.mutate()}
+              disabled={connectMutation.isPending}
+            >
+              Connect QuickBooks
+            </button>
+          ) : null}
         </div>
 
         {/* Account mapping */}
