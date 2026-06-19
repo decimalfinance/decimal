@@ -66,7 +66,10 @@ Decimal creates the transaction that moves money from a known Squads vault (or v
 spending limit) to known destination token accounts, so the execution signature is known.
 Verification fetches the parsed transaction by signature and checks:
 
-- it exists and is confirmed/finalized to the configured commitment
+- it exists at the required commitment for the `settled` assertion — `finalized` on mainnet
+  (irreversible money truth), `confirmed` on devnet (snappy demos); `SETTLEMENT_COMMITMENT`
+  overrides. The fast "executed" signal still uses `confirmed`, so the order shows progress
+  immediately and reaches `settled` once the required commitment is met.
 - the expected destination USDC token accounts changed by the expected amounts
 - the deltas aggregate correctly for batch payments
 

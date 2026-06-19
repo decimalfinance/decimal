@@ -30,6 +30,14 @@ type DecimalConfig = {
   publicApiUrl: string | null;
   publicFrontendUrl: string | null;
   solanaNetwork: SolanaNetwork;
+  /**
+   * Commitment required before a payment is asserted `settled` (the terminal,
+   * proof-backing state). `finalized` is the irreversible money-truth bar;
+   * `confirmed` is faster but theoretically reversible. Defaults to `finalized`
+   * on mainnet (real money) and `confirmed` on devnet (snappy demos); override
+   * with SETTLEMENT_COMMITMENT. The fast "executed" signal still uses confirmed.
+   */
+  settlementCommitment: 'confirmed' | 'finalized';
   solanaRpcUrl: string;
   /**
    * Frontend-safe RPC URL advertised to browsers (via /capabilities) for
@@ -104,6 +112,11 @@ function buildConfig(): DecimalConfig {
   const solanaPublicRpcUrl = (process.env.SOLANA_PUBLIC_RPC_URL?.trim() || defaultSolanaRpcUrl(solanaNetwork));
   const solanaDevnetRpcUrl = (process.env.SOLANA_DEVNET_RPC_URL?.trim() || 'https://api.devnet.solana.com');
   const solanaAirdropRpcUrl = (process.env.SOLANA_AIRDROP_RPC_URL?.trim() || 'https://api.devnet.solana.com');
+  const settlementCommitmentEnv = process.env.SETTLEMENT_COMMITMENT?.trim();
+  const settlementCommitment: 'confirmed' | 'finalized' =
+    settlementCommitmentEnv === 'finalized' || settlementCommitmentEnv === 'confirmed'
+      ? settlementCommitmentEnv
+      : solanaNetwork === 'mainnet' ? 'finalized' : 'confirmed';
 
   const nextConfig: DecimalConfig = {
     nodeEnv,
@@ -113,6 +126,7 @@ function buildConfig(): DecimalConfig {
     publicApiUrl: normalizeOptionalUrl(fileConfig.publicApiUrl),
     publicFrontendUrl: normalizeOptionalUrl(fileConfig.publicFrontendUrl),
     solanaNetwork,
+    settlementCommitment,
     solanaRpcUrl,
     solanaPublicRpcUrl,
     solanaDevnetRpcUrl,

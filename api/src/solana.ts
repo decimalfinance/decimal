@@ -81,9 +81,16 @@ export function candidateSettlementConnections(): Connection[] {
 }
 
 async function getParsedTransactionAcrossClusters(signature: string) {
+  // Settlement is asserted at config.settlementCommitment (finalized on mainnet
+  // = irreversible money truth; confirmed on devnet = snappy). Below that
+  // commitment the tx reads as not-yet-available → pending → the reconciler
+  // retries until it reaches the required commitment.
   for (const connection of candidateSettlementConnections()) {
     const tx = await connection
-      .getParsedTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 })
+      .getParsedTransaction(signature, {
+        commitment: config.settlementCommitment,
+        maxSupportedTransactionVersion: 0,
+      })
       .catch(() => null);
     if (tx) return tx;
   }
