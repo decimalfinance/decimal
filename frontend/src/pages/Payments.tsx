@@ -47,6 +47,8 @@ type UnifiedRow = {
   needsReview: boolean;
   // Tx landed on-chain but moved the wrong USDC amount — surfaced loudly.
   settlementMismatch: boolean;
+  // Settled payment posted to the connected accounting system (QuickBooks).
+  synced: boolean;
   // 'batch' iff the order entered via a CSV batch (carries originLabel).
   // 'single' otherwise (invoice upload or manual entry).
   origin: 'single' | 'batch';
@@ -146,6 +148,7 @@ export function PaymentsPage() {
       needsReview: orderNeedsReview(o),
       settlementMismatch:
         typeof o.metadataJson?.settlementMismatch === 'object' && o.metadataJson.settlementMismatch !== null,
+      synced: o.accountingSync?.status === 'synced',
       origin: o.inputBatchLabel ? 'batch' : 'single',
       originLabel: o.inputBatchLabel ?? undefined,
       routedViaSpendingLimit: Boolean(o.spendingLimitExecution),
@@ -350,6 +353,7 @@ export function PaymentsPage() {
                         <Pill tone={row.tone === 'neutral' ? 'info' : row.tone}>{row.state}</Pill>
                         {row.routedViaSpendingLimit ? <SLPill /> : null}
                         {row.settlementMismatch ? <Pill tone="danger">Mismatch</Pill> : null}
+                        {row.synced ? <Pill tone="success">Synced</Pill> : null}
                       </span>
                     </td>
                     <td>

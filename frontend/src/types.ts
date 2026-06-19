@@ -1023,6 +1023,14 @@ export type PaymentOrder = {
   // instead of creating a Squads proposal. The FE uses presence-of-this-field
   // as the signal to render the SL execution card.
   spendingLimitExecution: PaymentOrderSpendingLimitExecution | null;
+  accountingSync: {
+    provider: string;
+    status: string;
+    billId: string | null;
+    billPaymentId: string | null;
+    error: string | null;
+    syncedAt: string | null;
+  } | null;
   events: PaymentOrderEvent[];
   reconciliationDetail: ReconciliationDetail | null;
 };

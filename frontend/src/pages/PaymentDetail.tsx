@@ -507,6 +507,44 @@ export function PaymentDetailPage() {
             </div>
           ) : null}
 
+          {order.accountingSync ? (
+            <div
+              style={{
+                margin: '0 0 16px',
+                padding: '10px 14px',
+                borderRadius: 8,
+                border: '1px solid var(--ax-border, #e5e7eb)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                fontSize: 13,
+                lineHeight: 1.5,
+              }}
+            >
+              {order.accountingSync.status === 'synced' ? (
+                <>
+                  <Pill tone="success">QuickBooks</Pill>
+                  <span>
+                    Synced as <strong>Bill {order.accountingSync.billId}</strong>
+                    {order.accountingSync.billPaymentId ? <> · payment {order.accountingSync.billPaymentId}</> : null}.
+                  </span>
+                </>
+              ) : order.accountingSync.status === 'error' ? (
+                <>
+                  <Pill tone="danger">QuickBooks</Pill>
+                  <span>
+                    Sync failed{order.accountingSync.error ? `: ${order.accountingSync.error}` : ''}. Retrying automatically.
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Pill tone="warning">QuickBooks</Pill>
+                  <span>Sync pending.</span>
+                </>
+              )}
+            </div>
+          ) : null}
+
           <Rail stages={lifecycle} />
 
           <ActionBar

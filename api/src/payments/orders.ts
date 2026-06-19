@@ -1,4 +1,5 @@
 import type {
+  AccountingSync,
   Counterparty,
   CounterpartyWallet,
   DecimalProposal,
@@ -46,6 +47,7 @@ export type PaymentOrderWithRelations = PaymentOrder & {
     }
   >;
   events?: PaymentOrderEvent[];
+  accountingSyncs?: AccountingSync[];
 };
 
 type PaymentOrderClient = typeof prisma | Prisma.TransactionClient;
@@ -581,8 +583,23 @@ async function buildPaymentOrderReadModel(order: PaymentOrderWithRelations) {
     squadsPaymentProposal: latestSquadsPaymentProposal ? serializePaymentOrderProposal(latestSquadsPaymentProposal, liveProposalState) : null,
     canCreateSquadsPaymentProposal: !latestSquadsPaymentProposal || isTerminalSquadsPaymentProposal(latestSquadsPaymentProposal),
     spendingLimitExecution: serializeLatestSpendingLimitExecution(order),
+    accountingSync: serializeAccountingSync(order.accountingSyncs?.[0] ?? null),
     events: (order.events ?? []).map(serializePaymentOrderEvent),
     reconciliationDetail,
+  };
+}
+
+// Surface the QuickBooks GL-sync status for the FE badge/pill. Null until the
+// payment settles and the sync agent posts it.
+function serializeAccountingSync(sync: AccountingSync | null) {
+  if (!sync) return null;
+  return {
+    provider: sync.provider,
+    status: sync.status,
+    billId: sync.externalBillId,
+    billPaymentId: sync.externalBillPaymentId,
+    error: sync.error,
+    syncedAt: sync.syncedAt,
   };
 }
 
@@ -881,6 +898,11 @@ const paymentOrderInclude = {
         },
       },
     },
+  },
+  accountingSyncs: {
+    where: { provider: 'quickbooks' },
+    take: 1,
+    orderBy: { createdAt: 'desc' as const },
   },
 } satisfies Prisma.PaymentOrderInclude;
 
