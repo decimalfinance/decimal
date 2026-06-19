@@ -33,17 +33,36 @@ function requireStateSecret(): string {
   return config.oauthStateSecret;
 }
 
-function signState(organizationId: string): string {
+interface OAuthState {
+  organizationId: string;
+  frontendOrigin: string | null;
+}
+
+// Only redirect back to an origin we trust (an allowed CORS origin, or a
+// localhost dev origin outside production) — never an arbitrary URL.
+function safeFrontendOrigin(raw: string | undefined | null): string | null {
+  if (!raw) return null;
+  try {
+    const origin = new URL(raw).origin;
+    if (config.corsOrigins.includes(origin)) return origin;
+    if (!config.isProduction && /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) return origin;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function signState(organizationId: string, frontendOrigin: string | null): string {
   const secret = requireStateSecret();
   const payload = Buffer.from(
-    JSON.stringify({ organizationId, n: crypto.randomBytes(8).toString('hex') }),
+    JSON.stringify({ organizationId, frontendOrigin, n: crypto.randomBytes(8).toString('hex') }),
     'utf8',
   ).toString('base64url');
   const sig = crypto.createHmac('sha256', secret).update(payload).digest();
   return `${payload}.${sig.toString('base64url')}`;
 }
 
-function verifyState(raw: string): { organizationId: string } {
+function verifyState(raw: string): OAuthState {
   const secret = requireStateSecret();
   const [payload, sig] = (raw ?? '').split('.');
   if (!payload || !sig) {
@@ -58,13 +77,26 @@ function verifyState(raw: string): { organizationId: string } {
   if (typeof decoded?.organizationId !== 'string') {
     throw new ApiError(400, 'invalid_oauth_state', 'OAuth state payload is invalid.');
   }
-  return { organizationId: decoded.organizationId };
+  return {
+    organizationId: decoded.organizationId,
+    frontendOrigin: typeof decoded.frontendOrigin === 'string' ? decoded.frontendOrigin : null,
+  };
 }
 
-function finishCallback(res: import('express').Response, status: string, detail?: string) {
-  const frontend = config.publicFrontendUrl;
-  if (frontend) {
-    const url = new URL(frontend);
+function finishCallback(
+  res: import('express').Response,
+  status: string,
+  ctx: { organizationId?: string; frontendOrigin?: string | null },
+  detail?: string,
+) {
+  const base = ctx.frontendOrigin || config.publicFrontendUrl;
+  // Land the operator back on the Accounting page on success.
+  if (base && ctx.organizationId && status === 'connected') {
+    res.redirect(`${base}/organizations/${ctx.organizationId}/accounting?quickbooks=connected`);
+    return;
+  }
+  if (base) {
+    const url = new URL(base);
     url.searchParams.set('quickbooks', status);
     if (detail) url.searchParams.set('detail', detail);
     res.redirect(url.toString());
@@ -83,21 +115,32 @@ export const publicAccountingRouter = Router();
 publicAccountingRouter.get(
   '/accounting/quickbooks/callback',
   asyncRoute(async (req, res) => {
+    const rawState = String(req.query.state ?? '');
+    // Recover the redirect target (org + frontend origin) from state, even on
+    // error, so we bounce back to the right place.
+    let state: OAuthState | null = null;
+    if (rawState) {
+      try {
+        state = verifyState(rawState);
+      } catch {
+        state = null;
+      }
+    }
+    const ctx = { organizationId: state?.organizationId, frontendOrigin: state?.frontendOrigin ?? null };
+
     if (req.query.error) {
-      finishCallback(res, 'error', String(req.query.error));
+      finishCallback(res, 'error', ctx, String(req.query.error));
       return;
     }
     const code = String(req.query.code ?? '');
     const realmId = String(req.query.realmId ?? '');
-    const rawState = String(req.query.state ?? '');
-    if (!code || !realmId || !rawState) {
-      finishCallback(res, 'error', 'missing_parameters');
+    if (!code || !realmId || !state) {
+      finishCallback(res, 'error', ctx, 'missing_parameters');
       return;
     }
-    const { organizationId } = verifyState(rawState);
     const tokens = await QuickBooks.exchangeCode(code, realmId);
-    await saveConnection(organizationId, tokens);
-    finishCallback(res, 'connected');
+    await saveConnection(state.organizationId, tokens);
+    finishCallback(res, 'connected', ctx);
   }),
 );
 
@@ -114,7 +157,10 @@ accountingRouter.get(
     if (!config.quickbooksClientId) {
       throw new ApiError(501, 'quickbooks_not_configured', 'QuickBooks is not configured.');
     }
-    sendJson(res, { authorizeUrl: QuickBooks.authorizeUrl(signState(organizationId)) });
+    const frontendOrigin = safeFrontendOrigin(
+      typeof req.query.frontendOrigin === 'string' ? req.query.frontendOrigin : req.get('origin'),
+    );
+    sendJson(res, { authorizeUrl: QuickBooks.authorizeUrl(signState(organizationId, frontendOrigin)) });
   }),
 );
 

@@ -278,7 +278,10 @@ export const api = {
     return request<AccountingStatus>(`/organizations/${organizationId}/accounting/quickbooks/status`);
   },
   getQuickBooksConnectUrl(organizationId: string) {
-    return request<{ authorizeUrl: string }>(`/organizations/${organizationId}/accounting/quickbooks/connect`);
+    const q = new URLSearchParams({ frontendOrigin: window.location.origin }).toString();
+    return request<{ authorizeUrl: string }>(
+      `/organizations/${organizationId}/accounting/quickbooks/connect?${q}`,
+    );
   },
   listQuickBooksAccounts(organizationId: string) {
     return request<{ items: QuickBooksAccount[] }>(
