@@ -128,8 +128,20 @@ accountingRouter.get(
     const map = await prisma.accountingAccountMap.findUnique({
       where: { organizationId_provider: { organizationId, provider: PROVIDER } },
     });
+    const counts = await prisma.accountingSync.groupBy({
+      by: ['status'],
+      where: { organizationId, provider: PROVIDER },
+      _count: { _all: true },
+    });
+    const syncCounts = { synced: 0, pending: 0, error: 0 };
+    for (const c of counts) {
+      if (c.status in syncCounts) {
+        syncCounts[c.status as keyof typeof syncCounts] = c._count._all;
+      }
+    }
     sendJson(res, {
       connected: Boolean(conn && conn.status === 'connected'),
+      syncCounts,
       status: conn?.status ?? 'disconnected',
       realmId: conn?.realmId ?? null,
       environment: conn?.environment ?? config.quickbooksEnvironment,

@@ -170,6 +170,39 @@ async function download(path: string, fallbackFileName = 'export.csv') {
   window.URL.revokeObjectURL(url);
 }
 
+export interface AccountingStatus {
+  connected: boolean;
+  status: string;
+  realmId: string | null;
+  environment: string;
+  accountMap: {
+    apAccountId: string | null;
+    apAccountName: string | null;
+    clearingAccountId: string | null;
+    clearingAccountName: string | null;
+    defaultExpenseAccountId: string | null;
+    defaultExpenseAccountName: string | null;
+  } | null;
+  mappingComplete: boolean;
+  syncCounts: { synced: number; pending: number; error: number };
+}
+
+export interface QuickBooksAccount {
+  id: string;
+  name: string;
+  accountType: string;
+  classification: string;
+}
+
+export interface AccountMapInput {
+  apAccountId?: string | null;
+  apAccountName?: string | null;
+  clearingAccountId: string;
+  clearingAccountName?: string | null;
+  defaultExpenseAccountId: string;
+  defaultExpenseAccountName?: string | null;
+}
+
 export const api = {
   getCapabilities() {
     return request<CapabilitiesResponse>('/capabilities', { includeAuth: false });
@@ -240,6 +273,32 @@ export const api = {
   },
   getOrganizationSummary(organizationId: string) {
     return request<OrganizationSummary>(`/organizations/${organizationId}/summary`);
+  },
+  getAccountingStatus(organizationId: string) {
+    return request<AccountingStatus>(`/organizations/${organizationId}/accounting/quickbooks/status`);
+  },
+  getQuickBooksConnectUrl(organizationId: string) {
+    return request<{ authorizeUrl: string }>(`/organizations/${organizationId}/accounting/quickbooks/connect`);
+  },
+  listQuickBooksAccounts(organizationId: string) {
+    return request<{ items: QuickBooksAccount[] }>(
+      `/organizations/${organizationId}/accounting/quickbooks/accounts`,
+    );
+  },
+  saveQuickBooksAccountMap(organizationId: string, body: AccountMapInput) {
+    return request<{ ok: boolean }>(`/organizations/${organizationId}/accounting/quickbooks/account-map`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  },
+  disconnectQuickBooks(organizationId: string) {
+    return request<void>(`/organizations/${organizationId}/accounting/quickbooks`, { method: 'DELETE' });
+  },
+  syncPaymentOrderAccounting(organizationId: string, paymentOrderId: string) {
+    return request<{ outcome: string }>(
+      `/organizations/${organizationId}/payment-orders/${paymentOrderId}/accounting/sync`,
+      { method: 'POST' },
+    );
   },
   listOrganizationMembers(organizationId: string) {
     return request<{ items: OrganizationMember[] }>(
