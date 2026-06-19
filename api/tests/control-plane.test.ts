@@ -102,7 +102,10 @@ test('public health, capabilities, and OpenAPI endpoints expose the lean API sur
   assert.equal(capabilities.product, 'decimal');
   assert.equal(capabilities.version, 1);
   assert.equal(capabilities.solana.network, config.solanaNetwork);
-  assert.equal(capabilities.solana.rpcUrl, config.solanaRpcUrl);
+  // The capabilities endpoint exposes the PUBLIC RPC URL, never the keyed
+  // internal one (config.solanaRpcUrl) — that's what keeps the RPC key out of
+  // the browser. Assert against the public field accordingly.
+  assert.equal(capabilities.solana.rpcUrl, config.solanaPublicRpcUrl);
   assert.ok(capabilities.solana.usdcMint);
   assert.ok(capabilities.workflows.some((workflow: { id: string }) => workflow.id === 'single_payment'));
   assert.ok(capabilities.workflows.some((workflow: { id: string }) => workflow.id === 'csv_to_payment_orders'));
