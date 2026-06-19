@@ -1,107 +1,101 @@
 # 04 Data Model
 
-Important tables:
-
-- `users`: human accounts.
-- `auth_sessions`: API sessions.
-- `organizations`: tenants.
-- `organization_memberships`: roles inside organizations.
-- `organization_invites`: email-bound invites.
-- `user_wallets`: personal signing wallets.
-- `treasury_wallets`: organization treasury accounts, including Squads vaults.
-- `organization_wallet_authorizations`: local link between personal wallets and treasury permissions.
-- `counterparties`: business labels.
-- `counterparty_wallets`: unified address book for payees, payers, and internal receiving wallets.
-- `payment_orders`: one outbound payment intent. Batch imports are grouped by `input_batch_id` and `input_batch_label` on this table, not a separate run table.
-- `collection_runs`: batch wrapper for expected inbound collections.
-- `collection_requests`: expected inbound collection intents.
-- `collection_request_events`: collection audit trail.
-- `transfer_requests`: approval/settlement intent row behind a payment order or collection.
-- `approval_policies`: policy config.
-- `approval_decisions`: policy decisions.
-- `decimal_proposals`: local mirror of Squads proposals.
-- `execution_records`: submitted/executed signature evidence.
-- `payment_order_events`: payment audit trail.
-- `transfer_request_events`: approval/settlement audit trail.
-
-`TransferRequest` remains in the schema because it is still the shared approval/settlement intent primitive used by proof builders and older read models. It may eventually be renamed, but it is not dead code.
+Durable state lives in PostgreSQL, defined by `api/prisma/schema.prisma`. Tables group
+into: identity/access, treasury, counterparties (the address book), payments, the agent
+auto-pay layer, collections, and audit trails.
 
 ## Identity And Access
 
-`users` are global human accounts. `organizations` are tenants. A user receives access through `organization_memberships`; joining an organization should happen through `organization_invites`.
-
-`user_wallets` are personal signing wallets. They are Privy-managed in the active product path, not browser-wallet challenge records. They are not treasury wallets and should not be treated as organization funds. A personal wallet can be linked to organization permissions through `organization_wallet_authorizations`.
+- `users`: global human accounts (email/password or Google OAuth).
+- `auth_sessions`: API session tokens.
+- `organizations`: tenants.
+- `organization_memberships`: a user's role inside an organization.
+- `organization_invites`: invite-bound membership (you join through an invite, not self-serve).
+- `user_wallets`: personal signing wallets (Privy-managed embedded wallets in the active
+  path, not browser-wallet challenge records). Not treasury funds.
+- `organization_wallet_authorizations`: local link between a personal wallet and treasury
+  permissions.
+- `idempotency_records`: dedupe key for write routes so retries don't double-execute.
 
 ## Treasury State
 
-`treasury_wallets` stores organization-owned treasury accounts. For Squads accounts, `source = "squads_v4"` and the Squads PDA/vault metadata is stored in `properties_json`.
+- `treasury_wallets`: organization-owned treasury accounts. For Squads accounts,
+  `source = "squads_v4"` and the Squads PDA/vault metadata is in `properties_json`.
+- `decimal_proposals`: Decimal's local mirror of the Squads proposal lifecycle (proposal
+  type, transaction index, submitted/executed signatures, local status, verification
+  metadata). The chain remains authoritative for votes, threshold, and execution; Decimal
+  stores enough to render the product, retry confirmations, and build proofs.
 
-`decimal_proposals` stores Decimal's local mirror of Squads proposal lifecycle:
+## Counterparties (The Address Book)
 
-- local proposal identity
-- treasury wallet link
-- proposal type
-- transaction index
-- submitted/executed signatures
-- local status
-- verification metadata
+- `counterparties`: optional business entities (a vendor/customer). Identity is the display
+  name; a counterparty can hold several wallets.
+- `counterparty_wallets`: the actual Solana addresses paid (or, historically, received from).
+  One row per address per organization (`@@unique(organization_id, wallet_address)` —
+  load-bearing for the on-chain allowlist; an address maps to exactly one trust decision).
 
-The chain remains authoritative. Decimal stores enough data to render the product, retry confirmations, and generate proofs.
+Key columns:
+- `trust_state`: `unreviewed | trusted | restricted | blocked` — gates whether the address
+  can be paid. Only a `trusted` address can be delegated to an agent spending limit.
+- `is_primary`: the vendor's default payout address. Exactly one per vendor (enforced in the
+  service layer); the first verified address auto-promotes; an invoice that names a vendor but
+  carries no address routes to the primary.
+- `wallet_type`, `is_internal`, `is_active` (archived addresses set `is_active = false`),
+  `label`, `notes`, optional `counterparty_id`, optional `token_account_address`.
 
-## Counterparty State
-
-`counterparties` are optional business entities such as vendors, customers, contractors, or payers.
-
-`counterparty_wallets` are the actual Solana addresses Decimal uses in payments and collections. They replace the old `destinations` and `collection_sources` split.
-
-Key rules:
-
-- One organization can store one row per wallet address.
-- A row may link to a `counterparty`, but does not have to.
-- `walletType` describes intent, for example payee, payer, wallet, or internal receiver.
-- `trustState` gates outbound execution. Unreviewed or blocked wallets should not be paid from a Squads treasury.
-- `isInternal` marks organization-controlled receiving addresses created for collection bookkeeping.
-- Payment orders, collection requests, and transfer requests all point at `counterpartyWalletId` where applicable.
-
-This is the correct abstraction for the current product because the same address can be both a payer and a payee over time.
+Intake review signals (e.g. `known_counterparty_wallet_changed`, `near_duplicate_address`,
+`unreviewed_counterparty`) are **not** tables — they are computed per invoice and stored on
+the resulting payment order under `metadata_json.agent.triggeredRules`. See
+[07 Payment Routing Algorithm](./07-payment-routing-algorithm.md).
 
 ## Payment State
 
-`payment_orders` are executable outbound payment intents. Manual entry, CSV rows, and invoice extraction all converge into this one table.
+- `payment_orders`: one executable outbound payment intent. Manual entry, CSV rows, and
+  invoice extraction all converge here. Batch metadata lives on the order itself
+  (`input_batch_id`, `input_batch_label`, `metadata_json`) — there is no separate run table.
+  Each order can still link to a `transfer_request` (the shared approval/settlement primitive
+  the proof builders consume).
+- `payment_order_events`: payment audit trail.
+- `transfer_requests`: the approval/settlement intent row behind a payment order. Still the
+  shared primitive used by proof builders and settlement read models; not dead code.
+- `transfer_request_events`, `transfer_request_notes`: approval/settlement audit trail.
+- `execution_records`: submitted/executed signature evidence.
 
-For compatibility with earlier code, each payment order can still link to a `transfer_request`. That row carries approval and settlement state used by the proof builders.
+## Agent Auto-Pay Layer
 
-Document and CSV imports are not separate tables. Batch metadata is stored on the resulting `payment_orders` through `input_batch_id`, `input_batch_label`, and `metadata_json`.
+This is the "Auto-pay" feature — the agent paying an approved bill on its own, gated by a
+Squads spending limit. See [07 Payment Routing Algorithm](./07-payment-routing-algorithm.md).
 
-## Collection State
+- `automation_agents`: an organization's backend-managed agent (status active/paused/archived).
+- `agent_wallets`: the agent's Privy-managed signing wallet that submits `spendingLimitUse`
+  transactions.
+- `spending_limit_policies`: Decimal's mirror of an on-chain Squads spending limit (mint, cap,
+  period, member set). The on-chain limit is the enforcement authority.
+- `spending_limit_policy_destinations`: the allowlist — links a spending limit to the
+  `counterparty_wallets` it may pay (must be `trusted`).
+- `spending_limit_executions`: records of agent auto-pay executions (the spend against a limit).
 
-`collection_requests` are expected inbound payment records. They link to:
+## Collections (Inbound)
 
-- a receiving `treasury_wallet`
-- an optional payer `counterparty_wallet`
-- an optional `counterparty`
-- an optional `transfer_request` compatibility row
+- `collection_runs`, `collection_requests`, `collection_request_events`: expected inbound
+  payment records and their audit trail. These are intent/proof records only — they are not
+  auto-verified on-chain (Decimal does not create the inbound transaction), and inbound
+  collection is not the active product direction (the wedge is outbound AP / auto-pay).
 
-Collections are currently intent/proof records. They do not yet have an RPC verifier equivalent to outbound Squads execution because Decimal is not creating the inbound transaction.
+## Removed / Not In The Model
 
-## Removed Tables
+No longer present (dropped from the schema, some via self-healing `DROP TABLE IF EXISTS`):
 
-The following old tables are no longer part of the active model:
+- ClickHouse observed-transfer tables and the global USDC index.
+- `destinations` and `collection_sources` (merged into `counterparty_wallets`).
+- `approval_policies`, `approval_decisions` (the old policy-decision workflow).
+- `payment_requests`, `payment_runs`, `exception_notes`, `exception_states`,
+  `wallet_challenges`, and the old workspace tables.
 
-- ClickHouse observed-transfer tables.
-- `destinations`.
-- `collection_sources`.
-- `exception_notes`.
-- `exception_states`.
-- `payment_requests`.
-- `payment_runs`.
-- `wallet_challenges`.
-- workspace tables.
-
-RPC settlement mismatches are represented in read models and proposal metadata, not persisted into a separate exception workflow.
+RPC settlement mismatches are represented in read models and proposal metadata
+(`metadata_json.rpcSettlementVerification`), not in a separate exception workflow.
 
 ## Proof State
 
-Proofs are generated on demand from current database state. They are not stored as separate rows.
-
-The canonical digest is computed over stable JSON and returned with each proof packet.
+Proofs are generated on demand from current database state, not stored as rows. A canonical
+digest is computed over stable JSON and returned with each proof packet.
