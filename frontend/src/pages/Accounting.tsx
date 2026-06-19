@@ -9,7 +9,6 @@ import { api } from '../api';
 import type { AuthenticatedSession } from '../types';
 import { useToast } from '../ui/Toast';
 import { Pill, PageHead } from '../dec/primitives';
-import { Ico } from '../dec/icons';
 
 export function AccountingPage({ session }: { session: AuthenticatedSession }) {
   const { organizationId } = useParams<{ organizationId: string }>();
@@ -133,7 +132,10 @@ export function AccountingPage({ session }: { session: AuthenticatedSession }) {
         {/* Connection */}
         <div className="tbl-card" style={{ padding: 18 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-            <strong style={{ fontSize: 14 }}>QuickBooks Online</strong>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <img src="/quickbooks.svg" alt="" style={{ width: 18, height: 18 }} />
+              <strong style={{ fontSize: 14 }}>QuickBooks Online</strong>
+            </span>
             {connected ? <Pill tone="success">Connected</Pill> : <Pill tone="neutral">Not connected</Pill>}
           </div>
           {connected ? (
@@ -152,7 +154,7 @@ export function AccountingPage({ session }: { session: AuthenticatedSession }) {
                   onClick={() => connectMutation.mutate()}
                   disabled={connectMutation.isPending}
                 >
-                  <Ico.link w={15} />Connect QuickBooks
+                  <img src="/quickbooks.svg" alt="" style={{ width: 16, height: 16 }} />Connect QuickBooks
                 </button>
               ) : (
                 <p style={muted}>Ask an organization admin to connect QuickBooks.</p>
