@@ -185,6 +185,11 @@ export const Ico = {
       <path d="M9 14.5 14.5 9M10 6l1.5-1.5a3.5 3.5 0 0 1 5 5L15 11M9 13l-1.5 1.5a3.5 3.5 0 0 1-5-5L4 8" />
     </I>
   ),
+  book: (p: IcoProps = {}) => (
+    <I {...p}>
+      <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
+    </I>
+  ),
   vault: (p: IcoProps = {}) => (
     <I {...p}>
       <rect x="3" y="4.5" width="18" height="15" rx="2" />

@@ -248,7 +248,7 @@ export function AppSidebar({
             <NavItem to={`${base}/spending-limits`} icon={<Ico.shield w={16} />} label="Auto-pay" />
 
             <div className="sb-group-label">Integrations</div>
-            <NavItem to={`${base}/accounting`} icon={<Ico.link w={16} />} label="Accounting" />
+            <NavItem to={`${base}/accounting`} icon={<Ico.book w={16} />} label="Accounting" />
           </>
         ) : null}
       </div>

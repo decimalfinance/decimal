@@ -107,123 +107,151 @@ export function AccountingPage({ session }: { session: AuthenticatedSession }) {
 
   const counts = status?.syncCounts ?? { synced: 0, pending: 0, error: 0 };
   const canSave = Boolean(clearingId && expenseId) && !saveMutation.isPending;
+  const muted = { color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.55 } as const;
 
   return (
-    <div className="stack stack-24">
-      <PageHead
-        eyebrow="Integrations"
-        title="Accounting"
-        desc="Connect QuickBooks Online. Settled payments post automatically as a bill and a bill payment."
-        actions={
-          connected && isAdmin ? (
-            <button
-              className="btn btn-danger-ghost btn-sm"
-              onClick={() => disconnectMutation.mutate()}
-              disabled={disconnectMutation.isPending}
-            >
-              Disconnect
-            </button>
-          ) : null
-        }
-      />
-
-      {/* Connection */}
-      <div className="panel">
-        <div className="field-label-row">
-          <span className="field-label">QuickBooks Online</span>
-          {connected ? <Pill tone="success">Connected</Pill> : <Pill tone="neutral">Not connected</Pill>}
-        </div>
-        {connected ? (
-          <p className="input-help">
-            Company realm <span className="mono">{status?.realmId}</span> · {status?.environment} environment.
-          </p>
-        ) : (
-          <>
-            <p className="input-help">
-              Connect your QuickBooks company so settled payments flow into your books automatically.
-            </p>
-            {isAdmin ? (
+    <div className="page">
+      <div className="stack stack-24">
+        <PageHead
+          eyebrow="Integrations"
+          title="Accounting"
+          desc="Connect QuickBooks Online. Settled payments post automatically as a bill and a bill payment."
+          actions={
+            connected && isAdmin ? (
               <button
-                className="btn btn-primary"
-                onClick={() => connectMutation.mutate()}
-                disabled={connectMutation.isPending}
-                style={{ marginTop: 12 }}
+                type="button"
+                className="btn btn-danger-ghost btn-sm"
+                onClick={() => disconnectMutation.mutate()}
+                disabled={disconnectMutation.isPending}
               >
-                <Ico.link w={16} /> Connect QuickBooks
+                Disconnect
               </button>
-            ) : (
-              <p className="input-help">Ask an organization admin to connect QuickBooks.</p>
-            )}
-          </>
-        )}
-      </div>
+            ) : undefined
+          }
+        />
 
-      {/* Account mapping */}
-      {connected ? (
-        <div className="panel">
-          <div className="field-label-row">
-            <span className="field-label">Account mapping</span>
-            {status?.mappingComplete ? <Pill tone="success">Complete</Pill> : <Pill tone="warning">Incomplete</Pill>}
+        {/* Connection */}
+        <div className="tbl-card" style={{ padding: 18 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <strong style={{ fontSize: 14 }}>QuickBooks Online</strong>
+            {connected ? <Pill tone="success">Connected</Pill> : <Pill tone="neutral">Not connected</Pill>}
           </div>
-          <p className="input-help">
-            Which GL accounts each payment posts to. The clearing account stands in for your on-chain
-            treasury; the expense account codes the bill.
-          </p>
-
-          <div className="stack stack-16" style={{ marginTop: 14, maxWidth: 520 }}>
-            <label className="field">
-              <span className="field-label">Clearing account (bank)</span>
-              <select className="input" value={clearingId} onChange={(e) => setClearingId(e.target.value)} disabled={!isAdmin}>
-                <option value="">Select a bank account…</option>
-                {bankAccounts.map((a) => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))}
-              </select>
-            </label>
-
-            <label className="field">
-              <span className="field-label">Default expense account</span>
-              <select className="input" value={expenseId} onChange={(e) => setExpenseId(e.target.value)} disabled={!isAdmin}>
-                <option value="">Select an expense account…</option>
-                {expenseAccounts.map((a) => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))}
-              </select>
-            </label>
-
-            <label className="field">
-              <span className="field-label">Accounts Payable (optional)</span>
-              <select className="input" value={apId} onChange={(e) => setApId(e.target.value)} disabled={!isAdmin}>
-                <option value="">Use the company default</option>
-                {apAccounts.map((a) => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))}
-              </select>
-            </label>
-
-            {isAdmin ? (
-              <div>
-                <button className="btn btn-primary btn-sm" onClick={() => saveMutation.mutate()} disabled={!canSave}>
-                  Save mapping
+          {connected ? (
+            <p style={{ ...muted, margin: '10px 0 0' }}>
+              Company realm <span className="mono">{status?.realmId}</span> · {status?.environment} environment.
+            </p>
+          ) : (
+            <>
+              <p style={{ ...muted, margin: '10px 0 14px' }}>
+                Connect your QuickBooks company so settled payments flow into your books automatically.
+              </p>
+              {isAdmin ? (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => connectMutation.mutate()}
+                  disabled={connectMutation.isPending}
+                >
+                  <Ico.link w={15} />Connect QuickBooks
                 </button>
-              </div>
-            ) : null}
-          </div>
+              ) : (
+                <p style={muted}>Ask an organization admin to connect QuickBooks.</p>
+              )}
+            </>
+          )}
         </div>
-      ) : null}
 
-      {/* Sync health */}
-      {connected ? (
-        <div className="panel">
-          <span className="field-label">Sync health</span>
-          <p className="input-help">Settled payments post automatically. Failures retry on their own.</p>
-          <div style={{ display: 'flex', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
-            <Pill tone="success">{counts.synced} synced</Pill>
-            <Pill tone="warning">{counts.pending} pending</Pill>
-            <Pill tone={counts.error > 0 ? 'danger' : 'neutral'}>{counts.error} error</Pill>
+        {/* Account mapping */}
+        {connected ? (
+          <div>
+            <div className="sec-head">
+              <div className="sh-titles">
+                <h2>Account mapping</h2>
+                <p className="sh-desc">
+                  Which GL accounts each payment posts to. The clearing account stands in for your
+                  on-chain treasury; the expense account codes the bill.
+                </p>
+              </div>
+              {status?.mappingComplete ? (
+                <Pill tone="success">Complete</Pill>
+              ) : (
+                <Pill tone="warning">Incomplete</Pill>
+              )}
+            </div>
+
+            <div className="tbl-card" style={{ padding: 18 }}>
+              <div style={{ display: 'grid', gap: 14, maxWidth: 520 }}>
+                <label className="field">
+                  <span className="field-label">Clearing account (bank)</span>
+                  <select className="input" value={clearingId} onChange={(e) => setClearingId(e.target.value)} disabled={!isAdmin}>
+                    <option value="">Select a bank account…</option>
+                    {bankAccounts.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="field">
+                  <span className="field-label">Default expense account</span>
+                  <select className="input" value={expenseId} onChange={(e) => setExpenseId(e.target.value)} disabled={!isAdmin}>
+                    <option value="">Select an expense account…</option>
+                    {expenseAccounts.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="field">
+                  <span className="field-label">Accounts Payable (optional)</span>
+                  <select className="input" value={apId} onChange={(e) => setApId(e.target.value)} disabled={!isAdmin}>
+                    <option value="">Use the company default</option>
+                    {apAccounts.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </select>
+                </label>
+
+                {isAdmin ? (
+                  <div>
+                    <button type="button" className="btn btn-primary btn-sm" onClick={() => saveMutation.mutate()} disabled={!canSave}>
+                      Save mapping
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            </div>
           </div>
-        </div>
-      ) : null}
+        ) : null}
+
+        {/* Sync health */}
+        {connected ? (
+          <div>
+            <div className="sec-head">
+              <div className="sh-titles">
+                <h2>Sync health</h2>
+                <p className="sh-desc">Settled payments post automatically. Failures retry on their own.</p>
+              </div>
+            </div>
+            <div className="metrics" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+              <div className="metric">
+                <div className="m-label">Synced</div>
+                <div className="m-value">{counts.synced}</div>
+                <div className="m-sub">posted to QuickBooks</div>
+              </div>
+              <div className="metric">
+                <div className="m-label">Pending</div>
+                <div className="m-value">{counts.pending}</div>
+                <div className="m-sub">awaiting sync</div>
+              </div>
+              <div className="metric">
+                <div className="m-label">Errors</div>
+                <div className="m-value">{counts.error}</div>
+                <div className="m-sub">auto-retrying</div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
