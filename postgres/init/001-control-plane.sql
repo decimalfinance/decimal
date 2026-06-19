@@ -1048,3 +1048,111 @@ DROP TRIGGER IF EXISTS trg_collection_requests_updated_at ON collection_requests
 CREATE TRIGGER trg_collection_requests_updated_at
 BEFORE UPDATE ON collection_requests
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- =====================================================================
+-- Accounting integration (GL sync — e.g. QuickBooks Online). Everything is
+-- provider-scoped so a second accounting system can be added without churn.
+-- See the M2 GL-sync design.
+-- =====================================================================
+
+-- One OAuth connection per organization + provider (the customer's books).
+CREATE TABLE IF NOT EXISTS accounting_connections
+(
+  accounting_connection_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
+  provider TEXT NOT NULL DEFAULT 'quickbooks',
+  environment TEXT NOT NULL DEFAULT 'sandbox',
+  realm_id TEXT NOT NULL,
+  access_token TEXT NOT NULL,
+  refresh_token TEXT NOT NULL,
+  access_token_expires_at TIMESTAMPTZ NOT NULL,
+  refresh_token_expires_at TIMESTAMPTZ NOT NULL,
+  status TEXT NOT NULL DEFAULT 'connected',
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (organization_id, provider)
+);
+
+-- The key chart-of-accounts mapping for an org (which GL accounts to post to).
+CREATE TABLE IF NOT EXISTS accounting_account_maps
+(
+  accounting_account_map_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
+  provider TEXT NOT NULL DEFAULT 'quickbooks',
+  ap_account_id TEXT,
+  ap_account_name TEXT,
+  clearing_account_id TEXT,
+  clearing_account_name TEXT,
+  default_expense_account_id TEXT,
+  default_expense_account_name TEXT,
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (organization_id, provider)
+);
+
+-- Cache / operator override of a Decimal vendor (by label, optionally linked to
+-- a counterparty) → the provider's vendor id.
+CREATE TABLE IF NOT EXISTS accounting_vendor_maps
+(
+  accounting_vendor_map_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
+  provider TEXT NOT NULL DEFAULT 'quickbooks',
+  counterparty_id UUID REFERENCES counterparties(counterparty_id) ON DELETE CASCADE,
+  vendor_label TEXT NOT NULL,
+  external_vendor_id TEXT NOT NULL,
+  external_vendor_name TEXT,
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (organization_id, provider, vendor_label)
+);
+
+-- One sync record per payment order + provider (the idempotent ledger of the push).
+CREATE TABLE IF NOT EXISTS accounting_syncs
+(
+  accounting_sync_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
+  payment_order_id UUID NOT NULL REFERENCES payment_orders(payment_order_id) ON DELETE CASCADE,
+  provider TEXT NOT NULL DEFAULT 'quickbooks',
+  status TEXT NOT NULL DEFAULT 'pending',
+  request_id TEXT NOT NULL,
+  external_vendor_id TEXT,
+  external_bill_id TEXT,
+  external_bill_payment_id TEXT,
+  external_bill_balance NUMERIC,
+  error TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  synced_at TIMESTAMPTZ,
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (payment_order_id, provider)
+);
+
+CREATE INDEX IF NOT EXISTS idx_accounting_connections_org ON accounting_connections(organization_id);
+CREATE INDEX IF NOT EXISTS idx_accounting_vendor_maps_counterparty ON accounting_vendor_maps(counterparty_id);
+CREATE INDEX IF NOT EXISTS idx_accounting_syncs_org_status_created_at
+  ON accounting_syncs(organization_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_accounting_syncs_payment_order ON accounting_syncs(payment_order_id);
+
+DROP TRIGGER IF EXISTS trg_accounting_connections_updated_at ON accounting_connections;
+CREATE TRIGGER trg_accounting_connections_updated_at
+BEFORE UPDATE ON accounting_connections
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_accounting_account_maps_updated_at ON accounting_account_maps;
+CREATE TRIGGER trg_accounting_account_maps_updated_at
+BEFORE UPDATE ON accounting_account_maps
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_accounting_vendor_maps_updated_at ON accounting_vendor_maps;
+CREATE TRIGGER trg_accounting_vendor_maps_updated_at
+BEFORE UPDATE ON accounting_vendor_maps
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_accounting_syncs_updated_at ON accounting_syncs;
+CREATE TRIGGER trg_accounting_syncs_updated_at
+BEFORE UPDATE ON accounting_syncs
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();

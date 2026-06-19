@@ -95,6 +95,17 @@ type DecimalConfig = {
   devnetAutoFundLamports: number;
   settlementReconcilerEnabled: boolean;
   settlementReconcilerIntervalMs: number;
+  /**
+   * QuickBooks Online (GL sync) — same Intuit app, two key sets. `sandbox`
+   * uses the development keys + sandbox API host; `production` connects real
+   * customer companies. Defaults to sandbox; flip with QUICKBOOKS_ENVIRONMENT.
+   */
+  quickbooksClientId: string;
+  quickbooksClientSecret: string;
+  quickbooksRedirectUri: string | null;
+  quickbooksEnvironment: 'sandbox' | 'production';
+  accountingSyncEnabled: boolean;
+  accountingSyncIntervalMs: number;
 };
 
 export type SolanaNetwork = 'devnet' | 'mainnet';
@@ -176,6 +187,16 @@ function buildConfig(): DecimalConfig {
     settlementReconcilerIntervalMs: Number(
       process.env.SETTLEMENT_RECONCILER_INTERVAL_MS ?? 30_000,
     ),
+    quickbooksClientId: (process.env.QUICKBOOKS_CLIENT_ID ?? '').trim(),
+    quickbooksClientSecret: (process.env.QUICKBOOKS_CLIENT_SECRET ?? '').trim(),
+    quickbooksRedirectUri: normalizeOptionalUrl(process.env.QUICKBOOKS_REDIRECT_URI),
+    quickbooksEnvironment:
+      process.env.QUICKBOOKS_ENVIRONMENT?.trim() === 'production' ? 'production' : 'sandbox',
+    accountingSyncEnabled: getBooleanConfig(
+      process.env.ACCOUNTING_SYNC_ENABLED,
+      nodeEnv !== 'test' && Boolean((process.env.QUICKBOOKS_CLIENT_ID ?? '').trim()),
+    ),
+    accountingSyncIntervalMs: Number(process.env.ACCOUNTING_SYNC_INTERVAL_MS ?? 30_000),
   };
 
   validateConfig(nextConfig);
@@ -245,6 +266,12 @@ function validateConfig(nextConfig: DecimalConfig) {
   const hasPartialPrivyConfig = Boolean(nextConfig.privyAppId) !== Boolean(nextConfig.privyAppSecret);
   if (hasPartialPrivyConfig) {
     throw new Error('PRIVY_APP_ID and PRIVY_APP_SECRET must be configured together.');
+  }
+
+  const hasPartialQuickbooksConfig =
+    Boolean(nextConfig.quickbooksClientId) !== Boolean(nextConfig.quickbooksClientSecret);
+  if (hasPartialQuickbooksConfig) {
+    throw new Error('QUICKBOOKS_CLIENT_ID and QUICKBOOKS_CLIENT_SECRET must be configured together.');
   }
 
   if (nextConfig.autoProvisionWallets && (!nextConfig.privyAppId || !nextConfig.privyAppSecret)) {

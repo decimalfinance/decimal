@@ -35,8 +35,101 @@ model Organization {
   spendingLimitPolicies SpendingLimitPolicy[]
   spendingLimitPolicyDestinations SpendingLimitPolicyDestination[]
   spendingLimitExecutions SpendingLimitExecution[]
+  accountingConnections AccountingConnection[]
+  accountingAccountMaps AccountingAccountMap[]
+  accountingVendorMaps AccountingVendorMap[]
+  accountingSyncs AccountingSync[]
 
   @@map("organizations")
+}
+
+// One OAuth connection per organization + accounting provider (the customer's books).
+model AccountingConnection {
+  accountingConnectionId String       @id @default(dbgenerated("gen_random_uuid()")) @map("accounting_connection_id") @db.Uuid
+  organizationId         String       @map("organization_id") @db.Uuid
+  provider               String       @default("quickbooks")
+  environment            String       @default("sandbox")
+  realmId                String       @map("realm_id")
+  accessToken            String       @map("access_token")
+  refreshToken           String       @map("refresh_token")
+  accessTokenExpiresAt   DateTime     @map("access_token_expires_at") @db.Timestamptz(6)
+  refreshTokenExpiresAt  DateTime     @map("refresh_token_expires_at") @db.Timestamptz(6)
+  status                 String       @default("connected")
+  metadataJson           Json         @default("{}") @map("metadata_json")
+  createdAt              DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization           Organization @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
+
+  @@unique([organizationId, provider])
+  @@map("accounting_connections")
+}
+
+// The key chart-of-accounts mapping for an org (which GL accounts to post to).
+model AccountingAccountMap {
+  accountingAccountMapId    String       @id @default(dbgenerated("gen_random_uuid()")) @map("accounting_account_map_id") @db.Uuid
+  organizationId            String       @map("organization_id") @db.Uuid
+  provider                  String       @default("quickbooks")
+  apAccountId               String?      @map("ap_account_id")
+  apAccountName             String?      @map("ap_account_name")
+  clearingAccountId         String?      @map("clearing_account_id")
+  clearingAccountName       String?      @map("clearing_account_name")
+  defaultExpenseAccountId   String?      @map("default_expense_account_id")
+  defaultExpenseAccountName String?      @map("default_expense_account_name")
+  metadataJson              Json         @default("{}") @map("metadata_json")
+  createdAt                 DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization              Organization @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
+
+  @@unique([organizationId, provider])
+  @@map("accounting_account_maps")
+}
+
+// Cache / operator override of a Decimal vendor (by label, optionally linked to a
+// counterparty) → the provider's vendor id.
+model AccountingVendorMap {
+  accountingVendorMapId String        @id @default(dbgenerated("gen_random_uuid()")) @map("accounting_vendor_map_id") @db.Uuid
+  organizationId        String        @map("organization_id") @db.Uuid
+  provider              String        @default("quickbooks")
+  counterpartyId        String?       @map("counterparty_id") @db.Uuid
+  vendorLabel           String        @map("vendor_label")
+  externalVendorId      String        @map("external_vendor_id")
+  externalVendorName    String?       @map("external_vendor_name")
+  metadataJson          Json          @default("{}") @map("metadata_json")
+  createdAt             DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization          Organization  @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
+  counterparty          Counterparty? @relation(fields: [counterpartyId], references: [counterpartyId], onDelete: Cascade)
+
+  @@unique([organizationId, provider, vendorLabel])
+  @@index([counterpartyId])
+  @@map("accounting_vendor_maps")
+}
+
+// One sync record per payment order + provider (the idempotent ledger of the push).
+model AccountingSync {
+  accountingSyncId      String       @id @default(dbgenerated("gen_random_uuid()")) @map("accounting_sync_id") @db.Uuid
+  organizationId        String       @map("organization_id") @db.Uuid
+  paymentOrderId        String       @map("payment_order_id") @db.Uuid
+  provider              String       @default("quickbooks")
+  status                String       @default("pending")
+  requestId             String       @map("request_id")
+  externalVendorId      String?      @map("external_vendor_id")
+  externalBillId        String?      @map("external_bill_id")
+  externalBillPaymentId String?      @map("external_bill_payment_id")
+  externalBillBalance   Decimal?     @map("external_bill_balance") @db.Decimal
+  error                 String?
+  attempts              Int          @default(0)
+  syncedAt              DateTime?    @map("synced_at") @db.Timestamptz(6)
+  metadataJson          Json         @default("{}") @map("metadata_json")
+  createdAt             DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization          Organization @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
+  paymentOrder          PaymentOrder @relation(fields: [paymentOrderId], references: [paymentOrderId], onDelete: Cascade)
+
+  @@unique([paymentOrderId, provider])
+  @@index([organizationId, status, createdAt(sort: Desc)])
+  @@index([paymentOrderId])
+  @@map("accounting_syncs")
 }
 
 model User {
@@ -299,6 +392,7 @@ model Counterparty {
   wallets           CounterpartyWallet[]
   paymentOrders     PaymentOrder[]
   collectionRequests CollectionRequest[]
+  accountingVendorMaps AccountingVendorMap[]
 
   @@index([organizationId, createdAt(sort: Desc)])
   @@map("counterparties")
@@ -405,6 +499,7 @@ model PaymentOrder {
   events                    PaymentOrderEvent[]
   proposals                 DecimalProposal[]
   spendingLimitExecutions   SpendingLimitExecution[]
+  accountingSyncs           AccountingSync[]
 
   @@index([organizationId, state, createdAt(sort: Desc)])
   @@index([inputBatchId, createdAt(sort: Desc)])
