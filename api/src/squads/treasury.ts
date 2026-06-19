@@ -35,6 +35,7 @@ import {
   markPaymentBatchSquadsProposalPrepared,
   markPaymentBatchSquadsProposalSubmitted,
 } from './payment-markers.js';
+import { raiseSettlementMismatch } from '../payments/settlement-alerts.js';
 import {
   SQUADS_SOURCE,
   type SquadsSettlementVerification,
@@ -1795,8 +1796,13 @@ export async function confirmDecimalProposalExecution(
   actorUserId: string,
   decimalProposalId: string,
   input: ConfirmDecimalProposalSignatureInput,
+  // The background reconciler calls this with no user — actorIsSystem skips the
+  // Squads-member access check and attributes the writes to the system actor.
+  options: { actorIsSystem?: boolean } = {},
 ) {
-  await getDecimalProposal(organizationId, actorUserId, decimalProposalId);
+  if (!options.actorIsSystem) {
+    await getDecimalProposal(organizationId, actorUserId, decimalProposalId);
+  }
   const signature = input.signature.trim();
   // Lenient: store the signature even if RPC hasn't promoted it to
   // 'confirmed' yet, as long as the tx was actually seen on chain. The
@@ -1855,7 +1861,9 @@ export async function confirmDecimalProposalExecution(
     if (current.semanticType === 'send_payment' && current.paymentOrderId) {
       await markPaymentOrderSquadsProposalExecuted(tx, {
         organizationId,
-        actorUserId,
+        actorUserId: options.actorIsSystem ? null : actorUserId,
+        actorType: options.actorIsSystem ? 'system' : undefined,
+        actorId: options.actorIsSystem ? null : undefined,
         paymentOrderId: current.paymentOrderId,
         decimalProposalId,
         signature,
@@ -1870,7 +1878,9 @@ export async function confirmDecimalProposalExecution(
       if (paymentOrderIds.length) {
         await markPaymentBatchSquadsProposalExecuted(tx, {
         organizationId,
-        actorUserId,
+        actorUserId: options.actorIsSystem ? null : actorUserId,
+        actorType: options.actorIsSystem ? 'system' : undefined,
+        actorId: options.actorIsSystem ? null : undefined,
           paymentOrderIds,
           inputBatchId: getSemanticPayloadString(current.semanticPayloadJson, 'inputBatchId'),
         decimalProposalId,
@@ -1883,6 +1893,24 @@ export async function confirmDecimalProposalExecution(
     }
     return row;
   });
+
+  // A landed-but-wrong-amount settlement (mismatch) is the dangerous case —
+  // money moved incorrectly. Surface it loudly per affected order; never silent.
+  if (
+    settlementVerification.status === 'mismatch'
+    && (currentForSettlement.semanticType === 'send_payment'
+      || currentForSettlement.semanticType === 'send_payment_run')
+  ) {
+    const mismatchedOrderIds = currentForSettlement.semanticType === 'send_payment'
+      ? (currentForSettlement.paymentOrderId ? [currentForSettlement.paymentOrderId] : [])
+      : extractPaymentOrderIdsFromProposalPayload(
+          currentForSettlement.semanticPayloadJson,
+          currentForSettlement.metadataJson,
+        );
+    for (const orderId of mismatchedOrderIds) {
+      await raiseSettlementMismatch({ organizationId, paymentOrderId: orderId, signature, source: 'proposal' });
+    }
+  }
 
   // Spending-limit config proposals (add / remove / replace): the on-chain
   // SpendingLimit account was created or torn down by configTransactionExecute,
@@ -1927,6 +1955,7 @@ export async function reconcileDecimalProposalFromChain(
   organizationId: string,
   actorUserId: string,
   decimalProposalId: string,
+  options: { actorIsSystem?: boolean } = {},
 ) {
   const proposal = await prisma.decimalProposal.findFirstOrThrow({
     where: { organizationId, decimalProposalId },
@@ -1937,7 +1966,7 @@ export async function reconcileDecimalProposalFromChain(
   if (proposal.executedSignature) {
     return confirmDecimalProposalExecution(organizationId, actorUserId, decimalProposalId, {
       signature: proposal.executedSignature,
-    });
+    }, options);
   }
 
   if (!proposal.squadsMultisigPda || proposal.transactionIndex === null) {
@@ -1957,7 +1986,7 @@ export async function reconcileDecimalProposalFromChain(
 
   return confirmDecimalProposalExecution(organizationId, actorUserId, decimalProposalId, {
     signature: executionSignature,
-  });
+  }, options);
 }
 
 // Scan the proposal account's transaction history (across candidate clusters)

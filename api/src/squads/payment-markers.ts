@@ -207,7 +207,10 @@ export async function markPaymentOrderSquadsProposalExecuted(
   args: {
     organizationId: string;
     paymentOrderId: string;
-    actorUserId: string;
+    // Nullable so the background reconciler can run this with no user actor.
+    actorUserId: string | null;
+    actorType?: 'user' | 'system' | 'agent';
+    actorId?: string | null;
     decimalProposalId: string;
     signature: string;
     transactionIndex: string | null;
@@ -315,9 +318,9 @@ export async function markPaymentOrderSquadsProposalExecuted(
         eventType: upgradingToSettled && previousTransferStatus === 'submitted_onchain'
           ? 'squads_payment_proposal_settled'
           : 'squads_payment_proposal_executed',
-        actorType: 'user',
-        actorId: args.actorUserId,
-        eventSource: 'user',
+        actorType: args.actorType ?? 'user',
+        actorId: args.actorId ?? args.actorUserId,
+        eventSource: args.actorType ?? 'user',
         beforeState: previousTransferStatus,
         afterState: targetTransferStatus,
         linkedSignature: args.signature,
@@ -347,8 +350,8 @@ export async function markPaymentOrderSquadsProposalExecuted(
         eventType: upgradingToSettled && previousOrderState === 'executed'
           ? 'squads_payment_proposal_settled'
           : 'squads_payment_proposal_executed',
-        actorType: 'user',
-        actorId: args.actorUserId,
+        actorType: args.actorType ?? 'user',
+        actorId: args.actorId ?? args.actorUserId,
         beforeState: previousOrderState,
         afterState: targetOrderState,
         linkedTransferRequestId: transferRequest?.transferRequestId ?? null,
@@ -372,7 +375,9 @@ export async function markPaymentBatchSquadsProposalExecuted(
     organizationId: string;
     paymentOrderIds: string[];
     inputBatchId?: string | null;
-    actorUserId: string;
+    actorUserId: string | null;
+    actorType?: 'user' | 'system' | 'agent';
+    actorId?: string | null;
     decimalProposalId: string;
     signature: string;
     transactionIndex: string | null;
@@ -473,9 +478,9 @@ export async function markPaymentBatchSquadsProposalExecuted(
           eventType: upgradingToSettled
             ? 'squads_payment_batch_proposal_settled'
             : 'squads_payment_batch_proposal_executed',
-          actorType: 'user',
-          actorId: args.actorUserId,
-          eventSource: 'user',
+          actorType: args.actorType ?? 'user',
+          actorId: args.actorId ?? args.actorUserId,
+          eventSource: args.actorType ?? 'user',
           beforeState: previousTransferStatus,
           afterState: targetTransferStatus,
           linkedSignature: args.signature,
@@ -506,8 +511,8 @@ export async function markPaymentBatchSquadsProposalExecuted(
           eventType: upgradingToSettled
             ? 'squads_payment_batch_proposal_settled'
             : 'squads_payment_batch_proposal_executed',
-          actorType: 'user',
-          actorId: args.actorUserId,
+          actorType: args.actorType ?? 'user',
+          actorId: args.actorId ?? args.actorUserId,
           beforeState: previousOrderState,
           afterState: targetOrderState,
           linkedTransferRequestId: transferRequest?.transferRequestId ?? null,
