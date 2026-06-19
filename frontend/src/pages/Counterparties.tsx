@@ -3,7 +3,7 @@
 // payment, total paid, payment count) are computed client-side from
 // paymentOrders so we don't need a new endpoint.
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api';
@@ -40,11 +40,41 @@ function vendorInitials(label: string): string {
   return '??';
 }
 
+function fmtDate(s: string | null): string {
+  return s
+    ? new Date(s).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    : '—';
+}
+
+function CopyIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />
+      <path d="M3 10.5V4A1.5 1.5 0 0 1 4.5 2.5H11" />
+    </svg>
+  );
+}
+
 type VendorRow = {
   wallet: CounterpartyWallet;
   lastPaidAt: string | null;
   totalPaidRaw: string;
   paymentCount: number;
+};
+
+// A vendor is one entity that may hold several payout addresses. We group the
+// flat wallet list by the counterparty it belongs to (falling back to the
+// label when no counterparty is linked) so the same vendor never renders as
+// separate same-named rows. A new/changed address shows as an extra
+// "Unreviewed" address under the vendor it belongs to, not a peer vendor.
+type VendorGroup = {
+  key: string;
+  name: string;
+  addresses: VendorRow[];
+  lastPaidAt: string | null;
+  totalPaidRaw: string;
+  paymentCount: number;
+  needsReviewCount: number;
 };
 
 export function CounterpartiesPage({ session: _session }: { session: AuthenticatedSession }) {
@@ -56,6 +86,24 @@ export function CounterpartiesPage({ session: _session }: { session: Authenticat
   const [editing, setEditing] = useState<CounterpartyWallet | null>(null);
   const [search, setSearch] = useState('');
   const [tab, setTab] = useState<LocalTab>('all');
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const toggleExpanded = (key: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  const copyAddress = async (address: string) => {
+    try {
+      await navigator.clipboard.writeText(address);
+      success('Address copied');
+    } catch {
+      toastError('Could not copy address');
+    }
+  };
 
   const walletsQuery = useQuery({
     queryKey: ['counterparty-wallets', organizationId] as const,
@@ -103,11 +151,13 @@ export function CounterpartiesPage({ session: _session }: { session: Authenticat
       label: string;
       trustState: CounterpartyWalletTrustState;
       notes: string | null;
+      isPrimary?: boolean;
     }) =>
       api.updateCounterpartyWallet(organizationId!, input.counterpartyWalletId, {
         label: input.label,
         trustState: input.trustState,
         notes: input.notes,
+        isPrimary: input.isPrimary,
       }),
     onSuccess: async () => {
       success('Vendor updated.');
@@ -191,6 +241,49 @@ export function CounterpartiesPage({ session: _session }: { session: Authenticat
       unreviewed: rows.filter((r) => r.wallet.trustState !== 'trusted').length,
     };
   }, [rows]);
+
+  // Group the (filtered) addresses by vendor for display.
+  const groups = useMemo<VendorGroup[]>(() => {
+    const byKey = new Map<string, VendorRow[]>();
+    for (const r of filtered) {
+      const w = r.wallet;
+      const key = w.counterpartyId ?? `label:${w.label.trim().toLowerCase()}`;
+      const arr = byKey.get(key);
+      if (arr) arr.push(r);
+      else byKey.set(key, [r]);
+    }
+
+    const out: VendorGroup[] = [];
+    for (const [key, addresses] of byKey) {
+      const first = addresses[0]!.wallet;
+      const name = first.counterparty?.displayName ?? first.label;
+      let totalRaw = 0n;
+      let paymentCount = 0;
+      let lastPaidAt: string | null = null;
+      let needsReviewCount = 0;
+      for (const a of addresses) {
+        try { totalRaw += BigInt(a.totalPaidRaw); } catch { /* ignore */ }
+        paymentCount += a.paymentCount;
+        if (a.lastPaidAt && (!lastPaidAt || a.lastPaidAt > lastPaidAt)) lastPaidAt = a.lastPaidAt;
+        if (a.wallet.trustState !== 'trusted') needsReviewCount += 1;
+      }
+      // Trusted addresses first, then the ones awaiting review.
+      addresses.sort(
+        (a, b) =>
+          (a.wallet.trustState === 'trusted' ? 0 : 1) - (b.wallet.trustState === 'trusted' ? 0 : 1),
+      );
+      out.push({
+        key,
+        name,
+        addresses,
+        lastPaidAt,
+        totalPaidRaw: totalRaw.toString(),
+        paymentCount,
+        needsReviewCount,
+      });
+    }
+    return out.sort((a, b) => a.name.localeCompare(b.name));
+  }, [filtered]);
 
   const isLoading = walletsQuery.isLoading;
 
@@ -285,47 +378,140 @@ export function CounterpartiesPage({ session: _session }: { session: Authenticat
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((r) => {
-                  const w = r.wallet;
-                  const lastDate = r.lastPaidAt
-                    ? new Date(r.lastPaidAt).toLocaleDateString('en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                        year: 'numeric',
-                      })
-                    : '—';
+                {groups.map((g) => {
+                  const isExpanded = expanded.has(g.key);
+                  const only = g.addresses.length === 1 ? g.addresses[0]! : null;
                   return (
-                    <tr
-                      key={w.counterpartyWalletId}
-                      onClick={() => setEditing(w)}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      <td>
-                        <div className="member-cell">
-                          <span className="m-avatar">{vendorInitials(w.label)}</span>
-                          <div className="col">
-                            <span className="m-name">{w.label}</span>
-                            {w.counterparty?.displayName && w.counterparty.displayName !== w.label ? (
-                              <span className="m-sub" style={{ fontFamily: 'var(--font-body)', fontSize: 11, color: 'var(--text-faint)' }}>
-                                {w.counterparty.displayName}
-                              </span>
-                            ) : null}
+                    <Fragment key={g.key}>
+                      <tr onClick={() => toggleExpanded(g.key)} style={{ cursor: 'pointer' }}>
+                        <td>
+                          <div className="member-cell">
+                            <span className="m-avatar">{vendorInitials(g.name)}</span>
+                            <div className="col">
+                              <span className="m-name">{g.name}</span>
+                              {g.addresses.length > 1 ? (
+                                <span className="m-sub" style={{ fontFamily: 'var(--font-body)', fontSize: 11, color: 'var(--text-faint)' }}>
+                                  {g.addresses.length} addresses
+                                </span>
+                              ) : null}
+                            </div>
                           </div>
-                        </div>
-                      </td>
-                      <td>
-                        <Pill tone={trustTone(w.trustState)}>{trustLabel(w.trustState)}</Pill>
-                      </td>
-                      <td>
-                        <span className="joined">{lastDate}</span>
-                      </td>
-                      <td className="td-num" style={{ paddingRight: 28 }}>
-                        {formatRawUsdcCompact(r.totalPaidRaw)}{' '}
-                        <span style={{ color: 'var(--text-faint)' }}>USDC</span>
-                      </td>
-                      <td className="td-num" style={{ paddingRight: 28 }}>{r.paymentCount}</td>
-                      <td><span className="row-arrow"><Ico.chevRight w={16} /></span></td>
-                    </tr>
+                        </td>
+                        <td>
+                          {only ? (
+                            <Pill tone={trustTone(only.wallet.trustState)}>{trustLabel(only.wallet.trustState)}</Pill>
+                          ) : g.needsReviewCount > 0 ? (
+                            <Pill tone="warning">{g.needsReviewCount} need review</Pill>
+                          ) : (
+                            <Pill tone="success">Verified</Pill>
+                          )}
+                        </td>
+                        <td><span className="joined">{fmtDate(g.lastPaidAt)}</span></td>
+                        <td className="td-num" style={{ paddingRight: 28 }}>
+                          {formatRawUsdcCompact(g.totalPaidRaw)}{' '}
+                          <span style={{ color: 'var(--text-faint)' }}>USDC</span>
+                        </td>
+                        <td className="td-num" style={{ paddingRight: 28 }}>{g.paymentCount}</td>
+                        <td>
+                          <span
+                            className="row-arrow"
+                            style={{
+                              display: 'inline-flex',
+                              transform: isExpanded ? 'rotate(90deg)' : 'none',
+                              transition: 'transform 120ms ease',
+                            }}
+                          >
+                            <Ico.chevRight w={16} />
+                          </span>
+                        </td>
+                      </tr>
+                      {isExpanded ? (
+                        <tr>
+                          <td colSpan={6} style={{ padding: 0 }}>
+                            <div
+                              style={{
+                                background: 'var(--bg-subtle)',
+                                borderTop: '1px solid var(--border-strong)',
+                                padding: '2px 24px 2px 64px',
+                              }}
+                            >
+                              {g.addresses.map((r, i) => {
+                                const w = r.wallet;
+                                return (
+                                  <div
+                                    key={w.counterpartyWalletId}
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: 12,
+                                      padding: '11px 0',
+                                      borderTop: i === 0 ? 'none' : '1px solid var(--border-strong)',
+                                    }}
+                                  >
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
+                                      <span
+                                        style={{
+                                          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                                          fontSize: 12.5,
+                                          color: 'var(--text)',
+                                          wordBreak: 'break-all',
+                                        }}
+                                      >
+                                        {w.walletAddress}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        title="Copy address"
+                                        aria-label="Copy address"
+                                        onClick={() => copyAddress(w.walletAddress)}
+                                        style={{
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          background: 'transparent',
+                                          border: 'none',
+                                          color: 'var(--text-muted)',
+                                          cursor: 'pointer',
+                                          padding: 4,
+                                          flexShrink: 0,
+                                        }}
+                                      >
+                                        <CopyIcon />
+                                      </button>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+                                      {w.isPrimary ? (
+                                        <span
+                                          style={{
+                                            fontSize: 10,
+                                            fontWeight: 600,
+                                            textTransform: 'uppercase',
+                                            letterSpacing: 0.4,
+                                            color: 'var(--accent)',
+                                            border: '1px solid var(--accent)',
+                                            borderRadius: 4,
+                                            padding: '1px 5px',
+                                          }}
+                                        >
+                                          Default
+                                        </span>
+                                      ) : null}
+                                      <Pill tone={trustTone(w.trustState)}>{trustLabel(w.trustState)}</Pill>
+                                      <button
+                                        type="button"
+                                        className="btn btn-secondary btn-sm"
+                                        onClick={() => setEditing(w)}
+                                      >
+                                        Edit
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
                   );
                 })}
               </tbody>
@@ -355,6 +541,7 @@ export function CounterpartiesPage({ session: _session }: { session: Authenticat
               label: payload.label,
               trustState: payload.trustState,
               notes: payload.notes ?? null,
+              isPrimary: payload.isPrimary,
             })
           }
         />
@@ -375,6 +562,7 @@ function VendorDialog(
           walletAddress: string;
           trustState: CounterpartyWalletTrustState;
           notes?: string;
+          isPrimary?: boolean;
         }) => void;
       }
     | {
@@ -387,6 +575,7 @@ function VendorDialog(
           walletAddress: string;
           trustState: CounterpartyWalletTrustState;
           notes?: string;
+          isPrimary?: boolean;
         }) => void;
       },
 ): ReactNode {
@@ -399,6 +588,7 @@ function VendorDialog(
     initial?.trustState ?? 'unreviewed',
   );
   const [notes, setNotes] = useState(initial?.notes ?? '');
+  const [isPrimary, setIsPrimary] = useState(initial?.isPrimary ?? false);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -453,6 +643,7 @@ function VendorDialog(
               walletAddress: mode === 'create' ? walletAddress.trim() : initial!.walletAddress,
               trustState,
               notes: notes.trim() || undefined,
+              isPrimary: trustState === 'trusted' ? isPrimary : false,
             });
           }}
         >
@@ -486,12 +677,18 @@ function VendorDialog(
               <div className="field">
                 <label className="field-label">Wallet address</label>
                 <div
-                  className="input mono"
+                  className="mono"
                   style={{
-                    background: 'var(--bg-surface-2)',
-                    color: 'var(--text-muted)',
+                    border: '1px solid var(--border-strong)',
+                    borderRadius: 8,
+                    background: 'var(--bg-subtle)',
+                    color: 'var(--text-soft)',
                     fontSize: 12,
+                    lineHeight: 1.5,
+                    padding: '10px 12px',
+                    whiteSpace: 'normal',
                     wordBreak: 'break-all',
+                    userSelect: 'all',
                   }}
                 >
                   {initial!.walletAddress}
@@ -514,6 +711,32 @@ function VendorDialog(
                 <Ico.chevDown w={14} />
               </div>
             </div>
+            {mode === 'edit' ? (
+              <div className="field">
+                <label
+                  className="field-label"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    cursor: trustState === 'trusted' ? 'pointer' : 'not-allowed',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isPrimary}
+                    disabled={trustState !== 'trusted'}
+                    onChange={(e) => setIsPrimary(e.target.checked)}
+                  />
+                  Primary (default) payout address
+                </label>
+                <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
+                  {trustState === 'trusted'
+                    ? 'Invoices for this vendor that don’t include an address pay here.'
+                    : 'Only a verified address can be the default.'}
+                </span>
+              </div>
+            ) : null}
             <div className="field">
               <label className="field-label" htmlFor="dec-vendor-notes">
                 Notes{' '}
