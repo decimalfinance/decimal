@@ -6,6 +6,7 @@ import { Keypair, PublicKey, TransactionInstruction, TransactionMessage, Version
 import { createApp } from '../src/app.js';
 import { config } from '../src/config.js';
 import { prisma } from '../src/infra/prisma.js';
+import { requireTestDatabase } from './helpers/require-test-database.js';
 import { USDC_MINT } from '../src/solana.js';
 import { setPrivyWalletRuntimeForTests } from '../src/wallets/personal.js';
 import { resetRateLimitBuckets } from '../src/infra/rate-limit.js';
@@ -49,6 +50,7 @@ let closeServer: (() => Promise<void>) | undefined;
 
 before(async () => {
   await prisma.$connect();
+  await requireTestDatabase();
   const app = createApp();
   const server = app.listen(0);
 

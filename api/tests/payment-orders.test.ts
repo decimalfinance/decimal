@@ -5,6 +5,7 @@ import { AddressInfo } from 'node:net';
 import { Keypair } from '@solana/web3.js';
 import { createApp } from '../src/app.js';
 import { prisma } from '../src/infra/prisma.js';
+import { requireTestDatabase } from './helpers/require-test-database.js';
 import { setInvoiceIntakeRuntimeForTests } from '../src/payments/invoice-intake.js';
 
 const TRUNCATE_SQL = `
@@ -42,6 +43,7 @@ let closeServer: (() => Promise<void>) | undefined;
 
 before(async () => {
   await prisma.$connect();
+  await requireTestDatabase();
   const app = createApp();
   const server = app.listen(0);
 
