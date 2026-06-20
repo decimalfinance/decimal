@@ -38,6 +38,18 @@ async function upsertSync(organizationId: string, paymentOrderId: string, fields
   });
 }
 
+/**
+ * Clear a failed sync's attempt counter so an operator's manual retry actually
+ * runs (the sweep gives up at MAX_ATTEMPTS; a deliberate retry should not).
+ * Only touches error rows — never re-opens a successful sync.
+ */
+export async function resetSyncForRetry(paymentOrderId: string): Promise<void> {
+  await prisma.accountingSync.updateMany({
+    where: { paymentOrderId, provider: PROVIDER, status: 'error' },
+    data: { attempts: 0, status: 'pending', error: null },
+  });
+}
+
 /** Sync one settled payment order. Idempotent and safe to call repeatedly. */
 export async function syncSettledPaymentOrder(paymentOrderId: string): Promise<AccountingSyncOutcome> {
   const order = await prisma.paymentOrder.findUnique({

@@ -172,6 +172,7 @@ async function download(path: string, fallbackFileName = 'export.csv') {
 
 export interface AccountingStatus {
   connected: boolean;
+  needsReauth: boolean;
   status: string;
   realmId: string | null;
   environment: string;
@@ -192,6 +193,15 @@ export interface QuickBooksAccount {
   name: string;
   accountType: string;
   classification: string;
+}
+
+export interface FailedSync {
+  paymentOrderId: string;
+  vendor: string;
+  amountRaw: string;
+  invoiceNumber: string | null;
+  error: string | null;
+  attempts: number;
 }
 
 export interface AccountMapInput {
@@ -276,6 +286,11 @@ export const api = {
   },
   getAccountingStatus(organizationId: string) {
     return request<AccountingStatus>(`/organizations/${organizationId}/accounting/quickbooks/status`);
+  },
+  listFailedSyncs(organizationId: string) {
+    return request<{ items: FailedSync[] }>(
+      `/organizations/${organizationId}/accounting/quickbooks/failed-syncs`,
+    );
   },
   getQuickBooksConnectUrl(organizationId: string) {
     const q = new URLSearchParams({ frontendOrigin: window.location.origin }).toString();

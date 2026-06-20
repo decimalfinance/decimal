@@ -211,6 +211,15 @@ export function PaymentDetailPage() {
     onError: (err) => toastError(err instanceof Error ? err.message : 'Sync failed.'),
   });
 
+  const accountingRetryMutation = useMutation({
+    mutationFn: () => api.syncPaymentOrderAccounting(organizationId!, paymentOrderId!),
+    onSuccess: async () => {
+      success('Retrying QuickBooks sync…');
+      await queryClient.invalidateQueries({ queryKey: ['payment-order', organizationId, paymentOrderId] });
+    },
+    onError: (err) => toastError(err instanceof Error ? err.message : 'Could not retry the sync.'),
+  });
+
   // "Approve & continue" on a needs_review order. Clears the AP-intake
   // flag, trusts the counterparty wallet, and asks the agent router to either
   // use a spending limit or create a Squads proposal in the same call.
@@ -583,6 +592,15 @@ export function PaymentDetailPage() {
                   <span>
                     Sync failed{order.accountingSync.error ? `: ${order.accountingSync.error}` : ''}. Retrying automatically.
                   </span>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ marginLeft: 'auto' }}
+                    onClick={() => accountingRetryMutation.mutate()}
+                    disabled={accountingRetryMutation.isPending}
+                  >
+                    {accountingRetryMutation.isPending ? 'Retrying…' : 'Retry now'}
+                  </button>
                 </>
               ) : (
                 <>

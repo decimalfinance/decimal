@@ -8,7 +8,7 @@ import { asyncRoute, sendJson, sendList } from '../infra/route-helpers.js';
 import { assertOrganizationAccess, assertOrganizationAdmin } from '../auth/organization-access.js';
 import { QuickBooks } from '../accounting/quickbooks.js';
 import { disconnect, getConnection, getQuickBooksForOrg, saveConnection } from '../accounting/connections.js';
-import { syncSettledPaymentOrder } from '../accounting/account-sync.js';
+import { resetSyncForRetry, syncSettledPaymentOrder } from '../accounting/account-sync.js';
 import { ensureDefaultAccountingSetup } from '../accounting/setup.js';
 import { logger } from '../infra/logger.js';
 
@@ -197,6 +197,7 @@ accountingRouter.get(
     }
     sendJson(res, {
       connected: Boolean(conn && conn.status === 'connected'),
+      needsReauth: conn?.status === 'needs_reauth',
       syncCounts,
       status: conn?.status ?? 'disconnected',
       realmId: conn?.realmId ?? null,
@@ -265,7 +266,44 @@ accountingRouter.patch(
   }),
 );
 
+// Failed syncs that need attention — drives the Accounting page error list.
+accountingRouter.get(
+  '/organizations/:organizationId/accounting/quickbooks/failed-syncs',
+  asyncRoute(async (req, res) => {
+    const { organizationId } = orgParams.parse(req.params);
+    await assertOrganizationAccess(organizationId, req.auth!);
+    const rows = await prisma.accountingSync.findMany({
+      where: { organizationId, provider: PROVIDER, status: 'error' },
+      orderBy: { updatedAt: 'desc' },
+      take: 50,
+      include: {
+        paymentOrder: {
+          select: {
+            paymentOrderId: true,
+            amountRaw: true,
+            invoiceNumber: true,
+            counterparty: { select: { displayName: true } },
+            counterpartyWallet: { select: { label: true } },
+          },
+        },
+      },
+    });
+    sendList(
+      res,
+      rows.map((r) => ({
+        paymentOrderId: r.paymentOrderId,
+        vendor: r.paymentOrder.counterparty?.displayName ?? r.paymentOrder.counterpartyWallet.label,
+        amountRaw: r.paymentOrder.amountRaw.toString(),
+        invoiceNumber: r.paymentOrder.invoiceNumber,
+        error: r.error,
+        attempts: r.attempts,
+      })),
+    );
+  }),
+);
+
 // Manually sync one settled payment order (the agent does this automatically).
+// Doubles as the retry action — resets a maxed-out attempt counter first.
 accountingRouter.post(
   '/organizations/:organizationId/payment-orders/:paymentOrderId/accounting/sync',
   asyncRoute(async (req, res) => {
@@ -278,6 +316,7 @@ accountingRouter.post(
     if (!order) {
       throw new ApiError(404, 'payment_order_not_found', 'Payment order not found.');
     }
+    await resetSyncForRetry(paymentOrderId);
     const outcome = await syncSettledPaymentOrder(paymentOrderId);
     sendJson(res, { outcome });
   }),

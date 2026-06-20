@@ -31,7 +31,19 @@ export async function getQuickBooksForOrg(organizationId: string): Promise<Quick
   if (!row || row.status !== 'connected') {
     return null;
   }
-  return new QuickBooks(tokensFromRow(row), (tokens) => persistTokens(organizationId, tokens));
+  return new QuickBooks(
+    tokensFromRow(row),
+    (tokens) => persistTokens(organizationId, tokens),
+    () => markNeedsReauth(organizationId),
+  );
+}
+
+/** Flag a connection whose refresh token died — the operator must reconnect. */
+export async function markNeedsReauth(organizationId: string): Promise<void> {
+  await prisma.accountingConnection.updateMany({
+    where: { organizationId, provider: PROVIDER, status: 'connected' },
+    data: { status: 'needs_reauth' },
+  });
 }
 
 export async function persistTokens(organizationId: string, tokens: QboTokens): Promise<void> {

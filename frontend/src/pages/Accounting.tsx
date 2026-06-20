@@ -3,7 +3,7 @@
 // payments are posted automatically by the backend sync agent.
 
 import { useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router';
+import { Link, useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api';
 import type { AuthenticatedSession } from '../types';
@@ -29,6 +29,7 @@ export function AccountingPage({ session }: { session: AuthenticatedSession }) {
   });
   const status = statusQuery.data;
   const connected = Boolean(status?.connected);
+  const needsReauth = Boolean(status?.needsReauth);
 
   const accountsQuery = useQuery({
     queryKey: ['quickbooks-accounts', orgId] as const,
@@ -68,6 +69,23 @@ export function AccountingPage({ session }: { session: AuthenticatedSession }) {
       void queryClient.invalidateQueries({ queryKey: ['accounting-status', orgId] });
     },
     onError: (e) => toastError(e instanceof Error ? e.message : 'Could not disconnect.'),
+  });
+
+  const failedQuery = useQuery({
+    queryKey: ['accounting-failed-syncs', orgId] as const,
+    queryFn: () => api.listFailedSyncs(orgId),
+    enabled: connected && (status?.syncCounts?.error ?? 0) > 0,
+  });
+  const failed = failedQuery.data?.items ?? [];
+
+  const retryMutation = useMutation({
+    mutationFn: (paymentOrderId: string) => api.syncPaymentOrderAccounting(orgId, paymentOrderId),
+    onSuccess: () => {
+      success('Retrying sync…');
+      void queryClient.invalidateQueries({ queryKey: ['accounting-status', orgId] });
+      void queryClient.invalidateQueries({ queryKey: ['accounting-failed-syncs', orgId] });
+    },
+    onError: (e) => toastError(e instanceof Error ? e.message : 'Could not retry the sync.'),
   });
 
   const [clearingId, setClearingId] = useState('');
@@ -140,13 +158,21 @@ export function AccountingPage({ session }: { session: AuthenticatedSession }) {
                 <img src="/quickbooks.svg" alt="" style={{ width: 18, height: 18 }} />
                 <strong style={{ fontSize: 14 }}>QuickBooks Online</strong>
               </span>
-              {connected ? <Pill tone="success">Connected</Pill> : <Pill tone="neutral">Not connected</Pill>}
+              {connected ? (
+                <Pill tone="success">Connected</Pill>
+              ) : needsReauth ? (
+                <Pill tone="warning">Reconnect needed</Pill>
+              ) : (
+                <Pill tone="neutral">Not connected</Pill>
+              )}
             </span>
             <p style={{ ...muted, margin: '8px 0 0' }}>
               {connected ? (
                 <>
                   Company realm <span className="mono">{status?.realmId}</span> · {status?.environment} environment.
                 </>
+              ) : needsReauth ? (
+                'Your QuickBooks session expired. Reconnect to resume syncing settled payments.'
               ) : isAdmin ? (
                 'Connect your QuickBooks company so settled payments flow into your books automatically.'
               ) : (
@@ -162,7 +188,7 @@ export function AccountingPage({ session }: { session: AuthenticatedSession }) {
               onClick={() => connectMutation.mutate()}
               disabled={connectMutation.isPending}
             >
-              Connect QuickBooks
+              {needsReauth ? 'Reconnect' : 'Connect QuickBooks'}
             </button>
           ) : null}
         </div>
@@ -255,6 +281,59 @@ export function AccountingPage({ session }: { session: AuthenticatedSession }) {
                 <div className="m-sub">auto-retrying</div>
               </div>
             </div>
+
+            {failed.length > 0 ? (
+              <div className="tbl-card" style={{ padding: 0, marginTop: 14 }}>
+                {failed.map((f, idx) => (
+                  <div
+                    key={f.paymentOrderId}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 12,
+                      padding: '12px 16px',
+                      borderBottom: idx < failed.length - 1 ? '1px solid var(--border)' : 'none',
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>
+                        {f.vendor} · {(Number(f.amountRaw) / 1e6).toFixed(2)} USDC
+                      </div>
+                      <div
+                        style={{
+                          ...muted,
+                          marginTop: 2,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {f.error ?? 'Sync failed'} · {f.attempts} attempt{f.attempts === 1 ? '' : 's'}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                      <Link
+                        to={`/organizations/${orgId}/payments/${f.paymentOrderId}`}
+                        className="btn btn-ghost btn-sm"
+                      >
+                        View
+                      </Link>
+                      {isAdmin ? (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => retryMutation.mutate(f.paymentOrderId)}
+                          disabled={retryMutation.isPending}
+                        >
+                          Retry
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>

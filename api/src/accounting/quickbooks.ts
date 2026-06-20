@@ -44,6 +44,12 @@ export class QboError extends Error {
     super(`QBO ${status}: ${typeof body === 'string' ? body : JSON.stringify(body)}`);
     this.name = 'QboError';
   }
+
+  /** True when the refresh token is dead (revoked/expired) — connection needs re-auth. */
+  get isAuthInvalid(): boolean {
+    const s = typeof this.body === 'string' ? this.body : this.body ? JSON.stringify(this.body) : '';
+    return s.includes('invalid_grant');
+  }
 }
 
 function basicAuth(): string {
@@ -71,6 +77,9 @@ export class QuickBooks {
   constructor(
     private tokens: QboTokens,
     private onTokensChanged?: (t: QboTokens) => void | Promise<void>,
+    // Fired when a token refresh fails because the refresh token is dead, so the
+    // owner can mark the connection as needing re-auth.
+    private onAuthInvalid?: () => void | Promise<void>,
   ) {}
 
   get realmId(): string {
@@ -128,10 +137,20 @@ export class QuickBooks {
   }
 
   private async refresh(): Promise<void> {
-    const json = await QuickBooks.tokenRequest({
-      grant_type: 'refresh_token',
-      refresh_token: this.tokens.refreshToken,
-    });
+    let json: any;
+    try {
+      json = await QuickBooks.tokenRequest({
+        grant_type: 'refresh_token',
+        refresh_token: this.tokens.refreshToken,
+      });
+    } catch (error) {
+      // A dead refresh token can't be recovered automatically — signal the owner
+      // so the connection is flagged for re-auth instead of failing silently.
+      if (error instanceof QboError && error.isAuthInvalid) {
+        await this.onAuthInvalid?.();
+      }
+      throw error;
+    }
     // The refresh token rotates roughly daily — persist whatever comes back.
     this.tokens = tokensFromResponse(this.tokens.realmId, json);
     await this.onTokensChanged?.(this.tokens);
