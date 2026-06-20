@@ -9,6 +9,8 @@ import { assertOrganizationAccess, assertOrganizationAdmin } from '../auth/organ
 import { QuickBooks } from '../accounting/quickbooks.js';
 import { disconnect, getConnection, getQuickBooksForOrg, saveConnection } from '../accounting/connections.js';
 import { syncSettledPaymentOrder } from '../accounting/account-sync.js';
+import { ensureDefaultAccountingSetup } from '../accounting/setup.js';
+import { logger } from '../infra/logger.js';
 
 const PROVIDER = 'quickbooks';
 
@@ -140,6 +142,14 @@ publicAccountingRouter.get(
     }
     const tokens = await QuickBooks.exchangeCode(code, realmId);
     await saveConnection(state.organizationId, tokens);
+    // Provision sensible defaults (clearing + expense accounts, mapped) so the
+    // operator lands on a ready page. Best-effort: never block the connection.
+    await ensureDefaultAccountingSetup(state.organizationId).catch((e) =>
+      logger.warn('accounting_setup.failed', {
+        organizationId: state.organizationId,
+        error: e instanceof Error ? e.message : String(e),
+      }),
+    );
     finishCallback(res, 'connected', ctx);
   }),
 );

@@ -174,8 +174,8 @@ export function AccountingPage({ session }: { session: AuthenticatedSession }) {
               <div className="sh-titles">
                 <h2>Account mapping</h2>
                 <p className="sh-desc">
-                  Which GL accounts each payment posts to. The clearing account stands in for your
-                  on-chain treasury; the expense account codes the bill.
+                  Set up automatically when you connect — change anytime. The clearing account stands
+                  in for your on-chain treasury; the expense account codes each bill.
                 </p>
               </div>
               {status?.mappingComplete ? (
