@@ -50,12 +50,52 @@ function buildLifecycle(
   settlementVerification: ReturnType<typeof readSettlementVerificationStatus>,
 ): LifecycleStage[] {
   const s = order.productLifecycle?.productState ?? order.derivedState;
-  return buildSquadsPaymentLifecycle({
+  const stages = buildSquadsPaymentLifecycle({
     derivedState: s,
     settlementVerification,
     requestSub: formatRelativeTime(order.createdAt),
     settledSub: 'Matched',
   });
+  // Once a settled payment has a QuickBooks sync, the books step belongs in the
+  // lifecycle — append it so it reads as the natural stage after Settled.
+  const a = order.accountingSync;
+  if (a) {
+    stages.push({
+      id: 'accounting',
+      label: a.status === 'synced' ? 'Synced' : a.status === 'error' ? 'Sync failed' : 'Syncing',
+      sub: 'QuickBooks',
+      state: a.status === 'synced' ? 'complete' : a.status === 'error' ? 'blocked' : 'current',
+    });
+  }
+  return stages;
+}
+
+// Surface the QuickBooks sync as a timeline entry too (synthesised from the
+// sync record so it shows for every already-synced payment, no backfill).
+function withAccountingEvent(order: PaymentOrder): PaymentOrderEvent[] {
+  const base = order.events ?? [];
+  const a = order.accountingSync;
+  if (a?.status === 'synced' && a.syncedAt) {
+    return [
+      ...base,
+      {
+        paymentOrderEventId: `accounting-${a.billId ?? 'synced'}`,
+        paymentOrderId: order.paymentOrderId,
+        organizationId: order.organizationId,
+        eventType: 'accounting_synced',
+        actorType: 'system',
+        actorId: null,
+        beforeState: null,
+        afterState: null,
+        linkedTransferRequestId: null,
+        linkedExecutionRecordId: null,
+        linkedSignature: null,
+        payloadJson: { billId: a.billId, billPaymentId: a.billPaymentId },
+        createdAt: a.syncedAt,
+      },
+    ];
+  }
+  return base;
 }
 
 function determineVariant(order: PaymentOrder): ActionVariant {
@@ -99,9 +139,17 @@ export function PaymentDetailPage() {
     enabled: Boolean(organizationId && paymentOrderId),
     refetchInterval: (query) => {
       if (typeof document !== 'undefined' && document.hidden) return false;
-      const s = query.state.data?.derivedState;
-      if (s === 'settled' || s === 'cancelled') return false;
-      return 5_000;
+      const d = query.state.data;
+      const s = d?.derivedState;
+      if (s !== 'settled' && s !== 'cancelled') return 5_000;
+      if (s === 'cancelled') return false;
+      // Settled: keep polling briefly so a freshly-landed QuickBooks sync shows
+      // up live (the sync fires just after settlement). Stop once it resolves,
+      // or after a short window so orgs without accounting don't poll forever.
+      const acct = d?.accountingSync;
+      if (acct && acct.status !== 'pending') return false;
+      const settledRecently = d?.updatedAt ? Date.now() - new Date(d.updatedAt).getTime() < 90_000 : false;
+      return settledRecently ? 5_000 : false;
     },
   });
 
@@ -579,7 +627,7 @@ export function PaymentDetailPage() {
 
           <PaySummary order={order} sourceBadge={sourceBadge} submittedSignature={submittedSig} />
 
-          <ActivityAcc events={order.events ?? []} createdByEmail={order.createdByUser?.email ?? null} />
+          <ActivityAcc events={withAccountingEvent(order)} createdByEmail={order.createdByUser?.email ?? null} />
         </div>
       </div>
     </div>
@@ -814,6 +862,7 @@ function humanizeEventType(type: string): string {
     payment_settled: 'Settled',
     payment_cancelled: 'Cancelled',
     spending_limit_executed: 'Auto-paid by agent',
+    accounting_synced: 'Synced to QuickBooks',
   };
   if (map[type]) return map[type]!;
   return type
