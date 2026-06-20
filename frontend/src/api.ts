@@ -290,7 +290,7 @@ export const api = {
   },
   saveQuickBooksAccountMap(organizationId: string, body: AccountMapInput) {
     return request<{ ok: boolean }>(`/organizations/${organizationId}/accounting/quickbooks/account-map`, {
-      method: 'PUT',
+      method: 'PATCH',
       body: JSON.stringify(body),
     });
   },

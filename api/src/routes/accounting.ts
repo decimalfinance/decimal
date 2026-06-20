@@ -249,7 +249,7 @@ accountingRouter.get(
 );
 
 // Save the account map.
-accountingRouter.put(
+accountingRouter.patch(
   '/organizations/:organizationId/accounting/quickbooks/account-map',
   asyncRoute(async (req, res) => {
     const { organizationId } = orgParams.parse(req.params);
