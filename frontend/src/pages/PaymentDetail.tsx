@@ -695,8 +695,9 @@ function PaySummary({
         ? 'danger'
         : 'warning';
 
-  const sigLabel = submittedSignature ? 'Signed' : 'Not signed';
-  const sigTone: PillTone = submittedSignature ? 'info' : 'neutral';
+  const isAutoPaid = Boolean(order.spendingLimitExecution);
+  const sigLabel = isAutoPaid ? 'Auto-paid' : submittedSignature ? 'Signed' : 'Not signed';
+  const sigTone: PillTone = isAutoPaid || submittedSignature ? 'info' : 'neutral';
 
   const sourceName = order.sourceTreasuryWallet?.displayName ?? '—';
   const sourceSub = order.sourceTreasuryWallet?.address

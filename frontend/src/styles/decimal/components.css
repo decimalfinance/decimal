@@ -142,6 +142,8 @@
   font-family: var(--font-mono);
   font-weight: 600;
   display: inline-flex; align-items: center; gap: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* origin pill (Single / batch name) */
@@ -232,7 +234,7 @@
 .dec .cell-source svg { width: 15px; height: 15px; color: var(--text-muted); flex: 0 0 auto; }
 .dec .row-arrow { color: var(--text-faint); opacity: 0; transition: opacity .12s, transform .12s; }
 .dec .tbl tbody tr:hover .row-arrow { opacity: 1; transform: translateX(2px); }
-.dec .status-cell { display: flex; align-items: center; gap: 6px; }
+.dec .status-cell { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 
 .dec .skeleton { background: linear-gradient(90deg, var(--bg-surface-2) 25%, color-mix(in srgb, var(--bg-surface-2) 55%, var(--border)) 50%, var(--bg-surface-2) 75%); background-size: 200% 100%; animation: dec-shimmer 1.4s infinite; border-radius: var(--r-xs); height: 12px; }
 @keyframes dec-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
