@@ -11,6 +11,11 @@ POSTGRES_TEST_URL ?= postgresql://usdc_ops:usdc_ops@127.0.0.1:54329/usdc_ops_tes
 DB ?= usdc_ops
 PSQL_QUIET := PGOPTIONS='-c client_min_messages=warning' psql -v ON_ERROR_STOP=1 -q
 
+# API ports — kept distinct so local dev and the prod backend never fight over one
+# socket. Override per-process with the PORT env var (config.ts reads it).
+#   local dev (make dev)        -> 3100  (frontend localApiBaseUrl + QuickBooks redirect URI)
+#   prod backend (prod-backend) -> 3101  (cloudflared tunnel api.decimal.finance -> 127.0.0.1:3101)
+
 .SILENT:
 
 .PHONY: infra-up infra-down dev devnet mainnet dev-api dev-frontend tunnel prod-backend prod-backend-devnet prod-backend-mainnet _prod-backend-shared test test-api test-frontend sync-postgres-schema reset-data reset-prod-data backup-db restore-db list-backups help
@@ -43,6 +48,7 @@ dev:
 	  export SOLANA_NETWORK=mainnet; \
 	fi && \
 	export DATABASE_URL="$(POSTGRES_LOCAL_URL)" && \
+	export PORT=3100 && \
 	$(MAKE) sync-postgres-schema DB=usdc_ops_local && \
 	(cd api && npm run prisma:generate >/dev/null) && \
 	typeset -a pids && \
@@ -114,6 +120,7 @@ _prod-backend-shared:
 	fi && \
 	set -a && source api/.env && set +a && \
 	export DATABASE_URL="$(POSTGRES_URL)" && \
+	export PORT=3101 && \
 	if [[ -n "$${FORCE_SOLANA_NETWORK:-}" ]]; then export SOLANA_NETWORK="$${FORCE_SOLANA_NETWORK}"; fi && \
 	if [[ "$${SOLANA_NETWORK:-}" == "devnet" ]]; then export SOLANA_RPC_URL="$${SOLANA_DEVNET_RPC_URL:-https://api.devnet.solana.com}"; fi && \
 	$(MAKE) sync-postgres-schema DB=usdc_ops && \

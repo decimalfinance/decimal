@@ -133,7 +133,7 @@ function buildConfig(): DecimalConfig {
     nodeEnv,
     isProduction,
     host: fileConfig.host ?? '0.0.0.0',
-    port: fileConfig.port ?? 3100,
+    port: Number(process.env.PORT) || fileConfig.port || 3100,
     publicApiUrl: normalizeOptionalUrl(fileConfig.publicApiUrl),
     publicFrontendUrl: normalizeOptionalUrl(fileConfig.publicFrontendUrl),
     solanaNetwork,
