@@ -8,7 +8,8 @@ import { asyncRoute, sendJson, sendList } from '../infra/route-helpers.js';
 import { assertOrganizationAccess, assertOrganizationAdmin } from '../auth/organization-access.js';
 import { QuickBooks } from '../accounting/quickbooks.js';
 import { disconnect, getConnection, getQuickBooksForOrg, saveConnection } from '../accounting/connections.js';
-import { resetSyncForRetry, syncSettledPaymentOrder } from '../accounting/account-sync.js';
+import { resetSyncForRetry, syncSettledPaymentOrder, syncAllCodedForOrg } from '../accounting/account-sync.js';
+import { predictGlCandidates, getCodingInbox, setPaymentOrderGlCoding } from '../accounting/gl-coding.js';
 import { ensureDefaultAccountingSetup } from '../accounting/setup.js';
 import { logger } from '../infra/logger.js';
 
@@ -302,6 +303,51 @@ accountingRouter.get(
   }),
 );
 
+// Sync history — settled payments Decimal has posted to QuickBooks (newest first).
+accountingRouter.get(
+  '/organizations/:organizationId/accounting/quickbooks/synced',
+  asyncRoute(async (req, res) => {
+    const { organizationId } = orgParams.parse(req.params);
+    await assertOrganizationAccess(organizationId, req.auth!);
+    const rows = await prisma.accountingSync.findMany({
+      where: { organizationId, provider: PROVIDER, status: 'synced' },
+      orderBy: { syncedAt: 'desc' },
+      take: 100,
+      include: {
+        paymentOrder: {
+          select: {
+            paymentOrderId: true,
+            amountRaw: true,
+            invoiceNumber: true,
+            counterparty: { select: { displayName: true } },
+            counterpartyWallet: { select: { label: true } },
+            glCoding: { select: { codedExpenseAccountName: true, lines: true } },
+          },
+        },
+      },
+    });
+    sendList(
+      res,
+      rows.map((r) => {
+        const lines = Array.isArray(r.paymentOrder.glCoding?.lines)
+          ? (r.paymentOrder.glCoding!.lines as Array<{ accountName?: string | null }>)
+          : [];
+        const account =
+          lines.length > 1 ? `${lines.length} lines` : r.paymentOrder.glCoding?.codedExpenseAccountName ?? lines[0]?.accountName ?? null;
+        return {
+          paymentOrderId: r.paymentOrderId,
+          vendor: r.paymentOrder.counterparty?.displayName ?? r.paymentOrder.counterpartyWallet.label,
+          amountRaw: r.paymentOrder.amountRaw.toString(),
+          invoiceNumber: r.paymentOrder.invoiceNumber,
+          account,
+          billId: r.externalBillId,
+          syncedAt: r.syncedAt,
+        };
+      }),
+    );
+  }),
+);
+
 // Manually sync one settled payment order (the agent does this automatically).
 // Doubles as the retry action — resets a maxed-out attempt counter first.
 accountingRouter.post(
@@ -319,5 +365,90 @@ accountingRouter.post(
     await resetSyncForRetry(paymentOrderId);
     const outcome = await syncSettledPaymentOrder(paymentOrderId);
     sendJson(res, { outcome });
+  }),
+);
+
+const setGlCodingSchema = z
+  .object({
+    lines: z
+      .array(
+        z.object({
+          accountId: z.string().min(1),
+          accountName: z.string().nullish(),
+          amount: z.number(),
+          description: z.string().nullish(),
+        }),
+      )
+      .optional(),
+    codedExpenseAccountId: z.string().min(1).optional(),
+    codedExpenseAccountName: z.string().nullish(),
+    predictedAccountId: z.string().nullish(),
+    predictedAccountName: z.string().nullish(),
+    predictionSource: z.string().nullish(),
+    confidenceScore: z.number().nullish(),
+    billHeader: z
+      .object({
+        vendorName: z.string().nullish(),
+        invoiceNumber: z.string().nullish(),
+        billDate: z.string().nullish(),
+      })
+      .optional(),
+  })
+  .refine((d) => (d.lines && d.lines.length > 0) || d.codedExpenseAccountId, {
+    message: 'A coding needs at least one account.',
+  });
+
+// Up to 3 candidate expense accounts to offer for a payment (no pre-fill).
+accountingRouter.get(
+  '/organizations/:organizationId/payment-orders/:paymentOrderId/gl-coding/candidates',
+  asyncRoute(async (req, res) => {
+    const { organizationId, paymentOrderId } = orgPaymentParams.parse(req.params);
+    await assertOrganizationAccess(organizationId, req.auth!);
+    const result = await predictGlCandidates(organizationId, paymentOrderId);
+    sendJson(res, result);
+  }),
+);
+
+// The coding inbox: settled payments not yet in QuickBooks, each with its candidates.
+accountingRouter.get(
+  '/organizations/:organizationId/accounting/quickbooks/coding-inbox',
+  asyncRoute(async (req, res) => {
+    const { organizationId } = orgParams.parse(req.params);
+    await assertOrganizationAccess(organizationId, req.auth!);
+    const items = await getCodingInbox(organizationId);
+    sendList(res, items);
+  }),
+);
+
+// Sync every coded payment for the org at once (the "Sync coded" button).
+accountingRouter.post(
+  '/organizations/:organizationId/accounting/quickbooks/sync-coded',
+  asyncRoute(async (req, res) => {
+    const { organizationId } = orgParams.parse(req.params);
+    await assertOrganizationAccess(organizationId, req.auth!);
+    const summary = await syncAllCodedForOrg(organizationId);
+    sendJson(res, summary);
+  }),
+);
+
+// Set (or change) the GL expense account a payment will post to. The sync reads this.
+accountingRouter.post(
+  '/organizations/:organizationId/payment-orders/:paymentOrderId/gl-coding',
+  asyncRoute(async (req, res) => {
+    const { organizationId, paymentOrderId } = orgPaymentParams.parse(req.params);
+    await assertOrganizationAccess(organizationId, req.auth!);
+    const order = await prisma.paymentOrder.findFirst({ where: { paymentOrderId, organizationId }, select: { paymentOrderId: true } });
+    if (!order) {
+      throw new ApiError(404, 'payment_order_not_found', 'Payment order not found.');
+    }
+    const input = setGlCodingSchema.parse(req.body);
+    const coding = await setPaymentOrderGlCoding(organizationId, paymentOrderId, input, req.auth!.userId ?? null);
+    sendJson(res, {
+      codedExpenseAccountId: coding.codedExpenseAccountId,
+      codedExpenseAccountName: coding.codedExpenseAccountName,
+      predictionSource: coding.predictionSource,
+      confidenceScore: coding.confidenceScore ? Number(coding.confidenceScore) : null,
+      wasOverridden: coding.wasOverridden,
+    });
   }),
 );

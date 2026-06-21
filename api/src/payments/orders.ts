@@ -1,5 +1,6 @@
 import type {
   AccountingSync,
+  PaymentOrderGlCoding,
   Counterparty,
   CounterpartyWallet,
   DecimalProposal,
@@ -48,6 +49,7 @@ export type PaymentOrderWithRelations = PaymentOrder & {
   >;
   events?: PaymentOrderEvent[];
   accountingSyncs?: AccountingSync[];
+  glCoding?: PaymentOrderGlCoding | null;
 };
 
 type PaymentOrderClient = typeof prisma | Prisma.TransactionClient;
@@ -488,6 +490,44 @@ export async function clearPaymentOrderReview(args: PaymentActorInput & {
   return getPaymentOrderDetail(args.organizationId, args.paymentOrderId);
 }
 
+/**
+ * When a counterparty wallet becomes trusted (e.g. from the address book), advance any
+ * payment orders parked in needs_review solely because that wallet wasn't trusted yet.
+ * Every review rule is trust-based, so trusting the wallet resolves the block. Each order
+ * moves to `draft` (not auto-paid) so the operator still routes it. Idempotent.
+ */
+export async function advancePendingReviewsForWallet(args: {
+  organizationId: string;
+  counterpartyWalletId: string;
+  actorUserId: string | null;
+}): Promise<number> {
+  const pending = await prisma.paymentOrder.findMany({
+    where: {
+      organizationId: args.organizationId,
+      counterpartyWalletId: args.counterpartyWalletId,
+      state: 'needs_review',
+      transferRequests: { none: {} },
+    },
+    select: { paymentOrderId: true },
+  });
+  let advanced = 0;
+  for (const order of pending) {
+    try {
+      await clearPaymentOrderReview({
+        organizationId: args.organizationId,
+        paymentOrderId: order.paymentOrderId,
+        actorUserId: args.actorUserId,
+        trustCounterpartyWallet: false,
+        reviewNote: 'Wallet trusted from the address book.',
+      });
+      advanced += 1;
+    } catch {
+      // a concurrent change may have already moved it — skip
+    }
+  }
+  return advanced;
+}
+
 export async function cancelPaymentOrder(args: PaymentActorInput & {
   organizationId: string;
   paymentOrderId: string;
@@ -584,6 +624,7 @@ async function buildPaymentOrderReadModel(order: PaymentOrderWithRelations) {
     canCreateSquadsPaymentProposal: !latestSquadsPaymentProposal || isTerminalSquadsPaymentProposal(latestSquadsPaymentProposal),
     spendingLimitExecution: serializeLatestSpendingLimitExecution(order),
     accountingSync: serializeAccountingSync(order.accountingSyncs?.[0] ?? null),
+    glCoding: serializeGlCoding(order.glCoding ?? null),
     events: (order.events ?? []).map(serializePaymentOrderEvent),
     reconciliationDetail,
   };
@@ -600,6 +641,18 @@ function serializeAccountingSync(sync: AccountingSync | null) {
     billPaymentId: sync.externalBillPaymentId,
     error: sync.error,
     syncedAt: sync.syncedAt,
+  };
+}
+
+// The per-payment GL coding (the expense account it will post to) for the FE control.
+function serializeGlCoding(coding: PaymentOrderGlCoding | null) {
+  if (!coding) return null;
+  return {
+    codedExpenseAccountId: coding.codedExpenseAccountId,
+    codedExpenseAccountName: coding.codedExpenseAccountName,
+    predictionSource: coding.predictionSource,
+    confidenceScore: coding.confidenceScore ? Number(coding.confidenceScore) : null,
+    wasOverridden: coding.wasOverridden,
   };
 }
 
@@ -904,6 +957,7 @@ const paymentOrderInclude = {
     take: 1,
     orderBy: { createdAt: 'desc' as const },
   },
+  glCoding: true,
 } satisfies Prisma.PaymentOrderInclude;
 
 const paymentOrderIncludeWithEvents = {
