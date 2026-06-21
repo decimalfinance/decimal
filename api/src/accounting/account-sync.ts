@@ -60,6 +60,7 @@ export async function syncSettledPaymentOrder(paymentOrderId: string): Promise<A
       proposals: { where: { executedSignature: { not: null } }, orderBy: { executedAt: 'desc' }, take: 1 },
       spendingLimitExecutions: { where: { signature: { not: null } }, orderBy: { executedAt: 'desc' }, take: 1 },
       accountingSyncs: { where: { provider: PROVIDER } },
+      glCoding: true,
     },
   });
   if (!order || order.state !== 'settled') {
@@ -93,10 +94,17 @@ export async function syncSettledPaymentOrder(paymentOrderId: string): Promise<A
     return 'skipped';
   }
 
-  const vendorLabel = order.counterparty?.displayName ?? order.counterpartyWallet.label;
+  const billHeader = (order.glCoding?.billHeader ?? {}) as { vendorName?: string | null; invoiceNumber?: string | null; billDate?: string | null };
+  const vendorLabel = billHeader.vendorName?.trim() || order.counterparty?.displayName || order.counterpartyWallet.label;
   const amountUsdc = Number(order.amountRaw) / 10 ** USDC_DECIMALS;
   const signature = order.proposals[0]?.executedSignature ?? order.spendingLimitExecutions[0]?.signature ?? null;
   const requestId = `decimal_${paymentOrderId}`;
+  const rawLines = order.glCoding?.lines;
+  const codedLines = Array.isArray(rawLines)
+    ? (rawLines as Array<{ accountId?: unknown; amount?: unknown; description?: unknown }>)
+        .filter((l) => l?.accountId)
+        .map((l) => ({ accountId: String(l.accountId), amount: Number(l.amount) || 0, description: (l.description as string | null) ?? null }))
+    : undefined;
 
   try {
     const result = await syncPaymentToQuickBooks(
@@ -108,10 +116,14 @@ export async function syncSettledPaymentOrder(paymentOrderId: string): Promise<A
         invoiceNumber: order.invoiceNumber,
         reference: order.externalReference,
         txSignature: signature,
+        codedLines: codedLines && codedLines.length > 0 ? codedLines : undefined,
+        docNumber: billHeader.invoiceNumber ?? order.invoiceNumber,
+        txnDate: billHeader.billDate ?? null,
       },
       {
         clearingAccountId: map.clearingAccountId,
-        defaultExpenseAccountId: map.defaultExpenseAccountId,
+        // per-payment coded account if the operator set one, else the org default
+        defaultExpenseAccountId: order.glCoding?.codedExpenseAccountId ?? map.defaultExpenseAccountId,
         apAccountId: map.apAccountId,
       },
     );
@@ -159,16 +171,15 @@ export async function sweepUnsyncedSettledOrders(): Promise<AccountingSweepSumma
     return summary;
   }
 
+  // Retry-only: re-attempt manual syncs that errored (not yet exhausted). New syncs
+  // are initiated manually from the coding inbox after the operator codes + confirms —
+  // we never auto-post an uncoded payment to a catch-all account.
   const orders = await prisma.paymentOrder.findMany({
     where: {
       organizationId: { in: connected.map((c) => c.organizationId) },
       state: 'settled',
-      // exclude already-synced and error-exhausted orders
       accountingSyncs: {
-        none: {
-          provider: PROVIDER,
-          OR: [{ status: 'synced' }, { status: 'error', attempts: { gte: MAX_ATTEMPTS } }],
-        },
+        some: { provider: PROVIDER, status: 'error', attempts: { lt: MAX_ATTEMPTS } },
       },
     },
     orderBy: { updatedAt: 'asc' },
@@ -176,6 +187,26 @@ export async function sweepUnsyncedSettledOrders(): Promise<AccountingSweepSumma
     select: { paymentOrderId: true },
   });
 
+  for (const order of orders) {
+    const outcome = await syncSettledPaymentOrder(order.paymentOrderId);
+    summary[outcome] += 1;
+  }
+  return summary;
+}
+
+/** Sync every coded, settled, not-yet-synced payment for an org — the "Sync coded" button. */
+export async function syncAllCodedForOrg(organizationId: string): Promise<AccountingSweepSummary> {
+  const summary: AccountingSweepSummary = { synced: 0, skipped: 0, error: 0 };
+  const orders = await prisma.paymentOrder.findMany({
+    where: {
+      organizationId,
+      state: 'settled',
+      glCoding: { isNot: null },
+      accountingSyncs: { none: { provider: PROVIDER, status: 'synced' } },
+    },
+    orderBy: { createdAt: 'asc' },
+    select: { paymentOrderId: true },
+  });
   for (const order of orders) {
     const outcome = await syncSettledPaymentOrder(order.paymentOrderId);
     summary[outcome] += 1;

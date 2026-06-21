@@ -19,6 +19,13 @@ export interface SyncablePayment {
   invoiceNumber?: string | null;
   reference?: string | null;
   txSignature?: string | null;
+  /** Coded lines (account + amount + description) summing to amountUsdc. One Bill line
+   *  each; falls back to a single line on the default expense account when absent. */
+  codedLines?: Array<{ accountId: string; amount: number; description?: string | null }>;
+  /** Operator-set Bill DocNumber (QBO caps it at 21 chars). */
+  docNumber?: string | null;
+  /** Operator-set Bill TxnDate (YYYY-MM-DD). Defaults to QBO's "today" when absent. */
+  txnDate?: string | null;
 }
 
 export interface SyncResult {
@@ -54,21 +61,38 @@ export async function syncPaymentToQuickBooks(
 
   const reference = payment.invoiceNumber ?? payment.reference ?? null;
 
+  // One Bill line per coded line (account + amount + description); otherwise a single
+  // line on the default expense account. All amounts at 2dp.
+  const billLines =
+    payment.codedLines && payment.codedLines.length > 0
+      ? payment.codedLines.map((l) => ({
+          Amount: Math.round((Number(l.amount) || 0) * 100) / 100,
+          DetailType: 'AccountBasedExpenseLineDetail',
+          ...(l.description ? { Description: String(l.description).slice(0, 4000) } : {}),
+          AccountBasedExpenseLineDetail: { AccountRef: { value: l.accountId } },
+        }))
+      : [
+          {
+            Amount: amount,
+            DetailType: 'AccountBasedExpenseLineDetail',
+            AccountBasedExpenseLineDetail: { AccountRef: { value: accounts.defaultExpenseAccountId } },
+          },
+        ];
+  const billTotal = Math.round(billLines.reduce((sum, l) => sum + Number(l.Amount), 0) * 100) / 100;
+
   // Bill (idempotent via requestid). APAccountRef optional — QBO defaults if omitted.
   const billBody: Record<string, unknown> = {
     VendorRef: { value: vendor.Id },
     PrivateNote: `Decimal ${payment.id}${reference ? ` | ${reference}` : ''}`,
-    Line: [
-      {
-        Amount: amount,
-        DetailType: 'AccountBasedExpenseLineDetail',
-        AccountBasedExpenseLineDetail: { AccountRef: { value: accounts.defaultExpenseAccountId } },
-      },
-    ],
+    Line: billLines,
   };
   if (accounts.apAccountId) {
     billBody.APAccountRef = { value: accounts.apAccountId };
   }
+  // Operator-set Bill header. DocNumber caps at 21 chars in QBO; TxnDate is YYYY-MM-DD.
+  const docNumber = payment.docNumber?.trim() || payment.invoiceNumber?.trim() || null;
+  if (docNumber) billBody.DocNumber = docNumber.slice(0, 21);
+  if (payment.txnDate?.trim()) billBody.TxnDate = payment.txnDate.trim();
 
   const bill = (await qb.createBill(billBody, `${payment.id}_bill`)).Bill;
 
@@ -78,10 +102,10 @@ export async function syncPaymentToQuickBooks(
       {
         VendorRef: { value: vendor.Id },
         PayType: 'Check',
-        TotalAmt: amount,
+        TotalAmt: billTotal,
         CheckPayment: { BankAccountRef: { value: accounts.clearingAccountId } },
         PrivateNote: `USDC settlement${payment.txSignature ? ` | sig ${payment.txSignature}` : ''}`,
-        Line: [{ Amount: amount, LinkedTxn: [{ TxnId: bill.Id, TxnType: 'Bill' }] }],
+        Line: [{ Amount: billTotal, LinkedTxn: [{ TxnId: bill.Id, TxnType: 'Bill' }] }],
       },
       `${payment.id}_pmt`,
     )
