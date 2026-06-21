@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { Keypair, PublicKey, SystemProgram, Transaction } from '@solana/web3.js';
+import { Keypair, PublicKey, SystemProgram, Transaction, VersionedTransaction } from '@solana/web3.js';
 import { config } from '../config.js';
 import { logger } from '../infra/logger.js';
 import { getSolanaConnection, waitForSignatureVisible } from '../solana.js';
@@ -157,4 +157,35 @@ function loadFunderKeypair() {
   }
   funderCache = Keypair.fromSecretKey(Uint8Array.from(parsed as number[]));
   return funderCache;
+}
+
+// Fee-payer sponsorship: the devnet funder wallet doubles as the gas sponsor. When
+// configured, agent transactions set this wallet as the fee payer (and rent payer),
+// and it co-signs before broadcast — so member/agent wallets never need SOL. On
+// mainnet (no funder) this is null and the signer pays its own fee, as before.
+export function getFeePayerKeypair(): Keypair | null {
+  if (!config.devnetFunderKeypairPath) return null;
+  try {
+    return loadFunderKeypair();
+  } catch (error) {
+    logger.warn('fee_payer.load_failed', { error: error instanceof Error ? error.message : String(error) });
+    return null;
+  }
+}
+
+export function feePayerPublicKey(): PublicKey | null {
+  return getFeePayerKeypair()?.publicKey ?? null;
+}
+
+export function feePayerAddress(): string | null {
+  return feePayerPublicKey()?.toBase58() ?? null;
+}
+
+/** Add the fee payer's signature to an already-(agent-)signed transaction, if configured. */
+export function cosignWithFeePayer(signedTransactionBase64: string): string {
+  const keypair = getFeePayerKeypair();
+  if (!keypair) return signedTransactionBase64;
+  const transaction = VersionedTransaction.deserialize(Buffer.from(signedTransactionBase64, 'base64'));
+  transaction.sign([keypair]); // sets the fee-payer slot (index 0); preserves the agent's signature
+  return Buffer.from(transaction.serialize()).toString('base64');
 }

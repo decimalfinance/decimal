@@ -18,6 +18,7 @@ import {
 } from '../solana.js';
 import { config } from '../config.js';
 import { signPrivySolanaTransaction } from '../wallets/personal.js';
+import { feePayerAddress, feePayerPublicKey, cosignWithFeePayer } from '../wallets/devnet-funding.js';
 import { SQUADS_SOURCE, isRecordLike } from '../squads/shared.js';
 
 type SpendingLimitExecutionRuntime = {
@@ -292,7 +293,7 @@ export async function executePaymentOrderWithSpendingLimit(
     ?? deriveUsdcAtaForWallet(paymentOrder.counterpartyWallet.walletAddress);
   const instructions = [
     buildDestinationAtaCreateInstruction({
-      payer: policy.agentWallet.walletAddress,
+      payer: feePayerAddress() ?? policy.agentWallet.walletAddress,
       destinationWallet: paymentOrder.counterpartyWallet.walletAddress,
       destinationTokenAccount,
     }),
@@ -312,7 +313,7 @@ export async function executePaymentOrderWithSpendingLimit(
   ];
   const transaction = new VersionedTransaction(
     new TransactionMessage({
-      payerKey: agentPublicKey,
+      payerKey: feePayerPublicKey() ?? agentPublicKey,
       recentBlockhash: latestBlockhash.blockhash,
       instructions,
     }).compileToV0Message(),
@@ -323,7 +324,9 @@ export async function executePaymentOrderWithSpendingLimit(
       providerWalletId: policy.agentWallet.providerWalletId,
       serializedTransactionBase64: Buffer.from(transaction.serialize()).toString('base64'),
     });
-    sentSignature = await runtime.sendRawTransaction(Buffer.from(signed.signedTransactionBase64, 'base64'));
+    // Add the fee payer's signature (no-op if no sponsor is configured), then broadcast.
+    const broadcastTransaction = cosignWithFeePayer(signed.signedTransactionBase64);
+    sentSignature = await runtime.sendRawTransaction(Buffer.from(broadcastTransaction, 'base64'));
   } catch (error) {
     // Pre-send failure: no money moved, so release the claim and let the order be retried.
     await prisma.spendingLimitExecution
