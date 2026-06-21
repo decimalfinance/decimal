@@ -1156,3 +1156,72 @@ DROP TRIGGER IF EXISTS trg_accounting_syncs_updated_at ON accounting_syncs;
 CREATE TRIGGER trg_accounting_syncs_updated_at
 BEFORE UPDATE ON accounting_syncs
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- Per-payment GL coding: the expense account a settled payment posts to, learned
+-- from the vendor's prior codings. 1:1 with payment_orders. Doubles as the decision
+-- log (predicted vs confirmed account, source, confidence, whether the human overrode).
+CREATE TABLE IF NOT EXISTS payment_order_gl_codings
+(
+  payment_order_gl_coding_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
+  payment_order_id UUID NOT NULL REFERENCES payment_orders(payment_order_id) ON DELETE CASCADE,
+  provider TEXT NOT NULL DEFAULT 'quickbooks',
+  coded_expense_account_id TEXT NOT NULL,
+  coded_expense_account_name TEXT,
+  -- coded lines: [{ accountId, accountName, amount, description }], summing to the
+  -- payment amount. The single account above mirrors lines[0] for display/back-compat.
+  lines JSONB NOT NULL DEFAULT '[]'::jsonb,
+  -- operator overrides for the Bill header: { vendorName, invoiceNumber, billDate }.
+  -- The sync falls back to the payment's vendor/invoice/date when a field is absent.
+  bill_header JSONB NOT NULL DEFAULT '{}'::jsonb,
+  predicted_account_id TEXT,
+  predicted_account_name TEXT,
+  prediction_source TEXT,            -- 'vendor_history' | 'default' | 'none'
+  confidence_score NUMERIC,
+  was_overridden BOOLEAN NOT NULL DEFAULT FALSE,
+  accepted_by_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
+  accepted_at TIMESTAMPTZ,
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (payment_order_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_payment_order_gl_codings_org_created
+  ON payment_order_gl_codings(organization_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_payment_order_gl_codings_payment_order
+  ON payment_order_gl_codings(payment_order_id);
+
+DROP TRIGGER IF EXISTS trg_payment_order_gl_codings_updated_at ON payment_order_gl_codings;
+CREATE TRIGGER trg_payment_order_gl_codings_updated_at
+BEFORE UPDATE ON payment_order_gl_codings
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- Phase 2 stub: promoted per-vendor coding rules. The consolidation job + confidence
+-- gates will populate these from payment_order_gl_codings; not yet read/written by the app.
+CREATE TABLE IF NOT EXISTS coding_rules
+(
+  coding_rule_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
+  provider TEXT NOT NULL DEFAULT 'quickbooks',
+  match_vendor_label TEXT NOT NULL,
+  coded_expense_account_id TEXT NOT NULL,
+  coded_expense_account_name TEXT,
+  support_count INTEGER NOT NULL DEFAULT 0,
+  agreement_rate NUMERIC,
+  status TEXT NOT NULL DEFAULT 'shadow',   -- 'shadow' | 'active' | 'retired'
+  source_decision_ids UUID[] NOT NULL DEFAULT '{}',
+  valid_from TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  valid_to TIMESTAMPTZ,
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_coding_rules_org_vendor
+  ON coding_rules(organization_id, match_vendor_label) WHERE valid_to IS NULL;
+
+DROP TRIGGER IF EXISTS trg_coding_rules_updated_at ON coding_rules;
+CREATE TRIGGER trg_coding_rules_updated_at
+BEFORE UPDATE ON coding_rules
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();

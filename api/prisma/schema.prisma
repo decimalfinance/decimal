@@ -39,6 +39,8 @@ model Organization {
   accountingAccountMaps AccountingAccountMap[]
   accountingVendorMaps AccountingVendorMap[]
   accountingSyncs AccountingSync[]
+  paymentOrderGlCodings PaymentOrderGlCoding[]
+  codingRules CodingRule[]
 
   @@map("organizations")
 }
@@ -132,6 +134,55 @@ model AccountingSync {
   @@map("accounting_syncs")
 }
 
+model PaymentOrderGlCoding {
+  paymentOrderGlCodingId  String       @id @default(dbgenerated("gen_random_uuid()")) @map("payment_order_gl_coding_id") @db.Uuid
+  organizationId          String       @map("organization_id") @db.Uuid
+  paymentOrderId          String       @unique @map("payment_order_id") @db.Uuid
+  provider                String       @default("quickbooks")
+  codedExpenseAccountId   String       @map("coded_expense_account_id")
+  codedExpenseAccountName String?      @map("coded_expense_account_name")
+  lines                   Json         @default("[]")
+  billHeader              Json         @default("{}") @map("bill_header")
+  predictedAccountId      String?      @map("predicted_account_id")
+  predictedAccountName    String?      @map("predicted_account_name")
+  predictionSource        String?      @map("prediction_source")
+  confidenceScore         Decimal?     @map("confidence_score") @db.Decimal
+  wasOverridden           Boolean      @default(false) @map("was_overridden")
+  acceptedByUserId        String?      @map("accepted_by_user_id") @db.Uuid
+  acceptedAt              DateTime?    @map("accepted_at") @db.Timestamptz(6)
+  metadataJson            Json         @default("{}") @map("metadata_json")
+  createdAt               DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization            Organization @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
+  paymentOrder            PaymentOrder @relation(fields: [paymentOrderId], references: [paymentOrderId], onDelete: Cascade)
+  acceptedByUser          User?        @relation(fields: [acceptedByUserId], references: [userId], onDelete: SetNull)
+
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@map("payment_order_gl_codings")
+}
+
+model CodingRule {
+  codingRuleId            String       @id @default(dbgenerated("gen_random_uuid()")) @map("coding_rule_id") @db.Uuid
+  organizationId          String       @map("organization_id") @db.Uuid
+  provider                String       @default("quickbooks")
+  matchVendorLabel        String       @map("match_vendor_label")
+  codedExpenseAccountId   String       @map("coded_expense_account_id")
+  codedExpenseAccountName String?      @map("coded_expense_account_name")
+  supportCount            Int          @default(0) @map("support_count")
+  agreementRate           Decimal?     @map("agreement_rate") @db.Decimal
+  status                  String       @default("shadow")
+  sourceDecisionIds       String[]     @default([]) @map("source_decision_ids") @db.Uuid
+  validFrom               DateTime     @default(now()) @map("valid_from") @db.Timestamptz(6)
+  validTo                 DateTime?    @map("valid_to") @db.Timestamptz(6)
+  metadataJson            Json         @default("{}") @map("metadata_json")
+  createdAt               DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization            Organization @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
+
+  @@index([organizationId, matchVendorLabel])
+  @@map("coding_rules")
+}
+
 model User {
   userId                     String                   @id @default(dbgenerated("gen_random_uuid()")) @map("user_id") @db.Uuid
   email                      String                   @unique
@@ -152,6 +203,7 @@ model User {
   transferRequestNotes       TransferRequestNote[]
   executionRecords           ExecutionRecord[]        @relation("ExecutionRecordExecutorUser")
   paymentOrdersCreated       PaymentOrder[]           @relation("PaymentOrderCreatedByUser")
+  acceptedGlCodings          PaymentOrderGlCoding[]
   decimalProposalsCreated    DecimalProposal[]        @relation("DecimalProposalCreatedByUser")
   collectionRequestsCreated  CollectionRequest[]      @relation("CollectionRequestCreatedByUser")
   collectionRunsCreated      CollectionRun[]          @relation("CollectionRunCreatedByUser")
@@ -500,6 +552,7 @@ model PaymentOrder {
   proposals                 DecimalProposal[]
   spendingLimitExecutions   SpendingLimitExecution[]
   accountingSyncs           AccountingSync[]
+  glCoding                  PaymentOrderGlCoding?
 
   @@index([organizationId, state, createdAt(sort: Desc)])
   @@index([inputBatchId, createdAt(sort: Desc)])
