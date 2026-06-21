@@ -33,11 +33,23 @@ export async function syncPaymentToQuickBooks(
   payment: SyncablePayment,
   accounts: AccountMap,
 ): Promise<SyncResult> {
+  // QBO holds money at 2-decimal (cent) precision and stores DisplayName trimmed,
+  // control-char-free, and <=100 chars. Normalize once so the Bill, the
+  // BillPayment, and any re-sync vendor lookup all agree with what QBO records —
+  // otherwise a 6-decimal USDC amount drifts on rounding, or a name QBO would
+  // reject/trim fails the sync or creates a near-duplicate vendor.
+  const amount = Math.round(payment.amountUsdc * 100) / 100;
+  const vendorLabel = Array.from(payment.vendorLabel, (c) => (c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127 ? ' ' : c))
+    .join('')
+    .replace(/ {2,}/g, ' ')
+    .trim()
+    .slice(0, 100);
+
   // Vendor: find or create by DisplayName (no upsert in QBO — query then create).
-  let vendor = (await qb.query(`SELECT * FROM Vendor WHERE DisplayName = '${qboLiteral(payment.vendorLabel)}'`))
+  let vendor = (await qb.query(`SELECT * FROM Vendor WHERE DisplayName = '${qboLiteral(vendorLabel)}'`))
     .QueryResponse?.Vendor?.[0];
   if (!vendor) {
-    vendor = (await qb.createVendor({ DisplayName: payment.vendorLabel })).Vendor;
+    vendor = (await qb.createVendor({ DisplayName: vendorLabel })).Vendor;
   }
 
   const reference = payment.invoiceNumber ?? payment.reference ?? null;
@@ -48,7 +60,7 @@ export async function syncPaymentToQuickBooks(
     PrivateNote: `Decimal ${payment.id}${reference ? ` | ${reference}` : ''}`,
     Line: [
       {
-        Amount: payment.amountUsdc,
+        Amount: amount,
         DetailType: 'AccountBasedExpenseLineDetail',
         AccountBasedExpenseLineDetail: { AccountRef: { value: accounts.defaultExpenseAccountId } },
       },
@@ -66,10 +78,10 @@ export async function syncPaymentToQuickBooks(
       {
         VendorRef: { value: vendor.Id },
         PayType: 'Check',
-        TotalAmt: payment.amountUsdc,
+        TotalAmt: amount,
         CheckPayment: { BankAccountRef: { value: accounts.clearingAccountId } },
         PrivateNote: `USDC settlement${payment.txSignature ? ` | sig ${payment.txSignature}` : ''}`,
-        Line: [{ Amount: payment.amountUsdc, LinkedTxn: [{ TxnId: bill.Id, TxnType: 'Bill' }] }],
+        Line: [{ Amount: amount, LinkedTxn: [{ TxnId: bill.Id, TxnType: 'Bill' }] }],
       },
       `${payment.id}_pmt`,
     )
