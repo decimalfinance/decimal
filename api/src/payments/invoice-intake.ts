@@ -4,6 +4,7 @@ import { prisma } from '../infra/prisma.js';
 import { deriveUsdcAtaForWallet, SOLANA_CHAIN, USDC_ASSET, USDC_DECIMALS } from '../solana.js';
 import { createPaymentOrder } from './orders.js';
 import { extractPaymentRowsFromDocument, type ExtractedRow } from './document-extract.js';
+import { suggestOcrCodings } from '../accounting/ocr-coding.js';
 import { INVOICE_IMPORT_REVIEW_NOTE } from '../counterparty-wallets.js';
 
 const NEW_COUNTERPARTY_REVIEW_THRESHOLD_RAW = 1_000n * 10n ** BigInt(USDC_DECIMALS);
@@ -66,6 +67,16 @@ export async function uploadInvoiceToPaymentOrders(args: {
   if (extraction.rows.length === 0) {
     throw new Error('No payable invoice rows were extracted from this document.');
   }
+
+  // OCR-driven coding: map each invoice's "what it's for" to an expense account in the
+  // org's chart (no-op when QuickBooks isn't connected). Surfaced later as a candidate.
+  const ocrCodings = await suggestOcrCodings(
+    args.organizationId,
+    extraction.rows.map((r) => ({
+      categoryHint: r.source_invoice?.categoryHint ?? null,
+      lineItems: r.source_invoice?.lineItems ?? [],
+    })),
+  );
 
   const created = [];
   const skipped: InvoiceIntakeSkippedRow[] = [];
@@ -133,6 +144,7 @@ export async function uploadInvoiceToPaymentOrders(args: {
         dueAt: parseOptionalDate(row.due_date),
         metadataJson: {
           inputSource: 'invoice_upload',
+          ocrCoding: ocrCodings[index] ?? null,
           agent: {
             name: 'ap-intake',
             version: 'api-native-v1',

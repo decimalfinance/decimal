@@ -56,6 +56,7 @@ Return ONLY a JSON object with this exact shape, nothing else:
           "total": number or null
         }
       ],
+      "categoryHint": "string or null",
       "confidence": {
         "vendor": number,
         "amount": number,
@@ -71,6 +72,7 @@ Rules copied from the AP intake agent:
 - currency: use whatever 3-letter ISO code the document explicitly states (USD, EUR, GBP, INR, SGD, JPY, AUD, CAD, CHF, HKD, AED, etc.). If no currency is mentioned anywhere, default to USD.
 - Optional fields: use null when missing, not empty strings.
 - lineItems: empty array [] if not itemized.
+- categoryHint: a short 2-5 word plain-English summary of what this invoice is FOR — the spend category (e.g. "Inbound freight", "Monthly phone service", "Office supplies", "Cloud hosting", "Legal services"). Derive it from the line items and invoice context. Use null only if truly indeterminable.
 - confidence: three keys (vendor, amount, overall), each 0.0 to 1.0.
 - walletAddress: only emit a Solana wallet address if it is printed on the invoice itself, in a "Remit to", "Pay to wallet", "Solana address", or similar field. Never guess.
 - Solana wallet addresses are base58 public keys. Valid wallet characters exclude 0, O, I, and lowercase l.
@@ -104,6 +106,7 @@ const ExtractedInvoiceSchema = z.object({
       total: z.number().nullable(),
     }),
   ),
+  categoryHint: z.string().nullable().default(null),
   confidence: z.object({
     vendor: z.number(),
     amount: z.number(),
