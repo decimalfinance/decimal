@@ -195,6 +195,46 @@ export interface QuickBooksAccount {
   classification: string;
 }
 
+export interface GlCodingPrediction {
+  codedExpenseAccountId: string | null;
+  codedExpenseAccountName: string | null;
+  predictionSource: 'vendor_history' | 'default' | 'none';
+  confidenceScore: number | null;
+  supportCount: number;
+}
+
+export interface GlCandidate {
+  accountId: string;
+  accountName: string | null;
+  reason: 'vendor_history' | 'ocr' | 'frequent' | 'default';
+  count?: number;
+  weight?: number;
+  rationale?: string | null;
+}
+
+export interface CodedLine {
+  accountId: string;
+  accountName?: string | null;
+  amount: number;
+  description?: string | null;
+}
+
+export interface CodingInboxItem {
+  paymentOrderId: string;
+  vendorLabel: string | null;
+  amountUsdc: number;
+  invoiceNumber: string | null;
+  createdAt: string;
+  coding: {
+    accountId: string;
+    accountName: string | null;
+    lines: CodedLine[];
+    billHeader?: { vendorName?: string | null; invoiceNumber?: string | null; billDate?: string | null };
+  } | null;
+  candidates: GlCandidate[];
+  syncStatus: string | null;
+}
+
 export interface FailedSync {
   paymentOrderId: string;
   vendor: string;
@@ -202,6 +242,16 @@ export interface FailedSync {
   invoiceNumber: string | null;
   error: string | null;
   attempts: number;
+}
+
+export interface SyncedPayment {
+  paymentOrderId: string;
+  vendor: string;
+  amountRaw: string;
+  invoiceNumber: string | null;
+  account: string | null;
+  billId: string | null;
+  syncedAt: string | null;
 }
 
 export interface AccountMapInput {
@@ -292,6 +342,11 @@ export const api = {
       `/organizations/${organizationId}/accounting/quickbooks/failed-syncs`,
     );
   },
+  listSyncedPayments(organizationId: string) {
+    return request<{ items: SyncedPayment[] }>(
+      `/organizations/${organizationId}/accounting/quickbooks/synced`,
+    );
+  },
   getQuickBooksConnectUrl(organizationId: string) {
     const q = new URLSearchParams({ frontendOrigin: window.location.origin }).toString();
     return request<{ authorizeUrl: string }>(
@@ -316,6 +371,41 @@ export const api = {
     return request<{ outcome: string }>(
       `/organizations/${organizationId}/payment-orders/${paymentOrderId}/accounting/sync`,
       { method: 'POST' },
+    );
+  },
+  listCodingInbox(organizationId: string) {
+    return request<{ items: CodingInboxItem[] }>(
+      `/organizations/${organizationId}/accounting/quickbooks/coding-inbox`,
+    );
+  },
+  getGlCandidates(organizationId: string, paymentOrderId: string) {
+    return request<{ candidates: GlCandidate[]; vendorLabel: string | null }>(
+      `/organizations/${organizationId}/payment-orders/${paymentOrderId}/gl-coding/candidates`,
+    );
+  },
+  syncCodedPayments(organizationId: string) {
+    return request<{ synced: number; skipped: number; error: number }>(
+      `/organizations/${organizationId}/accounting/quickbooks/sync-coded`,
+      { method: 'POST' },
+    );
+  },
+  setPaymentOrderGlCoding(
+    organizationId: string,
+    paymentOrderId: string,
+    body: {
+      lines?: CodedLine[];
+      codedExpenseAccountId?: string;
+      codedExpenseAccountName?: string | null;
+      predictedAccountId?: string | null;
+      predictedAccountName?: string | null;
+      predictionSource?: string | null;
+      confidenceScore?: number | null;
+      billHeader?: { vendorName?: string | null; invoiceNumber?: string | null; billDate?: string | null };
+    },
+  ) {
+    return request<{ codedExpenseAccountId: string; codedExpenseAccountName: string | null; predictionSource: string | null; confidenceScore: number | null; wasOverridden: boolean }>(
+      `/organizations/${organizationId}/payment-orders/${paymentOrderId}/gl-coding`,
+      { method: 'POST', body: JSON.stringify(body) },
     );
   },
   listOrganizationMembers(organizationId: string) {

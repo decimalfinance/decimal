@@ -1031,6 +1031,13 @@ export type PaymentOrder = {
     error: string | null;
     syncedAt: string | null;
   } | null;
+  glCoding: {
+    codedExpenseAccountId: string;
+    codedExpenseAccountName: string | null;
+    predictionSource: string | null;
+    confidenceScore: number | null;
+    wasOverridden: boolean;
+  } | null;
   events: PaymentOrderEvent[];
   reconciliationDetail: ReconciliationDetail | null;
 };
