@@ -74,6 +74,12 @@ export function buildSquadsPaymentLifecycle(args: {
    * verifying state. Defaults to false.
    */
   showBlockedReviewState?: boolean;
+  /**
+   * The Squads proposal has reached its approval threshold (ready to execute) while the
+   * product state is still `proposed`. Threshold-met lives on the proposal, not the
+   * product state, so pass it in to advance the lifecycle from Signing to Send.
+   */
+  approvalThresholdMet?: boolean;
 }): LifecycleStage[] {
   const s = args.derivedState;
   const settlementVerification = args.settlementVerification;
@@ -84,8 +90,11 @@ export function buildSquadsPaymentLifecycle(args: {
     s === 'exception' || s === 'partially_settled' || verifyMismatch;
 
   const proposedDone = PROPOSED_DONE_STATES.has(s);
-  const approvalDone = APPROVAL_DONE_STATES.has(s);
   const executionDone = EXECUTION_DONE_STATES.has(s);
+  // A threshold-met proposal is still in `proposed` state, so the signing step is
+  // "done" by the proposal's approval, not by the product state — fold that in so the
+  // stepper shows Signing complete + Send current the moment the threshold is met.
+  const approvalDone = APPROVAL_DONE_STATES.has(s) || (proposedDone && !executionDone && args.approvalThresholdMet === true);
 
   const agentFlagged = AGENT_FLAGGED_STATES.has(s);
   const isReadyToPropose = READY_TO_PROPOSE_STATES.has(s);

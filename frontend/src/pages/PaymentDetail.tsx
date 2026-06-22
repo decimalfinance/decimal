@@ -50,11 +50,15 @@ function buildLifecycle(
   settlementVerification: ReturnType<typeof readSettlementVerificationStatus>,
 ): LifecycleStage[] {
   const s = order.productLifecycle?.productState ?? order.derivedState;
+  // The proposal can be approved (threshold met, ready to send) while the product state
+  // is still `proposed` — same signal the "Threshold met" card uses.
+  const proposalStatus = order.squadsLifecycle?.proposalStatus ?? order.squadsPaymentProposal?.status ?? null;
   const stages = buildSquadsPaymentLifecycle({
     derivedState: s,
     settlementVerification,
     requestSub: formatRelativeTime(order.createdAt),
     settledSub: 'Matched',
+    approvalThresholdMet: proposalStatus === 'approved',
   });
   // Once a settled payment has a QuickBooks sync, the books step belongs in the
   // lifecycle — append it so it reads as the natural stage after Settled.

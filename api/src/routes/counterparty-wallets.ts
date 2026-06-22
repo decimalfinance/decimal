@@ -10,6 +10,7 @@ import {
   updateCounterparty,
   updateCounterpartyWallet,
 } from '../counterparty-wallets.js';
+import { advancePendingReviewsForWallet } from '../payments/orders.js';
 import { assertOrganizationAccess, assertOrganizationAdmin } from '../auth/organization-access.js';
 import { asyncRoute, listQuerySchema, sendCreated, sendList, sendJson, unwrapItems } from '../infra/route-helpers.js';
 
@@ -179,20 +180,32 @@ counterpartyWalletsRouter.patch('/organizations/:organizationId/counterparty-wal
   const { organizationId, counterpartyWalletId } = counterpartyWalletParamsSchema.parse(req.params);
   await assertOrganizationAdmin(organizationId, req.auth!);
   const input = updateCounterpartyWalletSchema.parse(req.body);
-  sendJson(res, await updateCounterpartyWallet(organizationId, counterpartyWalletId, {
+  const updated = await updateCounterpartyWallet(organizationId, counterpartyWalletId, {
     ...input,
     walletType: input.destinationType ?? input.walletType,
-  }));
+  });
+  // Trusting a wallet here should un-stick any payment parked in review only because
+  // the wallet wasn't trusted yet — advance them to draft (not auto-paid).
+  if (input.trustState === 'trusted') {
+    await advancePendingReviewsForWallet({ organizationId, counterpartyWalletId, actorUserId: req.auth!.userId ?? null });
+  }
+  sendJson(res, updated);
 }));
 
 counterpartyWalletsRouter.patch('/organizations/:organizationId/destinations/:counterpartyWalletId', asyncRoute(async (req, res) => {
   const { organizationId, counterpartyWalletId } = counterpartyWalletParamsSchema.parse(req.params);
   await assertOrganizationAdmin(organizationId, req.auth!);
   const input = updateCounterpartyWalletSchema.parse(req.body);
-  sendJson(res, await updateCounterpartyWallet(organizationId, counterpartyWalletId, {
+  const updated = await updateCounterpartyWallet(organizationId, counterpartyWalletId, {
     ...input,
     walletType: input.destinationType ?? input.walletType,
-  }));
+  });
+  // Trusting a wallet here should un-stick any payment parked in review only because
+  // the wallet wasn't trusted yet — advance them to draft (not auto-paid).
+  if (input.trustState === 'trusted') {
+    await advancePendingReviewsForWallet({ organizationId, counterpartyWalletId, actorUserId: req.auth!.userId ?? null });
+  }
+  sendJson(res, updated);
 }));
 
 counterpartyWalletsRouter.delete('/organizations/:organizationId/counterparty-wallets/:counterpartyWalletId', asyncRoute(async (req, res) => {
