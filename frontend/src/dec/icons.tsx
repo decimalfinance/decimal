@@ -53,11 +53,6 @@ export const Ico = {
       <path d="M2.5 9.5h19" />
     </I>
   ),
-  collections: (p: IcoProps = {}) => (
-    <I {...p}>
-      <path d="M12 3v18M5 8l7-5 7 5M5 8v8l7 5 7-5V8" />
-    </I>
-  ),
   treasury: (p: IcoProps = {}) => (
     <I {...p}>
       <path d="M3 9.5 12 4l9 5.5M5 10v8M19 10v8M9 10v8M15 10v8M3.5 20.5h17" />
@@ -132,12 +127,6 @@ export const Ico = {
       <path d="M12 4v12M7 11l5 5 5-5M5 20h14" />
     </I>
   ),
-  csv: (p: IcoProps = {}) => (
-    <I {...p}>
-      <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6Z" />
-      <path d="M14 3v6h6" />
-    </I>
-  ),
   external: (p: IcoProps = {}) => (
     <I {...p}>
       <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
@@ -157,6 +146,13 @@ export const Ico = {
   moon: (p: IcoProps = {}) => (
     <I {...p}>
       <path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z" />
+    </I>
+  ),
+  info: (p: IcoProps = {}) => (
+    <I {...p}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 11v5" />
+      <path d="M12 8h.01" />
     </I>
   ),
   doc: (p: IcoProps = {}) => (
@@ -199,12 +195,6 @@ export const Ico = {
       <path d="M6 19.5v1M18 19.5v1" />
     </I>
   ),
-  users: (p: IcoProps = {}) => (
-    <I {...p}>
-      <circle cx="9" cy="8" r="3.2" />
-      <path d="M3.5 19a5.5 5.5 0 0 1 11 0M16 6.2a3 3 0 0 1 0 5.6M17.5 19a5 5 0 0 0-2-4" />
-    </I>
-  ),
   mail: (p: IcoProps = {}) => (
     <I {...p}>
       <rect x="3" y="5" width="18" height="14" rx="2" />
@@ -227,6 +217,33 @@ export const Ico = {
     <I {...p}>
       <circle cx="8" cy="14" r="4" />
       <path d="m11 11 8-8M16 6l2 2M14 8l1.5 1.5" />
+    </I>
+  ),
+  // AI assistant sparkle (8-ray burst) — the flow builder's assistant glyph.
+  sparkle: (p: IcoProps = {}) => (
+    <I {...p}>
+      <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" />
+    </I>
+  ),
+  // Circular arrow (Lucide rotate-cw) — reset the document view.
+  reset: (p: IcoProps = {}) => (
+    <I {...p}>
+      <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+      <path d="M21 3v5h-5" />
+    </I>
+  ),
+  minus: (p: IcoProps = {}) => (
+    <I {...p}>
+      <path d="M5 12h14" />
+    </I>
+  ),
+  // Diagonal expand arrows (Lucide maximize-2) — fit the document to view.
+  expand: (p: IcoProps = {}) => (
+    <I {...p}>
+      <path d="M15 3h6v6" />
+      <path d="M9 21H3v-6" />
+      <path d="m21 3-7 7" />
+      <path d="m3 21 7-7" />
     </I>
   ),
   google: ({ w = 18 }: { w?: number }) => (
