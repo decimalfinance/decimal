@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import { useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, policiesApi, protectionsApi, type ProtectionCard } from '../api';
+import { accessApi, api, policiesApi, protectionsApi, type ProtectionCard } from '../api';
 import type { OrganizationMember } from '../types';
 import { useToast } from '../ui/Toast';
 import { Ico } from '../dec/icons';
@@ -42,6 +42,15 @@ export function ProtectionsPage() {
     queryFn: () => api.listOrganizationMembers(organizationId!),
     enabled: Boolean(organizationId),
   });
+  // Changing rules is the primary admin's seat — everyone else reads.
+  // (Standing rule: never offer a control the server will refuse.)
+  const myAccess = useQuery({
+    queryKey: ['my-access', organizationId] as const,
+    queryFn: () => accessApi.get(organizationId!),
+    enabled: Boolean(organizationId),
+    staleTime: 60_000,
+  });
+  const isPrimaryAdmin = myAccess.data?.membershipRole === 'owner';
   // Always-on gates + the bill ceiling (the rest of the Policies page).
   const policiesQuery = useQuery({
     queryKey: ['policies-overview', organizationId] as const,
@@ -154,7 +163,9 @@ export function ProtectionsPage() {
                         ) : null}
                         <button
                           className={`switch${c.relaxed ? '' : ' on'}`}
-                          disabled={busy}
+                          disabled={busy || !isPrimaryAdmin}
+                          title={isPrimaryAdmin ? undefined : 'Only the primary admin can change a protection.'}
+                          style={!isPrimaryAdmin ? { opacity: 0.6, cursor: 'default' } : undefined}
                           aria-label={c.relaxed ? `Turn ${c.displayName} on` : `Turn ${c.displayName} off`}
                           onClick={() => {
                             if (c.relaxed) turnOn.mutate(c.code);
@@ -242,25 +253,31 @@ export function ProtectionsPage() {
                 </span>
               </div>
               <div className="sr-controls" style={{ gap: 8 }}>
-                <input
-                  className="input"
-                  type="number"
-                  min={1}
-                  placeholder="e.g. 50,000"
-                  value={ceilingDraft}
-                  onChange={(e) => setCeilingDraft(e.target.value)}
-                  style={{ width: 130, height: 32 }}
-                />
-                <button type="button" className="btn btn-secondary btn-sm" disabled={ceilingMutation.isPending || !(Number(ceilingDraft) > 0)}
-                  onClick={() => ceilingMutation.mutate(Number(ceilingDraft))}>
-                  Set
-                </button>
-                {policiesQuery.data?.ceilingUsd != null ? (
-                  <button type="button" className="btn btn-secondary btn-sm" disabled={ceilingMutation.isPending}
-                    onClick={() => ceilingMutation.mutate(null)}>
-                    Remove
-                  </button>
-                ) : null}
+                {isPrimaryAdmin ? (
+                  <>
+                    <input
+                      className="input"
+                      type="number"
+                      min={1}
+                      placeholder="e.g. 50,000"
+                      value={ceilingDraft}
+                      onChange={(e) => setCeilingDraft(e.target.value)}
+                      style={{ width: 130, height: 32 }}
+                    />
+                    <button type="button" className="btn btn-secondary btn-sm" disabled={ceilingMutation.isPending || !(Number(ceilingDraft) > 0)}
+                      onClick={() => ceilingMutation.mutate(Number(ceilingDraft))}>
+                      Set
+                    </button>
+                    {policiesQuery.data?.ceilingUsd != null ? (
+                      <button type="button" className="btn btn-secondary btn-sm" disabled={ceilingMutation.isPending}
+                        onClick={() => ceilingMutation.mutate(null)}>
+                        Remove
+                      </button>
+                    ) : null}
+                  </>
+                ) : (
+                  <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>Only the primary admin can change this.</span>
+                )}
               </div>
             </div>
           </div>
