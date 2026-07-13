@@ -884,6 +884,8 @@ function humanizeEventType(type: string): string {
     proposal_executed: 'Executed',
     payment_settled: 'Settled',
     payment_cancelled: 'Cancelled',
+    payment_order_sent_back: 'Sent back for changes',
+    payment_order_review_reopened: 'Returned to review',
     spending_limit_executed: 'Auto-paid by agent',
     accounting_synced: 'Synced to QuickBooks',
   };

@@ -5,7 +5,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router';
-import type { AuthenticatedSession, OrganizationMembership } from './api';
+import { useQuery } from '@tanstack/react-query';
+import { accessApi, type AuthenticatedSession, type Capability, type OrganizationMembership } from './api';
 import { Ico } from './dec/icons';
 
 type OrganizationContext = {
@@ -70,8 +71,8 @@ export function AppSidebar({
   organizationContexts,
   activeOrganizationId,
   paymentsIncompleteCount,
-  collectionsOpenCount,
   unreviewedWalletsCount,
+  codingInboxCount,
   onOrganizationSwitch,
   onLogout,
 }: {
@@ -79,8 +80,8 @@ export function AppSidebar({
   organizationContexts: OrganizationContext[];
   activeOrganizationId?: string;
   paymentsIncompleteCount?: number;
-  collectionsOpenCount?: number;
   unreviewedWalletsCount?: number;
+  codingInboxCount?: number;
   onOrganizationSwitch: (organizationId: string) => void;
   onLogout: () => void;
 }) {
@@ -99,6 +100,18 @@ export function AppSidebar({
 
   const base = activeOrganization ? `/organizations/${activeOrganization.organizationId}` : null;
   const onProfilePage = location.pathname === '/profile';
+
+  // Role-gated nav: hide surfaces the person's roles don't include (same
+  // feature-surface mechanism the backend enforces). Until access loads, show
+  // everything — the backend still refuses anything off-limits.
+  const accessQuery = useQuery({
+    queryKey: ['my-access', activeOrganization?.organizationId],
+    queryFn: () => accessApi.get(activeOrganization!.organizationId),
+    enabled: Boolean(activeOrganization),
+    staleTime: 60_000,
+  });
+  const caps = accessQuery.data?.capabilities;
+  const can = (c: Capability) => !caps || caps.includes(c);
 
   return (
     <div className="sidebar">
@@ -220,36 +233,33 @@ export function AppSidebar({
           <>
             <div className="sb-group-label">Operations</div>
             <NavItem to={base} end icon={<Ico.grid w={16} />} label="Overview" />
-            <NavItem
-              to={`${base}/payments`}
-              icon={<Ico.payments w={16} />}
-              label="Payments"
-              badge={paymentsIncompleteCount}
-            />
-            <NavItem
-              to={`${base}/collections`}
-              icon={<Ico.collections w={16} />}
-              label="Collections"
-              badge={collectionsOpenCount}
-            />
+            {can('bills.view') ? <NavItem to={`${base}/bills`} icon={<Ico.doc w={16} />} label="Bills" badge={paymentsIncompleteCount} /> : null}
 
             <div className="sb-group-label">Registry</div>
-            <NavItem to={`${base}/wallets`} icon={<Ico.treasury w={16} />} label="Treasury accounts" />
+            {can('treasury.view') ? <NavItem to={`${base}/wallets`} icon={<Ico.treasury w={16} />} label="Treasury accounts" /> : null}
             <NavItem to={`${base}/members`} icon={<Ico.members w={16} />} label="Members" />
-            <NavItem
-              to={`${base}/counterparties`}
-              icon={<Ico.address w={16} />}
-              label="Address book"
-              badge={unreviewedWalletsCount}
-            />
+            {can('vendors.view') ? (
+              <NavItem
+                to={`${base}/counterparties`}
+                icon={<Ico.address w={16} />}
+                label="Vendors"
+                badge={unreviewedWalletsCount}
+              />
+            ) : null}
 
             <div className="sb-group-label">Governance</div>
-            <NavItem to={`${base}/proposals`} icon={<Ico.proposals w={16} />} label="Proposals" />
-            <NavItem to={`${base}/spending-limits`} icon={<Ico.shield w={16} />} label="Auto-pay" />
+            {can('bills.view') ? <NavItem to={`${base}/approvals`} icon={<Ico.proposals w={16} />} label="Approvals" /> : null}
+            <NavItem to={`${base}/approval-flow`} icon={<Ico.shield w={16} />} label="Approval flow" />
+            <NavItem to={`${base}/policies`} icon={<Ico.key w={16} />} label="Policies" />
+            {can('treasury.view') ? <NavItem to={`${base}/spending-limits`} icon={<Ico.shield w={16} />} label="Auto-pay" /> : null}
 
-            <div className="sb-group-label">Integrations</div>
-            <NavItem to={`${base}/accounting`} end icon={<Ico.book w={16} />} label="Accounting" />
-            <NavItem to={`${base}/accounting/coding`} icon={<Ico.inbox w={16} />} label="Coding inbox" />
+            {can('accounting.view') ? (
+              <>
+                <div className="sb-group-label">Integrations</div>
+                <NavItem to={`${base}/accounting`} end icon={<Ico.book w={16} />} label="Accounting" />
+                <NavItem to={`${base}/accounting/coding`} icon={<Ico.inbox w={16} />} label="Coding inbox" badge={codingInboxCount} />
+              </>
+            ) : null}
           </>
         ) : null}
       </div>

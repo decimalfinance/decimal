@@ -998,8 +998,6 @@ table.csv-preview-table {
   border-radius: var(--ax-r-md);
   background: var(--ax-surface-1);
   border: 1px solid var(--ax-border-strong);
-  border-left-width: 3px;
-  border-left-color: var(--ax-border-strong);
   box-shadow: var(--ax-shadow-lg);
   pointer-events: auto;
   min-width: 280px;
@@ -1025,25 +1023,16 @@ table.csv-preview-table {
   }
 }
 
-/* Neutral card; tone shows only on the icon + the left rail (Mercury-clean,
-   not a fully-tinted alert box). Title stays primary text, message muted. */
-.ax-toast[data-tone='success'] {
-  border-left-color: var(--ax-accent);
-}
+/* Neutral card; tone shows ONLY on the icon. Never a colored left border —
+   user rule: accent left-borders on cards scream AI-generated. */
 .ax-toast[data-tone='success'] .ax-toast-icon {
   color: var(--ax-accent);
 }
 
-.ax-toast[data-tone='danger'] {
-  border-left-color: var(--ax-danger);
-}
 .ax-toast[data-tone='danger'] .ax-toast-icon {
   color: var(--ax-danger);
 }
 
-.ax-toast[data-tone='info'] {
-  border-left-color: var(--ax-info);
-}
 .ax-toast[data-tone='info'] .ax-toast-icon {
   color: var(--ax-info);
 }

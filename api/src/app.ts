@@ -4,9 +4,9 @@ import { ZodError } from 'zod';
 import { mapKnownError, normalizeErrorCode } from './infra/api-errors.js';
 import { errorToLogFields, logger, requestLoggerMiddleware } from './infra/logger.js';
 import { requireAuth } from './auth/sessions.js';
+import { capabilityAccessMiddleware } from './auth/capability-access.js';
 import { accountingRouter, publicAccountingRouter } from './routes/accounting.js';
 import { capabilitiesRouter } from './routes/capabilities.js';
-import { collectionsRouter } from './routes/collections.js';
 import { config } from './config.js';
 import { counterpartyWalletsRouter } from './routes/counterparty-wallets.js';
 import { eventsRouter } from './routes/events.js';
@@ -15,12 +15,14 @@ import { automationAgentsRouter } from './routes/automation-agents.js';
 import { healthRouter } from './routes/health.js';
 import { idempotencyMiddleware } from './infra/idempotency.js';
 import { invoicesRouter } from './routes/invoices.js';
+import { billsRouter } from './routes/bills.js';
 import { openApiRouter } from './routes/openapi.js';
 import { organizationsRouter } from './routes/organizations.js';
 import { organizationInvitesRouter, publicOrganizationInvitesRouter } from './routes/organization-invites.js';
 import { opsRouter } from './routes/ops.js';
 import { paymentOrdersRouter } from './routes/payment-orders.js';
 import { proposalsRouter } from './routes/proposals.js';
+import { approvalsRouter } from './approvals/routes.js';
 import { publicRateLimitMiddleware } from './infra/rate-limit.js';
 import { solanaRpcRouter } from './routes/solana-rpc.js';
 import { treasuryWalletsRouter } from './routes/treasury-wallets.js';
@@ -60,7 +62,7 @@ export function createApp() {
       res.setHeader('Vary', 'Origin');
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Headers', 'content-type,authorization,idempotency-key,x-request-id,solana-client');
-      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
       res.setHeader('Access-Control-Expose-Headers', 'content-disposition,x-request-id');
     }
 
@@ -86,6 +88,9 @@ export function createApp() {
   // QuickBooks OAuth callback — Intuit redirects here with no auth header.
   app.use(publicAccountingRouter);
   app.use(requireAuth());
+  // Role-based access: org-scoped requests must carry the capability their
+  // area requires (auth/capability-access.ts). Owner/admin bypass.
+  app.use(capabilityAccessMiddleware());
   // SSE stream is authed but long-lived; mount it before idempotency so that
   // middleware (built for mutations) never wraps the open response.
   app.use(eventsRouter);
@@ -101,9 +106,10 @@ export function createApp() {
   app.use(walletAuthorizationsRouter);
   app.use(counterpartyWalletsRouter);
   app.use(invoicesRouter);
+  app.use(billsRouter);
   app.use(paymentOrdersRouter);
   app.use(proposalsRouter);
-  app.use(collectionsRouter);
+  app.use(approvalsRouter);
   app.use(accountingRouter);
 
   app.use((error: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {

@@ -321,7 +321,7 @@ function PaymentsSidebar() {
         <div className="sb-group">REGISTRY</div>
         <SbItem icon={<TreasuryMini />} label="Treasury accounts" />
         <SbItem icon={<MembersIco />} label="Members" />
-        <SbItem icon={<AddressIco />} label="Address book" count="2" />
+        <SbItem icon={<AddressIco />} label="Vendors" count="2" />
         <div className="sb-group">CONTROLS</div>
         <SbItem icon={<ProposalsIco />} label="Approvals" />
         <SbItem icon={<ShieldIco />} label="Spending limits" />

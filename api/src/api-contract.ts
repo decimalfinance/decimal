@@ -197,29 +197,6 @@ export const API_ENDPOINTS = [
     requestBody: { csv: 'string', sourceTreasuryWalletId: 'uuid optional', batchLabel: 'string optional', autoAdvance: 'boolean default true' },
   }),
 
-  endpoint('list_collections', 'GET', '/organizations/{organizationId}/collections', ['collections'], 'List expected inbound collections', 'session', { scope: 'organization:read' }),
-  endpoint('create_collection', 'POST', '/organizations/{organizationId}/collections', ['collections'], 'Create expected inbound collection', 'session', {
-    scope: 'payments:write',
-    requestBody: { receivingTreasuryWalletId: 'string uuid', amountRaw: 'string', reason: 'string', externalReference: 'string optional' },
-  }),
-  endpoint('preview_collections_csv', 'POST', '/organizations/{organizationId}/collections/import-csv/preview', ['collections'], 'Preview collection CSV import without side effects', 'session', { scope: 'organization:read' }),
-  endpoint('get_collection', 'GET', '/organizations/{organizationId}/collections/{collectionRequestId}', ['collections'], 'Get expected collection detail', 'session', { scope: 'organization:read' }),
-  endpoint('collection_proof', 'GET', '/organizations/{organizationId}/collections/{collectionRequestId}/proof', ['proof'], 'Export expected collection proof', 'session', {
-    scope: 'proofs:read',
-  }),
-  endpoint('cancel_collection', 'POST', '/organizations/{organizationId}/collections/{collectionRequestId}/cancel', ['collections'], 'Cancel expected collection', 'session', { scope: 'payments:write' }),
-  endpoint('list_collection_runs', 'GET', '/organizations/{organizationId}/collection-runs', ['collections'], 'List collection runs', 'session', { scope: 'organization:read' }),
-  endpoint('import_collection_run_csv', 'POST', '/organizations/{organizationId}/collection-runs/import-csv', ['collections'], 'Import CSV as collection run', 'session', {
-    scope: 'payments:write',
-    requestBody: { csv: 'string', runName: 'string optional', receivingTreasuryWalletId: 'string optional' },
-  }),
-  endpoint('preview_collection_run_csv', 'POST', '/organizations/{organizationId}/collection-runs/import-csv/preview', ['collections'], 'Preview collection run CSV import', 'session', { scope: 'organization:read' }),
-  endpoint('get_collection_run', 'GET', '/organizations/{organizationId}/collection-runs/{collectionRunId}', ['collections'], 'Get collection run detail', 'session', { scope: 'organization:read' }),
-  endpoint('collection_run_proof', 'GET', '/organizations/{organizationId}/collection-runs/{collectionRunId}/proof', ['proof'], 'Export collection run proof', 'session', {
-    scope: 'proofs:read',
-    query: { detail: 'summary | compact | full' },
-  }),
-
   endpoint('list_payment_orders', 'GET', '/organizations/{organizationId}/payment-orders', ['payment orders'], 'List payment orders', 'session', { scope: 'organization:read' }),
   endpoint('create_payment_order', 'POST', '/organizations/{organizationId}/payment-orders', ['payment orders'], 'Create payment order', 'session', { scope: 'payments:write' }),
   endpoint('get_payment_order', 'GET', '/organizations/{organizationId}/payment-orders/{paymentOrderId}', ['payment orders'], 'Get payment order detail', 'session', { scope: 'organization:read' }),

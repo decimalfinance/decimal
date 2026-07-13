@@ -2,13 +2,6 @@ import type {
   AcceptInviteResponse,
   AuthenticatedSession,
   CapabilitiesResponse,
-  CollectionCsvPreview,
-  CollectionRequest,
-  CollectionProofPacket,
-  CollectionRunProofPacket,
-  CollectionRunCsvPreview,
-  CollectionRunImportResult,
-  CollectionRunSummary,
   Counterparty,
   CounterpartyWallet,
   CounterpartyWalletTrustState,
@@ -191,7 +184,10 @@ export interface AccountingStatus {
 export interface QuickBooksAccount {
   id: string;
   name: string;
+  acctNum: string | null;
+  fullyQualifiedName: string;
   accountType: string;
+  accountSubType: string | null;
   classification: string;
 }
 
@@ -296,6 +292,16 @@ export const api = {
   },
   login(input: { email: string; password: string }) {
     return request<LoginResponse>('/auth/login', {
+      method: 'POST',
+      includeAuth: false,
+      body: JSON.stringify(input),
+    });
+  },
+  // Developer sign-in for automated testing: secret-gated on the API and
+  // confined to @dev.decimal.test personas. organizationName picks which of
+  // the persona's orgs to land in. See LoginPage's dev panel.
+  devLogin(input: { secret: string; email: string; displayName?: string; organizationName?: string }) {
+    return request<LoginResponse & { landingOrganizationId?: string | null }>('/auth/dev/login', {
       method: 'POST',
       includeAuth: false,
       body: JSON.stringify(input),
@@ -637,6 +643,17 @@ export const api = {
   },
   listCounterparties(organizationId: string) {
     return request<{ items: Counterparty[] }>(`/organizations/${organizationId}/counterparties`);
+  },
+  // Vendor payable gate: held = admin sets/releases; blocked = primary admin only.
+  setVendorPayableStatus(
+    organizationId: string,
+    counterpartyId: string,
+    input: { status: 'payable' | 'held' | 'blocked'; reason?: string | null },
+  ) {
+    return request<Counterparty>(`/organizations/${organizationId}/counterparties/${counterpartyId}/payable-status`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    });
   },
   createCounterparty(
     organizationId: string,
@@ -1098,130 +1115,6 @@ export const api = {
   getPaymentOrderProof(organizationId: string, paymentOrderId: string) {
     return request<PaymentProofPacket>(`/organizations/${organizationId}/payment-orders/${paymentOrderId}/proof`);
   },
-  listCollections(
-    organizationId: string,
-    params?: { state?: string; collectionRunId?: string; limit?: number },
-  ) {
-    const qs = new URLSearchParams();
-    qs.set('limit', String(params?.limit ?? 100));
-    if (params?.state) qs.set('state', params.state);
-    if (params?.collectionRunId) qs.set('collectionRunId', params.collectionRunId);
-    return request<{
-      items: CollectionRequest[];
-      limit: number;
-      state: string | null;
-      collectionRunId: string | null;
-    }>(`/organizations/${organizationId}/collections?${qs.toString()}`);
-  },
-  createCollection(
-    organizationId: string,
-    input: {
-      collectionRunId?: string;
-      receivingTreasuryWalletId: string;
-      counterpartyWalletId?: string;
-      counterpartyId?: string;
-      payerWalletAddress?: string;
-      payerTokenAccountAddress?: string;
-      amountRaw: string;
-      asset?: string;
-      reason: string;
-      externalReference?: string;
-      dueAt?: string;
-      metadataJson?: Record<string, unknown>;
-    },
-  ) {
-    return request<CollectionRequest>(`/organizations/${organizationId}/collections`, {
-      method: 'POST',
-      body: JSON.stringify(input),
-    });
-  },
-  previewCollectionCsv(
-    organizationId: string,
-    input: { csv: string; receivingTreasuryWalletId?: string },
-  ) {
-    return request<CollectionCsvPreview>(
-      `/organizations/${organizationId}/collections/import-csv/preview`,
-      {
-        method: 'POST',
-        body: JSON.stringify(input),
-      },
-    );
-  },
-  getCollection(organizationId: string, collectionRequestId: string) {
-    return request<CollectionRequest>(
-      `/organizations/${organizationId}/collections/${collectionRequestId}`,
-    );
-  },
-  getCollectionProof(organizationId: string, collectionRequestId: string) {
-    return request<CollectionProofPacket>(
-      `/organizations/${organizationId}/collections/${collectionRequestId}/proof`,
-    );
-  },
-  downloadCollectionProofJson(organizationId: string, collectionRequestId: string) {
-    return download(
-      `/organizations/${organizationId}/collections/${collectionRequestId}/proof`,
-      `collection-${collectionRequestId}-proof.json`,
-    );
-  },
-  cancelCollection(organizationId: string, collectionRequestId: string) {
-    return request<CollectionRequest>(
-      `/organizations/${organizationId}/collections/${collectionRequestId}/cancel`,
-      {
-        method: 'POST',
-        body: JSON.stringify({}),
-      },
-    );
-  },
-  listCollectionRuns(organizationId: string) {
-    return request<{ items: CollectionRunSummary[]; limit: number }>(
-      `/organizations/${organizationId}/collection-runs`,
-    );
-  },
-  importCollectionRunCsv(
-    organizationId: string,
-    input: {
-      csv: string;
-      runName?: string;
-      receivingTreasuryWalletId?: string;
-      importKey?: string;
-    },
-  ) {
-    return request<CollectionRunImportResult>(
-      `/organizations/${organizationId}/collection-runs/import-csv`,
-      {
-        method: 'POST',
-        body: JSON.stringify(input),
-      },
-    );
-  },
-  previewCollectionRunCsv(
-    organizationId: string,
-    input: { csv: string; receivingTreasuryWalletId?: string },
-  ) {
-    return request<CollectionRunCsvPreview>(
-      `/organizations/${organizationId}/collection-runs/import-csv/preview`,
-      {
-        method: 'POST',
-        body: JSON.stringify(input),
-      },
-    );
-  },
-  getCollectionRun(organizationId: string, collectionRunId: string) {
-    return request<CollectionRunSummary>(
-      `/organizations/${organizationId}/collection-runs/${collectionRunId}`,
-    );
-  },
-  getCollectionRunProof(organizationId: string, collectionRunId: string) {
-    return request<CollectionRunProofPacket>(
-      `/organizations/${organizationId}/collection-runs/${collectionRunId}/proof`,
-    );
-  },
-  downloadCollectionRunProofJson(organizationId: string, collectionRunId: string) {
-    return download(
-      `/organizations/${organizationId}/collection-runs/${collectionRunId}/proof`,
-      `collection-run-${collectionRunId}-proof.json`,
-    );
-  },
 
   // ─── Automation agents ───────────────────────────────────────────────────
   // Needed to find the agent wallet ID when creating a spending limit policy.
@@ -1359,3 +1252,604 @@ function loadStoredToken() {
 
 
 export type * from './types';
+
+// --- Approvals engine ---------------------------------------------------------
+
+export interface ApprovalTask {
+  task_id: string;
+  state: string;
+  step_index: number;
+  sla_deadline: string | null;
+  approvable_id: string;
+  type: string;
+  total_minor_base: string;
+  macro_state: string;
+}
+
+export interface ApprovalFlowPerson { name: string; email: string }
+export type ApprovalFlowItem =
+  | { kind: 'step'; depth: number; purpose: string; mode: string; m: number | null; people: ApprovalFlowPerson[] }
+  | { kind: 'auto' | 'reject' | 'condition' | 'otherwise'; depth: number; text: string };
+
+export interface ApprovalFlowSummary {
+  approvableType: string;
+  name: string;
+  items: ApprovalFlowItem[];
+}
+
+export const approvalsApi = {
+  listMyTasks(organizationId: string) {
+    return request<{ items: ApprovalTask[] }>(`/organizations/${organizationId}/approvals/tasks`);
+  },
+  getPolicy(organizationId: string) {
+    return request<{ flows: ApprovalFlowSummary[] }>(`/organizations/${organizationId}/approvals/policy`);
+  },
+  actOnTask(organizationId: string, taskId: string, command: Record<string, unknown>) {
+    return request<{ replay: boolean; taskState: string; macroState: string }>(
+      `/organizations/${organizationId}/approvals/tasks/${taskId}/command`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ command, idempotencyKey: crypto.randomUUID() }),
+      },
+    );
+  },
+};
+
+export interface ProtectionCard {
+  code: string;
+  displayName: string;
+  oneLiner: string;
+  relaxable: boolean;
+  relaxed: boolean;
+  relaxedBy: string | null;
+  relaxedAt: string | null;
+  reviewAtHeadcount: number | null;
+  scopedPeople: { id: string; name: string }[] | null;
+}
+
+export interface ProtectionPerson { id: string; name: string; email: string }
+
+// Policies page aggregate: always-on gate stats + the org bill ceiling.
+// (The R-pack itself stays on protectionsApi — same rows, same ceremony.)
+export interface PoliciesOverview {
+  ceilingUsd: number | null;
+  gates: {
+    duplicate: { overridesLast30Days: number };
+    payable: { held: number; blocked: number };
+    pinnedDestination: Record<string, never>;
+  };
+}
+export const policiesApi = {
+  get(organizationId: string) {
+    return request<PoliciesOverview>(`/organizations/${organizationId}/policies`);
+  },
+  setCeiling(organizationId: string, amountUsd: number | null) {
+    return request<{ ok: boolean; ceilingUsd: number | null }>(`/organizations/${organizationId}/policies/ceiling`, {
+      method: 'PUT',
+      body: JSON.stringify({ amountUsd }),
+    });
+  },
+};
+
+export const protectionsApi = {
+  list(organizationId: string) {
+    return request<{ protections: ProtectionCard[]; people: ProtectionPerson[]; requiresPassword: boolean }>(`/organizations/${organizationId}/protections`);
+  },
+  relax(organizationId: string, code: string, body: { password?: string; sheetContent: unknown; scopedPersonIds?: string[] | null }) {
+    return request<{ relaxed: boolean }>(`/organizations/${organizationId}/protections/${code}/relax`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
+  retighten(organizationId: string, code: string) {
+    return request<{ sweptTasks: number }>(`/organizations/${organizationId}/protections/${code}/retighten`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  },
+};
+
+export interface InvoiceDocumentMeta {
+  invoiceDocumentId: string;
+  filename: string;
+  mimeType: string;
+  byteSize: number;
+  sha256: string;
+  pageCount: number | null;
+  uploadedByUserId: string | null;
+  createdAt: string;
+}
+
+export const invoiceDocumentsApi = {
+  meta(organizationId: string, invoiceDocumentId: string) {
+    return request<InvoiceDocumentMeta>(`/organizations/${organizationId}/invoice-documents/${invoiceDocumentId}/meta`);
+  },
+  // The document endpoint needs the auth header, so a plain URL in <iframe src>
+  // won't work — fetch the bytes and hand back an object URL. Callers must
+  // URL.revokeObjectURL it when the viewer unmounts.
+  async fetchObjectUrl(organizationId: string, invoiceDocumentId: string) {
+    const response = await fetch(`${API_BASE_URL}/organizations/${organizationId}/invoice-documents/${invoiceDocumentId}`, {
+      headers: sessionToken ? { authorization: `Bearer ${sessionToken}` } : {},
+    });
+    if (!response.ok) {
+      throw new ApiError('Could not load the invoice document.', response.status, null);
+    }
+    const blob = await response.blob();
+    return { url: URL.createObjectURL(blob), mimeType: blob.type };
+  },
+};
+
+export type BillBucket = 'needs_review' | 'in_approval' | 'to_pay' | 'done' | 'needs_attention';
+
+export interface WorkbenchBill {
+  paymentOrderId: string;
+  bucket: BillBucket;
+  state: string;
+  vendorName: string;
+  description: string | null;
+  amountUsd: number;
+  amountOriginal: { amount: number; currency: string } | null;
+  invoiceNumber: string | null;
+  invoiceDocumentId: string | null;
+  dueAt: string | null;
+  createdAt: string;
+  discountLabel: string | null;
+  readiness: 'ready' | 'missing_info' | null;
+  missing: string[];
+  subStatus: {
+    kind: 'plain' | 'person' | 'loud';
+    text: string;
+    tone: 'neutral' | 'info' | 'success' | 'warning' | 'danger';
+    blockedBy?: { name: string } | null;
+  };
+  // Present when this bill was flagged as a duplicate and an admin cleared it.
+  duplicateCleared: { byName: string; reason: string } | null;
+}
+
+export type DocSource = { page: number; box: [number, number, number, number] } | null;
+
+export interface BillReviewField {
+  key: string;
+  label: string;
+  value: string | number | null;
+  state: 'read' | 'needs_look' | 'not_on_document' | 'confirmed';
+  reason: string | null;
+  source?: DocSource;
+}
+
+export interface CategoryOption { value: string; label: string; num?: string | null; group: string }
+
+export interface BillReviewLine {
+  description: string;
+  quantity: number | null;
+  unitPrice: number | null;
+  amount: number | null;
+  category: string | null;
+  source?: DocSource;
+}
+
+export interface BillReview {
+  paymentOrderId: string;
+  state: string;
+  readOnly: boolean;
+  // An approver sent this bill back for changes — shown as the reviewer's homework.
+  sentBack: { reason: string | null; byName: string | null; at: string | null } | null;
+  vendor: { name: string; email: string | null; nameSource?: DocSource; emailSource?: DocSource; isNew: boolean; trustState: string };
+  document: { invoiceDocumentId: string; filename: string; mimeType: string; byteSize: number; pageCount: number | null } | null;
+  fields: BillReviewField[];
+  remitFields: BillReviewField[];
+  lines: BillReviewLine[];
+  categoryOptions: CategoryOption[];
+  totalsSources: { lineItems: DocSource; tax: DocSource; total: DocSource };
+  taxAmount: number | null;
+  totalUsd: number;
+  paymentBlock: { method: string | null; bankName: string | null; accountLast4: string | null; sendToLabel: string; sourceTreasuryWalletId: string | null; matchesVerified: boolean };
+  flags: Array<{ kind: string; severity: 'danger' | 'warning' | 'info'; message: string; blocking: boolean }>;
+  verification: { confirmedAt: string | null; confirmedByUserId: string | null; noteForApprovers: string | null } | null;
+}
+
+export interface ConfirmBillBody {
+  fields: {
+    vendorName?: string | null;
+    vendorEmail?: string | null;
+    invoiceNumber?: string | null;
+    invoiceDate?: string | null;
+    dueDate?: string | null;
+    terms?: string | null;
+    poNumber?: string | null;
+    discount?: string | null;
+    currency?: string | null;
+    total?: number;
+    taxAmount?: number | null;
+    remitTo?: { street?: string | null; city?: string | null; state?: string | null; zip?: string | null };
+  };
+  lines: Array<{ description: string; quantity: number | null; unitPrice: number | null; amount: number | null; category?: string | null }>;
+  confirmedFieldKeys: string[];
+  noteForApprovers?: string | null;
+  sourceTreasuryWalletId?: string | null;
+}
+
+export const billsApi = {
+  workbench(organizationId: string) {
+    return request<{ counts: Record<BillBucket, number>; reviewCounts: { ready: number; missingInfo: number }; bills: WorkbenchBill[] }>(`/organizations/${organizationId}/bills/workbench`);
+  },
+  review(organizationId: string, paymentOrderId: string) {
+    return request<BillReview>(`/organizations/${organizationId}/bills/${paymentOrderId}/review`);
+  },
+  detail(organizationId: string, paymentOrderId: string) {
+    return request<BillDetail>(`/organizations/${organizationId}/bills/${paymentOrderId}/detail`);
+  },
+  updateFacts(organizationId: string, paymentOrderId: string, facts: Record<string, unknown>) {
+    return request<{ changed: number }>(`/organizations/${organizationId}/bills/${paymentOrderId}/facts`, {
+      method: 'PATCH',
+      body: JSON.stringify(facts),
+    });
+  },
+  confirm(organizationId: string, paymentOrderId: string, body: ConfirmBillBody) {
+    return request<{ approvableId: string | null }>(`/organizations/${organizationId}/bills/${paymentOrderId}/confirm`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
+  notABill(organizationId: string, paymentOrderId: string, body: { reason: 'duplicate' | 'statement' | 'not_ours' | 'unreadable' | 'other'; note?: string | null }) {
+    return request<unknown>(`/organizations/${organizationId}/bills/${paymentOrderId}/not-a-bill`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
+  // Admin-only: clear the duplicate-bill flag with a logged reason.
+  overrideDuplicate(organizationId: string, paymentOrderId: string, reason: string) {
+    return request<BillReview>(`/organizations/${organizationId}/bills/${paymentOrderId}/duplicate-override`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  },
+  // Admin-only: unwind an approved-but-unpaid bill back to review (the
+  // recovery path when a release gate refuses).
+  sendBack(organizationId: string, paymentOrderId: string, reason: string) {
+    return request<BillReview>(`/organizations/${organizationId}/bills/${paymentOrderId}/send-back`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  },
+};
+
+export interface InvoiceDocumentStatus {
+  invoiceDocumentId: string;
+  filename: string;
+  mimeType: string;
+  status: 'processing' | 'processed' | 'failed';
+  processingError: string | null;
+  pageCount: number | null;
+  pagesStored: number;
+  paymentOrders: Array<{ paymentOrderId: string; state: string }>;
+}
+
+export const invoiceIntakeApi = {
+  uploadAsync(organizationId: string, body: { filename: string; mimeType: string; dataBase64: string; sourceTreasuryWalletId?: string | null }) {
+    return request<{ invoiceDocumentId: string; reused: boolean }>(`/organizations/${organizationId}/invoices/upload-async`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
+  status(organizationId: string, invoiceDocumentId: string) {
+    return request<InvoiceDocumentStatus>(`/organizations/${organizationId}/invoice-documents/${invoiceDocumentId}/status`);
+  },
+  // Rendered page image as an object URL (endpoint needs the auth header).
+  async fetchPageObjectUrl(organizationId: string, invoiceDocumentId: string, pageIndex: number) {
+    const response = await fetch(`${API_BASE_URL}/organizations/${organizationId}/invoice-documents/${invoiceDocumentId}/pages/${pageIndex}`, {
+      headers: sessionToken ? { authorization: `Bearer ${sessionToken}` } : {},
+    });
+    if (!response.ok) throw new ApiError('Could not load the page image.', response.status, null);
+    return URL.createObjectURL(await response.blob());
+  },
+};
+
+export interface BillDetailStepNode {
+  stepIndex: number;
+  person: { personId: string; name: string; avatarUrl: string | null } | null;
+  purpose: string | null;
+  mode: string;
+  state: 'done' | 'current' | 'upcoming' | 'declined' | 'stopped' | 'delegated';
+  actedAt: string | null;
+  declineReason: string | null;
+  thread: {
+    open: boolean;
+    waitingOn: string | null;
+    messages: Array<{ person: { personId: string; name: string; avatarUrl: string | null } | null; body: string; at: string }>;
+  } | null;
+}
+
+export interface BillDetail {
+  review: BillReview;
+  corrections: Array<{ field: string; from: string; to: string; by: string | null }>;
+  // Advisory: routine vs worth-a-look, same classifier as the approvals inbox.
+  signal?: InboxSignal;
+  status: { macroState: string | null; subStatus: WorkbenchBill['subStatus'] };
+  approval: {
+    approvableId: string;
+    macroState: string;
+    steps: BillDetailStepNode[];
+    flowVersion: number | null;
+    protectionNote: string | null;
+    release: { macroState: string } | null;
+  } | null;
+  viewer: {
+    personId: string | null;
+    name: string | null;
+    isRequester: boolean;
+    openTaskId: string | null;
+    viewerHasOpenAsk?: boolean;
+    openAskTaskId?: string | null;
+    anyTaskId: string | null;
+  };
+  requester: { personId: string; name: string; avatarUrl: string | null } | null;
+}
+
+export type FlowSplit =
+  | { kind: 'vendor'; vendorIds: string[]; vendorNames: string[] }
+  | { kind: 'category'; categories: string[] }
+  | { kind: 'firstBill' };
+export type FlowNode =
+  | { id: string; type: 'step'; title: string; approvers: string[]; quorum: 'all' | 'any' | number; purpose?: string | null }
+  | { id: string; type: 'if'; amountGteUsd: number; split?: FlowSplit | null; then: FlowNode[]; otherwise: FlowNode[] }
+  | { id: string; type: 'auto' }
+  | { id: string; type: 'notify'; people: string[] };
+
+export interface FlowPerson { id: string; name: string; email: string; user_id: string | null; roles: string[] }
+
+export interface FlowSimResult {
+  stuck: string | null;
+  chain: Array<{ personId: string; name: string; step: string; why: string; kind: 'always' | 'added' | 'standin' }>;
+  notes: string[];
+  summary: string | null;
+}
+
+export const flowApi = {
+  get(organizationId: string) {
+    return request<{ flow: FlowNode[] | null; draft?: FlowNode[] | null; people: FlowPerson[]; vendors?: Array<{ id: string; name: string }>; categoryOptions?: string[]; version: number | null }>(`/organizations/${organizationId}/approvals/flow`);
+  },
+  simulate(organizationId: string, flow: FlowNode[], sample: { amountUsd: number; requesterPersonId: string | null; vendorId?: string | null; category?: string | null }) {
+    return request<FlowSimResult>(`/organizations/${organizationId}/approvals/flow/simulate`, {
+      method: 'POST', body: JSON.stringify({ flow, sample }),
+    });
+  },
+  saveDraft(organizationId: string, flow: FlowNode[]) {
+    return request<{ ok: boolean }>(`/organizations/${organizationId}/approvals/flow/draft`, {
+      method: 'PUT', body: JSON.stringify({ flow }),
+    });
+  },
+  clearDraft(organizationId: string) {
+    return request<{ ok: boolean }>(`/organizations/${organizationId}/approvals/flow/draft`, { method: 'DELETE' });
+  },
+  publish(organizationId: string, flow: FlowNode[]) {
+    return request<{ policyId: string; version: number }>(`/organizations/${organizationId}/approvals/flow/publish`, {
+      method: 'POST', body: JSON.stringify({ flow }),
+    });
+  },
+  assist(organizationId: string, message: string, flow: FlowNode[]) {
+    return request<FlowAssistResult>(`/organizations/${organizationId}/approvals/flow/assist`, {
+      method: 'POST', body: JSON.stringify({ message, flow }),
+    });
+  },
+  // Streaming assist over SSE: narrates real steps and drops the flow onto the
+  // canvas mid-generation, then resolves with the final result. Pass a signal to
+  // support Stop. Consumed with fetch + ReadableStream (POST body + auth header).
+  async assistStream(
+    organizationId: string,
+    message: string,
+    flow: FlowNode[],
+    handlers: {
+      onStatus?: (s: { step: string; label: string }) => void;
+      onFlow?: (flow: FlowNode[]) => void;
+      signal?: AbortSignal;
+    },
+  ): Promise<FlowAssistResult> {
+    const res = await fetch(`${API_BASE_URL}/organizations/${organizationId}/approvals/flow/assist/stream`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(sessionToken ? { authorization: `Bearer ${sessionToken}` } : {}) },
+      body: JSON.stringify({ message, flow }),
+      signal: handlers.signal,
+    });
+    if (!res.ok || !res.body) throw new ApiError('Could not reach the assistant.', res.status, 'assist');
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let result: FlowAssistResult | null = null;
+    let errored: string | null = null;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const frames = buffer.split('\n\n');
+      buffer = frames.pop() ?? ''; // keep the trailing partial frame
+      for (const frame of frames) {
+        let event = 'message';
+        let data = '';
+        for (const line of frame.split('\n')) {
+          if (line.startsWith('event:')) event = line.slice(6).trim();
+          else if (line.startsWith('data:')) data += line.slice(5).trim();
+        }
+        if (!data) continue;
+        let parsed: unknown;
+        try { parsed = JSON.parse(data); } catch { continue; }
+        if (event === 'status') handlers.onStatus?.(parsed as { step: string; label: string });
+        else if (event === 'flow') handlers.onFlow?.((parsed as { flow: FlowNode[] }).flow);
+        else if (event === 'done') result = parsed as FlowAssistResult;
+        else if (event === 'error') errored = (parsed as { message: string }).message;
+      }
+    }
+    if (errored) throw new ApiError(errored, 500, 'assist');
+    if (!result) throw new ApiError('The assistant stopped early.', 500, 'assist');
+    return result;
+  },
+};
+
+export interface InboxSignal { clean: boolean; label: string; detail: string | null }
+export interface InboxWaitingRow {
+  taskId: string;
+  paymentOrderId: string;
+  vendor: string;
+  what: string;
+  invoice: string | null;
+  amountUsd: number;
+  overdueDays: number | null;
+  dueSoonDays: number | null;
+  progText: string;
+  hint: string | null;
+  signal: InboxSignal;
+  blocked: boolean;
+}
+export interface InboxInFlightRow {
+  taskId: string;
+  paymentOrderId: string;
+  vendor: string;
+  what: string;
+  invoice: string | null;
+  amountUsd: number;
+  nowWith: string | null;
+  stalledDays: number | null;
+}
+export interface ApprovalsInbox {
+  waitingOnYou: InboxWaitingRow[];
+  inFlight: InboxInFlightRow[];
+  summary: { flagCount: number; cleanCount: number; totalWaitingUsd: number };
+}
+
+export const approvalsInboxApi = {
+  get(organizationId: string) {
+    return request<ApprovalsInbox>(`/organizations/${organizationId}/bills/approvals-inbox`);
+  },
+};
+
+export interface ReleaseConfig { approvers: string[]; quorum: 'all' | 'any' | number; configured: boolean; people: FlowPerson[] }
+export const releaseApi = {
+  get(organizationId: string) {
+    return request<ReleaseConfig>(`/organizations/${organizationId}/approvals/release`);
+  },
+  publish(organizationId: string, approvers: string[], quorum: 'all' | 'any' | number) {
+    return request<{ policyId: string; version: number }>(`/organizations/${organizationId}/approvals/release/publish`, {
+      method: 'POST', body: JSON.stringify({ approvers, quorum }),
+    });
+  },
+};
+
+// Review stage (control point #1) — same shape as the approval flow, on its own
+// endpoint. A bill must clear this before it enters approval.
+export const reviewApi = {
+  get(organizationId: string) {
+    return request<{ flow: FlowNode[] | null; draft?: FlowNode[] | null; people: FlowPerson[]; vendors?: Array<{ id: string; name: string }>; categoryOptions?: string[]; version: number | null }>(`/organizations/${organizationId}/approvals/review`);
+  },
+  saveDraft(organizationId: string, flow: FlowNode[]) {
+    return request<{ ok: boolean }>(`/organizations/${organizationId}/approvals/review/draft`, { method: 'PUT', body: JSON.stringify({ flow }) });
+  },
+  clearDraft(organizationId: string) {
+    return request<{ ok: boolean }>(`/organizations/${organizationId}/approvals/review/draft`, { method: 'DELETE' });
+  },
+  publish(organizationId: string, flow: FlowNode[]) {
+    return request<{ policyId: string; version: number }>(`/organizations/${organizationId}/approvals/review/publish`, { method: 'POST', body: JSON.stringify({ flow }) });
+  },
+};
+
+// Separation-of-duties switches — the org's own choice, not ours.
+export interface SeparationSettings { reviewerCanApprove: boolean; submitterCanApprove: boolean; approverCanRelease: boolean }
+export const separationApi = {
+  get(organizationId: string) {
+    return request<SeparationSettings>(`/organizations/${organizationId}/approvals/separation`);
+  },
+  set(organizationId: string, settings: SeparationSettings) {
+    return request<{ ok: boolean }>(`/organizations/${organizationId}/approvals/separation`, { method: 'POST', body: JSON.stringify(settings) });
+  },
+};
+
+// Out-of-office fill-in: while you're away, your open approvals also go to your
+// substitute (self-service, like every mature AP product).
+export interface OutOfOffice { substitutePersonId: string; substituteName: string; endsAt: string }
+export const oooApi = {
+  get(organizationId: string) {
+    return request<{ outOfOffice: OutOfOffice | null }>(`/organizations/${organizationId}/approvals/out-of-office`);
+  },
+  set(organizationId: string, substitutePersonId: string, endsAt: string) {
+    return request<{ ok: boolean; mirrored: number }>(`/organizations/${organizationId}/approvals/out-of-office`, {
+      method: 'PUT', body: JSON.stringify({ substitutePersonId, endsAt }),
+    });
+  },
+  clear(organizationId: string) {
+    return request<{ ok: boolean }>(`/organizations/${organizationId}/approvals/out-of-office`, { method: 'DELETE' });
+  },
+};
+
+// Payment stage as a full flow (payment_run policy) — same shape as review.
+export const paymentFlowApi = {
+  get(organizationId: string) {
+    return request<{ flow: FlowNode[] | null; draft?: FlowNode[] | null; people: FlowPerson[]; vendors?: Array<{ id: string; name: string }>; categoryOptions?: string[]; version: number | null }>(`/organizations/${organizationId}/approvals/payment-flow`);
+  },
+  saveDraft(organizationId: string, flow: FlowNode[]) {
+    return request<{ ok: boolean }>(`/organizations/${organizationId}/approvals/payment-flow/draft`, { method: 'PUT', body: JSON.stringify({ flow }) });
+  },
+  clearDraft(organizationId: string) {
+    return request<{ ok: boolean }>(`/organizations/${organizationId}/approvals/payment-flow/draft`, { method: 'DELETE' });
+  },
+  publish(organizationId: string, flow: FlowNode[]) {
+    return request<{ policyId: string; version: number }>(`/organizations/${organizationId}/approvals/payment-flow/publish`, { method: 'POST', body: JSON.stringify({ flow }) });
+  },
+};
+
+// Whole-pipeline dry run for the Test rail.
+export interface PipelineStage { chain: FlowSimResult['chain']; notes: string[]; stuck: string | null; resolvedIds: string[] }
+export interface PipelineSimResult { review: PipelineStage; approve: PipelineStage; release: PipelineStage; stuck: string | null; flags: SeparationSettings }
+export const pipelineApi = {
+  simulate(organizationId: string, input: { reviewFlow: FlowNode[]; approveFlow: FlowNode[]; releaseFlow: FlowNode[]; amountUsd: number; submitterPersonId: string | null; vendorId?: string | null; category?: string | null; firstBill?: boolean | null; separation?: SeparationSettings | null }) {
+    return request<PipelineSimResult>(`/organizations/${organizationId}/approvals/pipeline/simulate`, { method: 'POST', body: JSON.stringify(input) });
+  },
+};
+
+export interface FlowAssistResult {
+  flow: FlowNode[];
+  explanation: string;
+  outcome: string | null;
+  deadlock?: boolean;
+  // Set when the request was too ambiguous to build — the assistant asks a
+  // question instead of guessing, and the flow is left unchanged.
+  clarify?: string | null;
+}
+
+
+// Prebuilt roles: a fixed set of permission bundles (reviewer/approver/payer/
+// viewer). Assignment only — the set itself is not editable.
+export type RoleKey = 'reviewer' | 'approver' | 'payer' | 'viewer';
+export interface OrgRole { key: RoleKey; name: string; summary: string; holders: { personId: string; name: string; userId: string | null }[] }
+export interface MemberWithRoles { userId: string; personId: string | null; name: string; email: string; access: string; roles: RoleKey[] }
+export interface MembersAndRoles { members: MemberWithRoles[]; roles: OrgRole[] }
+
+export const rolesApi = {
+  get(organizationId: string) {
+    return request<MembersAndRoles>(`/organizations/${organizationId}/roles`);
+  },
+  assign(organizationId: string, roleKey: RoleKey, userId: string) {
+    return request<{ ok: boolean; personId: string }>(`/organizations/${organizationId}/roles/${roleKey}/holders`, { method: 'POST', body: JSON.stringify({ userId }) });
+  },
+  unassign(organizationId: string, roleKey: RoleKey, personId: string) {
+    return request<{ ok: boolean }>(`/organizations/${organizationId}/roles/${roleKey}/holders/${personId}`, { method: 'DELETE' });
+  },
+};
+
+// The caller's own resolved access — what nav and pages gate on.
+export type Capability =
+  | 'bills.view' | 'bills.edit' | 'approvals.act'
+  | 'payments.view' | 'payments.sign' | 'treasury.view' | 'treasury.manage'
+  | 'vendors.view' | 'vendors.manage' | 'accounting.view' | 'accounting.manage'
+  | 'members.view' | 'members.manage' | 'governance.view' | 'governance.edit';
+export interface MyAccess { membershipRole: string; roles: RoleKey[]; capabilities: Capability[]; isOwnerOrAdmin: boolean }
+export const accessApi = {
+  get(organizationId: string) {
+    return request<MyAccess>(`/organizations/${organizationId}/my-access`);
+  },
+  // Access tiers: exactly one primary admin per org; only they touch the admin tier.
+  setMemberAccess(organizationId: string, userId: string, access: 'admin' | 'member') {
+    return request<{ ok: boolean }>(`/organizations/${organizationId}/members/${userId}/access`, { method: 'PATCH', body: JSON.stringify({ access }) });
+  },
+  transferPrimaryAdmin(organizationId: string, userId: string) {
+    return request<{ ok: boolean; primaryAdminUserId: string }>(`/organizations/${organizationId}/primary-admin/transfer`, { method: 'POST', body: JSON.stringify({ userId }) });
+  },
+};

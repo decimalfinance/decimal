@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo } from 'react';
-import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router';
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AppSidebar } from './Sidebar';
 import { api } from './api';
@@ -15,16 +15,19 @@ import { useLiveOrgEvents } from './lib/use-live-org-events';
 // OrganizationProposalDetail) out of the initial download for everyone else.
 const InboxPage = lazy(() => import('./pages/Inbox').then((m) => ({ default: m.InboxPage })));
 const ProposalRedirectPage = lazy(() => import('./pages/ProposalRedirect').then((m) => ({ default: m.ProposalRedirectPage })));
-const PaymentsPageV2 = lazy(() => import('./pages/Payments').then((m) => ({ default: m.PaymentsPage })));
+const BillsPage = lazy(() => import('./pages/Bills').then((m) => ({ default: m.BillsPage })));
+const InvoiceReviewPage = lazy(() => import('./pages/InvoiceReview').then((m) => ({ default: m.InvoiceReviewPage })));
+const DocumentReviewPage = lazy(() => import('./pages/InvoiceReview').then((m) => ({ default: m.DocumentReviewPage })));
+const BillDetailPage = lazy(() => import('./pages/BillDetail').then((m) => ({ default: m.BillDetailPage })));
+const FlowBuilderPage = lazy(() => import('./pages/FlowBuilder').then((m) => ({ default: m.FlowBuilderPage })));
 const PaymentDetailPageV2 = lazy(() => import('./pages/PaymentDetail').then((m) => ({ default: m.PaymentDetailPage })));
-const CollectionsPage = lazy(() => import('./pages/Collections').then((m) => ({ default: m.CollectionsPage })));
-const CollectionDetailPage = lazy(() => import('./pages/CollectionDetail').then((m) => ({ default: m.CollectionDetailPage })));
-const CollectionRunDetailPage = lazy(() => import('./pages/CollectionRunDetail').then((m) => ({ default: m.CollectionRunDetailPage })));
 const WalletsPage = lazy(() => import('./pages/Wallets').then((m) => ({ default: m.WalletsPage })));
 const CounterpartiesPage = lazy(() => import('./pages/Counterparties').then((m) => ({ default: m.CounterpartiesPage })));
 const LandingPageV2 = lazy(() => import('./pages/Landing').then((m) => ({ default: m.LandingPage })));
 const LandingPageV3 = lazy(() => import('./pages/landing-v3').then((m) => ({ default: m.LandingPage })));
 const MembersPage = lazy(() => import('./pages/Members').then((m) => ({ default: m.MembersPage })));
+const ApprovalsPage = lazy(() => import('./pages/Approvals').then((m) => ({ default: m.ApprovalsPage })));
+const ProtectionsPage = lazy(() => import('./pages/Protections').then((m) => ({ default: m.ProtectionsPage })));
 const AccountingPage = lazy(() => import('./pages/Accounting').then((m) => ({ default: m.AccountingPage })));
 const CodingInboxPage = lazy(() => import('./pages/CodingInbox').then((m) => ({ default: m.CodingInboxPage })));
 const TreasuryWalletDetailPage = lazy(() => import('./pages/TreasuryWalletDetail').then((m) => ({ default: m.TreasuryWalletDetailPage })));
@@ -89,6 +92,14 @@ export function App() {
   );
 }
 
+// Org-scoped redirect: `Navigate to="../x"` resolves against the ROUTE
+// hierarchy (flat here), silently dropping the org id and dumping users into
+// the default org (testbench 006, finding 1). This keeps the org explicit.
+function OrgRedirect({ to }: { to: string }) {
+  const { organizationId } = useParams();
+  return <Navigate to={`/organizations/${organizationId}/${to}`} replace />;
+}
+
 function RequireSession({
   sessionQuery,
 }: {
@@ -129,8 +140,8 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
       typeof document !== 'undefined' && document.hidden ? false : 15_000,
   });
   const paymentsIncompleteCount = organizationSummaryQuery.data?.paymentsIncompleteCount ?? 0;
-  const collectionsOpenCount = organizationSummaryQuery.data?.collectionsOpenCount ?? 0;
   const unreviewedWalletsCount = organizationSummaryQuery.data?.unreviewedWalletsCount ?? 0;
+  const codingInboxCount = organizationSummaryQuery.data?.codingInboxCount ?? 0;
 
   // Treasury gate removed — per the design handoff, Overview itself shows
   // a "Finish setting up" checklist when the org has no treasury yet, instead
@@ -156,8 +167,8 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
           organizationContexts={organizations}
           activeOrganizationId={activeOrganizationId}
           paymentsIncompleteCount={paymentsIncompleteCount}
-          collectionsOpenCount={collectionsOpenCount}
           unreviewedWalletsCount={unreviewedWalletsCount}
+          codingInboxCount={codingInboxCount}
           onOrganizationSwitch={(organizationId) => navigate(`/organizations/${organizationId}`)}
           onLogout={logout}
         />
@@ -173,6 +184,11 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
               <Route path="/organizations/:organizationId/wallets/:treasuryWalletId" element={<TreasuryWalletDetailPage session={session} />} />
               <Route path="/organizations/:organizationId/vaults/:treasuryWalletId" element={<VaultDetailPage />} />
               <Route path="/organizations/:organizationId/proposals" element={<OrganizationProposalsPage session={session} />} />
+              <Route path="/organizations/:organizationId/approvals" element={<ApprovalsPage />} />
+              <Route path="/organizations/:organizationId/approval-flow" element={<FlowBuilderPage session={session} />} />
+              <Route path="/organizations/:organizationId/policies" element={<ProtectionsPage />} />
+              {/* Protections grew into Policies (P1) — old links land there. */}
+              <Route path="/organizations/:organizationId/protections" element={<OrgRedirect to="policies" />} />
               <Route path="/organizations/:organizationId/spending-limits" element={<SpendingLimitsPage />} />
               <Route path="/organizations/:organizationId/spending-limits/:spendingLimitPolicyId" element={<SpendingLimitDetailPage />} />
               <Route path="/organizations/:organizationId/proposals/:decimalProposalId" element={<ProposalRedirectPage />} />
@@ -181,13 +197,18 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
               <Route path="/organizations/:organizationId/accounting" element={<AccountingPage session={session} />} />
               <Route path="/organizations/:organizationId/accounting/coding" element={<CodingInboxPage session={session} />} />
               <Route path="/organizations/:organizationId/counterparties" element={<CounterpartiesPage session={session} />} />
-              <Route path="/organizations/:organizationId/destinations" element={<Navigate to="counterparties" replace />} />
-              <Route path="/organizations/:organizationId/payments" element={<PaymentsPageV2 />} />
+              <Route path="/organizations/:organizationId/destinations" element={<OrgRedirect to="counterparties" />} />
+              <Route path="/organizations/:organizationId/bills" element={<BillsPage />} />
+              <Route path="/organizations/:organizationId/bills/:paymentOrderId" element={<BillDetailPage />} />
+              <Route path="/organizations/:organizationId/bills/:paymentOrderId/review" element={<InvoiceReviewPage />} />
+              <Route path="/organizations/:organizationId/bills/documents/:invoiceDocumentId/review" element={<DocumentReviewPage />} />
+              {/* The Payments list is retired — Bills IS the payments surface. Old links land on Bills. */}
+              <Route path="/organizations/:organizationId/payments" element={<OrgRedirect to="bills" />} />
               <Route path="/organizations/:organizationId/payments/:paymentOrderId" element={<PaymentDetailPageV2 />} />
-              <Route path="/organizations/:organizationId/collections" element={<CollectionsPage session={session} />} />
-              <Route path="/organizations/:organizationId/collections/:collectionRequestId" element={<CollectionDetailPage />} />
-              <Route path="/organizations/:organizationId/collection-runs/:collectionRunId" element={<CollectionRunDetailPage />} />
-              <Route path="/organizations/:organizationId/payers" element={<Navigate to="../counterparties" replace />} />
+              <Route path="/organizations/:organizationId/payers" element={<OrgRedirect to="counterparties" />} />
+              {/* Unknown paths (e.g. an org-less /approval-flow) rendered a
+                  blank content pane — land on home instead. */}
+              <Route path="*" element={<HomeRedirect session={session} />} />
             </Routes>
           </Suspense>
           </div>

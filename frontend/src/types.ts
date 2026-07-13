@@ -45,8 +45,8 @@ export type OrganizationSummary = {
   pendingApprovalCount: number;
   executionQueueCount: number;
   paymentsIncompleteCount: number;
-  collectionsOpenCount: number;
   unreviewedWalletsCount: number;
+  codingInboxCount: number;
   generatedAt: string;
 };
 
@@ -730,6 +730,14 @@ export type TreasuryWalletLite = {
   notes: string | null;
 };
 
+export type VendorPayableHold = {
+  status: 'held' | 'blocked';
+  reason: string;
+  byUserId: string;
+  byName: string;
+  at: string;
+};
+
 export type Counterparty = {
   counterpartyId: string;
   organizationId: string;
@@ -737,6 +745,9 @@ export type Counterparty = {
   category: string;
   externalReference: string | null;
   status: string;
+  // Payable gate (policy): 'payable' unless an admin held / the owner blocked.
+  payableStatus: 'payable' | 'held' | 'blocked';
+  payableHold: VendorPayableHold | null;
   metadataJson: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -974,6 +985,7 @@ export type PaymentOrder = {
   externalReference: string | null;
   invoiceNumber: string | null;
   attachmentUrl: string | null;
+  invoiceDocumentId: string | null;
   dueAt: string | null;
   state: PaymentOrderState;
   derivedState: PaymentOrderState;
@@ -1096,189 +1108,6 @@ export type ProofReadiness = {
     detail: string;
   }>;
   recommendedAction: string;
-};
-
-export type CollectionSourceReview = {
-  status:
-    | 'pass'
-    | 'unspecified_source'
-    | 'source_needs_review'
-    | 'awaiting_observation'
-    | 'source_mismatch'
-    | 'source_restricted';
-  severity: 'none' | 'info' | 'warning' | 'error';
-  expectedSourceWallet: string | null;
-  observedSourceWallet: string | null;
-  trustState: CollectionSourceTrustState | null;
-  message: string;
-};
-
-export type CollectionProofPacket = {
-  proofId: string;
-  canonicalDigest: string;
-  canonicalDigestAlgorithm: string;
-  packetType: 'stablecoin_collection_proof';
-  version: number;
-  generatedAt: string;
-  organizationId: string;
-  status: 'complete' | 'partial' | 'exception' | 'closed' | 'cancelled' | 'in_progress';
-  readiness: ProofReadiness;
-  intent: Record<string, unknown>;
-  parties: Record<string, unknown>;
-  collectionSourceReview: CollectionSourceReview;
-  settlement: Record<string, unknown>;
-  exceptions: Array<Record<string, unknown>>;
-  auditTrail: ReconciliationTimelineItem[];
-};
-
-export type CollectionRunProofPacket = {
-  proofId: string;
-  canonicalDigest: string;
-  canonicalDigestAlgorithm: string;
-  packetType: 'stablecoin_collection_run_proof';
-  version: number;
-  generatedAt: string;
-  organizationId: string;
-  collectionRunId: string;
-  runName: string;
-  status: string;
-  readiness: Omit<ProofReadiness, 'checks'> & {
-    counts: Record<string, number>;
-  };
-  summary: CollectionRunSummary['summary'];
-  collections: Array<Record<string, unknown>>;
-};
-
-export type CollectionRequestState =
-  | 'open'
-  | 'partially_collected'
-  | 'collected'
-  | 'exception'
-  | 'closed'
-  | 'cancelled';
-
-// Alias kept solely for the CollectionSourceReview proof-packet type below,
-// which mirrors a backend payload that still uses the legacy name. Unified
-// wallet model uses the same trust-state vocabulary, so this just points at
-// the new type.
-export type CollectionSourceTrustState = CounterpartyWalletTrustState;
-
-export type CollectionRequestEvent = {
-  collectionRequestEventId: string;
-  collectionRequestId: string;
-  organizationId: string;
-  eventType: string;
-  actorType: string;
-  actorId: string | null;
-  beforeState: string | null;
-  afterState: string | null;
-  linkedTransferRequestId: string | null;
-  payloadJson: Record<string, unknown>;
-  createdAt: string;
-};
-
-export type CollectionRequest = {
-  collectionRequestId: string;
-  organizationId: string;
-  collectionRunId: string | null;
-  receivingTreasuryWalletId: string;
-  counterpartyWalletId: string | null;
-  counterpartyId: string | null;
-  transferRequestId: string | null;
-  payerWalletAddress: string | null;
-  payerTokenAccountAddress: string | null;
-  amountRaw: string;
-  asset: string;
-  reason: string;
-  externalReference: string | null;
-  dueAt: string | null;
-  state: CollectionRequestState;
-  derivedState: CollectionRequestState;
-  metadataJson: Record<string, unknown>;
-  createdAt: string;
-  updatedAt: string;
-  collectionRun: {
-    collectionRunId: string;
-    runName: string;
-    state: string;
-    createdAt: string;
-  } | null;
-  receivingTreasuryWallet: TreasuryWallet;
-  counterpartyWallet: CounterpartyWallet | null;
-  counterparty: Counterparty | null;
-  transferRequest: {
-    transferRequestId: string;
-    requestType: string;
-    status: string;
-    amountRaw: string;
-    externalReference: string | null;
-    counterpartyWalletId: string;
-  } | null;
-  createdByUser: User | null;
-  reconciliationDetail: ReconciliationDetail | null;
-  events?: CollectionRequestEvent[];
-};
-
-export type CollectionRunSummary = {
-  collectionRunId: string;
-  organizationId: string;
-  receivingTreasuryWalletId: string | null;
-  runName: string;
-  inputSource: string;
-  state: string;
-  derivedState: string;
-  metadataJson: Record<string, unknown>;
-  createdByUserId: string | null;
-  createdAt: string;
-  updatedAt: string;
-  receivingTreasuryWallet: TreasuryWallet | null;
-  createdByUser: User | null;
-  summary: {
-    total: number;
-    open: number;
-    partiallyCollected: number;
-    collected: number;
-    exception: number;
-    totalAmountRaw: string;
-  };
-  collectionRequests?: CollectionRequest[];
-};
-
-export type CollectionCsvPreviewItem = {
-  rowNumber: number;
-  status: 'ready' | 'warning' | 'failed';
-  warnings?: string[];
-  parsed?: Record<string, unknown>;
-  duplicate?: { collectionRequestId: string; state: string } | null;
-  error?: string;
-};
-
-export type CollectionCsvPreview = {
-  totalRows: number;
-  ready: number;
-  warnings: number;
-  failed: number;
-  canImport: boolean;
-  items: CollectionCsvPreviewItem[];
-};
-
-export type CollectionRunCsvPreview = CollectionCsvPreview & {
-  csvFingerprint: string;
-};
-
-export type CollectionRunImportResult = {
-  collectionRun: CollectionRunSummary;
-  importResult: {
-    idempotentReplay?: boolean;
-    imported: number;
-    failed: number;
-    items: Array<{
-      rowNumber: number;
-      status: 'imported' | 'failed';
-      collectionRequest?: CollectionRequest;
-      error?: string;
-    }>;
-  };
 };
 
 

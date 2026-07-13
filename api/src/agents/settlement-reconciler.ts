@@ -56,7 +56,7 @@ export function classifySettlementError(error: unknown): 'tx_failed' | 'pending'
   return /failed on-chain/i.test(message) ? 'tx_failed' : 'pending';
 }
 
-export async function reconcilePendingSettlements(
+async function reconcilePendingSettlements(
   deps: SettlementReconcilerDeps = defaultDeps,
 ): Promise<ReconcileSummary> {
   const summary: ReconcileSummary = { settled: 0, mismatch: 0, failed: 0, reclaimed: 0, pending: 0 };
@@ -126,7 +126,7 @@ export type ProposalReconcileSummary = { reconciled: number; pending: number; fa
 // at execution time would otherwise stay stuck until a human clicks Sync. This
 // sweeps payment proposals that aren't settlement-verified and drives them to a
 // terminal state via the same chain-recovery path Sync uses, as the system actor.
-export async function reconcilePendingProposals(): Promise<ProposalReconcileSummary> {
+async function reconcilePendingProposals(): Promise<ProposalReconcileSummary> {
   const summary: ProposalReconcileSummary = { reconciled: 0, pending: 0, failed: 0 };
 
   const candidates = await prisma.decimalProposal.findMany({

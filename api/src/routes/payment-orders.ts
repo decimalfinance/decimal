@@ -12,7 +12,7 @@ import { importPaymentOrdersFromCsv, previewPaymentOrdersCsv } from '../payments
 import { tryAdvancePaymentOrderWithAgent } from '../agents/payment-automation.js';
 import { buildPaymentOrderProofPacket } from '../payments/order-proof.js';
 import { isPaymentOrderState } from '../payments/order-state.js';
-import { assertOrganizationAccess, assertOrganizationAdmin } from '../auth/organization-access.js';
+import { assertOrganizationAccess } from '../auth/organization-access.js';
 import { actorFromAuth } from '../auth/actor.js';
 import { asyncRoute, sendCreated, sendJson, sendList, unwrapItems } from '../infra/route-helpers.js';
 
@@ -103,7 +103,7 @@ paymentOrdersRouter.get('/organizations/:organizationId/payment-orders', asyncRo
 
 paymentOrdersRouter.post('/organizations/:organizationId/payment-orders', asyncRoute(async (req, res) => {
     const { organizationId } = organizationParamsSchema.parse(req.params);
-    await assertOrganizationAdmin(organizationId, req.auth!);
+    await assertOrganizationAccess(organizationId, req.auth!);
     const input = createPaymentOrderSchema.parse(req.body);
     const actor = actorFromAuth(req.auth!);
 
@@ -149,7 +149,7 @@ paymentOrdersRouter.post('/organizations/:organizationId/payment-orders/batch-cs
 
 paymentOrdersRouter.post('/organizations/:organizationId/payment-orders/batch-csv', asyncRoute(async (req, res) => {
     const { organizationId } = organizationParamsSchema.parse(req.params);
-    await assertOrganizationAdmin(organizationId, req.auth!);
+    await assertOrganizationAccess(organizationId, req.auth!);
     const input = batchCsvSchema.parse(req.body);
     const result = await importPaymentOrdersFromCsv({
       organizationId,
@@ -183,7 +183,7 @@ paymentOrdersRouter.get('/organizations/:organizationId/payment-orders/:paymentO
 paymentOrdersRouter.patch('/organizations/:organizationId/payment-orders/:paymentOrderId', async (req, res, next) => {
   try {
     const { organizationId, paymentOrderId } = paymentOrderParamsSchema.parse(req.params);
-    await assertOrganizationAdmin(organizationId, req.auth!);
+    await assertOrganizationAccess(organizationId, req.auth!);
     const input = updatePaymentOrderSchema.parse(req.body);
     const actor = actorFromAuth(req.auth!);
 
@@ -203,7 +203,7 @@ paymentOrdersRouter.patch('/organizations/:organizationId/payment-orders/:paymen
 
 paymentOrdersRouter.post('/organizations/:organizationId/payment-orders/:paymentOrderId/clear-review', asyncRoute(async (req, res) => {
     const { organizationId, paymentOrderId } = paymentOrderParamsSchema.parse(req.params);
-    await assertOrganizationAdmin(organizationId, req.auth!);
+    await assertOrganizationAccess(organizationId, req.auth!);
     const input = clearReviewSchema.parse(req.body);
     const actor = actorFromAuth(req.auth!);
 
@@ -230,7 +230,7 @@ paymentOrdersRouter.post('/organizations/:organizationId/payment-orders/:payment
 
 paymentOrdersRouter.post('/organizations/:organizationId/payment-orders/:paymentOrderId/agent/advance', asyncRoute(async (req, res) => {
     const { organizationId, paymentOrderId } = paymentOrderParamsSchema.parse(req.params);
-    await assertOrganizationAdmin(organizationId, req.auth!);
+    await assertOrganizationAccess(organizationId, req.auth!);
     const input = agentAdvanceSchema.parse(req.body);
 
     sendJson(res, await tryAdvancePaymentOrderWithAgent({
@@ -244,7 +244,7 @@ paymentOrdersRouter.post('/organizations/:organizationId/payment-orders/:payment
 paymentOrdersRouter.post('/organizations/:organizationId/payment-orders/:paymentOrderId/cancel', async (req, res, next) => {
   try {
     const { organizationId, paymentOrderId } = paymentOrderParamsSchema.parse(req.params);
-    await assertOrganizationAdmin(organizationId, req.auth!);
+    await assertOrganizationAccess(organizationId, req.auth!);
     const actor = actorFromAuth(req.auth!);
 
     res.json(await cancelPaymentOrder({

@@ -57,7 +57,7 @@ single_payment.pdf
 deliverables
 
 # Synthetic test data — bulky PDFs, easy to regenerate locally via
-# `node synthetic_data/render-invoice-pdfs.mjs`
+# `node synthetic_data/generate-invoices.mjs`
 synthetic_data/
 
 # Local scratch artifacts
@@ -86,3 +86,16 @@ mastercard.webp
 
 NEXT-TO-BUILD.md
 api/scripts/
+
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules
+.testbench/
+
+# local-only artifacts
+.claude/settings.local.json
+.claude/launch.json
+ramp_billpay/
+the-AI-momentum-report.pdf

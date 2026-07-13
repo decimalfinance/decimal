@@ -159,14 +159,23 @@ function loadFunderKeypair() {
   return funderCache;
 }
 
-// Fee-payer sponsorship: the devnet funder wallet doubles as the gas sponsor. When
-// configured, agent transactions set this wallet as the fee payer (and rent payer),
-// and it co-signs before broadcast — so member/agent wallets never need SOL. On
-// mainnet (no funder) this is null and the signer pays its own fee, as before.
+// Fee-payer sponsorship: a Decimal-controlled keypair pays gas for all user-initiated
+// Squads transactions so member wallets (Privy embedded) never need SOL on any network.
+// Set FEE_PAYER_KEYPAIR_PATH (any network) or DEVNET_FUNDER_KEYPAIR_PATH (devnet only).
+// When neither is configured this returns null and the signer pays its own fee.
+let feePayerCache: Keypair | null = null;
 export function getFeePayerKeypair(): Keypair | null {
-  if (!config.devnetFunderKeypairPath) return null;
+  if (!config.feePayerKeypairPath) return null;
+  if (feePayerCache) return feePayerCache;
   try {
-    return loadFunderKeypair();
+    const keypairPath = path.resolve(config.feePayerKeypairPath);
+    const raw = fs.readFileSync(keypairPath, 'utf8');
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed) || !parsed.every((value) => Number.isInteger(value))) {
+      throw new Error('FEE_PAYER_KEYPAIR_PATH must point to a Solana keypair JSON array.');
+    }
+    feePayerCache = Keypair.fromSecretKey(Uint8Array.from(parsed as number[]));
+    return feePayerCache;
   } catch (error) {
     logger.warn('fee_payer.load_failed', { error: error instanceof Error ? error.message : String(error) });
     return null;

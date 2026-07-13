@@ -104,7 +104,7 @@ export async function tryAdvancePaymentOrderWithAgent(args: {
   }
 }
 
-export async function advancePaymentOrderWithAgent(args: {
+async function advancePaymentOrderWithAgent(args: {
   organizationId: string;
   paymentOrderId: string;
   actorUserId: string | null;

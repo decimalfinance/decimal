@@ -58,8 +58,14 @@
   --success: #15A86B;
   --warning: #B0731B;
   --danger: #8B2A22;             /* oxblood — distinct from magenta pink */
+  --danger-vivid: #E5484D;       /* true red — inked chips that must READ red */
   --info: #1B5F8C;
+  --orange: #C25A18;
   --neutral: #5E5B57;
+  /* Solid stage inks (pipeline color coding) + the on-ink text color */
+  --stage-review: #6E4CC4;  --stage-review-on: #FFFFFF;   /* violet */
+  --stage-approve: #2B63D0; --stage-approve-on: #FFFFFF;   /* blue  */
+  --stage-payment: #E06A1B; --stage-payment-on: #FFFFFF;   /* orange */
 
   /* canvas behind the specimen cards — neutral so white cards pop */
   --dc-canvas-bg: #E9E7E3;
@@ -86,9 +92,14 @@
 
   --success: #4FBE8A;
   --warning: #E4B074;
-  --danger: #D9785F;             /* terracotta — distinct from bright pink */
+  --danger: #E5484D;             /* true red — destructive/off states (user rule: danger = red) */
+  --danger-vivid: #E5484D;
   --info: #79B2E0;
+  --orange: #E28A52;
   --neutral: #9E9C98;
+  --stage-review: #8A6BD8;  --stage-review-on: #FFFFFF;
+  --stage-approve: #3D74DB; --stage-approve-on: #FFFFFF;
+  --stage-payment: #DE7C36; --stage-payment-on: #FFFFFF;
 
   --dc-canvas-bg: #040404;
 }

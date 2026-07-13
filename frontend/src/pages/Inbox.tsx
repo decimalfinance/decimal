@@ -164,9 +164,11 @@ export function InboxPage({ session }: { session: AuthenticatedSession }) {
   const isFirstRun = treasuryCount === 0;
 
   const orgBase = `/organizations/${organizationId}`;
-  const orgName =
-    session.organizations.find((o) => o.organizationId === organizationId)?.organizationName
-    ?? 'your workspace';
+  const membership = session.organizations.find((o) => o.organizationId === organizationId);
+  const orgName = membership?.organizationName ?? 'your workspace';
+  // Setup is admin work — members on a fresh org get a quiet empty state, not
+  // a checklist of buttons whose actions the API will refuse them.
+  const canAdminister = membership?.role === 'owner' || membership?.role === 'admin';
 
   return (
     <div className="page">
@@ -181,7 +183,9 @@ export function InboxPage({ session }: { session: AuthenticatedSession }) {
           </h1>
           <p className="ov-summary">
             {isFirstRun ? (
-              <>Two quick steps and your agent can start paying vendors. Knock these out whenever you're ready — nothing's blocking you.</>
+              canAdminister
+                ? <>Two quick steps and your agent can start paying vendors. Knock these out whenever you're ready — nothing's blocking you.</>
+                : <>Your workspace is still being set up. Bills and approvals will show up here once things are moving.</>
             ) : (
               <>
                 <b>{approvalCount} payment{approvalCount === 1 ? '' : 's'}</b>{' '}
@@ -193,7 +197,17 @@ export function InboxPage({ session }: { session: AuthenticatedSession }) {
           </p>
         </div>
 
-        {isFirstRun ? (
+        {isFirstRun && !canAdminister ? (
+          <div className="snap">
+            <div className="empty" style={{ padding: '40px 24px' }}>
+              <div className="empty-icon"><Ico.inbox w={22} /></div>
+              <h4>Nothing here yet</h4>
+              <p>An admin is finishing the workspace setup. Once bills start flowing, the ones that need you land here.</p>
+            </div>
+          </div>
+        ) : null}
+
+        {isFirstRun && canAdminister ? (
           <>
             <div className="surface">
               <div className="snap-head">Finish setting up</div>

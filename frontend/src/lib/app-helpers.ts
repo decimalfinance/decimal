@@ -1,5 +1,15 @@
 import type { AuthenticatedSession } from '../api';
 
+// Approval-action errors, with a way forward: the SoD veto (e.g. a solo owner
+// approving their own bill) is a policy the owner may relax on the record —
+// tell them where, instead of dead-ending (testbench VERIFY follow-up).
+export function approvalActErrorMessage(err: unknown): string {
+  const msg = err instanceof Error ? err.message : 'Try again.';
+  return /separation-of-duties/i.test(msg)
+    ? `${msg} If your team is small enough that this rule doesn't fit, the primary admin can relax it on the Protections page — it goes on the record.`
+    : msg;
+}
+
 export function queryKeys(organizationId?: string, paymentOrderId?: string) {
   return {
     session: ['session'] as const,
