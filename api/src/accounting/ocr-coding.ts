@@ -21,6 +21,15 @@ export interface ExpenseAccount {
   description?: string | null;
 }
 
+export interface ChartAccount {
+  id: string;
+  name: string;
+  acctNum: string | null;
+  fullyQualifiedName: string;
+  accountType: string;
+  classification: string;
+}
+
 export type OcrSuggestion = { accountId: string; accountName: string; weight: number };
 
 export type OcrCoding = {
@@ -29,20 +38,36 @@ export type OcrCoding = {
   suggestions: OcrSuggestion[];
 };
 
-/** The org's active expense accounts (id, name, description) from QuickBooks; [] if not connected. */
-export async function listExpenseAccounts(organizationId: string): Promise<ExpenseAccount[]> {
+/** The org's FULL active chart of accounts from QuickBooks; [] if not connected. */
+export async function listChartOfAccounts(organizationId: string): Promise<ChartAccount[]> {
   const qb = await getQuickBooksForOrg(organizationId);
   if (!qb) return [];
   try {
     const resp = await qb.query('SELECT * FROM Account WHERE Active = true MAXRESULTS 1000');
-    const accounts = (resp.QueryResponse?.Account ?? []) as Array<{ Id: string; Name: string; Classification?: string; Description?: string }>;
-    return accounts
-      .filter((a) => a.Classification === 'Expense')
-      .map((a) => ({ id: a.Id, name: a.Name, description: a.Description ?? null }));
+    const accounts = (resp.QueryResponse?.Account ?? []) as Array<{
+      Id: string; Name: string; AcctNum?: string; FullyQualifiedName?: string;
+      AccountType?: string; Classification?: string; Description?: string;
+    }>;
+    return accounts.map((a) => ({
+      id: a.Id,
+      name: a.Name,
+      acctNum: a.AcctNum ?? null,
+      fullyQualifiedName: a.FullyQualifiedName ?? a.Name,
+      accountType: a.AccountType ?? 'Other',
+      classification: a.Classification ?? 'Other',
+    }));
   } catch (error) {
     logger.warn('ocr_coding.list_accounts_failed', { organizationId, error: error instanceof Error ? error.message : String(error) });
     return [];
   }
+}
+
+/** Expense-classification accounts only — what AI coding suggestions target. */
+export async function listExpenseAccounts(organizationId: string): Promise<ExpenseAccount[]> {
+  const chart = await listChartOfAccounts(organizationId);
+  return chart
+    .filter((a) => a.classification === 'Expense')
+    .map((a) => ({ id: a.id, name: a.name, description: null }));
 }
 
 /**
@@ -122,7 +147,11 @@ export async function suggestOcrCodings(
   items: Array<{ categoryHint: string | null; lineItems: { description: string }[] }>,
 ): Promise<Array<OcrCoding | null>> {
   const hasAnySignal = items.some((i) => i.categoryHint?.trim() || i.lineItems.length > 0);
-  const accounts = hasAnySignal ? await listExpenseAccounts(organizationId) : [];
+  const qboAccounts = hasAnySignal ? await listExpenseAccounts(organizationId) : [];
+  // No books connected yet → suggest against the builtin standard chart so
+  // coding works from day one (the real chart takes over once connected).
+  const { DEFAULT_EXPENSE_ACCOUNTS } = await import('./default-chart.js');
+  const accounts = qboAccounts.length > 0 ? qboAccounts : (hasAnySignal ? DEFAULT_EXPENSE_ACCOUNTS : []);
   return Promise.all(
     items.map(async (item): Promise<OcrCoding | null> => {
       const categoryHint = item.categoryHint?.trim() || null;

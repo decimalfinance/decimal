@@ -209,6 +209,9 @@ export async function predictGlCandidates(
   const ocrSuggestions = ocr?.suggestions
     ?? (ocr?.suggestedAccountId ? [{ accountId: ocr.suggestedAccountId, accountName: ocr.suggestedAccountName ?? null, weight: 1 }] : []);
   for (const s of ocrSuggestions) {
+    // Builtin-chart suggestions (made before QuickBooks was connected) are for
+    // the review screen only — never candidates for a real QuickBooks coding.
+    if (typeof s.accountId === 'string' && s.accountId.startsWith('builtin:')) continue;
     if (s.weight >= MIN_OCR_WEIGHT) add(s.accountId, s.accountName, 'ocr', { weight: s.weight, rationale: ocr?.rationale ?? null });
   }
   if (out.length < 3) {

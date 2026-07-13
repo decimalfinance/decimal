@@ -92,22 +92,22 @@ export class QuickBooks {
 
   // ---- OAuth ----
 
-  static authorizeUrl(state: string): string {
+  static authorizeUrl(state: string, redirectUri?: string): string {
     const p = new URLSearchParams({
       client_id: config.quickbooksClientId,
       response_type: 'code',
       scope: SCOPE,
-      redirect_uri: requireRedirectUri(),
+      redirect_uri: redirectUri ?? requireRedirectUri(),
       state,
     });
     return `${AUTHORIZE_URL}?${p.toString()}`;
   }
 
-  static async exchangeCode(code: string, realmId: string): Promise<QboTokens> {
+  static async exchangeCode(code: string, realmId: string, redirectUri?: string): Promise<QboTokens> {
     const json = await QuickBooks.tokenRequest({
       grant_type: 'authorization_code',
       code,
-      redirect_uri: requireRedirectUri(),
+      redirect_uri: redirectUri ?? requireRedirectUri(),
     });
     return tokensFromResponse(realmId, json);
   }

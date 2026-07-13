@@ -39,6 +39,9 @@ function requireStateSecret(): string {
 interface OAuthState {
   organizationId: string;
   frontendOrigin: string | null;
+  // The exact redirect_uri used at the authorize step — the token exchange
+  // must repeat it verbatim, so it rides in the signed state.
+  redirectUri: string | null;
 }
 
 // Only redirect back to an origin we trust (an allowed CORS origin, or a
@@ -55,10 +58,25 @@ function safeFrontendOrigin(raw: string | undefined | null): string | null {
   }
 }
 
-function signState(organizationId: string, frontendOrigin: string | null): string {
+// The OAuth redirect URI, derived from the request host so local dev
+// (localhost) and prod (api.decimal.finance) both work without ever touching
+// the Intuit app settings again — BOTH URIs must be registered once on the
+// Intuit app (it accepts multiple). Intuit requires the token exchange to use
+// the exact URI from the authorize step; since the browser lands on that very
+// URL, deriving from the callback request's host reproduces it.
+function callbackRedirectUri(req: import('express').Request): string | undefined {
+  const host = req.get('host');
+  if (!host) return config.quickbooksRedirectUri ?? undefined;
+  // Intuit rejects IP-address redirect URIs, so the loopback IP the dev
+  // frontend uses (127.0.0.1) must be presented as localhost.
+  const normalized = host.replace(/^127\.0\.0\.1(?=[:/]|$)/, 'localhost').replace(/^\[::1\](?=[:/]|$)/, 'localhost');
+  return `${req.protocol}://${normalized}/accounting/quickbooks/callback`;
+}
+
+function signState(organizationId: string, frontendOrigin: string | null, redirectUri: string | null): string {
   const secret = requireStateSecret();
   const payload = Buffer.from(
-    JSON.stringify({ organizationId, frontendOrigin, n: crypto.randomBytes(8).toString('hex') }),
+    JSON.stringify({ organizationId, frontendOrigin, redirectUri, n: crypto.randomBytes(8).toString('hex') }),
     'utf8',
   ).toString('base64url');
   const sig = crypto.createHmac('sha256', secret).update(payload).digest();
@@ -83,6 +101,7 @@ function verifyState(raw: string): OAuthState {
   return {
     organizationId: decoded.organizationId,
     frontendOrigin: typeof decoded.frontendOrigin === 'string' ? decoded.frontendOrigin : null,
+    redirectUri: typeof decoded.redirectUri === 'string' ? decoded.redirectUri : null,
   };
 }
 
@@ -141,7 +160,7 @@ publicAccountingRouter.get(
       finishCallback(res, 'error', ctx, 'missing_parameters');
       return;
     }
-    const tokens = await QuickBooks.exchangeCode(code, realmId);
+    const tokens = await QuickBooks.exchangeCode(code, realmId, state?.redirectUri ?? callbackRedirectUri(req));
     await saveConnection(state.organizationId, tokens);
     // Provision sensible defaults (clearing + expense accounts, mapped) so the
     // operator lands on a ready page. Best-effort: never block the connection.
@@ -171,7 +190,8 @@ accountingRouter.get(
     const frontendOrigin = safeFrontendOrigin(
       typeof req.query.frontendOrigin === 'string' ? req.query.frontendOrigin : req.get('origin'),
     );
-    sendJson(res, { authorizeUrl: QuickBooks.authorizeUrl(signState(organizationId, frontendOrigin)) });
+    const redirectUri = callbackRedirectUri(req) ?? null;
+    sendJson(res, { authorizeUrl: QuickBooks.authorizeUrl(signState(organizationId, frontendOrigin, redirectUri), redirectUri ?? undefined) });
   }),
 );
 
@@ -243,7 +263,12 @@ accountingRouter.get(
     const accounts = (resp.QueryResponse?.Account ?? []).map((a: any) => ({
       id: a.Id,
       name: a.Name,
+      // The number the bookkeeper knows the account by ("7410 Accounting").
+      acctNum: a.AcctNum ?? null,
+      // Sub-accounts render as "Utilities:Internet" — the unambiguous name.
+      fullyQualifiedName: a.FullyQualifiedName ?? a.Name,
       accountType: a.AccountType,
+      accountSubType: a.AccountSubType ?? null,
       classification: a.Classification,
     }));
     sendList(res, accounts);
