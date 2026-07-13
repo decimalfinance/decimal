@@ -12,6 +12,8 @@ export const publicOrganizationInvitesRouter = Router();
 export const organizationInvitesRouter = Router();
 
 const INVITE_TTL_DAYS = 14;
+// There is exactly ONE primary admin (role 'owner') per org — it can only be
+// transferred, never invited. Admins are minted by the primary admin alone.
 const INVITE_ROLES = ['admin', 'member'] as const;
 
 const organizationParamsSchema = z.object({
@@ -65,9 +67,13 @@ organizationInvitesRouter.get('/organizations/:organizationId/invites', asyncRou
 
 organizationInvitesRouter.post('/organizations/:organizationId/invites', asyncRoute(async (req, res) => {
   const { organizationId } = organizationParamsSchema.parse(req.params);
-  await assertOrganizationAdmin(organizationId, req.auth!);
+  const { membership } = await assertOrganizationAdmin(organizationId, req.auth!);
   assertVerifiedEmail(req.auth!.userEmailVerifiedAt);
   const input = createInviteSchema.parse(req.body);
+  // Only the primary admin manages the admin tier (QBO's primary-admin rule).
+  if (input.role === 'admin' && membership.role !== 'owner') {
+    throw forbidden('Only the primary admin can invite admins.');
+  }
   const invitedEmail = normalizeEmail(input.email);
 
   const existingUser = await prisma.user.findUnique({

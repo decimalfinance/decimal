@@ -51,6 +51,11 @@ export async function assertOrganizationAdmin(organizationId: string, actor: Acc
   return result;
 }
 
+/** Owner is distinct from admin for governance acts (protection relaxation, vault keys). */
+export function isOwnerRole(role: string | null | undefined) {
+  return role === 'owner';
+}
+
 export function isAdminRole(role: string | null | undefined) {
   return Boolean(role && ADMIN_ROLES.has(role));
 }

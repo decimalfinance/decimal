@@ -1,616 +1,454 @@
-// Members — implements the design (pages-people.jsx PageMembers + InviteModal).
-// Single unified roster: real members + pending invites in one table.
-// 3-tile metrics. Invite modal is two steps: compose → link generated.
-
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+// Members & roles. The core split: ACCESS tiers (owner/admin/member = settings
+// power, quiet) vs ROLES (Reviewer/Approver/Payer/Viewer = prebuilt permission
+// bundles for the AP pipeline, prominent). The role set is fixed — you assign
+// roles, you don't design them (roles-research/SYNTHESIS-decimal-roles.md).
+import { useState } from 'react';
 import { useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '../api';
-import type {
-  AuthenticatedSession,
-  CreateOrganizationInviteResponse,
-  OrganizationInvite,
-  OrganizationInviteRole,
-  OrganizationMember,
-} from '../types';
+import { accessApi, api, rolesApi, type AuthenticatedSession, type MemberWithRoles, type OrgRole, type OrganizationInviteRole, type RoleKey } from '../api';
 import { useToast } from '../ui/Toast';
 import { Ico } from '../dec/icons';
 import { PageHead } from '../dec/primitives';
 
-type RosterRow =
-  | {
-      kind: 'member';
-      id: string;
-      name: string | null;
-      email: string;
-      avatarUrl: string | null;
-      role: string;
-      status: string;
-      joined: string;
-      initials: string;
-    }
-  | {
-      kind: 'invite';
-      id: string;
-      email: string;
-      role: OrganizationInviteRole;
-      status: 'Invited';
-      createdAt: string;
-    };
-
-function initialsFromName(name: string | null, email: string): string {
-  if (name && name.trim()) {
-    const parts = name.trim().split(/\s+/);
-    if (parts.length >= 2) return (parts[0]![0]! + parts[1]![0]!).toUpperCase();
-    return name.slice(0, 2).toUpperCase();
-  }
-  const local = email.split('@')[0] ?? '?';
-  return local.slice(0, 2).toUpperCase();
-}
-
-function shortMonth(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
-}
-
-function rolePillClass(role: string): string {
-  return role.toLowerCase() === 'owner' ? 'role owner' : 'role';
-}
-
-function statusPill(status: string) {
-  if (status === 'Active') return { cls: 'pill-success', label: 'Active' };
-  if (status === 'Invited') return { cls: 'pill-warning', label: 'Invited' };
-  if (status === 'Revoked') return { cls: 'pill-neutral', label: 'Revoked' };
-  return { cls: 'pill-neutral', label: status };
-}
+const PERSON_COLORS = ['#B4632B', '#A24B6B', '#3F5FA8', '#2E7D5B', '#7A5CA8', '#3A7CA5', '#A8574A', '#5B7F3B'];
+const colorOf = (s: string) => { let h = 0; for (let i = 0; i < s.length; i += 1) h = (h * 31 + s.charCodeAt(i)) >>> 0; return PERSON_COLORS[h % PERSON_COLORS.length]!; };
+const initialsOf = (name: string, email = '') => {
+  const src = name?.trim() || email;
+  const p = src.split(/[\s@._-]+/).filter(Boolean);
+  return p.length >= 2 ? (p[0]![0]! + p[1]![0]!).toUpperCase() : src.slice(0, 2).toUpperCase();
+};
+const titleCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+// Access tiers, in product words: 'owner' is the primary admin (one per org).
+const accessLabel = (a: string) => (a === 'owner' ? 'Primary admin' : titleCase(a));
 
 export function MembersPage({ session }: { session: AuthenticatedSession }) {
-  const { organizationId } = useParams<{ organizationId: string }>();
+  const { organizationId = '' } = useParams();
   const queryClient = useQueryClient();
-  const { success, error: toastError } = useToast();
+  const toast = useToast();
+  const myRole = session.organizations.find((o) => o.organizationId === organizationId)?.role;
+  const canManage = myRole === 'owner' || myRole === 'admin';
+  const isPrimary = myRole === 'owner';
+  const myUserId = session.user.userId;
 
-  const currentMembership = useMemo(
-    () => session.organizations.find((o) => o.organizationId === organizationId),
-    [session.organizations, organizationId],
-  );
-  const isAdmin =
-    currentMembership?.role === 'owner' || currentMembership?.role === 'admin';
-
-  const [inviteOpen, setInviteOpen] = useState(false);
-  // Per the design, when the invite is generated the SAME modal swaps to a
-  // "link" step showing the copy field + "Shown once" warning. So we keep
-  // the modal open and stash the created invite for it to render.
-  const [createdInvite, setCreatedInvite] =
-    useState<CreateOrganizationInviteResponse | null>(null);
-
-  const membersQuery = useQuery({
-    queryKey: ['organization-members', organizationId] as const,
-    queryFn: () => api.listOrganizationMembers(organizationId!),
+  const q = useQuery({ queryKey: ['members-roles', organizationId], queryFn: () => rolesApi.get(organizationId), enabled: Boolean(organizationId) });
+  const invitesQuery = useQuery({
+    queryKey: ['org-invites', organizationId, 'pending'],
+    queryFn: () => api.listOrganizationInvites(organizationId, 'pending'),
     enabled: Boolean(organizationId),
   });
 
-  const invitesQuery = useQuery({
-    queryKey: ['organization-invites', organizationId, 'pending'] as const,
-    queryFn: () => api.listOrganizationInvites(organizationId!, 'pending'),
-    enabled: Boolean(organizationId) && isAdmin,
+  const [search, setSearch] = useState('');
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [manageFor, setManageFor] = useState<string | null>(null); // userId → manage-roles modal
+  const [assignFor, setAssignFor] = useState<OrgRole | null>(null); // role card → pick a member
+  const [linkModal, setLinkModal] = useState<{ email: string; link: string } | null>(null);
+  const [reinviting, setReinviting] = useState<string | null>(null);
+
+  const invalidateInvites = () => queryClient.invalidateQueries({ queryKey: ['org-invites', organizationId, 'pending'] });
+  const revokeM = useMutation({
+    mutationFn: (inviteId: string) => api.revokeOrganizationInvite(organizationId, inviteId),
+    onSuccess: () => { void invalidateInvites(); },
+    onError: (e) => toast.error('Could not revoke', e instanceof Error ? e.message : 'Try again.'),
+  });
+  // Links are one-time (the token is stored hashed), so "New link" = revoke the
+  // old invite and mint a fresh one, then show it.
+  const reinvite = async (inv: { organizationInviteId: string; invitedEmail: string; role: OrganizationInviteRole }) => {
+    setReinviting(inv.organizationInviteId);
+    try {
+      await api.revokeOrganizationInvite(organizationId, inv.organizationInviteId);
+      const res = await api.createOrganizationInvite(organizationId, { email: inv.invitedEmail, role: inv.role });
+      setLinkModal({ email: inv.invitedEmail, link: res.inviteLink });
+      void invalidateInvites();
+    } catch (e) {
+      toast.error('Could not create a new link', e instanceof Error ? e.message : 'Try again.');
+    } finally {
+      setReinviting(null);
+    }
+  };
+
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ['members-roles', organizationId] });
+    void queryClient.invalidateQueries({ queryKey: ['flow-stage'] });
+    void queryClient.invalidateQueries({ queryKey: ['release-config', organizationId] });
+  };
+
+  const assignM = useMutation({
+    mutationFn: (v: { roleKey: RoleKey; userId: string }) => rolesApi.assign(organizationId, v.roleKey, v.userId),
+    onSuccess: invalidate,
+    onError: (e) => toast.error('Could not assign', e instanceof Error ? e.message : 'Try again.'),
+  });
+  const unassignM = useMutation({
+    mutationFn: (v: { roleKey: RoleKey; personId: string }) => rolesApi.unassign(organizationId, v.roleKey, v.personId),
+    onSuccess: invalidate,
+  });
+  const accessM = useMutation({
+    mutationFn: (v: { userId: string; access: 'admin' | 'member' }) => accessApi.setMemberAccess(organizationId, v.userId, v.access),
+    onSuccess: () => { invalidate(); void queryClient.invalidateQueries({ queryKey: ['my-access'] }); },
+    onError: (e) => toast.error('Could not change access', e instanceof Error ? e.message : 'Try again.'),
+  });
+  const [transferFor, setTransferFor] = useState<MemberWithRoles | null>(null);
+  const transferM = useMutation({
+    mutationFn: (userId: string) => accessApi.transferPrimaryAdmin(organizationId, userId),
+    // The seat moved — our own session role changed, so reload for a clean slate.
+    onSuccess: () => { window.location.reload(); },
+    onError: (e) => toast.error('Could not transfer', e instanceof Error ? e.message : 'Try again.'),
   });
 
-  const createInviteMutation = useMutation({
-    mutationFn: (input: { email: string; role: OrganizationInviteRole }) =>
-      api.createOrganizationInvite(organizationId!, input),
-    onSuccess: async (created) => {
-      success('Invite created.');
-      // Keep the modal open — it swaps to the link step internally.
-      setCreatedInvite(created);
-      await queryClient.invalidateQueries({
-        queryKey: ['organization-invites', organizationId, 'pending'],
-      });
-    },
-    onError: (err) => {
-      toastError(err instanceof Error ? err.message : 'Unable to create invite.');
-    },
-  });
+  const data = q.data;
+  const members = data?.members ?? [];
+  const roles = data?.roles ?? [];
+  const roleName = (key: RoleKey) => roles.find((r) => r.key === key)?.name ?? titleCase(key);
+  const s = search.trim().toLowerCase();
+  const filtered = members.filter((m) => !s || m.name.toLowerCase().includes(s) || m.email.toLowerCase().includes(s));
+  const pending = invitesQuery.data?.items ?? [];
 
-  const revokeInviteMutation = useMutation({
-    mutationFn: (organizationInviteId: string) =>
-      api.revokeOrganizationInvite(organizationId!, organizationInviteId),
-    onSuccess: async () => {
-      success('Invite revoked.');
-      await queryClient.invalidateQueries({
-        queryKey: ['organization-invites', organizationId, 'pending'],
-      });
-    },
-    onError: (err) => {
-      toastError(err instanceof Error ? err.message : 'Unable to revoke invite.');
-    },
-  });
-
-  if (!organizationId) return null;
-
-  const members = membersQuery.data?.items ?? [];
-  const pendingInvites: OrganizationInvite[] = invitesQuery.data?.items ?? [];
-
-  // Merge into a single roster — real members first, pending invites below.
-  // The design puts them in one table with status pills doing the visual
-  // discrimination (Active vs Invited vs Revoked).
-  const roster: RosterRow[] = [
-    ...members.map<RosterRow>((m: OrganizationMember) => ({
-      kind: 'member',
-      id: m.membershipId,
-      name: m.user.displayName,
-      email: m.user.email,
-      avatarUrl: m.user.avatarUrl ?? null,
-      role: m.role.charAt(0).toUpperCase() + m.role.slice(1),
-      status: m.status === 'active' ? 'Active' : m.status,
-      joined: '—', // OrganizationMember doesn't carry joinedAt; surface "—" until backend exposes it
-      initials: initialsFromName(m.user.displayName, m.user.email),
-    })),
-    ...pendingInvites.map<RosterRow>((inv) => ({
-      kind: 'invite',
-      id: inv.organizationInviteId,
-      email: inv.invitedEmail,
-      role: inv.role,
-      status: 'Invited',
-      createdAt: inv.createdAt,
-    })),
-  ];
-
-  const activeMembers = members.filter((m) => m.status === 'active').length;
-  const pendingCount = pendingInvites.length;
-  const adminsCount = members.filter(
-    (m) => m.status === 'active' && (m.role === 'owner' || m.role === 'admin'),
-  ).length;
-
-  const orgName = currentMembership?.organizationName ?? 'this workspace';
+  const toggleRole = (member: MemberWithRoles, roleKey: RoleKey) => {
+    if (member.roles.includes(roleKey)) {
+      if (member.personId) unassignM.mutate({ roleKey, personId: member.personId });
+    } else {
+      assignM.mutate({ roleKey, userId: member.userId });
+    }
+  };
 
   return (
-    <div className="page">
+    <div className="page page-wide mr">
       <div className="stack stack-24">
         <PageHead
-          eyebrow="REGISTRY"
-          title="Members"
-          desc={`People in ${orgName}. Invite a teammate by email — they'll get a link to sign in and join.`}
-          actions={
-            isAdmin ? (
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => setInviteOpen(true)}
-              >
-                <Ico.userPlus w={15} />Invite member
-              </button>
-            ) : undefined
-          }
+          eyebrow="Registry"
+          title="Members & roles"
+          desc="Who's on the team, and the job each person does as a bill moves from received to paid."
+          actions={canManage ? <button type="button" className="btn btn-primary" onClick={() => setInviteOpen(true)}><Ico.userPlus w={15} /> Invite member</button> : undefined}
         />
 
-        <div className="metrics" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
-          <div className="metric">
-            <div className="m-label">Members</div>
-            <div className="m-value">{activeMembers}</div>
-            <div className="m-sub">{activeMembers === 1 ? 'active' : 'active'}</div>
-          </div>
-          <div className="metric">
-            <div className="m-label">Pending invites</div>
-            <div className="m-value">{pendingCount}</div>
-            <div className="m-sub">{pendingCount === 1 ? 'awaiting sign-in' : 'awaiting sign-in'}</div>
-          </div>
-          <div className="metric">
-            <div className="m-label">Admins</div>
-            <div className="m-value">{adminsCount}</div>
-            <div className="m-sub">{adminsCount > 0 ? 'incl. owner' : ''}</div>
-          </div>
-        </div>
+        {q.isLoading ? <div className="skeleton" style={{ height: 320 }} /> : (
+          <>
+            {/* Roster */}
+            <section>
+              <div className="sec-head">
+                <div className="sh-titles"><h2>Team</h2><p className="sh-desc">{members.length} {members.length === 1 ? 'person' : 'people'}</p></div>
+                <div className="input-search" style={{ width: 240 }}>
+                  <Ico.search w={15} />
+                  <input className="input" placeholder="Search people" value={search} onChange={(e) => setSearch(e.target.value)} />
+                </div>
+              </div>
+              <div className="tbl-card">
+                <table className="tbl" style={{ tableLayout: 'fixed' }}>
+                  <thead>
+                    <tr><th style={{ width: '28%' }}>Member</th><th style={{ width: '34%' }}>Email</th><th style={{ width: '30%' }}>Roles</th><th style={{ width: '8%' }} /></tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((m) => (
+                      <tr key={m.userId}>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+                            <span className="p-av" style={{ width: 36, height: 36, fontSize: 11, background: colorOf(m.name || m.email) }}>{initialsOf(m.name, m.email)}</span>
+                            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 14.5, letterSpacing: '-0.01em', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.name}</div>
+                          </div>
+                        </td>
+                        <td><span className="cell-mono" style={{ fontSize: 12.5 }}>{m.email}</span></td>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+                            {m.access !== 'member' ? (
+                              // Admins hold every capability — no role chips, just the tier.
+                              isPrimary && m.userId !== myUserId
+                                ? <button type="button" className="rolepill muted" style={{ cursor: 'pointer' }} onClick={() => setManageFor(m.userId)}>{accessLabel(m.access)}</button>
+                                : <span className="rolepill muted">{accessLabel(m.access)}</span>
+                            ) : (
+                              <>
+                                {m.roles.map((r) => (
+                                  canManage
+                                    ? <button key={r} type="button" className="rolepill" style={{ cursor: 'pointer' }} onClick={() => setManageFor(m.userId)}>{roleName(r)}</button>
+                                    : <span key={r} className="rolepill">{roleName(r)}</span>
+                                ))}
+                                {canManage && m.roles.length === 0 ? (
+                                  <button type="button" className="addrole" onClick={() => setManageFor(m.userId)}><Ico.plus w={11} /> Add role</button>
+                                ) : null}
+                              </>
+                            )}
+                          </div>
+                        </td>
+                        <td />
+                      </tr>
+                    ))}
+                    {pending.map((inv) => (
+                      <tr key={inv.organizationInviteId} style={{ opacity: 0.6 }}>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                            <span className="p-av" style={{ width: 36, height: 36, fontSize: 11, background: 'var(--text-faint)' }}>{initialsOf('', inv.invitedEmail)}</span>
+                            <div style={{ fontWeight: 600, color: 'var(--text-muted)' }}>Invited</div>
+                          </div>
+                        </td>
+                        <td><span className="cell-mono" style={{ fontSize: 12.5 }}>{inv.invitedEmail}</span></td>
+                        <td><span style={{ fontSize: 12, color: 'var(--text-faint)' }}>Assign a role once they join</span></td>
+                        <td>
+                          {canManage ? (
+                            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                              <button type="button" className="btn btn-ghost btn-sm" style={{ color: 'var(--accent)' }} disabled={reinviting === inv.organizationInviteId} onClick={() => reinvite(inv)}>{reinviting === inv.organizationInviteId ? 'Working…' : 'New link'}</button>
+                              <button type="button" className="btn btn-ghost btn-sm" style={{ color: 'var(--text-muted)' }} onClick={() => revokeM.mutate(inv.organizationInviteId)}>Revoke</button>
+                            </div>
+                          ) : null}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
 
-        <div className="tbl-card">
-          {membersQuery.isLoading ? (
-            <div style={{ padding: 16 }}>
-              <div className="skeleton" style={{ height: 48, marginBottom: 6 }} />
-              <div className="skeleton" style={{ height: 48 }} />
-            </div>
-          ) : roster.length === 0 ? (
-            <div className="empty">
-              <div className="empty-icon"><Ico.members w={22} /></div>
-              <h4>No members yet</h4>
-              <p>
-                {isAdmin
-                  ? 'Invite teammates to collaborate on this organization.'
-                  : 'Ask an admin to invite teammates.'}
-              </p>
-              {isAdmin ? (
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  style={{ marginTop: 6 }}
-                  onClick={() => setInviteOpen(true)}
-                >
-                  <Ico.userPlus w={15} />Invite member
-                </button>
-              ) : null}
-            </div>
-          ) : (
-            <table className="tbl">
-              <thead>
-                <tr>
-                  <th style={{ width: '40%' }}>Member</th>
-                  <th>Role</th>
-                  <th>Status</th>
-                  <th>Joined</th>
-                  <th className="num" style={{ width: 160 }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {roster.map((row) => (
-                  <RosterTableRow
-                    key={`${row.kind}:${row.id}`}
-                    row={row}
-                    isAdmin={isAdmin}
-                    onRevoke={(id) => {
-                      if (
-                        window.confirm(
-                          `Revoke invite for ${row.kind === 'invite' ? row.email : ''}? They will need a new link to join.`,
-                        )
-                      ) {
-                        revokeInviteMutation.mutate(id);
-                      }
-                    }}
-                    revoking={revokeInviteMutation.isPending}
-                  />
+            {/* Roles — fixed set, full-bleed separator (escapes the 32px page padding) */}
+            <div style={{ height: 1, background: 'var(--border)', margin: '0 -32px' }} />
+            <section>
+              <div className="sec-head">
+                <div className="sh-titles"><h2>Roles</h2><p className="sh-desc">Each role is a job in the pipeline and comes with exactly the access that job needs. A person can hold more than one. Owners and admins always have full access.</p></div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+                {roles.map((r) => (
+                  <div key={r.key} className="rolecard" style={{ alignItems: 'flex-start' }}>
+                    <span className="rolechip-lg"><Ico.members w={17} /></span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{r.name}</span>
+                        {r.holders.length > 0 ? <span style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>{r.holders.length} {r.holders.length === 1 ? 'person' : 'people'}</span> : null}
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3, lineHeight: 1.5 }}>{r.summary}</div>
+                      {r.holders.length > 0 ? (
+                        <div className="avstack" style={{ marginTop: 8 }}>
+                          {r.holders.slice(0, 6).map((h) => <span key={h.personId} className="p-av" style={{ width: 26, height: 26, fontSize: 9, background: colorOf(h.name) }} title={h.name}>{initialsOf(h.name)}</span>)}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: 8 }}>No one holds this yet</div>
+                      )}
+                    </div>
+                    {canManage ? (
+                      <button type="button" className="btn btn-secondary btn-sm" style={{ flex: 'none' }} onClick={() => setAssignFor(r)}>Assign</button>
+                    ) : null}
+                  </div>
                 ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+              </div>
+            </section>
+          </>
+        )}
       </div>
 
       {inviteOpen ? (
-        <InviteMemberDialog
-          pending={createInviteMutation.isPending}
-          createdInvite={createdInvite}
-          onClose={() => {
-            setInviteOpen(false);
-            setCreatedInvite(null);
-            createInviteMutation.reset();
-          }}
-          onSubmit={(input) => createInviteMutation.mutate(input)}
+        <InviteDialog
+          organizationId={organizationId}
+          canInviteAdmins={isPrimary}
+          onClose={() => setInviteOpen(false)}
+          onCreated={(email, link) => { setInviteOpen(false); setLinkModal({ email, link }); void invalidateInvites(); }}
+          toast={toast}
+        />
+      ) : null}
+
+      {linkModal ? <LinkDialog email={linkModal.email} link={linkModal.link} onClose={() => setLinkModal(null)} toast={toast} /> : null}
+
+      {manageFor && members.some((m) => m.userId === manageFor) ? (
+        <MemberRolesDialog
+          member={members.find((m) => m.userId === manageFor)!}
+          roles={roles}
+          tier={isPrimary && manageFor !== myUserId ? {
+            busy: accessM.isPending,
+            onSet: (access) => accessM.mutate({ userId: manageFor, access }),
+            onTransfer: () => { setTransferFor(members.find((m) => m.userId === manageFor)!); setManageFor(null); },
+          } : undefined}
+          onClose={() => setManageFor(null)}
+          onToggle={(roleKey) => toggleRole(members.find((m) => m.userId === manageFor)!, roleKey)}
+        />
+      ) : null}
+
+      {transferFor ? (
+        <div className="overlay" style={{ position: 'fixed', inset: 0, zIndex: 62 }} onClick={(e) => { if (e.target === e.currentTarget && !transferM.isPending) setTransferFor(null); }}>
+          <div className="dialog" role="dialog" aria-modal="true" style={{ maxWidth: 440 }}>
+            <div className="dialog-head"><div><h2>Make {transferFor.name} the primary admin?</h2></div><button type="button" className="drawer-x" onClick={() => setTransferFor(null)} aria-label="Close">×</button></div>
+            <div className="dialog-body"><p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.55, margin: 0 }}>There is exactly one primary admin. {transferFor.name} takes the seat — only they will be able to publish the pipeline, change protections, and manage admins. You stay on as an admin.</p></div>
+            <div className="dialog-foot">
+              <button type="button" className="btn btn-secondary" onClick={() => setTransferFor(null)} disabled={transferM.isPending}>Cancel</button>
+              <button type="button" className="btn btn-danger" onClick={() => transferM.mutate(transferFor.userId)} disabled={transferM.isPending}>{transferM.isPending ? 'Transferring…' : 'Transfer primary admin'}</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {assignFor ? (
+        <AssignMemberDialog
+          role={assignFor}
+          members={members.filter((m) => m.access === 'member')}
+          onClose={() => setAssignFor(null)}
+          onAssign={(userId) => { assignM.mutate({ roleKey: assignFor.key, userId }); setAssignFor(null); }}
         />
       ) : null}
     </div>
   );
 }
 
-function RosterTableRow({
-  row,
-  isAdmin,
-  onRevoke,
-  revoking,
-}: {
-  row: RosterRow;
-  isAdmin: boolean;
-  onRevoke: (id: string) => void;
-  revoking: boolean;
+// Tick the roles a member holds. Each row shows the role's plain-English
+// summary so assignment doubles as the explanation of what it grants.
+function MemberRolesDialog(props: {
+  member: MemberWithRoles;
+  roles: OrgRole[];
+  tier?: { busy: boolean; onSet: (access: 'admin' | 'member') => void; onTransfer: () => void };
+  onClose: () => void; onToggle: (roleKey: RoleKey) => void;
 }) {
-  if (row.kind === 'member') {
-    const status = statusPill(row.status);
-    return (
-      <tr>
-        <td>
-          <div className="member-cell">
-            <MemberAvatar avatarUrl={row.avatarUrl} initials={row.initials} />
-            <div className="col">
-              <span className="m-name">{row.name ?? row.email}</span>
-              {row.name ? (
-                <span className="m-sub" style={{ fontFamily: 'var(--font-body)' }}>{row.email}</span>
-              ) : null}
-            </div>
-          </div>
-        </td>
-        <td>
-          <span className={rolePillClass(row.role)}>
-            {row.role.toLowerCase() === 'owner' ? <Ico.key w={12} /> : null}
-            {row.role}
-          </span>
-        </td>
-        <td>
-          <span className={`pill ${status.cls}`}><span className="dot" />{status.label}</span>
-        </td>
-        <td><span className="joined">{shortMonth(row.joined) === '—' ? '—' : row.joined}</span></td>
-        <td />
-      </tr>
-    );
-  }
-
-  // invited row
-  const status = statusPill(row.status);
+  const { member, roles, tier, onClose, onToggle } = props;
+  const held = new Set(member.roles);
   return (
-    <tr>
-      <td>
-        <div className="member-cell">
-          <span className="m-avatar invited"><Ico.mail w={15} /></span>
-          <div className="col">
-            <span className="m-name">{row.email}</span>
-            <span className="m-sub" style={{ fontFamily: 'var(--font-body)' }}>Invitation sent · not yet joined</span>
-          </div>
+    <div className="overlay" style={{ position: 'fixed', inset: 0, zIndex: 60 }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="dialog roles-dialog" role="dialog" aria-modal="true" style={{ maxWidth: 480 }}>
+        <div className="dialog-head">
+          <div><h2>{member.access !== 'member' ? `${member.name}'s access` : `${member.name}'s roles`}</h2><p>{member.access !== 'member' ? 'Access tier and the primary-admin seat.' : 'Tick the jobs this person does. Their access follows from the roles they hold.'}</p></div>
+          <button type="button" className="drawer-x" onClick={onClose} aria-label="Close">×</button>
         </div>
-      </td>
-      <td>
-        <span className={rolePillClass(row.role)}>
-          {row.role.charAt(0).toUpperCase() + row.role.slice(1)}
-        </span>
-      </td>
-      <td>
-        <span className={`pill ${status.cls}`}><span className="dot" />{status.label}</span>
-      </td>
-      <td><span className="joined">—</span></td>
-      <td>
-        <div className="row-actions">
-          {isAdmin ? (
-            <button
-              type="button"
-              className="btn btn-sm btn-danger-ghost"
-              onClick={() => onRevoke(row.id)}
-              disabled={revoking}
-            >
-              Revoke
-            </button>
+        <div className="dialog-body">
+          {member.access !== 'member' ? (
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.55, margin: 0 }}>
+              {member.name.split(' ')[0]} is {member.access === 'owner' ? 'the primary admin' : 'an admin'} and already has full access — roles are for members. Move them to Member below if you want their access to come from roles instead.
+            </p>
+          ) : (
+          <div className="role-box">
+            {roles.map((r) => (
+              <button key={r.key} type="button" className={`role-row${held.has(r.key) ? ' on' : ''}`} onClick={() => onToggle(r.key)} style={{ alignItems: 'flex-start' }}>
+                <span className="rr-check" style={{ marginTop: 2 }}>{held.has(r.key) ? <Ico.checkSm w={12} /> : null}</span>
+                <span style={{ display: 'flex', flexDirection: 'column', gap: 2, textAlign: 'left', minWidth: 0 }}>
+                  <span className="rr-name">{r.name}</span>
+                  <span style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.45, whiteSpace: 'normal' }}>{r.summary}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+          )}
+          {tier ? (
+            <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-faint)' }}>Access level</span>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <span style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.45 }}>Admins can change anything except who the admins are.</span>
+                <div className="seg-pick" style={{ display: 'flex', padding: 3, gap: 3, background: 'var(--bg-surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--r-md)', flex: 'none', width: 180 }}>
+                  {(['member', 'admin'] as const).map((a) => (
+                    <button key={a} type="button" disabled={tier.busy} onClick={() => member.access !== a && tier.onSet(a)}
+                      style={{ flex: 1, height: 28, border: 'none', borderRadius: 'var(--r-sm)', background: member.access === a ? 'var(--bg-surface)' : 'transparent', boxShadow: member.access === a ? '0 1px 2px rgba(0,0,0,.06)' : undefined, color: member.access === a ? 'var(--text-primary)' : 'var(--text-muted)', fontSize: 12, fontWeight: member.access === a ? 600 : 500, cursor: 'pointer', fontFamily: 'var(--font-body)' }}>
+                      {a === 'member' ? 'Member' : 'Admin'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <button type="button" className="btn btn-ghost btn-sm" style={{ alignSelf: 'flex-start', color: 'var(--danger)' }} onClick={tier.onTransfer}>
+                Make {member.name.split(' ')[0]} the primary admin…
+              </button>
+            </div>
           ) : null}
         </div>
-      </td>
-    </tr>
+        <div className="dialog-foot" style={{ justifyContent: 'flex-end' }}><button type="button" className="btn btn-primary" onClick={onClose}>Done</button></div>
+      </div>
+    </div>
   );
 }
 
-// Real-photo avatar with initials fallback. Google profile photos block
-// requests with an unfamiliar Referer header, so we set
-// referrerPolicy="no-referrer" and fall back to initials if the image fails.
-function MemberAvatar({ avatarUrl, initials }: { avatarUrl: string | null; initials: string }) {
-  const [failed, setFailed] = useState(false);
-  if (!avatarUrl || failed) {
-    return <span className="m-avatar">{initials}</span>;
-  }
+function AssignMemberDialog(props: { role: OrgRole; members: MemberWithRoles[]; onClose: () => void; onAssign: (userId: string) => void }) {
+  const held = new Set(props.role.holders.map((h) => h.userId));
   return (
-    <span
-      className="m-avatar"
-      style={{ padding: 0, overflow: 'hidden', background: 'transparent' }}
-    >
-      <img
-        src={avatarUrl}
-        alt=""
-        referrerPolicy="no-referrer"
-        onError={() => setFailed(true)}
-        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-      />
-    </span>
-  );
-}
-
-// Centered dialog with TWO steps per the design (pages-people.jsx InviteModal):
-//   1. compose — email + role → "Generate invite link"
-//   2. link    — "Inviting {email}" + copy field + "Shown once" warning →
-//                "Email the link" + "Done"
-// The step is implicit: if `createdInvite` is set, we're on step 2; otherwise
-// step 1. Both share the .dialog-head / .dialog-body / .dialog-foot shell.
-function InviteMemberDialog({
-  pending,
-  createdInvite,
-  onClose,
-  onSubmit,
-}: {
-  pending: boolean;
-  createdInvite: CreateOrganizationInviteResponse | null;
-  onClose: () => void;
-  onSubmit: (input: { email: string; role: OrganizationInviteRole }) => void;
-}) {
-  const { success, error: toastError } = useToast();
-  const [email, setEmail] = useState('');
-  const [role, setRole] = useState<OrganizationInviteRole>('member');
-  const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
-    }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const trimmed = email.trim();
-    if (!trimmed) return;
-    onSubmit({ email: trimmed, role });
-  }
-
-  async function handleCopy() {
-    if (!createdInvite) return;
-    try {
-      await navigator.clipboard.writeText(createdInvite.inviteLink);
-      setCopied(true);
-      success('Invite link copied.');
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      toastError('Unable to copy. Select the link and copy manually.');
-    }
-  }
-
-  function handleEmail() {
-    if (!createdInvite) return;
-    const subject = encodeURIComponent(`You're invited to ${createdInvite.organization.organizationName} on Decimal`);
-    const body = encodeURIComponent(
-      `Hi,\n\nYou've been invited to join ${createdInvite.organization.organizationName} on Decimal.\n\nUse this link to sign in and join (single use, expires in 7 days):\n\n${createdInvite.inviteLink}\n`,
-    );
-    window.location.href = `mailto:${createdInvite.invitedEmail}?subject=${subject}&body=${body}`;
-  }
-
-  const onLinkStep = Boolean(createdInvite);
-  const roleLabel = createdInvite
-    ? createdInvite.role.charAt(0).toUpperCase() + createdInvite.role.slice(1)
-    : '';
-
-  return (
-    <div
-      className="overlay"
-      style={{ position: 'fixed', inset: 0, zIndex: 60 }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="dec-invite-title">
+    <div className="overlay" style={{ position: 'fixed', inset: 0, zIndex: 60 }} onClick={(e) => { if (e.target === e.currentTarget) props.onClose(); }}>
+      <div className="dialog" role="dialog" aria-modal="true" style={{ maxWidth: 440 }}>
         <div className="dialog-head">
-          <div>
-            <h2 id="dec-invite-title">
-              {onLinkStep ? 'Invitation ready' : 'Invite a member'}
-            </h2>
-            <p>
-              {onLinkStep
-                ? `Share this link with ${createdInvite!.invitedEmail}. They'll sign in and join ${createdInvite!.organization.organizationName}.`
-                : "Enter their email and pick a role. We'll generate a link you can share."}
-            </p>
-          </div>
-          <button type="button" className="drawer-x" onClick={onClose} aria-label="Close">
-            <Ico.x w={14} />
-          </button>
+          <div><h2>Assign “{props.role.name}”</h2><p>{props.role.summary}</p></div>
+          <button type="button" className="drawer-x" onClick={props.onClose} aria-label="Close">×</button>
         </div>
+        <div className="dialog-body">
+          <div className="check-list">
+            {props.members.map((m) => (
+              <button key={m.userId} type="button" className={`check-item${held.has(m.userId) ? ' on' : ''}`} disabled={held.has(m.userId)} onClick={() => props.onAssign(m.userId)}>
+                <span className="ci-av" style={{ background: colorOf(m.name) }}>{initialsOf(m.name, m.email)}</span>
+                <div className="col"><span className="ci-name">{m.name}</span><span className="ci-sub">{m.email}</span></div>
+                {held.has(m.userId) ? <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--success)' }}>Holds it</span> : null}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="dialog-foot"><button type="button" className="btn btn-secondary" onClick={props.onClose}>Done</button></div>
+      </div>
+    </div>
+  );
+}
 
-        {onLinkStep ? (
-          <>
-            <div className="dialog-body">
-              <div className="field">
-                <label className="field-label">Inviting</label>
-                <div className="member-cell">
-                  <span className="m-avatar invited"><Ico.mail w={15} /></span>
-                  <div className="col">
-                    <span className="m-name">{createdInvite!.invitedEmail}</span>
-                    <span className="m-sub" style={{ fontFamily: 'var(--font-body)' }}>{roleLabel}</span>
-                  </div>
-                </div>
+function InviteDialog(props: { organizationId: string; canInviteAdmins: boolean; onClose: () => void; onCreated: (email: string, link: string) => void; toast: ReturnType<typeof useToast> }) {
+  const [email, setEmail] = useState('');
+  const [access, setAccess] = useState<OrganizationInviteRole>('member');
+  const [sending, setSending] = useState(false);
+
+  const send = async () => {
+    if (!email.trim()) return;
+    setSending(true);
+    try {
+      const res = await api.createOrganizationInvite(props.organizationId, { email: email.trim(), role: access });
+      props.onCreated(email.trim(), res.inviteLink);
+    } catch (err) {
+      props.toast.error('Could not invite', err instanceof Error ? err.message : 'Try again.');
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="overlay" style={{ position: 'fixed', inset: 0, zIndex: 60 }} onClick={(e) => { if (e.target === e.currentTarget && !sending) props.onClose(); }}>
+      <div className="dialog" role="dialog" aria-modal="true" style={{ maxWidth: 460 }}>
+        <div className="dialog-head">
+          <div><h2>Invite a member</h2><p>You'll get a link to share — no email is sent.</p></div>
+          <button type="button" className="drawer-x" onClick={props.onClose} aria-label="Close">×</button>
+        </div>
+        <form onSubmit={(e) => { e.preventDefault(); void send(); }}>
+          <div className="dialog-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div className="field"><span className="field-label">Email address</span><input className="input" placeholder="name@company.com" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus /></div>
+            <div className="field">
+              <span className="field-label">Access level</span>
+              <div className="seg-pick" style={{ display: 'flex', padding: 3, gap: 3, background: 'var(--bg-surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--r-md)' }}>
+                {(['member', 'admin'] as const).map((a) => {
+                  const locked = a === 'admin' && !props.canInviteAdmins;
+                  return (
+                    <button key={a} type="button" disabled={locked} onClick={() => setAccess(a)} title={locked ? 'Only the primary admin can invite admins' : undefined}
+                      style={{ flex: 1, height: 32, border: 'none', borderRadius: 'var(--r-sm)', background: access === a ? 'var(--bg-surface)' : 'transparent', boxShadow: access === a ? '0 1px 2px rgba(0,0,0,.06)' : undefined, color: locked ? 'var(--text-faint)' : access === a ? 'var(--text-primary)' : 'var(--text-muted)', fontSize: 12.5, fontWeight: access === a ? 600 : 500, cursor: locked ? 'default' : 'pointer', fontFamily: 'var(--font-body)' }}>{titleCase(a)}</button>
+                  );
+                })}
               </div>
-              <div className="field">
-                <label className="field-label">Invite link</label>
-                {/* Custom unified copy bar — input + button share one
-                    rounded border with no visible seam. Inline styles
-                    because the design's .copy-field rule loses to the
-                    .btn pill-radius default in the cascade and ships a
-                    disconnected look. */}
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'stretch',
-                    border: '1px solid var(--border-strong)',
-                    borderRadius: 'var(--r-sm)',
-                    overflow: 'hidden',
-                    background: 'var(--bg-surface-2)',
-                    height: 40,
-                  }}
-                >
-                  <input
-                    readOnly
-                    value={createdInvite!.inviteLink}
-                    onFocus={(e) => e.currentTarget.select()}
-                    style={{
-                      flex: 1,
-                      minWidth: 0,
-                      border: 'none',
-                      outline: 'none',
-                      background: 'transparent',
-                      padding: '0 12px',
-                      fontFamily: 'var(--font-mono)',
-                      fontSize: 12,
-                      color: 'var(--text-primary)',
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={handleCopy}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      padding: '0 16px',
-                      border: 'none',
-                      borderLeft: '1px solid var(--border-strong)',
-                      borderRadius: 0,
-                      background: 'var(--primary)',
-                      color: 'var(--primary-contrast)',
-                      fontFamily: 'var(--font-body)',
-                      fontSize: 13,
-                      fontWeight: 500,
-                      cursor: 'pointer',
-                      flex: '0 0 auto',
-                    }}
-                  >
-                    <Ico.copy w={14} />{copied ? 'Copied' : 'Copy'}
-                  </button>
-                </div>
-              </div>
-              <div className="row" style={{ gap: 9, alignItems: 'flex-start' }}>
-                <span className="pill pill-warning" style={{ marginTop: 1 }}>
-                  <span className="dot" />Shown once
-                </span>
-                <span style={{ flex: 1, fontSize: 12, color: 'var(--text-faint)', lineHeight: 1.5 }}>
-                  Copy this link now — for security it won't be shown again. Expires in 7 days · single use.
-                  You can revoke it and generate a new one anytime.
-                </span>
-              </div>
+              <div className="input-help">Admins can change anything. Members get access from their roles. Only the primary admin can invite admins.</div>
             </div>
-            <div className="dialog-foot">
-              <button type="button" className="btn btn-primary" style={{ flex: 1 }} onClick={handleEmail}>
-                <Ico.mail w={15} />Email the link
-              </button>
-              <button type="button" className="btn btn-secondary" onClick={onClose}>
-                Done
-              </button>
+            <div className="field">
+              <span className="field-label">Role <span style={{ color: 'var(--text-faint)', fontWeight: 400 }}>· assign after they join</span></span>
+              <div className="input-help">Pick their job (Reviewer, Approver, Payer, Viewer) from the roster once they've joined.</div>
             </div>
-          </>
-        ) : (
-          <form onSubmit={handleSubmit}>
-            <div className="dialog-body">
-              <div className="field">
-                <label className="field-label">Email address</label>
-                <input
-                  className="input"
-                  type="email"
-                  required
-                  autoFocus
-                  autoComplete="off"
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  placeholder="teammate@company.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </div>
-              <div className="field">
-                <label className="field-label">Role</label>
-                <div className="select">
-                  <select
-                    value={role}
-                    onChange={(e) => setRole(e.target.value as OrganizationInviteRole)}
-                  >
-                    <option value="member">Member — can view and initiate payments</option>
-                    <option value="admin">Admin — can manage members &amp; settings</option>
-                  </select>
-                  <Ico.chevDown w={14} />
-                </div>
-              </div>
+          </div>
+          <div className="dialog-foot">
+            <button type="button" className="btn btn-secondary" onClick={props.onClose} disabled={sending}>Cancel</button>
+            <button type="submit" className="btn btn-primary" disabled={sending || !email.trim()}>{sending ? 'Creating…' : 'Create invite link'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// Shown after creating (or re-minting) an invite. The link is only available
+// this once — the token is stored hashed and can't be retrieved again.
+function LinkDialog(props: { email: string; link: string; onClose: () => void; toast: ReturnType<typeof useToast> }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(props.link); setCopied(true); setTimeout(() => setCopied(false), 1800); }
+    catch { props.toast.error('Copy failed', 'Select the link and copy it manually.'); }
+  };
+  return (
+    <div className="overlay" style={{ position: 'fixed', inset: 0, zIndex: 61 }} onClick={(e) => { if (e.target === e.currentTarget) props.onClose(); }}>
+      <div className="dialog" role="dialog" aria-modal="true" style={{ maxWidth: 480 }}>
+        <div className="dialog-head">
+          <div><h2>Invite link for {props.email}</h2><p>Copy it now and send it over — you can't see this link again.</p></div>
+          <button type="button" className="drawer-x" onClick={props.onClose} aria-label="Close">×</button>
+        </div>
+        <div className="dialog-body">
+          <div className="field">
+            <span className="field-label">Invite link</span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input className="input" readOnly value={props.link} onFocus={(e) => e.currentTarget.select()} style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: 12 }} />
+              <button type="button" className="btn btn-primary" onClick={copy} style={{ flex: 'none' }}>{copied ? 'Copied' : 'Copy'}</button>
             </div>
-            <div className="dialog-foot">
-              <button
-                type="submit"
-                className="btn btn-primary"
-                style={{ flex: 1 }}
-                disabled={pending || !email.trim()}
-                aria-busy={pending}
-              >
-                {pending ? 'Generating…' : <>Generate invite link<Ico.arrowRight w={14} /></>}
-              </button>
-              <button type="button" className="btn btn-secondary" onClick={onClose}>
-                Cancel
-              </button>
-            </div>
-          </form>
-        )}
+          </div>
+          <p className="input-help" style={{ marginTop: 10 }}>Anyone with this link can join as the invited member. If you lose it, use “New link” on their row to mint a fresh one.</p>
+        </div>
+        <div className="dialog-foot" style={{ justifyContent: 'flex-end' }}><button type="button" className="btn btn-secondary" onClick={props.onClose}>Done</button></div>
       </div>
     </div>
   );
