@@ -355,7 +355,8 @@ export async function verifyUsdcSettlementFromSignature(args: {
     });
   }
 
-  if (config.nodeEnv === 'test') {
+  // Fake chain (bench) settles synthetically, same as the test harness.
+  if (config.nodeEnv === 'test' || config.squadsFakeChain) {
     const items = [...expectedByTokenAccount.values()].map((item) => ({
       destinationWalletAddress: item.destinationWalletAddress,
       destinationTokenAccountAddress: item.destinationTokenAccountAddress,

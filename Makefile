@@ -18,7 +18,7 @@ PSQL_QUIET := PGOPTIONS='-c client_min_messages=warning' psql -v ON_ERROR_STOP=1
 
 .SILENT:
 
-.PHONY: infra-up infra-down dev devnet mainnet dev-api dev-frontend tunnel prod-backend prod-backend-devnet prod-backend-mainnet _prod-backend-shared test test-api test-frontend sync-postgres-schema reset-data reset-prod-data backup-db restore-db list-backups help
+.PHONY: infra-up infra-down dev devnet mainnet dev-api dev-frontend tunnel prod-backend prod-backend-devnet prod-backend-mainnet _prod-backend-shared test test-api test-frontend testbench-up testbench-down testbench-status testbench-restart-api sync-postgres-schema reset-data reset-prod-data backup-db restore-db list-backups help
 
 NETWORK_SELECTOR := $(strip $(filter devnet mainnet,$(MAKECMDGOALS)))
 
@@ -63,6 +63,17 @@ dev:
 
 devnet mainnet:
 	@:
+
+# Agent-operable dev stack (TESTBENCH.md): background api+frontend with logs,
+# hot-reloading, on the LOCAL db/ports — never touches prod (:3101/usdc_ops).
+testbench-up:
+	set -euo pipefail && ./scripts/testbench.sh up
+testbench-down:
+	set -euo pipefail && ./scripts/testbench.sh down
+testbench-status:
+	set -euo pipefail && ./scripts/testbench.sh status
+testbench-restart-api:
+	set -euo pipefail && ./scripts/testbench.sh restart-api
 
 test: test-api test-frontend
 

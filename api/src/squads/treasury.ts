@@ -8,8 +8,12 @@ import { logger } from '../infra/logger.js';
 import { prisma } from '../infra/prisma.js';
 import { ensureDefaultAutomationAgentWithWallet } from '../agents/automation.js';
 import { ensurePaymentOrderAuditRequest } from '../payments/orders.js';
-import { fundNewDevnetWalletIfConfigured } from '../wallets/devnet-funding.js';
+import { fundNewDevnetWalletIfConfigured, getFeePayerKeypair, feePayerPublicKey } from '../wallets/devnet-funding.js';
 import { signPrivySolanaTransaction } from '../wallets/personal.js';
+// Circular at module level, safe at call time: fake-chain only imports
+// setSquadsTreasuryRuntimeForTests, and both sides use each other inside
+// functions, never during module init.
+import { fakeChainRegisterMultisig, fakeChainRegisterProposal, fakeChainRecordApproval } from './fake-chain.js';
 import {
   buildDestinationAtaCreateInstruction,
   buildUsdcTransferTransactionInstructions,
@@ -296,6 +300,13 @@ export async function createSquadsTreasuryIntent(
   });
   await assertSquadsVaultAvailable(organizationId, multisigPda, vaultPda, normalized.vaultIndex);
 
+  // The Squads program CPIs into System::transfer to fund the new multisig account's
+  // rent from the creator's account. Fund the creator on devnet so they don't need SOL.
+  await fundNewDevnetWalletIfConfigured(memberState.creator.walletAddress, {
+    minimumLamports: SQUADS_PROPOSAL_RENT_PAYER_MIN_LAMPORTS,
+    reason: 'squads_multisig_create_rent_payer',
+  });
+
   const [programTreasury, latestBlockhash] = await Promise.all([
     runtime.getProgramTreasury(programId),
     runtime.getLatestBlockhash(),
@@ -315,15 +326,35 @@ export async function createSquadsTreasuryIntent(
     programId,
   });
 
+  const feePayer = feePayerPublicKey();
   const message = new TransactionMessage({
-    payerKey: new PublicKey(memberState.creator.walletAddress),
+    payerKey: feePayer ?? new PublicKey(memberState.creator.walletAddress),
     recentBlockhash: latestBlockhash.blockhash,
     instructions: [instruction],
   }).compileToV0Message();
   const transaction = new VersionedTransaction(message);
-  transaction.sign([createKey]);
+  // createKey must always sign; fee payer pre-signs so the user's wallet never needs SOL.
+  const signers: Parameters<typeof transaction.sign>[0] = [createKey];
+  const feePayerKeypair = getFeePayerKeypair();
+  if (feePayerKeypair) signers.push(feePayerKeypair);
+  transaction.sign(signers);
 
   const members = treasuryMembers.map(serializeTreasuryCreateIntentMember);
+
+  // Bench fake chain: the "on-chain" multisig this intent describes must be
+  // loadable at confirm time — register it with the in-memory runtime.
+  if (config.squadsFakeChain) {
+    fakeChainRegisterMultisig({
+      multisigPda: multisigPda.toBase58(),
+      createKey: createKey.publicKey.toBase58(),
+      threshold: normalized.threshold,
+      timeLockSeconds: normalized.timeLockSeconds,
+      members: treasuryMembers.map(toSquadsMember).map((member) => ({
+        address: member.key.toBase58(),
+        mask: (member.permissions as { mask: number }).mask,
+      })),
+    });
+  }
 
   return {
     intent: {
@@ -954,6 +985,10 @@ async function createSquadsPaymentProposalIntentForCreator(args: {
   assertOnchainMemberPermission(multisigAccount, creator.walletAddress, 'initiate');
 
   let paymentOrder = await loadPaymentOrderForSquadsProposal(organizationId, input.paymentOrderId);
+  // Fail closed: a bill still pending in the approval engine cannot be
+  // proposed for payment (BUG-approval-not-enforced-failopen §3).
+  const { assertBillApprovedForRelease } = await import('../payments/release-gate.js');
+  await assertBillApprovedForRelease(organizationId, paymentOrder.paymentOrderId);
   if (paymentOrder.sourceTreasuryWalletId && paymentOrder.sourceTreasuryWalletId !== treasuryWalletId) {
     throw badRequest('Payment order is already assigned to a different source treasury.');
   }
@@ -1182,6 +1217,13 @@ export async function createSquadsBatchedPaymentProposalIntent(
   });
 
   let paymentOrders = await loadPaymentOrdersForSquadsBatchProposal(organizationId, uniquePaymentOrderIds);
+  // Fail closed: no pending-approval bill rides out inside a batch either.
+  {
+    const { assertBillApprovedForRelease } = await import('../payments/release-gate.js');
+    for (const order of paymentOrders) {
+      await assertBillApprovedForRelease(organizationId, order.paymentOrderId);
+    }
+  }
   if (input.inputBatchId) {
     const wrongBatch = paymentOrders.find((order) => order.inputBatchId !== input.inputBatchId);
     if (wrongBatch) {
@@ -2056,6 +2098,13 @@ export async function createDecimalProposalApprovalIntent(
   assertOnchainMemberPermission(multisigAccount, member.walletAddress, 'vote');
   const transactionIndex = parseTransactionIndex(proposal.transactionIndex);
   const latestBlockhash = await runtime.getLatestBlockhash();
+  // Fake chain: there is no on-chain vote to land, so record it optimistically
+  // at intent time — otherwise approvals never register and quorum semantics
+  // vanish (testbench 004, leak 2).
+  if (config.squadsFakeChain) {
+    const [fakeProposalPda] = multisig.getProposalPda({ multisigPda, transactionIndex, programId });
+    fakeChainRecordApproval({ proposalPda: fakeProposalPda.toBase58(), multisigPda: multisigPda.toBase58(), memberAddress: member.walletAddress });
+  }
   const instruction = multisig.instructions.proposalApprove({
     multisigPda,
     transactionIndex,
@@ -2212,6 +2261,13 @@ export async function createDecimalProposalExecuteIntent(
   decimalProposalId: string,
   input: { memberPersonalWalletId: string },
 ) {
+  // Fake chain: the Squads SDK's execute builder reads the on-chain vault
+  // transaction over a REAL connection (not the swappable runtime), so it
+  // can't work against the in-memory chain. Point callers at the path that
+  // does (testbench 004, leak 1) instead of leaking an SDK error.
+  if (config.squadsFakeChain) {
+    throw badRequest('The fake chain cannot build execute transactions — record the execution directly with confirm-execution and any signature string (SQUADS_FAKE_CHAIN).');
+  }
   const proposal = await prisma.decimalProposal.findFirst({
     where: { organizationId, decimalProposalId },
   });
@@ -2920,12 +2976,26 @@ function buildSquadsSignableResponse(args: {
     programId: args.programId,
   });
 
+  // Bench fake chain: register the proposal so approval intents can load it
+  // and the multisig's transaction index advances like the real program's.
+  if (config.squadsFakeChain) {
+    fakeChainRegisterProposal({
+      multisigPda: args.multisigPda.toBase58(),
+      proposalPda: proposalPda.toBase58(),
+      transactionIndex: args.transactionIndex,
+    });
+  }
+
+  const feePayer = feePayerPublicKey();
   const message = new TransactionMessage({
-    payerKey: new PublicKey(args.signerWalletAddress),
+    payerKey: feePayer ?? new PublicKey(args.signerWalletAddress),
     recentBlockhash: args.latestBlockhash.blockhash,
     instructions: args.instructions,
   }).compileToV0Message(args.addressLookupTableAccounts);
   const transaction = new VersionedTransaction(message);
+  // Pre-sign with the fee payer so the signer's wallet never needs SOL.
+  const feePayerKeypair = getFeePayerKeypair();
+  if (feePayerKeypair) transaction.sign([feePayerKeypair]);
 
   return {
     intent: {
@@ -3393,7 +3463,7 @@ async function loadSquadsConfigProposal(
   };
 }
 
-export function serializeSquadsTreasuryWallet(wallet: {
+function serializeSquadsTreasuryWallet(wallet: {
   treasuryWalletId: string;
   organizationId: string;
   chain: string;
@@ -3860,7 +3930,7 @@ async function checkRpcSignatureStatus(
   signature: string,
   purpose: string,
 ): Promise<{ confirmed: boolean; seen: boolean }> {
-  if (config.nodeEnv === 'test') {
+  if (config.nodeEnv === 'test' || config.squadsFakeChain) {
     return { confirmed: true, seen: true };
   }
   if (!isSolanaSignatureLike(signature)) {
@@ -3918,7 +3988,8 @@ async function assertVaultHasUsdcForPayment(args: {
   vaultAddress: string;
   treasuryDisplayName: string | null;
 }) {
-  if (config.nodeEnv === 'test') return;
+  // Fake chain: there is no real vault ATA, so no real USDC to require.
+  if (config.nodeEnv === 'test' || config.squadsFakeChain) return;
   const required = BigInt(args.amountRaw);
   if (required <= 0n) return;
   let observedRaw: bigint | null = null;

@@ -72,6 +72,19 @@ type DecimalConfig = {
   googleOAuthClientSecret: string;
   googleOAuthRedirectUri: string | null;
   oauthStateSecret: string;
+  /**
+   * Developer sign-in for automated testing. When the secret is set,
+   * POST /auth/dev/login can mint pre-verified sessions — but ONLY for
+   * emails on the reserved @dev.decimal.test domain, so it can never touch
+   * a real account. Leave unset to disable the endpoint entirely.
+   */
+  devAuthSecret: string;
+  /**
+   * Bench-only fake Squads chain: the whole treasury/release ceremony runs
+   * against an in-memory runtime (squads/fake-chain.ts) with no real RPC and
+   * no real USDC. Validation refuses it in production.
+   */
+  squadsFakeChain: boolean;
   privyAppId: string;
   privyAppSecret: string;
   privyApiBaseUrl: string;
@@ -93,6 +106,7 @@ type DecimalConfig = {
   devnetAutoFundWallets: boolean;
   devnetFunderKeypairPath: string;
   devnetAutoFundLamports: number;
+  feePayerKeypairPath: string;
   settlementReconcilerEnabled: boolean;
   settlementReconcilerIntervalMs: number;
   /**
@@ -153,6 +167,8 @@ function buildConfig(): DecimalConfig {
     googleOAuthClientSecret: (process.env.GOOGLE_OAUTH_CLIENT_SECRET ?? '').trim(),
     googleOAuthRedirectUri: normalizeOptionalUrl(process.env.GOOGLE_OAUTH_REDIRECT_URI),
     oauthStateSecret: (process.env.OAUTH_STATE_SECRET ?? '').trim(),
+    devAuthSecret: (process.env.DEV_AUTH_SECRET ?? '').trim(),
+    squadsFakeChain: (process.env.SQUADS_FAKE_CHAIN ?? '').trim().toLowerCase() === 'true',
     privyAppId: (process.env.PRIVY_APP_ID ?? '').trim(),
     privyAppSecret: (process.env.PRIVY_APP_SECRET ?? '').trim(),
     privyApiBaseUrl: normalizeOptionalUrl(process.env.PRIVY_API_BASE_URL) ?? 'https://api.privy.io',
@@ -180,6 +196,7 @@ function buildConfig(): DecimalConfig {
         ),
     devnetFunderKeypairPath: (process.env.DEVNET_FUNDER_KEYPAIR_PATH ?? '').trim(),
     devnetAutoFundLamports: Number(process.env.DEVNET_AUTO_FUND_LAMPORTS ?? 5_000_000),
+    feePayerKeypairPath: (process.env.FEE_PAYER_KEYPAIR_PATH ?? process.env.DEVNET_FUNDER_KEYPAIR_PATH ?? '').trim(),
     settlementReconcilerEnabled: getBooleanConfig(
       process.env.SETTLEMENT_RECONCILER_ENABLED,
       nodeEnv !== 'test',
@@ -276,6 +293,10 @@ function validateConfig(nextConfig: DecimalConfig) {
 
   if (nextConfig.autoProvisionWallets && (!nextConfig.privyAppId || !nextConfig.privyAppSecret)) {
     throw new Error('AUTO_PROVISION_WALLETS requires PRIVY_APP_ID and PRIVY_APP_SECRET.');
+  }
+
+  if (nextConfig.squadsFakeChain && nextConfig.isProduction) {
+    throw new Error('SQUADS_FAKE_CHAIN is a test-bench flag and can never be enabled in production.');
   }
 
   if (nextConfig.devnetAutoFundWallets) {
