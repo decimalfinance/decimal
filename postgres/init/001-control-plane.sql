@@ -237,10 +237,7 @@ BEGIN
     'counterparty_wallets',
     'execution_records',
     'payment_orders',
-    'payment_order_events',
-    'collection_runs',
-    'collection_requests',
-    'collection_request_events'
+    'payment_order_events'
   ]
   LOOP
     IF to_regclass(format('public.%I', target_table)) IS NOT NULL THEN
@@ -356,7 +353,7 @@ CREATE TABLE IF NOT EXISTS counterparties
 -- Address book entry. One labeled Solana wallet per row. Trust state
 -- gates whether transfers can actually execute against it; counterparty
 -- linkage is optional. No direction concept — the same wallet can be
--- used as both a payment destination and a collection source.
+-- the receiving side of an outbound payment (vendor payout destination).
 CREATE TABLE IF NOT EXISTS counterparty_wallets
 (
   counterparty_wallet_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -513,62 +510,6 @@ CREATE TABLE IF NOT EXISTS spending_limit_executions
   UNIQUE (organization_id, signature)
 );
 
-CREATE TABLE IF NOT EXISTS collection_runs
-(
-  collection_run_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  organization_id UUID NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
-  receiving_treasury_wallet_id UUID REFERENCES treasury_wallets(treasury_wallet_id) ON DELETE SET NULL,
-  run_name TEXT NOT NULL,
-  input_source TEXT NOT NULL DEFAULT 'manual',
-  state TEXT NOT NULL DEFAULT 'open',
-  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_by_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS collection_requests
-(
-  collection_request_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  organization_id UUID NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
-  collection_run_id UUID REFERENCES collection_runs(collection_run_id) ON DELETE SET NULL,
-  receiving_treasury_wallet_id UUID NOT NULL REFERENCES treasury_wallets(treasury_wallet_id) ON DELETE RESTRICT,
-  counterparty_wallet_id UUID REFERENCES counterparty_wallets(counterparty_wallet_id) ON DELETE SET NULL,
-  counterparty_id UUID REFERENCES counterparties(counterparty_id) ON DELETE SET NULL,
-  transfer_request_id UUID UNIQUE REFERENCES transfer_requests(transfer_request_id) ON DELETE SET NULL,
-  payer_wallet_address TEXT,
-  payer_token_account_address TEXT,
-  amount_raw BIGINT NOT NULL,
-  asset TEXT NOT NULL DEFAULT 'usdc',
-  reason TEXT NOT NULL,
-  external_reference TEXT,
-  due_at TIMESTAMPTZ,
-  state TEXT NOT NULL DEFAULT 'open',
-  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_by_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (organization_id, receiving_treasury_wallet_id, amount_raw, external_reference)
-);
-
-ALTER TABLE collection_requests
-  ADD COLUMN IF NOT EXISTS counterparty_wallet_id UUID REFERENCES counterparty_wallets(counterparty_wallet_id) ON DELETE SET NULL;
-
-CREATE TABLE IF NOT EXISTS collection_request_events
-(
-  collection_request_event_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  collection_request_id UUID NOT NULL REFERENCES collection_requests(collection_request_id) ON DELETE CASCADE,
-  organization_id UUID NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
-  event_type TEXT NOT NULL,
-  actor_type TEXT NOT NULL,
-  actor_id TEXT,
-  before_state TEXT,
-  after_state TEXT,
-  linked_transfer_request_id UUID,
-  payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
 CREATE TABLE IF NOT EXISTS payment_order_events
 (
   payment_order_event_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -679,30 +620,6 @@ ALTER TABLE payment_orders
       'settled',
       'cancelled'
     )
-  );
-
-ALTER TABLE collection_runs
-  DROP CONSTRAINT IF EXISTS chk_collection_runs_state;
-
-ALTER TABLE collection_runs
-  ADD CONSTRAINT chk_collection_runs_state CHECK (
-    state IN ('open', 'partially_collected', 'collected', 'exception', 'closed', 'cancelled')
-  );
-
-ALTER TABLE collection_requests
-  DROP CONSTRAINT IF EXISTS chk_collection_requests_state;
-
-ALTER TABLE collection_requests
-  ADD CONSTRAINT chk_collection_requests_state CHECK (
-    state IN ('open', 'partially_collected', 'collected', 'exception', 'closed', 'cancelled')
-  );
-
-ALTER TABLE collection_request_events
-  DROP CONSTRAINT IF EXISTS chk_collection_request_events_actor_type;
-
-ALTER TABLE collection_request_events
-  ADD CONSTRAINT chk_collection_request_events_actor_type CHECK (
-    actor_type IN ('user', 'system')
   );
 
 ALTER TABLE counterparty_wallets
@@ -915,32 +832,31 @@ BEGIN
     DROP INDEX idx_payment_orders_unique_active_reference;
   END IF;
 END $$;
+-- Self-migrate: older shapes of this index blocked duplicates from ever
+-- REACHING review (where the visible duplicate gate + admin override live).
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_indexes
+    WHERE indexname = 'idx_payment_orders_unique_active_reference'
+      AND indexdef NOT LIKE '%needs_review%'
+  ) THEN
+    DROP INDEX idx_payment_orders_unique_active_reference;
+  END IF;
+END $$;
+-- Race backstop for directly-created orders (CSV/API drafts skip Review).
+-- Review-bound bills are exempt: duplicates must be able to LAND in review to
+-- be flagged, and an admin-overridden twin must be able to proceed past it —
+-- the app-level gate (payments/duplicate-check.ts) owns those paths.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_unique_active_reference
   ON payment_orders(organization_id, counterparty_wallet_id, amount_raw, lower(coalesce(external_reference, invoice_number)))
   WHERE coalesce(external_reference, invoice_number) IS NOT NULL
-    AND state NOT IN ('settled', 'cancelled');
+    AND state NOT IN ('settled', 'cancelled', 'needs_review')
+    AND NOT (metadata_json ? 'duplicateOverride');
 CREATE INDEX IF NOT EXISTS idx_payment_order_events_order_created_at
   ON payment_order_events(payment_order_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_payment_order_events_org_created_at
   ON payment_order_events(organization_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_collection_runs_org_state_created_at
-  ON collection_runs(organization_id, state, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_collection_runs_receiving_created_at
-  ON collection_runs(receiving_treasury_wallet_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_collection_requests_org_state_created_at
-  ON collection_requests(organization_id, state, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_collection_requests_run_created_at
-  ON collection_requests(collection_run_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_collection_requests_receiving_created_at
-  ON collection_requests(receiving_treasury_wallet_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_collection_requests_counterparty_wallet_created_at
-  ON collection_requests(counterparty_wallet_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_collection_requests_counterparty_created_at
-  ON collection_requests(counterparty_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_collection_request_events_request_created_at
-  ON collection_request_events(collection_request_id, created_at ASC);
-CREATE INDEX IF NOT EXISTS idx_collection_request_events_org_created_at
-  ON collection_request_events(organization_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_transfer_request_events_request_created_at
   ON transfer_request_events(transfer_request_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_transfer_request_events_org_created_at
@@ -1037,16 +953,6 @@ FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS trg_spending_limit_executions_updated_at ON spending_limit_executions;
 CREATE TRIGGER trg_spending_limit_executions_updated_at
 BEFORE UPDATE ON spending_limit_executions
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-
-DROP TRIGGER IF EXISTS trg_collection_runs_updated_at ON collection_runs;
-CREATE TRIGGER trg_collection_runs_updated_at
-BEFORE UPDATE ON collection_runs
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-
-DROP TRIGGER IF EXISTS trg_collection_requests_updated_at ON collection_requests;
-CREATE TRIGGER trg_collection_requests_updated_at
-BEFORE UPDATE ON collection_requests
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- =====================================================================

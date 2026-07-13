@@ -1,4 +1,4 @@
-// Address book — implements PageAddressBook from the design.
+// Vendors — implements PageAddressBook from the design.
 // Vendors and counterparties the org pays. Per-row aggregates (last
 // payment, total paid, payment count) are computed client-side from
 // paymentOrders so we don't need a new endpoint.
@@ -6,9 +6,10 @@
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '../api';
+import { accessApi, api } from '../api';
 import type {
   AuthenticatedSession,
+  Counterparty,
   CounterpartyWallet,
   CounterpartyWalletTrustState,
   PaymentOrder,
@@ -111,6 +112,40 @@ export function CounterpartiesPage({ session: _session }: { session: Authenticat
     enabled: Boolean(organizationId),
   });
 
+  // Vendor records carry the payable gate (held/blocked) — wallet rows don't.
+  const counterpartiesQuery = useQuery({
+    queryKey: ['counterparties', organizationId] as const,
+    queryFn: () => api.listCounterparties(organizationId!),
+    enabled: Boolean(organizationId),
+  });
+  // Blocking is the primary admin's call — don't OFFER it to people the server
+  // will refuse (testbench 003, cosmetic note 1).
+  const myAccess = useQuery({
+    queryKey: ['my-access', organizationId] as const,
+    queryFn: () => accessApi.get(organizationId!),
+    enabled: Boolean(organizationId),
+    staleTime: 60_000,
+  });
+  const isPrimaryAdmin = myAccess.data?.membershipRole === 'owner';
+  const vendorById = useMemo(
+    () => new Map((counterpartiesQuery.data?.items ?? []).map((c) => [c.counterpartyId, c])),
+    [counterpartiesQuery.data],
+  );
+
+  const payableMutation = useMutation({
+    mutationFn: (input: { counterpartyId: string; status: 'payable' | 'held' | 'blocked'; reason?: string | null }) =>
+      api.setVendorPayableStatus(organizationId!, input.counterpartyId, { status: input.status, reason: input.reason ?? null }),
+    onSuccess: async (updated) => {
+      success(
+        updated.payableStatus === 'payable' ? 'Payments to this vendor can flow again.'
+          : updated.payableStatus === 'held' ? 'Payments to this vendor are on hold.'
+          : 'Vendor blocked — their bills can no longer proceed.',
+      );
+      await queryClient.invalidateQueries({ queryKey: ['counterparties', organizationId] });
+    },
+    onError: (err) => toastError(err instanceof Error ? err.message : 'Could not change the payment status.'),
+  });
+
   // Used to compute per-vendor aggregates. Limit=100 from the list
   // endpoint is enough for the "last payment / total paid" view; older
   // rows fall off naturally.
@@ -180,7 +215,7 @@ export function CounterpartiesPage({ session: _session }: { session: Authenticat
 
   if (!organizationId) {
     return (
-      <div className="page">
+      <div className="page page-wide">
         <div className="empty">
           <h4>Organization unavailable</h4>
           <p>Pick an organization from the sidebar.</p>
@@ -299,11 +334,11 @@ export function CounterpartiesPage({ session: _session }: { session: Authenticat
   const isLoading = walletsQuery.isLoading;
 
   return (
-    <div className="page">
+    <div className="page page-wide">
       <div className="stack stack-24">
         <PageHead
-          eyebrow="REGISTRY"
-          title="Address book"
+          eyebrow="Registry"
+          title="Vendors"
           desc="Vendors and counterparties you pay. Review a new vendor once, then pay them again with confidence."
           actions={
             <button type="button" className="btn btn-primary" onClick={() => setAddOpen(true)}>
@@ -409,13 +444,24 @@ export function CounterpartiesPage({ session: _session }: { session: Authenticat
                           </div>
                         </td>
                         <td>
-                          {only ? (
-                            <Pill tone={trustTone(only.wallet.trustState)}>{trustLabel(only.wallet.trustState)}</Pill>
-                          ) : g.needsReviewCount > 0 ? (
-                            <Pill tone="warning">{g.needsReviewCount} need review</Pill>
-                          ) : (
-                            <Pill tone="success">Verified</Pill>
-                          )}
+                          {(() => {
+                            // The payable gate outranks trust display: a held or
+                            // blocked vendor can't be paid regardless of wallets.
+                            const cpId = g.addresses[0]?.wallet.counterpartyId;
+                            const hold = cpId ? vendorById.get(cpId)?.payableHold : null;
+                            if (hold) {
+                              return (
+                                <Pill tone="danger">{hold.status === 'blocked' ? 'Blocked' : 'Payments on hold'}</Pill>
+                              );
+                            }
+                            return only ? (
+                              <Pill tone={trustTone(only.wallet.trustState)}>{trustLabel(only.wallet.trustState)}</Pill>
+                            ) : g.needsReviewCount > 0 ? (
+                              <Pill tone="warning">{g.needsReviewCount} need review</Pill>
+                            ) : (
+                              <Pill tone="success">Verified</Pill>
+                            );
+                          })()}
                         </td>
                         <td><span className="joined">{fmtDate(g.lastPaidAt)}</span></td>
                         <td className="td-num" style={{ paddingRight: 28 }}>
@@ -446,6 +492,12 @@ export function CounterpartiesPage({ session: _session }: { session: Authenticat
                                 padding: '2px 24px 2px 64px',
                               }}
                             >
+                              <VendorPayableControls
+                                vendor={g.addresses[0]?.wallet.counterpartyId ? vendorById.get(g.addresses[0].wallet.counterpartyId!) ?? null : null}
+                                pending={payableMutation.isPending}
+                                isPrimaryAdmin={isPrimaryAdmin}
+                                onSet={(counterpartyId, status, reason) => payableMutation.mutate({ counterpartyId, status, reason })}
+                              />
                               {g.addresses.map((r, i) => {
                                 const w = r.wallet;
                                 return (
@@ -569,6 +621,77 @@ export function CounterpartiesPage({ session: _session }: { session: Authenticat
           }
         />
       ) : null}
+    </div>
+  );
+}
+
+// Payable gate controls (policy P0): hold (any admin) / block (primary admin,
+// enforced server-side) with a mandatory on-the-record reason; release/unblock
+// restores flow. Bills for a held/blocked vendor can't leave Review.
+function VendorPayableControls(props: {
+  vendor: Counterparty | null;
+  pending: boolean;
+  isPrimaryAdmin: boolean;
+  onSet: (counterpartyId: string, status: 'payable' | 'held' | 'blocked', reason: string | null) => void;
+}) {
+  const [mode, setMode] = useState<'held' | 'blocked' | null>(null);
+  const [reason, setReason] = useState('');
+  if (!props.vendor) return null;
+  const vendor = props.vendor;
+  const hold = vendor.payableHold;
+  const submit = () => {
+    if (!mode || reason.trim().length < 3) return;
+    props.onSet(vendor.counterpartyId, mode, reason.trim());
+    setMode(null);
+    setReason('');
+  };
+  return (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 0', borderBottom: '1px solid var(--border-strong)' }}
+    >
+      <Ico.shield w={14} />
+      <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: hold ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+        {hold
+          ? `${hold.status === 'blocked' ? 'Blocked' : 'Payments on hold'} — ${hold.byName}: “${hold.reason}”`
+          : 'Payments to this vendor can flow.'}
+      </span>
+      {mode ? (
+        <>
+          <input
+            className="input"
+            value={reason}
+            autoFocus
+            placeholder={mode === 'blocked' ? 'Why block them? Goes on the record.' : 'Why hold payments? Goes on the record.'}
+            onChange={(e) => setReason(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') setMode(null); }}
+            style={{ width: 280, height: 30 }}
+          />
+          <button type="button" className="btn btn-primary btn-sm" disabled={props.pending || reason.trim().length < 3} onClick={submit}>
+            {mode === 'blocked' ? 'Block' : 'Hold'}
+          </button>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setMode(null)}>Cancel</button>
+        </>
+      ) : hold ? (
+        <button type="button" className="btn btn-secondary btn-sm"
+          disabled={props.pending || (hold.status === 'blocked' && !props.isPrimaryAdmin)}
+          title={hold.status === 'blocked' && !props.isPrimaryAdmin ? 'Only the primary admin can unblock a vendor.' : undefined}
+          onClick={() => props.onSet(vendor.counterpartyId, 'payable', null)}>
+          {hold.status === 'blocked' ? 'Unblock' : 'Release hold'}
+        </button>
+      ) : (
+        <>
+          <button type="button" className="btn btn-secondary btn-sm" disabled={props.pending} onClick={() => setMode('held')}>
+            Hold payments
+          </button>
+          <button type="button" className="btn btn-secondary btn-sm"
+            disabled={props.pending || !props.isPrimaryAdmin}
+            title={props.isPrimaryAdmin ? undefined : 'Only the primary admin can block a vendor.'}
+            onClick={() => setMode('blocked')}>
+            Block
+          </button>
+        </>
+      )}
     </div>
   );
 }

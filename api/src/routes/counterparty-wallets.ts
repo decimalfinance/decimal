@@ -1,15 +1,16 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import {
-  createCollectionSourceWallet,
   createCounterparty,
   createCounterpartyWallet,
   listCounterparties,
   listCounterpartyWallets,
   removeCounterpartyWallet,
+  serializeCounterparty,
   updateCounterparty,
   updateCounterpartyWallet,
 } from '../counterparty-wallets.js';
+import { prisma } from '../infra/prisma.js';
 import { advancePendingReviewsForWallet } from '../payments/orders.js';
 import { assertOrganizationAccess, assertOrganizationAdmin } from '../auth/organization-access.js';
 import { asyncRoute, listQuerySchema, sendCreated, sendList, sendJson, unwrapItems } from '../infra/route-helpers.js';
@@ -125,6 +126,45 @@ counterpartyWalletsRouter.patch('/organizations/:organizationId/counterparties/:
   sendJson(res, await updateCounterparty(organizationId, counterpartyId, input));
 }));
 
+// Vendor payable gate (policy P0): held = any admin sets/releases; blocked is
+// terminal and only the PRIMARY ADMIN may set or lift it. A hold needs a
+// reason — the status change is the audit record.
+const payableStatusSchema = z.object({
+  status: z.enum(['payable', 'held', 'blocked']),
+  reason: z.string().trim().max(300).nullable().optional(),
+});
+
+counterpartyWalletsRouter.patch('/organizations/:organizationId/counterparties/:counterpartyId/payable-status', asyncRoute(async (req, res) => {
+  const { organizationId, counterpartyId } = counterpartyParamsSchema.parse(req.params);
+  const { membership } = await assertOrganizationAdmin(organizationId, req.auth!);
+  const input = payableStatusSchema.parse(req.body);
+
+  const { readPayableHold, setVendorPayableStatus } = await import('../payments/vendor-payable.js');
+  const current = await prisma.counterparty.findFirst({
+    where: { organizationId, counterpartyId },
+    select: { metadataJson: true },
+  });
+  if (!current) throw new Error('Vendor not found');
+  const existing = readPayableHold(current.metadataJson);
+  const touchesBlocked = input.status === 'blocked' || existing?.status === 'blocked';
+  if (touchesBlocked && membership.role !== 'owner') {
+    throw new Error('Blocking a vendor (or unblocking one) is the primary admin’s call.');
+  }
+  if (input.status !== 'payable' && !input.reason?.trim()) {
+    throw new Error('Give a reason — it goes on the vendor’s record.');
+  }
+  const user = await prisma.user.findUniqueOrThrow({ where: { userId: req.auth!.userId }, select: { displayName: true } });
+  const updated = await setVendorPayableStatus({
+    organizationId,
+    counterpartyId,
+    status: input.status,
+    reason: input.reason?.trim() || null,
+    actorUserId: req.auth!.userId,
+    actorName: user.displayName,
+  });
+  sendJson(res, serializeCounterparty(updated));
+}));
+
 counterpartyWalletsRouter.get('/organizations/:organizationId/counterparty-wallets', asyncRoute(async (req, res) => {
   const { organizationId } = organizationParamsSchema.parse(req.params);
   const query = listAddressBookQuerySchema.parse(req.query);
@@ -137,13 +177,6 @@ counterpartyWalletsRouter.get('/organizations/:organizationId/destinations', asy
   const query = listAddressBookQuerySchema.parse(req.query);
   await assertOrganizationAccess(organizationId, req.auth!);
   sendList(res, unwrapItems(await listCounterpartyWallets(organizationId, { ...query, view: 'destinations' })), { limit: query.limit });
-}));
-
-counterpartyWalletsRouter.get('/organizations/:organizationId/collection-sources', asyncRoute(async (req, res) => {
-  const { organizationId } = organizationParamsSchema.parse(req.params);
-  const query = listAddressBookQuerySchema.parse(req.query);
-  await assertOrganizationAccess(organizationId, req.auth!);
-  sendList(res, unwrapItems(await listCounterpartyWallets(organizationId, { ...query, view: 'collection_sources' })), { limit: query.limit });
 }));
 
 counterpartyWalletsRouter.post('/organizations/:organizationId/counterparty-wallets', asyncRoute(async (req, res) => {
@@ -163,16 +196,6 @@ counterpartyWalletsRouter.post('/organizations/:organizationId/destinations', as
   sendCreated(res, await createCounterpartyWallet(organizationId, {
     ...input,
     walletType: input.destinationType ?? input.walletType,
-  }));
-}));
-
-counterpartyWalletsRouter.post('/organizations/:organizationId/collection-sources', asyncRoute(async (req, res) => {
-  const { organizationId } = organizationParamsSchema.parse(req.params);
-  await assertOrganizationAdmin(organizationId, req.auth!);
-  const input = createCounterpartyWalletSchema.parse(req.body);
-  sendCreated(res, await createCollectionSourceWallet(organizationId, {
-    ...input,
-    walletType: input.destinationType ?? (input.walletType === 'wallet' ? 'payer_wallet' : input.walletType),
   }));
 }));
 

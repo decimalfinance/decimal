@@ -70,6 +70,7 @@ export async function createPaymentOrder(
     externalReference?: string | null;
     invoiceNumber?: string | null;
     attachmentUrl?: string | null;
+    invoiceDocumentId?: string | null;
     dueAt?: Date | null;
     sourceBalanceSnapshotJson?: Prisma.InputJsonValue;
     metadataJson?: Prisma.InputJsonValue;
@@ -113,12 +114,19 @@ export async function createPaymentOrder(
     counterpartyWallet,
   });
 
-  await enforceDuplicatePaymentOrder({
-    organizationId: args.organizationId,
-    counterpartyWalletId: counterpartyWallet.counterpartyWalletId,
-    amountRaw: args.amountRaw,
-    reference: normalizeReference(args.externalReference ?? args.invoiceNumber ?? null),
-  });
+  // Review-bound bills (invoice intake) are NOT blocked at creation: the
+  // duplicate gate lives in Review (payments/duplicate-check.ts) where the
+  // duplicate is VISIBLE — a flagged bill an admin can inspect and clear.
+  // Erroring here destroyed that whole flow (testbench report 001). Direct
+  // creations (CSV/API drafts) keep the hard check — they skip Review.
+  if (args.initialState !== 'needs_review') {
+    await enforceDuplicatePaymentOrder({
+      organizationId: args.organizationId,
+      counterpartyWalletId: counterpartyWallet.counterpartyWalletId,
+      amountRaw: args.amountRaw,
+      reference: normalizeReference(args.externalReference ?? args.invoiceNumber ?? null),
+    });
+  }
 
   const created = await prisma.$transaction(async (tx) => {
     const paymentOrder = await tx.paymentOrder.create({
@@ -135,6 +143,7 @@ export async function createPaymentOrder(
         externalReference: normalizeOptionalText(args.externalReference),
         invoiceNumber: normalizeOptionalText(args.invoiceNumber),
         attachmentUrl: normalizeOptionalText(args.attachmentUrl),
+        invoiceDocumentId: args.invoiceDocumentId ?? null,
         dueAt: args.dueAt ?? undefined,
         state: args.initialState ?? 'draft',
         sourceBalanceSnapshotJson: (args.sourceBalanceSnapshotJson ?? { status: 'unknown' }) as Prisma.InputJsonValue,
@@ -597,6 +606,7 @@ async function buildPaymentOrderReadModel(order: PaymentOrderWithRelations) {
     externalReference: order.externalReference,
     invoiceNumber: order.invoiceNumber,
     attachmentUrl: order.attachmentUrl,
+    invoiceDocumentId: order.invoiceDocumentId,
     dueAt: order.dueAt,
     state: order.state,
     derivedState,
