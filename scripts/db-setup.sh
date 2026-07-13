@@ -23,7 +23,13 @@ for db in usdc_ops usdc_ops_local usdc_ops_test; do
   fi
 done
 
-docker compose exec -T -e PGOPTIONS='-c client_min_messages=warning' postgres \
-  psql -v ON_ERROR_STOP=1 -q -U usdc_ops -d "${TARGET_DB}" \
-  -f /docker-entrypoint-initdb.d/001-control-plane.sql >/dev/null
+# Apply every schema file in order (000-* is the first-boot database bootstrap; skip on re-apply).
+# Files must stay idempotent — that contract is what lets this re-run on every make dev/prod-backend.
+for f in postgres/init/[0-9]*.sql; do
+  base="$(basename "${f}")"
+  [[ "${base}" == 000-* ]] && continue
+  docker compose exec -T -e PGOPTIONS='-c client_min_messages=warning' postgres \
+    psql -v ON_ERROR_STOP=1 -q -U usdc_ops -d "${TARGET_DB}" \
+    -f "/docker-entrypoint-initdb.d/${base}" >/dev/null
+done
 echo "schema synced: ${TARGET_DB}"

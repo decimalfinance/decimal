@@ -27,9 +27,6 @@ model Organization {
   transferRequestNotes TransferRequestNote[]
   paymentOrders PaymentOrder[]
   paymentOrderEvents PaymentOrderEvent[]
-  collectionRuns CollectionRun[]
-  collectionRequests CollectionRequest[]
-  collectionEvents CollectionRequestEvent[]
   automationAgents AutomationAgent[]
   agentWallets AgentWallet[]
   spendingLimitPolicies SpendingLimitPolicy[]
@@ -41,6 +38,7 @@ model Organization {
   accountingSyncs AccountingSync[]
   paymentOrderGlCodings PaymentOrderGlCoding[]
   codingRules CodingRule[]
+  invoiceDocuments InvoiceDocument[]
 
   @@map("organizations")
 }
@@ -205,10 +203,9 @@ model User {
   paymentOrdersCreated       PaymentOrder[]           @relation("PaymentOrderCreatedByUser")
   acceptedGlCodings          PaymentOrderGlCoding[]
   decimalProposalsCreated    DecimalProposal[]        @relation("DecimalProposalCreatedByUser")
-  collectionRequestsCreated  CollectionRequest[]      @relation("CollectionRequestCreatedByUser")
-  collectionRunsCreated      CollectionRun[]          @relation("CollectionRunCreatedByUser")
   organizationInvitesSent    OrganizationInvite[]     @relation("OrganizationInviteInvitedBy")
   organizationInvitesAccepted OrganizationInvite[]    @relation("OrganizationInviteAcceptedBy")
+  invoiceDocumentsUploaded   InvoiceDocument[]        @relation("InvoiceDocumentUploadedByUser")
 
   @@map("users")
 }
@@ -337,8 +334,6 @@ model TreasuryWallet {
   walletAuthorizations OrganizationWalletAuthorization[]
   outboundTransferRequests TransferRequest[] @relation("TransferRequestSourceWallet")
   sourcePaymentOrders      PaymentOrder[]    @relation("PaymentOrderSourceWallet")
-  receivingCollections     CollectionRequest[] @relation("CollectionReceivingWallet")
-  receivingCollectionRuns  CollectionRun[]     @relation("CollectionRunReceivingWallet")
   decimalProposals         DecimalProposal[]
   spendingLimitPolicies    SpendingLimitPolicy[]
   spendingLimitExecutions  SpendingLimitExecution[]
@@ -443,7 +438,6 @@ model Counterparty {
   organization      Organization     @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
   wallets           CounterpartyWallet[]
   paymentOrders     PaymentOrder[]
-  collectionRequests CollectionRequest[]
   accountingVendorMaps AccountingVendorMap[]
 
   @@index([organizationId, createdAt(sort: Desc)])
@@ -475,7 +469,6 @@ model CounterpartyWallet {
   organization         Organization      @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
   transferRequests     TransferRequest[]
   paymentOrders        PaymentOrder[]
-  collectionRequests   CollectionRequest[]
   spendingLimitDestinations SpendingLimitPolicyDestination[]
   spendingLimitExecutions SpendingLimitExecution[]
 
@@ -512,7 +505,6 @@ model TransferRequest {
   executionRecords       ExecutionRecord[]
   events                 TransferRequestEvent[]
   notes                  TransferRequestNote[]
-  collectionRequest      CollectionRequest?
 
   @@index([organizationId, status, requestedAt(sort: Desc)])
   @@index([paymentOrderId])
@@ -535,6 +527,7 @@ model PaymentOrder {
   externalReference         String?             @map("external_reference")
   invoiceNumber             String?             @map("invoice_number")
   attachmentUrl             String?             @map("attachment_url")
+  invoiceDocumentId         String?             @map("invoice_document_id") @db.Uuid
   dueAt                     DateTime?           @map("due_at") @db.Timestamptz(6)
   state                     String              @default("draft")
   sourceBalanceSnapshotJson Json                @default("{}") @map("source_balance_snapshot_json")
@@ -553,12 +546,51 @@ model PaymentOrder {
   spendingLimitExecutions   SpendingLimitExecution[]
   accountingSyncs           AccountingSync[]
   glCoding                  PaymentOrderGlCoding?
+  invoiceDocument           InvoiceDocument?    @relation(fields: [invoiceDocumentId], references: [invoiceDocumentId], onDelete: SetNull)
 
   @@index([organizationId, state, createdAt(sort: Desc)])
   @@index([inputBatchId, createdAt(sort: Desc)])
   @@index([counterpartyWalletId, createdAt(sort: Desc)])
   @@index([sourceTreasuryWalletId, createdAt(sort: Desc)])
   @@map("payment_orders")
+}
+
+// The uploaded invoice file itself (PDF/image), stored verbatim so the review
+// screen can render the original document next to what was extracted from it.
+model InvoiceDocument {
+  invoiceDocumentId String         @id @default(dbgenerated("gen_random_uuid()")) @map("invoice_document_id") @db.Uuid
+  organizationId    String         @map("organization_id") @db.Uuid
+  filename          String
+  mimeType          String         @map("mime_type")
+  byteSize          Int            @map("byte_size")
+  sha256            String
+  data              Bytes
+  pageCount         Int?           @map("page_count")
+  status            String         @default("processed")
+  processingError   String?        @map("processing_error")
+  uploadedByUserId  String?        @map("uploaded_by_user_id") @db.Uuid
+  createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization      Organization   @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
+  uploadedByUser    User?          @relation("InvoiceDocumentUploadedByUser", fields: [uploadedByUserId], references: [userId], onDelete: SetNull)
+  paymentOrders     PaymentOrder[]
+  pages             InvoiceDocumentPage[]
+
+  @@unique([organizationId, sha256])
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@map("invoice_documents")
+}
+
+// Rendered page images (PNG) — what the review screen actually displays.
+model InvoiceDocumentPage {
+  invoiceDocumentPageId String          @id @default(dbgenerated("gen_random_uuid()")) @map("invoice_document_page_id") @db.Uuid
+  invoiceDocumentId     String          @map("invoice_document_id") @db.Uuid
+  pageIndex             Int             @map("page_index")
+  mimeType              String          @map("mime_type")
+  data                  Bytes
+  document              InvoiceDocument @relation(fields: [invoiceDocumentId], references: [invoiceDocumentId], onDelete: Cascade)
+
+  @@unique([invoiceDocumentId, pageIndex])
+  @@map("invoice_document_pages")
 }
 
 model DecimalProposal {
@@ -691,85 +723,6 @@ model SpendingLimitExecution {
   @@index([spendingLimitPolicyId, createdAt(sort: Desc)])
   @@index([paymentOrderId, createdAt(sort: Desc)])
   @@map("spending_limit_executions")
-}
-
-model CollectionRun {
-  collectionRunId          String              @id @default(dbgenerated("gen_random_uuid()")) @map("collection_run_id") @db.Uuid
-  organizationId              String              @map("organization_id") @db.Uuid
-  receivingTreasuryWalletId String?            @map("receiving_treasury_wallet_id") @db.Uuid
-  runName                  String              @map("run_name")
-  inputSource              String              @default("manual") @map("input_source")
-  state                    String              @default("open")
-  metadataJson             Json                @default("{}") @map("metadata_json")
-  createdByUserId          String?             @map("created_by_user_id") @db.Uuid
-  createdAt                DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization           Organization           @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
-  receivingTreasuryWallet  TreasuryWallet?     @relation("CollectionRunReceivingWallet", fields: [receivingTreasuryWalletId], references: [treasuryWalletId], onDelete: SetNull)
-  createdByUser            User?               @relation("CollectionRunCreatedByUser", fields: [createdByUserId], references: [userId], onDelete: SetNull)
-  collectionRequests       CollectionRequest[]
-
-  @@index([organizationId, state, createdAt(sort: Desc)])
-  @@index([receivingTreasuryWalletId, createdAt(sort: Desc)])
-  @@map("collection_runs")
-}
-
-model CollectionRequest {
-  collectionRequestId       String                   @id @default(dbgenerated("gen_random_uuid()")) @map("collection_request_id") @db.Uuid
-  organizationId               String                   @map("organization_id") @db.Uuid
-  collectionRunId           String?                  @map("collection_run_id") @db.Uuid
-  receivingTreasuryWalletId String                   @map("receiving_treasury_wallet_id") @db.Uuid
-  counterpartyWalletId      String?                  @map("counterparty_wallet_id") @db.Uuid
-  counterpartyId            String?                  @map("counterparty_id") @db.Uuid
-  transferRequestId         String?                  @unique @map("transfer_request_id") @db.Uuid
-  payerWalletAddress        String?                  @map("payer_wallet_address")
-  payerTokenAccountAddress  String?                  @map("payer_token_account_address")
-  amountRaw                 BigInt                   @map("amount_raw")
-  asset                     String                   @default("usdc")
-  reason                    String
-  externalReference         String?                  @map("external_reference")
-  dueAt                     DateTime?                @map("due_at") @db.Timestamptz(6)
-  state                     String                   @default("open")
-  metadataJson              Json                     @default("{}") @map("metadata_json")
-  createdByUserId           String?                  @map("created_by_user_id") @db.Uuid
-  createdAt                 DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                 DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization           Organization                @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
-  collectionRun             CollectionRun?           @relation(fields: [collectionRunId], references: [collectionRunId], onDelete: SetNull)
-  receivingTreasuryWallet   TreasuryWallet           @relation("CollectionReceivingWallet", fields: [receivingTreasuryWalletId], references: [treasuryWalletId], onDelete: Restrict)
-  counterpartyWallet        CounterpartyWallet?      @relation(fields: [counterpartyWalletId], references: [counterpartyWalletId], onDelete: SetNull)
-  counterparty              Counterparty?            @relation(fields: [counterpartyId], references: [counterpartyId], onDelete: SetNull)
-  transferRequest           TransferRequest?         @relation(fields: [transferRequestId], references: [transferRequestId], onDelete: SetNull)
-  createdByUser             User?                    @relation("CollectionRequestCreatedByUser", fields: [createdByUserId], references: [userId], onDelete: SetNull)
-  events                    CollectionRequestEvent[]
-
-  @@unique([organizationId, receivingTreasuryWalletId, amountRaw, externalReference])
-  @@index([organizationId, state, createdAt(sort: Desc)])
-  @@index([collectionRunId, createdAt(sort: Desc)])
-  @@index([receivingTreasuryWalletId, createdAt(sort: Desc)])
-  @@index([counterpartyWalletId, createdAt(sort: Desc)])
-  @@index([counterpartyId, createdAt(sort: Desc)])
-  @@map("collection_requests")
-}
-
-model CollectionRequestEvent {
-  collectionRequestEventId String            @id @default(dbgenerated("gen_random_uuid()")) @map("collection_request_event_id") @db.Uuid
-  collectionRequestId      String            @map("collection_request_id") @db.Uuid
-  organizationId              String            @map("organization_id") @db.Uuid
-  eventType                String            @map("event_type")
-  actorType                String            @map("actor_type")
-  actorId                  String?           @map("actor_id")
-  beforeState              String?           @map("before_state")
-  afterState               String?           @map("after_state")
-  linkedTransferRequestId  String?           @map("linked_transfer_request_id") @db.Uuid
-  payloadJson              Json              @default("{}") @map("payload_json")
-  createdAt                DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
-  collectionRequest        CollectionRequest @relation(fields: [collectionRequestId], references: [collectionRequestId], onDelete: Cascade)
-  organization           Organization         @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
-
-  @@index([collectionRequestId, createdAt(sort: Asc)])
-  @@index([organizationId, createdAt(sort: Desc)])
-  @@map("collection_request_events")
 }
 
 model PaymentOrderEvent {
