@@ -47,13 +47,32 @@ Return ONLY a JSON object with this exact shape, nothing else:
       "invoiceNumber": "string or null",
       "invoiceDate": "string YYYY-MM-DD or null",
       "dueDate": "string YYYY-MM-DD or null",
+      "terms": "string or null",
+      "poNumber": "string or null",
+      "earlyPayDiscount": "string or null",
+      "subtotal": number or null,
+      "taxAmount": number or null,
+      "billToName": "string or null",
+      "remitTo": {
+        "street": "string or null",
+        "city": "string or null",
+        "state": "string or null",
+        "zip": "string or null"
+      },
+      "paymentDetails": {
+        "method": "string or null",
+        "bankName": "string or null",
+        "accountLast4": "string or null",
+        "routingNumber": "string or null"
+      },
       "walletAddress": "string or null",
       "lineItems": [
         {
           "description": "string",
           "quantity": number or null,
           "unitPrice": number or null,
-          "total": number or null
+          "total": number or null,
+          "source": { "page": 1, "box": [x, y, w, h] } or null
         }
       ],
       "categoryHint": "string or null",
@@ -61,6 +80,23 @@ Return ONLY a JSON object with this exact shape, nothing else:
         "vendor": number,
         "amount": number,
         "overall": number
+      },
+      "fieldConfidence": {
+        "invoiceNumber": number, "invoiceDate": number, "dueDate": number,
+        "terms": number, "poNumber": number, "currency": number, "total": number,
+        "remitTo": number, "lineItems": number
+      },
+      "fieldSources": {
+        "invoiceNumber": { "page": 1, "box": [x, y, w, h] },
+        "invoiceDate": { "page": 1, "box": [x, y, w, h] },
+        "dueDate": { "page": 1, "box": [x, y, w, h] },
+        "terms": { "page": 1, "box": [x, y, w, h] },
+        "poNumber": { "page": 1, "box": [x, y, w, h] },
+        "earlyPayDiscount": { "page": 1, "box": [x, y, w, h] },
+        "currency": { "page": 1, "box": [x, y, w, h] },
+        "total": { "page": 1, "box": [x, y, w, h] },
+        "remitTo": { "page": 1, "box": [x, y, w, h] },
+        "vendorName": { "page": 1, "box": [x, y, w, h] }
       }
     }
   ]
@@ -74,6 +110,15 @@ Rules copied from the AP intake agent:
 - lineItems: empty array [] if not itemized.
 - categoryHint: a short 2-5 word plain-English summary of what this invoice is FOR — the spend category (e.g. "Inbound freight", "Monthly phone service", "Office supplies", "Cloud hosting", "Legal services"). Derive it from the line items and invoice context. Use null only if truly indeterminable.
 - confidence: three keys (vendor, amount, overall), each 0.0 to 1.0.
+- fieldConfidence: 0.0-1.0 per field, for every field you attempted to read. 1.0 = printed clearly and unambiguously; below 0.85 means a human should double-check it. A field that is genuinely absent from the document gets confidence 1.0 with value null (absence read with certainty is not uncertainty).
+- terms: the payment terms exactly as printed ("Net 30", "Due on receipt", "2/10 Net 30"). null if absent.
+- poNumber: the purchase-order number if the document references one. null if absent.
+- earlyPayDiscount: any early-payment discount offer, verbatim ("2% 10 days"). null if absent.
+- subtotal / taxAmount: numbers as printed. null if the document doesn't break them out.
+- billToName: the entity the invoice is ADDRESSED TO (the buyer/customer side). Used to catch invoices addressed to someone else.
+- remitTo: the PHYSICAL remit-to / payment mailing address broken into parts. All null if the document has none.
+- paymentDetails: how the document says to pay — method ("ACH", "Wire", "Check", "Crypto"), bank name, ONLY the last 4 digits of any account number, and the routing number if printed. Never invent any of these.
+- fieldSources / line item source: WHERE each value appears on its page, so the UI can highlight it. page is 1-based. box is [x, y, w, h] as fractions of the page's width/height (0.0-1.0), where x,y is the TOP-LEFT corner of a tight rectangle around the printed value. Include an entry only for fields you actually located; omit or use null when unsure. For a line item, box the whole row.
 - walletAddress: only emit a Solana wallet address if it is printed on the invoice itself, in a "Remit to", "Pay to wallet", "Solana address", or similar field. Never guess.
 - Solana wallet addresses are base58 public keys. Valid wallet characters exclude 0, O, I, and lowercase l.
 - OCR commonly confuses 1/l/I and 0/O. If any wallet character is uncertain, return walletAddress: null and lower confidence.overall instead of guessing or "repairing" the address.
@@ -88,6 +133,26 @@ Vendor-side example:
 Correct vendorName: "Acme Corp".
 Wrong vendorName: "Decimal Labs Inc.".`;
 
+// Where a value was read from: 1-based page + [x, y, w, h] as 0-1 fractions.
+const SourceBoxSchema = z.object({
+  page: z.number().int().min(1),
+  box: z.tuple([z.number(), z.number(), z.number(), z.number()]),
+});
+
+const RemitToSchema = z.object({
+  street: z.string().nullable().default(null),
+  city: z.string().nullable().default(null),
+  state: z.string().nullable().default(null),
+  zip: z.string().nullable().default(null),
+});
+
+const PaymentDetailsSchema = z.object({
+  method: z.string().nullable().default(null),
+  bankName: z.string().nullable().default(null),
+  accountLast4: z.string().nullable().default(null),
+  routingNumber: z.string().nullable().default(null),
+});
+
 const ExtractedInvoiceSchema = z.object({
   vendorName: z.string(),
   vendorAddress: z.string().nullable(),
@@ -97,6 +162,14 @@ const ExtractedInvoiceSchema = z.object({
   invoiceNumber: z.string().nullable(),
   invoiceDate: z.string().nullable(),
   dueDate: z.string().nullable(),
+  terms: z.string().nullable().default(null),
+  poNumber: z.string().nullable().default(null),
+  earlyPayDiscount: z.string().nullable().default(null),
+  subtotal: z.number().nullable().default(null),
+  taxAmount: z.number().nullable().default(null),
+  billToName: z.string().nullable().default(null),
+  remitTo: RemitToSchema.nullable().default(null),
+  paymentDetails: PaymentDetailsSchema.nullable().default(null),
   walletAddress: z.string().nullable(),
   lineItems: z.array(
     z.object({
@@ -104,6 +177,7 @@ const ExtractedInvoiceSchema = z.object({
       quantity: z.number().nullable(),
       unitPrice: z.number().nullable(),
       total: z.number().nullable(),
+      source: SourceBoxSchema.nullish().default(null).catch(null),
     }),
   ),
   categoryHint: z.string().nullable().default(null),
@@ -112,7 +186,16 @@ const ExtractedInvoiceSchema = z.object({
     amount: z.number(),
     overall: z.number(),
   }),
+  // Per-field read confidence (0-1). Optional: older extractions and terse model
+  // replies simply lack entries; a missing field means "no signal", not "certain".
+  fieldConfidence: z.record(z.string(), z.number()).nullable().default(null),
+  // Per-field provenance for document highlighting. Fully optional — fields
+  // without a source simply don't highlight. `catch` shields us from sloppy
+  // model output (a malformed box must never sink the whole extraction).
+  fieldSources: z.record(z.string(), SourceBoxSchema.nullable().catch(null)).nullable().default(null).catch(null),
 });
+
+export type ExtractedInvoice = z.infer<typeof ExtractedInvoiceSchema>;
 
 const ExtractedInvoicesSchema = z.object({
   invoices: z.array(ExtractedInvoiceSchema),
@@ -146,18 +229,31 @@ export type DocumentExtractProgressEvent =
   | { stage: 'rendered'; pageCount: number }
   | { stage: 'extracting'; pageCount: number };
 
+// Render an uploaded document (PDF or image) to page images without running
+// extraction — the review screen stores and displays these.
+export async function renderDocumentToImages(args: {
+  fileBytes: Buffer;
+  filename: string;
+  mimeType: string;
+}): Promise<RenderedPage[]> {
+  return renderToImages(args.fileBytes, inferExtension(args.filename, args.mimeType));
+}
+
 export async function extractPaymentRowsFromDocument(args: {
   fileBytes: Buffer;
   filename: string;
   mimeType: string;
+  // Already-rendered page images (skips the render step — the async intake
+  // renders once, stores the pages, then extracts from the same images).
+  prerenderedPages?: RenderedPage[];
   onProgress?: (event: DocumentExtractProgressEvent) => void;
 }): Promise<{ rows: ExtractedRow[]; modelLatencyMs: number; pageCount: number }> {
   if (!isDocumentExtractionConfigured()) {
     throw new Error('OPENAI_API_KEY is not configured on the server.');
   }
 
-  const ext = inferExtension(args.filename, args.mimeType);
-  const pages = await renderToImages(args.fileBytes, ext);
+  const pages = args.prerenderedPages
+    ?? await renderToImages(args.fileBytes, inferExtension(args.filename, args.mimeType));
   if (pages.length > MAX_DOCUMENT_PAGES) {
     throw new Error(
       `Document has ${pages.length} pages; the extractor caps at ${MAX_DOCUMENT_PAGES}. ` +

@@ -3,7 +3,14 @@ import { logger } from '../infra/logger.js';
 import { prisma } from '../infra/prisma.js';
 import { deriveUsdcAtaForWallet, SOLANA_CHAIN, USDC_ASSET, USDC_DECIMALS } from '../solana.js';
 import { createPaymentOrder } from './orders.js';
-import { extractPaymentRowsFromDocument, type ExtractedRow } from './document-extract.js';
+import {
+  storeInvoiceDocument,
+  storeInvoiceDocumentPages,
+  setInvoiceDocumentPageCount,
+  setInvoiceDocumentStatus,
+} from './documents.js';
+import { extractPaymentRowsFromDocument, renderDocumentToImages, type ExtractedRow } from './document-extract.js';
+import { extractPdfTextLayer, refineInvoiceSources, PROVENANCE_VERSION } from './doc-provenance.js';
 import { suggestOcrCodings } from '../accounting/ocr-coding.js';
 import { INVOICE_IMPORT_REVIEW_NOTE } from '../counterparty-wallets.js';
 
@@ -58,11 +65,102 @@ export async function uploadInvoiceToPaymentOrders(args: {
     hasSourceTreasuryWallet: Boolean(args.sourceTreasuryWalletId),
   });
 
+  // Persist the original file BEFORE extraction — a failed or empty extraction
+  // must still leave the document retrievable. Non-fatal: a storage hiccup must
+  // never block invoice capture.
+  let invoiceDocumentId: string | null = null;
+  try {
+    const stored = await storeInvoiceDocument({
+      organizationId: args.organizationId,
+      uploadedByUserId: args.actorUserId,
+      fileBytes: args.fileBytes,
+      filename: args.filename,
+      mimeType: args.mimeType,
+    });
+    invoiceDocumentId = stored.invoiceDocumentId;
+  } catch (error) {
+    logger.warn('invoice_intake.document_store_failed', {
+      organizationId: args.organizationId,
+      filename: args.filename,
+      ...(error instanceof Error ? { message: error.message } : {}),
+    });
+  }
+
+  return processInvoiceDocument({ ...args, invoiceDocumentId });
+}
+
+// Everything after document storage: render pages → extract → create orders.
+// The async intake path calls this in the background while the operator is
+// already looking at the stored document on the review screen.
+export async function processInvoiceDocument(args: {
+  organizationId: string;
+  actorUserId: string;
+  invoiceDocumentId: string | null;
+  fileBytes: Buffer;
+  filename: string;
+  mimeType: string;
+  sourceTreasuryWalletId?: string | null;
+}) {
+  // Render page images once — the review screen displays these (never a PDF
+  // viewer), and extraction reuses the same renders. Best-effort: if rendering
+  // fails, extraction falls back to its own render and reports the real error.
+  let prerenderedPages: Awaited<ReturnType<typeof renderDocumentToImages>> | undefined;
+  try {
+    prerenderedPages = await renderDocumentToImages({
+      fileBytes: args.fileBytes,
+      filename: args.filename,
+      mimeType: args.mimeType,
+    });
+    if (args.invoiceDocumentId) {
+      await storeInvoiceDocumentPages(args.invoiceDocumentId, prerenderedPages);
+    }
+  } catch (error) {
+    logger.warn('invoice_intake.page_render_failed', {
+      organizationId: args.organizationId,
+      filename: args.filename,
+      ...(error instanceof Error ? { message: error.message } : {}),
+    });
+  }
+
+  const invoiceDocumentId = args.invoiceDocumentId;
   const extraction = await runtime.extractRowsFromDocument({
     fileBytes: args.fileBytes,
     filename: args.filename,
     mimeType: args.mimeType,
+    prerenderedPages,
   });
+
+  // Exact provenance: re-locate every extracted value in the PDF's text layer
+  // and replace the model's approximate boxes with real word coordinates.
+  // Best-effort — scans and images have no text layer and keep the model's box.
+  try {
+    const textPages = await extractPdfTextLayer({
+      fileBytes: args.fileBytes,
+      filename: args.filename,
+      mimeType: args.mimeType,
+    });
+    if (textPages) {
+      let refined = 0;
+      for (const row of extraction.rows) {
+        if (row.source_invoice) refined += refineInvoiceSources(row.source_invoice, textPages).refined;
+      }
+      logger.info('invoice_intake.provenance_refined', {
+        organizationId: args.organizationId,
+        filename: args.filename,
+        refined,
+      });
+    }
+  } catch (error) {
+    logger.warn('invoice_intake.provenance_refine_failed', {
+      organizationId: args.organizationId,
+      filename: args.filename,
+      ...(error instanceof Error ? { message: error.message } : {}),
+    });
+  }
+
+  if (invoiceDocumentId && extraction.pageCount != null) {
+    await setInvoiceDocumentPageCount(invoiceDocumentId, extraction.pageCount).catch(() => {});
+  }
 
   if (extraction.rows.length === 0) {
     throw new Error('No payable invoice rows were extracted from this document.');
@@ -129,7 +227,12 @@ export async function uploadInvoiceToPaymentOrders(args: {
         vendorAddressContext,
         nearDuplicate,
       });
-      const decision = triggeredRules.length ? 'needs_review' : 'drafted';
+      // Review is mandatory for EVERY uploaded bill — known vendor or not
+      // (pipeline v3 ruling, 2026-07-07). The operator confirms what was read
+      // from the document; "Confirm & send for approval" is the only door into
+      // routing. triggeredRules still matter: they become the review screen's
+      // flags and banners.
+      const decision = 'needs_review';
 
       const paymentOrder = await createPaymentOrder({
         organizationId: args.organizationId,
@@ -141,6 +244,7 @@ export async function uploadInvoiceToPaymentOrders(args: {
         memo: row.notes ?? `Pay ${row.counterparty}`,
         externalReference: row.reference,
         invoiceNumber: row.reference,
+        invoiceDocumentId,
         dueAt: parseOptionalDate(row.due_date),
         metadataJson: {
           inputSource: 'invoice_upload',
@@ -148,6 +252,7 @@ export async function uploadInvoiceToPaymentOrders(args: {
           agent: {
             name: 'ap-intake',
             version: 'api-native-v1',
+            provenanceVersion: PROVENANCE_VERSION,
             decision,
             triggeredRules,
             extracted: row.source_invoice ?? {
@@ -168,6 +273,7 @@ export async function uploadInvoiceToPaymentOrders(args: {
               },
             },
             sourceDocument: {
+              invoiceDocumentId,
               filename: args.filename,
               mimeType: args.mimeType,
               pageCount: extraction.pageCount,
@@ -176,7 +282,7 @@ export async function uploadInvoiceToPaymentOrders(args: {
             },
           },
         },
-        initialState: triggeredRules.length ? 'needs_review' : 'draft',
+        initialState: 'needs_review',
       });
 
       created.push({
@@ -221,6 +327,7 @@ export async function uploadInvoiceToPaymentOrders(args: {
 
   return {
     inputSource: 'invoice_upload',
+    invoiceDocumentId,
     filename: args.filename,
     modelLatencyMs: extraction.modelLatencyMs,
     pageCount: extraction.pageCount,
@@ -231,6 +338,56 @@ export async function uploadInvoiceToPaymentOrders(args: {
     paymentOrders: created,
     skippedRows: skipped,
   };
+}
+
+// Async intake: store the document and return immediately so the review screen
+// can open with the document visible while extraction runs in the background.
+// Progress is observed via the document's status (processing → processed/failed).
+export async function beginAsyncInvoiceIntake(args: {
+  organizationId: string;
+  actorUserId: string;
+  fileBytes: Buffer;
+  filename: string;
+  mimeType: string;
+  sourceTreasuryWalletId?: string | null;
+}) {
+  const stored = await storeInvoiceDocument({
+    organizationId: args.organizationId,
+    uploadedByUserId: args.actorUserId,
+    fileBytes: args.fileBytes,
+    filename: args.filename,
+    mimeType: args.mimeType,
+    status: 'processing',
+  });
+
+  if (stored.reused) {
+    const current = await prisma.invoiceDocument.findUnique({
+      where: { invoiceDocumentId: stored.invoiceDocumentId },
+      select: { status: true },
+    });
+    // Same file again: already processed (or mid-processing) — nothing to redo.
+    if (current && current.status !== 'failed') {
+      return { invoiceDocumentId: stored.invoiceDocumentId, reused: true };
+    }
+    await setInvoiceDocumentStatus(stored.invoiceDocumentId, 'processing');
+  }
+
+  void (async () => {
+    try {
+      await processInvoiceDocument({ ...args, invoiceDocumentId: stored.invoiceDocumentId });
+      await setInvoiceDocumentStatus(stored.invoiceDocumentId, 'processed');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Processing failed.';
+      logger.error('invoice_intake.async_failed', {
+        organizationId: args.organizationId,
+        invoiceDocumentId: stored.invoiceDocumentId,
+        message,
+      });
+      await setInvoiceDocumentStatus(stored.invoiceDocumentId, 'failed', message).catch(() => {});
+    }
+  })();
+
+  return { invoiceDocumentId: stored.invoiceDocumentId, reused: false };
 }
 
 async function resolveInvoiceCounterpartyWallet(args: {
@@ -265,7 +422,7 @@ async function resolveInvoiceCounterpartyWallet(args: {
   const counterpartyName = normalizeOptionalText(args.row.counterparty);
   if (!counterpartyName) return null;
 
-  return prisma.counterpartyWallet.findFirst({
+  const byName = await prisma.counterpartyWallet.findFirst({
     where: {
       organizationId: args.organizationId,
       isActive: true,
@@ -280,6 +437,62 @@ async function resolveInvoiceCounterpartyWallet(args: {
     // vendor's designated primary (default) payout address, not an arbitrary row.
     orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
     include: { counterparty: true },
+  });
+  if (byName) return byName;
+
+  // A normal (bank-only, crypto-free) invoice from a vendor we don't know yet:
+  // create the vendor with a PENDING payment method so the bill still flows
+  // through review + approval. The verified payout method is supplied later
+  // (vendor portal / Bridge liquidation address) — that's what release waits on,
+  // never approval. See project_vendor_payment_methods.
+  return createPendingMethodCounterpartyWallet({
+    organizationId: args.organizationId,
+    labelFromInvoice: counterpartyName,
+    documentPaymentDetails: args.row.source_invoice?.paymentDetails ?? null,
+  });
+}
+
+// A vendor whose payout destination isn't known yet — placeholder address so the
+// NOT-NULL/UNIQUE wallet_address constraint holds; the real method arrives later.
+async function createPendingMethodCounterpartyWallet(args: {
+  organizationId: string;
+  labelFromInvoice: string;
+  documentPaymentDetails: unknown;
+}) {
+  const label = normalizeOptionalText(args.labelFromInvoice) ?? 'Vendor';
+  const placeholder = `pending:${label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48)}`;
+
+  return prisma.$transaction(async (tx) => {
+    const counterparty = await findOrCreateCounterparty(tx, args.organizationId, label);
+    const existing = await tx.counterpartyWallet.findUnique({
+      where: { organizationId_walletAddress: { organizationId: args.organizationId, walletAddress: placeholder } },
+      include: { counterparty: true },
+    });
+    if (existing) return existing;
+
+    return tx.counterpartyWallet.create({
+      data: {
+        organizationId: args.organizationId,
+        counterpartyId: counterparty.counterpartyId,
+        chain: SOLANA_CHAIN,
+        asset: USDC_ASSET,
+        walletAddress: placeholder,
+        tokenAccountAddress: null,
+        walletType: 'pending_method',
+        trustState: 'unreviewed',
+        label,
+        notes: 'Awaiting a verified payment method from the vendor.',
+        isInternal: false,
+        isActive: true,
+        metadataJson: {
+          inputSource: 'invoice_upload',
+          pendingMethod: true,
+          createdFromInvoiceUploadAt: new Date().toISOString(),
+          ...(isRecordLike(args.documentPaymentDetails) ? { documentPaymentDetails: args.documentPaymentDetails } : {}),
+        } as Prisma.InputJsonValue,
+      },
+      include: { counterparty: true },
+    });
   });
 }
 
