@@ -241,6 +241,18 @@ test('vendor coding rules: agreeing history promotes a default; manual rules nev
   await code(b10, 'ACC-CLOUD');
   rule = await gl.getVendorCodingRule(orgId, counterpartyId);
   assert.equal(rule?.accountId, 'ACC-CLOUD', 'learning resumes after the manual rule is removed');
+
+  // Pre-QBO review pre-fill (testbench 007): the rule must validate against
+  // the PICKER's vocabulary — with no QBO chart, that's the builtin
+  // categories. A rule the picker knows pre-fills; the ACC-CLOUD learned
+  // rule above (not a picker option) correctly does not.
+  const before = await get(`/organizations/${orgId}/bills/${await mk(11)}/review`, owner.token);
+  assert.notEqual(before.codingSuggestionSource?.kind, 'rule', 'non-picker rule falls through to the document signal');
+  await gl.setVendorCodingRule({ organizationId: orgId, counterpartyId, accountId: 'builtin:cloud-hosting', accountName: 'Cloud hosting & infrastructure', actorUserId: owner.userId });
+  const b12 = await mk(12);
+  const review = await get(`/organizations/${orgId}/bills/${b12}/review`, owner.token);
+  assert.equal(review.codingSuggestionSource?.kind, 'rule', 'builtin-account rule pre-fills without QuickBooks');
+  assert.match(review.codingSuggestionSource?.detail ?? '', /coding default/);
 });
 
 test('2-person org: the default flow routes to the approver, never the vetoed submitter', async () => {

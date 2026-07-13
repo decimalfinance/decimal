@@ -127,6 +127,7 @@ export function CounterpartiesPage({ session: _session }: { session: Authenticat
     staleTime: 60_000,
   });
   const isPrimaryAdmin = myAccess.data?.membershipRole === 'owner';
+  const isAdminTier = Boolean(myAccess.data?.isOwnerOrAdmin);
   const vendorById = useMemo(
     () => new Map((counterpartiesQuery.data?.items ?? []).map((c) => [c.counterpartyId, c])),
     [counterpartiesQuery.data],
@@ -530,10 +531,12 @@ export function CounterpartiesPage({ session: _session }: { session: Authenticat
                                       {' — '}
                                       {rule.source === 'manual' ? 'set by your team' : `learned from ${rule.learnedFromCount} agreeing bill${rule.learnedFromCount === 1 ? '' : 's'}`}.
                                     </span>
-                                    <button type="button" className="btn btn-secondary btn-sm" disabled={clearCodingRule.isPending}
-                                      onClick={() => clearCodingRule.mutate(cpId!)}>
-                                      Remove default
-                                    </button>
+                                    {isAdminTier ? (
+                                      <button type="button" className="btn btn-secondary btn-sm" disabled={clearCodingRule.isPending}
+                                        onClick={() => clearCodingRule.mutate(cpId!)}>
+                                        Remove default
+                                      </button>
+                                    ) : null}
                                   </div>
                                 );
                               })()}

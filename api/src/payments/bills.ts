@@ -564,8 +564,16 @@ export async function getBillReview(organizationId: string, paymentOrderId: stri
     const { getVendorCodingRule } = await import('../accounting/gl-coding.js');
     const rule = await getVendorCodingRule(organizationId, order.counterpartyId).catch(() => null);
     if (rule?.accountName) {
+      // Validate against the SAME vocabulary the picker offers — the QBO chart
+      // when connected, the builtin categories otherwise. Checking the QBO
+      // chart alone made every pre-QBO rule silently fall through to OCR
+      // (testbench 007: the Vendors page promised a default the review
+      // screen never applied).
       const ruleAccount = chart.find((a) => a.name === rule.accountName || a.fullyQualifiedName === rule.accountName);
-      if (ruleAccount || chartNames.has(rule.accountName)) {
+      const pickerHasIt = chart.length > 0
+        ? (Boolean(ruleAccount) || chartNames.has(rule.accountName))
+        : categoryOptions.some((o) => o.value === rule.accountName);
+      if (pickerHasIt) {
         ruleSuggestion = ruleAccount?.fullyQualifiedName ?? rule.accountName;
         codingSuggestionSource = {
           kind: 'rule',
