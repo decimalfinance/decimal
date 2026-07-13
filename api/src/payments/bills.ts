@@ -555,6 +555,27 @@ export async function getBillReview(organizationId: string, paymentOrderId: stri
       }
     }
   }
+  // Coding waterfall (GL synthesis D1): the vendor's RULE outranks the
+  // document's own signal — resolved against the chart so the picker
+  // recognizes it. The source rides along so the UI can say WHY.
+  let codingSuggestionSource: { kind: 'rule' | 'ocr'; detail: string } | null = null;
+  let ruleSuggestion: string | null = null;
+  if (order.counterpartyId) {
+    const { getVendorCodingRule } = await import('../accounting/gl-coding.js');
+    const rule = await getVendorCodingRule(organizationId, order.counterpartyId).catch(() => null);
+    if (rule?.accountName) {
+      const ruleAccount = chart.find((a) => a.name === rule.accountName || a.fullyQualifiedName === rule.accountName);
+      if (ruleAccount || chartNames.has(rule.accountName)) {
+        ruleSuggestion = ruleAccount?.fullyQualifiedName ?? rule.accountName;
+        codingSuggestionSource = {
+          kind: 'rule',
+          detail: rule.source === 'manual'
+            ? 'your team set a coding default for this vendor'
+            : `learned from ${rule.learnedFromCount} agreeing bill${rule.learnedFromCount === 1 ? '' : 's'}`,
+        };
+      }
+    }
+  }
   const topSuggestion = ocrCoding && Array.isArray(ocrCoding.suggestions) && isRecord(ocrCoding.suggestions[0])
     ? str((ocrCoding.suggestions[0] as Record<string, unknown>).accountName)
     : null;
@@ -564,11 +585,15 @@ export async function getBillReview(organizationId: string, paymentOrderId: stri
   const suggestionAccount = topSuggestion
     ? chart.find((a) => a.name === topSuggestion || a.fullyQualifiedName === topSuggestion)
     : null;
-  const codingSuggestion = chart.length > 0
+  const ocrSuggestionResolved = chart.length > 0
     ? (suggestionAccount?.fullyQualifiedName ?? (topSuggestion && chartNames.has(topSuggestion) ? topSuggestion : null))
     : topSuggestion
       ?? (ocrCoding ? str(ocrCoding.categoryHint) : null)
       ?? str(extracted.categoryHint);
+  const codingSuggestion = ruleSuggestion ?? ocrSuggestionResolved;
+  if (!codingSuggestionSource && codingSuggestion) {
+    codingSuggestionSource = { kind: 'ocr', detail: 'read from the invoice' };
+  }
   const lineSource = (line: Record<string, unknown>) => {
     if (!isRecord(line.source)) return null;
     const page = num(line.source.page);
@@ -708,6 +733,7 @@ export async function getBillReview(organizationId: string, paymentOrderId: stri
     remitFields,
     lines,
     categoryOptions,
+    codingSuggestionSource,
     // Document anchors for the totals block, so the footer rows highlight too.
     totalsSources: {
       lineItems: sourceOf('subtotal'),

@@ -199,10 +199,20 @@ export interface GlCodingPrediction {
   supportCount: number;
 }
 
+export interface VendorCodingRule {
+  vendorCodingRuleId: string;
+  counterpartyId: string;
+  accountId: string;
+  accountName: string | null;
+  source: 'learned' | 'manual';
+  learnedFromCount: number;
+  updatedAt: string;
+}
+
 export interface GlCandidate {
   accountId: string;
   accountName: string | null;
-  reason: 'vendor_history' | 'ocr' | 'frequent' | 'default';
+  reason: 'rule' | 'vendor_history' | 'ocr' | 'frequent' | 'default';
   count?: number;
   weight?: number;
   rationale?: string | null;
@@ -383,6 +393,21 @@ export const api = {
     return request<{ items: CodingInboxItem[] }>(
       `/organizations/${organizationId}/accounting/quickbooks/coding-inbox`,
     );
+  },
+  // Vendor coding rules: the vendor's default expense account (learned or manual).
+  listVendorCodingRules(organizationId: string) {
+    return request<{ items: VendorCodingRule[] }>(`/organizations/${organizationId}/vendor-coding-rules`);
+  },
+  setVendorCodingRule(organizationId: string, counterpartyId: string, body: { accountId: string; accountName?: string | null }) {
+    return request<VendorCodingRule>(`/organizations/${organizationId}/counterparties/${counterpartyId}/coding-rule`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  },
+  clearVendorCodingRule(organizationId: string, counterpartyId: string) {
+    return request<{ ok: boolean }>(`/organizations/${organizationId}/counterparties/${counterpartyId}/coding-rule`, {
+      method: 'DELETE',
+    });
   },
   getGlCandidates(organizationId: string, paymentOrderId: string) {
     return request<{ candidates: GlCandidate[]; vendorLabel: string | null }>(
@@ -1440,6 +1465,8 @@ export interface BillReview {
   remitFields: BillReviewField[];
   lines: BillReviewLine[];
   categoryOptions: CategoryOption[];
+  // Why the pre-filled category was suggested (vendor rule vs the document).
+  codingSuggestionSource: { kind: 'rule' | 'ocr'; detail: string } | null;
   totalsSources: { lineItems: DocSource; tax: DocSource; total: DocSource };
   taxAmount: number | null;
   totalUsd: number;

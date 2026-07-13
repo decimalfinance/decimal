@@ -126,6 +126,43 @@ counterpartyWalletsRouter.patch('/organizations/:organizationId/counterparties/:
   sendJson(res, await updateCounterparty(organizationId, counterpartyId, input));
 }));
 
+// Vendor coding rules (GL-coding P0): the vendor's default expense account —
+// learned from agreeing history or set by hand. Manual rules are never
+// auto-changed; deleting one lets learning take over again.
+const codingRuleSchema = z.object({
+  accountId: z.string().trim().min(1).max(120),
+  accountName: z.string().trim().max(200).nullable().optional(),
+});
+
+counterpartyWalletsRouter.get('/organizations/:organizationId/vendor-coding-rules', asyncRoute(async (req, res) => {
+  const { organizationId } = organizationParamsSchema.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  const { listVendorCodingRules } = await import('../accounting/gl-coding.js');
+  sendJson(res, { items: await listVendorCodingRules(organizationId) });
+}));
+
+counterpartyWalletsRouter.put('/organizations/:organizationId/counterparties/:counterpartyId/coding-rule', asyncRoute(async (req, res) => {
+  const { organizationId, counterpartyId } = counterpartyParamsSchema.parse(req.params);
+  await assertOrganizationAdmin(organizationId, req.auth!);
+  const input = codingRuleSchema.parse(req.body);
+  const { setVendorCodingRule } = await import('../accounting/gl-coding.js');
+  sendJson(res, await setVendorCodingRule({
+    organizationId,
+    counterpartyId,
+    accountId: input.accountId,
+    accountName: input.accountName ?? null,
+    actorUserId: req.auth!.userId,
+  }));
+}));
+
+counterpartyWalletsRouter.delete('/organizations/:organizationId/counterparties/:counterpartyId/coding-rule', asyncRoute(async (req, res) => {
+  const { organizationId, counterpartyId } = counterpartyParamsSchema.parse(req.params);
+  await assertOrganizationAdmin(organizationId, req.auth!);
+  const { clearVendorCodingRule } = await import('../accounting/gl-coding.js');
+  await clearVendorCodingRule(organizationId, counterpartyId);
+  sendJson(res, { ok: true });
+}));
+
 // Vendor payable gate (policy P0): held = any admin sets/releases; blocked is
 // terminal and only the PRIMARY ADMIN may set or lift it. A hold needs a
 // reason — the status change is the audit record.

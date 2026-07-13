@@ -495,6 +495,9 @@ function ReviewScreen(props: {
               <div className="sec-head">
                 <div className="sh-titles">
                   <h2>Line items</h2>
+                  {review.codingSuggestionSource ? (
+                    <p className="sh-desc">Categories pre-filled — {review.codingSuggestionSource.detail}. Change any that look wrong.</p>
+                  ) : null}
                 </div>
                 {!readOnly ? (
                   <button

@@ -37,6 +37,7 @@ model Organization {
   accountingVendorMaps AccountingVendorMap[]
   accountingSyncs AccountingSync[]
   paymentOrderGlCodings PaymentOrderGlCoding[]
+  vendorCodingRules     VendorCodingRule[]
   codingRules CodingRule[]
   invoiceDocuments InvoiceDocument[]
 
@@ -130,6 +131,28 @@ model AccountingSync {
   @@index([organizationId, status, createdAt(sort: Desc)])
   @@index([paymentOrderId])
   @@map("accounting_syncs")
+}
+
+// Vendor coding default: the inspectable form of vendor memory. 'learned'
+// rules are auto-promoted from agreeing history and retrain on drift;
+// 'manual' rules are set by a person and never auto-changed.
+model VendorCodingRule {
+  vendorCodingRuleId String       @id @default(dbgenerated("gen_random_uuid()")) @map("vendor_coding_rule_id") @db.Uuid
+  organizationId     String       @map("organization_id") @db.Uuid
+  counterpartyId     String       @map("counterparty_id") @db.Uuid
+  provider           String       @default("quickbooks")
+  accountId          String       @map("account_id")
+  accountName        String?      @map("account_name")
+  source             String       @default("learned")
+  learnedFromCount   Int          @default(0) @map("learned_from_count")
+  setByUserId        String?      @map("set_by_user_id") @db.Uuid
+  createdAt          DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization       Organization @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
+  counterparty       Counterparty @relation(fields: [counterpartyId], references: [counterpartyId], onDelete: Cascade)
+
+  @@unique([organizationId, counterpartyId, provider])
+  @@map("vendor_coding_rules")
 }
 
 model PaymentOrderGlCoding {
@@ -439,6 +462,7 @@ model Counterparty {
   wallets           CounterpartyWallet[]
   paymentOrders     PaymentOrder[]
   accountingVendorMaps AccountingVendorMap[]
+  vendorCodingRules VendorCodingRule[]
 
   @@index([organizationId, createdAt(sort: Desc)])
   @@map("counterparties")

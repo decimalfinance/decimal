@@ -194,6 +194,55 @@ test('fail closed: a pending bill is never ready-to-pay — solo owner approves 
   assert.equal(afterRow.bucket, 'to_pay', 'approved by the owner → now genuinely ready to pay');
 });
 
+test('vendor coding rules: agreeing history promotes a default; manual rules never auto-change', async () => {
+  const { orgId, owner } = await makeOrg();
+  const mk = async (n: number) => (await uploadAndConfirm(orgId, owner.token, { vendor: 'Rule Vendor', amount: 100 + n, invoiceNo: `RV-${n}` })).billId;
+  const gl = await import('../src/accounting/gl-coding.js');
+  const code = (paymentOrderId: string, account: string) =>
+    gl.setPaymentOrderGlCoding(orgId, paymentOrderId, { codedExpenseAccountId: account, codedExpenseAccountName: account }, owner.userId);
+
+  const vendorOf = async () => (await prisma.counterparty.findFirstOrThrow({ where: { organizationId: orgId, displayName: 'Rule Vendor' } })).counterpartyId;
+
+  // Two agreeing codings: no rule yet. The third promotes it.
+  const b1 = await mk(1); const b2 = await mk(2); const b3 = await mk(3);
+  await code(b1, 'ACC-CLOUD'); await code(b2, 'ACC-CLOUD');
+  const counterpartyId = await vendorOf();
+  assert.equal(await gl.getVendorCodingRule(orgId, counterpartyId), null, 'two agreeing codings are not enough');
+  await code(b3, 'ACC-CLOUD');
+  let rule = await gl.getVendorCodingRule(orgId, counterpartyId);
+  assert.equal(rule?.accountId, 'ACC-CLOUD');
+  assert.equal(rule?.source, 'learned');
+  assert.equal(rule?.learnedFromCount, 3);
+
+  // The rule tops the candidate list for the vendor's next bill.
+  const b4 = await mk(4);
+  const { candidates } = await gl.predictGlCandidates(orgId, b4);
+  assert.equal(candidates[0]?.reason, 'rule');
+  assert.equal(candidates[0]?.accountId, 'ACC-CLOUD');
+
+  // Drift: three agreeing codings on a NEW account retrain the learned rule —
+  // current behavior wins, not six months ago.
+  const b5 = await mk(5); const b6 = await mk(6);
+  await code(b4, 'ACC-SOFTWARE'); await code(b5, 'ACC-SOFTWARE'); await code(b6, 'ACC-SOFTWARE');
+  rule = await gl.getVendorCodingRule(orgId, counterpartyId);
+  assert.equal(rule?.accountId, 'ACC-SOFTWARE', 'learned rule follows current behavior');
+
+  // Manual rules are a person's word: later agreeing history never overrides.
+  await gl.setVendorCodingRule({ organizationId: orgId, counterpartyId, accountId: 'ACC-MANUAL', accountName: 'Manual pick', actorUserId: owner.userId });
+  const b7 = await mk(7); const b8 = await mk(8); const b9 = await mk(9);
+  await code(b7, 'ACC-CLOUD'); await code(b8, 'ACC-CLOUD'); await code(b9, 'ACC-CLOUD');
+  rule = await gl.getVendorCodingRule(orgId, counterpartyId);
+  assert.equal(rule?.accountId, 'ACC-MANUAL');
+  assert.equal(rule?.source, 'manual');
+
+  // Clearing a manual rule reopens learning.
+  await gl.clearVendorCodingRule(orgId, counterpartyId);
+  const b10 = await mk(10);
+  await code(b10, 'ACC-CLOUD');
+  rule = await gl.getVendorCodingRule(orgId, counterpartyId);
+  assert.equal(rule?.accountId, 'ACC-CLOUD', 'learning resumes after the manual rule is removed');
+});
+
 test('2-person org: the default flow routes to the approver, never the vetoed submitter', async () => {
   // BUG-default-flow-deadlock: owner + one approver, NO published flow. The
   // owner submits — the bill must wait on the APPROVER (quorum clamped to the

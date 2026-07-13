@@ -22,7 +22,7 @@ type OcrCodingShape = {
 export interface GlCodingPrediction {
   codedExpenseAccountId: string | null;
   codedExpenseAccountName: string | null;
-  predictionSource: 'vendor_history' | 'default' | 'none';
+  predictionSource: 'vendor_rule' | 'vendor_history' | 'default' | 'none';
   confidenceScore: number | null;
   supportCount: number; // how many prior codings backed the suggestion
 }
@@ -42,6 +42,20 @@ export async function predictGlExpenseAccount(
   if (!order) return { codedExpenseAccountId: null, codedExpenseAccountName: null, predictionSource: 'none', confidenceScore: null, supportCount: 0 };
 
   const vendorLabel = order.counterparty?.displayName ?? order.counterpartyWallet?.label ?? null;
+  // The vendor's coding RULE outranks raw history — it IS the consolidated,
+  // inspectable form of that history (or a person's explicit instruction).
+  if (order.counterpartyId) {
+    const rule = await getVendorCodingRule(organizationId, order.counterpartyId);
+    if (rule) {
+      return {
+        codedExpenseAccountId: rule.accountId,
+        codedExpenseAccountName: rule.accountName,
+        predictionSource: 'vendor_rule',
+        confidenceScore: rule.source === 'manual' ? 1 : null,
+        supportCount: rule.learnedFromCount,
+      };
+    }
+  }
   // Match this vendor's prior codings: by counterparty when we have one (most precise),
   // else by the wallet label that the sync uses as the QBO vendor name.
   const vendorFilter = order.counterpartyId
@@ -151,17 +165,106 @@ export async function setPaymentOrderGlCoding(
     acceptedByUserId: actorUserId,
     acceptedAt: new Date(),
   };
-  return prisma.paymentOrderGlCoding.upsert({
+  const saved = await prisma.paymentOrderGlCoding.upsert({
     where: { paymentOrderId },
     create: { paymentOrderId, provider: PROVIDER, ...data },
     update: data,
+  });
+  // Consolidation (the step the decision log was designed for): agreeing
+  // recent codings promote into a visible vendor rule. Best-effort — a
+  // promotion hiccup must never fail the coding itself.
+  const order = await prisma.paymentOrder.findFirst({ where: { paymentOrderId }, select: { counterpartyId: true } });
+  if (order?.counterpartyId) {
+    await maybePromoteVendorCodingRule(organizationId, order.counterpartyId).catch(() => null);
+  }
+  return saved;
+}
+
+// ─── Vendor coding rules — vendor memory as an inspectable object ───────────
+// (GL-coding synthesis D2.) 'learned' rules are auto-promoted when a vendor's
+// recent codings agree, and retrain when behavior drifts; 'manual' rules are
+// a person's explicit instruction and are never auto-changed.
+const PROMOTE_WINDOW = 5;   // look at the vendor's last N codings…
+const PROMOTE_AGREE = 3;    // …promote/retrain when the latest N agree.
+
+export async function getVendorCodingRule(organizationId: string, counterpartyId: string) {
+  return prisma.vendorCodingRule.findUnique({
+    where: { organizationId_counterpartyId_provider: { organizationId, counterpartyId, provider: PROVIDER } },
+  });
+}
+
+export async function listVendorCodingRules(organizationId: string) {
+  return prisma.vendorCodingRule.findMany({ where: { organizationId, provider: PROVIDER } });
+}
+
+export async function setVendorCodingRule(args: {
+  organizationId: string;
+  counterpartyId: string;
+  accountId: string;
+  accountName: string | null;
+  actorUserId: string;
+}) {
+  const data = {
+    accountId: args.accountId,
+    accountName: args.accountName,
+    source: 'manual',
+    setByUserId: args.actorUserId,
+  };
+  return prisma.vendorCodingRule.upsert({
+    where: { organizationId_counterpartyId_provider: { organizationId: args.organizationId, counterpartyId: args.counterpartyId, provider: PROVIDER } },
+    create: { organizationId: args.organizationId, counterpartyId: args.counterpartyId, provider: PROVIDER, ...data },
+    update: data,
+  });
+}
+
+export async function clearVendorCodingRule(organizationId: string, counterpartyId: string) {
+  await prisma.vendorCodingRule.deleteMany({ where: { organizationId, counterpartyId, provider: PROVIDER } });
+}
+
+/**
+ * Promotion + drift, recomputed after every persisted coding: if the vendor's
+ * latest PROMOTE_AGREE codings agree on one account, that account becomes (or
+ * replaces) the LEARNED rule — applying current behavior, not six months ago.
+ * Manual rules are a person's word and are left alone.
+ */
+export async function maybePromoteVendorCodingRule(organizationId: string, counterpartyId: string) {
+  const recent = await prisma.paymentOrderGlCoding.findMany({
+    where: { organizationId, provider: PROVIDER, paymentOrder: { counterpartyId } },
+    select: { codedExpenseAccountId: true, codedExpenseAccountName: true },
+    orderBy: { updatedAt: 'desc' },
+    take: PROMOTE_WINDOW,
+  });
+  if (recent.length < PROMOTE_AGREE) return null;
+  const latest = recent.slice(0, PROMOTE_AGREE);
+  const account = latest[0]!;
+  if (!latest.every((c) => c.codedExpenseAccountId === account.codedExpenseAccountId)) return null;
+
+  const existing = await getVendorCodingRule(organizationId, counterpartyId);
+  if (existing?.source === 'manual') return existing;
+  const agreeing = recent.filter((c) => c.codedExpenseAccountId === account.codedExpenseAccountId).length;
+  return prisma.vendorCodingRule.upsert({
+    where: { organizationId_counterpartyId_provider: { organizationId, counterpartyId, provider: PROVIDER } },
+    create: {
+      organizationId, counterpartyId, provider: PROVIDER,
+      accountId: account.codedExpenseAccountId,
+      accountName: account.codedExpenseAccountName,
+      source: 'learned',
+      learnedFromCount: agreeing,
+    },
+    update: {
+      accountId: account.codedExpenseAccountId,
+      accountName: account.codedExpenseAccountName,
+      source: 'learned',
+      learnedFromCount: agreeing,
+      setByUserId: null,
+    },
   });
 }
 
 export interface GlCandidate {
   accountId: string;
   accountName: string | null;
-  reason: 'vendor_history' | 'ocr' | 'frequent' | 'default';
+  reason: 'rule' | 'vendor_history' | 'ocr' | 'frequent' | 'default';
   count?: number;
   /** For `ocr`: the model's confidence (0-1) this account is right, and its rationale. */
   weight?: number;
@@ -194,6 +297,20 @@ export async function predictGlCandidates(
   const add = (accountId: string | null | undefined, accountName: string | null, reason: GlCandidate['reason'], meta?: { count?: number; weight?: number; rationale?: string | null }) => {
     if (accountId && !seen.has(accountId) && out.length < 3) { seen.add(accountId); out.push({ accountId, accountName, reason, ...meta }); }
   };
+
+  // Tier 0 — the vendor's coding RULE (explicit or learned): rules beat
+  // everything below, and the candidate says which kind it is.
+  if (order.counterpartyId) {
+    const rule = await getVendorCodingRule(organizationId, order.counterpartyId);
+    if (rule) {
+      add(rule.accountId, rule.accountName, 'rule', {
+        count: rule.learnedFromCount || undefined,
+        rationale: rule.source === 'manual'
+          ? 'Set by your team on the vendor'
+          : `Learned from ${rule.learnedFromCount} agreeing bill${rule.learnedFromCount === 1 ? '' : 's'}`,
+      });
+    }
+  }
 
   const vendorFilter = order.counterpartyId
     ? { counterpartyId: order.counterpartyId }

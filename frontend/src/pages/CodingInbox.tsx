@@ -18,6 +18,7 @@ type FormLine = { accountId: string; accountName: string; amount: string; descri
 const colHead = { fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' as const, color: 'var(--text-muted)' };
 const LINE_COLS = 'minmax(0,1fr) minmax(0,1fr) 110px 28px';
 const CANDIDATE_REASON: Record<string, string> = {
+  rule: "This vendor's coding default",
   vendor_history: "From this vendor's past coding",
   ocr: 'From the invoice',
   frequent: 'Commonly used here',
@@ -313,9 +314,11 @@ export function CodingInboxPage({ session: _session }: { session: AuthenticatedS
                           key={c.accountId}
                           type="button"
                           title={
-                            c.reason === 'ocr' && c.rationale
-                              ? `From the invoice — ${c.rationale}${typeof c.weight === 'number' ? ` (${Math.round(c.weight * 100)}% sure)` : ''}`
-                              : CANDIDATE_REASON[c.reason]
+                            c.reason === 'rule' && c.rationale
+                              ? c.rationale
+                              : c.reason === 'ocr' && c.rationale
+                                ? `From the invoice — ${c.rationale}${typeof c.weight === 'number' ? ` (${Math.round(c.weight * 100)}% sure)` : ''}`
+                                : CANDIDATE_REASON[c.reason]
                           }
                           onClick={() => setLine(i, { accountId: c.accountId, accountName: c.accountName ?? '' })}
                           style={{
