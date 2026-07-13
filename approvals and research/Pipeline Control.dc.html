@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="_ds/decimal-design-system-175be9bd-80a0-4e4a-986e-851d3556e8b3/styles.css">
+  <script src="_ds/decimal-design-system-175be9bd-80a0-4e4a-986e-851d3556e8b3/_ds_bundle.js"></script>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; }
+    .pc .p-av { border-radius: 50%; color: #fff; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; font-weight: 700; letter-spacing: -0.02em; }
+    .pc .stage-tag { display: inline-flex; align-items: center; gap: 7px; height: 26px; padding: 0 12px; border-radius: var(--r-pill); font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+    .pc .stage-tag.auto { background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-faint); }
+    .pc .stage-tag.you { background: var(--text-primary); color: var(--bg-surface); }
+    .pc .explain { width: 460px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-md); padding: 14px 17px; display: flex; gap: 13px; align-items: flex-start; }
+    .pc .explain .xic { width: 30px; height: 30px; border-radius: 8px; background: var(--bg-surface-2); border: 1px solid var(--border); color: var(--text-muted); display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+    .pc .explain .xic svg { width: 15px; height: 15px; }
+    .pc .zone { width: 560px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--bg-surface); overflow: hidden; }
+    .pc .zone-h { display: flex; align-items: flex-start; gap: 12px; padding: 15px 18px; border-bottom: 1px solid var(--border); }
+    .pc .zone-body { padding: 22px 18px 24px; background: color-mix(in srgb, var(--bg-surface-2) 55%, var(--bg-surface)); display: flex; flex-direction: column; align-items: center; }
+    .pc .card { width: 330px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: 0 1px 2px rgba(0,0,0,.05), 0 6px 16px -12px rgba(0,0,0,.14); overflow: hidden; transition: border-color .12s, box-shadow .12s; }
+    .pc .card.clickable { cursor: pointer; }
+    .pc .card.clickable:hover { border-color: var(--border-strong); }
+    .pc .card.sel { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
+    .pc .cbody { padding: 13px 15px; }
+    .pc .ctitle { font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; color: var(--text-primary); padding-bottom: 11px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+    .pc .cwho { display: flex; align-items: center; gap: 9px; }
+    .pc .cname { font-size: 12.5px; color: var(--text-primary); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pc .crole { font-size: 11px; color: var(--text-faint); font-weight: 500; flex: 0 0 auto; }
+    .pc .cquorum { font-size: 11px; font-weight: 600; color: var(--text-muted); }
+    .pc .conn { width: 2px; height: 22px; background: var(--border-strong); }
+    .pc .conn-lg { width: 2px; height: 34px; background: var(--border-strong); }
+    .pc .plus { width: 22px; height: 22px; border-radius: 50%; border: 1px dashed var(--border-strong); background: var(--bg-surface); color: var(--text-faint); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: border-color .12s, color .12s; }
+    .pc .plus:hover { border-style: solid; border-color: var(--accent); color: var(--accent); }
+    .pc .plus svg { width: 12px; height: 12px; }
+    .pc .gateway { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 16px; border-radius: var(--r-pill); background: color-mix(in srgb, var(--info) 7%, var(--bg-surface)); border: 1.5px dashed color-mix(in srgb, var(--info) 45%, var(--border)); color: var(--info); font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+    .pc .gateway svg { width: 14px; height: 14px; flex: 0 0 auto; }
+    .pc .lanes { position: relative; display: flex; width: 520px; padding-top: 24px; }
+    .pc .branch-bar { position: absolute; top: 0; left: 25%; right: 25%; height: 2px; background: var(--border-strong); }
+    .pc .branch-drop { position: absolute; top: 0; width: 2px; height: 24px; background: var(--border-strong); }
+    .pc .lane { flex: 1; display: flex; flex-direction: column; align-items: center; }
+    .pc .lane-label { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-faint); }
+    .pc .terminal { display: inline-flex; align-items: center; gap: 9px; height: 38px; padding: 0 19px 0 15px; border-radius: var(--r-pill); background: var(--success); color: #fff; font-size: 12.5px; font-weight: 600; white-space: nowrap; box-shadow: 0 3px 10px -4px color-mix(in srgb, var(--success) 70%, transparent); }
+    .pc .terminal .tcheck { width: 19px; height: 19px; border-radius: 50%; background: rgba(255,255,255,.24); display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+    .pc .terminal .tcheck svg { width: 11px; height: 11px; }
+    .pc .signer { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 13px 0 6px; border-radius: var(--r-pill); background: var(--bg-surface); border: 1px solid var(--border-strong); }
+    .pc .ownernote { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); }
+    .pc .ownernote svg { width: 13px; height: 13px; flex: 0 0 auto; }
+    .pc .why { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 6px; font-size: 11px; font-weight: 600; white-space: nowrap; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-muted); }
+    .pc input[type=range] { width: 100%; accent-color: var(--accent); height: 4px; }
+    .pc .pop-field { display: flex; flex-direction: column; gap: 6px; }
+    .pc .pop-field > label { font-size: 11px; font-weight: 600; color: var(--text-muted); }
+    .pc .seg { display: flex; padding: 3px; gap: 3px; background: var(--bg-surface-2); border: 1px solid var(--border); border-radius: var(--r-md); }
+    .pc .seg button { flex: 1; height: 30px; border: none; border-radius: var(--r-sm); background: transparent; color: var(--text-muted); font-size: 12px; font-weight: 500; font-family: var(--font-body); cursor: pointer; white-space: nowrap; padding: 0 10px; }
+    .pc .seg button.on { background: var(--bg-surface); color: var(--text-primary); box-shadow: 0 1px 2px rgba(0,0,0,.06); font-weight: 600; }
+  </style>
+</helmet>
+<div class="dec pc" data-theme="{{ theme }}" data-screen-label="Pipeline control" style="height: 100vh; min-width: 1600px; display: flex; flex-direction: row; background: var(--bg-canvas); position: relative; overflow: hidden;">
+
+  <!-- ===== Sidebar ===== -->
+  <div class="sidebar" style="flex: 0 0 auto;">
+    <div class="sb-top"><div class="sb-wordmark"><span class="glyph">D</span>Decimal</div></div>
+    <div class="sb-org">
+      <span class="org-initials">DL</span><span class="org-name">Decimal Labs</span>
+      <svg class="org-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><path d="M8 9l4-4 4 4M16 15l-4 4-4-4"></path></svg>
+    </div>
+    <div class="sb-nav">
+      <div class="sb-group-label">Operations</div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg><span class="sb-label">Overview</span></div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path></svg><span class="sb-label">Bills</span><span class="sb-badge">4</span></div>
+      <div class="sb-group-label">Registry</div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 21h18M4 10h16M5 10V7l7-4 7 4v3M6 10v11M18 10v11M10 10v11M14 10v11"></path></svg><span class="sb-label">Treasury accounts</span></div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3"></circle><path d="M3 20c0-3 2.7-5 6-5s6 2 6 5M17 11a3 3 0 0 0 0-6M20 20c0-2.3-1.3-4-3.5-4.7"></path></svg><span class="sb-label">Members</span></div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4zM4 4v16M9 8h7M9 12h7"></path></svg><span class="sb-label">Address book</span></div>
+      <div class="sb-group-label">Governance</div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h10M4 12h7M4 18h4"></path><path d="M15 15l2 2 4-4"></path></svg><span class="sb-label">Approvals</span></div>
+      <div class="sb-item is-active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l7 4v5c0 4.4-3 8.3-7 9-4-0.7-7-4.6-7-9V7z"></path></svg><span class="sb-label">Approval flow</span></div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v4l3 2"></path></svg><span class="sb-label">Auto-pay</span></div>
+      <div class="sb-group-label">Integrations</div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v14H4zM4 9h16M9 5v14"></path></svg><span class="sb-label">Accounting</span></div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M3 9l9 6 9-6"></path></svg><span class="sb-label">Coding inbox</span></div>
+    </div>
+    <div class="sb-footer">
+      <div class="sb-user"><span class="avatar">{{ viewerAvatar }}</span><div style="flex: 1; min-width: 0;"><div class="u-name">{{ viewerName }}</div><div class="u-mail">{{ viewerMail }}</div></div></div>
+    </div>
+  </div>
+
+  <!-- ===== Main ===== -->
+  <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden;">
+
+    <!-- Header -->
+    <div style="flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 16px 28px; border-bottom: 1px solid var(--border); background: var(--bg-surface);">
+      <div style="display: flex; align-items: center; gap: 12px; min-width: 0;">
+        <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-faint);">Governance</div>
+        <span style="color: var(--border-strong);">/</span>
+        <h1 style="font-family: var(--font-display); font-weight: 600; font-size: 19px; letter-spacing: -0.01em; margin: 0; color: var(--text-primary);">How bills get approved &amp; paid</h1>
+        <sc-if value="{{ isOwner }}" hint-placeholder-val="{{ true }}"><span class="pill pill-min pill-warning"><span class="dot"></span>Unpublished changes</span></sc-if>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px; flex: 0 0 auto;">
+        <sc-if value="{{ isOwner }}" hint-placeholder-val="{{ true }}">
+          <button class="btn btn-secondary btn-sm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5"></path></svg>Undo</button>
+          <button class="btn btn-primary btn-sm">Publish</button>
+        </sc-if>
+        <sc-if value="{{ isReadOnly }}" hint-placeholder-val="{{ false }}">
+          <span class="ownernote"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>Only the owner can change this</span>
+        </sc-if>
+      </div>
+    </div>
+
+    <div style="flex: 1; display: flex; min-height: 0;">
+
+      <!-- ===== Pipeline (left) ===== -->
+      <div style="flex: 1; min-width: 0; overflow: auto; background-color: var(--bg-surface-2); background-image: radial-gradient(circle at center, color-mix(in srgb, var(--text-faint) 20%, transparent) 1px, transparent 1px); background-size: 22px 22px;">
+        <div style="display: flex; flex-direction: column; align-items: center; padding: 30px 20px 60px;">
+
+          <!-- STAGE: Review -->
+          <span class="stage-tag auto">Review</span>
+          <div class="conn"></div>
+          <div class="explain">
+            <span class="xic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6M9 13h6M9 17h4"></path></svg></span>
+            <div style="flex: 1; min-width: 0;">
+              <div style="font-size: 13.5px; font-weight: 600; color: var(--text-primary);">A bill arrives and gets reviewed</div>
+              <div style="font-size: 12px; color: var(--text-muted); line-height: 1.55; margin-top: 3px;">Every bill is read, its details filled in and confirmed by a person on the Bills page before it can enter approval.</div>
+              <div style="display: flex; align-items: center; gap: 9px; margin-top: 11px; padding-top: 11px; border-top: 1px solid var(--border);">
+                <span class="p-av" style="width: 24px; height: 24px; font-size: 8.5px; background: #2E7D5B;">JR</span>
+                <span style="font-size: 12px; color: var(--text-primary); font-weight: 500;">Jordan Reyes</span>
+                <span style="font-size: 11px; color: var(--text-faint);">reviews the bills</span>
+              </div>
+            </div>
+          </div>
+          <div class="conn-lg"></div>
+
+          <!-- STAGE: Approve -->
+          <span class="stage-tag you">Approve</span>
+          <div class="conn"></div>
+          <div class="zone">
+            <div class="zone-h">
+              <div style="flex: 1; min-width: 0;">
+                <div style="font-size: 14.5px; font-weight: 600; color: var(--text-primary); font-family: var(--font-display);">Who approves a bill</div>
+                <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px; line-height: 1.5;">{{ approvalZoneSub }}</div>
+              </div>
+              <sc-if value="{{ isReadOnly }}" hint-placeholder-val="{{ false }}"><span class="ownernote" style="flex: 0 0 auto;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>View only</span></sc-if>
+            </div>
+            <div class="zone-body">
+
+              <!-- empty / teaching state -->
+              <sc-if value="{{ isEmpty }}" hint-placeholder-val="{{ false }}">
+                <div style="display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 18px 0 8px; max-width: 330px; text-align: center;">
+                  <div style="width: 42px; height: 42px; border-radius: 50%; background: var(--bg-surface); border: 1px solid var(--border-strong); color: var(--text-muted); display: flex; align-items: center; justify-content: center;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width: 20px; height: 20px;"><path d="M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg></div>
+                  <div style="font-size: 14px; font-weight: 600; color: var(--text-primary); font-family: var(--font-display);">Add your first step</div>
+                  <div style="font-size: 12.5px; color: var(--text-muted); line-height: 1.5;">Choose who signs off on a bill. You can add more steps and split by amount as you go.</div>
+                  <sc-if value="{{ isOwner }}" hint-placeholder-val="{{ true }}"><button class="btn btn-primary btn-sm" style="margin-top: 4px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><path d="M12 5v14M5 12h14"></path></svg>Add a step</button></sc-if>
+                </div>
+              </sc-if>
+
+              <!-- configured flow -->
+              <sc-if value="{{ isConfigured }}" hint-placeholder-val="{{ true }}">
+                <div style="display: flex; flex-direction: column; align-items: center;">
+                  <div class="card {{ mgrSel }} {{ cardClick }}" onClick="{{ selManager }}">
+                    <div class="cbody">
+                      <div class="ctitle">Manager sign-off</div>
+                      <div class="cwho"><span class="p-av" style="width: 26px; height: 26px; font-size: 9.5px; background: #B4632B;">OR</span><span class="cname">Omar Reyes</span><span class="crole">Budget owner</span></div>
+                    </div>
+                  </div>
+                  <div class="conn"></div>
+                  <sc-if value="{{ isOwner }}" hint-placeholder-val="{{ true }}"><div class="plus"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"></path></svg></div><div class="conn"></div></sc-if>
+                  <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
+                    <div class="gateway"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3v12a3 3 0 0 0 3 3h6M6 3l-3 3M6 3l3 3M18 12l3 3-3 3"></path></svg>Is it over $10,000?</div>
+                  </div>
+                  <div class="conn"></div>
+                  <div class="lanes">
+                    <div class="branch-bar"></div>
+                    <div class="branch-drop" style="left: 25%;"></div>
+                    <div class="branch-drop" style="right: 25%;"></div>
+                    <div class="lane">
+                      <span class="lane-label" style="color: var(--accent);">Over $10,000</span>
+                      <div class="conn"></div>
+                      <div class="card {{ cfoSel }} {{ cardClick }}" style="width: 250px;" onClick="{{ selCfo }}">
+                        <div class="cbody">
+                          <div class="ctitle">CFO sign-off</div>
+                          <div class="cwho"><span class="p-av" style="width: 26px; height: 26px; font-size: 9.5px; background: #3F5FA8;">KB</span><span class="cname">Klaus Berger</span><span class="crole">CFO</span></div>
+                        </div>
+                      </div>
+                      <div class="conn"></div>
+                      <span class="node" style="width: 8px; height: 8px; border-radius: 50%; background: var(--border-strong);"></span>
+                    </div>
+                    <div class="lane">
+                      <span class="lane-label">$10,000 or less</span>
+                      <div class="conn"></div>
+                      <span style="font-size: 11.5px; color: var(--text-muted); max-width: 170px; text-align: center; line-height: 1.5;">No extra step — smaller bills move straight on.</span>
+                      <div class="conn"></div>
+                      <span class="node" style="width: 8px; height: 8px; border-radius: 50%; background: var(--border-strong);"></span>
+                    </div>
+                  </div>
+                  <div style="font-size: 11px; color: var(--text-faint); margin-top: 14px; display: flex; align-items: center; gap: 6px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px; height: 12px;"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v5M12 8h.01"></path></svg>The person who reviewed a bill can't approve it — if that empties a step, it falls to you as owner.</div>
+                </div>
+              </sc-if>
+            </div>
+          </div>
+          <div class="conn-lg"></div>
+
+          <!-- STAGE: Release -->
+          <span class="stage-tag you">Release</span>
+          <div class="conn"></div>
+          <div class="zone" style="border-color: color-mix(in srgb, var(--text-primary) 28%, var(--border));">
+            <div class="zone-h">
+              <div style="flex: 1; min-width: 0;">
+                <div style="font-size: 14.5px; font-weight: 600; color: var(--text-primary); font-family: var(--font-display);">Who releases the money</div>
+                <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px; line-height: 1.5;">The final gate. Approved is not paid — once a bill clears approval, these people sign to actually send the money.</div>
+              </div>
+              <sc-if value="{{ isReadOnly }}" hint-placeholder-val="{{ false }}"><span class="ownernote" style="flex: 0 0 auto;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>View only</span></sc-if>
+            </div>
+            <div class="zone-body" style="gap: 14px;">
+              <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center;">
+                <div class="signer"><span class="p-av" style="width: 28px; height: 28px; font-size: 10px; background: #A24B6B;">PT</span><div style="min-width: 0;"><div style="font-size: 12.5px; font-weight: 600; color: var(--text-primary); white-space: nowrap;">Priya Tan</div><div style="font-size: 10.5px; color: var(--text-faint);">Finance</div></div>
+                  <sc-if value="{{ isOwner }}" hint-placeholder-val="{{ true }}"><button class="drawer-x" style="width: 20px; height: 20px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 10px; height: 10px;"><path d="M18 6L6 18M6 6l12 12"></path></svg></button></sc-if>
+                </div>
+                <div class="signer"><span class="p-av" style="width: 28px; height: 28px; font-size: 10px; background: #6B4FA0;">ZK</span><div style="min-width: 0;"><div style="font-size: 12.5px; font-weight: 600; color: var(--text-primary); white-space: nowrap;">Zaid Khan</div><div style="font-size: 10.5px; color: var(--text-faint);">Owner</div></div>
+                  <sc-if value="{{ isOwner }}" hint-placeholder-val="{{ true }}"><button class="drawer-x" style="width: 20px; height: 20px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 10px; height: 10px;"><path d="M18 6L6 18M6 6l12 12"></path></svg></button></sc-if>
+                </div>
+                <sc-if value="{{ isOwner }}" hint-placeholder-val="{{ true }}"><button style="height: 40px; padding: 0 15px; border-radius: var(--r-pill); border: 1px dashed var(--border-strong); background: transparent; color: var(--text-muted); font-size: 12.5px; font-weight: 500; cursor: pointer; font-family: var(--font-body);">+ Add a signer</button></sc-if>
+              </div>
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <span style="font-size: 12px; color: var(--text-muted); font-weight: 500;">How many must sign:</span>
+                <sc-if value="{{ isOwner }}" hint-placeholder-val="{{ true }}">
+                  <div class="seg" style="width: 220px;"><button class="{{ q1Class }}" onClick="{{ setQ1 }}">Any one</button><button class="{{ q2Class }}" onClick="{{ setQ2 }}">Both</button></div>
+                </sc-if>
+                <sc-if value="{{ isReadOnly }}" hint-placeholder-val="{{ false }}"><span style="font-size: 12.5px; font-weight: 600; color: var(--text-primary);">{{ quorumLabel }}</span></sc-if>
+              </div>
+            </div>
+          </div>
+          <div class="conn-lg"></div>
+
+          <!-- terminal -->
+          <div class="terminal"><span class="tcheck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5 9-10"></path></svg></span>Money leaves the account</div>
+        </div>
+      </div>
+
+      <!-- ===== Test rail (right) ===== -->
+      <div style="flex: 0 0 auto; width: 440px; border-left: 1px solid var(--border); background: var(--bg-surface); display: flex; flex-direction: column; min-height: 0;">
+        <div style="padding: 17px 22px 13px; border-bottom: 1px solid var(--border); flex: 0 0 auto;">
+          <div style="font-size: 15px; font-weight: 600; color: var(--text-primary); font-family: var(--font-display);">Test the pipeline</div>
+          <p style="font-size: 12px; color: var(--text-muted); margin: 5px 0 0; line-height: 1.5;">Make up a bill and see its whole journey — approval to release.</p>
+        </div>
+        <div style="flex: 1; overflow: auto; padding: 18px 22px; display: flex; flex-direction: column; gap: 18px;">
+
+          <sc-if value="{{ isEmpty }}" hint-placeholder-val="{{ false }}">
+            <div class="empty" style="margin: 24px 0;">
+              <div class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" style="width: 22px; height: 22px;"><path d="M14 3v4a1 1 0 0 0 1 1h4M9 13l2 2 4-4M15 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"></path></svg></div>
+              <h4>Nothing to test yet</h4>
+              <p>Add your first approval step and a sample bill's journey will show here.</p>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ isConfigured }}" hint-placeholder-val="{{ true }}">
+            <div class="pop-field">
+              <div style="display: flex; align-items: baseline; justify-content: space-between;"><label>Bill amount</label><span class="mono" style="font-size: 15px; font-weight: 700; color: var(--text-primary);">{{ amountFmt }}</span></div>
+              <input type="range" min="0" max="30000" step="500" value="{{ amount }}" onInput="{{ onAmount }}">
+              <div style="display: flex; justify-content: space-between; font-size: 10.5px; color: var(--text-faint);"><span>$0</span><span>$30,000</span></div>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 13px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-surface-2);"><span style="font-size: 12.5px; color: var(--text-primary);">Reviewed by <b>{{ requesterName }}</b></span><button class="btn btn-ghost btn-sm" onClick="{{ toggleRequester }}" style="color: var(--accent);">Change</button></div>
+
+            <div>
+              <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-faint); margin-bottom: 12px;">The bill's journey</div>
+              <div style="display: flex; flex-direction: column; gap: 0;">
+                <sc-for list="{{ chain }}" as="c" hint-placeholder-count="3">
+                  <div style="display: flex; flex-direction: column; align-items: flex-start;">
+                    <div style="display: flex; align-items: center; gap: 12px; width: 100%;">
+                      <span class="p-av" style="{{ c.avStyle }}">{{ c.initials }}</span>
+                      <div style="flex: 1; min-width: 0;">
+                        <div style="font-size: 13.5px; font-weight: 600; color: var(--text-primary);">{{ c.name }}</div>
+                        <div style="font-size: 11.5px; color: var(--text-muted);">{{ c.step }}</div>
+                      </div>
+                      <span class="why">{{ c.why }}</span>
+                    </div>
+                    <sc-if value="{{ c.showConn }}" hint-placeholder-val="{{ true }}"><span style="width: 2px; height: 16px; background: var(--border-strong); margin-left: 17px;"></span></sc-if>
+                  </div>
+                </sc-for>
+              </div>
+              <sc-if value="{{ showStandin }}" hint-placeholder-val="{{ false }}">
+                <div style="display: flex; gap: 9px; align-items: flex-start; margin-top: 12px; padding: 11px 13px; border-radius: var(--r-md); background: var(--bg-surface-2); border: 1px solid var(--border);">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" style="width: 14px; height: 14px; flex: 0 0 auto; margin-top: 1px;"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v5M12 8h.01"></path></svg>
+                  <span style="font-size: 12px; color: var(--text-primary); line-height: 1.5;">{{ standinNote }}</span>
+                </div>
+              </sc-if>
+              <div style="display: flex; align-items: center; gap: 10px; margin-top: 14px; padding: 11px 13px; border-radius: var(--r-md); background: color-mix(in srgb, var(--success) 8%, transparent); border: 1px solid color-mix(in srgb, var(--success) 30%, var(--border));">
+                <svg viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.5" style="width: 15px; height: 15px;"><path d="M5 12l5 5 9-10"></path></svg>
+                <span style="font-size: 12.5px; color: var(--text-primary);">{{ releaseLine }}</span>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Step editor popover ===== -->
+  <sc-if value="{{ popOpen }}" hint-placeholder-val="{{ false }}">
+    <div class="overlay" onClick="{{ closePop }}"></div>
+    <div class="dialog" style="width: 400px;">
+      <div class="dialog-head">
+        <div><h2>Edit step</h2><p>Who signs off at this point, and how many of them.</p></div>
+        <button class="drawer-x" onClick="{{ closePop }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><path d="M18 6L6 18M6 6l12 12"></path></svg></button>
+      </div>
+      <div class="dialog-body" style="display: flex; flex-direction: column; gap: 16px;">
+        <div class="pop-field"><label>Step name</label><input class="input" value="{{ popName }}" style="height: 36px;"></div>
+        <div class="pop-field">
+          <label>Who can approve</label>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+            <span style="display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px 0 4px; border-radius: var(--r-pill); background: var(--bg-surface-2); border: 1px solid var(--border);"><span class="p-av" style="{{ popAvStyle }}">{{ popInit }}</span><span style="font-size: 12.5px; color: var(--text-primary);">{{ popWho }}</span><span style="font-size: 10.5px; color: var(--text-faint);">{{ popRole }}</span></span>
+            <button style="height: 30px; padding: 0 12px; border-radius: var(--r-pill); border: 1px dashed var(--border-strong); background: transparent; color: var(--text-muted); font-size: 12.5px; cursor: pointer; font-family: var(--font-body);">+ Add person</button>
+          </div>
+          <div class="input-help">Pick people. A role works too, if you'd rather it survive turnover.</div>
+        </div>
+      </div>
+      <div class="dialog-foot" style="justify-content: flex-end;">
+        <button class="btn btn-secondary" onClick="{{ closePop }}">Cancel</button>
+        <button class="btn btn-primary" onClick="{{ closePop }}">Done</button>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;viewer&quot;: {
+    &quot;editor&quot;: &quot;enum&quot;,
+    &quot;options&quot;: [&quot;Owner&quot;, &quot;Member (read-only)&quot;],
+    &quot;default&quot;: &quot;Owner&quot;,
+    &quot;tsType&quot;: &quot;string&quot;,
+    &quot;section&quot;: &quot;Screen state&quot;
+  },
+  &quot;pageState&quot;: {
+    &quot;editor&quot;: &quot;enum&quot;,
+    &quot;options&quot;: [&quot;Configured&quot;, &quot;First run&quot;],
+    &quot;default&quot;: &quot;Configured&quot;,
+    &quot;tsType&quot;: &quot;string&quot;,
+    &quot;section&quot;: &quot;Screen state&quot;
+  },
+  &quot;darkMode&quot;: {
+    &quot;editor&quot;: &quot;boolean&quot;,
+    &quot;default&quot;: false,
+    &quot;tsType&quot;: &quot;boolean&quot;,
+    &quot;section&quot;: &quot;Screen state&quot;
+  }
+}">
+class Component extends DCLogic {
+  state = { amount: 12000, reqOmar: false, card: null, quorum: 1 };
+
+  renderVals() {
+    const s = this.state;
+    const isOwner = this.props.viewer !== 'Member (read-only)';
+    const isEmpty = this.props.pageState === 'First run';
+    const isConfigured = !isEmpty;
+
+    const P = {
+      zaid: { n: 'Zaid Khan', i: 'ZK', c: '#6B4FA0', role: 'Owner' },
+      omar: { n: 'Omar Reyes', i: 'OR', c: '#B4632B', role: 'Budget owner' },
+      klaus: { n: 'Klaus Berger', i: 'KB', c: '#3F5FA8', role: 'CFO' },
+      priya: { n: 'Priya Tan', i: 'PT', c: '#A24B6B', role: 'Finance' },
+      jordan: { n: 'Jordan Reyes', i: 'JR', c: '#2E7D5B', role: 'Operator' }
+    };
+    const av = (p, sz) => 'width:' + sz + 'px;height:' + sz + 'px;font-size:' + (sz <= 24 ? 8.5 : 10) + 'px;background:' + p.c + ';';
+
+    // ---- simulate ----
+    const amt = s.amount;
+    const fmt = (n) => '$' + n.toLocaleString('en-US');
+    let chain = [];
+    let showStandin = false, standinNote = '';
+
+    // step 1: manager (Omar). Requester excluded; empty step falls to owner.
+    if (s.reqOmar) {
+      chain.push({ p: P.zaid, step: 'Manager sign-off', why: 'owner stand-in' });
+      showStandin = true;
+      standinNote = 'Omar reviewed this bill, so he can\u2019t also approve it. That would leave the step empty \u2014 so it falls to you, Zaid, as owner.';
+    } else {
+      chain.push({ p: P.omar, step: 'Manager sign-off', why: 'every bill' });
+    }
+    if (amt >= 10000) chain.push({ p: P.klaus, step: 'CFO sign-off', why: 'over $10,000' });
+
+    const chainVals = chain.map((c, i) => ({
+      initials: c.p.i, avStyle: av(c.p, 34), name: c.p.n, step: c.step, why: c.why, showConn: i < chain.length - 1
+    }));
+
+    const releaseLine = s.quorum === 2
+      ? 'Then Priya and Zaid both sign the release \u2014 and the money goes out.'
+      : 'Then Priya or Zaid signs the release \u2014 and the money goes out.';
+
+    const viewerP = isOwner ? { n: 'Zaid Khan (fuyofulo)', m: 'pheonixdiaz625@gmail.com', a: 'PH' } : { n: 'Dev Kapoor', m: 'dev@decimallabs.co', a: 'DK' };
+
+    const popMap = { manager: P.omar, cfo: P.klaus };
+    const popP = popMap[s.card] || P.omar;
+
+    return {
+      theme: this.props.darkMode ? 'dark' : 'light',
+      isOwner,
+      isReadOnly: !isOwner,
+      isEmpty,
+      isConfigured,
+      viewerName: viewerP.n,
+      viewerMail: viewerP.m,
+      viewerAvatar: viewerP.a,
+      approvalZoneSub: isOwner ? 'Stack the sign-offs a bill must collect. Add steps, or split by amount.' : 'The sign-offs every bill collects before it can be paid.',
+
+      cardClick: isOwner ? 'clickable' : '',
+      mgrSel: s.card === 'manager' ? 'sel' : '',
+      cfoSel: s.card === 'cfo' ? 'sel' : '',
+      selManager: () => { if (isOwner) this.setState({ card: 'manager' }); },
+      selCfo: () => { if (isOwner) this.setState({ card: 'cfo' }); },
+
+      popOpen: isOwner && !!s.card,
+      popName: s.card === 'cfo' ? 'CFO sign-off' : 'Manager sign-off',
+      popWho: popP.n,
+      popInit: popP.i,
+      popRole: popP.role,
+      popAvStyle: av(popP, 22),
+      closePop: () => this.setState({ card: null }),
+
+      q1Class: s.quorum === 1 ? 'on' : '',
+      q2Class: s.quorum === 2 ? 'on' : '',
+      setQ1: () => this.setState({ quorum: 1 }),
+      setQ2: () => this.setState({ quorum: 2 }),
+      quorumLabel: s.quorum === 2 ? 'Both must sign' : 'Any one signs',
+
+      amount: amt,
+      amountFmt: fmt(amt),
+      onAmount: (e) => this.setState({ amount: parseInt(e.target.value, 10) }),
+      requesterName: s.reqOmar ? 'Omar (also an approver)' : 'Jordan (operator)',
+      toggleRequester: () => this.setState({ reqOmar: !s.reqOmar }),
+      chain: chainVals,
+      showStandin,
+      standinNote,
+      releaseLine
+    };
+  }
+}
+</script>
+</body>
+</html>

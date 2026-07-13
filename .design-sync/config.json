@@ -1,0 +1,21 @@
+{
+  "projectId": "175be9bd-80a0-4e4a-986e-851d3556e8b3",
+  "shape": "package",
+  "pkg": "decimal-frontend",
+  "globalName": "DecimalDS",
+  "srcDir": "src",
+  "tsconfig": "tsconfig.app.json",
+  "cssEntry": "src/styles/decimal/ds-sync-entry.css",
+  "runtimeFontPrefixes": [
+    "Geist"
+  ],
+  "componentSrcMap": {
+    "PageHead": "src/dec/primitives.tsx",
+    "Pill": "src/dec/primitives.tsx",
+    "SLPill": "src/dec/primitives.tsx",
+    "OriginPill": "src/dec/primitives.tsx",
+    "Ico": "src/dec/icons.tsx"
+  },
+  "buildCmd": "bash .design-sync/build-css.sh",
+  "readmeHeader": ".design-sync/conventions.md"
+}

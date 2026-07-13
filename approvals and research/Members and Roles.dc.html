@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="_ds/decimal-design-system-175be9bd-80a0-4e4a-986e-851d3556e8b3/styles.css">
+  <script src="_ds/decimal-design-system-175be9bd-80a0-4e4a-986e-851d3556e8b3/_ds_bundle.js"></script>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; }
+    .mr .p-av { border-radius: 50%; color: #fff; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; font-weight: 700; letter-spacing: -0.02em; }
+    .mr table.tbl { table-layout: fixed; }
+    .mr .tbl tbody td { height: 68px; vertical-align: middle; }
+    .mr .rolepill { display: inline-flex; align-items: center; height: 25px; padding: 0 10px; border-radius: 6px; font-size: 12px; font-weight: 500; background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-strong); white-space: nowrap; }
+    .mr .rolepill.muted { background: var(--bg-surface-2); color: var(--text-muted); border-color: var(--border); }
+    .mr .addrole { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: var(--r-pill); border: 1px dashed var(--border-strong); background: transparent; color: var(--text-muted); font-size: 12px; font-weight: 500; cursor: pointer; font-family: var(--font-body); white-space: nowrap; }
+    .mr .addrole:hover { border-color: var(--accent); color: var(--accent); }
+    .mr .addrole svg { width: 11px; height: 11px; }
+    .mr .acc { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); font-weight: 500; }
+    .mr .acc .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-faint); }
+    .mr .rolecard { border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-surface); padding: 13px 15px; display: flex; align-items: center; gap: 13px; }
+    .mr .rolecard.vacant { border-style: solid; border-color: var(--border-strong); background: var(--bg-surface); }
+    .mr .rolechip-lg { width: 34px; height: 34px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; background: var(--bg-surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+    .mr .rolechip-lg svg { width: 17px; height: 17px; }
+    .mr .avstack { display: inline-flex; align-items: center; }
+    .mr .avstack .p-av { border: 2px solid var(--bg-surface); margin-left: -7px; }
+    .mr .avstack .p-av:first-child { margin-left: 0; }
+    .mr .depend { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 500; color: var(--text-muted); }
+    .mr .depend svg { width: 12px; height: 12px; }
+  </style>
+</helmet>
+<div class="dec mr" data-theme="{{ theme }}" data-screen-label="Members and roles" style="height: 100vh; min-width: 1600px; display: flex; flex-direction: row; background: var(--bg-canvas); position: relative; overflow: hidden;">
+
+  <!-- ===== Sidebar ===== -->
+  <div class="sidebar" style="flex: 0 0 auto;">
+    <div class="sb-top"><div class="sb-wordmark"><span class="glyph">D</span>Decimal</div></div>
+    <div class="sb-org">
+      <span class="org-initials">DL</span><span class="org-name">Decimal Labs</span>
+      <svg class="org-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><path d="M8 9l4-4 4 4M16 15l-4 4-4-4"></path></svg>
+    </div>
+    <div class="sb-nav">
+      <div class="sb-group-label">Operations</div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg><span class="sb-label">Overview</span></div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path></svg><span class="sb-label">Bills</span><span class="sb-badge">4</span></div>
+      <div class="sb-group-label">Registry</div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 21h18M4 10h16M5 10V7l7-4 7 4v3M6 10v11M18 10v11M10 10v11M14 10v11"></path></svg><span class="sb-label">Treasury accounts</span></div>
+      <div class="sb-item is-active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3"></circle><path d="M3 20c0-3 2.7-5 6-5s6 2 6 5M17 11a3 3 0 0 0 0-6M20 20c0-2.3-1.3-4-3.5-4.7"></path></svg><span class="sb-label">Members</span></div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4zM4 4v16M9 8h7M9 12h7"></path></svg><span class="sb-label">Address book</span></div>
+      <div class="sb-group-label">Governance</div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h10M4 12h7M4 18h4"></path><path d="M15 15l2 2 4-4"></path></svg><span class="sb-label">Approvals</span></div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l7 4v5c0 4.4-3 8.3-7 9-4-0.7-7-4.6-7-9V7z"></path></svg><span class="sb-label">Approval flow</span></div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v4l3 2"></path></svg><span class="sb-label">Auto-pay</span></div>
+      <div class="sb-group-label">Integrations</div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v14H4zM4 9h16M9 5v14"></path></svg><span class="sb-label">Accounting</span></div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M3 9l9 6 9-6"></path></svg><span class="sb-label">Coding inbox</span></div>
+    </div>
+    <div class="sb-footer">
+      <div class="sb-user"><span class="avatar">PH</span><div style="flex: 1; min-width: 0;"><div class="u-name">Zaid Khan (fuyofulo)</div><div class="u-mail"><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="92e2faf7fdfcfbeaf6fbf3e8a4a0a7d2f5fff3fbfebcf1fdff">[email&#160;protected]</a></div></div></div>
+    </div>
+  </div>
+
+  <!-- ===== Main ===== -->
+  <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden;">
+
+    <!-- Header -->
+    <div style="flex: 0 0 auto; display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding: 22px 28px 18px; border-bottom: 1px solid var(--border);">
+      <div>
+        <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-faint);">Registry</div>
+        <h1 style="font-family: var(--font-display); font-weight: 600; font-size: 26px; letter-spacing: -0.02em; margin: 4px 0 0; color: var(--text-primary);">Members &amp; roles</h1>
+        <p style="font-size: 13.5px; color: var(--text-muted); margin: 3px 0 0;">Who's on the team, and the role each plays when a bill needs approving.</p>
+      </div>
+      <button class="btn btn-primary" onClick="{{ openInvite }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 15px; height: 15px;"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M19 8v6M22 11h-6"></path></svg>Invite member</button>
+    </div>
+
+    <div style="flex: 1; overflow: auto; padding: 22px 28px 40px; display: flex; flex-direction: column; gap: 26px;">
+
+      <!-- vacant roles tray -->
+      <sc-if value="{{ hasVacant }}" hint-placeholder-val="{{ true }}">
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-faint);">Roles that need someone</span>
+            <span class="rolepill muted" style="height: 20px; font-size: 10.5px;">{{ vacantCount }}</span>
+          </div>
+          <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+            <sc-for list="{{ vacantRoles }}" as="v" hint-placeholder-count="2">
+              <div class="rolecard vacant" style="width: 340px;">
+                <span class="rolechip-lg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.5"></circle><path d="M5 20c0-3.3 3-6 7-6s7 2.7 7 6"></path></svg></span>
+                <div style="flex: 1; min-width: 0;">
+                  <div style="font-size: 13.5px; font-weight: 600; color: var(--text-primary);">{{ v.name }}</div>
+                  <div style="display: inline-flex; align-items: center; gap: 6px; margin-top: 3px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: var(--warning); flex: 0 0 auto;"></span><span style="font-size: 11.5px; color: var(--text-muted);">{{ v.warn }}</span></div>
+                </div>
+                <button class="btn btn-secondary btn-sm">Assign someone</button>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- roster -->
+      <div>
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <h2 style="font-family: var(--font-display); font-size: 16px; font-weight: 600; margin: 0; color: var(--text-primary);">Team</h2>
+            <span style="font-size: 12.5px; color: var(--text-muted);">{{ memberCount }} people</span>
+          </div>
+          <div class="input-search" style="width: 240px;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="M21 21l-4.3-4.3"></path></svg>
+            <input class="input" placeholder="Search people">
+          </div>
+        </div>
+        <div class="tbl-card">
+          <table class="tbl">
+            <thead>
+              <tr>
+                <th style="width: 30%;">Member</th>
+                <th style="width: 14%;">Access</th>
+                <th style="width: 46%;">Approval roles</th>
+                <th style="width: 10%;"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <sc-for list="{{ members }}" as="m" hint-placeholder-count="5">
+                <tr>
+                  <td>
+                    <div style="display: flex; align-items: center; gap: 12px; min-width: 0;">
+                      <span class="p-av" style="{{ m.avStyle }}">{{ m.initials }}</span>
+                      <div style="min-width: 0;">
+                        <div style="font-weight: 600; color: var(--text-primary); white-space: nowrap;">{{ m.name }}</div>
+                        <div class="cell-mono" style="font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ m.email }}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td><span class="acc"><span class="dot" style="{{ m.accDotStyle }}"></span>{{ m.access }}</span></td>
+                  <td>
+                    <div style="display: flex; align-items: center; gap: 7px; flex-wrap: wrap;">
+                      <sc-for list="{{ m.roles }}" as="r" hint-placeholder-count="1">
+                        <span class="rolepill">{{ r.name }}</span>
+                      </sc-for>
+                      <sc-if value="{{ m.noRoles }}" hint-placeholder-val="{{ false }}"><span style="font-size: 12px; color: var(--text-faint);">No approval role</span></sc-if>
+                      <button class="addrole" onClick="{{ m.addRole }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"></path></svg>Add role</button>
+                    </div>
+                  </td>
+                  <td>
+                    <div style="display: flex; justify-content: flex-end;">
+                      <button class="btn btn-icon btn-sm" title="Manage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;"><circle cx="12" cy="5" r="1.6"></circle><circle cx="12" cy="12" r="1.6"></circle><circle cx="12" cy="19" r="1.6"></circle></svg></button>
+                    </div>
+                  </td>
+                </tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- roles in use -->
+      <div>
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+          <h2 style="font-family: var(--font-display); font-size: 16px; font-weight: 600; margin: 0; color: var(--text-primary);">Approval roles</h2>
+          <span style="font-size: 12.5px; color: var(--text-muted);">Named seats routing points at — reassign the seat and every flow keeps working.</span>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;">
+          <sc-for list="{{ roles }}" as="r" hint-placeholder-count="4">
+            <div class="rolecard">
+              <span class="rolechip-lg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.5"></circle><path d="M5 20c0-3.3 3-6 7-6s7 2.7 7 6"></path></svg></span>
+              <div style="flex: 1; min-width: 0;">
+                <div style="display: flex; align-items: center; gap: 9px;">
+                  <span style="font-size: 14px; font-weight: 600; color: var(--text-primary);">{{ r.name }}</span>
+                  <sc-if value="{{ r.inFlow }}" hint-placeholder-val="{{ false }}"><span class="depend"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>Used in your flow</span></sc-if>
+                </div>
+                <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">{{ r.holderText }}</div>
+              </div>
+              <div class="avstack">
+                <sc-for list="{{ r.holders }}" as="h" hint-placeholder-count="1">
+                  <span class="p-av" style="{{ h.avStyle }}">{{ h.initials }}</span>
+                </sc-for>
+              </div>
+            </div>
+          </sc-for>
+          <div class="rolecard" style="border-style: dashed; cursor: pointer; justify-content: center; color: var(--text-muted);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 15px; height: 15px;"><path d="M12 5v14M5 12h14"></path></svg><span style="font-size: 13px; font-weight: 600;">Create a role</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Invite dialog ===== -->
+  <sc-if value="{{ inviteOpen }}" hint-placeholder-val="{{ false }}">
+    <div class="overlay" onClick="{{ closeInvite }}"></div>
+    <div class="dialog" style="width: 460px;">
+      <div class="dialog-head">
+        <div><h2>Invite a member</h2><p>They'll get an email to join Decimal Labs.</p></div>
+        <button class="drawer-x" onClick="{{ closeInvite }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><path d="M18 6L6 18M6 6l12 12"></path></svg></button>
+      </div>
+      <div class="dialog-body" style="display: flex; flex-direction: column; gap: 16px;">
+        <div class="field"><label class="field-label">Email address</label><input class="input" placeholder="name@company.com"></div>
+        <div class="field">
+          <label class="field-label">Access level</label>
+          <div style="display: flex; padding: 3px; gap: 3px; background: var(--bg-surface-2); border: 1px solid var(--border); border-radius: var(--r-md);">
+            <button style="flex: 1; height: 32px; border: none; border-radius: var(--r-sm); background: var(--bg-surface); box-shadow: 0 1px 2px rgba(0,0,0,.06); color: var(--text-primary); font-size: 12.5px; font-weight: 600; cursor: pointer; font-family: var(--font-body);">Member</button>
+            <button style="flex: 1; height: 32px; border: none; border-radius: var(--r-sm); background: transparent; color: var(--text-muted); font-size: 12.5px; font-weight: 500; cursor: pointer; font-family: var(--font-body);">Admin</button>
+            <button style="flex: 1; height: 32px; border: none; border-radius: var(--r-sm); background: transparent; color: var(--text-muted); font-size: 12.5px; font-weight: 500; cursor: pointer; font-family: var(--font-body);">Owner</button>
+          </div>
+          <div class="input-help">What they can change in settings. Separate from their approval role.</div>
+        </div>
+        <div class="field">
+          <label class="field-label">Approval role <span style="color: var(--text-faint); font-weight: 400;">· optional, add later too</span></label>
+          <div style="display: flex; align-items: center; gap: 7px; flex-wrap: wrap;">
+            <button class="addrole"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"></path></svg>Assign a role</button>
+          </div>
+        </div>
+      </div>
+      <div class="dialog-foot" style="justify-content: flex-end;">
+        <button class="btn btn-secondary" onClick="{{ closeInvite }}">Cancel</button>
+        <button class="btn btn-primary" onClick="{{ closeInvite }}">Send invite</button>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script type="text/x-dc" data-dc-script data-props="{
+  &quot;darkMode&quot;: { &quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: false, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;Screen state&quot; }
+}">
+class Component extends DCLogic {
+  state = { inviteOpen: false };
+
+  renderVals() {
+    const P = {
+      zaid: { i: 'ZK', c: '#6B4FA0' }, priya: { i: 'PT', c: '#A24B6B' }, omar: { i: 'OR', c: '#B4632B' },
+      klaus: { i: 'KB', c: '#3F5FA8' }, dev: { i: 'DK', c: '#2E7D5B' }, mara: { i: 'MW', c: '#7A3E8F' }
+    };
+    const av = (p, sz) => 'width:' + sz + 'px;height:' + sz + 'px;font-size:' + (sz <= 24 ? 9 : 11) + 'px;background:' + p.c + ';';
+    const accDot = { Owner: 'background:var(--accent);', Admin: 'background:var(--info);', Member: 'background:var(--text-faint);' };
+
+    const members = [
+      { p: P.zaid, name: 'Zaid Khan', email: 'zaid@decimallabs.co', access: 'Owner', roles: [] },
+      { p: P.priya, name: 'Priya Tan', email: 'priya@decimallabs.co', access: 'Admin', roles: ['Finance', 'Controller'] },
+      { p: P.omar, name: 'Omar Reyes', email: 'omar@decimallabs.co', access: 'Member', roles: ['Budget owner'] },
+      { p: P.klaus, name: 'Klaus Berger', email: 'klaus@decimallabs.co', access: 'Member', roles: ['CFO'] },
+      { p: P.dev, name: 'Dev Kapoor', email: 'dev@decimallabs.co', access: 'Member', roles: ['Finance'] },
+      { p: P.mara, name: 'Mara Wills', email: 'mara@decimallabs.co', access: 'Member', roles: [] }
+    ];
+
+    const memberVals = members.map((m) => ({
+      initials: m.p.i,
+      avStyle: av(m.p, 36),
+      name: m.name,
+      email: m.email,
+      access: m.access,
+      accDotStyle: accDot[m.access] || accDot.Member,
+      roles: m.roles.map((r) => ({ name: r })),
+      noRoles: m.roles.length === 0,
+      addRole: () => {}
+    }));
+
+    const roles = [
+      { name: 'CFO', holders: [P.klaus], inFlow: true },
+      { name: 'Finance', holders: [P.priya, P.dev], inFlow: true },
+      { name: 'Budget owner', holders: [P.omar], inFlow: true },
+      { name: 'Controller', holders: [P.priya], inFlow: false }
+    ];
+    const roleVals = roles.map((r) => ({
+      name: r.name,
+      inFlow: r.inFlow,
+      holders: r.holders.map((h) => ({ initials: h.i, avStyle: av(h, 28) })),
+      holderText: r.holders.length === 1 ? '1 person holds this' : r.holders.length + ' people hold this'
+    }));
+
+    const vacantRoles = [
+      { name: 'Legal', warn: 'A step in your flow points here — no one holds it' }
+    ];
+
+    return {
+      theme: this.props.darkMode ? 'dark' : 'light',
+      members: memberVals,
+      memberCount: members.length,
+      roles: roleVals,
+      vacantRoles,
+      hasVacant: vacantRoles.length > 0,
+      vacantCount: vacantRoles.length,
+      inviteOpen: this.state.inviteOpen,
+      openInvite: () => this.setState({ inviteOpen: true }),
+      closeInvite: () => this.setState({ inviteOpen: false })
+    };
+  }
+}
+</script>
+</body>
+</html>

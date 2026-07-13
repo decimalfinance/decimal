@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch",
+      "Bash(npx tsc --noEmit)",
+      "Bash(make test-api)",
+      "Bash(npm run typecheck)",
+      "mcp__Claude_Browser__read_page",
+      "mcp__Claude_Browser__navigate",
+      "mcp__Claude_Browser__find",
+      "mcp__Claude_Browser__read_console_messages"
+    ]
+  }
+}
