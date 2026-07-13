@@ -516,6 +516,7 @@ export function CounterpartiesPage({ session: _session }: { session: Authenticat
                                 vendor={g.addresses[0]?.wallet.counterpartyId ? vendorById.get(g.addresses[0].wallet.counterpartyId!) ?? null : null}
                                 pending={payableMutation.isPending}
                                 isPrimaryAdmin={isPrimaryAdmin}
+                                isAdminTier={isAdminTier}
                                 onSet={(counterpartyId, status, reason) => payableMutation.mutate({ counterpartyId, status, reason })}
                               />
                               {(() => {
@@ -674,6 +675,7 @@ function VendorPayableControls(props: {
   vendor: Counterparty | null;
   pending: boolean;
   isPrimaryAdmin: boolean;
+  isAdminTier: boolean;
   onSet: (counterpartyId: string, status: 'payable' | 'held' | 'blocked', reason: string | null) => void;
 }) {
   const [mode, setMode] = useState<'held' | 'blocked' | null>(null);
@@ -698,7 +700,9 @@ function VendorPayableControls(props: {
           ? `${hold.status === 'blocked' ? 'Blocked' : 'Payments on hold'} — ${hold.byName}: “${hold.reason}”`
           : 'Payments to this vendor can flow.'}
       </span>
-      {mode ? (
+      {/* Members see the status; only admins are OFFERED the controls — the
+          server refuses them anyway (standing rule: never offer-then-reject). */}
+      {!props.isAdminTier ? null : mode ? (
         <>
           <input
             className="input"
