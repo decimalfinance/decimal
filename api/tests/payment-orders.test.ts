@@ -23,9 +23,6 @@ TRUNCATE TABLE
   execution_records,
   transfer_request_notes,
   transfer_request_events,
-  collection_request_events,
-  collection_requests,
-  collection_runs,
   payment_order_events,
   decimal_proposals,
   payment_orders,
@@ -108,7 +105,7 @@ test('manual payment orders are the single payment intent entity', async () => {
   assert.equal(paymentOrder.balanceWarning.status, 'sufficient');
 });
 
-test('invoice upload creates draft orders for trusted wallets and review-gated orders for new wallets', async () => {
+test('invoice upload parks every bill in review; clearing review advances it', async () => {
   const setup = await createPaymentOrderSetup();
   const newVendorWallet = Keypair.generate().publicKey.toBase58();
   setInvoiceIntakeRuntimeForTests({
@@ -152,8 +149,9 @@ test('invoice upload creates draft orders for trusted wallets and review-gated o
 
   assert.equal(result.createdCount, 2);
   assert.equal(result.skippedCount, 0);
-  assert.equal(result.paymentOrders[0].decision, 'drafted');
-  assert.equal(result.paymentOrders[0].paymentOrder.state, 'draft');
+  // Review is mandatory for every uploaded bill — trusted vendor or not.
+  assert.equal(result.paymentOrders[0].decision, 'needs_review');
+  assert.equal(result.paymentOrders[0].paymentOrder.state, 'needs_review');
   assert.equal(result.paymentOrders[0].paymentOrder.transferRequests.length, 0);
   assert.equal(result.paymentOrders[1].decision, 'needs_review');
   assert.equal(result.paymentOrders[1].paymentOrder.state, 'needs_review');
@@ -182,6 +180,349 @@ test('invoice upload creates draft orders for trusted wallets and review-gated o
     },
   });
   assert.equal(wallet.trustState, 'trusted');
+});
+
+test('invoice upload stores the original document, links orders to it, and serves it back', async () => {
+  const setup = await createPaymentOrderSetup();
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [
+        {
+          counterparty: setup.counterpartyWallet.label,
+          amount: 0.01,
+          currency: 'USDC',
+          reference: 'INV-DOC-STORE',
+          due_date: '2026-08-01',
+          wallet_address: setup.counterpartyWallet.walletAddress,
+          notes: 'Document storage test',
+        },
+      ],
+      modelLatencyMs: 5,
+      pageCount: 3,
+    }),
+  });
+
+  const pdfBytes = Buffer.from('%PDF-1.4 fake invoice document body');
+  const upload = await post(
+    `/organizations/${setup.organization.organizationId}/invoices/upload`,
+    {
+      filename: 'acme-invoice.pdf',
+      mimeType: 'application/pdf',
+      dataBase64: pdfBytes.toString('base64'),
+      sourceTreasuryWalletId: setup.sourceTreasuryWallet.treasuryWalletId,
+      autoAdvance: false,
+    },
+    setup.sessionToken,
+  );
+
+  assert.ok(upload.invoiceDocumentId, 'upload response carries the stored document id');
+  assert.equal(upload.paymentOrders[0].paymentOrder.invoiceDocumentId, upload.invoiceDocumentId);
+
+  const meta = await get(
+    `/organizations/${setup.organization.organizationId}/invoice-documents/${upload.invoiceDocumentId}/meta`,
+    setup.sessionToken,
+  );
+  assert.equal(meta.filename, 'acme-invoice.pdf');
+  assert.equal(meta.mimeType, 'application/pdf');
+  assert.equal(meta.byteSize, pdfBytes.length);
+  assert.equal(meta.pageCount, 3);
+
+  const fileResponse = await fetch(
+    `${baseUrl}/organizations/${setup.organization.organizationId}/invoice-documents/${upload.invoiceDocumentId}`,
+    { headers: authHeaders(setup.sessionToken) },
+  );
+  assert.equal(fileResponse.status, 200);
+  assert.equal(fileResponse.headers.get('content-type'), 'application/pdf');
+  const served = Buffer.from(await fileResponse.arrayBuffer());
+  assert.ok(served.equals(pdfBytes), 'served bytes match the uploaded file exactly');
+
+  // Same file uploaded again dedupes to the same stored document.
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [
+        {
+          counterparty: setup.counterpartyWallet.label,
+          amount: 0.02,
+          currency: 'USDC',
+          reference: 'INV-DOC-STORE-2',
+          due_date: '2026-08-02',
+          wallet_address: setup.counterpartyWallet.walletAddress,
+          notes: 'Second upload of the same file',
+        },
+      ],
+      modelLatencyMs: 5,
+      pageCount: 3,
+    }),
+  });
+  const reupload = await post(
+    `/organizations/${setup.organization.organizationId}/invoices/upload`,
+    {
+      filename: 'acme-invoice-copy.pdf',
+      mimeType: 'application/pdf',
+      dataBase64: pdfBytes.toString('base64'),
+      sourceTreasuryWalletId: setup.sourceTreasuryWallet.treasuryWalletId,
+      autoAdvance: false,
+    },
+    setup.sessionToken,
+  );
+  assert.equal(reupload.invoiceDocumentId, upload.invoiceDocumentId);
+
+  const documentCount = await prisma.invoiceDocument.count({
+    where: { organizationId: setup.organization.organizationId },
+  });
+  assert.equal(documentCount, 1);
+});
+
+test('bills workbench triages uploads; review confirm sends the bill onward', async () => {
+  const setup = await createPaymentOrderSetup();
+  const newVendorWallet = Keypair.generate().publicKey.toBase58();
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [
+        {
+          counterparty: 'Acme Cloud Services',
+          amount: 4820,
+          currency: 'USD',
+          reference: 'INV-20411',
+          due_date: '2026-08-01',
+          wallet_address: newVendorWallet,
+          notes: 'Cloud hosting — July',
+          source_invoice: {
+            vendorName: 'Acme Cloud Services',
+            vendorAddress: null,
+            vendorEmail: null,
+            amount: 4820,
+            currency: 'USD',
+            invoiceNumber: 'INV-20411',
+            invoiceDate: '2026-07-02',
+            dueDate: '2026-08-01',
+            terms: 'Net 30',
+            poNumber: null,
+            earlyPayDiscount: null,
+            subtotal: 4820,
+            taxAmount: 0,
+            billToName: null,
+            remitTo: { street: '450 Westlake Ave N', city: 'Seattle', state: 'WA', zip: '98109' },
+            paymentDetails: { method: 'ACH', bankName: 'First Interstate Bank', accountLast4: '6621', routingNumber: null },
+            walletAddress: newVendorWallet,
+            lineItems: [
+              { description: 'Cloud hosting — compute (July 2026)', quantity: 1, unitPrice: 2650, total: 2650 },
+              { description: 'Object storage — 34 TB', quantity: 1, unitPrice: 2170, total: 2170 },
+            ],
+            categoryHint: 'Cloud hosting',
+            confidence: { vendor: 0.98, amount: 0.97, overall: 0.95 },
+            fieldConfidence: { invoiceNumber: 0.99, invoiceDate: 0.7, dueDate: 0.95, total: 0.97 },
+          },
+        },
+      ],
+      modelLatencyMs: 5,
+      pageCount: 1,
+    }),
+  });
+
+  const upload = await post(
+    `/organizations/${setup.organization.organizationId}/invoices/upload`,
+    {
+      filename: 'acme-cloud-inv-20411.pdf',
+      mimeType: 'application/pdf',
+      dataBase64: Buffer.from('%PDF-1.4 acme').toString('base64'),
+      sourceTreasuryWalletId: setup.sourceTreasuryWallet.treasuryWalletId,
+      autoAdvance: false,
+    },
+    setup.sessionToken,
+  );
+  const billId = upload.paymentOrders[0].paymentOrder.paymentOrderId;
+  assert.equal(upload.paymentOrders[0].paymentOrder.state, 'needs_review');
+  // v3 pipeline: no bill enters the approval engine at upload — Confirm is the door.
+  assert.equal(upload.paymentOrders[0].approvableId ?? null, null);
+
+  const workbench = await get(
+    `/organizations/${setup.organization.organizationId}/bills/workbench`,
+    setup.sessionToken,
+  );
+  assert.equal(workbench.counts.needs_review, 1);
+  const row = workbench.bills.find((b: { paymentOrderId: string }) => b.paymentOrderId === billId);
+  assert.equal(row.bucket, 'needs_review');
+  assert.equal(row.vendorName, 'Acme Cloud Services');
+  assert.equal(row.description, 'Cloud hosting — compute (July 2026)');
+  assert.equal(row.amountUsd, 4820);
+  // Complete facts, nothing security-shaped open → ready for approval.
+  assert.equal(row.readiness, 'ready');
+  assert.equal(row.subStatus.text, 'Ready for approval');
+
+  const review = await get(
+    `/organizations/${setup.organization.organizationId}/bills/${billId}/review`,
+    setup.sessionToken,
+  );
+  assert.equal(review.readOnly, false);
+  assert.equal(review.vendor.isNew, true);
+  const invoiceDateField = review.fields.find((f: { key: string }) => f.key === 'invoiceDate');
+  assert.equal(invoiceDateField.state, 'needs_look');
+  const invoiceNumberField = review.fields.find((f: { key: string }) => f.key === 'invoiceNumber');
+  assert.equal(invoiceNumberField.state, 'read');
+  const poField = review.fields.find((f: { key: string }) => f.key === 'poNumber');
+  assert.equal(poField.state, 'not_on_document');
+  assert.equal(review.paymentBlock.bankName, 'First Interstate Bank');
+  assert.equal(review.flags.some((f: { kind: string }) => f.kind === 'new_vendor'), true);
+  assert.equal(review.flags.some((f: { blocking: boolean }) => f.blocking), false);
+
+  const confirmed = await post(
+    `/organizations/${setup.organization.organizationId}/bills/${billId}/confirm`,
+    {
+      fields: {
+        invoiceNumber: 'INV-20411',
+        invoiceDate: '2026-07-02',
+        dueDate: '2026-08-01',
+        terms: 'Net 30',
+        currency: 'USD',
+        total: 4820,
+        taxAmount: 0,
+        remitTo: { street: '450 Westlake Ave N', city: 'Seattle', state: 'WA', zip: '98109' },
+      },
+      // Tier-1: lines must carry amounts AND categories — approval routes on them.
+      lines: [
+        { description: 'Cloud hosting — compute (July 2026)', quantity: 1, unitPrice: 2650, amount: 2650, category: 'Cloud hosting & infrastructure' },
+        { description: 'Object storage — 34 TB', quantity: 1, unitPrice: 2170, amount: 2170, category: 'Cloud hosting & infrastructure' },
+      ],
+      confirmedFieldKeys: ['invoiceDate'],
+      noteForApprovers: 'Recurring cloud bill, verified against the document.',
+    },
+    setup.sessionToken,
+  );
+  assert.equal(confirmed.detail.state, 'draft');
+
+  const after = await get(
+    `/organizations/${setup.organization.organizationId}/bills/workbench`,
+    setup.sessionToken,
+  );
+  assert.equal(after.counts.needs_review, 0);
+  const afterRow = after.bills.find((b: { paymentOrderId: string }) => b.paymentOrderId === billId);
+  assert.notEqual(afterRow.bucket, 'needs_review');
+
+  // Bill detail (Screen 3): review facts + the approval side, viewer-aware.
+  const detail = await get(
+    `/organizations/${setup.organization.organizationId}/bills/${billId}/detail`,
+    setup.sessionToken,
+  );
+  assert.equal(detail.review.paymentOrderId, billId);
+  assert.ok(detail.approval, 'the confirmed bill has an approvable');
+  assert.equal(detail.viewer.isRequester, true);
+  assert.ok(Array.isArray(detail.approval.steps));
+  assert.ok(Array.isArray(detail.corrections));
+
+  const reviewAfter = await get(
+    `/organizations/${setup.organization.organizationId}/bills/${billId}/review`,
+    setup.sessionToken,
+  );
+  assert.equal(reviewAfter.readOnly, true);
+  assert.equal(reviewAfter.verification.noteForApprovers, 'Recurring cloud bill, verified against the document.');
+  const confirmedField = reviewAfter.fields.find((f: { key: string }) => f.key === 'invoiceDate');
+  assert.equal(confirmedField.state, 'confirmed');
+});
+
+test('async intake returns the document immediately and processes in the background', async () => {
+  const setup = await createPaymentOrderSetup();
+  const newVendorWallet = Keypair.generate().publicKey.toBase58();
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [{
+        counterparty: 'Async Vendor Co',
+        amount: 250,
+        currency: 'USD',
+        reference: 'INV-ASYNC-1',
+        due_date: '2026-08-15',
+        wallet_address: newVendorWallet,
+        notes: null,
+      }],
+      modelLatencyMs: 5,
+      pageCount: 1,
+    }),
+  });
+
+  const upload = await post(
+    `/organizations/${setup.organization.organizationId}/invoices/upload-async`,
+    {
+      filename: 'async-invoice.pdf',
+      mimeType: 'application/pdf',
+      dataBase64: Buffer.from('%PDF-1.4 async').toString('base64'),
+      autoAdvance: false,
+    },
+    setup.sessionToken,
+  );
+  assert.ok(upload.invoiceDocumentId);
+
+  // Poll status until the background read completes.
+  let status: { status: string; paymentOrders: Array<{ paymentOrderId: string; state: string }>; processingError: string | null } | null = null;
+  for (let i = 0; i < 40; i += 1) {
+    status = await get(
+      `/organizations/${setup.organization.organizationId}/invoice-documents/${upload.invoiceDocumentId}/status`,
+      setup.sessionToken,
+    );
+    if (status!.status !== 'processing') break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.equal(status!.status, 'processed', status!.processingError ?? '');
+  assert.equal(status!.paymentOrders.length, 1);
+  assert.equal(status!.paymentOrders[0]!.state, 'needs_review');
+
+  // The same file again dedupes to the already-processed document.
+  const again = await post(
+    `/organizations/${setup.organization.organizationId}/invoices/upload-async`,
+    {
+      filename: 'async-invoice-copy.pdf',
+      mimeType: 'application/pdf',
+      dataBase64: Buffer.from('%PDF-1.4 async').toString('base64'),
+      autoAdvance: false,
+    },
+    setup.sessionToken,
+  );
+  assert.equal(again.invoiceDocumentId, upload.invoiceDocumentId);
+  assert.equal(again.reused, true);
+});
+
+test('a needs-review upload can be dismissed as not a bill', async () => {
+  const setup = await createPaymentOrderSetup();
+  const newVendorWallet = Keypair.generate().publicKey.toBase58();
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [{
+        counterparty: 'Statement Sender LLC',
+        amount: 120,
+        currency: 'USD',
+        reference: 'STMT-1',
+        due_date: null,
+        wallet_address: newVendorWallet,
+        notes: null,
+      }],
+      modelLatencyMs: 5,
+      pageCount: 1,
+    }),
+  });
+  const upload = await post(
+    `/organizations/${setup.organization.organizationId}/invoices/upload`,
+    {
+      filename: 'statement.pdf',
+      mimeType: 'application/pdf',
+      dataBase64: Buffer.from('%PDF-1.4 statement').toString('base64'),
+      autoAdvance: false,
+    },
+    setup.sessionToken,
+  );
+  const billId = upload.paymentOrders[0].paymentOrder.paymentOrderId;
+
+  const dismissed = await post(
+    `/organizations/${setup.organization.organizationId}/bills/${billId}/not-a-bill`,
+    { reason: 'statement', note: 'Monthly statement, not an invoice.' },
+    setup.sessionToken,
+  );
+  assert.equal(dismissed.state, 'cancelled');
+
+  const workbench = await get(
+    `/organizations/${setup.organization.organizationId}/bills/workbench`,
+    setup.sessionToken,
+  );
+  const row = workbench.bills.find((b: { paymentOrderId: string }) => b.paymentOrderId === billId);
+  assert.equal(row.bucket, 'needs_attention');
 });
 
 test('CSV batch import creates PaymentOrders with a shared input batch id', async () => {

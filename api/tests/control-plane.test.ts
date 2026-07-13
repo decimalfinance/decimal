@@ -30,9 +30,6 @@ TRUNCATE TABLE
   execution_records,
   transfer_request_notes,
   transfer_request_events,
-  collection_request_events,
-  collection_requests,
-  collection_runs,
   payment_order_events,
   decimal_proposals,
   payment_orders,
@@ -197,7 +194,6 @@ test('session auth supports organization and address-book setup', async () => {
 
   const summary = await get(`/organizations/${organization.organizationId}/summary`, register.sessionToken);
   assert.equal(summary.paymentsIncompleteCount, 0);
-  assert.equal(summary.collectionsOpenCount, 0);
   assert.equal(summary.unreviewedWalletsCount, 0);
 
   const session = await get('/auth/session', register.sessionToken);
@@ -410,6 +406,133 @@ test('auth registration and login require the right password', async () => {
   assert.equal(login.status, 'authenticated');
   assert.ok(login.sessionToken);
   assert.equal(login.user.email, 'auth@example.com');
+});
+
+test('developer sign-in is secret-gated and confined to the dev domain', async () => {
+  const priorSecret = config.devAuthSecret;
+  try {
+    // Disabled entirely when no secret is configured.
+    config.devAuthSecret = '';
+    const disabled = await fetch(`${baseUrl}/auth/dev/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ secret: 'anything', email: 'alice@dev.decimal.test' }),
+    });
+    assert.equal(disabled.status, 404);
+
+    config.devAuthSecret = 'test-dev-secret';
+    const wrongSecret = await fetch(`${baseUrl}/auth/dev/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ secret: 'nope', email: 'alice@dev.decimal.test' }),
+    });
+    assert.equal(wrongSecret.status, 401);
+
+    // A real person's domain is refused — the endpoint can never mint a
+    // session for an existing production account.
+    const realDomain = await fetch(`${baseUrl}/auth/dev/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ secret: 'test-dev-secret', email: 'victim@gmail.com' }),
+    });
+    assert.equal(realDomain.status, 400);
+
+    const first = await post('/auth/dev/login', {
+      secret: 'test-dev-secret',
+      email: 'alice@dev.decimal.test',
+      displayName: 'Alice Dev',
+    });
+    assert.equal(first.status, 'authenticated');
+    assert.ok(first.sessionToken);
+    assert.ok(first.user.emailVerifiedAt, 'dev personas are pre-verified');
+
+    // Idempotent: same persona signs in again as the same user, new session.
+    const again = await post('/auth/dev/login', {
+      secret: 'test-dev-secret',
+      email: 'alice@dev.decimal.test',
+    });
+    assert.equal(again.user.userId, first.user.userId);
+
+    // The session actually works against authenticated routes.
+    const session = await fetch(`${baseUrl}/auth/session`, {
+      headers: { authorization: `Bearer ${again.sessionToken}` },
+    });
+    assert.equal(session.status, 200);
+    assert.equal((await session.json()).user.email, 'alice@dev.decimal.test');
+  } finally {
+    config.devAuthSecret = priorSecret;
+  }
+});
+
+test('dev seed builds a whole org — users, memberships, roles, sessions — in one call', async () => {
+  const priorSecret = config.devAuthSecret;
+  try {
+    config.devAuthSecret = 'test-dev-secret';
+    const seed = await post('/auth/dev/seed', {
+      secret: 'test-dev-secret',
+      organizationName: 'Seeded Test Org',
+      owner: { email: 'zaid@dev.decimal.test', displayName: 'Zaid Owner' },
+      members: [
+        { email: 'ana@dev.decimal.test', displayName: 'Ana Admin', access: 'admin' },
+        { email: 'rio@dev.decimal.test', displayName: 'Rio Reviewer', roles: ['Reviewer', 'Approver'] },
+        { email: 'vi@dev.decimal.test', displayName: 'Vi Viewer' },
+      ],
+    });
+    assert.ok(seed.organizationId);
+    assert.equal(seed.users.length, 4);
+    const owner = seed.users.find((u: { email: string }) => u.email === 'zaid@dev.decimal.test');
+    const rio = seed.users.find((u: { email: string }) => u.email === 'rio@dev.decimal.test');
+    assert.equal(owner.access, 'owner');
+    assert.deepEqual(rio.roles, ['reviewer', 'approver']);
+
+    // Every persona got a working session.
+    for (const u of seed.users) {
+      const session = await fetch(`${baseUrl}/auth/session`, {
+        headers: { authorization: `Bearer ${u.sessionToken}` },
+      });
+      assert.equal(session.status, 200);
+      const body = await session.json();
+      assert.equal(body.organizations[0]?.organizationId, seed.organizationId);
+    }
+
+    // Role assignments are live in the org roster.
+    const roster = await fetch(`${baseUrl}/organizations/${seed.organizationId}/roles`, {
+      headers: { authorization: `Bearer ${owner.sessionToken}` },
+    });
+    assert.equal(roster.status, 200);
+    const rosterBody = await roster.json();
+    const rioMember = rosterBody.members.find((m: { email: string }) => m.email === 'rio@dev.decimal.test');
+    assert.deepEqual([...rioMember.roles].sort(), ['approver', 'reviewer']);
+
+    // Dev login can target an org by name — landing in the wrong same-named
+    // test org is the trap this exists to close.
+    const targeted = await post('/auth/dev/login', {
+      secret: 'test-dev-secret',
+      email: 'zaid@dev.decimal.test',
+      organizationName: 'Seeded Test Org',
+    });
+    assert.equal(targeted.landingOrganizationId, seed.organizationId);
+    const wrongOrg = await fetch(`${baseUrl}/auth/dev/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ secret: 'test-dev-secret', email: 'zaid@dev.decimal.test', organizationName: 'Nope Org' }),
+    });
+    assert.equal(wrongOrg.status, 400);
+
+    // Same name twice → clear conflict, not a half-seeded org.
+    const dupe = await fetch(`${baseUrl}/auth/dev/seed`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        secret: 'test-dev-secret',
+        organizationName: 'Seeded Test Org',
+        owner: { email: 'other@dev.decimal.test' },
+      }),
+    });
+    assert.equal(dupe.status, 409);
+  } finally {
+    config.devAuthSecret = priorSecret;
+  }
 });
 
 test('google oauth start uses stable local redirect URI when configured', async () => {
@@ -1911,17 +2034,26 @@ test('AP invoice intake lets the org agent propose green payments and waits on h
     register.sessionToken,
   );
   assert.equal(imported.createdCount, 2);
-  assert.equal(imported.automation.length, 2);
-  assert.equal(imported.automation[0].status, 'proposal_submitted');
-  assert.equal(imported.automation[1].status, 'needs_review');
+  // Pipeline v3: review is mandatory for every uploaded bill — nothing
+  // advances at upload time, known vendor or not.
+  assert.equal(imported.automation.length, 0);
 
   const cleanOrder = await get(
     `/organizations/${organization.organizationId}/payment-orders/${imported.paymentOrders[0].paymentOrder.paymentOrderId}`,
     register.sessionToken,
   );
-  assert.equal(cleanOrder.derivedState, 'proposed');
+  assert.equal(cleanOrder.derivedState, 'needs_review');
+  assert.equal(cleanOrder.squadsPaymentProposal, null);
+
+  const clearedClean = await post(
+    `/organizations/${organization.organizationId}/payment-orders/${cleanOrder.paymentOrderId}/clear-review`,
+    { reviewNote: 'Confirmed on the review screen.' },
+    register.sessionToken,
+  );
+  assert.equal(clearedClean.automation.status, 'proposal_submitted');
+  assert.equal(clearedClean.derivedState, 'proposed');
   const cleanProposal = await prisma.decimalProposal.findUniqueOrThrow({
-    where: { decimalProposalId: cleanOrder.squadsPaymentProposal.decimalProposalId },
+    where: { decimalProposalId: clearedClean.squadsPaymentProposal.decimalProposalId },
   });
   assert.equal(cleanProposal.creatorPersonalWalletId, null);
   assert.equal(cleanProposal.creatorWalletAddress, agentWalletAddress);
