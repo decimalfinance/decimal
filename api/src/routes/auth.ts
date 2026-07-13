@@ -256,6 +256,201 @@ authRouter.post('/auth/login', async (req, res, next) => {
   }
 });
 
+// ─── Developer sign-in (automated testing) ─────────────────────────────────
+// Mints a pre-verified session for a synthetic persona so an agent (or a dev)
+// can drive the product end to end — multi-user orgs, invite flows, approval
+// chains — without real inboxes. Two hard gates keep this safe even though
+// the API is publicly reachable:
+//   1. DEV_AUTH_SECRET must be configured AND presented (constant-time check).
+//   2. Emails are confined to the reserved @dev.decimal.test domain, so this
+//      endpoint can never mint a session for a real person's account.
+const DEV_EMAIL_DOMAIN = '@dev.decimal.test';
+
+const devLoginSchema = z.object({
+  secret: z.string().min(1),
+  email: z.string().email(),
+  displayName: z.string().trim().min(1).max(80).optional(),
+  // Land in a specific org by name — seeded personas often belong to several
+  // near-identically named test orgs, and defaulting to the oldest one is a trap.
+  organizationName: z.string().trim().min(1).max(80).optional(),
+});
+
+function requireDevSecret(secret: string) {
+  if (!config.devAuthSecret) {
+    throw new ApiError(404, 'not_found', 'Not found.');
+  }
+  const provided = Buffer.from(secret);
+  const expected = Buffer.from(config.devAuthSecret);
+  if (provided.length !== expected.length || !crypto.timingSafeEqual(provided, expected)) {
+    throw new ApiError(401, 'invalid_credentials', 'Invalid developer secret.');
+  }
+}
+
+function requireDevEmail(rawEmail: string) {
+  const email = normalizeEmail(rawEmail);
+  if (!email.endsWith(DEV_EMAIL_DOMAIN)) {
+    throw badRequest(`Developer sign-in only accepts ${DEV_EMAIL_DOMAIN} emails.`);
+  }
+  return email;
+}
+
+async function upsertDevUser(rawEmail: string, rawDisplayName?: string) {
+  const email = requireDevEmail(rawEmail);
+  const providedName = normalizeOptionalDisplayName(rawDisplayName);
+  const displayName = providedName ?? defaultDisplayName(email);
+  let user = await prisma.user.upsert({
+    where: { email },
+    // An explicitly provided name wins on re-seed — stale names from prior
+    // runs made personas hard to tell apart.
+    update: providedName ? { displayName: providedName } : {},
+    create: {
+      email,
+      displayName,
+      emailVerifiedAt: new Date(),
+    },
+  });
+  if (!user.emailVerifiedAt) {
+    // A dev-domain account that came in through normal register: verify it —
+    // the domain restriction is the trust boundary here, not the inbox.
+    user = await prisma.user.update({ where: { userId: user.userId }, data: { emailVerifiedAt: new Date() } });
+  }
+  return user;
+}
+
+authRouter.post('/auth/dev/login', async (req, res, next) => {
+  try {
+    const input = devLoginSchema.parse(req.body);
+    requireDevSecret(input.secret);
+    const user = await upsertDevUser(input.email, input.displayName);
+
+    const session = await createSession(user.userId);
+    const organizations = await listUserOrganizations(user.userId);
+
+    let landingOrganizationId: string | null = null;
+    if (input.organizationName) {
+      const wanted = input.organizationName.trim().toLowerCase();
+      const match = organizations.find((o) => o.organizationName.toLowerCase() === wanted);
+      if (!match) {
+        throw badRequest(`${user.email} isn't a member of an organization named "${input.organizationName}". Their orgs: ${organizations.map((o) => o.organizationName).join(', ') || 'none'}.`);
+      }
+      landingOrganizationId = match.organizationId;
+    }
+
+    logger.info('auth.dev_login', { email: user.email, userId: user.userId });
+    res.json({
+      status: 'authenticated',
+      sessionToken: session.sessionToken,
+      user: serializeUser(user),
+      organizations,
+      landingOrganizationId,
+      emailDelivered: false,
+      devEmailVerificationCode: null,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// One-call test-world builder: users + organization + memberships + role
+// bundles, returning a session token for EVERY persona so an agent can act as
+// each of them immediately. Same gates as dev/login (secret + dev domain).
+// Wallet provisioning is deliberately skipped — this exists for workflow,
+// role, and approval testing, not for moving money.
+const devSeedSchema = z.object({
+  secret: z.string().min(1),
+  organizationName: z.string().trim().min(3).max(80),
+  owner: z.object({
+    email: z.string().email(),
+    displayName: z.string().trim().min(1).max(80).optional(),
+  }),
+  members: z.array(z.object({
+    email: z.string().email(),
+    displayName: z.string().trim().min(1).max(80).optional(),
+    access: z.enum(['admin', 'member']).default('member'),
+    roles: z.array(z.string()).max(8).default([]),
+  })).max(50).default([]),
+});
+
+authRouter.post('/auth/dev/seed', async (req, res, next) => {
+  try {
+    const input = devSeedSchema.parse(req.body);
+    requireDevSecret(input.secret);
+
+    const emails = [input.owner.email, ...input.members.map((m) => m.email)].map(requireDevEmail);
+    if (new Set(emails).size !== emails.length) {
+      throw badRequest('Each persona needs a distinct email.');
+    }
+    const { isRoleKey, assignRole } = await import('../approvals/roles.js');
+    // Role keys are lowercase ('reviewer'); accept any casing from callers.
+    const normalizedRoles = input.members.map((m) => m.roles.map((r) => r.trim().toLowerCase()));
+    for (const roles of normalizedRoles) {
+      for (const role of roles) {
+        if (!isRoleKey(role)) throw badRequest(`Unknown role "${role}". Valid: reviewer, approver, payer, viewer.`);
+      }
+    }
+
+    const organizationName = input.organizationName.trim();
+    const nameTaken = await prisma.organization.findFirst({ where: { organizationName } });
+    if (nameTaken) {
+      throw conflict('An organization with this name already exists — use a unique name per seed.');
+    }
+
+    const ownerUser = await upsertDevUser(input.owner.email, input.owner.displayName);
+    const organization = await prisma.$transaction(async (tx) => {
+      const org = await tx.organization.create({ data: { organizationName } });
+      await tx.organizationMembership.create({
+        data: { organizationId: org.organizationId, userId: ownerUser.userId, role: 'owner' },
+      });
+      return org;
+    });
+    const personas = [{ user: ownerUser, access: 'owner', roles: [] as string[] }];
+    for (const [index, member] of input.members.entries()) {
+      const user = await upsertDevUser(member.email, member.displayName);
+      await prisma.organizationMembership.create({
+        data: { organizationId: organization.organizationId, userId: user.userId, role: member.access },
+      });
+      const applied: string[] = [];
+      if (member.access === 'member') {
+        // Admins hold every capability; roles are for members only.
+        for (const role of normalizedRoles[index]!) {
+          if (!isRoleKey(role)) continue;
+          await assignRole(organization.organizationId, role, user.userId);
+          applied.push(role);
+        }
+      }
+      personas.push({ user, access: member.access, roles: applied });
+    }
+
+    // Engine setup runs AFTER the members exist — seeding it first gave the
+    // default approval seat only the owner, which deadlocked every bill
+    // (BUG-default-flow-deadlock, found by testbench brief 005).
+    const { ensureEngineSetup } = await import('../approvals/wiring.js');
+    await ensureEngineSetup(organization.organizationId);
+
+    const users = await Promise.all(personas.map(async (p) => {
+      const session = await createSession(p.user.userId, organization.organizationId);
+      return {
+        userId: p.user.userId,
+        email: p.user.email,
+        displayName: p.user.displayName,
+        access: p.access,
+        roles: p.roles,
+        sessionToken: session.sessionToken,
+      };
+    }));
+
+    logger.info('auth.dev_seed', { organizationId: organization.organizationId, users: users.length });
+    res.status(201).json({
+      organizationId: organization.organizationId,
+      organizationName: organization.organizationName,
+      users,
+      note: 'Wallet provisioning skipped — seeded for workflow/approval testing.',
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 authRouter.post('/auth/verify-email', requireAuth(), async (req, res, next) => {
   try {
     const input = verifyEmailSchema.parse(req.body);

@@ -269,7 +269,90 @@ export function LoginPage() {
       <p className="auth-switch">
         New to Decimal? <a href="/register">Create an account</a>
       </p>
+
+      <DevLoginPanel returnTo={returnTo} />
     </AuthLayout>
+  );
+}
+
+// ─── Developer sign-in panel (testing) ─────────────────────────────────────
+// Renders ONLY when VITE_DEV_AUTH_SECRET is present in the build env — the
+// production build never ships it. Signs in as a synthetic persona on the
+// reserved @dev.decimal.test domain (the API enforces both the secret and the
+// domain), so an agent driving the browser can spin up any number of users.
+function DevLoginPanel({ returnTo }: { returnTo: string | null }) {
+  const envSecret = (import.meta.env.VITE_DEV_AUTH_SECRET as string | undefined)?.trim();
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const [persona, setPersona] = useState('');
+  const [orgName, setOrgName] = useState('');
+  const [secret, setSecret] = useState(envSecret ?? '');
+  const [error, setError] = useState<string | null>(null);
+
+  const devMutation = useMutation({
+    mutationFn: (input: { secret: string; email: string; displayName?: string; organizationName?: string }) => {
+      void queryClient.cancelQueries({ queryKey: queryKeys().session });
+      queryClient.removeQueries({ queryKey: queryKeys().session });
+      api.clearSessionToken();
+      return api.devLogin(input);
+    },
+    onSuccess: (result) => {
+      api.setSessionToken(result.sessionToken);
+      queryClient.setQueryData(queryKeys().session, toAuthenticatedSession(result));
+      // The named org wins over everything — landing in the wrong same-named
+      // test org cost a whole debugging session.
+      if (result.landingOrganizationId) {
+        navigate(`/organizations/${result.landingOrganizationId}`, { replace: true });
+        return;
+      }
+      if (returnTo) {
+        navigate(returnTo, { replace: true });
+        return;
+      }
+      const firstOrganizationId = result.organizations[0]?.organizationId;
+      navigate(firstOrganizationId ? `/organizations/${firstOrganizationId}` : '/setup', { replace: true });
+    },
+    onError: (nextError) => setError(authErrorMessage(nextError, 'Developer sign-in failed.')),
+  });
+
+  if (!envSecret) return null;
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const slug = persona.trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
+    if (!slug) { setError('Give the persona a name, e.g. "alice".'); return; }
+    if (!secret.trim()) { setError('The developer password (DEV_AUTH_SECRET) is required.'); return; }
+    setError(null);
+    // No displayName here: seeded personas already have real names ("Zaid
+    // Owner"), and sending the slug overwrote them — which then leaked into
+    // audit strings ("cleared by zaid"). New personas default to the slug.
+    devMutation.mutate({
+      secret: secret.trim(),
+      email: `${slug}@dev.decimal.test`,
+      ...(orgName.trim() ? { organizationName: orgName.trim() } : {}),
+    });
+  };
+
+  const inputStyle = { flex: 1, minWidth: 0 } as const;
+  return (
+    <form onSubmit={submit} data-testid="dev-login" style={{ marginTop: 18, padding: '12px 14px', border: '1px dashed var(--border-strong)', borderRadius: 'var(--r-md)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-faint)' }}>Developer sign-in</span>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input className="input" name="dev-persona" value={persona} onChange={(e) => setPersona(e.target.value)}
+          placeholder="persona, e.g. alice" autoComplete="off" spellCheck={false} style={inputStyle} />
+        <input className="input" name="dev-org" value={orgName} onChange={(e) => setOrgName(e.target.value)}
+          placeholder="organization (optional)" autoComplete="off" spellCheck={false} style={inputStyle} />
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input className="input" name="dev-secret" type="password" value={secret} onChange={(e) => setSecret(e.target.value)}
+          placeholder="developer password" autoComplete="off" style={inputStyle} />
+        <button type="submit" className="btn btn-secondary" disabled={devMutation.isPending} style={{ flex: 'none' }}>
+          {devMutation.isPending ? 'Signing in…' : 'Sign in'}
+        </button>
+      </div>
+      <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Signs in as persona@dev.decimal.test and lands in the named org — verified, no inbox needed. New personas are created on the spot.</span>
+      {error ? <span style={{ fontSize: 12, color: 'var(--danger)' }}>{error}</span> : null}
+    </form>
   );
 }
 
