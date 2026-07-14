@@ -38,6 +38,7 @@ export function CodingInboxPage({ session: _session }: { session: AuthenticatedS
   const [billDate, setBillDate] = useState('');
   const [total, setTotal] = useState('');
   const [lines, setLines] = useState<FormLine[]>([]);
+  const [correctionNote, setCorrectionNote] = useState('');
 
   // Esc closes the dialog (the .dialog structure has no built-in handler).
   useEffect(() => {
@@ -96,10 +97,12 @@ export function CodingInboxPage({ session: _session }: { session: AuthenticatedS
         predictedAccountId: openRow!.candidates[0]?.accountId ?? null,
         predictedAccountName: openRow!.candidates[0]?.accountName ?? null,
         predictionSource: openRow!.candidates[0]?.reason ?? null,
+        correctionNote: correctionNote.trim() || null,
       }),
     onSuccess: () => {
       success('Coded.');
       setOpenRow(null);
+      setCorrectionNote('');
       void queryClient.invalidateQueries({ queryKey: ['coding-inbox', orgId] });
     },
     onError: (e) => toastError(e instanceof Error ? e.message : 'Could not code this payment.'),
@@ -246,7 +249,9 @@ export function CodingInboxPage({ session: _session }: { session: AuthenticatedS
                     <td style={muted}>{row.invoiceNumber ?? '—'}</td>
                     <td>
                       {row.status === 'to_code' ? (
-                        <Pill tone="warning">Needs coding</Pill>
+                        row.inboxItem?.hasUncategorizedLines
+                          ? <Pill tone="warning">Parked uncategorized — sweep</Pill>
+                          : <Pill tone="warning">Needs coding</Pill>
                       ) : (
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                           <Pill tone={row.status === 'synced' ? 'success' : 'info'}>{row.status === 'synced' ? 'Synced' : 'Coded'}</Pill>
@@ -346,6 +351,22 @@ export function CodingInboxPage({ session: _session }: { session: AuthenticatedS
             <div>
               <button type="button" className="btn btn-secondary btn-sm" onClick={addLine}>+ Add line (split)</button>
             </div>
+
+            {/* Correction capture (GL synthesis P1): one optional sentence when
+                the pick differs from the suggestion — it teaches the vendor's
+                default. Low friction on purpose. */}
+            {openRow.candidates[0] && lines[0]?.accountId && lines[0].accountId !== openRow.candidates[0].accountId ? (
+              <div className="pop-field">
+                <label>What made this one different? (optional — teaches this vendor’s default)</label>
+                <input
+                  className="input"
+                  value={correctionNote}
+                  onChange={(e) => setCorrectionNote(e.target.value)}
+                  placeholder="e.g. client project, not internal software"
+                  maxLength={300}
+                />
+              </div>
+            ) : null}
 
             {/* balance bar */}
             <div style={{ padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>

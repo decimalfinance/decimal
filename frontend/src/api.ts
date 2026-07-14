@@ -226,6 +226,7 @@ export interface CodedLine {
 }
 
 export interface CodingInboxItem {
+  hasUncategorizedLines?: boolean;
   paymentOrderId: string;
   vendorLabel: string | null;
   amountUsdc: number;
@@ -432,6 +433,7 @@ export const api = {
       predictionSource?: string | null;
       confidenceScore?: number | null;
       billHeader?: { vendorName?: string | null; invoiceNumber?: string | null; billDate?: string | null };
+      correctionNote?: string | null;
     },
   ) {
     return request<{ codedExpenseAccountId: string; codedExpenseAccountName: string | null; predictionSource: string | null; confidenceScore: number | null; wasOverridden: boolean }>(

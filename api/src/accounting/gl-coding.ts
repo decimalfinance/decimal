@@ -122,6 +122,9 @@ export interface SetGlCodingInput {
   confidenceScore?: number | null;
   /** Operator overrides for the Bill header (vendor name, invoice #, bill date). */
   billHeader?: { vendorName?: string | null; invoiceNumber?: string | null; billDate?: string | null };
+  /** One sentence on WHY the suggestion was overridden — low friction, high
+   *  signal; rides the decision log and informs the vendor rule. */
+  correctionNote?: string | null;
 }
 
 /** Persist the operator's coded lines for a payment (the sync builds the Bill from them). */
@@ -164,6 +167,9 @@ export async function setPaymentOrderGlCoding(
     wasOverridden,
     acceptedByUserId: actorUserId,
     acceptedAt: new Date(),
+    metadataJson: {
+      ...(wasOverridden && input.correctionNote?.trim() ? { correctionNote: input.correctionNote.trim() } : {}),
+    } as unknown as Prisma.InputJsonValue,
   };
   const saved = await prisma.paymentOrderGlCoding.upsert({
     where: { paymentOrderId },
@@ -356,10 +362,17 @@ export async function getCodingInbox(organizationId: string) {
     take: 100,
   });
   const items = [];
+  const { UNCATEGORIZED_ACCOUNT } = await import('./default-chart.js');
   for (const o of orders) {
     const { candidates } = await predictGlCandidates(organizationId, o.paymentOrderId);
+    // Reviewer parked lines in the catch-all — the accountant's sweep signal.
+    const meta = (o.metadataJson ?? {}) as Record<string, unknown>;
+    const verification = meta.verification && typeof meta.verification === 'object' ? meta.verification as Record<string, unknown> : null;
+    const vLines = verification && Array.isArray(verification.lines) ? verification.lines : [];
+    const hasUncategorizedLines = vLines.some((l) => !!l && typeof l === 'object' && (l as Record<string, unknown>).category === UNCATEGORIZED_ACCOUNT.name);
     items.push({
       paymentOrderId: o.paymentOrderId,
+      hasUncategorizedLines,
       vendorLabel: o.counterparty?.displayName ?? o.counterpartyWallet?.label ?? null,
       amountUsdc: Number(o.amountRaw) / 1e6,
       invoiceNumber: o.invoiceNumber,

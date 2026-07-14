@@ -418,6 +418,7 @@ const setGlCodingSchema = z
         billDate: z.string().nullish(),
       })
       .optional(),
+    correctionNote: z.string().trim().max(300).nullish(),
   })
   .refine((d) => (d.lines && d.lines.length > 0) || d.codedExpenseAccountId, {
     message: 'A coding needs at least one account.',
