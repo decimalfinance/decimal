@@ -1857,6 +1857,16 @@ export async function confirmDecimalProposalExecution(
     where: { organizationId, decimalProposalId },
   });
 
+  // On a REAL chain, confirm-execution records a transaction that already
+  // landed — refusing here would strand the truth (the executed-payment-stuck
+  // incident), so the payable re-check lives at execute-intent instead. Under
+  // the FAKE chain there is no execute-intent: this call IS the execution
+  // act, so the same gate fires here — before anything is recorded. Retries
+  // of an already-recorded execution and the system reconciler pass through.
+  if ((config.squadsFakeChain || config.nodeEnv === 'test') && !options.actorIsSystem && !currentForSettlement.executedSignature) {
+    await assertProposalOrdersPayableForExecution(organizationId, currentForSettlement);
+  }
+
   // Idempotency: if the proposal is already recorded as executed under a
   // *different* signature, a duplicate Execute click landed two on-chain
   // transactions. The first one wins (Squads enforces this on-chain too —
@@ -2255,12 +2265,37 @@ export async function createDecimalProposalRejectIntent(
   });
 }
 
+// A payment proposal can sit approved while the world changes under it — a
+// vendor held AFTER the proposal was created must still block the money from
+// moving. Execution (building the execute tx) is the last server choke point,
+// so the payable rule re-fires here for every order the proposal pays
+// (BUG-payable-recheck-skipped-at-execution).
+async function assertProposalOrdersPayableForExecution(
+  organizationId: string,
+  proposal: { semanticType: string | null; paymentOrderId: string | null; semanticPayloadJson: Prisma.JsonValue; metadataJson: Prisma.JsonValue },
+) {
+  if (proposal.semanticType !== 'send_payment' && proposal.semanticType !== 'send_payment_run') return;
+  const orderIds = proposal.semanticType === 'send_payment'
+    ? (proposal.paymentOrderId ? [proposal.paymentOrderId] : [])
+    : extractPaymentOrderIdsFromProposalPayload(proposal.semanticPayloadJson, proposal.metadataJson);
+  const { assertVendorPayableForRelease } = await import('../payments/release-gate.js');
+  for (const paymentOrderId of orderIds) {
+    await assertVendorPayableForRelease(organizationId, paymentOrderId);
+  }
+}
+
 export async function createDecimalProposalExecuteIntent(
   organizationId: string,
   actorUserId: string,
   decimalProposalId: string,
   input: { memberPersonalWalletId: string },
 ) {
+  const gatedProposal = await prisma.decimalProposal.findFirst({
+    where: { organizationId, decimalProposalId },
+  });
+  if (gatedProposal) {
+    await assertProposalOrdersPayableForExecution(organizationId, gatedProposal);
+  }
   // Fake chain: the Squads SDK's execute builder reads the on-chain vault
   // transaction over a REAL connection (not the swappable runtime), so it
   // can't work against the in-memory chain. Point callers at the path that
@@ -2268,9 +2303,7 @@ export async function createDecimalProposalExecuteIntent(
   if (config.squadsFakeChain) {
     throw badRequest('The fake chain cannot build execute transactions — record the execution directly with confirm-execution and any signature string (SQUADS_FAKE_CHAIN).');
   }
-  const proposal = await prisma.decimalProposal.findFirst({
-    where: { organizationId, decimalProposalId },
-  });
+  const proposal = gatedProposal;
   if (!proposal || !proposal.treasuryWalletId || !proposal.transactionIndex) {
     throw notFound('Proposal not found');
   }

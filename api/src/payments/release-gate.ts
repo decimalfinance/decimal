@@ -9,7 +9,29 @@ import { prisma } from '../infra/prisma.js';
 import { badRequest } from '../infra/api-errors.js';
 import { getBillCeilingMinor } from '../approvals/store.js';
 
+/**
+ * Vendor payable status, re-checked at the last server choke point before
+ * money moves. Standalone (no approval-engine involvement required): a held
+ * or blocked vendor binds direct/API/agent orders exactly the same.
+ */
+export async function assertVendorPayableForRelease(organizationId: string, paymentOrderId: string) {
+  const order = await prisma.paymentOrder.findFirst({
+    where: { organizationId, paymentOrderId },
+    select: { counterparty: { select: { displayName: true, metadataJson: true } } },
+  });
+  if (!order?.counterparty) return;
+  const { readPayableHold, describePayableHold } = await import('./vendor-payable.js');
+  const hold = readPayableHold(order.counterparty.metadataJson);
+  if (hold) {
+    throw badRequest(describePayableHold(order.counterparty.displayName, hold), { paymentOrderId, rule: 'vendor_payable' });
+  }
+}
+
 export async function assertBillApprovedForRelease(organizationId: string, paymentOrderId: string) {
+  // Vendor payable first: it applies to EVERY order, including direct/agent
+  // ones with no engine approvable (which return early below).
+  await assertVendorPayableForRelease(organizationId, paymentOrderId);
+
   // A bill can have several approvables across its life (a sent-back bill is
   // re-confirmed as a fresh one, the old one cancelled). The gate passes when
   // ANY of them is approved; cancelled husks alone don't block, and a live
@@ -31,19 +53,9 @@ export async function assertBillApprovedForRelease(organizationId: string, payme
 
   const order = await prisma.paymentOrder.findFirst({
     where: { organizationId, paymentOrderId },
-    select: { amountRaw: true, counterpartyWalletId: true, counterpartyWallet: { select: { walletAddress: true } }, counterparty: { select: { displayName: true, metadataJson: true } } },
+    select: { amountRaw: true, counterpartyWalletId: true, counterpartyWallet: { select: { walletAddress: true } } },
   });
   if (!order) return;
-
-  // Vendor payable status, re-checked at release (the deferred half of the
-  // entry gate): a hold set while the bill sat approved still binds.
-  if (order.counterparty) {
-    const { readPayableHold, describePayableHold } = await import('./vendor-payable.js');
-    const hold = readPayableHold(order.counterparty.metadataJson);
-    if (hold) {
-      throw badRequest(describePayableHold(order.counterparty.displayName, hold), { paymentOrderId, rule: 'vendor_payable' });
-    }
-  }
 
   // Org ceiling, re-checked at release: a ceiling lowered after approval
   // still binds — the ceiling is the org's standing rule, not a snapshot.

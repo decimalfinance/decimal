@@ -1748,6 +1748,31 @@ test('Squads vault payment proposals turn payment orders into executable treasur
   assert.equal(submittedPaymentOrder.productLifecycle.productState, 'proposed');
   assert.equal(submittedPaymentOrder.squadsLifecycle.submittedSignature, confirmed.submittedSignature);
 
+  // A vendor held AFTER the proposal was created and submitted must still
+  // block execution — the payable rule re-fires at the execution act
+  // (BUG-payable-recheck-skipped-at-execution).
+  await patch(
+    `/organizations/${organization.organizationId}/counterparties/${counterparty.counterpartyId}/payable-status`,
+    { status: 'held', reason: 'audit in progress' },
+    register.sessionToken,
+  );
+  const heldExecution = await fetch(
+    `${baseUrl}/organizations/${organization.organizationId}/proposals/${paymentProposal.decimalProposal.decimalProposalId}/confirm-execution`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...authHeaders(register.sessionToken) },
+      body: JSON.stringify({ signature: Keypair.generate().publicKey.toBase58() }),
+    },
+  );
+  assert.equal(heldExecution.status, 400);
+  const heldExecutionBody = await heldExecution.json();
+  assert.match(heldExecutionBody.message, /on hold/i);
+  await patch(
+    `/organizations/${organization.organizationId}/counterparties/${counterparty.counterpartyId}/payable-status`,
+    { status: 'payable', reason: null },
+    register.sessionToken,
+  );
+
   const executed = await post(
     `/organizations/${organization.organizationId}/proposals/${paymentProposal.decimalProposal.decimalProposalId}/confirm-execution`,
     { signature: Keypair.generate().publicKey.toBase58() },
@@ -2189,6 +2214,22 @@ test('Privy personal wallet signing endpoint signs only transactions requiring t
 async function get(path: string, token?: string) {
   const response = await fetch(`${baseUrl}${path}`, {
     headers: token ? authHeaders(token) : undefined,
+  });
+
+  if (!response.ok) {
+    assert.fail(`${path} returned ${response.status}: ${await response.text()}`);
+  }
+  return response.json();
+}
+
+async function patch(path: string, body: unknown, token?: string) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: 'PATCH',
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? authHeaders(token) : {}),
+    },
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
