@@ -31,9 +31,19 @@ export async function assertBillApprovedForRelease(organizationId: string, payme
 
   const order = await prisma.paymentOrder.findFirst({
     where: { organizationId, paymentOrderId },
-    select: { amountRaw: true, counterpartyWalletId: true, counterpartyWallet: { select: { walletAddress: true } } },
+    select: { amountRaw: true, counterpartyWalletId: true, counterpartyWallet: { select: { walletAddress: true } }, counterparty: { select: { displayName: true, metadataJson: true } } },
   });
   if (!order) return;
+
+  // Vendor payable status, re-checked at release (the deferred half of the
+  // entry gate): a hold set while the bill sat approved still binds.
+  if (order.counterparty) {
+    const { readPayableHold, describePayableHold } = await import('./vendor-payable.js');
+    const hold = readPayableHold(order.counterparty.metadataJson);
+    if (hold) {
+      throw badRequest(describePayableHold(order.counterparty.displayName, hold), { paymentOrderId, rule: 'vendor_payable' });
+    }
+  }
 
   // Org ceiling, re-checked at release: a ceiling lowered after approval
   // still binds — the ceiling is the org's standing rule, not a snapshot.
