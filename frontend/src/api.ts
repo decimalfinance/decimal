@@ -1345,6 +1345,10 @@ export interface PoliciesOverview {
     payable: { held: number; blocked: number };
     pinnedDestination: Record<string, never>;
   };
+  agent: {
+    earnedAutonomyMinBills: number;
+    autonomousPaymentsLast30Days: number;
+  };
 }
 export const policiesApi = {
   get(organizationId: string) {

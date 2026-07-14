@@ -234,6 +234,31 @@ export function ProtectionsPage() {
         <section>
           <div className="sec-head">
             <div className="sh-titles">
+              <h2>Auto-pay autonomy</h2>
+              <p className="sh-desc">When the agent may pay on its own. Autonomy is earned and bounded — a failed check hands the bill to people; it never blocks people.</p>
+            </div>
+          </div>
+          <div className="tbl-card">
+            <div className="setting-row">
+              <div className="sr-text">
+                <span className="sr-name">The agent pays alone only when every check passes</span>
+                <span className="sr-desc">
+                  Within its signed spending limit · vendor has {policiesQuery.data?.agent.earnedAutonomyMinBills ?? 2}+ bills settled with people involved · payment details verified · vendor not held or blocked · no open duplicate flag. Every autonomous payment records the checklist it passed.
+                </span>
+              </div>
+              <div className="sr-controls">
+                {policiesQuery.data && policiesQuery.data.agent.autonomousPaymentsLast30Days > 0 ? (
+                  <span className="pill pill-min pill-success"><span className="dot" />{policiesQuery.data.agent.autonomousPaymentsLast30Days} in 30 days</span>
+                ) : null}
+                <span className="pill pill-min pill-info"><span className="dot" />Always on</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <div className="sec-head">
+            <div className="sh-titles">
               <h2>Bill ceiling</h2>
               <p className="sh-desc">A hard cap no single bill may cross — regardless of the approval flow. Only the primary admin can change it.</p>
             </div>

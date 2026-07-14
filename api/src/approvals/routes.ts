@@ -607,6 +607,13 @@ approvalsRouter.get('/organizations/:organizationId/policies', asyncRoute(async 
   ]);
   const held = Number(payableCounts.find((r) => r.status === 'held')?.count ?? 0n);
   const blocked = Number(payableCounts.find((r) => r.status === 'blocked')?.count ?? 0n);
+  const agentAuthorized = await prisma.paymentOrderEvent.count({
+    where: {
+      organizationId,
+      eventType: 'agent_authorized',
+      createdAt: { gte: new Date(Date.now() - 30 * 24 * 3600 * 1000) },
+    },
+  });
   sendJson(res, {
     protections,
     ceilingUsd: ceilingMinor === null ? null : Number(ceilingMinor) / 1_000_000,
@@ -614,6 +621,10 @@ approvalsRouter.get('/organizations/:organizationId/policies', asyncRoute(async 
       duplicate: { overridesLast30Days: duplicateOverrides },
       payable: { held, blocked },
       pinnedDestination: {},
+    },
+    agent: {
+      earnedAutonomyMinBills: 2,
+      autonomousPaymentsLast30Days: agentAuthorized,
     },
   });
 }));
