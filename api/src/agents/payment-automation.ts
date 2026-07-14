@@ -169,12 +169,25 @@ async function advancePaymentOrderWithAgent(args: {
   );
 
   const result = serializeRoutingDecision(decision);
-  // Stamp WHY the agent was allowed to act (D5): every autonomous action
-  // carries the checklist it passed, on the bill's own record — the agent
-  // explains its authorization, not just its action.
+  // Stamp WHY the agent was allowed to act (D5): every action carries the
+  // checklist on the bill's own record. The one distinction this feature is
+  // built on — agent-alone vs person-directed — must survive in the audit
+  // trail, so humanDirected is recorded and vendorAutonomyEarned states the
+  // vendor's ACTUAL standing (a human-directed advance can pass with it false).
   if (result.status === 'spending_limit_executed' || result.status === 'proposal_submitted') {
     const payment = decision.status === 'agent_executed' || decision.status === 'proposal_created' ? decision.payment : null;
     if (payment) {
+      const humanDirected = args.humanDirected ?? false;
+      const priorSettledBills = payment.counterpartyId
+        ? await prisma.paymentOrder.count({
+            where: {
+              organizationId: payment.organizationId,
+              counterpartyId: payment.counterpartyId,
+              paymentOrderId: { not: payment.paymentOrderId },
+              state: 'settled',
+            },
+          }).catch(() => null)
+        : null;
       await prisma.paymentOrderEvent.create({
         data: {
           paymentOrderId: payment.paymentOrderId,
@@ -186,11 +199,13 @@ async function advancePaymentOrderWithAgent(args: {
           afterState: payment.state,
           payloadJson: {
             action: result.status,
+            humanDirected,
             checks: {
               railTrusted: true,
               vendorPayable: true,
               noOpenDuplicate: true,
-              vendorAutonomyEarned: true,
+              vendorAutonomyEarned: priorSettledBills !== null && priorSettledBills >= EARNED_AUTONOMY_MIN_BILLS,
+              priorSettledBills,
               minPriorSettledBills: EARNED_AUTONOMY_MIN_BILLS,
             },
           },
