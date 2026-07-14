@@ -194,6 +194,65 @@ test('fail closed: a pending bill is never ready-to-pay — solo owner approves 
   assert.equal(afterRow.bucket, 'to_pay', 'approved by the owner → now genuinely ready to pay');
 });
 
+test('release gate: a vendor hold set after approval still blocks release', async () => {
+  const { orgId, owner } = await makeOrg();
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'Held Late Co', amount: 300, invoiceNo: 'HL-1' });
+  await bill.confirm();
+  await prisma.$executeRaw`
+    UPDATE approval.approvables SET macro_state = 'approved'
+    WHERE organization_id = ${orgId}::uuid AND attributes->>'paymentOrderId' = ${bill.billId}`;
+  const { assertBillApprovedForRelease } = await import('../src/payments/release-gate.js');
+  await assertBillApprovedForRelease(orgId, bill.billId); // payable vendor: fine
+
+  const vendor = await prisma.counterparty.findFirstOrThrow({ where: { organizationId: orgId, displayName: 'Held Late Co' } });
+  const { setVendorPayableStatus } = await import('../src/payments/vendor-payable.js');
+  await setVendorPayableStatus({
+    organizationId: orgId, counterpartyId: vendor.counterpartyId,
+    status: 'held', reason: 'bank change under review', actorUserId: owner.userId, actorName: 'Owner',
+  });
+  await assert.rejects(() => assertBillApprovedForRelease(orgId, bill.billId), /on hold/);
+});
+
+test('agent preconditions: autonomy is earned per vendor and vetoed by holds/duplicates', async () => {
+  const { orgId, owner } = await makeOrg();
+  // A trusted-rail bill from a NEW vendor: the agent must decline (no track
+  // record), routing it to people instead of paying.
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'Fresh Agent Vendor', amount: 200, invoiceNo: 'FA-1' });
+  await prisma.paymentOrder.update({
+    where: { paymentOrderId: bill.billId },
+    data: { state: 'draft' }, // past review, so the review-state reason doesn't mask the autonomy one
+  });
+  await prisma.counterpartyWallet.updateMany({
+    where: { organizationId: orgId },
+    data: { trustState: 'trusted' },
+  });
+  const { tryAdvancePaymentOrderWithAgent } = await import('../src/agents/payment-automation.js');
+  const first = await tryAdvancePaymentOrderWithAgent({ organizationId: orgId, paymentOrderId: bill.billId, actorUserId: owner.userId });
+  assert.equal(first.status, 'needs_review');
+  assert.match(first.reason ?? '', /agent pays a vendor on its own only after/i);
+
+  // Give the vendor a settled human track record → the autonomy reason clears
+  // (the agent then fails later on missing treasury, which is fine — the
+  // preconditions are what's under test).
+  const vendor = await prisma.counterparty.findFirstOrThrow({ where: { organizationId: orgId, displayName: 'Fresh Agent Vendor' } });
+  for (const n of [2, 3]) {
+    const b = await uploadAndConfirm(orgId, owner.token, { vendor: 'Fresh Agent Vendor', amount: 200 + n, invoiceNo: `FA-${n}` });
+    await prisma.paymentOrder.update({ where: { paymentOrderId: b.billId }, data: { state: 'settled' } });
+  }
+  const second = await tryAdvancePaymentOrderWithAgent({ organizationId: orgId, paymentOrderId: bill.billId, actorUserId: owner.userId });
+  assert.ok(!/agent pays a vendor on its own/i.test(second.reason ?? ''), 'earned-autonomy reason cleared after 2 settled bills');
+
+  // A vendor hold vetoes the agent no matter the track record.
+  const { setVendorPayableStatus } = await import('../src/payments/vendor-payable.js');
+  await setVendorPayableStatus({
+    organizationId: orgId, counterpartyId: vendor.counterpartyId,
+    status: 'held', reason: 'under review', actorUserId: owner.userId, actorName: 'Owner',
+  });
+  const third = await tryAdvancePaymentOrderWithAgent({ organizationId: orgId, paymentOrderId: bill.billId, actorUserId: owner.userId });
+  assert.equal(third.status, 'needs_review');
+  assert.match(third.reason ?? '', /never pays a held or blocked vendor/i);
+});
+
 test('vendor coding rules: agreeing history promotes a default; manual rules never auto-change', async () => {
   const { orgId, owner } = await makeOrg();
   const mk = async (n: number) => (await uploadAndConfirm(orgId, owner.token, { vendor: 'Rule Vendor', amount: 100 + n, invoiceNo: `RV-${n}` })).billId;

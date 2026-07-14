@@ -1337,6 +1337,21 @@ test('automation agents can receive Squads spending limits and execute bounded p
     assert.equal(syncedPolicy.status, 'active');
     assert.equal(syncedPolicy.metadataJson.onchain.remainingAmountRaw, '100000');
 
+    // Earned autonomy (D5): the agent only pays vendors with a settled human
+    // track record — seed two prior settled bills for this vendor.
+    for (const seedRef of ['AGENT-SEED-1', 'AGENT-SEED-2']) {
+      await prisma.paymentOrder.create({
+        data: {
+          organizationId: organization.organizationId,
+          counterpartyWalletId: destination.destinationId,
+          counterpartyId: counterparty.counterpartyId,
+          amountRaw: 10_000n,
+          externalReference: seedRef,
+          state: 'settled',
+        },
+      });
+    }
+
     const paymentOrder = await post(
       `/organizations/${organization.organizationId}/payment-orders`,
       {
@@ -1959,7 +1974,7 @@ test('AP invoice intake lets the org agent propose green payments and waits on h
     { displayName: 'Trusted Labs' },
     register.sessionToken,
   );
-  await post(
+  const trustedDestination = await post(
     `/organizations/${organization.organizationId}/destinations`,
     {
       walletAddress: trustedVendorAddress,
@@ -1969,6 +1984,20 @@ test('AP invoice intake lets the org agent propose green payments and waits on h
     },
     register.sessionToken,
   );
+  // Earned autonomy (D5): the agent proposes green payments only for vendors
+  // with a settled human track record.
+  for (const seedRef of ['INTAKE-SEED-1', 'INTAKE-SEED-2']) {
+    await prisma.paymentOrder.create({
+      data: {
+        organizationId: organization.organizationId,
+        counterpartyWalletId: trustedDestination.destinationId,
+        counterpartyId: counterparty.counterpartyId,
+        amountRaw: 10_000n,
+        externalReference: seedRef,
+        state: 'settled',
+      },
+    });
+  }
 
   setInvoiceIntakeRuntimeForTests({
     extractRowsFromDocument: async () => ({
