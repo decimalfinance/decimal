@@ -28,4 +28,10 @@ export const DEFAULT_EXPENSE_ACCOUNTS: ExpenseAccount[] = [
   { id: 'builtin:utilities', name: 'Utilities', description: 'Electricity, water, internet, phone' },
   { id: 'builtin:cloud-hosting', name: 'Cloud hosting & infrastructure', description: 'Servers, cloud compute, storage, infrastructure services' },
   { id: 'builtin:other', name: 'Other business expenses', description: 'Anything that fits nowhere else' },
+  // The catch-all (GL synthesis D3/P1): the accountant's holding tank every
+  // ledger already has (QBO: "Uncategorized Expense" / "Ask My Accountant").
+  // Coding uncertainty parks here — it never blocks a bill.
+  { id: 'builtin:uncategorized', name: 'Uncategorized expense', description: 'Parked for your accountant to place — sweep before close' },
 ];
+
+export const UNCATEGORIZED_ACCOUNT = DEFAULT_EXPENSE_ACCOUNTS[DEFAULT_EXPENSE_ACCOUNTS.length - 1]!;

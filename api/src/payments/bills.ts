@@ -873,15 +873,23 @@ export async function confirmBillReview(input: ConfirmBillInput) {
     throw new Error('Total must be a positive amount.');
   }
 
-  // Tier-1 gate: approval routes on these — a plan compiled without them is a
-  // wrong plan, silently. Everything else can be filled during approval.
+  // Tier-1 gate: approval routes on amounts — a plan compiled without them is
+  // a wrong plan, silently. Categories are DIFFERENT (GL synthesis: coding
+  // uncertainty never blocks a bill): an uncoded line parks in the catch-all
+  // the accountant sweeps before close, and category splits correctly read it
+  // as "not coded to X".
   const realLines = input.lines.filter((l) => l.description.trim());
   if (realLines.length === 0) {
     throw new Error('Add at least one line item before sending for approval.');
   }
+  const { UNCATEGORIZED_ACCOUNT } = await import('../accounting/default-chart.js');
+  let uncategorizedLines = 0;
   for (const [i, line] of realLines.entries()) {
     if (line.amount == null) throw new Error(`Add an amount to line ${i + 1} before sending for approval.`);
-    if (!line.category || !line.category.trim()) throw new Error(`Add a category to line ${i + 1} before sending for approval.`);
+    if (!line.category || !line.category.trim()) {
+      line.category = UNCATEGORIZED_ACCOUNT.name;
+      uncategorizedLines += 1;
+    }
   }
   const confirmedAmountRaw = BigInt(Math.round(confirmedTotal * 10 ** USDC_DECIMALS));
   if (confirmCeiling !== null && confirmedAmountRaw > confirmCeiling) {

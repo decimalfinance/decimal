@@ -525,18 +525,27 @@ test('bank-only upload creates a pending-method vendor and a needs-review bill',
   assert.ok(wallet.walletAddress.startsWith('pending:'));
 });
 
-test('tier-1 gate blocks confirm without a coded line; passes when coded', async () => {
+test('coding uncertainty never blocks: uncoded lines park in Uncategorized expense', async () => {
+  // The old tier-1 gate rejected confirm on a missing category. GL synthesis:
+  // bookkeeping uncertainty parks in the accountant's catch-all, it never
+  // stops a bill. Amounts still gate — approval routes on them.
   const { orgId, owner, a2, a3 } = await makeOrg();
   const flow = await get(`/organizations/${orgId}/approvals/flow`, owner.token);
   const byUser = new Map(flow.people.map((p: { user_id: string; id: string }) => [p.user_id, p.id]));
   await publishLadder(orgId, owner.token, [byUser.get(a2.userId) as string], byUser.get(a3.userId) as string);
 
   const uncoded = await uploadAndConfirm(orgId, owner.token, { amount: 15000 }, { skipCategory: true });
-  await assert.rejects(uncoded.confirm(), /category/i);
+  const res = await uncoded.confirm();
+  assert.equal(res.detail.state, 'draft', 'uncoded bill confirms and enters approval');
+  // The line landed in the catch-all, visible on the approvable's attributes.
+  const rows = await prisma.$queryRaw<{ attributes: { categories?: string[] } }[]>`
+    SELECT attributes FROM approval.approvables
+    WHERE organization_id = ${orgId}::uuid AND attributes->>'paymentOrderId' = ${uncoded.billId}`;
+  assert.ok(rows[0]?.attributes.categories?.includes('Uncategorized expense'), 'line parked in the catch-all');
 
   const coded = await uploadAndConfirm(orgId, owner.token, { amount: 15000, invoiceNo: 'INV-2' });
-  const res = await coded.confirm();
-  assert.equal(res.detail.state, 'draft');
+  const res2 = await coded.confirm();
+  assert.equal(res2.detail.state, 'draft');
 });
 
 test('confirm routes the bill; the chain, inbox signal, approve/reject all work', async () => {

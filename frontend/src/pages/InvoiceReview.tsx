@@ -222,8 +222,8 @@ function ReviewScreen(props: {
       : (() => {
           const noAmount = realLines.findIndex((l) => l.amount == null);
           if (noAmount >= 0) return `Add an amount to line ${noAmount + 1} before sending.`;
-          const noCategory = realLines.findIndex((l) => !l.category);
-          if (noCategory >= 0) return `Add a category to line ${noCategory + 1} before sending.`;
+          // Categories don't gate (GL synthesis): an uncoded line parks in
+          // "Uncategorized expense" for the accountant to place later.
           return null;
         })();
   const canConfirm = !readOnly && blockingFlags.length === 0 && !submitting && !tier1Gap;
