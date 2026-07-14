@@ -1,4 +1,4 @@
-import type { CounterpartyWallet, PaymentOrder, Prisma, TreasuryWallet } from '@prisma/client';
+import type { Counterparty, CounterpartyWallet, PaymentOrder, Prisma, TreasuryWallet } from '@prisma/client';
 import { ApiError } from '../infra/api-errors.js';
 import { logger } from '../infra/logger.js';
 import { prisma } from '../infra/prisma.js';
@@ -17,6 +17,7 @@ import { executePaymentOrderWithSpendingLimit, loadOnchainSpendingLimitRemaining
 
 type AgentPaymentOrder = PaymentOrder & {
   counterpartyWallet: CounterpartyWallet;
+  counterparty: Counterparty | null;
   sourceTreasuryWallet: TreasuryWallet | null;
 };
 
@@ -38,6 +39,10 @@ type ExistingAgentRoute =
 
 type AgentRoutingContext = PaymentRoutingContext & {
   sourceTreasuryWalletId?: string | null;
+  /** True when a person explicitly directed this advance (clear-review, the
+   *  Advance button). Earned autonomy gates the agent acting ALONE — a human
+   *  directing it IS the human involvement the rule wants. */
+  humanDirected?: boolean;
 };
 
 export type PaymentOrderAgentAdvanceResult =
@@ -83,6 +88,7 @@ export async function tryAdvancePaymentOrderWithAgent(args: {
   paymentOrderId: string;
   actorUserId: string | null;
   sourceTreasuryWalletId?: string | null;
+  humanDirected?: boolean;
 }): Promise<PaymentOrderAgentAdvanceResult> {
   try {
     return await advancePaymentOrderWithAgent(args);
@@ -109,12 +115,14 @@ async function advancePaymentOrderWithAgent(args: {
   paymentOrderId: string;
   actorUserId: string | null;
   sourceTreasuryWalletId?: string | null;
+  humanDirected?: boolean;
 }): Promise<PaymentOrderAgentAdvanceResult> {
   const routingContext: AgentRoutingContext = {
     organizationId: args.organizationId,
     paymentOrderId: args.paymentOrderId,
     actorUserId: args.actorUserId,
     sourceTreasuryWalletId: args.sourceTreasuryWalletId,
+    humanDirected: args.humanDirected ?? false,
   };
   const decision = await routePayment<AgentPaymentOrder, string, Awaited<ReturnType<typeof executePaymentOrderWithSpendingLimit>>, Awaited<ReturnType<typeof createAndSubmitSquadsPaymentProposalAsAgent>>, ExistingAgentRoute, { updated: boolean }>(
     routingContext,
@@ -160,7 +168,37 @@ async function advancePaymentOrderWithAgent(args: {
     },
   );
 
-  return serializeRoutingDecision(decision);
+  const result = serializeRoutingDecision(decision);
+  // Stamp WHY the agent was allowed to act (D5): every autonomous action
+  // carries the checklist it passed, on the bill's own record — the agent
+  // explains its authorization, not just its action.
+  if (result.status === 'spending_limit_executed' || result.status === 'proposal_submitted') {
+    const payment = decision.status === 'agent_executed' || decision.status === 'proposal_created' ? decision.payment : null;
+    if (payment) {
+      await prisma.paymentOrderEvent.create({
+        data: {
+          paymentOrderId: payment.paymentOrderId,
+          organizationId: payment.organizationId,
+          eventType: 'agent_authorized',
+          actorType: 'agent',
+          actorId: args.actorUserId,
+          beforeState: payment.state,
+          afterState: payment.state,
+          payloadJson: {
+            action: result.status,
+            checks: {
+              railTrusted: true,
+              vendorPayable: true,
+              noOpenDuplicate: true,
+              vendorAutonomyEarned: true,
+              minPriorSettledBills: EARNED_AUTONOMY_MIN_BILLS,
+            },
+          },
+        },
+      }).catch(() => null);
+    }
+  }
+  return result;
 }
 
 async function resolveSourceTreasuryWallet(args: {
@@ -195,6 +233,7 @@ async function loadPaymentOrder(context: PaymentRoutingContext): Promise<AgentPa
     },
     include: {
       counterpartyWallet: true,
+      counterparty: true,
       sourceTreasuryWallet: true,
     },
   });
@@ -252,7 +291,11 @@ async function findExistingRoute(paymentOrder: AgentPaymentOrder): Promise<Exist
   return { status: 'none' };
 }
 
-async function evaluateReviewGate(paymentOrder: AgentPaymentOrder): Promise<PaymentReviewDecision> {
+// Earned autonomy (policy D5): people pay a vendor's first bills; the agent
+// takes over only once the vendor has this many settled bills on record.
+const EARNED_AUTONOMY_MIN_BILLS = 2;
+
+async function evaluateReviewGate(paymentOrder: AgentPaymentOrder, context: PaymentRoutingContext): Promise<PaymentReviewDecision> {
   const reasons: PaymentReviewReason[] = [];
 
   if (paymentOrder.state === 'needs_review') {
@@ -273,6 +316,65 @@ async function evaluateReviewGate(paymentOrder: AgentPaymentOrder): Promise<Paym
     reasons.push({
       code: 'unsupported_asset',
       message: `Payment automation supports USDC only, received ${paymentOrder.asset}.`,
+    });
+  }
+
+  // ── D5 hard preconditions: the agent may only act ALONE when every one of
+  // these passes — no exceptions, no confidence scores. A failed check hands
+  // the bill to people; it never blocks people from paying it themselves.
+  const { readPayableHold } = await import('../payments/vendor-payable.js');
+  const hold = paymentOrder.counterparty ? readPayableHold(paymentOrder.counterparty.metadataJson) : null;
+  if (hold) {
+    reasons.push({
+      code: 'vendor_not_payable',
+      message: `Vendor is ${hold.status} (${hold.byName}: ${hold.reason || 'no reason recorded'}) — the agent never pays a held or blocked vendor.`,
+    });
+  }
+
+  const { findDuplicateBills, readDuplicateOverride } = await import('../payments/duplicate-check.js');
+  if (!readDuplicateOverride(paymentOrder.metadataJson)) {
+    const dupes = await findDuplicateBills(paymentOrder.organizationId, {
+      excludePaymentOrderId: paymentOrder.paymentOrderId,
+      counterpartyId: paymentOrder.counterpartyId,
+      counterpartyWalletId: paymentOrder.counterpartyWalletId,
+      invoiceNumber: paymentOrder.invoiceNumber,
+      externalReference: paymentOrder.externalReference,
+      amountRaw: paymentOrder.amountRaw,
+      createdAt: paymentOrder.createdAt,
+    });
+    if (dupes.length > 0) {
+      reasons.push({
+        code: 'possible_duplicate',
+        message: 'This bill looks like a duplicate — a human decides, never the agent.',
+      });
+    }
+  }
+
+  // Earned autonomy, per VENDOR: the agent may never be the only party ever
+  // to have seen a vendor's bills. People pay the first ones; the agent takes
+  // over once the vendor has a human track record. A human explicitly
+  // directing this advance IS that involvement — the check applies only when
+  // the agent acts alone.
+  const humanDirected = Boolean((context as AgentRoutingContext).humanDirected);
+  if (!humanDirected && paymentOrder.counterpartyId) {
+    const priorSettled = await prisma.paymentOrder.count({
+      where: {
+        organizationId: paymentOrder.organizationId,
+        counterpartyId: paymentOrder.counterpartyId,
+        paymentOrderId: { not: paymentOrder.paymentOrderId },
+        state: 'settled',
+      },
+    });
+    if (priorSettled < EARNED_AUTONOMY_MIN_BILLS) {
+      reasons.push({
+        code: 'vendor_autonomy_not_earned',
+        message: `The agent pays a vendor on its own only after ${EARNED_AUTONOMY_MIN_BILLS} bills settled with people involved (this vendor has ${priorSettled}).`,
+      });
+    }
+  } else if (!humanDirected) {
+    reasons.push({
+      code: 'vendor_autonomy_not_earned',
+      message: 'This payment has no vendor record — the agent only acts on vendors with a human track record.',
     });
   }
 

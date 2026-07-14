@@ -219,6 +219,8 @@ paymentOrdersRouter.post('/organizations/:organizationId/payment-orders/:payment
           organizationId,
           paymentOrderId,
           actorUserId: req.auth!.userId,
+          // A person just reviewed and released this bill to automation.
+          humanDirected: true,
         })
       : null;
     const detail = await getPaymentOrderDetail(organizationId, paymentOrderId);
@@ -237,6 +239,7 @@ paymentOrdersRouter.post('/organizations/:organizationId/payment-orders/:payment
       organizationId,
       paymentOrderId,
       actorUserId: req.auth!.userId,
+      humanDirected: true, // the Advance button — a person is directing this
       sourceTreasuryWalletId: input.sourceTreasuryWalletId,
     }));
 }));
