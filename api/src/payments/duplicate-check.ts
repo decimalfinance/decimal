@@ -33,6 +33,9 @@ export async function findDuplicateBills(organizationId: string, input: {
   counterpartyId: string | null;
   counterpartyWalletId: string;
   invoiceNumber: string | null;
+  /** API/CSV orders carry their reference here — same coalesce the DB's
+   *  unique index uses. */
+  externalReference?: string | null;
   amountRaw: bigint;
   createdAt?: Date;
 }): Promise<DuplicateMatch[]> {
@@ -45,16 +48,16 @@ export async function findDuplicateBills(organizationId: string, input: {
         ? { counterpartyId: input.counterpartyId }
         : { counterpartyWalletId: input.counterpartyWalletId }),
     },
-    select: { paymentOrderId: true, invoiceNumber: true, amountRaw: true, state: true, createdAt: true },
+    select: { paymentOrderId: true, invoiceNumber: true, externalReference: true, amountRaw: true, state: true, createdAt: true },
     orderBy: { createdAt: 'desc' },
     take: 200,
   });
 
-  const inv = normalizeInvoiceNumber(input.invoiceNumber);
+  const inv = normalizeInvoiceNumber(input.invoiceNumber ?? input.externalReference ?? null);
   const at = (input.createdAt ?? new Date()).getTime();
   const matches: DuplicateMatch[] = [];
   for (const c of candidates) {
-    const cInv = normalizeInvoiceNumber(c.invoiceNumber);
+    const cInv = normalizeInvoiceNumber(c.invoiceNumber ?? c.externalReference);
     if (inv && cInv) {
       // Both sides carry an invoice number: it IS the discriminator. Same
       // number = duplicate; different numbers = two real bills, even at the

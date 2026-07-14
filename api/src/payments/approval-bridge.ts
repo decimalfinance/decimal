@@ -154,7 +154,7 @@ export function registerPaymentApprovalBridge(): void {
       const { findDuplicateBills, readDuplicateOverride, describeDuplicate } = await import('./duplicate-check.js');
       const releaseOrder = await prisma.paymentOrder.findFirst({
         where: { organizationId: approvable.organization_id, paymentOrderId },
-        select: { counterpartyId: true, counterpartyWalletId: true, invoiceNumber: true, amountRaw: true, createdAt: true, state: true, metadataJson: true },
+        select: { counterpartyId: true, counterpartyWalletId: true, invoiceNumber: true, externalReference: true, amountRaw: true, createdAt: true, state: true, metadataJson: true },
       });
       if (releaseOrder && !readDuplicateOverride(releaseOrder.metadataJson)) {
         const dupes = await findDuplicateBills(approvable.organization_id, {
@@ -162,6 +162,7 @@ export function registerPaymentApprovalBridge(): void {
           counterpartyId: releaseOrder.counterpartyId,
           counterpartyWalletId: releaseOrder.counterpartyWalletId,
           invoiceNumber: releaseOrder.invoiceNumber,
+          externalReference: releaseOrder.externalReference,
           amountRaw: releaseOrder.amountRaw,
           createdAt: releaseOrder.createdAt,
         });
