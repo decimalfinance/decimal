@@ -7,11 +7,11 @@ Zaid only reads reports.
 
 ## The stack (safe by construction)
 
-| Thing | Test bench | Production (do NOT touch) |
-|---|---|---|
-| API | http://127.0.0.1:3100 | :3101 (cloudflared → api.decimal.finance) |
-| Frontend | http://localhost:5174 (vite dev) | Vercel (decimal.finance) |
-| Database | `usdc_ops_local` | `usdc_ops` |
+| Thing | Test bench |
+|---|---|
+| API | http://127.0.0.1:3100 |
+| Frontend | http://localhost:5174 (vite dev) |
+| Database | `usdc_ops_local` |
 
 Both bench processes hot-reload (`tsx watch` / vite): after a code change you
 normally need NO restart — just reload the page. `make test-api` uses a third

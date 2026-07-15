@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
-# Ensure the prod / local / test databases exist in the local docker Postgres, and apply the
-# control-plane schema to the target database (default: usdc_ops). Idempotent.
+# Ensure the local / test databases exist in the local docker Postgres, and apply the
+# control-plane schema to the target database (default: usdc_ops_local). Idempotent.
 #
-#   prod  -> usdc_ops        (served by `make prod-backend` / decimal.finance)
 #   local -> usdc_ops_local  (used by `make dev`)
 #   test  -> usdc_ops_test   (used by `make test-api`; truncate-based tests live here only)
 #
 # Usage: scripts/db-setup.sh [target_db]
 set -euo pipefail
 
-TARGET_DB="${1:-usdc_ops}"
+TARGET_DB="${1:-usdc_ops_local}"
 
 docker compose up -d --remove-orphans postgres >/dev/null
 
@@ -24,7 +23,7 @@ for db in usdc_ops usdc_ops_local usdc_ops_test; do
 done
 
 # Apply every schema file in order (000-* is the first-boot database bootstrap; skip on re-apply).
-# Files must stay idempotent — that contract is what lets this re-run on every make dev/prod-backend.
+# Files must stay idempotent — that contract is what lets this re-run on every make dev.
 for f in postgres/init/[0-9]*.sql; do
   base="$(basename "${f}")"
   [[ "${base}" == 000-* ]] && continue

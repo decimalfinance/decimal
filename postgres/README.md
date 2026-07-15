@@ -13,11 +13,9 @@ It stores:
 - mappings
 - onboarding state
 
-## Local Docker Postgres (used for both dev and prod-backend)
+## Local Docker Postgres (dev + tests)
 
-Decimal runs against the local Postgres container in every environment —
-tests, local dev, and the production-backed runtime serving https://decimal.finance
-via Cloudflare Tunnel.
+Decimal runs against the local Postgres container for local dev and tests.
 
 ```bash
 docker compose up -d postgres
@@ -29,7 +27,7 @@ Apply the bootstrap schema (idempotent):
 make sync-postgres-schema
 ```
 
-`make dev` and `make prod-backend` both call this automatically.
+`make dev` calls this automatically.
 
 ### Backups
 
