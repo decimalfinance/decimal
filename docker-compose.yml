@@ -21,3 +21,7 @@ services:
 
 volumes:
   postgres_data:
+    # Pinned to the existing volume so the data survives a repo-folder rename.
+    # Compose otherwise prefixes the volume with the folder name, which would
+    # orphan the current data (dev + prod DBs) behind a new empty volume.
+    name: stablecoin_intelligence_postgres_data
