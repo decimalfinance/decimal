@@ -1,3 +1,9 @@
+> ⚠️ **SUPERSEDED 2026-07-15 for positioning — see `POSITIONING-CORRECTED.md`.** Every
+> one-liner, the ICP, and the problem statement below are built on a rejected
+> contractor / "pay teams abroad" framing. Decimal is vendor-AP only, one unified
+> product (local + global). Mine this file ONLY for the "why now" dated shift and the
+> honesty-ledger structure; take all positioning from the corrected doc.
+
 # Decimal — pitch spine
 
 The shared core for the YC app, the SPC app, and the landing hero. Written plain

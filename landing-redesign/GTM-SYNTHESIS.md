@@ -1,3 +1,9 @@
+> ⚠️ **The "overlap = sweet spot" / "beachhead ICP = import-heavy" recommendation is
+> SUPERSEDED 2026-07-15 — see `POSITIONING-CORRECTED.md`.** The two customers are NOT to
+> be narrowed into their intersection; that framing is rejected. Still valid to mine:
+> the competitive-gap map, the "sell the rail invisibly" buyer data, and the vertical
+> research. Ignore the "Recommended shape" section's sweet-spot conclusion.
+
 # GTM synthesis (corrected) — AP-heavy customer map
 
 Date: 2026-07-14. Supersedes the earlier version that was built on a wrong
