@@ -494,7 +494,8 @@ export function Hero() {
           </div>
         </div>
         <div style={{ position: 'relative', minWidth: 0, alignSelf: 'start', padding: '11px 0 0 11px', boxSizing: 'border-box', animation: 'fadeUp .7s ease .4s both' }}>
-          <div style={{ position: 'absolute', top: -17, left: -20, width: 'calc(100% + 35px)', height: 'calc(100% + 33px)', background: 'var(--ink)', WebkitMaskImage: `url('${A}art2-hatch.png')`, maskImage: `url('${A}art2-hatch.png')`, WebkitMaskSize: '100% 100%', maskSize: '100% 100%', pointerEvents: 'none' }} />
+          {/* Art ends flush with the product frame's bottom edge (top overhang only). */}
+          <div style={{ position: 'absolute', top: -17, left: -20, width: 'calc(100% + 35px)', height: 'calc(100% + 17px)', background: 'var(--ink)', WebkitMaskImage: `url('${A}art2-hatch.png')`, maskImage: `url('${A}art2-hatch.png')`, WebkitMaskSize: '100% 100%', maskSize: '100% 100%', pointerEvents: 'none' }} />
           <div style={{ position: 'relative', boxSizing: 'border-box', background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: '0 24px 70px rgba(10,10,10,.10)', overflow: 'hidden', display: 'grid', gridTemplateColumns: '50px 1fr' }}>
             <Sidebar />
             <div style={{ position: 'relative', minWidth: 0 }}>
