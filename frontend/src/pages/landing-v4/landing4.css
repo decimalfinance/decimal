@@ -18,6 +18,29 @@
   --dw: 500;
   --btn-font: 'Geist Mono', ui-monospace, monospace;
   background: #FFFFFF;
+
+  /* Marketing page always renders light. The .dec design system flips its
+     surface/text/border tokens dark under <html data-theme="dark">; redeclaring
+     the light values here (on the .l4 element itself) wins over that inherited
+     dark cascade for the whole subtree, regardless of the app's theme. */
+  --bg-canvas: #FFFFFF;
+  --bg-surface: #FFFFFF;
+  --bg-surface-2: #F5F4F2;
+  --border: #EAE8E4;
+  --border-strong: #D8D5CF;
+  --text-primary: #0A0A0A;
+  --text-muted: #5E5B57;
+  --text-faint: #9A9690;
+  --solid: #0A0A0A;
+  --solid-contrast: #FFFFFF;
+  --success: #15A86B;
+  --warning: #B0731B;
+  --danger: #8B2A22;
+  --danger-vivid: #E5484D;
+  --info: #1B5F8C;
+  --orange: #C25A18;
+  --neutral: #5E5B57;
+  --dc-canvas-bg: #E9E7E3;
 }
 
 /* Text selection uses the marker-highlight pink. */
