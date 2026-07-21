@@ -25,6 +25,7 @@ const WalletsPage = lazy(() => import('./pages/Wallets').then((m) => ({ default:
 const CounterpartiesPage = lazy(() => import('./pages/Counterparties').then((m) => ({ default: m.CounterpartiesPage })));
 const LandingPageV2 = lazy(() => import('./pages/Landing').then((m) => ({ default: m.LandingPage })));
 const LandingPageV3 = lazy(() => import('./pages/landing-v3').then((m) => ({ default: m.LandingPage })));
+const LandingPageV4 = lazy(() => import('./pages/landing-v4').then((m) => ({ default: m.LandingPage })));
 const MembersPage = lazy(() => import('./pages/Members').then((m) => ({ default: m.MembersPage })));
 const ApprovalsPage = lazy(() => import('./pages/Approvals').then((m) => ({ default: m.ApprovalsPage })));
 const ProtectionsPage = lazy(() => import('./pages/Protections').then((m) => ({ default: m.ProtectionsPage })));
@@ -78,7 +79,9 @@ export function App() {
   return (
     <Suspense fallback={<RouteFallback />}>
       <Routes>
-        <Route path="/" element={<LandingPageV3 />} />
+        {/* Landing history is preserved: current at /, prior versions at /1 (v3) and /landing (v2). */}
+        <Route path="/" element={<LandingPageV4 />} />
+        <Route path="/1" element={<LandingPageV3 />} />
         <Route path="/landing" element={<LandingPageV2 />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />

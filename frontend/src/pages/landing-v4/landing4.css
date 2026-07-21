@@ -1,0 +1,130 @@
+/* Landing v4 — implements design_handoff_decimal_landing (artboards 20b/6a/16a/18b/19a).
+   Resolved design tokens (from the handoff's baked tweak values):
+   ink/accent #5C1F33 · band #F5F4F2 · canvas #FFFFFF · highlight #F9C6D0
+   display: Instrument Serif 500 · buttons: Geist Mono · print style mode. */
+
+.l4 {
+  --ink: #5C1F33;
+  --band: #F5F4F2;
+  --accent: #5C1F33;
+  --accent-hover: #481828;
+  --accent-contrast: #FFFFFF;
+  --pink: #5C1F33;
+  --pink-deep: #481828;
+  --primary: #5C1F33;
+  --primary-hover: #451726;
+  --primary-contrast: #FFFFFF;
+  --font-display: 'Instrument Serif', serif;
+  --dw: 500;
+  --btn-font: 'Geist Mono', ui-monospace, monospace;
+  background: #FFFFFF;
+}
+
+/* print-style mode (design: .dec[data-style="print"]) */
+.l4 .btn { font-family: var(--btn-font); border-radius: 2px; text-transform: uppercase; letter-spacing: .06em; font-size: 12px; font-weight: 600; }
+.l4 h1, .l4 h2 { color: var(--ink); }
+.l4 .btn.btn-primary:hover { filter: brightness(1.15); }
+.l4 .field-label { font-size: 10px; }
+.l4 a { color: var(--accent); text-decoration: none; }
+.l4 a:hover { color: var(--accent-hover); }
+
+/* ——— keyframes (verbatim from the design file) ——— */
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes dragPath{0%{transform:translate(112%,128%);opacity:0}3%{opacity:1}20%{transform:translate(50%,56%);opacity:1}24%{transform:translate(50%,56%);opacity:1}28%,100%{transform:translate(50%,56%);opacity:0}}
+@keyframes zoneFade{0%,15%{opacity:1}19%,94%{opacity:0}99%,100%{opacity:1}}
+@keyframes procIn{0%,26%{opacity:0;transform:translateY(6px)}30%,40%{opacity:1;transform:none}44%,100%{opacity:0}}
+@keyframes procTrack{0%,27%{opacity:0}29%,35%{opacity:1}38%,100%{opacity:0}}
+@keyframes procBar{0%,29%{width:0}35%{width:100%}100%{width:100%}}
+@keyframes revealBtn{0%,36%{opacity:0;transform:translateY(6px)}40%{opacity:1;transform:none}41%{opacity:1;transform:scale(.95)}43%{opacity:1;transform:scale(1)}47%,100%{opacity:0;transform:none}}
+@keyframes clickCursor{0%,34%{opacity:0;transform:translate(46px,46px)}38%{opacity:1;transform:translate(4px,0px)}40%{opacity:1;transform:translate(4px,0px) scale(.82)}42%{opacity:1;transform:translate(4px,0px) scale(1)}46%,100%{opacity:0;transform:translate(4px,0px)}}
+@keyframes aw1{0%,32%{opacity:0}36%,92%{opacity:1}96%,100%{opacity:1}}
+@keyframes aw2{0%,36%{opacity:0}40%,92%{opacity:1}96%,100%{opacity:1}}
+@keyframes aw3{0%,40%{opacity:0}44%,92%{opacity:1}96%,100%{opacity:1}}
+@keyframes aw4{0%,44%{opacity:0}48%,92%{opacity:1}96%,100%{opacity:1}}
+@keyframes aw5{0%,48%{opacity:0}52%,92%{opacity:1}96%,100%{opacity:1}}
+@keyframes aw6{0%,52%{opacity:0}56%,92%{opacity:1}96%,100%{opacity:1}}
+@keyframes aw7{0%,56%{opacity:0}60%,92%{opacity:1}96%,100%{opacity:1}}
+@keyframes aw8{0%,60%{opacity:0}64%,92%{opacity:1}96%,100%{opacity:1}}
+@keyframes tl1{0%,4%{opacity:0;transform:translateY(6px)}9%,93%{opacity:1;transform:none}97%,100%{opacity:1}}
+@keyframes tlChk1{0%,12%{opacity:0;transform:scale(.5)}15%,93%{opacity:1;transform:scale(1)}97%,100%{opacity:1}}
+@keyframes tl2{0%,17%{opacity:0;transform:translateY(6px)}22%,93%{opacity:1;transform:none}97%,100%{opacity:1}}
+@keyframes tlBubA{0%,24%{opacity:0;transform:translateY(4px)}28%,93%{opacity:1;transform:none}97%,100%{opacity:1}}
+@keyframes tlBubQ{0%,33%{opacity:0;transform:translateY(4px)}37%,93%{opacity:1;transform:none}97%,100%{opacity:1}}
+@keyframes tlBubR{0%,42%{opacity:0;transform:translateY(4px)}46%,93%{opacity:1;transform:none}97%,100%{opacity:1}}
+@keyframes tlChk2{0%,52%{opacity:0;transform:scale(.5)}55%,93%{opacity:1;transform:scale(1)}97%,100%{opacity:1}}
+@keyframes tlBubB{0%,52%{opacity:0;transform:translateY(4px)}56%,93%{opacity:1;transform:none}97%,100%{opacity:1}}
+@keyframes tl3{0%,62%{opacity:0;transform:translateY(6px)}66%,93%{opacity:1;transform:none}97%,100%{opacity:1}}
+@keyframes tlChk3{0%,69%{opacity:0;transform:scale(.5)}72%,93%{opacity:1;transform:scale(1)}97%,100%{opacity:1}}
+@keyframes tlBubC{0%,72%{opacity:0;transform:translateY(4px)}76%,93%{opacity:1;transform:none}97%,100%{opacity:1}}
+@keyframes tl3b{0%,80%{opacity:0;transform:translateY(6px)}84%,93%{opacity:1;transform:none}97%,100%{opacity:1}}
+@keyframes tl4{0%,86%{opacity:0;transform:translateY(6px)}90%,93%{opacity:1;transform:none}97%,100%{opacity:1}}
+@keyframes gbCur{0%,8%{opacity:0;transform:translate(50px,40px)}13%{opacity:1;transform:translate(0,0)}15%{opacity:1;transform:scale(.82)}16.5%{opacity:1;transform:scale(1)}21%,100%{opacity:0;transform:translate(0,0)}}
+@keyframes gbBtn{0%,14.5%{transform:scale(1)}15.5%{transform:scale(.93)}17.5%,100%{transform:scale(1)}}
+@keyframes gbBtnBg{0%,100%{background:#fff;color:var(--ink)}}
+@keyframes gbBtnA{0%,15%{opacity:1}17%,96%{opacity:0}99%,100%{opacity:1}}
+@keyframes gbBtnB{0%,16%{opacity:0}18%,67%{opacity:1}69%,100%{opacity:0}}
+@keyframes gbBtnC{0%,70%{opacity:0}72%,94%{opacity:1}97%,100%{opacity:0}}
+@keyframes gbSpin{to{transform:rotate(360deg)}}
+@keyframes gbFootA{0%,69%{opacity:1}72%,94%{opacity:0}98%,100%{opacity:1}}
+@keyframes gbFootB{0%,73%{opacity:0}76%,93%{opacity:1}97%,100%{opacity:0}}
+@keyframes gbChk0{0%,20%{opacity:0;transform:scale(.4)}23%,93%{opacity:1;transform:scale(1)}98%,100%{opacity:0}}
+@keyframes gbChk1{0%,27%{opacity:0;transform:scale(.4)}30%,93%{opacity:1;transform:scale(1)}98%,100%{opacity:0}}
+@keyframes gbChk2{0%,34%{opacity:0;transform:scale(.4)}37%,93%{opacity:1;transform:scale(1)}98%,100%{opacity:0}}
+@keyframes gbChk3{0%,41%{opacity:0;transform:scale(.4)}44%,93%{opacity:1;transform:scale(1)}98%,100%{opacity:0}}
+@keyframes gbChk4{0%,48%{opacity:0;transform:scale(.4)}51%,93%{opacity:1;transform:scale(1)}98%,100%{opacity:0}}
+@keyframes gbChk5{0%,55%{opacity:0;transform:scale(.4)}58%,93%{opacity:1;transform:scale(1)}98%,100%{opacity:0}}
+@keyframes gbChk6{0%,62%{opacity:0;transform:scale(.4)}65%,93%{opacity:1;transform:scale(1)}98%,100%{opacity:0}}
+@keyframes gbArc0{0%,21%{stroke-dashoffset:100;opacity:0}21.6%{stroke-dashoffset:97;opacity:1}27%,86%{stroke-dashoffset:0;opacity:1}93%,100%{stroke-dashoffset:0;opacity:0}}
+@keyframes gbDot0{0%,26%{opacity:0;transform:scale(.5)}29%,86%{opacity:1;transform:scale(1)}93%,100%{opacity:0}}
+@keyframes gbArc1{0%,28%{stroke-dashoffset:100;opacity:0}28.6%{stroke-dashoffset:97;opacity:1}34%,86%{stroke-dashoffset:0;opacity:1}93%,100%{stroke-dashoffset:0;opacity:0}}
+@keyframes gbDot1{0%,33%{opacity:0;transform:scale(.5)}36%,86%{opacity:1;transform:scale(1)}93%,100%{opacity:0}}
+@keyframes gbArc2{0%,35%{stroke-dashoffset:100;opacity:0}35.6%{stroke-dashoffset:97;opacity:1}41%,86%{stroke-dashoffset:0;opacity:1}93%,100%{stroke-dashoffset:0;opacity:0}}
+@keyframes gbDot2{0%,40%{opacity:0;transform:scale(.5)}43%,86%{opacity:1;transform:scale(1)}93%,100%{opacity:0}}
+@keyframes gbArc3{0%,42%{stroke-dashoffset:100;opacity:0}42.6%{stroke-dashoffset:97;opacity:1}48%,86%{stroke-dashoffset:0;opacity:1}93%,100%{stroke-dashoffset:0;opacity:0}}
+@keyframes gbDot3{0%,47%{opacity:0;transform:scale(.5)}50%,86%{opacity:1;transform:scale(1)}93%,100%{opacity:0}}
+@keyframes gbArc4{0%,49%{stroke-dashoffset:100;opacity:0}49.6%{stroke-dashoffset:97;opacity:1}55%,86%{stroke-dashoffset:0;opacity:1}93%,100%{stroke-dashoffset:0;opacity:0}}
+@keyframes gbDot4{0%,54%{opacity:0;transform:scale(.5)}57%,86%{opacity:1;transform:scale(1)}93%,100%{opacity:0}}
+@keyframes gbArc5{0%,14%{stroke-dashoffset:100;opacity:0}14.6%{stroke-dashoffset:97;opacity:1}20%,86%{stroke-dashoffset:0;opacity:1}93%,100%{stroke-dashoffset:0;opacity:0}}
+@keyframes gbDot5{0%,19%{opacity:0;transform:scale(.5)}22%,86%{opacity:1;transform:scale(1)}93%,100%{opacity:0}}
+@keyframes gbArc6{0%,56%{stroke-dashoffset:100;opacity:0}56.6%{stroke-dashoffset:97;opacity:1}62%,86%{stroke-dashoffset:0;opacity:1}93%,100%{stroke-dashoffset:0;opacity:0}}
+@keyframes gbDot6{0%,61%{opacity:0;transform:scale(.5)}64%,86%{opacity:1;transform:scale(1)}93%,100%{opacity:0}}
+@keyframes aiL1{0%,2%{width:0}10%,100%{width:79ch}}
+@keyframes aiL2{0%,9.9%{width:0;height:0}10%{width:0;height:1.6em}17%,100%{width:87ch;height:1.6em}}
+@keyframes aiL3{0%,16.9%{width:0;height:0}17%{width:0;height:1.6em}24%,100%{width:96ch;height:1.6em}}
+@keyframes aiPrompt{0%,96%{opacity:1}100%{opacity:1}}
+@keyframes aiDot{0%,100%{opacity:.25}50%{opacity:1}}
+@keyframes aiBtnLay{0%,26%{opacity:1;transform:translateY(-50%) scale(1)}27%{opacity:1;transform:translateY(-50%) scale(.9)}28.5%,100%{opacity:0;transform:translateY(-50%) scale(1)}}
+@keyframes aiGenBtn{0%,27.5%{opacity:0}29%,61%{opacity:1}63%,100%{opacity:0}}
+@keyframes aiSaveBtn{0%,63%{opacity:0;transform:translateY(-50%) scale(1)}65%,67%{opacity:1;transform:translateY(-50%) scale(1)}68%{opacity:1;transform:translateY(-50%) scale(.9)}70%,100%{opacity:0;transform:translateY(-50%) scale(1)}}
+@keyframes aiSavedBtn{0%,69%{opacity:0;transform:translateY(-50%)}71%,100%{opacity:1;transform:translateY(-50%)}}
+@keyframes aiCursorA{0%,20%{opacity:0;transform:translate(60px,40px)}24%{opacity:1;transform:translate(0,0)}27%{opacity:1;transform:scale(.82)}29%{opacity:1;transform:scale(1)}33%,100%{opacity:0;transform:translate(0,0)}}
+@keyframes aiCursorB{0%,62%{opacity:0;transform:translate(-70px,50px)}66%{opacity:1;transform:translate(0,0)}68%{opacity:1;transform:scale(.82)}70%{opacity:1;transform:scale(1)}75%,100%{opacity:0;transform:translate(0,0)}}
+@keyframes reviewIn{0%,44%{opacity:0;transform:translateY(8px)}48%,90%{opacity:1;transform:none}96%,100%{opacity:1}}
+@keyframes loopShimmer{0%,49%{transform:translateX(-120%)}59%{transform:translateX(360%)}100%{transform:translateX(360%)}}
+@keyframes loopPulse{0%,49%{box-shadow:0 0 0 0 transparent;border-color:var(--border)}53%{box-shadow:0 0 0 3px color-mix(in srgb, var(--ink) 18%, transparent);border-color:var(--ink)}59%{box-shadow:0 0 0 0 transparent;border-color:var(--border)}100%{box-shadow:0 0 0 0 transparent;border-color:var(--border)}}
+@keyframes fVal1{0%,52%{opacity:0}55%,90%{opacity:1}96%,100%{opacity:1}}
+@keyframes fVal2{0%,58%{opacity:0}61%,90%{opacity:1}96%,100%{opacity:1}}
+@keyframes fVal3{0%,64%{opacity:0}67%,90%{opacity:1}96%,100%{opacity:1}}
+@keyframes fVal4{0%,70%{opacity:0}73%,90%{opacity:1}96%,100%{opacity:1}}
+@keyframes invTilt{0%{transform:rotate(7deg)}20%{transform:rotate(0deg)}23%{transform:rotate(0deg) scale(1)}25%{transform:scale(.97)}28%,100%{transform:scale(1)}}
+@keyframes cursorGrab{0%,20%{opacity:1;transform:scale(1)}23%{transform:scale(.85)}26%{opacity:1;transform:translate(14px,16px) scale(1)}30%,100%{opacity:0;transform:translate(34px,40px)}}
+@keyframes pulseRing{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb, var(--accent) 30%, transparent)}50%{box-shadow:0 0 0 10px transparent}}
+@keyframes b2Overlay{0%,45.4%{opacity:1}45.41%,100%{opacity:0}}
+@keyframes b2Cur{0%,2.4%{transform:translate(0,0)}17%{transform:translate(36px,232px)}28.4%{transform:translate(36px,416px)}31.1%{transform:translate(36px,416px)}42.5%{transform:translate(36px,232px)}43.2%{transform:translate(36px,232px)}43.5%{transform:translate(36px,232px) scale(.66)}44.3%{transform:translate(36px,232px) scale(1.12)}45.1%{transform:translate(36px,232px) scale(1)}48.1%{transform:translate(36px,232px)}62.5%{transform:translate(262px,182px)}67.9%{transform:translate(262px,182px)}80.3%{transform:translate(62px,182px)}85.7%{transform:translate(62px,182px)}97.6%{transform:translate(0,0)}97.8%{transform:translate(0,0) scale(.66)}98.9%{transform:translate(0,0) scale(1.12)}99.5%{transform:translate(0,0) scale(1)}100%{transform:translate(0,0)}}
+@keyframes b2CrumbHi{0%,95.5%{color:var(--text-muted)}97.6%,99.5%{color:var(--accent)}100%{color:var(--text-muted)}}
+@keyframes heroShimmer{0%,48.3%{transform:translateX(-120%)}54.8%{transform:translateX(360%)}100%{transform:translateX(360%)}}
+@keyframes heroFieldVal{0%,50.3%{opacity:0}52.3%,100%{opacity:1}}
+@keyframes heroFieldPulse{0%,48.3%{box-shadow:0 0 0 0 transparent;border-color:var(--border)}50.8%{box-shadow:0 0 0 3px color-mix(in srgb, var(--ink) 18%, transparent);border-color:var(--ink)}54.8%,100%{box-shadow:0 0 0 0 transparent;border-color:var(--border)}}
+@keyframes heroPdfFlash{0%,48.8%{background:transparent}50.3%,54.8%{background:#F9C6D0}57.8%,100%{background:transparent}}
+@keyframes heroVendorPulse{0%,48.3%{box-shadow:0 0 0 0 transparent;border-color:var(--border)}50.8%{box-shadow:0 0 0 3px color-mix(in srgb, var(--ink) 18%, transparent);border-color:var(--ink)}54.8%,78%{box-shadow:0 0 0 0 transparent;border-color:var(--border)}80.3%,85.7%{box-shadow:inset 0 0 0 1.5px var(--accent);border-color:var(--accent)}88%,100%{box-shadow:0 0 0 0 transparent;border-color:var(--border)}}
+@keyframes heroVendorFlash{0%,48.8%{background:transparent}50.3%,54.8%{background:#F9C6D0}57.8%,78%{background:transparent}80.3%,85.7%{background:#F9C6D0}88%,100%{background:transparent}}
+@keyframes heroEmailPulse{0%,48.3%{box-shadow:0 0 0 0 transparent;border-color:var(--border)}50.8%{box-shadow:0 0 0 3px color-mix(in srgb, var(--ink) 18%, transparent);border-color:var(--ink)}54.8%,60.5%{box-shadow:0 0 0 0 transparent;border-color:var(--border)}62.5%,67.9%{box-shadow:inset 0 0 0 1.5px var(--accent);border-color:var(--accent)}70%,100%{box-shadow:0 0 0 0 transparent;border-color:var(--border)}}
+@keyframes heroEmailFlash{0%,48.8%{background:transparent}50.3%,54.8%{background:#F9C6D0}57.8%,60.5%{background:transparent}62.5%,67.9%{background:#F9C6D0}70%,100%{background:transparent}}
+@keyframes heroCheckIn{0%,49.8%{opacity:0}51.3%,100%{opacity:1}}
+@keyframes b2RowH1{0%,15.7%{background:transparent}17.2%{background:var(--band)}18.7%,40.8%{background:transparent}42.3%{background:var(--band)}45.4%{background:var(--band)}45.5%,100%{background:transparent}}
+@keyframes b2RowH2{0%,17.6%{background:transparent}19.1%{background:var(--band)}20.6%,38.9%{background:transparent}40.4%{background:var(--band)}41.9%,100%{background:transparent}}
+@keyframes b2RowH3{0%,19.5%{background:transparent}21.0%{background:var(--band)}22.5%,37.0%{background:transparent}38.5%{background:var(--band)}40.0%,100%{background:transparent}}
+@keyframes b2RowH4{0%,21.3%{background:transparent}22.8%{background:var(--band)}24.3%,35.2%{background:transparent}36.7%{background:var(--band)}38.2%,100%{background:transparent}}
+@keyframes b2RowH5{0%,23.2%{background:transparent}24.7%{background:var(--band)}26.2%,33.3%{background:transparent}34.8%{background:var(--band)}36.3%,100%{background:transparent}}
+@keyframes b2RowH6{0%,25.0%{background:transparent}26.5%{background:var(--band)}28.0%,31.5%{background:transparent}33.0%{background:var(--band)}34.5%,100%{background:transparent}}
+@keyframes b2RowH7{0%,26.9%{background:transparent}28.4%{background:var(--band)}31.1%{background:var(--band)}32.6%,100%{background:transparent}}
