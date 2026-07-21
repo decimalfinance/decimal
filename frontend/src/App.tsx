@@ -79,10 +79,10 @@ export function App() {
   return (
     <Suspense fallback={<RouteFallback />}>
       <Routes>
-        {/* Landing history is preserved: current at /, prior versions at /1 (v3) and /landing (v2). */}
+        {/* Landing history, numbered oldest to newest: /1 = v2 (oldest), /2 = v3, / = v4 (current). */}
         <Route path="/" element={<LandingPageV4 />} />
-        <Route path="/1" element={<LandingPageV3 />} />
-        <Route path="/landing" element={<LandingPageV2 />} />
+        <Route path="/2" element={<LandingPageV3 />} />
+        <Route path="/1" element={<LandingPageV2 />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
