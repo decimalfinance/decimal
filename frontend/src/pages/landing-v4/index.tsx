@@ -45,9 +45,9 @@ export function LandingPage() {
           ref={sheetRef}
           style={scaled ? { width: DESIGN_W, transform: `scale(${scale})`, transformOrigin: 'top left' } : { width: '100%' }}
         >
-          <div style={{ maxWidth: DESIGN_W, margin: '0 auto' }}>
-            <Hero />
-          </div>
+          {/* Hero spans the full viewport: content aligns to the centered 1440 grid,
+              the product frame bleeds off the right edge. */}
+          <Hero />
           <Sep />
           <div style={{ maxWidth: DESIGN_W, margin: '0 auto' }}>
             <Anatomy />

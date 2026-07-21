@@ -5,6 +5,10 @@ import { AnimField, Cursor, Marker, Shimmer } from './shared';
 
 const A = '/landing4/';
 const LOOP = '18.5s linear infinite';
+// Left/right padding that pins content to the centered 1440 grid while the
+// hero itself spans the full viewport (the product frame bleeds to the edge).
+const EDGE_L = 'calc(max(0px, 50% - 720px) + 36px)';
+const EDGE_R = 'calc(max(0px, 50% - 720px) + 48px)';
 const fieldAnim = {
   pulse: `heroFieldPulse ${LOOP}`,
   val: `heroFieldVal ${LOOP}`,
@@ -14,7 +18,7 @@ const fieldAnim = {
 /* ——— nav ——— */
 export function Nav() {
   return (
-    <div style={{ position: 'relative', zIndex: 2, display: 'flex', alignItems: 'center', padding: '18px 48px 18px 36px' }}>
+    <div style={{ position: 'relative', zIndex: 2, display: 'flex', alignItems: 'center', padding: '18px 0', paddingLeft: EDGE_L, paddingRight: EDGE_R }}>
       <div style={{ font: 'var(--dw,600) 22px var(--font-display)', letterSpacing: '-.01em', color: 'var(--ink)', transform: 'translateX(12px)' }}>
         Decimal<span style={{ color: 'var(--accent)' }}>.</span>
       </div>
@@ -473,7 +477,7 @@ export function Hero() {
   return (
     <div style={{ position: 'relative', background: '#FFFFFF', overflow: 'hidden', paddingBottom: 88 }}>
       <Nav />
-      <div style={{ position: 'relative', zIndex: 1, display: 'grid', gridTemplateColumns: '35fr 65fr', gap: 44, alignItems: 'start', padding: '64px 0 0 36px', boxSizing: 'border-box' }}>
+      <div style={{ position: 'relative', zIndex: 1, display: 'grid', gridTemplateColumns: 'minmax(0, 476px) minmax(0, 1fr)', gap: 44, alignItems: 'start', padding: '64px 0 0', paddingLeft: EDGE_L, boxSizing: 'border-box' }}>
         <div style={{ alignSelf: 'stretch', display: 'flex', flexDirection: 'column', padding: '0 0 28px', transform: 'translateX(12px)' }}>
           <h1 style={{ margin: 0, font: 'var(--dw,600) 48px/1.05 var(--font-display)', letterSpacing: '-.02em', color: 'var(--ink)', animation: 'fadeUp .6s ease both' }}>
             <Marker>Self-driving</Marker> <br />Accounts Payable.
