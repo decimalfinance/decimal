@@ -164,7 +164,7 @@ export function Features() {
         <h2 style={{ margin: 0, font: 'var(--dw,600) 40px/1.08 var(--font-display)', letterSpacing: '-.02em', color: 'var(--ink)' }}>
           More than <Marker side="right">payments.</Marker>
         </h2>
-        <div style={{ marginTop: 40, maxWidth: 1040 }}>
+        <div style={{ marginTop: 40 }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 25 }}>
             <FeatureCard
               img={A + 'purplecheck.jpg'} card={<SelfCustodyCard />} title="Self-custodial funds"
