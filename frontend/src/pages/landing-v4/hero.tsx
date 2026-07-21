@@ -2,6 +2,7 @@
 // product screen with its 18.5s bills-list → review → AI-extraction loop.
 import type { CSSProperties, ReactNode } from 'react';
 import { AnimField, Cursor, Marker, Shimmer } from './shared';
+import { FitScale, M_PAD, useNarrow } from './responsive';
 
 const A = '/landing4/';
 const LOOP = '18.5s linear infinite';
@@ -16,19 +17,21 @@ const fieldAnim = {
 };
 
 /* ——— nav ——— */
-export function Nav() {
+export function Nav({ narrow }: { narrow?: boolean }) {
   return (
-    <div style={{ position: 'relative', zIndex: 2, display: 'flex', alignItems: 'center', padding: '18px 0', paddingLeft: EDGE_L, paddingRight: EDGE_R }}>
-      <div style={{ font: 'var(--dw,600) 22px var(--font-display)', letterSpacing: '-.01em', color: 'var(--ink)', transform: 'translateX(12px)' }}>
+    <div style={{ position: 'relative', zIndex: 2, display: 'flex', alignItems: 'center', padding: narrow ? `16px ${M_PAD}px` : '18px 0', paddingLeft: narrow ? M_PAD : EDGE_L, paddingRight: narrow ? M_PAD : EDGE_R }}>
+      <div style={{ font: `var(--dw,600) ${narrow ? 20 : 22}px var(--font-display)`, letterSpacing: '-.01em', color: 'var(--ink)', transform: narrow ? undefined : 'translateX(12px)' }}>
         Decimal<span style={{ color: 'var(--accent)' }}>.</span>
       </div>
-      <div style={{ marginLeft: 'auto', marginRight: 0, display: 'flex', gap: 30, fontSize: 14, color: 'var(--text-muted)', paddingRight: 28 }}>
-        <a href="#how-it-works" style={{ color: 'inherit' }}>How it works</a>
-        <a href="#features" style={{ color: 'inherit' }}>Features</a>
-        <a href="#faq" style={{ color: 'inherit' }}>FAQ</a>
-      </div>
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-        <a className="btn btn-primary" href="/login" style={{ textTransform: 'uppercase' }}>Join the waitlist</a>
+      {!narrow && (
+        <div style={{ marginLeft: 'auto', marginRight: 0, display: 'flex', gap: 30, fontSize: 14, color: 'var(--text-muted)', paddingRight: 28 }}>
+          <a href="#how-it-works" style={{ color: 'inherit' }}>How it works</a>
+          <a href="#features" style={{ color: 'inherit' }}>Features</a>
+          <a href="#faq" style={{ color: 'inherit' }}>FAQ</a>
+        </div>
+      )}
+      <div style={{ marginLeft: narrow ? 'auto' : undefined, display: 'flex', gap: 10, alignItems: 'center' }}>
+        <a className="btn btn-primary" href="/login" style={{ textTransform: 'uppercase', ...(narrow ? { height: 34, padding: '0 14px', fontSize: 11 } : null) }}>Join the waitlist</a>
       </div>
     </div>
   );
@@ -473,38 +476,71 @@ function BillsOverlay() {
 }
 
 /* ——— hero section ——— */
+/* ——— hero copy + cards (shared) ——— */
+function HeroCopy({ narrow }: { narrow: boolean }) {
+  return (
+    <div style={{ alignSelf: 'stretch', display: 'flex', flexDirection: 'column', padding: narrow ? 0 : '0 0 28px', transform: narrow ? undefined : 'translateX(12px)' }}>
+      <h1 style={{ margin: 0, font: `var(--dw,600) ${narrow ? 38 : 48}px/1.05 var(--font-display)`, letterSpacing: '-.02em', color: 'var(--ink)', animation: 'fadeUp .6s ease both' }}>
+        <Marker>Self-driving</Marker> <br />Accounts Payable.
+      </h1>
+      <p style={{ margin: '14px 0 0', fontSize: narrow ? 16 : 15.5, lineHeight: 1.55, maxWidth: narrow ? undefined : 400, color: 'var(--text-muted)', animation: 'fadeUp .6s ease .15s both' }}>
+        Get your vendor bills read, coded to your books, and paid on time, anywhere in the world. You just approve.
+      </p>
+      <div style={{ display: 'flex', gap: 12, marginTop: 22, animation: 'fadeUp .6s ease .3s both' }}>
+        <a className="btn btn-primary" href="/login" style={{ height: 40, padding: '0 20px', fontSize: 13, textTransform: 'uppercase', display: 'inline-flex', alignItems: 'center' }}>Join the waitlist</a>
+      </div>
+      <div style={{ marginTop: narrow ? 28 : 36, flex: 1, display: 'flex', flexDirection: narrow ? 'column' : 'row', gap: 18, alignItems: 'stretch', paddingRight: narrow ? 0 : 10 }}>
+        <ChartBox />
+        <SlackBox />
+      </div>
+    </div>
+  );
+}
+
+/* ——— the product screen (mask + frame) ——— */
+function ProductFrame() {
+  return (
+    <div style={{ position: 'relative', minWidth: 0, alignSelf: 'start', padding: '11px 0 0 11px', boxSizing: 'border-box', animation: 'fadeUp .7s ease .4s both' }}>
+      {/* Art ends flush with the product frame's bottom edge (top overhang only). */}
+      <div style={{ position: 'absolute', top: -17, left: -20, width: 'calc(100% + 35px)', height: 'calc(100% + 17px)', background: 'var(--ink)', WebkitMaskImage: `url('${A}art2-hatch.png')`, maskImage: `url('${A}art2-hatch.png')`, WebkitMaskSize: '100% 100%', maskSize: '100% 100%', pointerEvents: 'none' }} />
+      <div style={{ position: 'relative', boxSizing: 'border-box', background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: '0 24px 70px rgba(10,10,10,.10)', overflow: 'hidden', display: 'grid', gridTemplateColumns: '50px 1fr' }}>
+        <Sidebar />
+        <div style={{ position: 'relative', minWidth: 0 }}>
+          <ReviewScreen />
+          <BillsOverlay />
+          <Cursor style={{ position: 'absolute', top: 14, left: 24, zIndex: 20, filter: 'drop-shadow(0 1px 2px rgba(0,0,0,.3))', animation: `b2Cur ${LOOP}` }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Hero() {
+  const narrow = useNarrow();
+
+  if (narrow) {
+    return (
+      <div style={{ position: 'relative', background: '#FFFFFF', overflow: 'hidden', paddingBottom: 48 }}>
+        <Nav narrow />
+        <div style={{ padding: `28px ${M_PAD}px 0` }}>
+          <HeroCopy narrow />
+        </div>
+        {/* product screen as a scaled, full-width preview (natural width 900) */}
+        <div style={{ marginTop: 36, padding: `0 ${M_PAD}px` }}>
+          <FitScale w={900}>
+            <ProductFrame />
+          </FitScale>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ position: 'relative', background: '#FFFFFF', overflow: 'hidden', paddingBottom: 88 }}>
       <Nav />
       <div style={{ position: 'relative', zIndex: 1, display: 'grid', gridTemplateColumns: 'minmax(0, 476px) minmax(0, 1fr)', gap: 44, alignItems: 'start', padding: '64px 0 0', paddingLeft: EDGE_L, boxSizing: 'border-box' }}>
-        <div style={{ alignSelf: 'stretch', display: 'flex', flexDirection: 'column', padding: '0 0 28px', transform: 'translateX(12px)' }}>
-          <h1 style={{ margin: 0, font: 'var(--dw,600) 48px/1.05 var(--font-display)', letterSpacing: '-.02em', color: 'var(--ink)', animation: 'fadeUp .6s ease both' }}>
-            <Marker>Self-driving</Marker> <br />Accounts Payable.
-          </h1>
-          <p style={{ margin: '14px 0 0', fontSize: 15.5, lineHeight: 1.55, maxWidth: 400, color: 'var(--text-muted)', animation: 'fadeUp .6s ease .15s both' }}>
-            Get your vendor bills read, coded to your books, and paid on time, anywhere in the world. You just approve.
-          </p>
-          <div style={{ display: 'flex', gap: 12, marginTop: 22, animation: 'fadeUp .6s ease .3s both' }}>
-            <a className="btn btn-primary" href="/login" style={{ height: 38, padding: '0 18px', fontSize: 13, textTransform: 'uppercase', display: 'inline-flex', alignItems: 'center' }}>Join the waitlist</a>
-          </div>
-          <div style={{ marginTop: 36, flex: 1, display: 'flex', flexDirection: 'row', gap: 18, alignItems: 'stretch', paddingRight: 10 }}>
-            <ChartBox />
-            <SlackBox />
-          </div>
-        </div>
-        <div style={{ position: 'relative', minWidth: 0, alignSelf: 'start', padding: '11px 0 0 11px', boxSizing: 'border-box', animation: 'fadeUp .7s ease .4s both' }}>
-          {/* Art ends flush with the product frame's bottom edge (top overhang only). */}
-          <div style={{ position: 'absolute', top: -17, left: -20, width: 'calc(100% + 35px)', height: 'calc(100% + 17px)', background: 'var(--ink)', WebkitMaskImage: `url('${A}art2-hatch.png')`, maskImage: `url('${A}art2-hatch.png')`, WebkitMaskSize: '100% 100%', maskSize: '100% 100%', pointerEvents: 'none' }} />
-          <div style={{ position: 'relative', boxSizing: 'border-box', background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: '0 24px 70px rgba(10,10,10,.10)', overflow: 'hidden', display: 'grid', gridTemplateColumns: '50px 1fr' }}>
-            <Sidebar />
-            <div style={{ position: 'relative', minWidth: 0 }}>
-              <ReviewScreen />
-              <BillsOverlay />
-              <Cursor style={{ position: 'absolute', top: 14, left: 24, zIndex: 20, filter: 'drop-shadow(0 1px 2px rgba(0,0,0,.3))', animation: `b2Cur ${LOOP}` }} />
-            </div>
-          </div>
-        </div>
+        <HeroCopy narrow={false} />
+        <ProductFrame />
       </div>
     </div>
   );

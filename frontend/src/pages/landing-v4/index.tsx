@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Hero } from './hero';
 import { Anatomy } from './anatomy';
 import { Faq, Features, FinalCta, Footer } from './sections';
+import { MOBILE_BP } from './responsive';
 import './landing4.css';
 
 const DESIGN_W = 1440;
@@ -23,7 +24,11 @@ export function LandingPage() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  const scale = Math.min(1, vw / DESIGN_W);
+  // Below MOBILE_BP the page reflows to a real single-column mobile layout, so we
+  // stop uniformly shrinking the 1440 sheet there. Between MOBILE_BP and the design
+  // width we still scale the desktop sheet to fit (tablet), which keeps it faithful.
+  const scaled = vw < DESIGN_W && vw >= MOBILE_BP;
+  const scale = scaled ? vw / DESIGN_W : 1;
 
   useLayoutEffect(() => {
     const el = sheetRef.current;
@@ -36,8 +41,6 @@ export function LandingPage() {
   useEffect(() => {
     document.title = 'Decimal — Self-driving Accounts Payable';
   }, []);
-
-  const scaled = scale < 1;
   return (
     <div className="dec l4" data-style="print" style={{ minHeight: '100vh', overflowX: 'clip' }}>
       <div style={scaled ? { height: contentH * scale || undefined, overflow: 'hidden' } : undefined}>

@@ -6,39 +6,42 @@ import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { AnimField, Av, Cursor, Marker, Shimmer } from './shared';
 import { PayGlobe } from './globe';
+import { FitScale, M_PAD, useNarrow } from './responsive';
 
 const A = '/landing4/';
 
 /* ═══════════ bridge header ═══════════ */
-function Bridge() {
+function Bridge({ narrow }: { narrow: boolean }) {
   return (
-    <div style={{ padding: '52px 64px 44px', display: 'grid', gridTemplateColumns: '1.1fr 1fr', gap: 56, alignItems: 'center' }}>
+    <div style={{ padding: narrow ? `40px ${M_PAD}px 8px` : '52px 64px 44px', display: narrow ? 'block' : 'grid', gridTemplateColumns: '1.1fr 1fr', gap: 56, alignItems: 'center' }}>
       <div>
-        <h2 style={{ margin: 0, font: 'var(--dw,600) 40px/1.08 var(--font-display)', letterSpacing: '-.02em', color: 'var(--ink)' }}>
+        <h2 style={{ margin: 0, font: `var(--dw,600) ${narrow ? 34 : 40}px/1.08 var(--font-display)`, letterSpacing: '-.02em', color: 'var(--ink)' }}>
           <Marker>Anatomy</Marker> of a bill.
         </h2>
-        <p style={{ margin: '14px 0 0', fontSize: 14.5, lineHeight: 1.55, maxWidth: 460, color: 'var(--text-muted)' }}>
+        <p style={{ margin: '14px 0 0', fontSize: narrow ? 15 : 14.5, lineHeight: 1.55, maxWidth: 460, color: 'var(--text-muted)' }}>
           A bill gets read, approved, paid, and booked. Today, every one of them is your team's manual work. Decimal takes all four, and leaves you a single decision: approve it, or don't.
         </p>
       </div>
-      <div style={{ position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'center', alignSelf: 'stretch', width: 600, height: 161, marginTop: -22 }}>
-        <div style={{ width: 454, maxWidth: 360, height: 180, background: 'var(--ink)', WebkitMaskImage: `url('${A}skull-mask.png')`, maskImage: `url('${A}skull-mask.png')`, WebkitMaskSize: 'contain', maskSize: 'contain', WebkitMaskRepeat: 'no-repeat', maskRepeat: 'no-repeat', WebkitMaskPosition: 'center', maskPosition: 'center' }} />
-      </div>
+      {!narrow && (
+        <div style={{ position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'center', alignSelf: 'stretch', width: 600, height: 161, marginTop: -22 }}>
+          <div style={{ width: 454, maxWidth: 360, height: 180, background: 'var(--ink)', WebkitMaskImage: `url('${A}skull-mask.png')`, maskImage: `url('${A}skull-mask.png')`, WebkitMaskSize: 'contain', maskSize: 'contain', WebkitMaskRepeat: 'no-repeat', maskRepeat: 'no-repeat', WebkitMaskPosition: 'center', maskPosition: 'center' }} />
+        </div>
+      )}
     </div>
   );
 }
 
 /* ═══════════ plate copy blocks ═══════════ */
-function PlateCopy({ title, blocks, padding }: { title: string; blocks: Array<{ mark: string; body: string; padTop?: number }>; padding: string }) {
+function PlateCopy({ title, blocks, padding, narrow }: { title: string; blocks: Array<{ mark: string; body: string; padTop?: number }>; padding: string; narrow?: boolean }) {
   return (
-    <div style={{ padding, display: 'flex', flexDirection: 'column' }}>
-      <h3 style={{ margin: 0, font: 'var(--dw,600) 30px/1.12 var(--font-display)', letterSpacing: '-.015em', color: 'var(--ink)' }}>{title}</h3>
+    <div style={{ padding: narrow ? `28px ${M_PAD}px 4px` : padding, display: 'flex', flexDirection: 'column' }}>
+      <h3 style={{ margin: 0, font: `var(--dw,600) ${narrow ? 26 : 30}px/1.12 var(--font-display)`, letterSpacing: '-.015em', color: 'var(--ink)' }}>{title}</h3>
       {blocks.map((b) => (
-        <div key={b.mark} style={{ marginTop: 'auto', paddingTop: b.padTop ?? 56 }}>
-          <div style={{ font: 'var(--dw,600) 21px/1.18 var(--font-display)', letterSpacing: '-.01em', color: 'var(--ink)' }}>
+        <div key={b.mark} style={{ marginTop: narrow ? 0 : 'auto', paddingTop: narrow ? 18 : (b.padTop ?? 56) }}>
+          <div style={{ font: `var(--dw,600) ${narrow ? 19 : 21}px/1.18 var(--font-display)`, letterSpacing: '-.01em', color: 'var(--ink)' }}>
             <Marker>{b.mark}</Marker>
           </div>
-          <p style={{ margin: '13px 0 0', fontSize: 12, lineHeight: 1.6, color: 'var(--text-muted)' }}>{b.body}</p>
+          <p style={{ margin: '13px 0 0', fontSize: narrow ? 13.5 : 12, lineHeight: 1.6, color: 'var(--text-muted)' }}>{b.body}</p>
         </div>
       ))}
     </div>
@@ -73,9 +76,9 @@ function P1Th({ children, right }: { children: ReactNode; right?: boolean }) {
   return <th className="field-label" style={{ fontSize: 8.5, textAlign: right ? 'right' : 'left', border: '1px solid var(--border)', background: 'var(--ink)', color: '#FFFFFF', padding: '4px 8px', fontWeight: 500 }}>{children}</th>;
 }
 
-function Plate01Visual() {
+function Plate01Visual({ narrow }: { narrow?: boolean }) {
   return (
-    <div style={{ position: 'relative', background: 'var(--band)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', margin: '36px 36px 36px 140px', padding: '40px 36px' }}>
+    <div style={{ position: 'relative', background: 'var(--band)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', margin: narrow ? 0 : '36px 36px 36px 140px', padding: '40px 36px' }}>
       <div style={{ position: 'relative', width: '64%', border: 'none', backgroundColor: 'var(--bg-surface)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', minHeight: 205 }}>
         <svg aria-hidden="true" style={{ position: 'absolute', inset: 1, width: 'calc(100% - 2px)', height: 'calc(100% - 2px)', pointerEvents: 'none', overflow: 'visible' }} stroke="color-mix(in srgb, var(--ink) 70%, #FFFFFF)" strokeWidth="2" strokeLinecap="square">
           <line x1="0%" y1="0%" x2="100%" y2="0%" pathLength={608} strokeDasharray="8 4" />
@@ -414,7 +417,7 @@ function ApprovalTimeline() {
   );
 }
 
-function Plate02Visual() {
+function Plate02Visual({ narrow }: { narrow?: boolean }) {
   const [phase, setPhase] = useState<'flow' | 'timeline'>('flow');
   useEffect(() => {
     // flow (10s) -> timeline (12s) -> loop, no blank gap
@@ -422,7 +425,7 @@ function Plate02Visual() {
     return () => clearTimeout(t);
   }, [phase]);
   return (
-    <div style={{ position: 'relative', width: 832, height: 703, margin: '36px auto 36px 64px' }}>
+    <div style={{ position: 'relative', width: 832, height: 703, margin: narrow ? 0 : '36px auto 36px 64px' }}>
       {phase === 'flow' ? <FlowBuilder key="flow" /> : <ApprovalTimeline key="timeline" />}
     </div>
   );
@@ -440,12 +443,12 @@ const RUN_ROWS: RunRow[] = [
   { flag: 'us', vendor: 'Lumen Cloud', country: 'United States', amount: '$2,940', chk: 6 },
 ];
 
-function Plate03Visual() {
+function Plate03Visual({ narrow }: { narrow?: boolean }) {
   // Phase-lock: animation position ≡ document time mod 16s, matching the globe.
   const gbd = useMemo(() => `-${Math.round(((document.timeline?.currentTime as number) || 0) % 16000)}ms`, []);
   const d = (name: string) => ({ animation: `${name} 16s linear infinite`, animationDelay: gbd });
   return (
-    <div style={{ position: 'relative', background: 'var(--band)', padding: '20px 24px', width: 810, boxSizing: 'border-box', margin: '36px auto' }}>
+    <div style={{ position: 'relative', background: 'var(--band)', padding: '20px 24px', width: 810, boxSizing: 'border-box', margin: narrow ? 0 : '36px auto' }}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 450px', gap: 0, background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
         <div style={{ borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', background: 'var(--ink)', color: '#fff' }}>
@@ -496,47 +499,70 @@ function Plate03Visual() {
 }
 
 /* ═══════════ section ═══════════ */
+const COPY_01 = {
+  title: 'AI extraction and coding',
+  padding: '40px 48px 40px 64px',
+  blocks: [{
+    mark: 'Zero manual entry',
+    body: "Forward a bill or drop in a PDF. A vision model reads it the way a person would, pulling every field and every line item into structured data and checking it against the document's own totals. Each line is coded to your chart of accounts, and it learns every vendor as it goes, so the next bill lands already coded.",
+  }],
+};
+const COPY_02 = {
+  title: 'Approval workflows, built and enforced',
+  padding: '40px 64px 40px 40px',
+  blocks: [
+    { mark: 'Any complexity', padTop: 40, body: 'Build the exact path each bill takes: route by amount, vendor, or category, branch on conditions, require two signatures or any one of a group, enforce separation of duties. However your company approves a bill, the engine runs it. Changing the policy later? Describe it in plain words and Decimal redraws the flow.' },
+    { mark: 'Routed and recorded', padTop: 40, body: 'Once your flow is set, every bill runs it automatically: routed to the right people, in the right order, and chased until it clears. Every comment, question, and sign-off is captured on the bill and kept, so months later you can see exactly who approved what, and why.' },
+  ],
+};
+const COPY_03 = {
+  title: 'Cross-border payments',
+  padding: '40px 48px 40px 64px',
+  blocks: [{
+    mark: 'In their currency', padTop: 40,
+    body: 'Pay a vendor in any country, or a whole run of them at once, each in their own currency at a rate you can see. No correspondent banks, no week-long wire, no hidden markup.',
+  }],
+};
+
+// One stacked plate for mobile: copy above a scaled-to-fit visual preview.
+function MobilePlate({ copy, w, children }: { copy: typeof COPY_01; w: number; children: ReactNode }) {
+  return (
+    <div>
+      <PlateCopy narrow {...copy} />
+      <div style={{ padding: `10px ${M_PAD}px 20px` }}>
+        <FitScale w={w}>{children}</FitScale>
+      </div>
+    </div>
+  );
+}
+
 export function Anatomy() {
+  const narrow = useNarrow();
+
+  if (narrow) {
+    return (
+      <div id="how-it-works" style={{ background: '#FFFFFF' }}>
+        <Bridge narrow />
+        <MobilePlate copy={COPY_01} w={620}><Plate01Visual narrow /></MobilePlate>
+        <MobilePlate copy={COPY_02} w={832}><Plate02Visual narrow /></MobilePlate>
+        <MobilePlate copy={COPY_03} w={810}><Plate03Visual narrow /></MobilePlate>
+      </div>
+    );
+  }
+
   return (
     <div id="how-it-works" style={{ background: '#FFFFFF' }}>
-      <Bridge />
+      <Bridge narrow={false} />
       <div style={{ display: 'grid', gridTemplateColumns: '30fr 70fr' }}>
-        <PlateCopy
-          title="AI extraction and coding"
-          padding="40px 48px 40px 64px"
-          blocks={[{
-            mark: 'Zero manual entry',
-            body: "Forward a bill or drop in a PDF. A vision model reads it the way a person would, pulling every field and every line item into structured data and checking it against the document's own totals. Each line is coded to your chart of accounts, and it learns every vendor as it goes, so the next bill lands already coded.",
-          }]}
-        />
+        <PlateCopy {...COPY_01} />
         <Plate01Visual />
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '65fr 35fr' }}>
         <Plate02Visual />
-        <PlateCopy
-          title="Approval workflows, built and enforced"
-          padding="40px 64px 40px 40px"
-          blocks={[
-            {
-              mark: 'Any complexity', padTop: 40,
-              body: 'Build the exact path each bill takes: route by amount, vendor, or category, branch on conditions, require two signatures or any one of a group, enforce separation of duties. However your company approves a bill, the engine runs it. Changing the policy later? Describe it in plain words and Decimal redraws the flow.',
-            },
-            {
-              mark: 'Routed and recorded', padTop: 40,
-              body: 'Once your flow is set, every bill runs it automatically: routed to the right people, in the right order, and chased until it clears. Every comment, question, and sign-off is captured on the bill and kept, so months later you can see exactly who approved what, and why.',
-            },
-          ]}
-        />
+        <PlateCopy {...COPY_02} />
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '34fr 66fr' }}>
-        <PlateCopy
-          title="Cross-border payments"
-          padding="40px 48px 40px 64px"
-          blocks={[{
-            mark: 'In their currency', padTop: 40,
-            body: 'Pay a vendor in any country, or a whole run of them at once, each in their own currency at a rate you can see. No correspondent banks, no week-long wire, no hidden markup.',
-          }]}
-        />
+        <PlateCopy {...COPY_03} />
         <Plate03Visual />
       </div>
     </div>

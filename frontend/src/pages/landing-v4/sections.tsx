@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { Marker, PersonIcon } from './shared';
+import { M_PAD, useNarrow } from './responsive';
 
 const A = '/landing4/';
 const monoLabel: CSSProperties = { font: '400 9px/1 var(--font-mono)', letterSpacing: '.16em', color: 'var(--text-muted)' };
@@ -158,14 +159,15 @@ function FeatureCard({ img, imgScale, card, title, body }: { img: string; imgSca
 }
 
 export function Features() {
+  const narrow = useNarrow();
   return (
-    <div id="features" style={{ padding: '56px 64px', backgroundColor: 'var(--bg-surface)' }}>
+    <div id="features" style={{ padding: narrow ? `44px ${M_PAD}px` : '56px 64px', backgroundColor: 'var(--bg-surface)' }}>
       <div style={{ maxWidth: 1240, margin: '0 auto' }}>
-        <h2 style={{ margin: 0, font: 'var(--dw,600) 40px/1.08 var(--font-display)', letterSpacing: '-.02em', color: 'var(--ink)' }}>
+        <h2 style={{ margin: 0, font: `var(--dw,600) ${narrow ? 32 : 40}px/1.08 var(--font-display)`, letterSpacing: '-.02em', color: 'var(--ink)' }}>
           More than <Marker side="right">payments.</Marker>
         </h2>
-        <div style={{ marginTop: 40 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 25 }}>
+        <div style={{ marginTop: narrow ? 28 : 40 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: narrow ? '1fr' : 'repeat(3,1fr)', gap: narrow ? 20 : 25 }}>
             <FeatureCard
               img={A + 'purplecheck.jpg'} card={<SelfCustodyCard />} title="Self-custodial funds"
               body="Your funds stay in an account only you control. Decimal prepares every payment, but it can't move a dollar on its own, and no one can override that."
@@ -197,11 +199,12 @@ const FAQ_ITEMS: Array<{ q: string; a: string }> = [
 
 export function Faq() {
   const [open, setOpen] = useState<number | null>(0);
+  const narrow = useNarrow();
   return (
-    <div id="faq" style={{ padding: '56px 64px', backgroundColor: 'var(--bg-surface)' }}>
-      <div style={{ maxWidth: 1240, margin: '0 auto', display: 'grid', gridTemplateColumns: '0.9fr 1.3fr', gap: 72, alignItems: 'start' }}>
+    <div id="faq" style={{ padding: narrow ? `44px ${M_PAD}px` : '56px 64px', backgroundColor: 'var(--bg-surface)' }}>
+      <div style={{ maxWidth: 1240, margin: '0 auto', display: 'grid', gridTemplateColumns: narrow ? '1fr' : '0.9fr 1.3fr', gap: narrow ? 24 : 72, alignItems: 'start' }}>
         <div>
-          <h2 style={{ margin: 0, font: 'var(--dw,600) 38px/1.1 var(--font-display)', letterSpacing: '-.02em', color: 'var(--ink)' }}>
+          <h2 style={{ margin: 0, font: `var(--dw,600) ${narrow ? 30 : 38}px/1.1 var(--font-display)`, letterSpacing: '-.02em', color: 'var(--ink)' }}>
             Frequently asked <Marker side="right">questions.</Marker>
           </h2>
         </div>
@@ -230,12 +233,13 @@ export function Faq() {
 
 /* ═══════════ final CTA ═══════════ */
 export function FinalCta() {
+  const narrow = useNarrow();
   return (
-    <div style={{ padding: '104px 64px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', backgroundColor: '#5C1F33' }}>
-      <h2 style={{ margin: 0, maxWidth: 820, font: 'var(--dw,600) 56px/1.08 var(--font-display)', letterSpacing: '-.02em', color: 'var(--bg-canvas)' }}>
+    <div style={{ padding: narrow ? `64px ${M_PAD}px` : '104px 64px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', backgroundColor: '#5C1F33' }}>
+      <h2 style={{ margin: 0, maxWidth: 820, font: `var(--dw,600) ${narrow ? 34 : 56}px/1.08 var(--font-display)`, letterSpacing: '-.02em', color: 'var(--bg-canvas)' }}>
         Put your accounts payable on autopilot.
       </h2>
-      <p style={{ margin: '10px 0 0', fontSize: 16, lineHeight: 1.55, color: 'var(--bg-canvas)' }}>
+      <p style={{ margin: '10px 0 0', fontSize: narrow ? 15 : 16, lineHeight: 1.55, color: 'var(--bg-canvas)' }}>
         Decimal reads, codes, and pays every vendor bill, at home or overseas. You just approve.
       </p>
       <a
@@ -251,17 +255,18 @@ export function FinalCta() {
 
 /* ═══════════ footer — one slim row, no CTA ═══════════ */
 export function Footer() {
+  const narrow = useNarrow();
   return (
-    <div style={{ padding: '14px 48px', background: '#FFFFFF', display: 'flex', alignItems: 'center', gap: 24 }}>
+    <div style={{ padding: narrow ? `16px ${M_PAD}px` : '14px 48px', background: '#FFFFFF', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: narrow ? '8px 16px' : 24 }}>
       <div style={{ font: 'var(--dw,600) 15px var(--font-display)', letterSpacing: '-.01em', color: 'var(--ink)' }}>
         Decimal<span style={{ color: 'var(--accent)' }}>.</span>
       </div>
-      <div style={{ display: 'flex', gap: 20, fontSize: 12.5, color: 'var(--text-muted)' }}>
+      <div style={{ display: 'flex', gap: narrow ? 16 : 20, fontSize: 12.5, color: 'var(--text-muted)' }}>
         <a href="#how-it-works" style={{ color: 'inherit' }}>How it works</a>
         <a href="#features" style={{ color: 'inherit' }}>Features</a>
         <a href="#faq" style={{ color: 'inherit' }}>FAQ</a>
       </div>
-      <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-faint)' }}>© {new Date().getFullYear()} Decimal. All rights reserved.</span>
+      <span style={{ marginLeft: narrow ? 0 : 'auto', flexBasis: narrow ? '100%' : 'auto', fontSize: 12, color: 'var(--text-faint)' }}>© {new Date().getFullYear()} Decimal. All rights reserved.</span>
     </div>
   );
 }
