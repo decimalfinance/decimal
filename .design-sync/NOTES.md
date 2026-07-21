@@ -22,5 +22,30 @@
   whenever styles/decimal/*.css classes change (grep each named class).
 - Dark theme SHIPS inside tokens.css ([data-theme="dark"] block) — activation is the data-theme
   attribute on an ancestor. app-dark.css is legacy/non-decimal surfaces only; not needed.
-- Only 5 React components exist; the real system is the class vocabulary — new app components
-  (e.g. future flow-builder canvas parts) should be added to ds-entry.ts + componentSrcMap + previews.
+- Only 5 React *primitives* exist; the real system is the class vocabulary — new components
+  should be added to ds-entry.ts + componentSrcMap + previews.
+
+## Screen mocks (2026-07-16)
+- `frontend/src/dec/mocks.tsx` holds 4 static reference SCREENS (BillList, BillReview, FlowCanvas,
+  PaymentTracker) lifted from the real pages (Bills / InvoiceReview / FlowBuilder / PaymentDetail).
+  It is **design-sync-only** — exported via ds-entry.ts, NOT imported by the app. Seeded fake data,
+  no hooks. Purpose: the landing-page design agent forks real product screens.
+- Grouped under **"Screens"** via `cfg.docsMap` → `.design-sync/mock-docs/<Name>.md` (frontmatter
+  `category: Screens`). Screens use `cfg.overrides.<Name>: {cardMode: single, viewport: WxH}` — full
+  screens need explicit viewports (FlowCanvas is wide: 1880x600 to show the whole pipeline+terminal).
+- **GOTCHA — the `.pc` parent:** flow-builder classes (`qcard`, `stage-div`, `lane-end`, `received`,
+  `terminal`, `tree-branches`, `branch`, `q-yes/q-no`, `conn`, `spine`, `zbtn`…) are scoped
+  `.dec .pc .*` — they render UNSTYLED unless an ancestor has class `pc`. FlowCanvas wraps its canvas
+  in `<div className="pc">`. (The real page uses `<div className="rev-shell pc">`.)
+- **Grouping side effect:** introducing `docsMap` categories moved the 5 primitives from group "dec"
+  to the default **"misc"**, and the mocks to "screens". Harmless (re-paths on upload); to rename
+  "misc" → e.g. "Primitives" would need category docs for the primitives (risks their synthesized
+  .prompt.md — left as-is).
+
+## Re-sync toolchain
+- **macOS playwright cache is `~/Library/Caches/ms-playwright`, NOT `~/.cache/ms-playwright`** (the
+  skill's Linux path). Chromium is already installed there (build 1228, playwright 1.61.1, launches OK).
+  `ls ~/.cache/...` returning empty ≠ "not installed" on this machine.
+- `projectId` repointed 2026-07-16 from `175be9bd…` ("Decimal Design System") to **`89bf71fd…`
+  ("Design System")** — the project Zaid's Claude Design chat is actually linked to. `175be9bd…` is a
+  now-redundant duplicate (also fully synced); can be deleted.

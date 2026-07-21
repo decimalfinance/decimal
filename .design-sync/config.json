@@ -1,5 +1,5 @@
 {
-  "projectId": "175be9bd-80a0-4e4a-986e-851d3556e8b3",
+  "projectId": "89bf71fd-9488-4592-aca3-39e3ae93efee",
   "shape": "package",
   "pkg": "decimal-frontend",
   "globalName": "DecimalDS",
@@ -14,7 +14,24 @@
     "Pill": "src/dec/primitives.tsx",
     "SLPill": "src/dec/primitives.tsx",
     "OriginPill": "src/dec/primitives.tsx",
-    "Ico": "src/dec/icons.tsx"
+    "Ico": "src/dec/icons.tsx",
+    "BillList": "src/dec/mocks.tsx",
+    "BillReview": "src/dec/mocks.tsx",
+    "FlowCanvas": "src/dec/mocks.tsx",
+    "PaymentTracker": "src/dec/mocks.tsx"
+  },
+  "docsMap": {
+    "BillList": "../.design-sync/mock-docs/BillList.md",
+    "BillReview": "../.design-sync/mock-docs/BillReview.md",
+    "FlowCanvas": "../.design-sync/mock-docs/FlowCanvas.md",
+    "PaymentTracker": "../.design-sync/mock-docs/PaymentTracker.md"
+  },
+  "overrides": {
+    "PageHead": { "cardMode": "column" },
+    "BillList": { "cardMode": "single", "viewport": "1240x760" },
+    "BillReview": { "cardMode": "single", "viewport": "1160x904" },
+    "FlowCanvas": { "cardMode": "single", "viewport": "1880x600" },
+    "PaymentTracker": { "cardMode": "single", "viewport": "820x720" }
   },
   "buildCmd": "bash .design-sync/build-css.sh",
   "readmeHeader": ".design-sync/conventions.md"
