@@ -4,7 +4,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Hero } from './hero';
 import { Anatomy } from './anatomy';
-import { Faq, Features, FinalCta } from './sections';
+import { Faq, Features, FinalCta, Footer } from './sections';
 import './landing4.css';
 
 const DESIGN_W = 1440;
@@ -57,6 +57,7 @@ export function LandingPage() {
           <Sep />
           <Faq />
           <FinalCta />
+          <Footer />
         </div>
       </div>
     </div>

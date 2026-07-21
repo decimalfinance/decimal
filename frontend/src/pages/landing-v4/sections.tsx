@@ -249,4 +249,19 @@ export function FinalCta() {
   );
 }
 
-/* Footer intentionally omitted — the page ends on the CTA band. */
+/* ═══════════ footer — one slim row, no CTA ═══════════ */
+export function Footer() {
+  return (
+    <div style={{ padding: '14px 48px', background: '#FFFFFF', display: 'flex', alignItems: 'center', gap: 24 }}>
+      <div style={{ font: 'var(--dw,600) 15px var(--font-display)', letterSpacing: '-.01em', color: 'var(--ink)' }}>
+        Decimal<span style={{ color: 'var(--accent)' }}>.</span>
+      </div>
+      <div style={{ display: 'flex', gap: 20, fontSize: 12.5, color: 'var(--text-muted)' }}>
+        <a href="#how-it-works" style={{ color: 'inherit' }}>How it works</a>
+        <a href="#features" style={{ color: 'inherit' }}>Features</a>
+        <a href="#faq" style={{ color: 'inherit' }}>FAQ</a>
+      </div>
+      <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-faint)' }}>© {new Date().getFullYear()} Decimal. All rights reserved.</span>
+    </div>
+  );
+}

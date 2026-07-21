@@ -20,6 +20,9 @@
   background: #FFFFFF;
 }
 
+/* Text selection uses the marker-highlight pink. */
+.l4 ::selection { background: #F9C6D0; color: var(--ink); }
+
 /* print-style mode (design: .dec[data-style="print"]) */
 .l4 .btn { font-family: var(--btn-font); border-radius: 2px; text-transform: uppercase; letter-spacing: .06em; font-size: 12px; font-weight: 600; }
 .l4 h1, .l4 h2 { color: var(--ink); }
