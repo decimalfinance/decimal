@@ -4,10 +4,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Hero } from './hero';
 import { Anatomy } from './anatomy';
-import { Faq, Features, FinalCta, Footer } from './sections';
+import { Faq, Features, FinalCta } from './sections';
 import './landing4.css';
 
 const DESIGN_W = 1440;
+
+/** Full-bleed hairline between page sections. */
+const Sep = () => <div style={{ borderTop: '1px solid var(--border)' }} />;
 
 export function LandingPage() {
   const [vw, setVw] = useState(() => window.innerWidth);
@@ -45,13 +48,15 @@ export function LandingPage() {
           <div style={{ maxWidth: DESIGN_W, margin: '0 auto' }}>
             <Hero />
           </div>
+          <Sep />
           <div style={{ maxWidth: DESIGN_W, margin: '0 auto' }}>
             <Anatomy />
           </div>
+          <Sep />
           <Features />
+          <Sep />
           <Faq />
           <FinalCta />
-          <Footer />
         </div>
       </div>
     </div>

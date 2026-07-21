@@ -471,7 +471,7 @@ function BillsOverlay() {
 /* ——— hero section ——— */
 export function Hero() {
   return (
-    <div style={{ position: 'relative', background: '#FFFFFF', overflow: 'hidden' }}>
+    <div style={{ position: 'relative', background: '#FFFFFF', overflow: 'hidden', paddingBottom: 88 }}>
       <Nav />
       <div style={{ position: 'relative', zIndex: 1, display: 'grid', gridTemplateColumns: '35fr 65fr', gap: 44, alignItems: 'start', padding: '64px 0 0 36px', boxSizing: 'border-box' }}>
         <div style={{ alignSelf: 'stretch', display: 'flex', flexDirection: 'column', padding: '0 0 28px', transform: 'translateX(12px)' }}>

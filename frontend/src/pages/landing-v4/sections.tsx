@@ -249,22 +249,4 @@ export function FinalCta() {
   );
 }
 
-/* ═══════════ footer (not designed — minimal) ═══════════ */
-export function Footer() {
-  return (
-    <div style={{ padding: '28px 48px', background: '#FFFFFF', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 30 }}>
-      <div style={{ font: 'var(--dw,600) 18px var(--font-display)', letterSpacing: '-.01em', color: 'var(--ink)' }}>
-        Decimal<span style={{ color: 'var(--accent)' }}>.</span>
-      </div>
-      <div style={{ display: 'flex', gap: 26, fontSize: 13, color: 'var(--text-muted)' }}>
-        <a href="#how-it-works" style={{ color: 'inherit' }}>How it works</a>
-        <a href="#features" style={{ color: 'inherit' }}>Features</a>
-        <a href="#faq" style={{ color: 'inherit' }}>FAQ</a>
-      </div>
-      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 18 }}>
-        <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>© {new Date().getFullYear()} Decimal. All rights reserved.</span>
-        <a className="btn btn-primary btn-sm" href="/login" style={{ textTransform: 'uppercase' }}>Join the waitlist</a>
-      </div>
-    </div>
-  );
-}
+/* Footer intentionally omitted — the page ends on the CTA band. */

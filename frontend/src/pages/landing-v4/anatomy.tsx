@@ -500,7 +500,7 @@ export function Anatomy() {
   return (
     <div id="how-it-works" style={{ background: '#FFFFFF' }}>
       <Bridge />
-      <div style={{ borderTop: '1px solid var(--border)', display: 'grid', gridTemplateColumns: '30fr 70fr' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '30fr 70fr' }}>
         <PlateCopy
           title="AI extraction and coding"
           padding="40px 48px 40px 64px"
@@ -511,7 +511,7 @@ export function Anatomy() {
         />
         <Plate01Visual />
       </div>
-      <div style={{ borderTop: '1px solid var(--border)', display: 'grid', gridTemplateColumns: '65fr 35fr' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '65fr 35fr' }}>
         <Plate02Visual />
         <PlateCopy
           title="Approval workflows, built and enforced"
@@ -528,7 +528,7 @@ export function Anatomy() {
           ]}
         />
       </div>
-      <div style={{ borderTop: '1px solid var(--border)', display: 'grid', gridTemplateColumns: '34fr 66fr' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '34fr 66fr' }}>
         <PlateCopy
           title="Cross-border payments"
           padding="40px 48px 40px 64px"
