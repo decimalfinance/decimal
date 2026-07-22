@@ -62,15 +62,7 @@ then one line on Decimal, then the ask. No hype, no em-dashes.
 
 **Ask:** pre-application feedback / relationship for R4 (Sep 15).
 
-## 7. Entrepreneur First (EF) — Bangalore
-
-> Hi ⟨name⟩ — I'm a solo technical founder in ⟨city⟩ who has already shipped a full AP product, and
-> EF's solo-first, Bangalore-based model fits well. Decimal: AI accounts payable that's built to pay
-> vendors globally. Would love to talk to someone on the EF India team before I apply. Open to a quick call?
-
-**Ask:** intro to EF India team.
-
-## 8. a16z crypto (CSX / speedrun network)
+## 7. a16z crypto (CSX / speedrun network)
 
 > Hi ⟨name⟩ — building Decimal, AI-native accounts payable moving toward self-custodial cross-border
 > vendor settlement. The AP core is shipped; the payment layer is the next build, done from first
@@ -91,7 +83,6 @@ then one line on Decimal, then the ask. No hype, no em-dashes.
 | 4 | Orange DAO | ⟨ ⟩ | | vouch/intro | ☐ | | |
 | 5 | Colosseum builder | ⟨ ⟩ | | Colosseum intro | ☐ | | |
 | 6 | Fabric | ⟨ ⟩ | | R4 feedback | ☐ | | |
-| 7 | EF Bangalore | ⟨ ⟩ | | EF intro | ☐ | | |
-| 8 | a16z crypto | ⟨ ⟩ | | CSX intro | ☐ | | |
+| 7 | a16z crypto | ⟨ ⟩ | | CSX intro | ☐ | | |
 
-Target: **≥8 sent this week**, Superteam warm intro first. Add rows as Zaid surfaces more contacts.
+Target: **≥7 sent this week**, Superteam warm intro first. Add rows as Zaid surfaces more contacts.
