@@ -13,7 +13,7 @@ Plain voice, no em-dashes in final copy, no crypto jargon to a business buyer (a
 ## 1. One-liner (three lengths)
 
 **One line (what we make):**
-> Decimal is AI-powered accounts payable software for businesses that pay vendors, locally and globally.
+> Decimal is AI-native accounts payable software for businesses that pay vendors, locally and globally.
 
 **50 words:**
 > Decimal is AI-native accounts payable software. It reads every invoice, codes it to your books,
