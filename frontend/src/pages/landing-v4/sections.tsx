@@ -144,9 +144,9 @@ function LedgerSyncCard() {
 function FeatureCard({ img, imgScale, card, title, body }: { img: string; imgScale?: number; card: ReactNode; title: string; body: string }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--bg-surface)', border: '1px solid #0A0A0A' }}>
-      <div style={{ position: 'relative', height: 405, overflow: 'hidden', background: 'var(--bg-surface)' }}>
+      <div style={{ position: 'relative', height: 540, overflow: 'hidden', background: 'var(--bg-surface)' }}>
         <img src={img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', transform: imgScale ? `scale(${imgScale})` : undefined }} />
-        <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: '80%', height: '75%', background: '#FFFFFF', border: '1px solid #0A0A0A', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: '80%', height: 320, background: '#FFFFFF', border: '1px solid #0A0A0A', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           {card}
         </div>
       </div>
