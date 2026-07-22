@@ -38,12 +38,12 @@ export function Nav({ narrow }: { narrow?: boolean }) {
 }
 
 /* ——— left column: chart card ——— */
-function ChartBox() {
+function ChartBox({ narrow }: { narrow?: boolean }) {
   const label: CSSProperties = { fontSize: 9, color: 'var(--text-muted)', lineHeight: 1, fontFamily: 'Geist' };
   const value: CSSProperties = { fontSize: 11, fontWeight: 400, color: 'var(--text-primary)', lineHeight: 1, fontFamily: 'Geist' };
   const chip: CSSProperties = { font: '600 7px var(--font-mono)', background: 'color-mix(in srgb, var(--ink) 9%, var(--bg-surface))', color: 'var(--text-muted)', padding: '1px 3px', fontFamily: 'Geist' };
   return (
-    <div style={{ flex: 1, minWidth: 0, position: 'relative', background: 'var(--bg-surface)', border: '1px solid var(--bg-canvas)', boxSizing: 'border-box', padding: '16px 12px 6px 14px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div style={{ flex: narrow ? 'none' : 1, height: narrow ? 260 : undefined, minWidth: 0, position: 'relative', background: 'var(--bg-surface)', border: '1px solid var(--bg-canvas)', boxSizing: 'border-box', padding: '16px 12px 6px 14px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ position: 'absolute', top: 48, left: 14, zIndex: 4, background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: '0 6px 16px rgba(25,12,18,.10)', padding: '9px 11px', display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ width: 11, height: 11, background: '#F9C6D0', flex: 'none' }} />
@@ -490,7 +490,7 @@ function HeroCopy({ narrow }: { narrow: boolean }) {
         <a className="btn btn-primary" href="/login" style={{ height: 40, padding: '0 20px', fontSize: 13, textTransform: 'uppercase', display: 'inline-flex', alignItems: 'center' }}>Join the waitlist</a>
       </div>
       <div style={{ marginTop: narrow ? 28 : 36, flex: 1, display: 'flex', flexDirection: narrow ? 'column' : 'row', gap: 18, alignItems: 'stretch', paddingRight: narrow ? 0 : 10 }}>
-        <ChartBox />
+        <ChartBox narrow={narrow} />
         <SlackBox />
       </div>
     </div>
