@@ -214,7 +214,7 @@ function CategoryChip({ children }: { children: ReactNode }) {
 
 function LineRow({ desc, qty, unit, cat, amount }: { desc: string; qty: string; unit: string; cat: string; amount: string }) {
   return (
-    <tr style={{ borderTop: '1px solid var(--border)', animation: `heroFieldVal ${LOOP}` }}>
+    <tr style={{ borderTop: '1px solid var(--border)', color: 'var(--text-primary)', animation: `heroFieldVal ${LOOP}` }}>
       <td style={{ padding: '4px 0' }}>{desc}</td>
       <td className="mono" style={{ textAlign: 'right', padding: '4px 5px' }}>{qty}</td>
       <td className="mono" style={{ textAlign: 'right', padding: '4px 5px' }}>{unit}</td>
