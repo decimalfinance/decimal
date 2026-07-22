@@ -68,19 +68,29 @@ function ChartBox({ narrow }: { narrow?: boolean }) {
       </div>
       <div style={{ font: 'var(--dw,600) 13px/1.15 var(--font-display)', letterSpacing: '-.01em', color: 'var(--ink)' }}>What you pay, month by month</div>
       <div style={{ flex: 1, minHeight: 0, margin: '12px -12px 0 -14px' }}>
-        <svg viewBox="0 0 210 330" preserveAspectRatio="none" style={{ width: '100%', height: '100%', display: 'block' }}>
+        {/* On mobile the card is wide, so preserveAspectRatio="none" would stretch
+            the axis text and the Jul marker; crop the label strip out of the SVG
+            and render months as a normal HTML row below instead. */}
+        <svg viewBox={narrow ? '0 0 210 306' : '0 0 210 330'} preserveAspectRatio="none" style={{ width: '100%', height: '100%', display: 'block' }}>
           <path d="M2,304 L2,224.2 C8.9,222.3 29.5,217.4 43.2,212.5 C56.9,207.6 70.7,201.7 84.4,194.9 C98.1,188.2 111.9,178.7 125.6,172 C139.3,165.3 153.1,159.6 166.8,155 C180.5,150.4 201.1,146.2 208,144.4 L208,304 Z" fill="var(--ink)" />
           <path d="M2,224.2 C8.9,222.3 29.5,217.4 43.2,212.5 C56.9,207.6 70.7,201.7 84.4,194.9 C98.1,188.2 111.9,178.7 125.6,172 C139.3,165.3 153.1,159.6 166.8,155 C180.5,150.4 201.1,146.2 208,144.4 L208,13.4 C201.1,18.4 180.5,32.1 166.8,43.3 C153.1,54.5 139.3,67.2 125.6,80.5 C111.9,93.8 98.1,110.7 84.4,123.1 C70.7,135.5 56.9,146.1 43.2,155 C29.5,163.9 8.9,172.8 2,176.3 Z" fill="#F9C6D0" />
           <path d="M2,224.2 C8.9,222.3 29.5,217.4 43.2,212.5 C56.9,207.6 70.7,201.7 84.4,194.9 C98.1,188.2 111.9,178.7 125.6,172 C139.3,165.3 153.1,159.6 166.8,155 C180.5,150.4 201.1,146.2 208,144.4" fill="none" stroke="#FFFFFF" strokeWidth="2" />
           <path d="M2,176.3 C8.9,172.8 29.5,163.9 43.2,155 C56.9,146.1 70.7,135.5 84.4,123.1 C98.1,110.7 111.9,93.8 125.6,80.5 C139.3,67.2 153.1,54.5 166.8,43.3 C180.5,32.1 201.1,18.4 208,13.4" fill="none" stroke="#E58BA1" strokeWidth="1.6" />
-          <line x1="166.8" y1="6" x2="166.8" y2="304" stroke="#FFFFFF" strokeWidth="1" />
-          <circle cx="166.8" cy="43.3" r="3.6" fill="var(--bg-canvas)" stroke="var(--bg-canvas)" strokeWidth="1.8" />
-          <circle cx="166.8" cy="155" r="3.6" fill="var(--bg-canvas)" stroke="var(--bg-canvas)" strokeWidth="1.8" />
-          {([['Mar', 2, 'start'], ['Apr', 43.2, 'middle'], ['May', 84.4, 'middle'], ['Jun', 125.6, 'middle'], ['Jul', 166.8, 'middle'], ['Aug', 208, 'end']] as const).map(([m, x, a]) => (
-            <text key={m} x={x} y={320} textAnchor={a} fontSize="8.5" fill="var(--text-faint)" fontFamily="var(--font-mono)">{m}</text>
-          ))}
+          <line x1="166.8" y1="6" x2="166.8" y2="304" stroke="#FFFFFF" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+          {!narrow && <>
+            <circle cx="166.8" cy="43.3" r="3.6" fill="var(--bg-canvas)" stroke="var(--bg-canvas)" strokeWidth="1.8" />
+            <circle cx="166.8" cy="155" r="3.6" fill="var(--bg-canvas)" stroke="var(--bg-canvas)" strokeWidth="1.8" />
+            {([['Mar', 2, 'start'], ['Apr', 43.2, 'middle'], ['May', 84.4, 'middle'], ['Jun', 125.6, 'middle'], ['Jul', 166.8, 'middle'], ['Aug', 208, 'end']] as const).map(([m, x, a]) => (
+              <text key={m} x={x} y={320} textAnchor={a} fontSize="8.5" fill="var(--text-faint)" fontFamily="var(--font-mono)">{m}</text>
+            ))}
+          </>}
         </svg>
       </div>
+      {narrow && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', margin: '7px -12px 0 -14px', padding: '0 4px', font: '10px var(--font-mono)', color: 'var(--text-faint)' }}>
+          {['Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug'].map((m) => <span key={m}>{m}</span>)}
+        </div>
+      )}
     </div>
   );
 }
