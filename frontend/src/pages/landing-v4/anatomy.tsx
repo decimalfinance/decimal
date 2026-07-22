@@ -54,7 +54,7 @@ const p1Anim = { pulse: 'loopPulse 12s linear infinite', val: 'fVal1 12s linear 
 function P1Cell({ children, right, muted }: { children: ReactNode; right?: boolean; muted?: boolean }) {
   return (
     <td style={{ border: '1px solid var(--border)', background: 'var(--bg-surface)', padding: '4px 8px', textAlign: right ? 'right' : undefined, color: muted ? 'var(--text-muted)' : 'var(--text-primary)', position: 'relative', overflow: 'hidden', animation: p1Anim.pulse }}>
-      <span style={{ animation: p1Anim.val }}>{children}</span>
+      <span>{children}</span>
       <Shimmer anim={p1Anim.shimmer} />
     </td>
   );
@@ -63,7 +63,7 @@ function P1Cell({ children, right, muted }: { children: ReactNode; right?: boole
 function P1CatCell({ children }: { children: ReactNode }) {
   return (
     <td style={{ border: '1px solid var(--border)', background: 'var(--bg-surface)', padding: '4px 8px', color: 'var(--text-primary)', position: 'relative', overflow: 'hidden', animation: p1Anim.pulse }}>
-      <span style={{ animation: p1Anim.val, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 5 }}>
+      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 5 }}>
         {children}
         <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9" /></svg>
       </span>
