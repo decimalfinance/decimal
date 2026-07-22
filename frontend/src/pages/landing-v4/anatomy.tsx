@@ -172,8 +172,8 @@ function Plate01Visual({ narrow }: { narrow?: boolean }) {
             </tbody>
           </table>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
-            <span style={{ fontSize: 9.5, color: 'var(--ink)', fontWeight: 500, animation: p1Anim.val }}>✓ Adds up to the document's total</span>
-            <span style={{ fontSize: 10, fontWeight: 600 }}>Total <span className="mono" style={{ marginLeft: 8, animation: p1Anim.val }}>$29,743.00</span></span>
+            <span style={{ fontSize: 9.5, color: 'var(--ink)', fontWeight: 500 }}>✓ Adds up to the document's total</span>
+            <span style={{ fontSize: 10, fontWeight: 600 }}>Total <span className="mono" style={{ marginLeft: 8 }}>$29,743.00</span></span>
           </div>
         </div>
       </div>
