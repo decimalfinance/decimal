@@ -41,6 +41,16 @@
   --orange: #C25A18;
   --neutral: #5E5B57;
   --dc-canvas-bg: #E9E7E3;
+
+  /* The app's global reset colors bare cells/body via the --ax-* token family
+     (`th, td { color: var(--ax-text) }`), which flips to light grey under
+     <html data-theme="dark"> and beats a row's inherited color. The landing is
+     always light, so pin the whole --ax text family to light values too. */
+  --ax-text: #0A0A0A;
+  --ax-text-secondary: rgba(0, 0, 0, 0.68);
+  --ax-text-muted: rgba(0, 0, 0, 0.52);
+  --ax-text-faint: rgba(0, 0, 0, 0.32);
+  --text: #0A0A0A;
 }
 
 /* Text selection uses the marker-highlight pink. */
