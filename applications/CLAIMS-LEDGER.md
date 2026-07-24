@@ -59,4 +59,5 @@ self-custodial Squads treasury holding the funds. It ends at the ledger, not at 
 2. **One unified product.** Global payment is a feature of the one product, never a second track or audience.
 3. The two customer shapes (AP-heavy complex orgs; global vendor payers) are an **internal lens only** — never shown as a split.
 4. **No crypto jargon to the buyer.** Sell outcomes (fast, cheap, transparent, safe, self-custodial), not "stablecoins / multisig / web3." (Accelerator audiences are the exception — they want the rail named.)
-5. Plain voice, no em-dashes, human not AI-marketing.
+5. **The two flexes / product spine:** (a) **AI** automates the manual AP work; (b) **a self-custodial, global USDC account** — a concrete account the business gets and controls, that it pays vendors globally from. Frame the crypto pillar as this **account**, NOT as "stablecoin rails" (abstract/confusing). Honesty: the account is real/built; paying vendors *out of it* globally is the roadmap.
+6. Plain voice, no em-dashes, human not AI-marketing.

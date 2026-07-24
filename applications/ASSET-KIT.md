@@ -16,10 +16,10 @@ Plain voice, no em-dashes in final copy, no crypto jargon to a business buyer (a
 > Decimal is AI-native accounts payable software for businesses that pay vendors, locally and globally.
 
 **50 words:**
-> Decimal is AI-native accounts payable software. It reads every invoice, codes it to your books,
-> and runs it through an approval flow you design and a fraud gate that catches vendor-account
-> takeover, then syncs two ways with QuickBooks. It is built to pay vendors across borders as
-> cheaply and fast as domestic ones.
+> Decimal is AI-native accounts payable software. AI automates the manual work of paying vendor
+> bills, and it comes with a self-custodial, global USDC account — money that stays in an account
+> only the business controls, and that pays vendors anywhere in the world, without the slow,
+> expensive bank wires cross-border payments take today.
 
 **150 words:**
 > Businesses that pay vendors still type invoices, code them to the books by hand, chase approvals
@@ -117,10 +117,16 @@ YC is asking founders to build.
 
 ## 6. The payments narrative (roadmap, not shipped)
 
-Be precise here. What is shipped is the AP workflow that ends at the books, and a **self-custodial
-treasury built on Squads multisig** — the money already sits in an account only the customer controls.
-What is next, and what the whole product is aimed at, is **paying the vendor across borders**: fast,
-transparent-FX settlement out of that self-custodial treasury.
+**Framing (mental-model fix, 2026-07-24):** the second pillar is **"a self-custodial, global USDC
+account"** — a *concrete account the business gets and controls* — NOT "stablecoin rails" (abstract,
+confusing jargon). This is the catch: nobody else hands a business a global account it fully controls
+and pays vendors from. It is also the more *honest* frame — **the account is real and built; paying
+vendors globally *out of it* is the roadmap.**
+
+Be precise here. What is shipped is the AP workflow that ends at the books, and the **self-custodial
+global USDC account (Squads multisig)** — the money already sits in an account only the customer
+controls. What is next, and what the whole product is aimed at, is **paying the vendor out of that
+account, across borders**: fast, transparent-FX settlement.
 
 The concrete piece still to solve is the **payout rail: integrating Bridge (Stripe's stablecoin
 infrastructure) for the fiat off-ramp and FX**, plus the fee/spread model and reconciliation back into
