@@ -59,10 +59,17 @@ self-custodial Squads treasury holding the funds. It ends at the ledger, not at 
   bank's ~6%, healthy margin" — NOT "our cost is ~0.1%" and NOT "we keep most of a sub-1% charge."
 
 **Market size — sizing "how much could you make" (bottoms-up, use REVENUE pool not volume):**
-- **Cross-border B2B payments = ~$154–161B in annual REVENUE** (triangulated: ~$154B from "B2B = 80% of
-  $193B cross-border revenue pool"; ~$161B from Corpay's own investor deck, which concedes <1% share).
-  Lead with this. **Do NOT cite cross-border B2B *volume* in trillions — unreconcilable across sources
-  (20%–95% of flow depending on methodology) and attackable.**
+- **Anchor on Corpay's ~$161B middle-market cross-border revenue TAM + "<1% share" (VERIFIED 2026-07-25).**
+  From Corpay's (CPAY) own investor presentation: they target the "$161B Middle Market where they have
+  less than 1% share" (companies $20M–$1B revenue — i.e. our exact ICP). Single verifiable public source,
+  internally consistent (TAM and share from the same deck). Capture math: 1% = ~$1.6B ARR, 0.1% = ~$160M.
+- **Corpay is NOT "the largest player."** It's a *major* public cross-border fintech, but its own deck
+  says banks are its primary (larger) competitors. Say "Corpay, one of the largest players in cross-border
+  payments, reports under 1% share" — never "the largest player."
+- Don't stack the older ~$154B "80% of $193B cross-border revenue pool" figure *and* Corpay's $161B — they
+  don't reconcile (middle-market alone can't be ~100% of all cross-border B2B). Use the Corpay number alone.
+- **Do NOT cite cross-border B2B *volume* in trillions — unreconcilable across sources (20%–95% of flow
+  depending on methodology) and attackable.**
 - Global B2B payments (volume, ceiling context): **$83T (2024) → $124T (2028)** (Juniper, one methodology).
 - Per-customer ACV, mid-market AP-with-payments: **~$45K/yr** (AvidXchange ~$52K, Tipalti ~$40K; bracketed
   by Ramp ~$20K SMB below and Coupa ~$400K enterprise above).
