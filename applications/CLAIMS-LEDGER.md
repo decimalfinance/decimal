@@ -44,9 +44,31 @@ self-custodial Squads treasury holding the funds. It ends at the ledger, not at 
 
 ## Approved market figures (cite only these)
 
-- World Bank: banks average **~15%** on remittance-scale transfers; B2B wire markup commonly **2.5–5%**.
+**Cross-border cost / take rate (CORRECTED 2026-07-25 — the old "~15%" was wrong and is checkable):**
+- **Banks charge ~6.3% on cross-border payments** (World Bank, global average cost ~6.36% Q3 2025; banks
+  higher, ~12% on small remittances). **Do NOT say ~15%.** B2B wire markup commonly **2.5–5%**.
+- **Wise (the efficient incumbent) blends ~0.52%** and is compressing on purpose (was 0.58%), and holds
+  **under 1% of business cross-border.** Do not model a fat, permanent FX spread; the honest story is "we
+  undercut bank rails and still profit because stablecoin settlement costs near-zero."
+
+**Market size — sizing "how much could you make" (bottoms-up, use REVENUE pool not volume):**
+- **Cross-border B2B payments = ~$154–161B in annual REVENUE** (triangulated: ~$154B from "B2B = 80% of
+  $193B cross-border revenue pool"; ~$161B from Corpay's own investor deck, which concedes <1% share).
+  Lead with this. **Do NOT cite cross-border B2B *volume* in trillions — unreconcilable across sources
+  (20%–95% of flow depending on methodology) and attackable.**
+- Global B2B payments (volume, ceiling context): **$83T (2024) → $124T (2028)** (Juniper, one methodology).
+- Per-customer ACV, mid-market AP-with-payments: **~$45K/yr** (AvidXchange ~$52K, Tipalti ~$40K; bracketed
+  by Ramp ~$20K SMB below and Coupa ~$400K enterprise above).
+- AP automation software TAM (context only, de-emphasize): ~$6B (2026) → ~$14B by ~2031 (Mordor); analyst
+  estimates span $3.4B–$18B, which is itself the reason not to lead with it.
+- No credible global mid-market business count exists; US = ~200,000 (Nat'l Center for the Middle Market).
+  If a global figure is needed, flag it as an estimate (US ≈ 25% of global GDP → order-of-magnitude ~800K).
+
+**Stablecoin / regulatory:**
 - **GENIUS Act** — signed **July 18, 2025** (Public Law 119-27): federal payment-stablecoin definition,
   100% reserves, par redemption, holder bankruptcy priority.
+- **Cross-border B2B stablecoin volume: $13.4B (2026) → projected $5T by 2035** (Juniper, Apr 27 2026;
+  85% of all stablecoin transaction value expected to be B2B by 2035). The sharpest growth stat.
 - **B2B stablecoin payment volume ~$226B in 2025 (+733% YoY)** (McKinsey/Artemis).
 - Optional: Visa ~$7B annualized USDC settlement run-rate; Stripe's Bridge got an OCC trust-bank charter (Feb 2026).
 - Context only (not landing copy): YC funds companies in USDC on Solana and its RFS names cross-border stablecoin payments.
