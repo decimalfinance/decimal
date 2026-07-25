@@ -49,7 +49,14 @@ self-custodial Squads treasury holding the funds. It ends at the ledger, not at 
   higher, ~12% on small remittances). **Do NOT say ~15%.** B2B wire markup commonly **2.5–5%**.
 - **Wise (the efficient incumbent) blends ~0.52%** and is compressing on purpose (was 0.58%), and holds
   **under 1% of business cross-border.** Do not model a fat, permanent FX spread; the honest story is "we
-  undercut bank rails and still profit because stablecoin settlement costs near-zero."
+  undercut bank rails and still profit."
+- **Our own rail economics (Bridge, 2026-07-25) — do NOT overclaim "cost ~0.1%":** the ~10bps figure is
+  only Bridge's *conversion fee at top volume tier*, not all-in. All-in cost = conversion + network fee +
+  the payout/offramp leg (ACH near-free, SWIFT $15–30/wire, SEPA/local rails cheaper), and **the offramp
+  leg dominates at ~30–100bps.** Bridge sets the platform's take via API (`fee_percent`/`minimum_fee`/
+  `maximum_fee` per rail); **no public rate card — confirm via sales** (competitors cite a "1% ceiling" vs
+  10bps-at-scale; unresolved). **Realistic holdable spread ≈ 40–90bps.** So in copy say "a fraction of the
+  bank's ~6%, healthy margin" — NOT "our cost is ~0.1%" and NOT "we keep most of a sub-1% charge."
 
 **Market size — sizing "how much could you make" (bottoms-up, use REVENUE pool not volume):**
 - **Cross-border B2B payments = ~$154–161B in annual REVENUE** (triangulated: ~$154B from "B2B = 80% of
