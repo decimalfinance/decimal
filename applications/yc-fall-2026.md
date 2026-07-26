@@ -1,13 +1,32 @@
-# YC Fall 2026 — application draft
+# YC Fall 2026 — application (assembled)
 
-**Deadline:** Mon Jul 27, 2026, 8:00pm PT. **Submit target:** Sun Jul 26 (one buffer day).
-**Terms:** $500K (7% + MFN), USDC-on-Solana funding option, SF Oct–Dec. Solo / non-US friendly.
-**Why #1:** YC's current RFS explicitly names stablecoin + cross-border money movement — Decimal's
-exact thesis.
+**Deadline:** Mon Jul 27, 2026, 8:00pm PT — **TODAY.**
+**Method:** Zaid writes every answer in his own voice; AI only checks (truth vs `CLAIMS-LEDGER.md`,
+precision, story-beat). ✅ = locked this week. ⟨PENDING⟩ = still to do.
 
-Answers drafted from `ASSET-KIT.md`; every claim checked against `CLAIMS-LEDGER.md`. Verify the live
-question set on the YC form before submitting — these are the standard YC questions; fill any new/renamed
-field from the kit. **⟨Zaid to refine every answer.⟩**
+## Still to fill before submit
+- ⟨PENDING⟩ 50-char company description (candidate below — confirm)
+- ⟨PENDING⟩ "What is your company going to make?" (plain product description — draft below, make it yours)
+- ⟨PENDING⟩ Q1 Idea: "Why this idea? / expertise / how you know people need it" (drafted earlier — paste final)
+- ⟨PENDING⟩ Company URL (landing), Demo video + product login
+- ⟨PENDING⟩ Equity numbers: cash in bank, monthly spend, runway
+- ⟨PENDING⟩ Founder video (do last — follow YC's public guidelines exactly)
+
+---
+
+## Founders
+
+**Who writes code / other technical work? Any of it by a non-founder?** ✅
+> I do. I built the entire product end to end myself, and no non-founder has done any technical work on it.
+
+**Are you looking for a cofounder?** ✅
+> Not actively, but open to the right person.
+
+---
+
+## Founder Video ⟨PENDING — do last⟩
+One minute, founder only, look at the camera, talk like a person. 60s arc: who you are + a line of
+credibility → what Decimal is in one sentence → why you're the person to build it. Not a product demo.
 
 ---
 
@@ -15,114 +34,133 @@ field from the kit. **⟨Zaid to refine every answer.⟩**
 
 **Company name:** Decimal
 
-**Describe what your company does in 50 characters or less.**
-> AI accounts payable that pays vendors worldwide
+**Describe what your company does in 50 characters or less.** ⟨PENDING — confirm⟩
+> AI accounts payable that pays vendors worldwide  *(47 chars)*
 
-**Company URL:** ⟨landing URL⟩
-**Demo video / product:** ⟨link to a 60–90s product walkthrough of capture → code → approve → sync⟩
+**Company URL:** ⟨PENDING⟩
+**Demo (≤3 min) + product link + login:** ⟨PENDING⟩
 
-**What is your company going to make? (elaborate)**
-> Decimal is AI-native accounts payable software. Today it reads every invoice with a vision model,
-> codes it to the right GL account and learns each vendor, runs it through an approval flow the
-> customer designs (cost-center hierarchies, tiered spend authority, delegation) that the system
-> enforces, holds any new or look-alike vendor payout address for review to stop account-takeover
-> fraud, and syncs two ways with QuickBooks. That AP core is built and working.
+**What is your company going to make?** ⟨PENDING — plain product description, make it yours⟩
+> Decimal is AI-native accounts payable software. AI does the manual work of paying vendor bills:
+> reading each invoice, coding it, and running it through the approvals you set. It comes with a
+> self-custodial global USDC account, so a business can pay its vendors anywhere in the world from an
+> account only it controls, without the slow, expensive bank wires cross-border payments take today.
+
+**Where do you live now, and where would the company be based after YC?** ✅
+> Hyderabad, India / San Francisco, USA
+
+**Explain your decision regarding location.** ✅
+> We have to be in the US: India has no regulatory clarity for stablecoin payments, but the US does with
+> the GENIUS Act. In the US, we would want to be in SF, where our chances of building a billion-dollar
+> stablecoin payments company are highest.
+
+---
+
+## Progress
+
+**How far along are you?** ✅
+> The core AP product is done and working. AI assistance is in progress, and Bridge integration for
+> payments comes after the legal setup.
+
+**How long have you been working on this? How much full-time?** ✅
+> Full-time since mid-April 2026: started at Colosseum on a different idea, converged on accounts payable
+> in June, and have been building the core since.
+
+**What tech stack are you using, or planning to use? Include AI models and AI coding tools.** ✅
+> Tech Stack:
+> - Invoice OCR: OpenAI GPT-4o mini (vision)
+> - GL coding: GPT-4o mini
+> - Decimal agent: Claude Sonnet 5
+> - Backend: Node, Express, TypeScript
+> - Database: PostgreSQL, Prisma
+> - Frontend: React, Vite, TanStack Query
+> - Treasury: Squads Multisig v4 protocol on Solana
+> - Payment Rails: Bridge.xyz
+> - Payment Processor: Rust
 >
-> The treasury already runs on a self-custodial Squads multisig, so the money sits in an account only
-> the customer controls. What we are building next, and what the product is aimed at, is paying the
-> vendor out of it: fast, transparent-FX, cross-border vendor settlement, integrating Bridge for the
-> off-ramp and FX. Incumbents split the market: Ramp and BILL are fast domestic AP with weak global payout;
-> Tipalti has global reach but sits outside the ERP with opaque multi-day FX; new AI-native AP is all
-> on traditional bank rails. Decimal is the one product that is AI-native, ERP-native, and settles
-> cross-border fast with transparent FX and self-custody.
+> What I use to build the product:
+> - Frontend and Design: Claude Design (Fable 5 for design and implementation)
+> - Planning and Development: Claude Code (Opus 4.8 and Fable 5)
+> - Research: Opus 4.8 as orchestrator and Sonnet 5 for agents
 
-**Where do you live now, and where would the company be based after YC?**
-> ⟨Now: Zaid's city / India. After: SF for the batch; open to relocating.⟩
+**Are people using your product?** ✅ No.
+**When will you have a version people can use?** ✅
+> Mid-September. The main gate is access to Bridge's payment rails and the legal setup so we can build
+> the payment processor, not the rest of the software.
 
----
+**Do you have revenue?** ✅ No.
 
-## Founders
+**Have you applied with this idea before / did you pivot?** ✅
+> First time applying. No prior batch. (The direction converged from a different idea at Colosseum into
+> accounts payable in June.)
 
-**How long have the founders known each other and how did you meet?** (solo)
-> Solo founder. I chose to start solo: the bar for a co-founder is high, and nothing so far has needed
-> to wait for one. I am actively open to a technical co-founder who is a genuine peer.
-
-**Who writes code, or does other technical work on your product? Was any of it done by a non-founder?**
-> I do. I built the entire product end to end, myself: invoice extraction, the GL-coding agent, the
-> approval engine, the fraud review gate, and the two-way QuickBooks sync.
-
-**How far along are you? What have you built?**
-> The AP core is shipped and demoable: capture → AI extraction → AI GL coding → a build-your-own,
-> enforced approval engine → a BEC/look-alike fraud gate → two-way QuickBooks sync. The treasury runs
-> on a self-custodial Squads multisig. Backed by a $10,000 grant from Solana Foundation × Superteam.
-> Pre-launch, so no usage metrics claimed. The next build is the cross-border payout rail: integrating
-> Bridge for the fiat off-ramp and FX.
-
-**How many users do you have?** Pre-launch; no live users yet. First paid design partners are the
-near-term goal.
+**Any incubator / accelerator / pre-accelerator joined or committed to?** ✅ No.
 
 ---
 
-## Progress & idea
+## Idea
 
-**Why did you pick this idea? Do you have domain expertise? How do you know people need it?**
-> AP is one of the last big back-office workflows still done by hand: invoices typed, coded, chased
-> for approval, and reconciled by a person, and when the vendor is overseas the payment itself is slow
-> and costs up to ~15% all-in. I kept seeing that businesses have to choose between a tool that does
-> the AP work (BILL, Ramp) and one that pays vendors globally (Tipalti, Wise), never both well. I
-> built the AP core to prove the judgment work is now automatable with agents, and the pull I want to
-> resolve is the payment.
+**Q1 — Why this idea? Domain expertise? How do you know people need it?** ⟨PENDING — paste final⟩
 
-**What's new about what you're making? What substitutes do people resort to?**
-> New: an agent that *resolves* AP exceptions rather than just routing them; an approval engine the
-> customer designs and the system enforces; a fraud gate on vendor payout addresses; and a design
-> aimed at self-custodial cross-border settlement. Substitutes today: BILL/Ramp plus a separate
-> wire/Wise/Tipalti transfer, with reconciliation stitched by hand.
+**Q2 — Who are your competitors? What do you understand that they don't?** ✅
+> Our competitors are Bill.com, Stampli, and Tipalti.
+>
+> Accounts payable is a decision problem, not data entry. Every bill is a call to approve, reject, or
+> escalate. Even the latest tools automate parts of the process, but to understand a single bill you
+> still click through a few screens to piece the context together. As Decimal is AI-native, we provide
+> all the required information in one view, eliminating the time spent gathering context to make the
+> decision.
+>
+> Decimal is non-custodial, so we never hold or move the money, only the business can. This skips much
+> of the money-transmitter licensing Bill.com is built around, and lets us settle natively on stablecoin
+> rails.
 
-**Why now?**
-> The settlement rail turned real in 2025–26 (~$226B B2B stablecoin volume, +733% YoY; Visa settling
-> in USDC), the GENIUS Act (Jul 2025) gave payment stablecoins legal standing, and vision models plus
-> agents finally make AP judgment work automatable. The three had to arrive together, and they just did.
+**Q3 — How do or will you make money? How much could you make?** ✅
+> We make money three ways:
+> - A subscription for the software.
+> - A fee on each payment.
+> - A spread on the currency conversion when a payment goes cross-border.
+>
+> Banks charge around 6% on cross-border. Stablecoin rails cost a fraction of that, so we can price well
+> under 1%, undercut every bank, and still hold a healthy margin.
+>
+> Cross-border payments for mid-market businesses are a roughly $160 billion revenue market. Capturing
+> even 1% of it is $1.6 billion in annual revenue, and 0.1% is $160 million. The lane we are built for,
+> cross-border business payments on stablecoin rails, goes from $13 billion this year to a projected $5
+> trillion by 2035.
 
-**Who are your competitors, and who might become competitors? Who do you fear most?**
-> Ramp, BILL, Brex (fast domestic AP, weak global); Tipalti (global reach, outside the ERP, opaque
-> FX); new YC-backed AI-native AP (on bank rails). Most feared: whichever fast-moving AI-native AP
-> company adds a real self-custodial cross-border rail first.
-
-**How do or will you make money? How much could you make?**
-> SaaS + a transparent take on cross-border settlement (a visible spread far below the 2.5–5% banks
-> bury). B2B cross-border is a multi-hundred-billion-dollar flow; AP-heavy mid-market with overseas
-> vendors is a large, underserved wedge of it.
-
-**How will you get users?** Personalized outbound to Controllers/AP leads at import-heavy mid-market
-companies; leverage the existing Superteam/Solana ecosystem relationships for warm intros; paid design
-partnerships, not free pilots.
-
----
-
-## YC RFS tie-in (put this in the "anything else" / equity or idea box)
-
-> YC's RFS asks for stablecoin and cross-border money movement, and YC now funds its companies in USDC
-> on Solana. Decimal is built for exactly that: an AI-native AP product whose next layer is fast,
-> transparent, self-custodial cross-border vendor settlement. We would be building the category on the
-> rail YC itself uses.
+**Q4 — Other ideas you considered applying with.** ✅
+> - A global USDC account for businesses: a self-custodial account a business holds and controls, to
+>   send and receive money anywhere.
+> - A global payments API: the same cross-border stablecoin rail exposed for other companies to build
+>   payments on.
+>
+> Both are directions Decimal naturally grows into. We chose accounts payable as the way in, because it
+> is the concrete, recurring need that gets a business onto the account in the first place.
 
 ---
 
-## 1-minute founder video script (founder only, no advisors)
+## Equity
 
-Target 60s. Show the real product on screen for the middle third.
+**Have you formed any legal entity yet?** ✅ No.
+**Planned ownership breakdown:** ✅ Zaid — 100%, Founder / CEO.
+**Have you taken any investment?** ✅ No (the Solana Foundation × Superteam support is a non-dilutive grant).
+**Total raised from investors (USD):** ✅ $0. (Note: $10,000 non-dilutive grant from Solana Foundation × Superteam.)
+**Cash in bank now:** ⟨PENDING⟩
+**Monthly spend:** ⟨PENDING⟩
+**Runway:** ⟨PENDING⟩
+**Currently fundraising?** ✅ No.
 
-- **0:00–0:10 — Who + what (talking head).** "I'm ⟨name⟩, founder of Decimal. Decimal is AI accounts
-  payable for businesses that pay vendors, and I built it solo."
-- **0:10–0:20 — The problem.** "Companies still type invoices, code them by hand, chase approvals, and
-  when the vendor is overseas the payment takes days and costs up to fifteen percent."
-- **0:20–0:42 — Product (screen share, no fake steps).** Show: drop in an invoice → it extracts →
-  the agent codes it → it hits an approval flow you designed → the fraud gate flags a changed payout
-  address → it syncs to QuickBooks. Narrate plainly. Do not show or imply a live payment that isn't built.
-- **0:42–0:55 — Why now + vision.** "Stablecoins made cross-border dollars move in minutes, the GENIUS
-  Act made them legal, and agents finally do the AP judgment work. Next we pay the vendor: fast,
-  transparent FX, in an account only the customer controls."
-- **0:55–1:00 — Ask.** "I'm building the exact category YC is asking for, on the rail YC uses. Let's talk."
+---
 
-**Shoot notes:** good light, quiet room, one clean take of the screen segment. Founder only.
+## Curious
+
+**What convinced you to apply to YC? Did someone encourage you? Been to any YC events?** ✅
+> YC is the fastest path to building this into a billion-dollar company. With so much stablecoin payment
+> innovation happening in SF, being close to it lets us accelerate growth and find product-market fit
+> faster. No one encouraged me to apply, and I haven't been to any YC events.
+
+---
+
+## Batch Preference
+**Which batch?** ✅ Fall 2026.
