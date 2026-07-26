@@ -34,10 +34,10 @@ video** (recording now). Equity radios set to No / No / No.
 **Product link + login:** ⟨none⟩
 
 **What is your company going to make? Please describe your product and what it does or will do.**
-> Decimal is an accounts payable software. It automates all the work of paying vendor bills, reducing
-> time and effort to just a few clicks using AI and provides a self-custodial, global USDC account,
-> allowing payments to vendors across the world, saving money on the high fees that banks charge for
-> international payments.
+> Decimal is accounts payable software. Businesses send it their vendor bills, and the AI extracts each
+> one, prepares the approvals, and once approved, pays the vendor anywhere in the world over stablecoin
+> rails. It comes with a self-custodial global USDC account, so the money moves from an account only the
+> business controls, saving the high fees banks charge for international payments.
 
 **Where do you live now, and where would the company be based after YC?**
 > Hyderabad, India / San Francisco, USA
@@ -105,9 +105,9 @@ video** (recording now). Equity radios set to No / No / No.
 **Who are your competitors? What do you understand that they don't?**
 > Our competitors are Bill.com, Stampli, Tipalti.
 > Accounts payable is a decision problem, not data entry. Every bill is a call to approve, reject or
-> escalate. Even the latest tools automate parts of the process but to understand a single bill you
-> click through a few screens to piece the context together. As Decimal is AI native, we provide all
-> the required information in one view eliminating the time spent gathering context to make the decision.
+> escalate. Even the latest tools automate parts of the process, but to understand a single bill you
+> still click through a few screens to piece the context together. Bill.com shows you documents; Decimal
+> is AI-native, so it puts everything in one view and recommends the decision.
 > Decimal is non custodial, so we never hold or move the money, only the business can. This skips much
 > of the money transmitter licensing Bill.com is built around, and lets us settle natively on stablecoin
 > rails.
@@ -122,8 +122,7 @@ video** (recording now). Equity radios set to No / No / No.
 > under 1%, undercut every bank, and still hold a healthy margin.
 >
 > Cross-border payments for mid market businesses are a roughly $160 billion revenue market. Capturing
-> even 1% of it is $1.6 billion in annual revenue. The lane we are built for, cross-border business
-> payments on stablecoin rails, goes from $13 billion this year to a projected $5 trillion by 2035.
+> even 1% of it is $1.6 billion in annual revenue.
 
 **Other ideas you considered applying with.**
 > - Global USDC accounts for businesses
