@@ -149,9 +149,15 @@ function LedgerSyncCard() {
 // composition enlarges or shrinks as one piece and never stretches. Desktop cards
 // land at 397 (1.20x); on mobile MAX_CARD keeps the card from outgrowing its mini-UI.
 const ART = { card: 330, plateH: 405, panelW: 264, panelH: 304 };
-const MAX_CARD = 396;
+
+// On mobile the plate is trimmed in on the mini-UI: the plate box and its furniture
+// shrink by TRIM while the mini-UI keeps the size it renders at on desktop, so the
+// card reads slimmer without the panel inside it changing.
+const MOBILE_TRIM = 0.92;
+const MAX_CARD = Math.round(396 * MOBILE_TRIM);
 
 function FeatureCard({ n, fig, card, title, body }: { n: string; fig: string; card: ReactNode; title: string; body: string }) {
+  const narrow = useNarrow();
   const ref = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(ART.card);
 
@@ -167,14 +173,16 @@ function FeatureCard({ n, fig, card, title, body }: { n: string; fig: string; ca
     return () => ro.disconnect();
   }, []);
 
-  const s = w / ART.card;
-  const px = (v: number) => Math.round(v * s * 10) / 10;
+  const trim = narrow ? MOBILE_TRIM : 1;
+  const s = w / (ART.card * trim); // mini-UI scale — unaffected by the trim
+  const px = (v: number) => Math.round(v * s * 10) / 10; // mini-UI measurements
+  const plate = (v: number) => Math.round(v * s * trim * 10) / 10; // plate + furniture
   return (
     <div ref={ref} style={{ display: 'flex', flexDirection: 'column', background: 'var(--bg-surface)', border: '1px solid #0A0A0A' }}>
-      <div style={{ position: 'relative', height: px(ART.plateH), overflow: 'hidden', background: '#F1EDE8' }}>
-        <div style={{ position: 'absolute', inset: px(12), border: '1px dashed color-mix(in srgb, var(--ink) 40%, transparent)', pointerEvents: 'none' }} />
-        <div style={{ position: 'absolute', top: px(4), left: px(16), font: `600 ${px(96)}px/1 var(--font-mono)`, color: 'transparent', WebkitTextStroke: `${px(1.2)}px var(--accent)`, opacity: 0.5 }}>{n}</div>
-        <div style={{ position: 'absolute', bottom: px(20), left: px(22), font: `500 ${px(8)}px var(--font-mono)`, letterSpacing: '.18em', color: 'color-mix(in srgb, var(--ink) 55%, transparent)', whiteSpace: 'nowrap' }}>{fig}</div>
+      <div style={{ position: 'relative', height: plate(ART.plateH), overflow: 'hidden', background: '#F1EDE8' }}>
+        <div style={{ position: 'absolute', inset: plate(12), border: '1px dashed color-mix(in srgb, var(--ink) 40%, transparent)', pointerEvents: 'none' }} />
+        <div style={{ position: 'absolute', top: plate(4), left: plate(16), font: `600 ${plate(96)}px/1 var(--font-mono)`, color: 'transparent', WebkitTextStroke: `${plate(1.2)}px var(--accent)`, opacity: 0.5 }}>{n}</div>
+        <div style={{ position: 'absolute', bottom: plate(20), left: plate(22), font: `500 ${plate(8)}px var(--font-mono)`, letterSpacing: '.18em', color: 'color-mix(in srgb, var(--ink) 55%, transparent)', whiteSpace: 'nowrap' }}>{fig}</div>
         <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: px(ART.panelW), height: px(ART.panelH), background: '#FFFFFF', border: '1px solid #0A0A0A', boxShadow: `${px(10)}px ${px(10)}px 0 var(--band)` }}>
           {/* Laid out at the artboard's 264x304 and scaled as a unit: type, rows and
               buttons all grow together, so the mini-UI never gaps at its auto spacers. */}
