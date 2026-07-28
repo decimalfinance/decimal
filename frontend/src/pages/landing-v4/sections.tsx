@@ -142,15 +142,27 @@ function LedgerSyncCard() {
 
 /** 21b "ruled specimen" plate: dashed frame + oversized outlined numeral behind a
     flat-offset mini-UI panel. No photography in this section by design. */
+
+// The artboard draws a 330-wide card: a 405 plate carrying a 264x304 mini-UI panel.
+// The grid spans the full 1240 section, so cards land at 397 — every measurement in
+// the plate is multiplied by that ratio, mini-UI included, so the whole composition
+// enlarges at fixed proportions instead of stretching. Mobile keeps artboard size.
+const ART = { card: 330, plateH: 405, panelW: 264, panelH: 304 };
+const PLATE_SCALE = 397 / ART.card;
+
 function FeatureCard({ n, fig, card, title, body }: { n: string; fig: string; card: ReactNode; title: string; body: string }) {
+  const s = useNarrow() ? 1 : PLATE_SCALE;
+  const px = (v: number) => Math.round(v * s * 10) / 10;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--bg-surface)', border: '1px solid #0A0A0A' }}>
-      <div style={{ position: 'relative', height: 405, overflow: 'hidden', background: '#F1EDE8' }}>
-        <div style={{ position: 'absolute', inset: 12, border: '1px dashed color-mix(in srgb, var(--ink) 40%, transparent)', pointerEvents: 'none' }} />
-        <div style={{ position: 'absolute', top: 4, left: 16, font: '600 96px/1 var(--font-mono)', color: 'transparent', WebkitTextStroke: '1.2px var(--accent)', opacity: 0.5 }}>{n}</div>
-        <div style={{ position: 'absolute', bottom: 20, left: 22, font: '500 8px var(--font-mono)', letterSpacing: '.18em', color: 'color-mix(in srgb, var(--ink) 55%, transparent)', whiteSpace: 'nowrap' }}>{fig}</div>
-        <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: '80%', height: '75%', background: '#FFFFFF', border: '1px solid #0A0A0A', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '10px 10px 0 var(--band)' }}>
-          {card}
+      <div style={{ position: 'relative', height: px(ART.plateH), overflow: 'hidden', background: '#F1EDE8' }}>
+        <div style={{ position: 'absolute', inset: px(12), border: '1px dashed color-mix(in srgb, var(--ink) 40%, transparent)', pointerEvents: 'none' }} />
+        <div style={{ position: 'absolute', top: px(4), left: px(16), font: `600 ${px(96)}px/1 var(--font-mono)`, color: 'transparent', WebkitTextStroke: `${px(1.2)}px var(--accent)`, opacity: 0.5 }}>{n}</div>
+        <div style={{ position: 'absolute', bottom: px(20), left: px(22), font: `500 ${px(8)}px var(--font-mono)`, letterSpacing: '.18em', color: 'color-mix(in srgb, var(--ink) 55%, transparent)', whiteSpace: 'nowrap' }}>{fig}</div>
+        <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: px(ART.panelW), height: px(ART.panelH), background: '#FFFFFF', border: '1px solid #0A0A0A', boxShadow: `${px(10)}px ${px(10)}px 0 var(--band)` }}>
+          {/* Laid out at the artboard's 264x304 and scaled as a unit: type, rows and
+              buttons all grow together, so the mini-UI never gaps at its auto spacers. */}
+          <div style={{ width: ART.panelW, height: ART.panelH, transform: `scale(${s})`, transformOrigin: 'top left' }}>{card}</div>
         </div>
       </div>
       <div style={{ flex: 1, background: 'var(--bg-surface)', borderTop: '1px solid #0A0A0A', padding: '20px 22px 24px', display: 'flex', flexDirection: 'column', gap: 9 }}>
@@ -171,10 +183,10 @@ export function Features() {
         </h2>
         {/* The 21b artboard caps the grid at 1040, which left-aligns it inside the
             1240 section and leaves a lopsided gutter on the right. The grid spans the
-            full section instead, and the slack goes into the column gap so the cards
-            keep the artboard's portrait proportion (330 wide against a 405 plate). */}
+            full section instead: equal gutters, cards scaled up at the artboard's gap
+            and proportion (see PLATE_H). */}
         <div style={{ marginTop: narrow ? 28 : 40 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: narrow ? '1fr' : 'repeat(3,1fr)', columnGap: narrow ? 20 : 125, rowGap: narrow ? 20 : 25 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: narrow ? '1fr' : 'repeat(3,1fr)', gap: narrow ? 20 : 25 }}>
             <FeatureCard
               n="01" fig="FIG. 01 — CUSTODY" card={<SelfCustodyCard />} title="Self-custodial funds"
               body="Your funds stay in an account only you control. Decimal prepares every payment, but it can't move a dollar on its own, and no one can override that."
