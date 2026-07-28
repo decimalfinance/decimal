@@ -12,19 +12,27 @@ const A = '/landing4/';
 
 /* ═══════════ bridge header ═══════════ */
 function Bridge({ narrow }: { narrow: boolean }) {
+  // Ink silhouette masked from the skull art. Desktop parks it in the right column;
+  // mobile has no second column, so it runs full width between title and copy.
+  const skull = (maxWidth: number, height: number) => (
+    <div style={{ width: '100%', maxWidth, height, background: 'var(--ink)', WebkitMaskImage: `url('${A}skull-mask.png')`, maskImage: `url('${A}skull-mask.png')`, WebkitMaskSize: 'contain', maskSize: 'contain', WebkitMaskRepeat: 'no-repeat', maskRepeat: 'no-repeat', WebkitMaskPosition: 'center', maskPosition: 'center' }} />
+  );
   return (
     <div style={{ padding: narrow ? `40px ${M_PAD}px 8px` : '52px 64px 44px', display: narrow ? 'block' : 'grid', gridTemplateColumns: '1.1fr 1fr', gap: 56, alignItems: 'center' }}>
       <div>
         <h2 style={{ margin: 0, font: `var(--dw,600) ${narrow ? 34 : 40}px/1.08 var(--font-display)`, letterSpacing: '-.02em', color: 'var(--ink)' }}>
           <Marker>Anatomy</Marker> of a bill.
         </h2>
+        {narrow && (
+          <div style={{ display: 'flex', justifyContent: 'center', margin: '22px 0 6px' }}>{skull(320, 158)}</div>
+        )}
         <p style={{ margin: '14px 0 0', fontSize: narrow ? 15 : 14.5, lineHeight: 1.55, maxWidth: 460, color: 'var(--text-muted)' }}>
           A bill gets read, approved, paid, and booked. Today, every one of them is your team's manual work. Decimal takes all four, and leaves you a single decision: approve it, or don't.
         </p>
       </div>
       {!narrow && (
         <div style={{ position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'center', alignSelf: 'stretch', width: 600, height: 161, marginTop: -22 }}>
-          <div style={{ width: 454, maxWidth: 360, height: 180, background: 'var(--ink)', WebkitMaskImage: `url('${A}skull-mask.png')`, maskImage: `url('${A}skull-mask.png')`, WebkitMaskSize: 'contain', maskSize: 'contain', WebkitMaskRepeat: 'no-repeat', maskRepeat: 'no-repeat', WebkitMaskPosition: 'center', maskPosition: 'center' }} />
+          {skull(360, 180)}
         </div>
       )}
     </div>
