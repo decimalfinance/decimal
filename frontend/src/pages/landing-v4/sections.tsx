@@ -170,10 +170,11 @@ export function Features() {
           More than <Marker side="right">payments.</Marker>
         </h2>
         {/* The 21b artboard caps the grid at 1040, which left-aligns it inside the
-            1240 section and leaves a lopsided gutter on the right. The grid fills the
-            section instead: equal margins, and the header still aligns to card 01. */}
+            1240 section and leaves a lopsided gutter on the right. The grid spans the
+            full section instead, and the slack goes into the column gap so the cards
+            keep the artboard's portrait proportion (330 wide against a 405 plate). */}
         <div style={{ marginTop: narrow ? 28 : 40 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: narrow ? '1fr' : 'repeat(3,1fr)', gap: narrow ? 20 : 25 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: narrow ? '1fr' : 'repeat(3,1fr)', columnGap: narrow ? 20 : 125, rowGap: narrow ? 20 : 25 }}>
             <FeatureCard
               n="01" fig="FIG. 01 — CUSTODY" card={<SelfCustodyCard />} title="Self-custodial funds"
               body="Your funds stay in an account only you control. Decimal prepares every payment, but it can't move a dollar on its own, and no one can override that."
