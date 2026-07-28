@@ -41,7 +41,9 @@ function PlateCopy({ title, blocks, padding, narrow }: { title: string; blocks: 
           <div style={{ font: `var(--dw,600) ${narrow ? 19 : 21}px/1.18 var(--font-display)`, letterSpacing: '-.01em', color: 'var(--ink)' }}>
             <Marker>{b.mark}</Marker>
           </div>
-          <p style={{ margin: '13px 0 0', fontSize: narrow ? 13.5 : 12, lineHeight: 1.6, color: 'var(--text-muted)' }}>{b.body}</p>
+          {/* 13.5 rather than the artboard's 12: the plate copy read undersized next
+              to the 14px feature-card body it sits between. */}
+          <p style={{ margin: '13px 0 0', fontSize: narrow ? 14 : 13.5, lineHeight: 1.6, color: 'var(--text-muted)' }}>{b.body}</p>
         </div>
       ))}
     </div>

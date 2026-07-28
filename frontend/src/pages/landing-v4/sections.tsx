@@ -1,6 +1,6 @@
 // Features (21b "ruled specimen"), FAQ (18b two-column dossier),
 // final CTA (19a Monk-simple), and a minimal footer (not designed — kept simple).
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { Marker, PersonIcon } from './shared';
 import { M_PAD, useNarrow } from './responsive';
@@ -112,7 +112,10 @@ function LedgerSyncCard() {
           />
         ))}
       </div>
-      <div style={{ marginTop: 16, position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 0 }}>
+      {/* 11, not the 16 the other blocks use: this card runs 4.6px taller than the
+          panel's content box, which pushed the button into the bottom padding and left
+          it sitting lower than the other two. Pulling the sync block up absorbs it. */}
+      <div style={{ marginTop: 11, position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 0 }}>
         <div style={{ border: '1px solid #0A0A0A', padding: '9px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#F7F4F0' }}>
           <span style={{ font: '400 7.5px/1 var(--font-mono)', letterSpacing: '.12em', color: 'var(--solid)' }}>BILL TOTAL</span>
           <span style={{ font: '500 13px/1 Geist', letterSpacing: '-.01em', color: 'var(--ink)' }}>$4,518</span>
@@ -142,15 +145,57 @@ function LedgerSyncCard() {
 
 /** 21b "ruled specimen" plate: dashed frame + oversized outlined numeral behind a
     flat-offset mini-UI panel. No photography in this section by design. */
+
+// The artboard draws a 330-wide card: a 405 plate carrying a 264x304 mini-UI panel.
+// The card measures itself and multiplies every plate measurement — inset, numeral,
+// fig label, panel and the mini-UI inside it — by its width against that 330, so the
+// composition enlarges or shrinks as one piece and never stretches. Desktop cards
+// land at 397 (1.20x); on mobile MAX_CARD keeps the card from outgrowing its mini-UI.
+const ART = { card: 330, plateH: 405, panelW: 264, panelH: 304 };
+
+// On mobile the plate is trimmed in on the mini-UI: the plate box and its furniture
+// shrink by TRIM while the mini-UI keeps the size it renders at on desktop, so the
+// card reads slimmer without the panel inside it changing.
+const MOBILE_TRIM = 0.92;
+const MAX_CARD = Math.round(396 * MOBILE_TRIM);
+
+// Desktop cards are pinned narrower than the third of the section they'd otherwise
+// fill (397), and the width they give up becomes the column gap: 3*360 + 2*80 = 1240.
+// Everything inside scales off the card, so this shrinks the composition, not its
+// proportions. The row still spans the section, so the gutters stay equal.
+const DESKTOP_CARD = 360;
+
 function FeatureCard({ n, fig, card, title, body }: { n: string; fig: string; card: ReactNode; title: string; body: string }) {
+  const narrow = useNarrow();
+  const ref = useRef<HTMLDivElement>(null);
+  const [w, setW] = useState(ART.card);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    // offsetWidth, not the rect: between MOBILE_BP and the design width the whole
+    // sheet is transform-scaled, and layout width is what the plate scales against.
+    const measure = () => setW(el.offsetWidth || ART.card);
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    measure();
+    return () => ro.disconnect();
+  }, []);
+
+  const trim = narrow ? MOBILE_TRIM : 1;
+  const s = w / (ART.card * trim); // mini-UI scale — unaffected by the trim
+  const px = (v: number) => Math.round(v * s * 10) / 10; // mini-UI measurements
+  const plate = (v: number) => Math.round(v * s * trim * 10) / 10; // plate + furniture
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--bg-surface)', border: '1px solid #0A0A0A' }}>
-      <div style={{ position: 'relative', height: 405, overflow: 'hidden', background: '#F1EDE8' }}>
-        <div style={{ position: 'absolute', inset: 12, border: '1px dashed color-mix(in srgb, var(--ink) 40%, transparent)', pointerEvents: 'none' }} />
-        <div style={{ position: 'absolute', top: 4, left: 16, font: '600 96px/1 var(--font-mono)', color: 'transparent', WebkitTextStroke: '1.2px var(--accent)', opacity: 0.5 }}>{n}</div>
-        <div style={{ position: 'absolute', bottom: 20, left: 22, font: '500 8px var(--font-mono)', letterSpacing: '.18em', color: 'color-mix(in srgb, var(--ink) 55%, transparent)', whiteSpace: 'nowrap' }}>{fig}</div>
-        <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: '80%', height: '75%', background: '#FFFFFF', border: '1px solid #0A0A0A', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '10px 10px 0 var(--band)' }}>
-          {card}
+    <div ref={ref} style={{ display: 'flex', flexDirection: 'column', background: 'var(--bg-surface)', border: '1px solid #0A0A0A' }}>
+      <div style={{ position: 'relative', height: plate(ART.plateH), overflow: 'hidden', background: '#F1EDE8' }}>
+        <div style={{ position: 'absolute', inset: plate(12), border: '1px dashed color-mix(in srgb, var(--ink) 40%, transparent)', pointerEvents: 'none' }} />
+        <div style={{ position: 'absolute', top: plate(4), left: plate(16), font: `600 ${plate(96)}px/1 var(--font-mono)`, color: 'transparent', WebkitTextStroke: `${plate(1.2)}px var(--accent)`, opacity: 0.5 }}>{n}</div>
+        <div style={{ position: 'absolute', bottom: plate(20), left: plate(22), font: `500 ${plate(8)}px var(--font-mono)`, letterSpacing: '.18em', color: 'color-mix(in srgb, var(--ink) 55%, transparent)', whiteSpace: 'nowrap' }}>{fig}</div>
+        <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: px(ART.panelW), height: px(ART.panelH), background: '#FFFFFF', border: '1px solid #0A0A0A', boxShadow: `${px(10)}px ${px(10)}px 0 var(--band)` }}>
+          {/* Laid out at the artboard's 264x304 and scaled as a unit: type, rows and
+              buttons all grow together, so the mini-UI never gaps at its auto spacers. */}
+          <div style={{ width: ART.panelW, height: ART.panelH, transform: `scale(${s})`, transformOrigin: 'top left' }}>{card}</div>
         </div>
       </div>
       <div style={{ flex: 1, background: 'var(--bg-surface)', borderTop: '1px solid #0A0A0A', padding: '20px 22px 24px', display: 'flex', flexDirection: 'column', gap: 9 }}>
@@ -163,14 +208,39 @@ function FeatureCard({ n, fig, card, title, body }: { n: string; fig: string; ca
 
 export function Features() {
   const narrow = useNarrow();
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [wrapW, setWrapW] = useState(0);
+
+  useLayoutEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const measure = () => setWrapW(el.offsetWidth);
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    measure();
+    return () => ro.disconnect();
+  }, []);
+
+  // Past MAX_CARD the single mobile column stops filling the width and starts to
+  // centre, which leaves a left-aligned header hanging off the card. Centre the
+  // header with it. On a phone the card still fills, so the header stays left —
+  // aligned with the card and with every other section header on the page.
+  const headerCentred = narrow && wrapW > MAX_CARD;
+
   return (
     <div id="features" style={{ padding: narrow ? `44px ${M_PAD}px` : '56px 64px', backgroundColor: 'var(--bg-surface)' }}>
-      <div style={{ maxWidth: 1240, margin: '0 auto' }}>
-        <h2 style={{ margin: 0, font: `var(--dw,600) ${narrow ? 32 : 40}px/1.08 var(--font-display)`, letterSpacing: '-.02em', color: 'var(--ink)' }}>
+      <div ref={wrapRef} style={{ maxWidth: 1240, margin: '0 auto' }}>
+        <h2 style={{ margin: 0, font: `var(--dw,600) ${narrow ? 32 : 40}px/1.08 var(--font-display)`, letterSpacing: '-.02em', color: 'var(--ink)', textAlign: headerCentred ? 'center' : undefined }}>
           More than <Marker side="right">payments.</Marker>
         </h2>
-        <div style={{ marginTop: narrow ? 28 : 40, maxWidth: narrow ? undefined : 1040 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: narrow ? '1fr' : 'repeat(3,1fr)', gap: narrow ? 20 : 25 }}>
+        {/* The 21b artboard caps the grid at 1040, which left-aligns it inside the
+            1240 section and leaves a lopsided gutter on the right. The grid spans the
+            full section instead: equal gutters, cards scaled up at the artboard's gap
+            and proportion (see PLATE_H). */}
+        <div style={{ marginTop: narrow ? 28 : 40 }}>
+          {/* One centred column on mobile, capped so the card can't grow far past the
+              mini-UI it frames — full width would leave the plate mostly empty. */}
+          <div style={{ display: 'grid', gridTemplateColumns: narrow ? `minmax(0, ${MAX_CARD}px)` : `repeat(3, ${DESKTOP_CARD}px)`, justifyContent: narrow ? 'center' : 'space-between', gap: narrow ? 20 : undefined }}>
             <FeatureCard
               n="01" fig="FIG. 01 — CUSTODY" card={<SelfCustodyCard />} title="Self-custodial funds"
               body="Your funds stay in an account only you control. Decimal prepares every payment, but it can't move a dollar on its own, and no one can override that."
