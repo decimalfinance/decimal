@@ -112,7 +112,10 @@ function LedgerSyncCard() {
           />
         ))}
       </div>
-      <div style={{ marginTop: 16, position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 0 }}>
+      {/* 11, not the 16 the other blocks use: this card runs 4.6px taller than the
+          panel's content box, which pushed the button into the bottom padding and left
+          it sitting lower than the other two. Pulling the sync block up absorbs it. */}
+      <div style={{ marginTop: 11, position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 0 }}>
         <div style={{ border: '1px solid #0A0A0A', padding: '9px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#F7F4F0' }}>
           <span style={{ font: '400 7.5px/1 var(--font-mono)', letterSpacing: '.12em', color: 'var(--solid)' }}>BILL TOTAL</span>
           <span style={{ font: '500 13px/1 Geist', letterSpacing: '-.01em', color: 'var(--ink)' }}>$4,518</span>
