@@ -6,19 +6,26 @@ we answer them **once** in `ASSET-KIT.md`, then adapt per program. YC's form is 
 
 ## The core rule
 
-**Sell the vision, never fabricate live proof.** The shipped, demoable story is the AP workflow that
-ends at the books: **capture → AI extraction → AI GL coding → build-your-own approval engine → vendor
-fraud gate → two-way QuickBooks sync,** with a **self-custodial treasury on Squads multisig** holding
-the funds (this is real). Cross-border vendor payment is the **roadmap**: the missing piece is
-**integrating Bridge for the fiat off-ramp and FX.** Never present cross-border settlement as working
-today. Every claim is gated by `CLAIMS-LEDGER.md`.
+**The spine: Decimal does the work of an AP clerk.** Every business hires an AP clerk (~$50k/year) to
+run accounts payable: gathering context on each bill, coding it, routing approvals, chasing sign-offs,
+sorting exceptions. Decimal does that with AI. Two flexes: **AI-native (saves time)** — one view,
+recommends the decision, not just shows documents; and a **self-custodial global stablecoin account
+(saves money)** — pay vendors anywhere at a fraction of the ~6% banks charge, from money only the
+business controls.
+
+**Sell the vision, never fabricate live proof.** The shipped, demoable story is **capture → AI
+extraction → AI GL coding → build-your-own approval engine → vendor fraud gate → two-way QuickBooks
+sync,** with a **self-custodial treasury on Squads multisig** holding the funds (real). Cross-border
+vendor payout is the **roadmap**: the payment processor plus **Bridge for the fiat off-ramp and FX**,
+targeted mid-September after the legal setup. Never present cross-border settlement as working today.
+Every claim is gated by `CLAIMS-LEDGER.md`.
 
 ## Files
 
 | File | What it is |
 |---|---|
 | `CLAIMS-LEDGER.md` | **Read first.** What's safe to claim (with code proof) vs. what's off-limits. The guardrail. |
-| `ASSET-KIT.md` | Canonical reusable answers (one-liner/50w/150w, why-now, traction, market, why-me, payments-roadmap, the ask). |
+| `ASSET-KIT.md` | Canonical reusable answers: the AP-clerk spine + two flexes, one-liner/50w/150w, why-now, traction, market/competition/money, why-me, payments-roadmap, the ask. |
 | `yc-fall-2026.md` | Full YC answer draft + 1-min founder video script. The pin (deadline Jul 27). |
 | `programs/*.md` | Per-program tailoring deltas (which kit answers to lift + the program-specific angle). |
 | `outreach.md` | ≥8 personalized DM/email drafts; I draft, Zaid sends; reply tracking. |

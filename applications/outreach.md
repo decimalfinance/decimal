@@ -21,9 +21,10 @@ then one line on Decimal, then the ask. No hype, no em-dashes.
 ## 2. YC alumnus (fintech/crypto)
 
 > Hi ⟨name⟩ — I'm applying to YC Fall 2026 (their RFS literally asks for cross-border stablecoin
-> payments, which is exactly what I'm building). Decimal is AI-native accounts payable; the AP core is
-> shipped and the next layer is self-custodial cross-border vendor settlement. You went through YC with
-> ⟨company⟩ — would you be open to a 10-min read of my app or a quick call this week? Solo founder, moving fast.
+> payments, which is exactly what I'm building). Decimal does the work of an AP clerk with AI, and pays
+> vendors globally from a self-custodial stablecoin account. The AP core is shipped; the cross-border
+> payout is the next build. You went through YC with ⟨company⟩ — would you be open to a 10-min read of
+> my app or a quick call this week? Solo founder, moving fast.
 
 **Ask:** app review / quick call before the Jul 27 deadline.
 

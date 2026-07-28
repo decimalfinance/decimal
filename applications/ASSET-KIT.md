@@ -1,148 +1,151 @@
 # Decimal — Application Asset Kit
 
-Canonical answers, written once, reused everywhere. Every program below adapts from these. Claims
-are gated by `CLAIMS-LEDGER.md`; positioning follows `landing-redesign/POSITIONING-CORRECTED.md`.
-Plain voice, no em-dashes in final copy, no crypto jargon to a business buyer (accelerators excepted).
+Canonical answers, written once, reused everywhere. Every program adapts from these. Claims are gated
+by `CLAIMS-LEDGER.md`. Plain voice, no em-dashes, no crypto jargon to a business buyer (accelerator
+audiences are the exception, they want the rail named).
 
-> **The shipped story ends at the books, not at a payment.** Capture → code → approve → fraud-gate →
-> QuickBooks sync is real and demoable. Cross-border vendor payment is the roadmap. Never present the
-> old USDC/Squads code as a shipped settlement rail.
+> **Honesty boundary.** The AP work is built and demoable, and the self-custodial treasury (Squads
+> multisig) that holds the funds is real. Paying vendors *out of it* across borders is the roadmap: the
+> next build is the payment processor plus Bridge for the fiat off-ramp and FX, targeted mid-September,
+> gated on the legal setup. Never claim cross-border payments work today.
+
+---
+
+## The spine: Decimal does the work of an AP clerk
+
+Every business that pays vendors hires an **AP clerk** (around **$50k/year**) to run accounts payable:
+gathering the context on each bill, coding it, routing it for approval, chasing sign-offs, and sorting
+out exceptions. Modern tools automate the data entry, but a person still does the real work. **Decimal
+does that clerk's work with AI.** Two flexes:
+
+- **AI-native, saves time.** Decimal automates the clerk's work and puts everything in one view so an
+  approver clears a bill in a few clicks. Incumbents bolt an AI layer on top and still make you click
+  through screens to piece the context together. We are built around the model, so we do not just show
+  the bill, we recommend the decision.
+- **Self-custodial global stablecoin account, saves money.** Businesses pay vendors anywhere in the
+  world at a fraction of the ~6% banks charge, and the money stays in an account only they control.
+
+AI is table stakes (every incumbent ships some). The durable differentiator is the **self-custodial
+global account**: nobody else hands a business a global account it fully controls and pays vendors from.
 
 ---
 
 ## 1. One-liner (three lengths)
 
-**One line (what we make):**
-> Decimal is AI-native accounts payable software for businesses that pay vendors, locally and globally.
+**One line:**
+> Decimal is AI-native accounts payable software: it does the work of an AP clerk and pays vendors
+> globally from a self-custodial stablecoin account.
 
 **50 words:**
-> Decimal is AI-native accounts payable software. AI automates the manual work of paying vendor
-> bills, and it comes with a self-custodial, global USDC account — money that stays in an account
-> only the business controls, and that pays vendors anywhere in the world, without the slow,
-> expensive bank wires cross-border payments take today.
+> Decimal is AI-native accounts payable software. It does the work businesses hire an AP clerk for:
+> reading each bill, coding it, and running approvals. And it comes with a self-custodial, global
+> stablecoin account, so businesses pay vendors anywhere in the world at a fraction of what banks charge,
+> from money only they control.
 
 **150 words:**
-> Businesses that pay vendors still type invoices, code them to the books by hand, chase approvals
-> across email and Slack, and reconcile manually. When those vendors are overseas, the payment
-> itself is slow and expensive: bank wires that take days at up to ~15% all-in, or fintech apps that
-> mark up the exchange rate through correspondent banks. No single tool does the AP work well and
-> pays the vendor well.
+> Every business that pays vendors hires an AP clerk to run accounts payable: reading each bill, coding
+> it to the books, routing it for approval, chasing sign-offs, and sorting out exceptions. Modern tools
+> automate the data entry, but a person still does the real work, and when the vendor is overseas the
+> payment is slow and banks take up to 6%.
 >
-> Decimal is one AI-native product that does both. A vision model extracts each invoice; an agent
-> codes it to the right GL account and learns each vendor; you design the approval flow (cost-center
-> hierarchies, tiered spend authority, delegation) and it is enforced, not advisory; a fraud gate
-> holds any new or look-alike payout address before money can move; and everything syncs two ways
-> with QuickBooks. The roadmap: settle cross-border vendor payments fast, with transparent FX, in an
-> account only the customer controls.
+> Decimal does that work with AI. It reads each bill, codes it, and puts everything in one view so an
+> approver clears it in a few clicks: it recommends the decision instead of just showing documents. And
+> it comes with a self-custodial, global stablecoin account, so a business pays vendors anywhere in the
+> world at a fraction of bank cost, from an account only it controls. The AP core is built; the
+> cross-border payout, over Bridge, is the next build.
 
 ---
 
 ## 2. Why now
 
-Three things turned in 2025 and 2026:
+- **The rail became real.** B2B stablecoin payment volume hit ~$226B in 2025, up 733% year over year;
+  Visa settles billions in USDC; Stripe's Bridge is the infrastructure. Cross-border dollars now move in
+  minutes at a fraction of a percent.
+- **The law caught up.** The GENIUS Act (July 18, 2025) gave payment stablecoins federal legal standing,
+  100% reserves, and redemption rights.
+- **AP is finally automatable.** Vision models and agents can now do the AP clerk's judgment work: read
+  a messy bill, code it, and resolve the exception, not just route it.
 
-- **The settlement rail became real.** B2B stablecoin payment volume hit ~$226B in 2025, up 733% year
-  over year; Visa is settling billions in USDC; Stripe's Bridge got a bank charter. Dollars can now
-  move across borders in minutes at a fraction of a percent.
-- **The law caught up.** The GENIUS Act (July 18, 2025) gave payment stablecoins federal legal
-  standing, 100% reserve rules, and redemption rights.
-- **AP is finally automatable.** Vision models and agents can now do the judgment work AP software
-  never could: read a messy invoice, code it, and resolve the exception, rather than just routing it.
-
-Nobody has combined all of it: an agent that *resolves* AP exceptions, ERP-native sync with no
-reconciliation lag, fast transparent cross-border settlement, and self-custodial control. That is the
-open lane. (Accelerator beat: YC funds its companies in USDC on Solana and its RFS explicitly asks for
-cross-border stablecoin payments. We are building exactly that.)
+The open lane: an AI that does the clerk's job *and* a self-custodial global account that pays the
+vendor. (Accelerator beat: YC's RFS explicitly asks for cross-border stablecoin payments and funds its
+companies in USDC. We are building exactly that.)
 
 ---
 
-## 3. Traction (the working product, honest)
+## 3. Traction (honest)
 
-A solo technical founder has shipped the AP core end to end:
+A solo technical founder, full-time, has shipped the AP core end to end:
 
-- **Invoice capture + AI extraction** — a PDF/image or CSV becomes structured payment orders via a
-  vision model.
-- **AI GL coding** — an agent codes each bill to the right account and learns each vendor's coding.
-- **A build-your-own approval engine** — cost-center hierarchies, seats, tiered spend authority,
-  delegation, and policy toggles; enforced by the system, not advisory. This is the strongest
-  demoable feature.
-- **A fraud review gate** — a new or changed payout address for a known vendor (account-takeover / BEC
-  signal), or a near-duplicate look-alike address, is held for human review before any money can move.
-- **Two-way QuickBooks sync** — a settled payment posts an idempotent Bill + BillPayment to the org's
-  chart of accounts; idempotent at two layers so nothing double-posts.
-- **A $10,000 grant from Solana Foundation × Superteam** — backing this project. (The relationship is
-  also a warm asset for ecosystem intros.)
+- **Invoice capture + AI extraction** (vision model into structured orders).
+- **AI GL coding** that learns each vendor (rules + vendor memory + model).
+- **A build-your-own approval engine**: cost-center hierarchies, seats, tiered authority, delegation,
+  enforced by the system, not advisory.
+- **A fraud review gate**: a new or look-alike vendor payout address is held for review before money
+  can move.
+- **Two-way QuickBooks sync**, idempotent at two layers.
+- **A self-custodial Squads treasury** holding the funds.
+- **A $10,000 grant from the Solana Foundation × Superteam.**
 
-No usage or revenue metrics are claimed; the product is pre-launch, and no test-result numbers are
-cited. The traction is the working product, the $10k Solana Foundation × Superteam grant, and the pace
-of a single builder.
+Pre-launch: no usage or revenue claimed. The payment processor and cross-border payout (over Bridge) are
+the next build, targeted mid-September after the legal setup. Traction is the working product, the grant,
+and the pace of a single builder.
 
 ---
 
-## 4. Market / customers
+## 4. Market, competition, and money
 
-**The buyer:** mid-market businesses that are AP-heavy (many vendors, high invoice volume) and are
-outgrowing BILL / Ramp / manual / Tipalti, on a modern-enough ERP (QuickBooks / NetSuite / Sage
-Intacct). Two shapes of the *same* customer (internal lens, never pitched as two products):
+**Competitors:** Bill.com, Stampli, Tipalti (Ramp for domestic AP). The line: **"Bill.com shows you
+documents; Decimal recommends the decision."** Accounts payable is a decision problem, not data entry.
 
-- **AP-heavy, complex orgs** — construction, healthcare, manufacturing, distribution, real estate;
-  drowning in invoices and approval chaos. Value: AI removes the manual hours and tames approvals.
-- **Global vendor payers** — importers and businesses paying overseas suppliers; the rail replaces
-  slow, expensive international transfers. Value: cheaper, faster, transparent cross-border payment.
+**The structural edge:** Decimal is **non-custodial**, so we never hold or move the money, only the
+business can. This skips much of the money-transmitter licensing Bill.com is built around, and lets us
+settle natively on stablecoin rails. The incumbents are all on traditional bank rails.
 
-Most real businesses are some of both. First design partners: import-heavy mid-market on QBO/NetSuite
-paying many overseas suppliers, reachable through a Controller or founder (not an 18-month enterprise
-sale).
+**How we make money:**
+- A subscription for the software.
+- A fee on each payment.
+- A spread on the currency conversion when a payment goes cross-border (the highest-margin line).
 
-**The gap we fill:** enterprise suites (Coupa/Ariba) are slow and rule-based; mid-market ERP-native
-tools (Ramp/BILL/Stampli) are fast but shallow with weak or no global payout; Tipalti has real global
-reach but sits outside the ERP, so reconciliation lags and FX is opaque and multi-day; new AI-native
-entrants are all on traditional bank rails. Decimal is the one product that is AI-native + ERP-native
-+ fast transparent cross-border + self-custodial.
+Banks charge around 6% on cross-border; our rail cost is a fraction (Bridge is roughly 10bps plus the
+payout leg), so we price well under 1%, undercut every bank, and still hold a healthy margin.
 
-Market facts (approved): World Bank ~15% bank cost on cross-border; 2.5–5% typical wire markup;
-GENIUS Act (Jul 2025); ~$226B B2B stablecoin volume in 2025 (+733% YoY).
+**How big:** cross-border payments for mid-market businesses are a roughly **$160 billion revenue
+market**. Capturing even 1% of it is **$1.6 billion in annual revenue**. The stablecoin slice is early
+and growing fast (business stablecoin cross-border is projected to grow from ~$13B today toward the
+trillions by 2035).
+
+**The buyer:** mid-market AP-heavy businesses on QuickBooks / NetSuite, especially those paying overseas
+vendors, reachable through a Controller or founder, not an 18-month enterprise sale.
 
 ---
 
 ## 5. Why me / solo
 
-A 22-year-old technical founder who, alone, shipped a working AI-native AP product — capture, coding,
-a real approval engine, a fraud gate, and two-way QuickBooks sync — and earned Solana ecosystem grants
-before writing a deck. Solo by choice: the bar for a co-founder is high, and nothing so far has needed
-to wait for one. Framing: a chosen high bar and resourcefulness, not a gap. Building the exact category
-YC is asking founders to build.
+A 22-year-old technical founder who, alone and full-time, shipped a working AI-native AP product (capture,
+coding, a real approval engine, a fraud gate, and two-way QuickBooks sync) and earned a Solana ecosystem
+grant before writing a deck. Solo by choice, with a high bar for a cofounder, open to the right person,
+not blocking on one. Building the exact category YC is asking founders to build.
 
 ---
 
-## 6. The payments narrative (roadmap, not shipped)
+## 6. The payments narrative (roadmap, honest)
 
-**Framing (mental-model fix, 2026-07-24):** the second pillar is **"a self-custodial, global USDC
-account"** — a *concrete account the business gets and controls* — NOT "stablecoin rails" (abstract,
-confusing jargon). This is the catch: nobody else hands a business a global account it fully controls
-and pays vendors from. It is also the more *honest* frame — **the account is real and built; paying
-vendors globally *out of it* is the roadmap.**
+The second pillar is a **self-custodial, global stablecoin account**: a concrete account the business
+gets and controls, and pays vendors from. This is the catch, nobody else hands a business a global
+account it fully controls. It is also the honest frame: **the account (Squads treasury) is real and
+holds the money today; paying vendors out of it, across borders, is the roadmap.**
 
-Be precise here. What is shipped is the AP workflow that ends at the books, and the **self-custodial
-global USDC account (Squads multisig)** — the money already sits in an account only the customer
-controls. What is next, and what the whole product is aimed at, is **paying the vendor out of that
-account, across borders**: fast, transparent-FX settlement.
-
-The concrete piece still to solve is the **payout rail: integrating Bridge (Stripe's stablecoin
-infrastructure) for the fiat off-ramp and FX**, plus the fee/spread model and reconciliation back into
-the ledger. That is the next build. For applications: state the Squads self-custody as real, and sell
-cross-border payment as the roadmap the shipped AP product leads into. **Never claim cross-border
-payments work today.**
-
-The control story is the durable differentiator: **your money stays in an account only you control,
-and the automation runs inside rules that cannot be flipped by us or an insider.**
+The concrete piece to build is the **payment processor plus Bridge (Stripe's stablecoin infrastructure)
+for the fiat off-ramp and FX**, plus the fee/spread model and reconciliation back to the ledger.
+Targeted mid-September, gated on the legal setup. Never claim cross-border payments work today. The
+durable differentiator is control: **your money stays in an account only you control, and the automation
+runs inside rules that cannot be flipped by us or an insider.**
 
 ---
 
 ## 7. The ask / use of funds
 
-Raising to (1) build the cross-border payout rail (integrating Bridge for off-ramp and FX), and (2) land the first
-paid design partners among import-heavy mid-market AP teams. Accelerator capital + network is the
-fastest path to both: warm intros to mid-market Controllers/AP leads, and the credibility to sign
-paid design partnerships rather than free pilots. Use of funds: founding engineering hires for the
+Raising to (1) build the cross-border payout rail (the payment processor plus Bridge for off-ramp and
+FX), and (2) land the first paid design partners among mid-market AP teams paying overseas vendors.
+Accelerator capital and network is the fastest path to both. Use of funds: founding engineering for the
 payments build, design-partner onboarding, and compliance groundwork for the payout rail.
