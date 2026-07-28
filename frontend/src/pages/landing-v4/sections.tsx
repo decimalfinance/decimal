@@ -156,6 +156,12 @@ const ART = { card: 330, plateH: 405, panelW: 264, panelH: 304 };
 const MOBILE_TRIM = 0.92;
 const MAX_CARD = Math.round(396 * MOBILE_TRIM);
 
+// Desktop cards are pinned narrower than the third of the section they'd otherwise
+// fill (397), and the width they give up becomes the column gap: 3*360 + 2*80 = 1240.
+// Everything inside scales off the card, so this shrinks the composition, not its
+// proportions. The row still spans the section, so the gutters stay equal.
+const DESKTOP_CARD = 360;
+
 function FeatureCard({ n, fig, card, title, body }: { n: string; fig: string; card: ReactNode; title: string; body: string }) {
   const narrow = useNarrow();
   const ref = useRef<HTMLDivElement>(null);
@@ -212,7 +218,7 @@ export function Features() {
         <div style={{ marginTop: narrow ? 28 : 40 }}>
           {/* One centred column on mobile, capped so the card can't grow far past the
               mini-UI it frames — full width would leave the plate mostly empty. */}
-          <div style={{ display: 'grid', gridTemplateColumns: narrow ? `minmax(0, ${MAX_CARD}px)` : 'repeat(3,1fr)', justifyContent: narrow ? 'center' : undefined, gap: narrow ? 20 : 25 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: narrow ? `minmax(0, ${MAX_CARD}px)` : `repeat(3, ${DESKTOP_CARD}px)`, justifyContent: narrow ? 'center' : 'space-between', gap: narrow ? 20 : undefined }}>
             <FeatureCard
               n="01" fig="FIG. 01 — CUSTODY" card={<SelfCustodyCard />} title="Self-custodial funds"
               body="Your funds stay in an account only you control. Decimal prepares every payment, but it can't move a dollar on its own, and no one can override that."
