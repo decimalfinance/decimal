@@ -1,11 +1,10 @@
-// Features (16a "specimen plates"), FAQ (18b two-column dossier),
+// Features (21b "ruled specimen"), FAQ (18b two-column dossier),
 // final CTA (19a Monk-simple), and a minimal footer (not designed — kept simple).
 import { useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { Marker, PersonIcon } from './shared';
 import { M_PAD, useNarrow } from './responsive';
 
-const A = '/landing4/';
 const monoLabel: CSSProperties = { font: '400 9px/1 var(--font-mono)', letterSpacing: '.16em', color: 'var(--text-muted)' };
 
 /* ═══════════ features ═══════════ */
@@ -141,12 +140,16 @@ function LedgerSyncCard() {
   );
 }
 
-function FeatureCard({ img, imgScale, card, title, body }: { img: string; imgScale?: number; card: ReactNode; title: string; body: string }) {
+/** 21b "ruled specimen" plate: dashed frame + oversized outlined numeral behind a
+    flat-offset mini-UI panel. No photography in this section by design. */
+function FeatureCard({ n, fig, card, title, body }: { n: string; fig: string; card: ReactNode; title: string; body: string }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--bg-surface)', border: '1px solid #0A0A0A' }}>
-      <div style={{ position: 'relative', height: 540, overflow: 'hidden', background: 'var(--bg-surface)' }}>
-        <img src={img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', transform: imgScale ? `scale(${imgScale})` : undefined }} />
-        <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: '80%', height: 320, background: '#FFFFFF', border: '1px solid #0A0A0A', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ position: 'relative', height: 405, overflow: 'hidden', background: '#F1EDE8' }}>
+        <div style={{ position: 'absolute', inset: 12, border: '1px dashed color-mix(in srgb, var(--ink) 40%, transparent)', pointerEvents: 'none' }} />
+        <div style={{ position: 'absolute', top: 4, left: 16, font: '600 96px/1 var(--font-mono)', color: 'transparent', WebkitTextStroke: '1.2px var(--accent)', opacity: 0.5 }}>{n}</div>
+        <div style={{ position: 'absolute', bottom: 20, left: 22, font: '500 8px var(--font-mono)', letterSpacing: '.18em', color: 'color-mix(in srgb, var(--ink) 55%, transparent)', whiteSpace: 'nowrap' }}>{fig}</div>
+        <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: '80%', height: '75%', background: '#FFFFFF', border: '1px solid #0A0A0A', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '10px 10px 0 var(--band)' }}>
           {card}
         </div>
       </div>
@@ -166,18 +169,18 @@ export function Features() {
         <h2 style={{ margin: 0, font: `var(--dw,600) ${narrow ? 32 : 40}px/1.08 var(--font-display)`, letterSpacing: '-.02em', color: 'var(--ink)' }}>
           More than <Marker side="right">payments.</Marker>
         </h2>
-        <div style={{ marginTop: narrow ? 28 : 40 }}>
+        <div style={{ marginTop: narrow ? 28 : 40, maxWidth: narrow ? undefined : 1040 }}>
           <div style={{ display: 'grid', gridTemplateColumns: narrow ? '1fr' : 'repeat(3,1fr)', gap: narrow ? 20 : 25 }}>
             <FeatureCard
-              img={A + 'purplecheck.jpg'} card={<SelfCustodyCard />} title="Self-custodial funds"
+              n="01" fig="FIG. 01 — CUSTODY" card={<SelfCustodyCard />} title="Self-custodial funds"
               body="Your funds stay in an account only you control. Decimal prepares every payment, but it can't move a dollar on its own, and no one can override that."
             />
             <FeatureCard
-              img={A + 'water2.jpg'} imgScale={1.18} card={<VendorPortalCard />} title="Verified vendor onboarding"
+              n="02" fig="FIG. 02 — VENDORS" card={<VendorPortalCard />} title="Verified vendor onboarding"
               body="Payment details come straight from the vendor through a secure link, and Decimal verifies them before a cent goes out. Set up once, they stay on file for every bill after."
             />
             <FeatureCard
-              img={A + 'sky1.jpg'} card={<LedgerSyncCard />} title="Two-way ledger sync"
+              n="03" fig="FIG. 03 — LEDGER" card={<LedgerSyncCard />} title="Two-way ledger sync"
               body="Every line is coded to your chart of accounts, and posted bills land in QuickBooks Online on their own. Nothing left to re-key at close."
             />
           </div>
