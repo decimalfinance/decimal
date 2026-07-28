@@ -192,7 +192,9 @@ function FeatureCard({ n, fig, card, title, body }: { n: string; fig: string; ca
         <div style={{ position: 'absolute', inset: plate(12), border: '1px dashed color-mix(in srgb, var(--ink) 40%, transparent)', pointerEvents: 'none' }} />
         <div style={{ position: 'absolute', top: plate(4), left: plate(16), font: `600 ${plate(96)}px/1 var(--font-mono)`, color: 'transparent', WebkitTextStroke: `${plate(1.2)}px var(--accent)`, opacity: 0.5 }}>{n}</div>
         <div style={{ position: 'absolute', bottom: plate(20), left: plate(22), font: `500 ${plate(8)}px var(--font-mono)`, letterSpacing: '.18em', color: 'color-mix(in srgb, var(--ink) 55%, transparent)', whiteSpace: 'nowrap' }}>{fig}</div>
-        <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: px(ART.panelW), height: px(ART.panelH), background: '#FFFFFF', border: '1px solid #0A0A0A', boxShadow: `${px(10)}px ${px(10)}px 0 var(--band)` }}>
+        {/* No offset shadow on mobile: the trimmed plate leaves too little margin for
+            it to read as a deliberate flat offset rather than a smudge. */}
+        <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: px(ART.panelW), height: px(ART.panelH), background: '#FFFFFF', border: '1px solid #0A0A0A', boxShadow: narrow ? undefined : `${px(10)}px ${px(10)}px 0 var(--band)` }}>
           {/* Laid out at the artboard's 264x304 and scaled as a unit: type, rows and
               buttons all grow together, so the mini-UI never gaps at its auto spacers. */}
           <div style={{ width: ART.panelW, height: ART.panelH, transform: `scale(${s})`, transformOrigin: 'top left' }}>{card}</div>
