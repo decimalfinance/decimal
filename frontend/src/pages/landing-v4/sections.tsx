@@ -1,6 +1,6 @@
 // Features (21b "ruled specimen"), FAQ (18b two-column dossier),
 // final CTA (19a Monk-simple), and a minimal footer (not designed — kept simple).
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { Marker, PersonIcon } from './shared';
 import { M_PAD, useNarrow } from './responsive';
@@ -144,17 +144,33 @@ function LedgerSyncCard() {
     flat-offset mini-UI panel. No photography in this section by design. */
 
 // The artboard draws a 330-wide card: a 405 plate carrying a 264x304 mini-UI panel.
-// The grid spans the full 1240 section, so cards land at 397 — every measurement in
-// the plate is multiplied by that ratio, mini-UI included, so the whole composition
-// enlarges at fixed proportions instead of stretching. Mobile keeps artboard size.
+// The card measures itself and multiplies every plate measurement — inset, numeral,
+// fig label, panel and the mini-UI inside it — by its width against that 330, so the
+// composition enlarges or shrinks as one piece and never stretches. Desktop cards
+// land at 397 (1.20x); on mobile MAX_CARD keeps the card from outgrowing its mini-UI.
 const ART = { card: 330, plateH: 405, panelW: 264, panelH: 304 };
-const PLATE_SCALE = 397 / ART.card;
+const MAX_CARD = 396;
 
 function FeatureCard({ n, fig, card, title, body }: { n: string; fig: string; card: ReactNode; title: string; body: string }) {
-  const s = useNarrow() ? 1 : PLATE_SCALE;
+  const ref = useRef<HTMLDivElement>(null);
+  const [w, setW] = useState(ART.card);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    // offsetWidth, not the rect: between MOBILE_BP and the design width the whole
+    // sheet is transform-scaled, and layout width is what the plate scales against.
+    const measure = () => setW(el.offsetWidth || ART.card);
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    measure();
+    return () => ro.disconnect();
+  }, []);
+
+  const s = w / ART.card;
   const px = (v: number) => Math.round(v * s * 10) / 10;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--bg-surface)', border: '1px solid #0A0A0A' }}>
+    <div ref={ref} style={{ display: 'flex', flexDirection: 'column', background: 'var(--bg-surface)', border: '1px solid #0A0A0A' }}>
       <div style={{ position: 'relative', height: px(ART.plateH), overflow: 'hidden', background: '#F1EDE8' }}>
         <div style={{ position: 'absolute', inset: px(12), border: '1px dashed color-mix(in srgb, var(--ink) 40%, transparent)', pointerEvents: 'none' }} />
         <div style={{ position: 'absolute', top: px(4), left: px(16), font: `600 ${px(96)}px/1 var(--font-mono)`, color: 'transparent', WebkitTextStroke: `${px(1.2)}px var(--accent)`, opacity: 0.5 }}>{n}</div>
@@ -186,7 +202,9 @@ export function Features() {
             full section instead: equal gutters, cards scaled up at the artboard's gap
             and proportion (see PLATE_H). */}
         <div style={{ marginTop: narrow ? 28 : 40 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: narrow ? '1fr' : 'repeat(3,1fr)', gap: narrow ? 20 : 25 }}>
+          {/* One centred column on mobile, capped so the card can't grow far past the
+              mini-UI it frames — full width would leave the plate mostly empty. */}
+          <div style={{ display: 'grid', gridTemplateColumns: narrow ? `minmax(0, ${MAX_CARD}px)` : 'repeat(3,1fr)', justifyContent: narrow ? 'center' : undefined, gap: narrow ? 20 : 25 }}>
             <FeatureCard
               n="01" fig="FIG. 01 — CUSTODY" card={<SelfCustodyCard />} title="Self-custodial funds"
               body="Your funds stay in an account only you control. Decimal prepares every payment, but it can't move a dollar on its own, and no one can override that."
