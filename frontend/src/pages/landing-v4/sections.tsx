@@ -208,10 +208,29 @@ function FeatureCard({ n, fig, card, title, body }: { n: string; fig: string; ca
 
 export function Features() {
   const narrow = useNarrow();
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [wrapW, setWrapW] = useState(0);
+
+  useLayoutEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const measure = () => setWrapW(el.offsetWidth);
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    measure();
+    return () => ro.disconnect();
+  }, []);
+
+  // Past MAX_CARD the single mobile column stops filling the width and starts to
+  // centre, which leaves a left-aligned header hanging off the card. Centre the
+  // header with it. On a phone the card still fills, so the header stays left —
+  // aligned with the card and with every other section header on the page.
+  const headerCentred = narrow && wrapW > MAX_CARD;
+
   return (
     <div id="features" style={{ padding: narrow ? `44px ${M_PAD}px` : '56px 64px', backgroundColor: 'var(--bg-surface)' }}>
-      <div style={{ maxWidth: 1240, margin: '0 auto' }}>
-        <h2 style={{ margin: 0, font: `var(--dw,600) ${narrow ? 32 : 40}px/1.08 var(--font-display)`, letterSpacing: '-.02em', color: 'var(--ink)' }}>
+      <div ref={wrapRef} style={{ maxWidth: 1240, margin: '0 auto' }}>
+        <h2 style={{ margin: 0, font: `var(--dw,600) ${narrow ? 32 : 40}px/1.08 var(--font-display)`, letterSpacing: '-.02em', color: 'var(--ink)', textAlign: headerCentred ? 'center' : undefined }}>
           More than <Marker side="right">payments.</Marker>
         </h2>
         {/* The 21b artboard caps the grid at 1040, which left-aligns it inside the
