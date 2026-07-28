@@ -169,7 +169,10 @@ export function Features() {
         <h2 style={{ margin: 0, font: `var(--dw,600) ${narrow ? 32 : 40}px/1.08 var(--font-display)`, letterSpacing: '-.02em', color: 'var(--ink)' }}>
           More than <Marker side="right">payments.</Marker>
         </h2>
-        <div style={{ marginTop: narrow ? 28 : 40, maxWidth: narrow ? undefined : 1040 }}>
+        {/* The 21b artboard caps the grid at 1040, which left-aligns it inside the
+            1240 section and leaves a lopsided gutter on the right. The grid fills the
+            section instead: equal margins, and the header still aligns to card 01. */}
+        <div style={{ marginTop: narrow ? 28 : 40 }}>
           <div style={{ display: 'grid', gridTemplateColumns: narrow ? '1fr' : 'repeat(3,1fr)', gap: narrow ? 20 : 25 }}>
             <FeatureCard
               n="01" fig="FIG. 01 — CUSTODY" card={<SelfCustodyCard />} title="Self-custodial funds"
