@@ -1,13 +1,14 @@
-// Lives inside frontend/src/ so Vercel (project root = frontend/) can
-// resolve it during build. Keep this in sync with the repo-root
-// config/frontend.public.json that other entry points read.
+// Lives inside frontend/src/ so Vercel (project root = frontend/) can resolve
+// it during build.
+//
+// No RPC URL here: every client-side Solana call goes through the backend
+// proxy (POST /solana/rpc, see lib/solana-wallet.ts), which is what keeps the
+// backend's RPC key out of the browser.
 import frontendPublicConfig from './public-config.json';
-import { getRuntimeSolanaRpcUrl } from './solana-network';
 
 type PublicConfig = {
   apiBaseUrl: string;
   localApiBaseUrl?: string;
-  solanaRpcUrl: string;
 };
 
 const config = frontendPublicConfig as PublicConfig;
@@ -25,22 +26,9 @@ export function getPublicApiBaseUrl() {
     ? String(config.localApiBaseUrl ?? '').trim()
     : String(config.apiBaseUrl ?? '').trim();
   if (!value) {
-    throw new Error('config/frontend.public.json must define apiBaseUrl.');
+    throw new Error('frontend/src/public-config.json must define apiBaseUrl.');
   }
   return value.replace(/\/+$/, '');
-}
-
-export function getPublicSolanaRpcUrl() {
-  const runtimeValue = getRuntimeSolanaRpcUrl().trim();
-  if (runtimeValue) {
-    return runtimeValue;
-  }
-
-  const value = String(config.solanaRpcUrl ?? '').trim();
-  if (!value) {
-    return 'https://api.mainnet-beta.solana.com';
-  }
-  return value;
 }
 
 function shouldUseLocalApiBaseUrl() {

@@ -1,10 +1,6 @@
 import { Connection, type Commitment } from '@solana/web3.js';
-import { getPublicApiBaseUrl, getPublicSolanaRpcUrl } from '../public-config';
+import { getPublicApiBaseUrl } from '../public-config';
 import { api } from '../api';
-
-export function resolveSolanaRpcUrl(): string {
-  return getPublicSolanaRpcUrl();
-}
 
 // All client-side Solana RPC goes through the backend proxy (POST /solana/rpc)
 // so the backend's paid RPC key never reaches the browser. The session token

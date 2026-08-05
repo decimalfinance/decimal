@@ -470,11 +470,9 @@ const airdropSolSchema = z.object({
   amountSol: z.number().positive().max(2).optional(),
 });
 
-// Devnet SOL airdrop. Always hits the devnet RPC connection
-// (SOLANA_DEVNET_RPC_URL), never the configured network connection —
-// a mainnet airdrop request would just be a hard error from the RPC,
-// and we want this to remain useful for testing even when the app is
-// running in mainnet mode.
+// Devnet SOL airdrop. Uses the faucet-capable connection
+// (SOLANA_AIRDROP_RPC_URL) rather than the main one, because paid providers
+// disable requestAirdrop — so a keyed SOLANA_RPC_URL would fail here.
 //
 // Devnet airdrops are rate-limited per IP/wallet by Solana's network;
 // hitting that limit returns a 429-shaped error from the RPC which we

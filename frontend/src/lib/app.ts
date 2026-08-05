@@ -1,5 +1,3 @@
-import type { SolanaNetwork } from '../solana-network';
-import { getRuntimeSolanaNetwork } from '../solana-network';
 import type { TreasuryWallet } from '../types';
 
 export function formatRawUsdc(amountRaw: string) {
@@ -110,29 +108,26 @@ export function shortenAddress(value: string | null | undefined, prefix = 6, suf
 }
 
 export function orbTransactionUrl(signature: string) {
-  return explorerTransactionUrl(signature, getRuntimeSolanaNetwork());
+  return explorerTransactionUrl(signature);
 }
 
 export function orbAccountUrl(address: string) {
-  return explorerAccountUrl(address, getRuntimeSolanaNetwork());
+  return explorerAccountUrl(address);
 }
 
 export function solanaAccountUrl(address: string) {
-  return explorerAccountUrl(address, getRuntimeSolanaNetwork());
+  return explorerAccountUrl(address);
 }
 
-// Solscan supports both mainnet and devnet via the `?cluster=devnet` query
-// param. Orb (orbmarkets.io) was nicer for mainnet but doesn't render devnet
-// state, which made every link broken in dev. Single explorer for both
-// clusters now.
-export function explorerTransactionUrl(signature: string, network: SolanaNetwork) {
-  const cluster = network === 'devnet' ? '?cluster=devnet' : '';
-  return `https://solscan.io/tx/${signature}${cluster}`;
+// Solscan, always on devnet — that is the only cluster this product uses.
+// (Orb rendered mainnet more nicely but shows nothing for devnet, which made
+// every link dead in practice.)
+export function explorerTransactionUrl(signature: string) {
+  return `https://solscan.io/tx/${signature}?cluster=devnet`;
 }
 
-export function explorerAccountUrl(address: string, network: SolanaNetwork) {
-  const cluster = network === 'devnet' ? '?cluster=devnet' : '';
-  return `https://solscan.io/account/${address}${cluster}`;
+export function explorerAccountUrl(address: string) {
+  return `https://solscan.io/account/${address}?cluster=devnet`;
 }
 
 // Page-level helpers. App.tsx has its own variants with different fallback

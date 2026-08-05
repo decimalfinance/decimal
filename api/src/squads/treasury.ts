@@ -1994,13 +1994,12 @@ export async function confirmDecimalProposalExecution(
   return serializeDecimalProposal(updated);
 }
 
-// Recover a proposal whose on-chain execution the app never recorded. This
-// happens when the execute transaction landed on a cluster the backend wasn't
-// reading at the time (e.g. a devnet treasury while the backend ran mainnet),
-// so confirm-execution threw "signature has not landed" and the row is stuck at
-// `submitted` with no executedSignature. We find the real VaultTransactionExecute
-// signature from chain and feed it back through confirm-execution, which records
-// it and runs the (now cluster-robust) settlement verification.
+// Recover a proposal whose on-chain execution the app never recorded — the
+// execute landed but confirm-execution threw "signature has not landed" (a slow
+// or unavailable RPC at the wrong moment), leaving the row stuck at `submitted`
+// with no executedSignature. We find the real VaultTransactionExecute signature
+// from chain and feed it back through confirm-execution, which records it and
+// runs settlement verification.
 export async function reconcileDecimalProposalFromChain(
   organizationId: string,
   actorUserId: string,
