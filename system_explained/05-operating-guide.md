@@ -9,45 +9,47 @@ by a local docker PostgreSQL. No worker, no ClickHouse.
 shelved during the research phase; restore the `prod-backend`/`tunnel` Make targets from git
 history to bring it back.)
 
-Two databases live in the one docker Postgres container (port 54329):
+Three databases live in the one docker Postgres container (port 54329), and
+they cannot see each other:
 
-- `usdc_ops_local` — local dev (`make dev`).
-- `usdc_ops_test` — tests (`make test-api`); truncate-based, safe to wipe.
-- (`usdc_ops` is just the Postgres default/admin DB; the app doesn't use it.)
+- `usdc_ops_local` — what you look at in the browser (`make dev`).
+- `usdc_ops_bench` — what an AI agent drives (`make bench`).
+- `usdc_ops_test` — tests (`make test`); truncate-based, safe to wipe.
 
-## Local Development
+## The six commands
 
 ```bash
-make dev            # postgres + api + frontend on devnet, one terminal
+make dev     # start everything (db + api + web) -> localhost:5174
+make stop    # stop everything, including docker
+make test    # run all tests
+make reset   # wipe local dev data (schema stays)
+make bench   # background stack for AI testing -> localhost:5274
+make help    # show this list
 ```
 
-Individual processes: `make dev-api`, `make dev-frontend`.
+That is the whole surface. Devnet only — there is no network to choose.
+
+`make dev` and `make bench` run at the same time on different ports and
+different databases, so an agent testing in the background can never touch what
+you have open.
 
 ## Tests
 
-```bash
-make test            # api + frontend
-make test-api        # API tests (against usdc_ops_test)
-make test-frontend
-```
+`make test` points `DATABASE_URL` at `usdc_ops_test`, applies the schema,
+generates Prisma, typechecks the API, runs the Node tests, and builds the
+frontend. **Always go through `make test`.** The truncate-based suites
+`TRUNCATE` every table in `beforeEach`; run them directly (e.g. `npx tsx
+--test`) and they inherit `DATABASE_URL=usdc_ops_local` from `api/.env` and wipe
+your dev DB. A guard (`api/tests/helpers/require-test-database.ts`) refuses to
+run unless the connected database name ends in `_test`.
 
-`make test-api` sets `DATABASE_URL` to `usdc_ops_test`, applies the bootstrap SQL, generates
-Prisma, and runs the Node tests. **Always run API tests through `make test-api`.** The
-truncate-based suites `TRUNCATE` every table in `beforeEach`; run them directly (e.g.
-`npx tsx --test`) and they inherit `DATABASE_URL=usdc_ops_local` from `api/.env` and wipe the
-dev DB. A guard (`api/tests/helpers/require-test-database.ts`) now refuses to run unless the
-connected database name ends in `_test`.
+## Data
 
-## Data: Backup, Restore, Reset
+`make reset` empties `usdc_ops_local` and `usdc_ops_bench`, keeping the schema —
+it discovers tables from `pg_tables`, so it cannot go stale as the schema moves.
 
-```bash
-make backup-db                              # pg_dump -> backups/<db>-<timestamp>.sql (DB=usdc_ops_local default)
-make restore-db FILE=backups/<name>.sql     # restore a dump [DB=usdc_ops_local]
-make list-backups
-make reset-data                             # truncate the local dev DB (usdc_ops_local)
-```
-
-There is no ClickHouse reset path. Take a `make backup-db` before any destructive operation.
+For a backup before something risky, see `postgres/README.md`; there are no
+backup make targets because they were never once used.
 
 ## Health
 
