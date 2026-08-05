@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, beforeEach, test } from 'node:test';
 import { prisma } from '../src/infra/prisma.js';
 import { requireTestDatabase } from './helpers/require-test-database.js';
+import { signSvixPayloadForTests, verifySvixSignature } from '../src/payments/inbound-email/svix-signature.js';
 import {
   RESERVED_INTAKE_SLUGS,
   backfillIntakeSlugs,
@@ -197,4 +198,148 @@ test('an address on any other domain is not ours', () => {
 test('a display-name header yields the bare address', () => {
   assert.equal(extractEmailAddress('Acme Books <ap@acme.com>'), 'ap@acme.com');
   assert.equal(extractEmailAddress('  AP@Acme.com '), 'ap@acme.com');
+});
+
+// --- webhook signature -------------------------------------------------------
+
+const SECRET = `whsec_${Buffer.from('a-test-signing-key-of-decent-length').toString('base64')}`;
+const NOW = 1_800_000_000;
+
+function signed(body: string, overrides: { secret?: string; id?: string; at?: number } = {}) {
+  return signSvixPayloadForTests({
+    rawBody: Buffer.from(body, 'utf8'),
+    secret: overrides.secret ?? SECRET,
+    id: overrides.id ?? 'msg_2abc',
+    timestampSeconds: overrides.at ?? NOW,
+  });
+}
+
+test('a correctly signed payload verifies', () => {
+  const body = '{"type":"email.received"}';
+  const result = verifySvixSignature({
+    rawBody: Buffer.from(body, 'utf8'),
+    headers: signed(body),
+    secret: SECRET,
+    nowSeconds: NOW,
+  });
+  assert.deepEqual(result, { ok: true });
+});
+
+test('a tampered body fails verification', () => {
+  const headers = signed('{"type":"email.received","amount":1}');
+  const result = verifySvixSignature({
+    rawBody: Buffer.from('{"type":"email.received","amount":9999}', 'utf8'),
+    headers,
+    secret: SECRET,
+    nowSeconds: NOW,
+  });
+  assert.deepEqual(result, { ok: false, reason: 'no_match' });
+});
+
+test('a payload signed with a different secret is rejected', () => {
+  const body = '{"type":"email.received"}';
+  const headers = signed(body, { secret: `whsec_${Buffer.from('some-other-key-entirely').toString('base64')}` });
+  const result = verifySvixSignature({
+    rawBody: Buffer.from(body, 'utf8'),
+    headers,
+    secret: SECRET,
+    nowSeconds: NOW,
+  });
+  assert.deepEqual(result, { ok: false, reason: 'no_match' });
+});
+
+test('a timestamp outside the tolerance window is rejected as a replay', () => {
+  const body = '{"type":"email.received"}';
+  const headers = signed(body, { at: NOW - 3600 });
+  const result = verifySvixSignature({
+    rawBody: Buffer.from(body, 'utf8'),
+    headers,
+    secret: SECRET,
+    nowSeconds: NOW,
+  });
+  assert.deepEqual(result, { ok: false, reason: 'stale_timestamp' });
+  // ...and a future timestamp is equally suspicious
+  assert.deepEqual(
+    verifySvixSignature({
+      rawBody: Buffer.from(body, 'utf8'),
+      headers: signed(body, { at: NOW + 3600 }),
+      secret: SECRET,
+      nowSeconds: NOW,
+    }),
+    { ok: false, reason: 'stale_timestamp' },
+  );
+});
+
+test('a header carrying several signatures verifies when any one matches', () => {
+  // What a secret rotation looks like on the wire.
+  const body = '{"type":"email.received"}';
+  const valid = signed(body)['svix-signature'];
+  const headers = { ...signed(body), 'svix-signature': `v1,ZmFrZXNpZ25hdHVyZQ== ${valid}` };
+  assert.deepEqual(
+    verifySvixSignature({ rawBody: Buffer.from(body, 'utf8'), headers, secret: SECRET, nowSeconds: NOW }),
+    { ok: true },
+  );
+});
+
+test('an unknown signature version is ignored rather than trusted', () => {
+  const body = '{"type":"email.received"}';
+  const valid = signed(body)['svix-signature']!.slice('v1,'.length);
+  const headers = { ...signed(body), 'svix-signature': `v2,${valid}` };
+  assert.deepEqual(
+    verifySvixSignature({ rawBody: Buffer.from(body, 'utf8'), headers, secret: SECRET, nowSeconds: NOW }),
+    { ok: false, reason: 'no_match' },
+  );
+});
+
+test('a malformed signature header is rejected, never thrown on', () => {
+  const body = '{"type":"email.received"}';
+  for (const bad of ['', 'garbage', 'v1', 'v1,', '!!!not base64!!!']) {
+    const headers = { ...signed(body), 'svix-signature': bad };
+    const result = verifySvixSignature({
+      rawBody: Buffer.from(body, 'utf8'),
+      headers,
+      secret: SECRET,
+      nowSeconds: NOW,
+    });
+    assert.equal(result.ok, false, `should not verify: ${JSON.stringify(bad)}`);
+  }
+});
+
+test('missing headers are reported distinctly from a signature mismatch', () => {
+  const body = '{"type":"email.received"}';
+  assert.deepEqual(
+    verifySvixSignature({ rawBody: Buffer.from(body, 'utf8'), headers: {}, secret: SECRET, nowSeconds: NOW }),
+    { ok: false, reason: 'missing_headers' },
+  );
+});
+
+test('the webhook-* header spelling is accepted as well as svix-*', () => {
+  const body = '{"type":"email.received"}';
+  const svix = signed(body);
+  const headers = {
+    'webhook-id': svix['svix-id']!,
+    'webhook-timestamp': svix['svix-timestamp']!,
+    'webhook-signature': svix['svix-signature']!,
+  };
+  assert.deepEqual(
+    verifySvixSignature({ rawBody: Buffer.from(body, 'utf8'), headers, secret: SECRET, nowSeconds: NOW }),
+    { ok: true },
+  );
+});
+
+test('the signature covers the raw bytes, so re-serialized JSON does not verify', () => {
+  // The reason the route mounts express.raw() instead of reusing express.json():
+  // parsing and re-serializing changes the bytes (here, whitespace) even though
+  // the JSON value is identical, and the signature would silently stop matching.
+  const body = '{"type":"email.received","a":1}';
+  const reserialized = JSON.stringify(JSON.parse(body), null, 1);
+  assert.notEqual(reserialized, body, 'same value, different bytes');
+
+  const result = verifySvixSignature({
+    rawBody: Buffer.from(reserialized, 'utf8'),
+    headers: signed(body),
+    secret: SECRET,
+    nowSeconds: NOW,
+  });
+  assert.deepEqual(result, { ok: false, reason: 'no_match' });
 });
