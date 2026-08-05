@@ -18,6 +18,12 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
     },
     auth: {
       user: 'Authorization: Bearer <sessionToken>',
+      // Whether throwaway testing accounts are possible on this deployment.
+      // The SPA is a static bundle and cannot know otherwise; /dev-login reads
+      // this to show itself as unavailable rather than failing on submit.
+      // False in production, where DEV_AUTH_SECRET is unset.
+      developerSignIn: Boolean(config.devAuthSecret),
+      developerEmailDomain: config.devAuthSecret ? 'dev.decimal.test' : null,
     },
     onboarding: {
       autoProvisionWallets: config.autoProvisionWallets,

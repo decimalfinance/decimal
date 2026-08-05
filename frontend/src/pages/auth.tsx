@@ -6,7 +6,7 @@
 import type { FormEvent } from 'react';
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, type AuthenticatedSession } from '../api';
 import { queryKeys, toAuthenticatedSession } from '../lib/app-helpers';
 import { Ico } from '../dec/icons';
@@ -270,91 +270,10 @@ export function LoginPage() {
         New to Decimal? <a href="/register">Create an account</a>
       </p>
 
-      <DevLoginPanel returnTo={returnTo} />
     </AuthLayout>
   );
 }
 
-// ─── Developer sign-in panel (testing) ─────────────────────────────────────
-// Renders ONLY when VITE_DEV_AUTH_SECRET is present in the build env — the
-// production build never ships it. Signs in as a synthetic persona on the
-// reserved @dev.decimal.test domain (the API enforces both the secret and the
-// domain), so an agent driving the browser can spin up any number of users.
-function DevLoginPanel({ returnTo }: { returnTo: string | null }) {
-  const envSecret = (import.meta.env.VITE_DEV_AUTH_SECRET as string | undefined)?.trim();
-  const queryClient = useQueryClient();
-  const navigate = useNavigate();
-  const [persona, setPersona] = useState('');
-  const [orgName, setOrgName] = useState('');
-  const [secret, setSecret] = useState(envSecret ?? '');
-  const [error, setError] = useState<string | null>(null);
-
-  const devMutation = useMutation({
-    mutationFn: (input: { secret: string; email: string; displayName?: string; organizationName?: string }) => {
-      void queryClient.cancelQueries({ queryKey: queryKeys().session });
-      queryClient.removeQueries({ queryKey: queryKeys().session });
-      api.clearSessionToken();
-      return api.devLogin(input);
-    },
-    onSuccess: (result) => {
-      api.setSessionToken(result.sessionToken);
-      queryClient.setQueryData(queryKeys().session, toAuthenticatedSession(result));
-      // The named org wins over everything — landing in the wrong same-named
-      // test org cost a whole debugging session.
-      if (result.landingOrganizationId) {
-        navigate(`/organizations/${result.landingOrganizationId}`, { replace: true });
-        return;
-      }
-      if (returnTo) {
-        navigate(returnTo, { replace: true });
-        return;
-      }
-      const firstOrganizationId = result.organizations[0]?.organizationId;
-      navigate(firstOrganizationId ? `/organizations/${firstOrganizationId}` : '/setup', { replace: true });
-    },
-    onError: (nextError) => setError(authErrorMessage(nextError, 'Developer sign-in failed.')),
-  });
-
-  if (!envSecret) return null;
-
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const slug = persona.trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
-    if (!slug) { setError('Give the persona a name, e.g. "alice".'); return; }
-    if (!secret.trim()) { setError('The developer password (DEV_AUTH_SECRET) is required.'); return; }
-    setError(null);
-    // No displayName here: seeded personas already have real names ("Zaid
-    // Owner"), and sending the slug overwrote them — which then leaked into
-    // audit strings ("cleared by zaid"). New personas default to the slug.
-    devMutation.mutate({
-      secret: secret.trim(),
-      email: `${slug}@dev.decimal.test`,
-      ...(orgName.trim() ? { organizationName: orgName.trim() } : {}),
-    });
-  };
-
-  const inputStyle = { flex: 1, minWidth: 0 } as const;
-  return (
-    <form onSubmit={submit} data-testid="dev-login" style={{ marginTop: 18, padding: '12px 14px', border: '1px dashed var(--border-strong)', borderRadius: 'var(--r-md)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-faint)' }}>Developer sign-in</span>
-      <div style={{ display: 'flex', gap: 8 }}>
-        <input className="input" name="dev-persona" value={persona} onChange={(e) => setPersona(e.target.value)}
-          placeholder="persona, e.g. alice" autoComplete="off" spellCheck={false} style={inputStyle} />
-        <input className="input" name="dev-org" value={orgName} onChange={(e) => setOrgName(e.target.value)}
-          placeholder="organization (optional)" autoComplete="off" spellCheck={false} style={inputStyle} />
-      </div>
-      <div style={{ display: 'flex', gap: 8 }}>
-        <input className="input" name="dev-secret" type="password" value={secret} onChange={(e) => setSecret(e.target.value)}
-          placeholder="developer password" autoComplete="off" style={inputStyle} />
-        <button type="submit" className="btn btn-secondary" disabled={devMutation.isPending} style={{ flex: 'none' }}>
-          {devMutation.isPending ? 'Signing in…' : 'Sign in'}
-        </button>
-      </div>
-      <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Signs in as persona@dev.decimal.test and lands in the named org — verified, no inbox needed. New personas are created on the spot.</span>
-      {error ? <span style={{ fontSize: 12, color: 'var(--danger)' }}>{error}</span> : null}
-    </form>
-  );
-}
 
 // ─── Sign up (public — creates a new account, which then creates an org) ──
 
@@ -584,6 +503,145 @@ export function VerifyEmailPage({ session }: { session: AuthenticatedSession }) 
       >
         {resendMutation.isPending ? 'Sending…' : 'Resend code'}
       </button>
+    </AuthLayout>
+  );
+}
+
+// ─── Developer sign-in (testing only, never linked from the product) ────────
+//
+// Deliberately NOT a parallel auth path: this page calls the same
+// /auth/register and /auth/login the real pages do, with the same password
+// rules and the same session handling. The single concession to testing is
+// server-side — an account on the reserved dev domain is created already
+// verified, because no inbox exists to read a code from.
+//
+// The previous version was its own endpoint with persona, organization and
+// pre-filled-secret fields, and it drifted until it tested nothing like
+// production. Keeping this on the real endpoints is what stops that recurring.
+
+const DEV_EMAIL_DOMAIN = 'dev.decimal.test';
+
+export function DevLoginPage() {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const returnTo = readSafeReturnTo(location.search);
+  const [error, setError] = useState<string | null>(null);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+
+  const capabilities = useQuery({
+    queryKey: ['capabilities'],
+    queryFn: () => api.getCapabilities(),
+    staleTime: 5 * 60_000,
+  });
+  const enabled = capabilities.data?.auth?.developerSignIn ?? false;
+  const domain = capabilities.data?.auth?.developerEmailDomain ?? DEV_EMAIL_DOMAIN;
+
+  // Sign in; create the account on first use. Both are the real endpoints —
+  // nothing about the resulting account is special except that it needed no
+  // inbox to become verified.
+  const signIn = useMutation({
+    mutationFn: async (input: { email: string; password: string }) => {
+      void queryClient.cancelQueries({ queryKey: queryKeys().session });
+      queryClient.removeQueries({ queryKey: queryKeys().session });
+      api.clearSessionToken();
+      try {
+        return await api.login(input);
+      } catch (loginError) {
+        if (loginError instanceof ApiError && loginError.status === 401) {
+          return api.register(input);
+        }
+        throw loginError;
+      }
+    },
+    onSuccess: async (result) => {
+      api.setSessionToken(result.sessionToken);
+      queryClient.setQueryData(queryKeys().session, toAuthenticatedSession(result));
+      if (returnTo) {
+        navigate(returnTo, { replace: true });
+        return;
+      }
+      const firstOrganizationId = result.organizations[0]?.organizationId;
+      navigate(firstOrganizationId ? `/organizations/${firstOrganizationId}` : '/setup', { replace: true });
+    },
+    onError: (nextError) => setError(authErrorMessage(nextError, 'Unable to sign in.')),
+  });
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail.endsWith(`@${domain}`)) {
+      setError(`Use a throwaway address on @${domain} — real domains go through the normal login.`);
+      return;
+    }
+    if (!password) {
+      setError('Password is required.');
+      return;
+    }
+    setError(null);
+    signIn.mutate({ email: normalizedEmail, password });
+  }
+
+  if (capabilities.isSuccess && !enabled) {
+    return (
+      <AuthLayout tagline="Developer sign-in is a testing affordance. It is switched off here.">
+        <h1>Not available</h1>
+        <p className="auth-sub">This deployment doesn't allow throwaway testing accounts.</p>
+        <p className="auth-switch"><a href="/login">Back to log in</a></p>
+      </AuthLayout>
+    );
+  }
+
+  return (
+    <AuthLayout tagline="Testing sign-in. Same account, same rules — it just doesn't need a real inbox.">
+      <h1>Developer sign-in</h1>
+      <p className="auth-sub">
+        For testing. Use any address on @{domain} — the account is created on first use.
+      </p>
+
+      <form className="stack-field" onSubmit={handleSubmit}>
+        <div className="field">
+          <label className="field-label">Testing email</label>
+          <input
+            className="input"
+            type="email"
+            name="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder={`alice@${domain}`}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            inputMode="email"
+            required
+          />
+        </div>
+        <div className="field">
+          <label className="field-label">Password</label>
+          <input
+            className="input"
+            type="password"
+            name="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="off"
+            required
+          />
+          <span className="input-help">Whatever you like — you'll need the same one to sign back in.</span>
+        </div>
+
+        {error ? <div style={{ fontSize: 12, color: 'var(--danger)' }}>{error}</div> : null}
+
+        <button type="submit" className="btn btn-primary" disabled={signIn.isPending} aria-busy={signIn.isPending}>
+          {signIn.isPending ? 'Signing in…' : <>Sign in<Ico.arrowRight w={15} /></>}
+        </button>
+      </form>
+
+      <p className="auth-switch">
+        Real account? <a href="/login">Log in</a>
+      </p>
     </AuthLayout>
   );
 }
