@@ -308,16 +308,6 @@ export const api = {
       body: JSON.stringify(input),
     });
   },
-  // Developer sign-in for automated testing: secret-gated on the API and
-  // confined to @dev.decimal.test personas. organizationName picks which of
-  // the persona's orgs to land in. See LoginPage's dev panel.
-  devLogin(input: { secret: string; email: string; displayName?: string; organizationName?: string }) {
-    return request<LoginResponse & { landingOrganizationId?: string | null }>('/auth/dev/login', {
-      method: 'POST',
-      includeAuth: false,
-      body: JSON.stringify(input),
-    });
-  },
   getSession() {
     return request<AuthenticatedSession>('/auth/session');
   },

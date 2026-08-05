@@ -151,7 +151,11 @@ export type CapabilitiesResponse = {
     usdcMint: string;
     rpcUrl: string;
   };
-  auth: Record<string, unknown>;
+  auth: {
+    // True only on deployments that allow throwaway testing accounts.
+    developerSignIn?: boolean;
+    developerEmailDomain?: string | null;
+  } & Record<string, unknown>;
   apiSurface: Record<string, unknown>;
   workflows: Array<Record<string, unknown>>;
   endpointGroups: Array<Record<string, unknown>>;

@@ -40,6 +40,7 @@ const SpendingLimitDetailPage = lazy(() => import('./pages/SpendingLimitDetail')
 const OrganizationProposalDetailPage = lazy(() => import('./pages/OrganizationProposalDetail').then((m) => ({ default: m.OrganizationProposalDetailPage })));
 const InviteAcceptPage = lazy(() => import('./pages/InviteAccept').then((m) => ({ default: m.InviteAcceptPage })));
 const LoginPage = lazy(() => import('./pages/auth').then((m) => ({ default: m.LoginPage })));
+const DevLoginPage = lazy(() => import('./pages/auth').then((m) => ({ default: m.DevLoginPage })));
 const RegisterPage = lazy(() => import('./pages/auth').then((m) => ({ default: m.RegisterPage })));
 const OAuthCallbackPage = lazy(() => import('./pages/auth').then((m) => ({ default: m.OAuthCallbackPage })));
 const VerifyEmailPage = lazy(() => import('./pages/auth').then((m) => ({ default: m.VerifyEmailPage })));
@@ -62,6 +63,7 @@ export function App() {
   const shouldCheckSession =
     location.pathname !== '/login' &&
     location.pathname !== '/register' &&
+    location.pathname !== '/dev-login' &&
     api.hasSessionToken();
   const sessionQuery = useQuery({
     queryKey: queryKeys().session,
@@ -87,6 +89,9 @@ export function App() {
         <Route path="/1" element={<LandingPageV1 />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        {/* Testing sign-in. Not linked from anywhere in the product, and the
+            page reports itself unavailable when the server has dev mode off. */}
+        <Route path="/dev-login" element={<DevLoginPage />} />
         <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
         <Route path="/invites/:inviteToken" element={<InviteAcceptPage />} />
         <Route path="/verify-email" element={<RequireSession sessionQuery={sessionQuery} />} />

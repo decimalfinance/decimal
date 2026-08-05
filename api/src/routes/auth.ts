@@ -106,6 +106,16 @@ authRouter.post('/auth/register', async (req, res, next) => {
           displayName,
         },
       });
+    } else if (isDeveloperEmail(email)) {
+      // Developer testing: an account on the reserved dev domain is created
+      // already verified. That is the ONLY way dev sign-up differs from a real
+      // one — same page, same endpoint, same password rules — and it exists
+      // because nobody can receive mail at dev.decimal.test to read a code.
+      // Off entirely unless DEV_AUTH_SECRET is set, so production is unaffected.
+      user = await prisma.user.create({
+        data: { email, passwordHash, displayName, emailVerifiedAt: new Date() },
+      });
+      logger.info('auth.dev_register', { email, userId: user.userId });
     } else {
       plaintextCode = generateVerificationCode();
       user = await prisma.user.create({
@@ -266,15 +276,6 @@ authRouter.post('/auth/login', async (req, res, next) => {
 //      endpoint can never mint a session for a real person's account.
 const DEV_EMAIL_DOMAIN = '@dev.decimal.test';
 
-const devLoginSchema = z.object({
-  secret: z.string().min(1),
-  email: z.string().email(),
-  displayName: z.string().trim().min(1).max(80).optional(),
-  // Land in a specific org by name — seeded personas often belong to several
-  // near-identically named test orgs, and defaulting to the oldest one is a trap.
-  organizationName: z.string().trim().min(1).max(80).optional(),
-});
-
 function requireDevSecret(secret: string) {
   if (!config.devAuthSecret) {
     throw new ApiError(404, 'not_found', 'Not found.');
@@ -292,6 +293,16 @@ function requireDevEmail(rawEmail: string) {
     throw badRequest(`Developer sign-in only accepts ${DEV_EMAIL_DOMAIN} emails.`);
   }
   return email;
+}
+
+/**
+ * Is this a throwaway testing address? True only when developer mode is
+ * switched on server-side AND the address is on the reserved domain — two
+ * independent gates, so a leaked address alone grants nothing, and production
+ * (where DEV_AUTH_SECRET is unset) treats the domain like any other.
+ */
+export function isDeveloperEmail(email: string): boolean {
+  return Boolean(config.devAuthSecret) && email.toLowerCase().endsWith(DEV_EMAIL_DOMAIN);
 }
 
 async function upsertDevUser(rawEmail: string, rawDisplayName?: string) {
@@ -317,43 +328,15 @@ async function upsertDevUser(rawEmail: string, rawDisplayName?: string) {
   return user;
 }
 
-authRouter.post('/auth/dev/login', async (req, res, next) => {
-  try {
-    const input = devLoginSchema.parse(req.body);
-    requireDevSecret(input.secret);
-    const user = await upsertDevUser(input.email, input.displayName);
-
-    const session = await createSession(user.userId);
-    const organizations = await listUserOrganizations(user.userId);
-
-    let landingOrganizationId: string | null = null;
-    if (input.organizationName) {
-      const wanted = input.organizationName.trim().toLowerCase();
-      const match = organizations.find((o) => o.organizationName.toLowerCase() === wanted);
-      if (!match) {
-        throw badRequest(`${user.email} isn't a member of an organization named "${input.organizationName}". Their orgs: ${organizations.map((o) => o.organizationName).join(', ') || 'none'}.`);
-      }
-      landingOrganizationId = match.organizationId;
-    }
-
-    logger.info('auth.dev_login', { email: user.email, userId: user.userId });
-    res.json({
-      status: 'authenticated',
-      sessionToken: session.sessionToken,
-      user: serializeUser(user),
-      organizations,
-      landingOrganizationId,
-      emailDelivered: false,
-      devEmailVerificationCode: null,
-    });
-  } catch (error) {
-    next(error);
-  }
-});
+// There is deliberately no /auth/dev/login. Developer sign-in goes through the
+// REAL /auth/register and /auth/login — the only concession to testing is that
+// accounts on the reserved dev domain are created pre-verified (see
+// isDeveloperEmail), because no inbox exists to read a code from. A parallel
+// login path drifts from the real one; this way it cannot.
 
 // One-call test-world builder: users + organization + memberships + role
 // bundles, returning a session token for EVERY persona so an agent can act as
-// each of them immediately. Same gates as dev/login (secret + dev domain).
+// each of them immediately. Gated on the secret + the dev domain.
 // Wallet provisioning is deliberately skipped — this exists for workflow,
 // role, and approval testing, not for moving money.
 const devSeedSchema = z.object({

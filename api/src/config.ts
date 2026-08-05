@@ -74,10 +74,14 @@ type DecimalConfig = {
   googleOAuthRedirectUri: string | null;
   oauthStateSecret: string;
   /**
-   * Developer sign-in for automated testing. When the secret is set,
-   * POST /auth/dev/login can mint pre-verified sessions — but ONLY for
-   * emails on the reserved @dev.decimal.test domain, so it can never touch
-   * a real account. Leave unset to disable the endpoint entirely.
+   * Developer testing switch. When set, two things become possible, both
+   * confined to the reserved @dev.decimal.test domain so a real account can
+   * never be touched:
+   *   - /auth/register creates accounts already verified (no inbox exists to
+   *     read a code from) — this is what /dev-login relies on, and it is the
+   *     ONLY way developer sign-in differs from a customer's;
+   *   - /auth/dev/seed builds a whole test org in one call, for automated runs.
+   * Leave unset in production: the reserved domain is then just a domain.
    */
   devAuthSecret: string;
   /**
