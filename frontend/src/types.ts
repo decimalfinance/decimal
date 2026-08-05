@@ -140,14 +140,13 @@ export type LoginResponse = {
   devEmailVerificationCode?: string | null;
 };
 
-export type SolanaNetwork = 'devnet' | 'mainnet';
-
 export type CapabilitiesResponse = {
   product: string;
   version: number;
   generatedAt: string;
   solana: {
-    network: SolanaNetwork;
+    // Devnet-only product — this is the only value the API ever sends.
+    network: 'devnet';
     usdcMint: string;
     rpcUrl: string;
   };

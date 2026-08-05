@@ -1,4 +1,4 @@
-# Vercel deploy only needs the frontend build + config/frontend.public.json.
+# Vercel deploy only needs the frontend build.
 # Exclude everything else in the monorepo to keep the upload small.
 
 api

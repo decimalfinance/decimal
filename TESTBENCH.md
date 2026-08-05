@@ -7,21 +7,18 @@ Zaid only reads reports.
 
 ## The stack (safe by construction)
 
-| Thing | Test bench |
-|---|---|
-| API | http://127.0.0.1:3100 |
-| Frontend | http://localhost:5174 (vite dev) |
-| Database | `usdc_ops_local` |
+The bench is a **separate stack** from the one Zaid runs. Different ports,
+different database — they can run at the same time and cannot see each other.
+
+| | bench (`make bench`) | Zaid's (`make dev`) |
+|---|---|---|
+| API | http://127.0.0.1:3200 | :3100 — **never touch** |
+| Frontend | http://localhost:5274 | :5174 — **never touch** |
+| Database | `usdc_ops_bench` | `usdc_ops_local` — **never touch** |
 
 Both bench processes hot-reload (`tsx watch` / vite): after a code change you
-normally need NO restart — just reload the page. `make test-api` uses a third
-database (`usdc_ops_test`) and never touches the bench either.
-
-**Known flake — the fake chain flag drops:** if anything else claims port 3100
-(e.g. `make dev`, which shares the port and does NOT set the flag), the API
-serving the bench loses the fake chain. `make testbench-status` detects it
-loudly (`fakechain: OFF`) — the fix is always `make testbench-restart-api`.
-Check status at the START of every brief and after any long pause.
+normally need NO restart — just reload the page. `make test` uses a third
+database (`usdc_ops_test`) and never touches either stack.
 
 **Fake Squads chain:** the bench runs with `SQUADS_FAKE_CHAIN=true` — treasury
 creation and the whole release ceremony (propose → approve → submit → execute
@@ -34,14 +31,17 @@ validation refuses this flag in production.
 ## Commands (run from the repo root)
 
 ```
-make testbench-up           # start postgres + api + frontend in background, wait for health
-make testbench-status       # api/frontend up? dev auth configured?
-make testbench-restart-api  # bounce the api only (rarely needed — it hot-reloads)
-make testbench-down         # stop bench processes (prod untouched)
-./scripts/testbench.sh logs # last 40 lines of the api log
+make bench                # start (or restart) the bench, wait for health, print status
+make bench-stop           # stop ONLY the bench — leaves :3100/:5174 alone
+./scripts/bench.sh status # ports, database, fake-chain flag
+./scripts/bench.sh logs   # last 40 lines of the api log
 ```
 
-Logs and pids live in `.testbench/` (gitignored).
+`make bench` is idempotent: it starts, restarts and reports in one word.
+Logs and pids live in `.bench/` (gitignored).
+
+Note: `make stop` stops **everything**, including Zaid's stack. Use
+`make bench-stop` unless you mean to take the whole machine down.
 
 ## Signing in and seeding (no real emails, ever)
 
@@ -51,7 +51,7 @@ only concession to testing is that an account on the reserved
 to read a verification code from. Everything else — password rules, sessions,
 org creation, invites — behaves exactly as it does for a customer.
 
-- **Browser**: http://localhost:5174/**dev-login** (never linked from the
+- **Browser**: http://localhost:5274/**dev-login** (never linked from the
   product, and it reports itself unavailable when the server has dev mode off).
   Two fields: a throwaway email on `@dev.decimal.test` and a password you
   choose. The account is created on first use and signs you in thereafter.
@@ -119,7 +119,7 @@ send from). The simulate endpoint additionally needs `DEV_AUTH_SECRET`.
    expected result per step, and what would count as a failure.
 2. Zaid (or a scheduled run) hands desktop Claude one line:
    *"Run the latest test brief in synthetic_data/testbench/briefs/ per TESTBENCH.md."*
-3. Desktop Claude: `make testbench-up` (or `-status` if already up) → executes
+3. Desktop Claude: `make bench` (idempotent — starts or restarts) → executes
    the brief in the browser and/or API → writes
    `synthetic_data/testbench/reports/NNN-<slug>.md` with **PASS/FAIL per step**,
    expected-vs-saw for every failure, and exact repro steps. Blunt honesty;
@@ -129,11 +129,12 @@ send from). The simulate endpoint additionally needs `DEV_AUTH_SECRET`.
 
 ## Ground rules for the desktop side
 
-- Never touch port 3101, the `usdc_ops` database, decimal.finance, or anything
-  under Cloudflare — that's production.
+- Never touch :3100, :5174, or the `usdc_ops_local` database — that is Zaid's
+  stack, in his browser. The bench is :3200 / :5274 / `usdc_ops_bench`.
+- Never touch decimal.finance or anything under Cloudflare — that's production.
 - Fresh orgs have no vendors/categories: create counterparties via API first
   if the brief involves vendor/category behavior (or the brief will say so).
-- If the bench won't start, paste the tail of `.testbench/api.log` into the
+- If the bench won't start, paste the tail of `.bench/api.log` into the
   report rather than debugging blind.
 - Report format: brief number, date, environment status line, then one section
   per brief step with PASS/FAIL. End with "Other observations" — anything odd

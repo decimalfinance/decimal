@@ -12,8 +12,9 @@ Files:
 
 - `api.config.json`
   - API host/port, public URL, CORS, rate-limit settings
-- `frontend.public.json`
-  - frontend API base URL and browser RPC URL
+The frontend's own config lives at `frontend/src/public-config.json` (API base
+URL only — the browser never needs an RPC URL, every client-side Solana call
+goes through the backend proxy).
 
 Secrets that must **not** go here:
 

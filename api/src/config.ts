@@ -30,31 +30,12 @@ type DecimalConfig = {
   port: number;
   publicApiUrl: string | null;
   publicFrontendUrl: string | null;
-  solanaNetwork: SolanaNetwork;
   /**
-   * Commitment required before a payment is asserted `settled` (the terminal,
-   * proof-backing state). `finalized` is the irreversible money-truth bar;
-   * `confirmed` is faster but theoretically reversible. Defaults to `finalized`
-   * on mainnet (real money) and `confirmed` on devnet (snappy demos); override
-   * with SETTLEMENT_COMMITMENT. The fast "executed" signal still uses confirmed.
+   * The backend's Solana node. Devnet — there is no other cluster in this
+   * product. May be a paid provider (Alchemy / Helius) for rate limits; a
+   * mainnet URL is refused at boot (see validateConfig).
    */
-  settlementCommitment: 'confirmed' | 'finalized';
   solanaRpcUrl: string;
-  /**
-   * Frontend-safe RPC URL advertised to browsers (via /capabilities) for
-   * client-side signing/submission. Must NOT be a paid keyed endpoint —
-   * it is exposed in every browser. Defaults to the network's public RPC;
-   * override with SOLANA_PUBLIC_RPC_URL (e.g. a domain-restricted key).
-   */
-  solanaPublicRpcUrl: string;
-  /**
-   * Always-devnet RPC URL. Used for devnet reads (balances, signature
-   * status) regardless of which network the rest of the app is
-   * configured for. Typically a paid provider (Alchemy / Helius) for
-   * better rate limits — premium providers disable requestAirdrop, so
-   * see solanaAirdropRpcUrl below for the airdrop-specific path.
-   */
-  solanaDevnetRpcUrl: string;
   /**
    * RPC URL used specifically for `requestAirdrop` calls. Must be a
    * node that allows the airdrop method (Solana's public devnet
@@ -144,8 +125,14 @@ type DecimalConfig = {
   inboundWebhookRateLimitMax: number;
 };
 
-export type SolanaNetwork = 'devnet' | 'mainnet';
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'silent';
+
+/**
+ * The only cluster this product runs on. There is no mainnet path: no network
+ * type, no env var to choose one, and a mainnet RPC URL is refused at boot.
+ * Bringing mainnet back is a deliberate act, not a forgotten variable.
+ */
+export const DEVNET_RPC_URL = 'https://api.devnet.solana.com';
 
 export const config: DecimalConfig = buildConfig();
 
@@ -153,21 +140,11 @@ function buildConfig(): DecimalConfig {
   const nodeEnv = process.env.NODE_ENV ?? 'development';
   const isProduction = nodeEnv === 'production';
   const fileConfig = loadApiFileConfig();
-  const solanaNetwork = getSolanaNetwork();
-  const solanaRpcUrl = (process.env.SOLANA_RPC_URL?.trim() || defaultSolanaRpcUrl(solanaNetwork));
-  // Frontend-safe RPC: never the paid keyed endpoint. Public RPC by default.
-  const solanaPublicRpcUrl = (process.env.SOLANA_PUBLIC_RPC_URL?.trim() || defaultSolanaRpcUrl(solanaNetwork));
-  const solanaDevnetRpcUrl = (process.env.SOLANA_DEVNET_RPC_URL?.trim() || 'https://api.devnet.solana.com');
-  const solanaAirdropRpcUrl = (process.env.SOLANA_AIRDROP_RPC_URL?.trim() || 'https://api.devnet.solana.com');
+  const solanaRpcUrl = (process.env.SOLANA_RPC_URL?.trim() || DEVNET_RPC_URL);
+  const solanaAirdropRpcUrl = (process.env.SOLANA_AIRDROP_RPC_URL?.trim() || DEVNET_RPC_URL);
   const inboundEmailDomain = (process.env.INBOUND_EMAIL_DOMAIN ?? fileConfig.inboundEmailDomain ?? '')
     .trim()
     .toLowerCase();
-  const settlementCommitmentEnv = process.env.SETTLEMENT_COMMITMENT?.trim();
-  const settlementCommitment: 'confirmed' | 'finalized' =
-    settlementCommitmentEnv === 'finalized' || settlementCommitmentEnv === 'confirmed'
-      ? settlementCommitmentEnv
-      : solanaNetwork === 'mainnet' ? 'finalized' : 'confirmed';
-
   const nextConfig: DecimalConfig = {
     nodeEnv,
     isProduction,
@@ -175,11 +152,7 @@ function buildConfig(): DecimalConfig {
     port: Number(process.env.PORT) || fileConfig.port || 3100,
     publicApiUrl: normalizeOptionalUrl(fileConfig.publicApiUrl),
     publicFrontendUrl: normalizeOptionalUrl(fileConfig.publicFrontendUrl),
-    solanaNetwork,
-    settlementCommitment,
     solanaRpcUrl,
-    solanaPublicRpcUrl,
-    solanaDevnetRpcUrl,
     solanaAirdropRpcUrl,
     corsOrigins: normalizeStringArray(fileConfig.corsOrigins),
     trustProxy: fileConfig.trustProxy ?? false,
@@ -253,17 +226,6 @@ function buildConfig(): DecimalConfig {
   return nextConfig;
 }
 
-export function getSolanaNetwork(): SolanaNetwork {
-  const raw = (process.env.SOLANA_NETWORK ?? 'mainnet').trim().toLowerCase();
-  if (raw !== 'devnet' && raw !== 'mainnet') {
-    throw new Error(`Invalid SOLANA_NETWORK="${raw}". Use 'devnet' or 'mainnet'.`);
-  }
-  return raw;
-}
-
-function defaultSolanaRpcUrl(network: SolanaNetwork) {
-  return network === 'devnet' ? 'https://api.devnet.solana.com' : 'https://api.mainnet-beta.solana.com';
-}
 
 function getLogLevel(value: string): LogLevel {
   const normalized = value.trim().toLowerCase();
@@ -332,10 +294,20 @@ function validateConfig(nextConfig: DecimalConfig) {
     throw new Error('SQUADS_FAKE_CHAIN is a test-bench flag and can never be enabled in production.');
   }
 
-  if (nextConfig.devnetAutoFundWallets) {
-    if (nextConfig.solanaNetwork !== 'devnet') {
-      throw new Error('DEVNET_AUTO_FUND_WALLETS can only be enabled when SOLANA_NETWORK=devnet.');
+  // Devnet-only, enforced rather than assumed. Every RPC URL is checked, so a
+  // stray mainnet endpoint in a .env or a deploy env stops the process instead
+  // of quietly pointing real-money infrastructure at the product. A paid devnet
+  // URL (solana-devnet.g.alchemy.com/…) passes; api.mainnet-beta does not.
+  for (const [name, url] of [
+    ['SOLANA_RPC_URL', nextConfig.solanaRpcUrl],
+    ['SOLANA_AIRDROP_RPC_URL', nextConfig.solanaAirdropRpcUrl],
+  ] as const) {
+    if (/mainnet/i.test(url)) {
+      throw new Error(`${name} points at mainnet ("${url}"). Decimal is devnet-only.`);
     }
+  }
+
+  if (nextConfig.devnetAutoFundWallets) {
     if (!nextConfig.devnetFunderKeypairPath) {
       throw new Error('DEVNET_AUTO_FUND_WALLETS requires DEVNET_FUNDER_KEYPAIR_PATH.');
     }

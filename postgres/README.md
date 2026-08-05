@@ -31,15 +31,19 @@ make sync-postgres-schema
 
 ### Backups
 
-Plain-SQL `pg_dump` into `./backups/`:
+There are no backup make targets — they existed, were never used once, and
+`make help` is more useful short. Before a risky change, take a dump by hand:
 
 ```bash
-make backup-db
-make list-backups
-make restore-db FILE=backups/usdc_ops-<timestamp>.sql
+./scripts/compose.sh exec -T postgres \
+  pg_dump -U usdc_ops -d usdc_ops_local --clean --if-exists --no-owner \
+  > backup.sql
+
+./scripts/compose.sh exec -T postgres psql -U usdc_ops -d usdc_ops_local < backup.sql
 ```
 
-The `backups/` directory is gitignored. Run a backup before any risky change.
+Always go through `scripts/compose.sh`, never `docker compose` directly — it
+pins the project so a worktree can't spin up a second, empty Postgres.
 
 ## Open SQL shell
 

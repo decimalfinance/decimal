@@ -538,10 +538,9 @@ export const api = {
       }>;
     }>('/personal-wallets/balances');
   },
-  // Devnet SOL airdrop. Backend always uses SOLANA_DEVNET_RPC_URL
-  // regardless of the app's configured network, so this works for
-  // testing even when the app is running mainnet mode. Default 1 SOL,
-  // max 2 SOL per call (network's hard cap).
+  // Devnet SOL airdrop. The backend uses a faucet-capable endpoint
+  // (SOLANA_AIRDROP_RPC_URL) because paid providers disable requestAirdrop.
+  // Default 1 SOL, max 2 SOL per call (the network's hard cap).
   airdropSolToPersonalWallet(userWalletId: string, input: { amountSol?: number } = {}) {
     return request<{
       signature: string;

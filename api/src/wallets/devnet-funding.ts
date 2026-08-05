@@ -63,9 +63,6 @@ export async function fundNewDevnetWalletIfConfigured(
   if (!config.devnetAutoFundWallets) {
     return { status: 'skipped', reason: 'devnet_auto_fund_disabled' };
   }
-  if (config.solanaNetwork !== 'devnet') {
-    return { status: 'skipped', reason: 'not_devnet' };
-  }
   if (config.devnetAutoFundLamports <= 0) {
     return { status: 'skipped', reason: 'zero_lamports' };
   }

@@ -45,7 +45,6 @@ async function main() {
     logger.info('api.started', {
       host: config.host,
       port: config.port,
-      solanaNetwork: config.solanaNetwork,
       solanaRpcUrl: config.solanaRpcUrl,
       usdcMint: USDC_MINT.toBase58(),
       logLevel: config.logLevel,

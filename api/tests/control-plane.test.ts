@@ -4,7 +4,7 @@ import { AddressInfo } from 'node:net';
 import * as multisig from '@sqds/multisig';
 import { Keypair, PublicKey, TransactionInstruction, TransactionMessage, VersionedTransaction } from '@solana/web3.js';
 import { createApp } from '../src/app.js';
-import { config } from '../src/config.js';
+import { DEVNET_RPC_URL, config } from '../src/config.js';
 import { prisma } from '../src/infra/prisma.js';
 import { requireTestDatabase } from './helpers/require-test-database.js';
 import { USDC_MINT } from '../src/solana.js';
@@ -99,12 +99,11 @@ test('public health, capabilities, and OpenAPI endpoints expose the lean API sur
   const capabilities = await capabilitiesResponse.json();
   assert.equal(capabilities.product, 'decimal');
   assert.equal(capabilities.version, 1);
-  assert.equal(capabilities.solana.network, config.solanaNetwork);
-  // The capabilities endpoint exposes the PUBLIC RPC URL, never the keyed
-  // internal one (config.solanaRpcUrl) — that's what keeps the RPC key out of
-  // the browser. Assert against the public field accordingly.
-  assert.equal(capabilities.solana.rpcUrl, config.solanaPublicRpcUrl);
-  assert.ok(capabilities.solana.usdcMint);
+  assert.equal(capabilities.solana.network, 'devnet');
+  // Exposes the PUBLIC endpoint, never the backend's own — SOLANA_RPC_URL may
+  // carry a provider key and this response reaches every browser.
+  assert.equal(capabilities.solana.rpcUrl, DEVNET_RPC_URL);
+  assert.equal(capabilities.solana.usdcMint, '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU');
   assert.ok(capabilities.workflows.some((workflow: { id: string }) => workflow.id === 'single_payment'));
   assert.ok(capabilities.workflows.some((workflow: { id: string }) => workflow.id === 'csv_to_payment_orders'));
   assert.equal(capabilities.apiSurface.idempotency.includes('Idempotency-Key'), true);

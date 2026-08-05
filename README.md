@@ -55,19 +55,22 @@ Runtime dependencies:
 ```bash
 cd api && npm install
 cd ../frontend && npm install
-make dev devnet
+make dev
 ```
 
-Useful commands:
+That's the whole command surface:
 
 ```bash
-make dev mainnet
-make test-api
-make test-frontend
-make infra-up
-make reset-data
-make help
+make dev     # start everything (db + api + web) -> localhost:5174
+make stop    # stop everything, including docker
+make test    # run all tests
+make reset   # wipe local dev data (schema stays)
+make bench   # background stack for AI testing -> localhost:5274
+make help    # show this list
 ```
+
+Devnet only. There is no network to choose and no mainnet path — a mainnet RPC
+URL is refused at boot.
 
 ## API
 
@@ -111,7 +114,7 @@ They are meant to be verifiable operational records, not a private ledger and no
 Committed non-secret config:
 
 - `config/api.config.json`
-- `config/frontend.public.json`
+- `frontend/src/public-config.json`
 
 Local secrets:
 

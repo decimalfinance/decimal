@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { config } from '../config.js';
+import { DEVNET_RPC_URL, config } from '../config.js';
 import { USDC_MINT } from '../solana.js';
 
 export const capabilitiesRouter = Router();
@@ -10,11 +10,12 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
     version: 1,
     generatedAt: new Date().toISOString(),
     solana: {
-      network: config.solanaNetwork,
+      // Devnet-only product; there is no other value this can take.
+      network: 'devnet',
       usdcMint: USDC_MINT.toBase58(),
-      // Frontend-safe public RPC, never the paid keyed endpoint (this is
-      // exposed in every browser). The backend keeps using solanaRpcUrl.
-      rpcUrl: config.solanaPublicRpcUrl,
+      // The public endpoint, never the backend's own — this is exposed in
+      // every browser and SOLANA_RPC_URL may carry a provider key.
+      rpcUrl: DEVNET_RPC_URL,
     },
     auth: {
       user: 'Authorization: Bearer <sessionToken>',

@@ -1,10 +1,9 @@
-import { Suspense, lazy, useEffect, useMemo } from 'react';
+import { Suspense, lazy, useMemo } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AppSidebar } from './Sidebar';
 import { api } from './api';
 import type { AuthenticatedSession } from './api';
-import { setRuntimeSolanaConfig } from './solana-network';
 import { ScreenState } from './ui-primitives';
 import { getOrganizations, queryKeys } from './lib/app-helpers';
 import { useLiveOrgEvents } from './lib/use-live-org-events';
@@ -71,13 +70,6 @@ export function App() {
     enabled: shouldCheckSession,
     retry: false,
   });
-
-  useEffect(() => {
-    const solana = capabilitiesQuery.data?.solana;
-    if (solana) {
-      setRuntimeSolanaConfig(solana);
-    }
-  }, [capabilitiesQuery.data?.solana]);
 
   return (
     <Suspense fallback={<RouteFallback />}>
