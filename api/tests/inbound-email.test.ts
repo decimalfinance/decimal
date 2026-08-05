@@ -764,6 +764,21 @@ test('an oversized attachment is skipped while its siblings still ingest', async
   assert.equal(message.disposition, 'partially_accepted');
 });
 
+test('the workbench labels an emailed bill with who sent it', async () => {
+  const { org } = await seedOrgWithMember('Acme', 'priya@acme.test');
+  stubExtraction();
+
+  await queueAndSweep();
+  await waitForPaymentOrders(1);
+
+  const { getBillsWorkbench } = await import('../src/payments/bills.js');
+  const workbench = await getBillsWorkbench(org.organizationId);
+
+  assert.equal(workbench.bills.length, 1);
+  assert.equal(workbench.bills[0]!.source, 'email');
+  assert.equal(workbench.bills[0]!.sourceLabel, 'Emailed by Priya Sharma');
+});
+
 test('two sweeps racing the same attachment fetch it once', async () => {
   // The webhook nudges a sweep inline while the interval sweep may already be
   // running, so this race is the normal case, not a corner case.

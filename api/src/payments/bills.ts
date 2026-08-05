@@ -212,6 +212,26 @@ function bucketAndStatus(args: {
     : { bucket: 'to_pay', subStatus: { kind: 'plain', text: 'Ready to pay', tone: 'neutral' } };
 }
 
+/**
+ * How this bill arrived. `intakeChannel` is stamped by invoice intake when the
+ * door was email; everything else is an ordinary upload. The label names the
+ * person because it tells a reviewer who to ask — "Emailed by Priya" beats
+ * "Emailed in".
+ */
+function billSource(
+  metadataJson: unknown,
+  createdByName: string | null,
+): { source: 'email' | 'upload'; sourceLabel: string | null } {
+  const channel = isRecord(metadataJson) ? metadataJson.intakeChannel : null;
+  if (!isRecord(channel) || channel.kind !== 'email') {
+    return { source: 'upload', sourceLabel: null };
+  }
+  return {
+    source: 'email',
+    sourceLabel: createdByName ? `Emailed by ${createdByName}` : 'Emailed in',
+  };
+}
+
 function extractedOf(metadataJson: unknown): Record<string, unknown> | null {
   if (!isRecord(metadataJson)) return null;
   const agent = metadataJson.agent;
@@ -288,6 +308,7 @@ export async function getBillsWorkbench(organizationId: string) {
         metadataJson: true,
         counterpartyWallet: { select: { label: true } },
         counterparty: { select: { displayName: true } },
+        createdByUser: { select: { displayName: true } },
       },
     }),
     loadEngineState(organizationId),
@@ -356,6 +377,7 @@ export async function getBillsWorkbench(organizationId: string) {
       invoiceDocumentId: order.invoiceDocumentId,
       dueAt: order.dueAt,
       createdAt: order.createdAt,
+      ...billSource(order.metadataJson, order.createdByUser?.displayName ?? null),
       discountLabel: str(extracted?.earlyPayDiscount),
       subStatus,
       readiness,
@@ -432,6 +454,7 @@ export async function getBillReview(organizationId: string, paymentOrderId: stri
     include: {
       counterpartyWallet: true,
       counterparty: true,
+      createdByUser: { select: { displayName: true } },
       invoiceDocument: {
         select: { invoiceDocumentId: true, filename: true, mimeType: true, byteSize: true, pageCount: true },
       },
@@ -723,6 +746,7 @@ export async function getBillReview(organizationId: string, paymentOrderId: stri
     paymentOrderId: order.paymentOrderId,
     state: order.state,
     readOnly: order.state !== 'needs_review',
+    ...billSource(order.metadataJson, order.createdByUser?.displayName ?? null),
     // An approver sent this bill back for changes — the reviewer's homework.
     sentBack: sentBackRaw && order.state === 'needs_review'
       ? { reason: str(sentBackRaw.reason), byName: str(sentBackRaw.byName), at: str(sentBackRaw.at) }
