@@ -10,6 +10,10 @@ datasource db {
 model Organization {
   organizationId   String                   @id @default(dbgenerated("gen_random_uuid()")) @map("organization_id") @db.Uuid
   organizationName String                   @map("organization_name")
+  /// Local part of this org's inbound invoice address (acme@<inbound domain>).
+  /// Minted once at creation and never re-minted on rename — customers put this
+  /// address in their vendors' address books, so stability beats prettiness.
+  intakeSlug       String?                  @unique @map("intake_slug")
   status           String                   @default("active")
   createdAt        DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -40,6 +44,7 @@ model Organization {
   vendorCodingRules     VendorCodingRule[]
   codingRules CodingRule[]
   invoiceDocuments InvoiceDocument[]
+  inboundEmailMessages InboundEmailMessage[]
 
   @@map("organizations")
 }
@@ -229,6 +234,7 @@ model User {
   organizationInvitesSent    OrganizationInvite[]     @relation("OrganizationInviteInvitedBy")
   organizationInvitesAccepted OrganizationInvite[]    @relation("OrganizationInviteAcceptedBy")
   invoiceDocumentsUploaded   InvoiceDocument[]        @relation("InvoiceDocumentUploadedByUser")
+  inboundEmailsSent          InboundEmailMessage[]    @relation("InboundEmailSender")
 
   @@map("users")
 }
@@ -598,10 +604,80 @@ model InvoiceDocument {
   uploadedByUser    User?          @relation("InvoiceDocumentUploadedByUser", fields: [uploadedByUserId], references: [userId], onDelete: SetNull)
   paymentOrders     PaymentOrder[]
   pages             InvoiceDocumentPage[]
+  inboundEmailAttachments InboundEmailAttachment[]
 
   @@unique([organizationId, sha256])
   @@index([organizationId, createdAt(sort: Desc)])
   @@map("invoice_documents")
+}
+
+/// One row per email received at an org's intake address, written BEFORE the
+/// webhook responds — accepted or not. Mail we ignore leaves a record with a
+/// reason rather than vanishing, which is what makes the intake debuggable.
+/// See postgres/init/011-inbound-email-intake.sql for the disposition vocabulary.
+model InboundEmailMessage {
+  inboundEmailMessageId String    @id @default(dbgenerated("gen_random_uuid()")) @map("inbound_email_message_id") @db.Uuid
+  provider              String    @default("resend")
+  /// svix-id — the delivery id, stable across redeliveries of one message.
+  providerEventId       String    @map("provider_event_id")
+  /// data.email_id — the message id, and the authority for ingestion dedupe.
+  /// The partial unique index on this column lives in SQL only (Prisma cannot
+  /// express `WHERE ... IS NOT NULL`), so the dedupe read is explicit in code.
+  providerEmailId       String?   @map("provider_email_id")
+  organizationId        String?   @map("organization_id") @db.Uuid
+  toAddress             String    @map("to_address")
+  intakeSlug            String?   @map("intake_slug")
+  plusTag               String?   @map("plus_tag")
+  fromAddress           String    @map("from_address")
+  fromDisplay           String?   @map("from_display")
+  senderUserId          String?   @map("sender_user_id") @db.Uuid
+  subject               String?
+  messageIdHeader       String?   @map("message_id_header")
+  attachmentCount       Int       @default(0) @map("attachment_count")
+  disposition           String    @default("pending")
+  dispositionReason     String?   @map("disposition_reason")
+  authResultsJson       Json      @default("{}") @map("auth_results_json")
+  payloadJson           Json      @default("{}") @map("payload_json")
+  receivedAt            DateTime  @default(now()) @map("received_at") @db.Timestamptz(6)
+  processedAt           DateTime? @map("processed_at") @db.Timestamptz(6)
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization          Organization? @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
+  senderUser            User?         @relation("InboundEmailSender", fields: [senderUserId], references: [userId], onDelete: SetNull)
+  attachments           InboundEmailAttachment[]
+
+  @@unique([provider, providerEventId])
+  @@index([organizationId, receivedAt(sort: Desc)])
+  @@index([disposition, receivedAt(sort: Desc)])
+  @@map("inbound_email_messages")
+}
+
+/// One row per attachment = the fetch retry queue. Resend's webhook carries
+/// attachment metadata only, so pulling the bytes is a separate network call
+/// that can fail; this row is what lets the sweep retry it. Bytes are never
+/// stored here — once ingested they live once, in InvoiceDocument.data.
+model InboundEmailAttachment {
+  inboundEmailAttachmentId String   @id @default(dbgenerated("gen_random_uuid()")) @map("inbound_email_attachment_id") @db.Uuid
+  inboundEmailMessageId    String   @map("inbound_email_message_id") @db.Uuid
+  providerAttachmentId     String   @map("provider_attachment_id")
+  filename                 String
+  contentType              String?  @map("content_type")
+  contentDisposition       String?  @map("content_disposition")
+  byteSize                 Int?     @map("byte_size")
+  status                   String   @default("pending")
+  statusReason             String?  @map("status_reason")
+  invoiceDocumentId        String?  @map("invoice_document_id") @db.Uuid
+  attempts                 Int      @default(0)
+  nextAttemptAt            DateTime @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  lastError                String?  @map("last_error")
+  createdAt                DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  message                  InboundEmailMessage @relation(fields: [inboundEmailMessageId], references: [inboundEmailMessageId], onDelete: Cascade)
+  invoiceDocument          InvoiceDocument?    @relation(fields: [invoiceDocumentId], references: [invoiceDocumentId], onDelete: SetNull)
+
+  @@unique([inboundEmailMessageId, providerAttachmentId])
+  @@index([status, nextAttemptAt])
+  @@map("inbound_email_attachments")
 }
 
 // Rendered page images (PNG) — what the review screen actually displays.
