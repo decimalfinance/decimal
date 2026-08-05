@@ -77,7 +77,7 @@ drives the **same handler** through a dev-only simulate endpoint, so no Resend
 account, no MX records, and no public ingress are required.
 
 ```
-curl -s localhost:3100/webhooks/resend/inbound/simulate \
+curl -s localhost:3200/webhooks/resend/inbound/simulate \
   -H 'content-type: application/json' \
   -d @api/tests/fixtures/inbound-email/email-received.basic.json
 ```

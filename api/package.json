@@ -5,8 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "prisma:generate": "prisma generate",
     "test": "NODE_ENV=test INBOUND_EMAIL_DOMAIN=bills.decimal.test RESEND_INBOUND_WEBHOOK_SECRET=whsec_dGVzdC1pbmJvdW5kLXNpZ25pbmcta2V5 tsx --test --test-concurrency=1 tests/**/*.test.ts"
   },
