@@ -13,6 +13,14 @@ type PublicConfig = {
 const config = frontendPublicConfig as PublicConfig;
 
 export function getPublicApiBaseUrl() {
+  // The bench (scripts/bench.sh) sets this so its own frontend on :5274 talks
+  // to its own API on :3200. Without it the bench UI would call :3100 — your
+  // stack, your data.
+  const override = String(import.meta.env.VITE_API_BASE_URL ?? '').trim();
+  if (override) {
+    return override.replace(/\/+$/, '');
+  }
+
   const value = shouldUseLocalApiBaseUrl()
     ? String(config.localApiBaseUrl ?? '').trim()
     : String(config.apiBaseUrl ?? '').trim();
