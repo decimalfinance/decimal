@@ -5,19 +5,14 @@ import {
   getAssociatedTokenAddressSync,
   TOKEN_PROGRAM_ID,
 } from '@solana/spl-token';
-import { config, type SolanaNetwork } from './config.js';
+import { config } from './config.js';
 
 export const SOLANA_CHAIN = 'solana';
 export const USDC_ASSET = 'usdc';
 export const USDC_DECIMALS = 6;
-const USDC_MINT_MAINNET = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
-const USDC_MINT_DEVNET = new PublicKey('4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU');
-export const USDC_MINT = getUsdcMint();
+/** Circle's devnet USDC. The only mint this product knows about. */
+export const USDC_MINT = new PublicKey('4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU');
 export const SOLANA_SIGNATURE_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{64,128}$/;
-
-export function getUsdcMint(network: SolanaNetwork = config.solanaNetwork): PublicKey {
-  return network === 'devnet' ? USDC_MINT_DEVNET : USDC_MINT_MAINNET;
-}
 
 let connectionSingleton: Connection | null = null;
 export function getSolanaConnection(): Connection {
@@ -27,36 +22,16 @@ export function getSolanaConnection(): Connection {
   return connectionSingleton;
 }
 
-let devnetConnectionSingleton: Connection | null = null;
-
-/**
- * Connection pinned to SOLANA_DEVNET_RPC_URL, regardless of the app's
- * primary SOLANA_NETWORK. Used for devnet reads (balances, signature
- * polling) — typically a paid provider for better rate limits.
- *
- * Do NOT use this for `requestAirdrop` — premium RPC providers
- * (Alchemy, Helius, etc.) explicitly disable that method and return
- * "Invalid request". Use getSolanaAirdropConnection() instead.
- */
-export function getSolanaDevnetConnection(): Connection {
-  if (!devnetConnectionSingleton) {
-    devnetConnectionSingleton = new Connection(config.solanaDevnetRpcUrl, 'confirmed');
-  }
-  return devnetConnectionSingleton;
-}
-
 let airdropConnectionSingleton: Connection | null = null;
 
 /**
- * Connection pinned to a node that allows `requestAirdrop`. Defaults
- * to Solana's public devnet endpoint (https://api.devnet.solana.com)
- * — premium providers like Alchemy disable the airdrop method.
- * Override via SOLANA_AIRDROP_RPC_URL if a different faucet-allowing
- * endpoint is preferred.
+ * Connection pinned to a node that allows `requestAirdrop`. Separate from the
+ * main connection because premium providers (Alchemy, Helius) disable that
+ * method — so if SOLANA_RPC_URL is a paid devnet endpoint, airdrops must still
+ * go to the public faucet. Override via SOLANA_AIRDROP_RPC_URL.
  *
- * Once the airdrop signature is returned, callers can poll its status
- * on getSolanaDevnetConnection() (the faster Alchemy URL) — both
- * read the same chain state.
+ * Once the signature is returned, callers can poll its status on the main
+ * connection — both read the same chain.
  */
 export function getSolanaAirdropConnection(): Connection {
   if (!airdropConnectionSingleton) {
@@ -65,77 +40,15 @@ export function getSolanaAirdropConnection(): Connection {
   return airdropConnectionSingleton;
 }
 
-/**
- * Connections to probe when a signature/transaction could live on either the
- * primary network or devnet. The backend runs one network at a time, but the
- * database can hold devnet treasuries created during a devnet run — so a tx we
- * need to read (settlement verification, signature status) may be on devnet even
- * when the primary RPC is mainnet. Probing both (primary first, devnet fallback)
- * lets those reads succeed regardless of the mismatch. When the primary RPC IS
- * the devnet RPC (a devnet backend) there's only one connection, no extra calls.
- */
-export function candidateSettlementConnections(): Connection[] {
-  const primary = getSolanaConnection();
-  if (config.solanaRpcUrl === config.solanaDevnetRpcUrl) return [primary];
-  return [primary, getSolanaDevnetConnection()];
-}
-
-async function getParsedTransactionAcrossClusters(signature: string) {
-  // Settlement is asserted at config.settlementCommitment (finalized on mainnet
-  // = irreversible money truth; confirmed on devnet = snappy). Below that
-  // commitment the tx reads as not-yet-available → pending → the reconciler
-  // retries until it reaches the required commitment.
-  for (const connection of candidateSettlementConnections()) {
-    const tx = await connection
-      .getParsedTransaction(signature, {
-        commitment: config.settlementCommitment,
-        maxSupportedTransactionVersion: 0,
-      })
-      .catch(() => null);
-    if (tx) return tx;
-  }
-  return null;
-}
-
-/**
- * Like waitForSignatureVisible, but checks every candidate cluster each round so
- * a devnet signature is still "seen" when the primary RPC is mainnet.
- */
-export async function waitForSignatureVisibleAcrossClusters(
-  signature: string,
-  options: { timeoutMs?: number; pollIntervalMs?: number } = {},
-): Promise<{ confirmed: boolean; seen: boolean }> {
-  const connections = candidateSettlementConnections();
-  const timeoutMs = options.timeoutMs ?? 10_000;
-  const pollIntervalMs = options.pollIntervalMs ?? 1000;
-  const deadline = Date.now() + timeoutMs;
-  let everSeen = false;
-  while (Date.now() < deadline) {
-    const statuses = await Promise.all(
-      connections.map((connection) =>
-        connection
-          // searchTransactionHistory: without it, getSignatureStatuses only
-          // returns signatures from the last few minutes, so an older but
-          // finalized tx (e.g. reconciling/confirming a payment well after it
-          // executed) reads back as null and looks like it "never landed".
-          .getSignatureStatuses([signature], { searchTransactionHistory: true })
-          .then((r) => r.value[0])
-          .catch(() => null),
-      ),
-    );
-    for (const status of statuses) {
-      if (!status) continue;
-      everSeen = true;
-      if (status.err) {
-        throw new Error(`On-chain error: ${JSON.stringify(status.err)}`);
-      }
-      if (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized') {
-        return { confirmed: true, seen: true };
-      }
-    }
-    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-  }
-  return { confirmed: false, seen: everSeen };
+async function getParsedSettlementTransaction(signature: string) {
+  // Settlement asserts at 'confirmed'. Below that the tx reads as
+  // not-yet-available → pending → the reconciler retries.
+  return getSolanaConnection()
+    .getParsedTransaction(signature, {
+      commitment: 'confirmed',
+      maxSupportedTransactionVersion: 0,
+    })
+    .catch(() => null);
 }
 
 /**
@@ -161,7 +74,14 @@ export async function waitForSignatureVisible(
   const deadline = Date.now() + timeoutMs;
   let everSeen = false;
   while (Date.now() < deadline) {
-    const { value } = await connection.getSignatureStatuses([signature]);
+    // searchTransactionHistory: without it, getSignatureStatuses only returns
+    // signatures from the last few minutes, so an older but finalized tx (e.g.
+    // reconciling a payment well after it executed) reads back as null and
+    // looks like it "never landed". Carried over from the cross-cluster variant
+    // this replaced — dropping it would silently break late reconciliation.
+    const { value } = await connection.getSignatureStatuses([signature], {
+      searchTransactionHistory: true,
+    });
     const status = value[0];
     if (status) {
       everSeen = true;
@@ -372,9 +292,7 @@ export async function verifyUsdcSettlementFromSignature(args: {
     };
   }
 
-  // Probe primary + devnet so a devnet settlement still verifies when the
-  // backend's primary RPC is mainnet (see candidateSettlementConnections).
-  const tx = await getParsedTransactionAcrossClusters(args.signature);
+  const tx = await getParsedSettlementTransaction(args.signature);
   if (!tx) {
     throw new Error('Confirmed transaction is not yet available from RPC. Retry settlement verification shortly.');
   }

@@ -25,7 +25,6 @@ import {
   fetchWalletBalances,
   getSolanaAirdropConnection,
   getSolanaConnection,
-  getSolanaDevnetConnection,
   waitForSignatureVisible,
 } from '../solana.js';
 import { LAMPORTS_PER_SOL } from '@solana/web3.js';
@@ -513,7 +512,7 @@ userWalletsRouter.post(
       // Alchemy — faster, better rate limits). Both connections read
       // the same chain so the airdrop tx is visible on either one.
       try {
-        await waitForSignatureVisible(getSolanaDevnetConnection(), signature, { timeoutMs: 8_000 });
+        await waitForSignatureVisible(getSolanaConnection(), signature, { timeoutMs: 8_000 });
       } catch {
         // swallow — signature is what matters; airdrop errored on chain
         // is rare and the user can verify the signature themselves

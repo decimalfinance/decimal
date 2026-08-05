@@ -17,7 +17,6 @@ import { fakeChainRegisterMultisig, fakeChainRegisterProposal, fakeChainRecordAp
 import {
   buildDestinationAtaCreateInstruction,
   buildUsdcTransferTransactionInstructions,
-  candidateSettlementConnections,
   deriveUsdcAtaForWallet,
   getSolanaConnection,
   isSolanaSignatureLike,
@@ -28,7 +27,6 @@ import {
   USDC_MINT,
   verifyUsdcSettlementFromSignature,
   waitForSignatureVisible,
-  waitForSignatureVisibleAcrossClusters,
   type ExpectedUsdcSettlement,
 } from '../solana.js';
 import {
@@ -2041,15 +2039,16 @@ export async function reconcileDecimalProposalFromChain(
   }, options);
 }
 
-// Scan the proposal account's transaction history (across candidate clusters)
-// for the VaultTransactionExecute that settled it. Returns the newest matching
+// Scan the proposal account's transaction history for the
+// VaultTransactionExecute that settled it. Returns the newest matching
 // signature, or null if the proposal hasn't been executed on chain yet.
 async function findVaultExecuteSignatureOnChain(
   multisigPda: PublicKey,
   transactionIndex: bigint,
 ): Promise<string | null> {
   const [proposalPda] = multisig.getProposalPda({ multisigPda, transactionIndex });
-  for (const connection of candidateSettlementConnections()) {
+  {
+    const connection = getSolanaConnection();
     const infos = await connection.getSignaturesForAddress(proposalPda, { limit: 40 }).catch(() => []);
     for (const info of infos) {
       if (info.err) continue;
@@ -3970,9 +3969,9 @@ async function checkRpcSignatureStatus(
     throw badRequest('Invalid Solana transaction signature.', { signature, purpose });
   }
 
-  let visible: Awaited<ReturnType<typeof waitForSignatureVisibleAcrossClusters>>;
+  let visible: Awaited<ReturnType<typeof waitForSignatureVisible>>;
   try {
-    visible = await waitForSignatureVisibleAcrossClusters(signature, {
+    visible = await waitForSignatureVisible(getSolanaConnection(), signature, {
       timeoutMs: 20_000,
       pollIntervalMs: 1_000,
     });
