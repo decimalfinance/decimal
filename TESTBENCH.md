@@ -56,6 +56,49 @@ Logs and pids live in `.testbench/` (gitignored).
   Roles: reviewer / approver / payer (any casing). Access: admin | member.
 - Use `Authorization: Bearer <sessionToken>` to act as any persona over the API.
 
+## Inbound invoice email (no provider account needed)
+
+Customers forward bills to `<org-slug>@<INBOUND_EMAIL_DOMAIN>`. In production
+Resend posts a Svix-signed webhook to `/webhooks/resend/inbound`; the bench
+drives the **same handler** through a dev-only simulate endpoint, so no Resend
+account, no MX records, and no public ingress are required.
+
+```
+curl -s localhost:3100/webhooks/resend/inbound/simulate \
+  -H 'content-type: application/json' \
+  -d @api/tests/fixtures/inbound-email/email-received.basic.json
+```
+
+Before sending, edit the fixture: set `secret` to `DEV_AUTH_SECRET` from
+`api/.env`, and change `data.to` to the org's real address (get it from
+`GET /organizations/:id/inbound-email/address`, or the "Forward by email"
+dialog on Bills). The `from` must be an **active member's** email — that is the
+sender policy, not a bug.
+
+Fixtures in `api/tests/fixtures/inbound-email/`:
+
+| Fixture | What it exercises |
+|---|---|
+| `email-received.basic.json` | happy path — one PDF becomes a bill in `needs_review` |
+| `email-received.stranger.json` | sender not on the team → recorded, ignored, no bill |
+| `email-received.unknown-org.json` | address matches no org |
+| `email-received.no-attachments.json` | plain mail with nothing to read |
+| `email-received.multi-attachment.json` | inline logo skipped, .docx skipped, PDF ingested |
+
+`attachmentBytes` maps an attachment id to base64 bytes, which the fetcher
+consults before any network call. To use a real invoice instead of the tiny
+sample: `base64 -i your-invoice.pdf | tr -d '\n'` and paste it in.
+
+Only signature verification is bypassed — org resolution, sender authorization,
+dedupe, persistence, the fetch queue and the sweep are all the real code paths.
+Sending the same fixture twice should return `{"status":"deduped"}` and create
+nothing new.
+
+**Feature flags:** the webhook 404s unless `INBOUND_EMAIL_DOMAIN` and
+`RESEND_INBOUND_WEBHOOK_SECRET` are both set in `api/.env` (they must be set
+together, and the domain must be a dedicated subdomain — never the domain we
+send from). The simulate endpoint additionally needs `DEV_AUTH_SECRET`.
+
 ## The brief → report loop
 
 1. CLI Claude finishes a change and writes a brief to
