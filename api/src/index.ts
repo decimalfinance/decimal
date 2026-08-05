@@ -26,6 +26,12 @@ function startApprovalTimerSweep(): () => void {
 
 async function main() {
   await prisma.$connect();
+  // Organizations created before inbound email intake existed have no address.
+  // Idempotent — a no-op once every org has one.
+  const { backfillIntakeSlugs } = await import('./payments/inbound-email/slug.js');
+  await backfillIntakeSlugs().catch((error) => {
+    logger.warn('inbound_email.slug_backfill_skipped', errorToLogFields(error));
+  });
   // Bench-only: simulate the Squads chain in memory (config validation
   // refuses this flag in production).
   if (config.squadsFakeChain) {

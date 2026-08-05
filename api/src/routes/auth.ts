@@ -401,6 +401,8 @@ authRouter.post('/auth/dev/seed', async (req, res, next) => {
       await tx.organizationMembership.create({
         data: { organizationId: org.organizationId, userId: ownerUser.userId, role: 'owner' },
       });
+      const { mintIntakeSlug } = await import('../payments/inbound-email/slug.js');
+      await mintIntakeSlug(tx, org.organizationId, organizationName);
       return org;
     });
     const personas = [{ user: ownerUser, access: 'owner', roles: [] as string[] }];
