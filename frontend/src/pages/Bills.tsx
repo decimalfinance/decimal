@@ -4,7 +4,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { billsApi, invoiceIntakeApi, type BillBucket, type WorkbenchBill } from '../api';
+import { billsApi, inboundEmailApi, invoiceIntakeApi, type BillBucket, type WorkbenchBill } from '../api';
 import { Ico } from '../dec/icons';
 import { PageHead } from '../dec/primitives';
 import { useToast } from '../ui/Toast';
@@ -63,6 +63,7 @@ export function BillsPage() {
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<'urgent' | 'due' | 'newest'>('urgent');
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [forwardOpen, setForwardOpen] = useState(false);
 
   const workbench = useQuery({
     queryKey: ['bills-workbench', organizationId],
@@ -129,9 +130,14 @@ export function BillsPage() {
           title="Bills"
           desc="Everything you've received, from first look to paid."
           actions={
-            <button type="button" className="btn btn-primary" onClick={() => setUploadOpen(true)}>
-              <Ico.upload w={15} /> Upload a bill
-            </button>
+            <>
+              <button type="button" className="btn btn-secondary" onClick={() => setForwardOpen(true)}>
+                <Ico.mail w={15} /> Forward by email
+              </button>
+              <button type="button" className="btn btn-primary" onClick={() => setUploadOpen(true)}>
+                <Ico.upload w={15} /> Upload a bill
+              </button>
+            </>
           }
         />
 
@@ -141,7 +147,7 @@ export function BillsPage() {
             <div className="skeleton" style={{ height: 320 }} />
           </>
         ) : totalBills === 0 ? (
-          <FirstRun onUpload={() => setUploadOpen(true)} />
+          <FirstRun onUpload={() => setUploadOpen(true)} organizationId={organizationId} />
         ) : (
           <>
             <div className="metrics" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
@@ -233,7 +239,14 @@ export function BillsPage() {
                       return (
                         <tr key={bill.paymentOrderId} onClick={() => openBill(bill)} style={{ cursor: 'pointer' }}>
                           <td>
-                            <span className="v-name">{bill.vendorName}</span>
+                            {/* cell-vendor is the name+sub stack; v-name/v-sub
+                                are scoped to it and render unstyled without it. */}
+                            <div className="cell-vendor">
+                              <span className="v-name">{bill.vendorName}</span>
+                              {bill.source === 'email' ? (
+                                <span className="v-sub">{bill.sourceLabel ?? 'Emailed in'}</span>
+                              ) : null}
+                            </div>
                           </td>
                           <td className="cell-mono">
                             {bill.invoiceNumber ?? '—'}
@@ -294,13 +307,22 @@ export function BillsPage() {
           onSuccess={onUploaded}
         />
       ) : null}
+
+      {forwardOpen ? (
+        <ForwardByEmailDialog organizationId={organizationId} onClose={() => setForwardOpen(false)} />
+      ) : null}
     </div>
   );
 }
 
 // True zero (new org): the empty state IS intake setup — the workbench and
 // intake onboarding are the same screen when there's nothing in it.
-function FirstRun(props: { onUpload: () => void }) {
+function FirstRun(props: { onUpload: () => void; organizationId: string }) {
+  const address = useQuery({
+    queryKey: ['inbound-email-address', props.organizationId],
+    queryFn: () => inboundEmailApi.address(props.organizationId),
+  });
+
   return (
     <section>
       <div
@@ -314,10 +336,133 @@ function FirstRun(props: { onUpload: () => void }) {
         <span className="dz-main">Drop your first bill here, or click to browse</span>
         <span className="dz-sub">PDF or image · we read it, you confirm it, approvers take it from there</span>
       </div>
-      <p style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 14 }}>
-        You can also forward bills by email — a dedicated address for your team is coming soon.
-      </p>
+      {address.data?.enabled && address.data.address ? (
+        <div className="field" style={{ marginTop: 18 }}>
+          <span className="field-label">Or forward bills to</span>
+          <AddressCopyRow address={address.data.address} />
+          <p className="input-help" style={{ marginTop: 8 }}>
+            Anyone on your team can forward a bill here. We read it and it lands in this list.
+          </p>
+        </div>
+      ) : null}
     </section>
+  );
+}
+
+// The address plus a Copy button — the Members invite-link pattern.
+function AddressCopyRow(props: { address: string }) {
+  const [copied, setCopied] = useState(false);
+  const toast = useToast();
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(props.address);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      toast.error('Copy failed', 'Select the address and copy it manually.');
+    }
+  };
+  return (
+    <div style={{ display: 'flex', gap: 8 }}>
+      <input
+        className="input"
+        readOnly
+        value={props.address}
+        onFocus={(e) => e.currentTarget.select()}
+        style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: 12 }}
+      />
+      <button type="button" className="btn btn-primary" onClick={copy} style={{ flex: 'none' }}>
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+    </div>
+  );
+}
+
+// Always-available affordance, so the address stays findable once the workbench
+// has bills in it. A dialog, not a panel — the playbook is explicit that
+// reveals overlay rather than reflow.
+function ForwardByEmailDialog(props: { organizationId: string; onClose: () => void }) {
+  const address = useQuery({
+    queryKey: ['inbound-email-address', props.organizationId],
+    queryFn: () => inboundEmailApi.address(props.organizationId),
+  });
+  const ignored = useQuery({
+    queryKey: ['inbound-email-messages', props.organizationId],
+    queryFn: () => inboundEmailApi.messages(props.organizationId),
+    // Admin-only endpoint; members simply don't get the list.
+    retry: false,
+  });
+
+  const ignoredItems = (ignored.data?.items ?? []).filter((m) => m.disposition === 'rejected').slice(0, 10);
+
+  return (
+    <div
+      className="overlay"
+      style={{ position: 'fixed', inset: 0, zIndex: 61 }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) props.onClose();
+      }}
+    >
+      <div className="dialog" role="dialog" aria-modal="true" style={{ maxWidth: 560 }}>
+        <div className="dialog-head">
+          <div>
+            <h2>Forward bills by email</h2>
+            <p>Send invoices straight into your review queue.</p>
+          </div>
+          <button type="button" className="drawer-x" onClick={props.onClose} aria-label="Close">
+            ×
+          </button>
+        </div>
+        <div className="dialog-body">
+          {address.data?.enabled && address.data.address ? (
+            <>
+              <div className="field">
+                <span className="field-label">Your address</span>
+                <AddressCopyRow address={address.data.address} />
+                <p className="input-help" style={{ marginTop: 8 }}>
+                  Only people on your team can send here. Mail from anyone else is ignored.
+                </p>
+              </div>
+              {ignoredItems.length > 0 ? (
+                <div className="field" style={{ marginTop: 18 }}>
+                  <span className="field-label">Recently ignored</span>
+                  <div className="tbl-card">
+                    <table className="tbl tbl-slim">
+                      <thead>
+                        <tr>
+                          <th>From</th>
+                          <th>Subject</th>
+                          <th>Why</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ignoredItems.map((m) => (
+                          <tr key={m.inboundEmailMessageId}>
+                            <td>{m.from}</td>
+                            <td style={{ color: 'var(--text-muted)' }}>{m.subject ?? '—'}</td>
+                            <td style={{ color: 'var(--text-muted)' }}>{m.reason ?? '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <div className="empty">
+              <h4>Not set up yet</h4>
+              <p>Email intake isn't switched on for this workspace.</p>
+            </div>
+          )}
+        </div>
+        <div className="dialog-foot" style={{ justifyContent: 'flex-end' }}>
+          <button type="button" className="btn btn-secondary" onClick={props.onClose}>
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

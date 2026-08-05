@@ -323,6 +323,14 @@ function ReviewScreen(props: {
           <button type="button" className="btn btn-ghost tb-back" onClick={onBack}>
             <Ico.chevLeft w={15} /> Bills
           </button>
+          {/* Who put this bill here — a reviewer's first question when a bill
+              they didn't upload appears in their queue. */}
+          {review.source === 'email' && review.sourceLabel ? (
+            <span className="cell-source" style={{ marginLeft: 12 }}>
+              <Ico.mail w={15} />
+              <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{review.sourceLabel}</span>
+            </span>
+          ) : null}
         </div>
 
       </div>

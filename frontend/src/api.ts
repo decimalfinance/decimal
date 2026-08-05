@@ -1424,6 +1424,10 @@ export interface WorkbenchBill {
   invoiceDocumentId: string | null;
   dueAt: string | null;
   createdAt: string;
+  // How the bill arrived. 'email' means someone forwarded it to the org's
+  // intake address; sourceLabel names them ("Emailed by Priya Sharma").
+  source: 'email' | 'upload';
+  sourceLabel: string | null;
   discountLabel: string | null;
   readiness: 'ready' | 'missing_info' | null;
   missing: string[];
@@ -1463,6 +1467,9 @@ export interface BillReview {
   paymentOrderId: string;
   state: string;
   readOnly: boolean;
+  // How the bill arrived; sourceLabel names who forwarded it.
+  source: 'email' | 'upload';
+  sourceLabel: string | null;
   // An approver sent this bill back for changes — shown as the reviewer's homework.
   sentBack: { reason: string | null; byName: string | null; at: string | null } | null;
   vendor: { name: string; email: string | null; nameSource?: DocSource; emailSource?: DocSource; isNew: boolean; trustState: string };
@@ -1501,6 +1508,34 @@ export interface ConfirmBillBody {
   noteForApprovers?: string | null;
   sourceTreasuryWalletId?: string | null;
 }
+
+export type InboundEmailAddress = {
+  address: string | null;
+  slug: string | null;
+  domain: string | null;
+  enabled: boolean;
+};
+
+export type InboundEmailMessage = {
+  inboundEmailMessageId: string;
+  from: string;
+  fromAddress: string;
+  subject: string | null;
+  receivedAt: string;
+  disposition: string;
+  attachmentCount: number;
+  reason: string | null;
+  reasonCode: string | null;
+};
+
+export const inboundEmailApi = {
+  address(organizationId: string) {
+    return request<InboundEmailAddress>(`/organizations/${organizationId}/inbound-email/address`);
+  },
+  messages(organizationId: string) {
+    return request<{ items: InboundEmailMessage[] }>(`/organizations/${organizationId}/inbound-email/messages`);
+  },
+};
 
 export const billsApi = {
   workbench(organizationId: string) {
