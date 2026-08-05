@@ -34,10 +34,11 @@ video** (recording now). Equity radios set to No / No / No.
 **Product link + login:** ⟨none⟩
 
 **What is your company going to make? Please describe your product and what it does or will do.**
-> Decimal is accounts payable software. Businesses send it their vendor bills, and the AI extracts each
-> one, prepares the approvals, and once approved, pays the vendor anywhere in the world over stablecoin
-> rails. It comes with a self-custodial global USDC account, so the money moves from an account only the
-> business controls, saving the high fees banks charge for international payments.
+> Decimal is AI-native accounts payable software. It does the work an accounts payable clerk normally
+> does: it reads each vendor bill a business sends in, codes it to the right account, prepares the
+> approval with the context the approver needs, and once approved, pays the vendor anywhere in the world
+> over stablecoin rails. It comes with a self-custodial global USDC account, so the money moves from an
+> account only the business controls, saving the high fees banks charge on international payments.
 
 **Where do you live now, and where would the company be based after YC?**
 > Hyderabad, India / San Francisco, USA
@@ -53,7 +54,7 @@ video** (recording now). Equity radios set to No / No / No.
 
 **How far along are you?**
 > The core AP product is done and working. AI assistance is in progress, and Bridge integration for
-> payments comes after the legal setup.
+> payments comes after the legal setup. We've also been awarded a $10k grant from the Solana Foundation.
 
 **How long have you been working on this? How much full-time?**
 > Since June, full-time.
@@ -94,13 +95,13 @@ video** (recording now). Equity radios set to No / No / No.
 ## Idea
 
 **Why did you pick this idea? Domain expertise? How do you know people need it?**
-> Out of curiosity, I started reverse-engineering how Bridge built its global payment rails. The deeper
-> I went, the clearer it got that very few products are actually using AI and stablecoin rails to make
-> payments faster and easier for specific use cases. Expense management and corporate cards are crowded,
-> but accounts payable is still primitive and neglected, so I decided to build Decimal.
-> I do not have domain expertise in Accounts Payable.
-> AP software is a proven necessity. Businesses already spend billions on it. Decimal saves them both
-> time and money in the process.
+> Out of curiosity, I started reverse-engineering how Bridge built its global payment rails, and the real
+> bottleneck turned out not to be moving the money. It was all the manual work a business has to do before
+> a payment can even happen, the reading, coding, and chasing of every bill. Very few products use AI and
+> stablecoin rails together to fix that. Expense management and corporate cards are crowded, but accounts
+> payable is still primitive and neglected, so I decided to build Decimal.
+> AP software is a proven necessity. Businesses already spend billions on it, and Decimal saves them both
+> time and money.
 
 **Who are your competitors? What do you understand that they don't?**
 > Our competitors are Bill.com, Stampli, Tipalti.
