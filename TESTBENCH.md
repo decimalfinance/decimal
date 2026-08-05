@@ -45,16 +45,29 @@ Logs and pids live in `.testbench/` (gitignored).
 
 ## Signing in and seeding (no real emails, ever)
 
-- **Browser**: http://localhost:5174/login → "Developer sign-in" panel at the
-  bottom. Three fields: persona (e.g. `zaid`), organization name (optional but
-  ALWAYS use it — same-named test orgs are a trap), developer password
-  (pre-filled from env). Signs in as `persona@dev.decimal.test`, pre-verified.
-- **API**: `POST /auth/dev/login` `{secret, email, organizationName?}` and
-  `POST /auth/dev/seed` `{secret, organizationName, owner, members[]}` — the
-  seed creates users + org + active memberships + role bundles and returns a
-  session token per persona. `secret` = `DEV_AUTH_SECRET` in `api/.env`.
+Developer sign-in is the **real** sign-in. There is no parallel auth path: the
+only concession to testing is that an account on the reserved
+`@dev.decimal.test` domain is created already verified, because no inbox exists
+to read a verification code from. Everything else — password rules, sessions,
+org creation, invites — behaves exactly as it does for a customer.
+
+- **Browser**: http://localhost:5174/**dev-login** (never linked from the
+  product, and it reports itself unavailable when the server has dev mode off).
+  Two fields: a throwaway email on `@dev.decimal.test` and a password you
+  choose. The account is created on first use and signs you in thereafter.
+  The normal `/login` page has no developer affordance on it at all.
+- **API**: registration and login are the ordinary `POST /auth/register` and
+  `POST /auth/login` — a dev-domain address just comes back with
+  `emailVerifiedAt` already set.
+- **Fixtures**: `POST /auth/dev/seed` `{secret, organizationName, owner, members[]}`
+  builds users + org + active memberships + role bundles in one call and returns
+  a session token per persona — worth it because assembling that through real
+  endpoints is a dozen round-trips. `secret` = `DEV_AUTH_SECRET` in `api/.env`.
   Roles: reviewer / approver / payer (any casing). Access: admin | member.
 - Use `Authorization: Bearer <sessionToken>` to act as any persona over the API.
+
+Both affordances are off unless `DEV_AUTH_SECRET` is set, which it never is in
+production — there the reserved domain is just an ordinary domain.
 
 ## The brief → report loop
 

@@ -408,57 +408,68 @@ test('auth registration and login require the right password', async () => {
   assert.equal(login.user.email, 'auth@example.com');
 });
 
-test('developer sign-in is secret-gated and confined to the dev domain', async () => {
+test('a testing account registers pre-verified, so it can create an org with no inbox', async () => {
   const priorSecret = config.devAuthSecret;
   try {
-    // Disabled entirely when no secret is configured.
-    config.devAuthSecret = '';
-    const disabled = await fetch(`${baseUrl}/auth/dev/login`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ secret: 'anything', email: 'alice@dev.decimal.test' }),
-    });
-    assert.equal(disabled.status, 404);
-
     config.devAuthSecret = 'test-dev-secret';
-    const wrongSecret = await fetch(`${baseUrl}/auth/dev/login`, {
+
+    // The REAL register endpoint — there is no separate dev login path.
+    const registered = await post('/auth/register', {
+      email: 'alice@dev.decimal.test',
+      password: 'devpassword123',
+      displayName: 'Alice',
+    });
+    assert.ok(registered.sessionToken);
+    assert.ok(registered.user.emailVerifiedAt, 'dev-domain accounts skip verification — nobody can read that inbox');
+    assert.equal(registered.devEmailVerificationCode, null, 'no code is minted at all');
+
+    // The whole point: verified means it can do what an unverified account can't.
+    const org = await fetch(`${baseUrl}/organizations`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${registered.sessionToken}` },
+      body: JSON.stringify({ organizationName: 'Alice Test Org' }),
+    });
+    assert.equal(org.status, 201);
+
+    // ...and signing back in is the REAL login, same password rules.
+    const back = await post('/auth/login', { email: 'alice@dev.decimal.test', password: 'devpassword123' });
+    assert.equal(back.user.userId, registered.user.userId);
+
+    const wrongPassword = await fetch(`${baseUrl}/auth/login`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ secret: 'nope', email: 'alice@dev.decimal.test' }),
+      body: JSON.stringify({ email: 'alice@dev.decimal.test', password: 'not-the-password' }),
     });
-    assert.equal(wrongSecret.status, 401);
+    assert.equal(wrongPassword.status, 401, 'a throwaway account is not a password-free account');
+  } finally {
+    config.devAuthSecret = priorSecret;
+  }
+});
 
-    // A real person's domain is refused — the endpoint can never mint a
-    // session for an existing production account.
-    const realDomain = await fetch(`${baseUrl}/auth/dev/login`, {
+test('a real email still has to verify, and the dev domain is ordinary when dev mode is off', async () => {
+  const priorSecret = config.devAuthSecret;
+  try {
+    config.devAuthSecret = 'test-dev-secret';
+    // A normal address gets the ordinary journey even while dev mode is on.
+    const real = await post('/auth/register', { email: 'real@example.com', password: 'realpassword123' });
+    assert.equal(real.user.emailVerifiedAt, null);
+    assert.ok(real.devEmailVerificationCode, 'still a code to enter');
+
+    const blocked = await fetch(`${baseUrl}/organizations`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ secret: 'test-dev-secret', email: 'victim@gmail.com' }),
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${real.sessionToken}` },
+      body: JSON.stringify({ organizationName: 'Unverified Org' }),
     });
-    assert.equal(realDomain.status, 400);
+    assert.notEqual(blocked.status, 201, 'unverified accounts cannot create an organization');
 
-    const first = await post('/auth/dev/login', {
-      secret: 'test-dev-secret',
-      email: 'alice@dev.decimal.test',
-      displayName: 'Alice Dev',
+    // Production shape: no secret configured → the reserved domain is just a
+    // domain, with no special casing whatsoever.
+    config.devAuthSecret = '';
+    const inProduction = await post('/auth/register', {
+      email: 'bob@dev.decimal.test',
+      password: 'devpassword123',
     });
-    assert.equal(first.status, 'authenticated');
-    assert.ok(first.sessionToken);
-    assert.ok(first.user.emailVerifiedAt, 'dev personas are pre-verified');
-
-    // Idempotent: same persona signs in again as the same user, new session.
-    const again = await post('/auth/dev/login', {
-      secret: 'test-dev-secret',
-      email: 'alice@dev.decimal.test',
-    });
-    assert.equal(again.user.userId, first.user.userId);
-
-    // The session actually works against authenticated routes.
-    const session = await fetch(`${baseUrl}/auth/session`, {
-      headers: { authorization: `Bearer ${again.sessionToken}` },
-    });
-    assert.equal(session.status, 200);
-    assert.equal((await session.json()).user.email, 'alice@dev.decimal.test');
+    assert.equal(inProduction.user.emailVerifiedAt, null, 'no free verification when dev mode is off');
   } finally {
     config.devAuthSecret = priorSecret;
   }
@@ -504,20 +515,13 @@ test('dev seed builds a whole org — users, memberships, roles, sessions — in
     const rioMember = rosterBody.members.find((m: { email: string }) => m.email === 'rio@dev.decimal.test');
     assert.deepEqual([...rioMember.roles].sort(), ['approver', 'reviewer']);
 
-    // Dev login can target an org by name — landing in the wrong same-named
-    // test org is the trap this exists to close.
-    const targeted = await post('/auth/dev/login', {
-      secret: 'test-dev-secret',
-      email: 'zaid@dev.decimal.test',
-      organizationName: 'Seeded Test Org',
+    // Seed hands back a working session per persona, so an agent can act as
+    // each of them without a login round-trip.
+    const asOwner = await fetch(`${baseUrl}/auth/session`, {
+      headers: { authorization: `Bearer ${owner.sessionToken}` },
     });
-    assert.equal(targeted.landingOrganizationId, seed.organizationId);
-    const wrongOrg = await fetch(`${baseUrl}/auth/dev/login`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ secret: 'test-dev-secret', email: 'zaid@dev.decimal.test', organizationName: 'Nope Org' }),
-    });
-    assert.equal(wrongOrg.status, 400);
+    assert.equal(asOwner.status, 200);
+    assert.equal((await asOwner.json()).user.email, 'zaid@dev.decimal.test');
 
     // Same name twice → clear conflict, not a half-seeded org.
     const dupe = await fetch(`${baseUrl}/auth/dev/seed`, {
