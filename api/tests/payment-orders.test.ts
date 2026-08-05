@@ -30,6 +30,8 @@ TRUNCATE TABLE
   counterparty_wallets,
   counterparties,
   treasury_wallets,
+  inbound_email_attachments,
+  inbound_email_messages,
   organizations,
   users
 RESTART IDENTITY CASCADE

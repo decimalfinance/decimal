@@ -4,6 +4,7 @@ import { assertOrganizationAccess } from '../auth/organization-access.js';
 import { asyncRoute, sendCreated } from '../infra/route-helpers.js';
 import { uploadInvoiceToPaymentOrders, beginAsyncInvoiceIntake } from '../payments/invoice-intake.js';
 import {
+  MAX_DOCUMENT_BYTES,
   getInvoiceDocumentMeta,
   getInvoiceDocumentWithBytes,
   getInvoiceDocumentStatus,
@@ -11,8 +12,6 @@ import {
 } from '../payments/documents.js';
 
 export const invoicesRouter = Router();
-
-const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
 
 const organizationParamsSchema = z.object({
   organizationId: z.string().uuid(),

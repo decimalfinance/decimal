@@ -48,6 +48,20 @@ export type InvoiceIntakeSkippedRow = {
   message: string;
 };
 
+/**
+ * How a bill got here, when it wasn't a person clicking Upload. Purely
+ * descriptive — it carries no actor semantics (the bill is still attributed to
+ * a real user) and does not change `inputSource`, which the review screen and
+ * duplicate gate key off. Email is an invoice upload; this records the door.
+ */
+export type IntakeChannel = {
+  kind: 'email';
+  inboundEmailMessageId: string;
+  fromAddress: string;
+  subject: string | null;
+  receivedAt: string;
+};
+
 export async function uploadInvoiceToPaymentOrders(args: {
   organizationId: string;
   actorUserId: string;
@@ -55,6 +69,7 @@ export async function uploadInvoiceToPaymentOrders(args: {
   filename: string;
   mimeType: string;
   sourceTreasuryWalletId?: string | null;
+  intakeChannel?: IntakeChannel | null;
 }) {
   logger.info('invoice_intake.started', {
     organizationId: args.organizationId,
@@ -100,6 +115,7 @@ export async function processInvoiceDocument(args: {
   filename: string;
   mimeType: string;
   sourceTreasuryWalletId?: string | null;
+  intakeChannel?: IntakeChannel | null;
 }) {
   // Render page images once — the review screen displays these (never a PDF
   // viewer), and extraction reuses the same renders. Best-effort: if rendering
@@ -248,6 +264,7 @@ export async function processInvoiceDocument(args: {
         dueAt: parseOptionalDate(row.due_date),
         metadataJson: {
           inputSource: 'invoice_upload',
+          ...(args.intakeChannel ? { intakeChannel: args.intakeChannel } : {}),
           ocrCoding: ocrCodings[index] ?? null,
           agent: {
             name: 'ap-intake',
@@ -350,6 +367,7 @@ export async function beginAsyncInvoiceIntake(args: {
   filename: string;
   mimeType: string;
   sourceTreasuryWalletId?: string | null;
+  intakeChannel?: IntakeChannel | null;
 }) {
   const stored = await storeInvoiceDocument({
     organizationId: args.organizationId,

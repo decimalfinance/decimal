@@ -4,6 +4,7 @@ import { forbidden } from '../infra/api-errors.js';
 import { assertOrganizationAccess } from '../auth/organization-access.js';
 import { ensureDefaultAutomationAgentWithWallet } from '../agents/automation.js';
 import { prisma } from '../infra/prisma.js';
+import { mintIntakeSlug } from '../payments/inbound-email/slug.js';
 import { ensureManagedPersonalWalletForUser } from '../wallets/provisioning.js';
 
 export const organizationsRouter = Router();
@@ -125,6 +126,9 @@ organizationsRouter.post('/organizations', async (req, res, next) => {
           role: 'owner',
         },
       });
+
+      // The org's inbound invoice address, minted once and never re-minted.
+      await mintIntakeSlug(tx, createdOrganization.organizationId, organizationName);
 
       return createdOrganization;
     });

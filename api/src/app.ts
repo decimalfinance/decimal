@@ -14,6 +14,8 @@ import { authRouter } from './routes/auth.js';
 import { automationAgentsRouter } from './routes/automation-agents.js';
 import { healthRouter } from './routes/health.js';
 import { idempotencyMiddleware } from './infra/idempotency.js';
+import { inboundEmailRouter, publicInboundEmailRouter } from './routes/inbound-email.js';
+import { INBOUND_EMAIL_WEBHOOK_PATH } from './infra/rate-limit.js';
 import { invoicesRouter } from './routes/invoices.js';
 import { billsRouter } from './routes/bills.js';
 import { openApiRouter } from './routes/openapi.js';
@@ -75,6 +77,13 @@ export function createApp() {
   });
 
   app.use(publicRateLimitMiddleware());
+  // Svix signs the exact bytes it sent, so the inbound-email webhook needs its
+  // raw body — mounted BEFORE express.json below, and scoped to that path only
+  // (express.json's `verify` callback would stash a raw copy of every upload).
+  // Metadata-only payload, so 2mb is generous. Moving express.json above this
+  // would silently break every signature; there's a Buffer.isBuffer assertion
+  // in the route and a test through the full stack guarding that.
+  app.use(INBOUND_EMAIL_WEBHOOK_PATH, express.raw({ type: '*/*', limit: '2mb' }));
   // 15mb covers base64-encoded invoice uploads on the doc-to-proposal
   // route (10mb decoded, ~13.4mb encoded + headers). The 1mb default
   // is too tight for that payload.
@@ -87,6 +96,8 @@ export function createApp() {
   app.use(publicOrganizationInvitesRouter);
   // QuickBooks OAuth callback — Intuit redirects here with no auth header.
   app.use(publicAccountingRouter);
+  // Inbound invoice email — Resend posts here with a Svix signature, no session.
+  app.use(publicInboundEmailRouter);
   app.use(requireAuth());
   // Role-based access: org-scoped requests must carry the capability their
   // area requires (auth/capability-access.ts). Owner/admin bypass.
@@ -106,6 +117,7 @@ export function createApp() {
   app.use(walletAuthorizationsRouter);
   app.use(counterpartyWalletsRouter);
   app.use(invoicesRouter);
+  app.use(inboundEmailRouter);
   app.use(billsRouter);
   app.use(paymentOrdersRouter);
   app.use(proposalsRouter);

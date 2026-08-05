@@ -1,0 +1,17 @@
+{
+  "secret": "REPLACE_WITH_DEV_AUTH_SECRET",
+  "payload": {
+    "type": "email.received",
+    "data": {
+      "email_id": "email_fixture_4",
+      "from": "Priya Sharma <priya@acme.test>",
+      "to": [
+        "acme@bills.decimal.finance"
+      ],
+      "cc": [],
+      "subject": "FW: Invoice HG-501 from Helios Group",
+      "message_id": "<fixture-1@acme.test>",
+      "attachments": []
+    }
+  }
+}

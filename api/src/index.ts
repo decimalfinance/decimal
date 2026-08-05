@@ -4,6 +4,7 @@ import { createApp } from './app.js';
 import { USDC_MINT } from './solana.js';
 import { startSettlementReconciler } from './agents/settlement-reconciler.js';
 import { startAccountingSync } from './agents/accounting-sync.js';
+import { startInboundEmailIntake } from './agents/inbound-email-intake.js';
 import { registerPaymentApprovalBridge } from './payments/approval-bridge.js';
 import { sweepTimers } from './approvals/lifecycle.js';
 import { errorToLogFields, logger } from './infra/logger.js';
@@ -26,6 +27,12 @@ function startApprovalTimerSweep(): () => void {
 
 async function main() {
   await prisma.$connect();
+  // Organizations created before inbound email intake existed have no address.
+  // Idempotent — a no-op once every org has one.
+  const { backfillIntakeSlugs } = await import('./payments/inbound-email/slug.js');
+  await backfillIntakeSlugs().catch((error) => {
+    logger.warn('inbound_email.slug_backfill_skipped', errorToLogFields(error));
+  });
   // Bench-only: simulate the Squads chain in memory (config validation
   // refuses this flag in production).
   if (config.squadsFakeChain) {
@@ -49,12 +56,14 @@ async function main() {
   const stopSettlementReconciler = startSettlementReconciler();
   const stopAccountingSync = startAccountingSync();
   const stopApprovalSweep = startApprovalTimerSweep();
+  const stopInboundEmailIntake = startInboundEmailIntake();
 
   const shutdown = async () => {
     logger.info('api.shutdown.started');
     stopSettlementReconciler();
     stopAccountingSync();
     stopApprovalSweep();
+    stopInboundEmailIntake();
     server.close(async () => {
       await prisma.$disconnect();
       logger.info('api.shutdown.completed');

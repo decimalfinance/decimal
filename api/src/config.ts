@@ -20,6 +20,7 @@ type FileConfig = {
   autoProvisionWallets?: boolean;
   devnetAutoFundWallets?: boolean;
   openAiModel?: string;
+  inboundEmailDomain?: string;
 };
 
 type DecimalConfig = {
@@ -124,6 +125,23 @@ type DecimalConfig = {
   quickbooksEnvironment: 'sandbox' | 'production';
   accountingSyncEnabled: boolean;
   accountingSyncIntervalMs: number;
+  /**
+   * Inbound invoice email. The receiving domain is a CATCH-ALL: it accepts any
+   * local part with no per-address setup, and that local part (the org's
+   * intakeSlug) is the only thing identifying the customer. Must be a dedicated
+   * subdomain — never the domain we send from, or our own bounces and
+   * auto-replies would land back in invoice intake.
+   */
+  inboundEmailDomain: string;
+  /** Svix signing secret (whsec_…) for the Resend inbound webhook. */
+  inboundEmailWebhookSecret: string;
+  inboundEmailIntakeEnabled: boolean;
+  inboundEmailIntakeIntervalMs: number;
+  /**
+   * Separate, higher bucket than the public auth limiter: a legitimate
+   * Monday-morning batch of forwarded invoices must not be throttled.
+   */
+  inboundWebhookRateLimitMax: number;
 };
 
 export type SolanaNetwork = 'devnet' | 'mainnet';
@@ -141,6 +159,9 @@ function buildConfig(): DecimalConfig {
   const solanaPublicRpcUrl = (process.env.SOLANA_PUBLIC_RPC_URL?.trim() || defaultSolanaRpcUrl(solanaNetwork));
   const solanaDevnetRpcUrl = (process.env.SOLANA_DEVNET_RPC_URL?.trim() || 'https://api.devnet.solana.com');
   const solanaAirdropRpcUrl = (process.env.SOLANA_AIRDROP_RPC_URL?.trim() || 'https://api.devnet.solana.com');
+  const inboundEmailDomain = (process.env.INBOUND_EMAIL_DOMAIN ?? fileConfig.inboundEmailDomain ?? '')
+    .trim()
+    .toLowerCase();
   const settlementCommitmentEnv = process.env.SETTLEMENT_COMMITMENT?.trim();
   const settlementCommitment: 'confirmed' | 'finalized' =
     settlementCommitmentEnv === 'finalized' || settlementCommitmentEnv === 'confirmed'
@@ -218,6 +239,14 @@ function buildConfig(): DecimalConfig {
       nodeEnv !== 'test' && Boolean((process.env.QUICKBOOKS_CLIENT_ID ?? '').trim()),
     ),
     accountingSyncIntervalMs: Number(process.env.ACCOUNTING_SYNC_INTERVAL_MS ?? 30_000),
+    inboundEmailDomain,
+    inboundEmailWebhookSecret: (process.env.RESEND_INBOUND_WEBHOOK_SECRET ?? '').trim(),
+    inboundEmailIntakeEnabled: getBooleanConfig(
+      process.env.INBOUND_EMAIL_INTAKE_ENABLED,
+      nodeEnv !== 'test' && Boolean(inboundEmailDomain),
+    ),
+    inboundEmailIntakeIntervalMs: Number(process.env.INBOUND_EMAIL_INTAKE_INTERVAL_MS ?? 30_000),
+    inboundWebhookRateLimitMax: Number(process.env.INBOUND_WEBHOOK_RATE_LIMIT_MAX ?? 600),
   };
 
   validateConfig(nextConfig);
@@ -322,6 +351,38 @@ function validateConfig(nextConfig: DecimalConfig) {
 
   if (nextConfig.openAiApiKey && !nextConfig.openAiModel) {
     throw new Error('OPENAI_MODEL is required when OPENAI_API_KEY is configured.');
+  }
+
+  const hasPartialInboundEmailConfig =
+    Boolean(nextConfig.inboundEmailDomain) !== Boolean(nextConfig.inboundEmailWebhookSecret);
+  if (hasPartialInboundEmailConfig) {
+    throw new Error('INBOUND_EMAIL_DOMAIN and RESEND_INBOUND_WEBHOOK_SECRET must be configured together.');
+  }
+
+  if (nextConfig.inboundEmailWebhookSecret && !nextConfig.inboundEmailWebhookSecret.startsWith('whsec_')) {
+    throw new Error('RESEND_INBOUND_WEBHOOK_SECRET must be the Svix signing secret, starting with whsec_.');
+  }
+
+  if (nextConfig.inboundEmailDomain && !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9-]+)+$/.test(nextConfig.inboundEmailDomain)) {
+    throw new Error('INBOUND_EMAIL_DOMAIN must be a bare hostname, e.g. bills.decimal.finance.');
+  }
+
+  // A catch-all receiving domain must never be the sending identity domain:
+  // every bounce and auto-reply we send would land straight back in invoice
+  // intake. Inbound belongs on its own subdomain.
+  if (
+    nextConfig.inboundEmailDomain
+    && nextConfig.resendFromEmail.toLowerCase().endsWith(`@${nextConfig.inboundEmailDomain}`)
+  ) {
+    throw new Error('INBOUND_EMAIL_DOMAIN must be a dedicated receiving subdomain, not the RESEND_FROM_EMAIL domain.');
+  }
+
+  if (nextConfig.inboundEmailIntakeEnabled && !nextConfig.resendApiKey) {
+    throw new Error('Inbound email intake requires RESEND_API_KEY to fetch attachment bytes.');
+  }
+
+  if (!Number.isInteger(nextConfig.inboundWebhookRateLimitMax) || nextConfig.inboundWebhookRateLimitMax < 1) {
+    throw new Error('INBOUND_WEBHOOK_RATE_LIMIT_MAX must be a positive integer.');
   }
 
   if (nextConfig.privyApiBaseUrl.includes('/jwks') || nextConfig.privyApiBaseUrl.includes('/apps/')) {
