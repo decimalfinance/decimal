@@ -30,7 +30,7 @@ yellowstone/target/
 
 # Local-only working files
 list.md
-stablecoin ops v1.mp4
+assets/history/stablecoin ops v1.mp4
 .vercel
 
 # Scratch dir for one-off research dumps
@@ -52,8 +52,8 @@ research/spike-doc-to-proposal/state.json
 research/spike-doc-to-proposal/samples/*.png
 
 # Local test invoices for the doc-to-proposal flow
-batch_payment.pdf
-single_payment.pdf
+assets/samples/batch_payment.pdf
+assets/samples/single_payment.pdf
 
 deliverables
 
@@ -63,18 +63,18 @@ synthetic_data/
 
 # Local scratch artifacts
 db-queries.txt
-fuyofulo logo.jpg
-harkirat singh.jpg
-toly pfp.jpeg
-paarug.jpg
-tks.png
-superteam.jpeg
-solana.png
-shell.jpg
-rektoff.png
-ikea.png
-mastercard.webp
-100xdevs.jpeg
+assets/logos/fuyofulo logo.jpg
+assets/logos/harkirat singh.jpg
+assets/logos/toly pfp.jpeg
+assets/logos/paarug.jpg
+assets/logos/tks.png
+assets/logos/superteam.jpeg
+assets/logos/solana.png
+assets/logos/shell.jpg
+assets/logos/rektoff.png
+assets/logos/ikea.png
+assets/logos/mastercard.webp
+assets/logos/100xdevs.jpeg
 
 # Internal research, design handoffs, and pitch material — local only
 /outputs/
@@ -83,7 +83,7 @@ mastercard.webp
 /landing/
 /payment_run_ai_agent.json
 /*.zip
-/cv.pdf
+assets/samples/cv.pdf
 
 NEXT-TO-BUILD.md
 api/scripts/
@@ -99,7 +99,6 @@ ds-bundle/
 .claude/settings.local.json
 .claude/launch.json
 ramp_billpay/
-the-AI-momentum-report.pdf
 .claude/worktrees/
 applications/
 design_handoff_decimal_landing/
