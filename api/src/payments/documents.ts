@@ -5,6 +5,13 @@ import { createHash } from 'node:crypto';
 import { prisma } from '../infra/prisma.js';
 import { logger } from '../infra/logger.js';
 
+/**
+ * Largest document we accept, whatever door it comes through — a browser upload
+ * or an email attachment. Lives here rather than on a route so both callers
+ * share one number.
+ */
+export const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
+
 export async function storeInvoiceDocument(args: {
   organizationId: string;
   uploadedByUserId: string | null;

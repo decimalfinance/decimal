@@ -31,6 +31,10 @@ const RULES: Array<{ pattern: RegExp; view: Need; act: Need }> = [
   { pattern: /^\/payment-orders\/[^/]+\/(gl-coding|accounting)(\/|$)/, view: 'bills.view', act: 'bills.edit' },
   // Bills work surface.
   { pattern: /^\/(bills|invoices|invoice-documents)(\/|$)/, view: 'bills.view', act: 'bills.edit' },
+  // The org's inbound invoice address is part of the bills surface: anyone who
+  // can see bills can see where to forward them. The ignored-mail log inside
+  // this prefix re-checks admin in its own route.
+  { pattern: /^\/inbound-email(\/|$)/, view: 'bills.view', act: 'bills.edit' },
   // Creating/editing payment orders is entering payables (reviewer work);
   // cancel/execute/advance actually move or stop money.
   { pattern: /^\/payment-orders\/[^/]+\/(cancel|execute-with-spending-limit|agent\/advance)$/, view: 'payments.sign', act: 'payments.sign' },

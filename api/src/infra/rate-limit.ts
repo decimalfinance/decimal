@@ -8,9 +8,33 @@ type Bucket = {
 
 const buckets = new Map<string, Bucket>();
 
+/** Public paths reachable by machines, not people — see isWebhookPath. */
+export const INBOUND_EMAIL_WEBHOOK_PATH = '/webhooks/resend/inbound';
+
 export function publicRateLimitMiddleware() {
   return (req: Request, res: Response, next: NextFunction) => {
-    if (!config.rateLimitEnabled || !isPublicLimitedPath(req.path)) {
+    if (!config.rateLimitEnabled) {
+      next();
+      return;
+    }
+
+    // Webhooks get their own, much higher bucket: the auth limiter's 120/min
+    // would throttle a legitimate Monday-morning batch of forwarded invoices.
+    // Signature verification still runs after this, so an unsigned flood is
+    // cheap to reject either way.
+    if (isWebhookPath(req.path)) {
+      applyRateLimit({
+        req,
+        res,
+        next,
+        bucketKey: `webhook:${clientIp(req)}:${req.path}`,
+        limit: config.inboundWebhookRateLimitMax,
+        windowMs: 60_000,
+      });
+      return;
+    }
+
+    if (!isPublicLimitedPath(req.path)) {
       next();
       return;
     }
@@ -72,6 +96,10 @@ function applyRateLimit(args: {
 
 function isPublicLimitedPath(path: string) {
   return path === '/auth/register' || path === '/auth/login' || path === '/capabilities';
+}
+
+function isWebhookPath(path: string) {
+  return path === INBOUND_EMAIL_WEBHOOK_PATH || path === `${INBOUND_EMAIL_WEBHOOK_PATH}/simulate`;
 }
 
 function clientIp(req: Request) {

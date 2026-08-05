@@ -4,6 +4,7 @@ import { createApp } from './app.js';
 import { USDC_MINT } from './solana.js';
 import { startSettlementReconciler } from './agents/settlement-reconciler.js';
 import { startAccountingSync } from './agents/accounting-sync.js';
+import { startInboundEmailIntake } from './agents/inbound-email-intake.js';
 import { registerPaymentApprovalBridge } from './payments/approval-bridge.js';
 import { sweepTimers } from './approvals/lifecycle.js';
 import { errorToLogFields, logger } from './infra/logger.js';
@@ -55,12 +56,14 @@ async function main() {
   const stopSettlementReconciler = startSettlementReconciler();
   const stopAccountingSync = startAccountingSync();
   const stopApprovalSweep = startApprovalTimerSweep();
+  const stopInboundEmailIntake = startInboundEmailIntake();
 
   const shutdown = async () => {
     logger.info('api.shutdown.started');
     stopSettlementReconciler();
     stopAccountingSync();
     stopApprovalSweep();
+    stopInboundEmailIntake();
     server.close(async () => {
       await prisma.$disconnect();
       logger.info('api.shutdown.completed');
