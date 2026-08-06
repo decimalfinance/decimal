@@ -6,12 +6,13 @@
 // call that can fail, so it needs a durable queue and a retry, not a floating
 // promise inside the request handler.
 //
-// UNVERIFIED: the exact response shape is not confirmed against live docs. The
-// reader below deliberately handles the three plausible forms (raw bytes,
-// base64 in JSON, or a signed download URL) so the first real call succeeds
-// whichever it turns out to be. Confirm the path, the shape, and — importantly
-// — how long Resend retains the bytes: the retry budget below assumes at least
-// a few hours.
+// VERIFIED against the live API 2026-08-06 with a real forwarded invoice.
+// GET /emails/receiving/{email_id}/attachments/{attachment_id} returns JSON
+// metadata (filename, size, content_type) plus a SIGNED `download_url` on
+// cdn.resend.app that carries its own Expires timestamp — so the bytes are a
+// second hop, and the URL must not be sent our Authorization header.
+// Note the path shape: `emails/receiving/{id}`, NOT `emails/{id}` — the latter
+// 404s, which is how this was originally wrong.
 import { config } from '../../config.js';
 
 const RESEND_API_BASE = 'https://api.resend.com';
@@ -40,7 +41,7 @@ const defaultRuntime: ResendInboundRuntime = {
       throw new Error('RESEND_API_KEY is not configured; cannot fetch inbound attachment bytes.');
     }
 
-    const response = await fetch(`${RESEND_API_BASE}/emails/${emailId}/attachments/${attachmentId}`, {
+    const response = await fetch(`${RESEND_API_BASE}/emails/receiving/${emailId}/attachments/${attachmentId}`, {
       headers: { authorization: `Bearer ${config.resendApiKey}` },
     });
 
