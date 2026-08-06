@@ -28,6 +28,8 @@ things a human can actually do**. That asymmetry is the design.
 So the goal is not an exhaustive case list. It is:
 
 1. A **closed set of actions** (section 3) that the UI implements once.
+   Research revised this from eight verbs to twelve — the count was wrong, the
+   shape was right.
 2. A rule that **every case routes to at least one action** — including cases we
    have not thought of, which land on a generic "needs a human" path rather than
    silently passing.
@@ -230,24 +232,88 @@ bank-like patterns, but never as an input to payment.
 
 ---
 
-## 3. The eight actions
+## 3. The actions
 
 This is the part that becomes UI. Everything above resolves to one of these.
 
-| # | Action | What it does | Who |
-|---|---|---|---|
-| 1 | **Fix** | Edit a field inline and confirm it | Reviewer |
-| 2 | **Ask the sender** | Question to whoever forwarded it; bill waits | Reviewer |
-| 3 | **Ask the vendor** | Outbound question; bill waits | Reviewer |
-| 4 | **Reject** | Close with a typed reason | Reviewer |
-| 5 | **Link** | Attach to an existing bill, PO, or vendor instead of creating new | Reviewer |
-| 6 | **Hold** | Snooze to a date or pending a condition | Reviewer |
-| 7 | **Escalate** | Route to a named person or role | Reviewer |
-| 8 | **Override** | Proceed anyway, with a logged reason | Admin only |
+**Revised after research.** This started as eight verbs. Studying what six AP
+platforms actually ship changed it to twelve, and the correction is worth
+recording rather than quietly editing: I had collapsed **three genuinely
+different negative actions into one "Reject"**, and that turns out to be the
+single most-divergent design decision across the whole industry.
 
-Reject needs typed reasons, not free text, because the reason determines what
+AvidXchange has no Reject at all. Tipalti has no Reject on bills. Both split the
+concept, and once you see the split it is obviously right — the three differ in
+who hears about it and whether it can be undone:
+
+| | Audience | Reversible | Meaning |
+|---|---|---|---|
+| **Send back** | Internal | Yes | "Fix this and resubmit" |
+| **Dispute** | The vendor | Yes | "We disagree, formally" |
+| **Void** | Nobody | **No** | "This is not a payable, ever" |
+
+Firing "Reject" when you meant "send back" annoys a colleague. Firing it when
+you meant "dispute" leaves the vendor uninformed and chasing. Collapsing them
+was a real modelling error, not a naming preference.
+
+| # | Action | What it does | Reversible | Who |
+|---|---|---|---|---|
+| 1 | **Fix** | Edit a field inline and confirm it | — | Reviewer |
+| 2 | **Ask the sender** | Question to whoever forwarded it; bill parks | — | Reviewer |
+| 3 | **Ask the vendor** | Outbound question; bill parks | — | Reviewer |
+| 4 | **Send back** | Internal correction loop | Yes | Reviewer |
+| 5 | **Dispute** | Formal, vendor-facing disagreement | Yes | Reviewer |
+| 6 | **Void** | Not a payable. Terminal. | **No** | Reviewer |
+| 7 | **Link** | Attach to an existing bill, PO, or vendor instead of creating new | Yes | Reviewer |
+| 8 | **Mark paid elsewhere** | Already settled outside the system — records it so we cannot pay twice | Yes | Reviewer |
+| 9 | **Hold** | Park this bill, or *every* bill for this vendor | Yes | Reviewer |
+| 10 | **Escalate / reassign** | Route to a named person or role | Yes | Reviewer |
+| 11 | **Retract approval** | Undo your *own* approval, before money moves | Yes | The approver |
+| 12 | **Override** | Proceed anyway, with a logged reason | — | Admin only |
+
+Reasons should be a picklist, not free text, because the reason decides what
 happens next and what the vendor is told: *not ours, duplicate, already paid,
-not an invoice, disputed, wrong amount, cannot verify sender.*
+not an invoice, disputed, wrong amount, cannot verify sender.* Coupa is the only
+platform found with structured, configurable reason codes; everyone else uses
+free text, which is why their reasons cannot drive anything downstream.
+
+### The five that came from research, not from thinking
+
+Four of these I would not have derived, and one matters disproportionately to us:
+
+- **Retract approval** (Tipalti). An approver can undo *their own* approval as
+  long as payment has not gone out. On an irreversible rail this is not a
+  convenience — the gap between approval and execution is the **last moment
+  anything can be stopped**, and having no way to use it would be negligent.
+  Highest-value single item in this research.
+- **Mark paid elsewhere** (Ramp, "mark as synced"). A dedicated action for "this
+  was already paid outside the system," existing purely to stop a double
+  payment during reconciliation. Fills the `already paid` gap in Gate 7 with a
+  verb rather than a warning.
+- **Vendor-level hold** (Ramp). Blocks all current *and future* bills for that
+  vendor in one click. Far larger blast radius than the bill you are looking at,
+  which means it needs to be visibly different from a bill-level hold.
+- **Approve on behalf** (Tipalti). A delegate approves *as* a named person,
+  distinct from being handed the task.
+- **"Ultimate approver"** (Coupa) is explicitly **not** a rubber stamp for large
+  amounts. Its documented job is catching a broken approval-chain
+  configuration — a circuit breaker for policy misconfiguration, which is a role
+  we have not considered at all.
+
+### Where we deliberately differ
+
+Research found **four of six platforms auto-approve** some subset of invoices
+with no human click, and Coupa's rules engine can **auto-reject** outright.
+
+We should not, and the reason is the irreversible rail rather than caution for
+its own sake. Their auto-approve is underwritten by recourse; ours would not be.
+This is now a considered position with evidence behind it, not an omission.
+
+The counterpart finding is more encouraging: **a first-class "ask a question" is
+rare** — only Stampli and AvidXchange have one. Everywhere else you repurpose a
+comment (which parks nothing) or misuse reject. That is exactly the gap an
+AI-native product closes cheaply, because drafting the question and knowing who
+to send it to is the part a model is actually good at.
 
 **Where AI-native actually shows up.** Not in extracting fields — everyone
 extracts fields. It shows up here: the system picks the right action, pre-fills

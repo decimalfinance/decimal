@@ -1,9 +1,8 @@
 # Intake research: sourced findings
 
-Two research passes run 2026-08-06 against the open questions in
+Three research passes run 2026-08-06 against the open questions in
 `cases-and-actions.md`. Kept because the useful part is the sourcing and the
-evidence grading, which is easy to lose and expensive to redo. A third pass on
-competitor action vocabularies is pending.
+evidence grading, which is easy to lose and expensive to redo.
 
 Evidence grading is deliberate: several widely-repeated claims in this space
 turn out to be practitioner folklore rather than agency guidance, and one of
@@ -143,3 +142,88 @@ breakdown, VAT amount. Their presence is strong positive evidence of a genuine
 tax invoice — but useless for US domestic invoices, so it is a supplementary
 signal, not a universal one.
 ([Art. 226 explainer](https://www.vatupdate.com/2022/05/12/eu-vat-directive-2006-112-ec-explained-art-226-content-of-an-invoice/))
+
+
+---
+
+## C. What AP platforms actually let people click (section 3)
+
+Six platforms, from their own help centres and API docs rather than marketing:
+Bill.com, Ramp, Tipalti, Coupa, Stampli, AvidXchange.
+
+### The finding that changed our design
+
+**"Reject" is not a universal primitive.** AvidXchange's app has no Reject
+permission at all — cross-checked against its exhaustive permissions list.
+Tipalti has no Reject action and no Rejected status on bills. Both split it:
+
+| Platform | Internal correction | Vendor-facing | Terminal |
+|---|---|---|---|
+| Tipalti | Send back to AP | Dispute | Delete |
+| AvidXchange | — | Dispute (To/CC named people) | Void (no resurrection) |
+| Coupa | — | Dispute (structured reason codes) | Reject — terminal |
+| Bill.com | Deny (resets whole chain) | — | — |
+| Ramp | Reject → edit &amp; resubmit | — | Archive |
+| Stampli | Reject (pre-posting) | — | Void (post-posting) |
+
+Coupa's Reject is a dead end: the documented remedy is *create a new invoice*.
+AvidXchange's Void is stricter still — "cannot be reinstated", start from a new
+upload. Meanwhile Tipalti's Send back and Dispute are both reversible. Same
+word, opposite semantics, depending on the product.
+
+### Rare, and therefore our opportunity
+
+**A first-class "ask a question" exists in only two of six.** Stampli treats it
+as an explicit verb ("approves, rejects, or questions it") on a messaging thread
+that vendors join *without a separate licence*. AvidXchange's Dispute is
+documented as exactly this, addressed manually to named people via To/CC.
+
+The other four have nothing. Ramp's own community forum carries a live customer
+request for @mentions, because "the only way to notify [a non-approver] is to
+add them as an approver." Bill.com's nearest equivalent is Deny + comment, which
+**resets the entire approval chain** — destructive, not a park.
+
+### Autonomy is more common than the marketing admits
+
+Four of six ship a documented, config-gated **auto-approve** path with no human
+click: Ramp (recurring series, imported bills), Tipalti (PO-matched lines within
+tolerance), Coupa (in-tolerance invoices skip the chain entirely), Stampli
+("Skip Approval", with duplicate/variance flags as an automatic kill switch).
+
+Coupa is the only one with documented **auto-reject** — its Process Automator
+acting on admin-authored rules, not model judgement.
+
+Stampli's framing is the one worth stealing: *"auto-approval is safe when it's
+designed as a control, not an absence of one."*
+
+### Actions worth stealing outright
+
+- **Retract approval** (Tipalti) — undo your *own* approval while payment has
+  not gone out. On an irreversible rail this is the last stop-point that exists.
+- **Mark as synced** (Ramp) — "already paid outside the system", purely to
+  prevent double payment at reconciliation.
+- **Vendor-level hold** (Ramp) — blocks all current *and future* payments to a
+  vendor in one click.
+- **Retract / approve on behalf** (Tipalti) — approval is not a one-way ratchet,
+  and delegation is explicit rather than implied by task assignment.
+- **Ultimate approver** (Coupa) — documented as a circuit breaker for *broken
+  approval configuration*, explicitly not a bigger-limit approver.
+
+### Duplicate handling splits two ways
+
+Hard block on import (Ramp's accounting sync: "we won't import a bill if one
+exists with the same vendor and invoice number", no override; Coupa: duplicate
+invoice numbers auto-trigger a Dispute) versus flag-and-let-a-human-clear
+(Bill.com, Tipalti's "Mark as non-duplicate", Stampli's confirmed/potential
+two-tier). Ramp logs a required reason on dismissing a high-severity alert.
+
+Ours is currently the second kind, admin-clearable with a logged reason, which
+puts us with the majority and matches the irreversibility argument.
+
+### Low confidence — do not build on these
+
+AvidXchange's duplicate UI (no authoritative source found at all); whether
+Stampli's or Coupa's plain reject notifies anyone externally; whether Ramp's or
+Stampli's reject reason is free text or a picklist. Coupa's internal AP-reviewer
+screens generally sit behind a customer login, so its entries lean on API and
+config docs more than the other five.
