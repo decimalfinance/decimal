@@ -33,7 +33,7 @@ function mapEngineError(e: unknown): never {
 }
 
 const submitSchema = z.object({
-  type: z.enum(['invoice', 'vendor_change', 'payment_run', 'po']),
+  type: z.enum(['review', 'invoice', 'vendor_change', 'payment_run', 'po']),
   totalMinorBase: z.string().regex(/^\d+$/),
   vendorId: z.string().uuid().nullish(),
   attributes: z.record(z.unknown()).optional(),

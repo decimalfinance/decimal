@@ -41,7 +41,17 @@ async function rawVetoRule(tx: Tx, approvable: ApprovableRow, personId: string, 
   // ceremony is guarded by R5 (approver of the source may not release) — the bill's
   // requester may hold a release key: requester ≠ approver ≠ ... is already satisfied.
   // Each rule is skipped when the org has opted out of that separation (org_settings).
-  if (!flags.submitterCanApprove && personId === approvable.requester_id && approvable.type !== 'payment_run') {
+  //
+  // 'review' is excluded for the same reason as 'payment_run': it is not the
+  // liability decision. Stage 1 is verification — does what we extracted match
+  // the document — and the person who forwarded a bill is exactly who should
+  // be able to check that. R2 is the rule that stops a reviewer going on to
+  // APPROVE, and it would be meaningless if R1 had already barred them from
+  // reviewing. Without this exclusion a one-person org deadlocks on its first
+  // bill: the forwarder is the requester, R1 removes them from their own
+  // review step, and nobody else exists.
+  if (!flags.submitterCanApprove && personId === approvable.requester_id
+      && approvable.type !== 'payment_run' && approvable.type !== 'review') {
     return approvable.type === 'vendor_change' ? 'R7' : 'R1';
   }
   if (!flags.reviewerCanApprove && approvable.enterer_id && personId === approvable.enterer_id) return 'R2';
