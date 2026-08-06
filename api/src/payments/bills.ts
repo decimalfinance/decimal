@@ -280,6 +280,8 @@ function reviewReadiness(args: {
   dueAt: Date | null;
   hasLineItems: boolean;
   triggeredRules: Array<Record<string, unknown>>;
+  /** Set when the bill names a different company as the buyer. */
+  addressedElsewhere: boolean;
 }): { readiness: 'ready' | 'missing_info'; missing: string[]; laterNeeded: string[]; blocked: boolean } {
   const missing: string[] = [];
   if (!(args.amountUsd > 0)) missing.push('amount');
@@ -287,12 +289,14 @@ function reviewReadiness(args: {
   const laterNeeded: string[] = [];
   if (!args.invoiceNumber) laterNeeded.push('invoice number');
   if (!args.dueAt) laterNeeded.push('due date');
-  const blocked = args.triggeredRules.some((r) => typeof r.rule === 'string' && BLOCKING_RULES.has(r.rule));
+  const blocked =
+    args.addressedElsewhere ||
+    args.triggeredRules.some((r) => typeof r.rule === 'string' && BLOCKING_RULES.has(r.rule));
   return { readiness: blocked || missing.length > 0 ? 'missing_info' : 'ready', missing, laterNeeded, blocked };
 }
 
 export async function getBillsWorkbench(organizationId: string) {
-  const [orders, engine] = await Promise.all([
+  const [orders, engine, org] = await Promise.all([
     prisma.paymentOrder.findMany({
       where: { organizationId },
       orderBy: { createdAt: 'desc' },
@@ -312,6 +316,10 @@ export async function getBillsWorkbench(organizationId: string) {
       },
     }),
     loadEngineState(organizationId),
+    prisma.organization.findUniqueOrThrow({
+      where: { organizationId },
+      select: { organizationName: true },
+    }),
   ]);
 
   const counts: Record<BillBucket, number> = {
@@ -336,6 +344,12 @@ export async function getBillsWorkbench(organizationId: string) {
       ? (agentRecord.triggeredRules as Array<Record<string, unknown>>)
       : [];
 
+    // A bill made out to another company used to read "Ready for approval" on
+    // this row — you only learned otherwise by opening it. The whole point of
+    // the workbench is deciding what to open, so the danger has to be ON the row.
+    const billToName = str(extracted?.billToName);
+    const addressedElsewhere = Boolean(billToName && !namesLookRelated(billToName, org.organizationName));
+
     let readiness: 'ready' | 'missing_info' | null = null;
     let missing: string[] = [];
     if (bucket === 'needs_review') {
@@ -345,10 +359,13 @@ export async function getBillsWorkbench(organizationId: string) {
         dueAt: order.dueAt,
         hasLineItems: Array.isArray(extracted?.lineItems) && (extracted!.lineItems as unknown[]).length > 0,
         triggeredRules,
+        addressedElsewhere,
       });
       readiness = r.readiness;
       missing = r.missing;
-      if (r.blocked) {
+      if (addressedElsewhere) {
+        subStatus = { kind: 'loud', text: `Addressed to ${billToName}`, tone: 'danger' };
+      } else if (r.blocked) {
         subStatus = { kind: 'loud', text: 'Payment details need a look', tone: 'danger' };
       } else if (r.missing.length > 0) {
         subStatus = { kind: 'plain', text: `Missing ${r.missing.join(', ')}`, tone: 'warning' };
@@ -379,6 +396,7 @@ export async function getBillsWorkbench(organizationId: string) {
       createdAt: order.createdAt,
       ...billSource(order.metadataJson, order.createdByUser?.displayName ?? null),
       discountLabel: str(extracted?.earlyPayDiscount),
+      addressedElsewhere: addressedElsewhere ? billToName : null,
       subStatus,
       readiness,
       missing,
@@ -512,7 +530,17 @@ export async function getBillReview(organizationId: string, paymentOrderId: stri
     source: sourceOf(sourceKeyByField[f.key] ?? f.key),
   }));
 
-  const remitTo = isRecord(extracted.remitTo) ? extracted.remitTo : {};
+  const remitToRaw = isRecord(extracted.remitTo) ? extracted.remitTo : {};
+  // These four inputs live inside the Vendor block and read as "the vendor's
+  // address", but remitTo only fills when the invoice prints an explicit
+  // "Remit To" panel. Most invoices just carry the address on the letterhead,
+  // which extraction puts in the flat `vendorAddress` string — so the fields
+  // rendered "Not on document" about an address plainly on the page. Fall back
+  // to the letterhead address rather than tell the reviewer it isn't there.
+  const remitTo = (['street', 'city', 'state', 'zip'] as const).some((p) => str(remitToRaw[p]))
+    ? remitToRaw
+    : splitPostalAddress(str(extracted.vendorAddress));
+  const usedVendorAddress = remitTo !== remitToRaw;
   const remitToVerified = verifiedFields && isRecord(verifiedFields.remitTo) ? verifiedFields.remitTo : null;
   const remitPartSourceKey = { street: 'remitStreet', city: 'remitCity', state: 'remitState', zip: 'remitZip' } as const;
   const remitFields = (['street', 'city', 'state', 'zip'] as const).map((part) => {
@@ -522,7 +550,9 @@ export async function getBillReview(organizationId: string, paymentOrderId: stri
       label: part === 'zip' ? 'ZIP code' : part[0]!.toUpperCase() + part.slice(1),
       value,
       ...fieldState({ key: 'remitTo', value, fieldConfidence, confirmedKeys }),
-      source: sourceOf(remitPartSourceKey[part]) ?? sourceOf('remitTo'),
+      source: usedVendorAddress
+        ? sourceOf('vendorAddress')
+        : sourceOf(remitPartSourceKey[part]) ?? sourceOf('remitTo'),
     };
   });
 
@@ -799,15 +829,64 @@ export async function getBillReview(organizationId: string, paymentOrderId: stri
 
 // "Halcyon Labs, Inc." vs "Halcyon Labs" should not fire the addressed-elsewhere
 // flag; "Meridian Systems" vs "Halcyon Labs" should. Token overlap, not equality.
-function namesLookRelated(a: string, b: string): boolean {
+// Legal wrappers, plus the industry words that half of B2B shares. Both are
+// stripped before comparing: matching on "labs" made "Decimal Labs" look
+// related to "Halcyon Labs, Inc." and silently passed a bill addressed to
+// someone else. A shared generic word is not evidence of the same company;
+// only the distinctive part of the name is.
+const NAME_NOISE = new Set([
+  'inc', 'llc', 'ltd', 'limited', 'corp', 'corporation', 'co', 'company', 'the',
+  'gmbh', 'bv', 'nv', 'plc', 'sa', 'ag', 'pvt', 'private', 'pte', 'pty',
+  'labs', 'lab', 'technologies', 'technology', 'tech', 'systems', 'system',
+  'solutions', 'services', 'group', 'holdings', 'partners', 'ventures',
+  'global', 'international', 'digital', 'capital', 'studio', 'studios',
+  'agency', 'media', 'consulting', 'software', 'industries', 'enterprises',
+]);
+
+// Invoices print the vendor address as one line ("450 Westlake Ave N, Seattle,
+// WA 98109"); the review screen wants it in four boxes. Anything this can't
+// confidently split stays whole in `street` — showing the address in the wrong
+// box is recoverable, showing "Not on document" is not.
+function splitPostalAddress(address: string | null): {
+  street: string | null; city: string | null; state: string | null; zip: string | null;
+} {
+  const empty = { street: null, city: null, state: null, zip: null };
+  if (!address) return empty;
+  const parts = address.split(',').map((p) => p.trim()).filter(Boolean);
+  if (parts.length === 0) return empty;
+  if (parts.length === 1) return { ...empty, street: parts[0]! };
+
+  let state: string | null = null;
+  let zip: string | null = null;
+  const tail = parts[parts.length - 1]!;
+  const stateZip = /^([A-Za-z][A-Za-z. ]*?)\s+(\d{5}(?:-\d{4})?)$/.exec(tail);
+  if (stateZip) {
+    state = stateZip[1]!.trim();
+    zip = stateZip[2]!;
+    parts.pop();
+  } else if (/^\d{5}(?:-\d{4})?$/.test(tail)) {
+    zip = tail;
+    parts.pop();
+  } else if (/^[A-Za-z][A-Za-z. ]*$/.test(tail) && tail.length <= 20 && parts.length > 2) {
+    state = tail;
+    parts.pop();
+  }
+
+  const city = parts.length > 1 ? parts.pop()! : null;
+  return { street: parts.join(', ') || null, city, state, zip };
+}
+
+export function namesLookRelated(a: string, b: string): boolean {
   const tokens = (s: string) =>
     new Set(
       s.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
-        .filter((t) => t.length > 1 && !['inc', 'llc', 'ltd', 'corp', 'co', 'the'].includes(t)),
+        .filter((t) => t.length > 1 && !NAME_NOISE.has(t)),
     );
   const ta = tokens(a);
   const tb = tokens(b);
-  if (ta.size === 0 || tb.size === 0) return true; // nothing to compare — don't alarm
+  // Nothing distinctive left on either side (e.g. "Labs Inc" vs "Labs LLC") —
+  // we genuinely can't tell, so don't cry wolf.
+  if (ta.size === 0 || tb.size === 0) return true;
   for (const t of ta) if (tb.has(t)) return true;
   return false;
 }
