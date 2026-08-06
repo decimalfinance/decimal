@@ -193,8 +193,17 @@ Best-covered gate, because it is where fraud was already modelled.
 | Wallet address invalid or OCR-ambiguous | `[have]` blocking |
 | Near-duplicate wallet address | `[have]` blocking |
 | No payment details anywhere | `[none]` |
-| **Payment details in the email body, not the invoice** | `[none]` — the standard BEC vector |
+| **Payment details in the email body, not the invoice** | `[safe by construction]` — see below |
 | Method we cannot pay | `[none]` |
+
+On the email-body case, research corrected an assumption. This *is* a
+recognised vector (bank guidance describes fraudsters putting new bank details
+in the body while attaching a genuine-looking invoice), but our extraction is
+scoped to the attachment and never reads the body — so we are **safer by
+construction than a system that treats the body as a fallback**. The rule to
+protect is therefore a negative one: never add body text as a fallback or
+override source for payment details. Worth adding a flag if the body contains
+bank-like patterns, but never as an input to payment.
 
 ### Gate 7 — Do we owe it, once?
 
@@ -260,10 +269,17 @@ It depends entirely on Gate 3, which is why that gate matters more than it looks
 |---|---|---|
 | **Employee forwarded it** | Ask the sender | They have context we lack — it may be a subsidiary, a rebrand, or a genuine mistake. Rejecting silently makes us look broken to our own user. |
 | **Vendor sent it direct** | Reject "not ours" and notify | Little ambiguity: they misdirected it. The notification is the useful part — it gets the invoice to the right payer. |
-| **Unknown external sender** | Quarantine, do not reply | **Never auto-reply.** A reply confirms a live monitored mailbox to whoever is probing it. Route to an admin instead. |
+| **Unknown external sender** | Quarantine, do not reply | Do not reply to the inbound thread. Route to an admin instead. |
 
-That last row is the one that would not have come up without asking the
-question, and it is a genuine security decision rather than a UX preference.
+That last row is a genuine security decision rather than a UX preference, but
+it needs a correction to how I first justified it. I said a reply "confirms a
+live monitored mailbox to whoever is probing it". That reasoning is vendor
+security research, **not** primary guidance — no FBI, CISA, NCSC or FTC source
+states it. What *is* well-sourced is the neighbouring rule: never use contact
+details supplied by the suspicious message itself; verify through a channel you
+already trust. The conclusion holds; the stated reason was stronger than the
+evidence. Any outbound contact with a first-time or flagged sender should go
+through a separately verified channel rather than a reply.
 
 ---
 
