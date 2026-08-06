@@ -1009,41 +1009,77 @@ export async function confirmBillReview(input: ConfirmBillInput) {
     reviewNote: 'Confirmed on the review screen',
   });
 
-  // THE call site (spec §6): verification done, now the bill enters routing.
+  // Bills now enter the engine at INTAKE, so by the time anyone confirms, an
+  // approvable usually already exists. Confirm's job is then to push the
+  // corrected facts onto it — not to create a second one, which would leave
+  // two competing plans for one bill.
   let approvableId: string | null = null;
-  try {
-    const { submitInvoiceForApproval } = await import('../approvals/wiring.js');
-    // Vendor + line categories ride along so vendor/category splits can route.
-    const lineCategories = [...new Set(input.lines.map((l) => l.category).filter((c): c is string => Boolean(c)))];
-    // First bill from this vendor? (fuels the first-bill split + new-vendor scrutiny)
-    const priorCount = await prisma.paymentOrder.count({
-      where: {
+  // Vendor + line categories ride along so vendor/category splits can route.
+  const lineCategories = [...new Set(input.lines.map((l) => l.category).filter((c): c is string => Boolean(c)))];
+  // First bill from this vendor? (fuels the first-bill split + new-vendor scrutiny)
+  const priorCount = await prisma.paymentOrder.count({
+    where: {
+      organizationId: input.organizationId,
+      paymentOrderId: { not: input.paymentOrderId },
+      state: { not: 'cancelled' },
+      ...(order.counterpartyId ? { counterpartyId: order.counterpartyId } : { counterpartyWalletId: order.counterpartyWalletId }),
+    },
+  });
+  // What verification established. Intake could not know any of it, so it must
+  // reach the approvable whichever path below runs — the pinned destination
+  // especially: approvers authorize paying THIS address, and the release gate
+  // refuses if the vendor's rail changes afterwards.
+  const verifiedAttributes = {
+    paymentOrderId: input.paymentOrderId,
+    inputSource: 'invoice_upload',
+    approvedDestination: {
+      counterpartyWalletId: order.counterpartyWalletId,
+      walletAddress: order.counterpartyWallet.walletAddress,
+    },
+    vendor_is_first_invoice: priorCount === 0,
+    ...(lineCategories.length ? { categories: lineCategories } : {}),
+    ...(verification.noteForApprovers ? { noteForApprovers: verification.noteForApprovers } : {}),
+  };
+
+  const existing = await prisma.$queryRaw<{ id: string }[]>`
+    SELECT id FROM approval.approvables
+    WHERE organization_id = ${input.organizationId}::uuid
+      AND type = 'invoice'
+      AND macro_state NOT IN ('rejected', 'cancelled')
+      AND attributes->>'paymentOrderId' = ${input.paymentOrderId}
+    ORDER BY id LIMIT 1`;
+  if (existing.length > 0) {
+    approvableId = existing[0]!.id;
+    try {
+      // Always applied, not only when the amount moved: the destination and
+      // categories are set here for the first time. With no decisions yet this
+      // is a silent recompile; if someone already approved, routing restarts,
+      // which is the correct loud behaviour.
+      const { applyMaterialChange } = await import('../approvals/lifecycle.js');
+      await applyMaterialChange(approvableId, {
+        totalMinorBase: confirmedAmountRaw,
+        vendorId: order.counterpartyId ?? null,
+        attributes: verifiedAttributes,
+      });
+    } catch (error) {
+      logger.warn('bill_confirm.material_change_failed', {
         organizationId: input.organizationId,
-        paymentOrderId: { not: input.paymentOrderId },
-        state: { not: 'cancelled' },
-        ...(order.counterpartyId ? { counterpartyId: order.counterpartyId } : { counterpartyWalletId: order.counterpartyWalletId }),
-      },
-    });
+        paymentOrderId: input.paymentOrderId,
+        ...(error instanceof Error ? { message: error.message } : {}),
+      });
+    }
+  }
+
+  // Fallback: intake's submit is best-effort, so a bill can still arrive here
+  // with no approvable. Submitting at confirm keeps that bill routable.
+  if (!approvableId) try {
+    const { submitInvoiceForApproval } = await import('../approvals/wiring.js');
     const submitted = await submitInvoiceForApproval({
       organizationId: input.organizationId,
       requesterUserId: input.actorUserId,
       totalMinorBase: confirmedAmountRaw,
       vendorId: order.counterpartyId,
-      attributes: {
-        paymentOrderId: input.paymentOrderId,
-        inputSource: 'invoice_upload',
-        // Pinned payout destination (policy P0): approvers authorize paying
-        // THIS destination. If the vendor's rail changes after approval, the
-        // release gate refuses until the bill is re-approved — on irreversible
-        // rails, "pay Acme" must mean "pay Acme at the address you saw".
-        approvedDestination: {
-          counterpartyWalletId: order.counterpartyWalletId,
-          walletAddress: order.counterpartyWallet.walletAddress,
-        },
-        vendor_is_first_invoice: priorCount === 0,
-        ...(lineCategories.length ? { categories: lineCategories } : {}),
-        ...(verification.noteForApprovers ? { noteForApprovers: verification.noteForApprovers } : {}),
-      },
+      attributes: verifiedAttributes,
       lines: input.lines.length > 0
         ? input.lines.map((line) => ({
             amountMinor: BigInt(Math.round((line.amount ?? 0) * 10 ** USDC_DECIMALS)),

@@ -261,7 +261,7 @@ async function closeLiveTasks(tx: Tx, planId: string, to: string): Promise<void>
  */
 export async function applyMaterialChange(
   approvableId: string,
-  change: { totalMinorBase?: bigint; vendorId?: string | null },
+  change: { totalMinorBase?: bigint; vendorId?: string | null; attributes?: Record<string, unknown> },
 ): Promise<SubmitResult> {
   return prisma.$transaction(async (tx) => {
     const approvable = (await getApprovable(tx, approvableId))!;
@@ -276,6 +276,16 @@ export async function applyMaterialChange(
     }
     if (change.vendorId !== undefined) {
       await tx.$executeRaw`UPDATE approval.approvables SET vendor_id = ${change.vendorId}::uuid WHERE id = ${approvableId}::uuid`;
+    }
+    // Attributes are routing inputs (categories, first-bill) AND the pinned
+    // payout destination the approvers are authorizing. A bill submitted at
+    // intake has only what intake knew; confirm merges in what verification
+    // established, and it must land here rather than as a direct UPDATE —
+    // the pending_approval lock trigger refuses those, which is why this
+    // function drops to 'draft' first.
+    if (change.attributes !== undefined) {
+      const merged = { ...(approvable.attributes ?? {}), ...change.attributes };
+      await tx.$executeRaw`UPDATE approval.approvables SET attributes = ${JSON.stringify(merged)}::jsonb WHERE id = ${approvableId}::uuid`;
     }
     if (plan) {
       for (const t of tasks.filter((t) => LIVE_STATES.has(t.state) || t.state === 'approved')) {

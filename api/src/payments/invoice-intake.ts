@@ -302,6 +302,42 @@ export async function processInvoiceDocument(args: {
         initialState: 'needs_review',
       });
 
+      // The bill enters the approval engine HERE, not at confirm.
+      //
+      // Until this, a bill sat outside the engine until someone confirmed it,
+      // so it had no TASK — and without a task none of the engine's commands
+      // are reachable. That is precisely backwards: the moment a reviewer most
+      // needs to ask a question, delegate, push back or escalate is when a flag
+      // says something is wrong, which is BEFORE they would ever confirm.
+      //
+      // Editing the bill afterwards is safe: applyMaterialChange treats a
+      // change with no decisions yet as a silent recompile, so correcting an
+      // amount during review re-routes without disturbing anyone.
+      //
+      // Best-effort — an engine failure must not lose an ingested bill. The
+      // order exists either way and confirm will submit as a fallback.
+      try {
+        const { submitInvoiceForApproval } = await import('../approvals/wiring.js');
+        await submitInvoiceForApproval({
+          organizationId: args.organizationId,
+          requesterUserId: args.actorUserId,
+          totalMinorBase: amountRaw,
+          vendorId: counterpartyWallet.counterpartyId ?? null,
+          attributes: {
+            paymentOrderId: paymentOrder.paymentOrderId,
+            inputSource: 'invoice_upload',
+            ...(args.intakeChannel ? { intakeChannel: args.intakeChannel } : {}),
+          },
+          lines: [{ amountMinor: amountRaw, currency: 'USD', description: row.notes ?? row.counterparty }],
+        });
+      } catch (error) {
+        logger.warn('invoice_intake.approval_submit_failed', {
+          organizationId: args.organizationId,
+          paymentOrderId: paymentOrder.paymentOrderId,
+          ...(error instanceof Error ? { message: error.message } : {}),
+        });
+      }
+
       created.push({
         rowIndex: index,
         decision,

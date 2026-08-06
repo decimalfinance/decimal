@@ -33,6 +33,14 @@ export async function ensurePersonForUser(tx: Tx, organizationId: string, userId
  */
 export async function ensureEngineSetup(organizationId: string): Promise<{ created: boolean }> {
   return prisma.$transaction(async (tx) => {
+    // Serialize setup per organization. Bills now enter the engine at intake,
+    // so two invoices arriving together — one forwarded email with three
+    // attachments, or two sweeps racing — both land here at once. Each call
+    // creates a hierarchy, seats, grants and policies in one transaction, and
+    // concurrent runs deadlocked against each other (40P01). An advisory lock
+    // held for the transaction makes the second caller wait, find the setup
+    // already there, and return.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'engine-setup:' + organizationId}))`;
     const existing = await getPolicySet(tx, organizationId, 'invoice');
     await ensureRulePack(tx, organizationId); // rules-as-data: cards, relaxation FK targets, veto lookup
     if (existing) return { created: false };
