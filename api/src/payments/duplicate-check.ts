@@ -53,6 +53,34 @@ export async function findDuplicateBills(organizationId: string, input: {
     take: 200,
   });
 
+  return matchDuplicates(candidates, input);
+}
+
+/** A row this matcher can consider — the shape findDuplicateBills selects. */
+export type DuplicateCandidate = {
+  paymentOrderId: string;
+  invoiceNumber: string | null;
+  externalReference: string | null;
+  amountRaw: bigint;
+  state: string;
+  createdAt: Date;
+};
+
+/**
+ * The matching itself, with no database access.
+ *
+ * Split out so the workbench can run the SAME rules over payment orders it has
+ * already loaded, instead of issuing one query per row — and, more importantly,
+ * instead of growing a second, subtly different notion of "duplicate". The
+ * caller is responsible for having filtered candidates to the right vendor and
+ * excluded the bill under test.
+ */
+export function matchDuplicates(candidates: DuplicateCandidate[], input: {
+  invoiceNumber: string | null;
+  externalReference?: string | null;
+  amountRaw: bigint;
+  createdAt?: Date;
+}): DuplicateMatch[] {
   const inv = normalizeInvoiceNumber(input.invoiceNumber ?? input.externalReference ?? null);
   const at = (input.createdAt ?? new Date()).getTime();
   const matches: DuplicateMatch[] = [];

@@ -16,8 +16,9 @@ import { USDC_DECIMALS } from '../solana.js';
 import { clearPaymentOrderReview, cancelPaymentOrder, getPaymentOrderDetail } from './orders.js';
 import { listChartOfAccounts } from '../accounting/ocr-coding.js';
 import { extractPdfTextLayer, refineInvoiceSources, PROVENANCE_VERSION } from './doc-provenance.js';
-import { findDuplicateBills, readDuplicateOverride, describeDuplicate } from './duplicate-check.js';
+import { findDuplicateBills, readDuplicateOverride, describeDuplicate, matchDuplicates } from './duplicate-check.js';
 import { readPayableHold, describePayableHold } from './vendor-payable.js';
+import { evaluateBillFlags, summarizeBillFlags } from './bill-flags.js';
 import { getBillCeilingMinor } from '../approvals/store.js';
 import type { ExtractedInvoice } from './document-extract.js';
 
@@ -266,22 +267,21 @@ function amountRawToUsd(amountRaw: bigint): number {
 // Ramp-style split of the review queue: a bill is "ready for approval" when
 // the facts an approver needs are present and nothing security-shaped is open;
 // otherwise it's "missing information" and the row says what's missing.
-const BLOCKING_RULES = new Set([
-  'invalid_extracted_wallet_address',
-  'known_counterparty_wallet_changed',
-  'near_duplicate_address',
-]);
-
 // Tier 1 (blocks entering approval): amount + line items to route on.
 // Tier 2 (flag, never block): invoice number, due date — fill during approval.
+//
+// Which RULES block is no longer decided here. That list used to live in a
+// local BLOCKING_RULES set, which was a third copy of knowledge already held by
+// the flag definitions — so a flag could be marked blocking and this function
+// would still call the bill ready. Blocking-ness now has exactly one owner:
+// bill-flags.ts. This only asks whether something is missing.
 function reviewReadiness(args: {
   amountUsd: number;
   invoiceNumber: string | null;
   dueAt: Date | null;
   hasLineItems: boolean;
-  triggeredRules: Array<Record<string, unknown>>;
-  /** Set when the bill names a different company as the buyer. */
-  addressedElsewhere: boolean;
+  /** Any flag that blocks the bill leaving review, per bill-flags.ts. */
+  blockedByFlag: boolean;
 }): { readiness: 'ready' | 'missing_info'; missing: string[]; laterNeeded: string[]; blocked: boolean } {
   const missing: string[] = [];
   if (!(args.amountUsd > 0)) missing.push('amount');
@@ -289,14 +289,12 @@ function reviewReadiness(args: {
   const laterNeeded: string[] = [];
   if (!args.invoiceNumber) laterNeeded.push('invoice number');
   if (!args.dueAt) laterNeeded.push('due date');
-  const blocked =
-    args.addressedElsewhere ||
-    args.triggeredRules.some((r) => typeof r.rule === 'string' && BLOCKING_RULES.has(r.rule));
+  const blocked = args.blockedByFlag;
   return { readiness: blocked || missing.length > 0 ? 'missing_info' : 'ready', missing, laterNeeded, blocked };
 }
 
 export async function getBillsWorkbench(organizationId: string) {
-  const [orders, engine, org] = await Promise.all([
+  const [orders, engine, org, ceilingMinor] = await Promise.all([
     prisma.paymentOrder.findMany({
       where: { organizationId },
       orderBy: { createdAt: 'desc' },
@@ -310,8 +308,11 @@ export async function getBillsWorkbench(organizationId: string) {
         dueAt: true,
         createdAt: true,
         metadataJson: true,
+        externalReference: true,
+        counterpartyId: true,
+        counterpartyWalletId: true,
         counterpartyWallet: { select: { label: true } },
-        counterparty: { select: { displayName: true } },
+        counterparty: { select: { displayName: true, metadataJson: true } },
         createdByUser: { select: { displayName: true } },
       },
     }),
@@ -320,7 +321,20 @@ export async function getBillsWorkbench(organizationId: string) {
       where: { organizationId },
       select: { organizationName: true },
     }),
+    getBillCeilingMinor(prisma, organizationId),
   ]);
+
+  // Duplicate detection over rows we already hold. findDuplicateBills would be
+  // one query per bill; matchDuplicates is the same rules against the same
+  // candidate set, in memory. Grouped by vendor because that is how the query
+  // scopes candidates, and cancelled orders are excluded for the same reason.
+  const liveOrders = orders.filter((o) => o.state !== 'cancelled');
+  const byVendor = new Map<string, typeof liveOrders>();
+  for (const o of liveOrders) {
+    const key = o.counterpartyId ?? `wallet:${o.counterpartyWalletId}`;
+    const list = byVendor.get(key);
+    if (list) list.push(o); else byVendor.set(key, [o]);
+  }
 
   const counts: Record<BillBucket, number> = {
     needs_review: 0, in_approval: 0, to_pay: 0, done: 0, needs_attention: 0,
@@ -344,11 +358,30 @@ export async function getBillsWorkbench(organizationId: string) {
       ? (agentRecord.triggeredRules as Array<Record<string, unknown>>)
       : [];
 
-    // A bill made out to another company used to read "Ready for approval" on
-    // this row — you only learned otherwise by opening it. The whole point of
-    // the workbench is deciding what to open, so the danger has to be ON the row.
-    const billToName = str(extracted?.billToName);
-    const addressedElsewhere = Boolean(billToName && !namesLookRelated(billToName, org.organizationName));
+    // The SAME evaluator the review screen uses. A bill made out to another
+    // company used to read "Ready for approval" here, because this row had its
+    // own idea of "ready" that never consulted the flags. It no longer has one.
+    const vendorKey = order.counterpartyId ?? `wallet:${order.counterpartyWalletId}`;
+    const flags = evaluateBillFlags({
+      vendorName: order.counterparty?.displayName ?? order.counterpartyWallet.label,
+      organizationName: org.organizationName,
+      amountRaw: order.amountRaw,
+      billToName: str(extracted?.billToName),
+      triggeredRules: triggeredRules.map((r) => str(r.rule)).filter((r): r is string => Boolean(r)),
+      vendorHold: order.counterparty ? readPayableHold(order.counterparty.metadataJson) : null,
+      ceilingMinor,
+      duplicates: matchDuplicates(
+        (byVendor.get(vendorKey) ?? []).filter((c) => c.paymentOrderId !== order.paymentOrderId),
+        {
+          invoiceNumber: order.invoiceNumber,
+          externalReference: order.externalReference,
+          amountRaw: order.amountRaw,
+          createdAt: order.createdAt,
+        },
+      ),
+      duplicateOverride: readDuplicateOverride(order.metadataJson),
+    });
+    const flagSummary = summarizeBillFlags(flags);
 
     let readiness: 'ready' | 'missing_info' | null = null;
     let missing: string[] = [];
@@ -358,20 +391,23 @@ export async function getBillsWorkbench(organizationId: string) {
         invoiceNumber: order.invoiceNumber,
         dueAt: order.dueAt,
         hasLineItems: Array.isArray(extracted?.lineItems) && (extracted!.lineItems as unknown[]).length > 0,
-        triggeredRules,
-        addressedElsewhere,
+        blockedByFlag: flagSummary.blocking,
       });
       readiness = r.readiness;
       missing = r.missing;
-      if (addressedElsewhere) {
-        subStatus = { kind: 'loud', text: `Addressed to ${billToName}`, tone: 'danger' };
-      } else if (r.blocked) {
-        subStatus = { kind: 'loud', text: 'Payment details need a look', tone: 'danger' };
+      if (flagSummary.worst && flagSummary.worst.severity === 'danger') {
+        subStatus = { kind: 'loud', text: flagSummary.worst.short, tone: 'danger' };
       } else if (r.missing.length > 0) {
         subStatus = { kind: 'plain', text: `Missing ${r.missing.join(', ')}`, tone: 'warning' };
       } else {
         subStatus = { kind: 'plain', text: 'Ready for approval', tone: 'success' };
       }
+    } else if (flagSummary.worst?.severity === 'danger' && bucket !== 'done') {
+      // A danger flag does not stop mattering once a bill leaves review. A bill
+      // sitting in approval or queued to pay while addressed to another company
+      // is the same failure, one stage later and with less scrutiny left. Paid
+      // bills are excluded: the warning is spent, and the row is now history.
+      subStatus = { kind: 'loud', text: flagSummary.worst.short, tone: 'danger' };
     }
     const vendorName = order.counterparty?.displayName ?? order.counterpartyWallet.label;
     const lineItems = Array.isArray(extracted?.lineItems) ? (extracted!.lineItems as unknown[]) : [];
@@ -396,7 +432,8 @@ export async function getBillsWorkbench(organizationId: string) {
       createdAt: order.createdAt,
       ...billSource(order.metadataJson, order.createdByUser?.displayName ?? null),
       discountLabel: str(extracted?.earlyPayDiscount),
-      addressedElsewhere: addressedElsewhere ? billToName : null,
+      flags,
+      blocking: flagSummary.blocking,
       subStatus,
       readiness,
       missing,
@@ -420,6 +457,39 @@ export async function getBillsWorkbench(organizationId: string) {
 // -----------------------------------------------------------------------------
 // Review packet
 // -----------------------------------------------------------------------------
+
+// Invoices print the vendor address as one line ("450 Westlake Ave N, Seattle,
+// WA 98109"); the review screen wants it in four boxes. Anything this can't
+// confidently split stays whole in `street` — showing the address in the wrong
+// box is recoverable, showing "Not on document" is not.
+function splitPostalAddress(address: string | null): {
+  street: string | null; city: string | null; state: string | null; zip: string | null;
+} {
+  const empty = { street: null, city: null, state: null, zip: null };
+  if (!address) return empty;
+  const parts = address.split(',').map((p) => p.trim()).filter(Boolean);
+  if (parts.length === 0) return empty;
+  if (parts.length === 1) return { ...empty, street: parts[0]! };
+
+  let state: string | null = null;
+  let zip: string | null = null;
+  const tail = parts[parts.length - 1]!;
+  const stateZip = /^([A-Za-z][A-Za-z. ]*?)\s+(\d{5}(?:-\d{4})?)$/.exec(tail);
+  if (stateZip) {
+    state = stateZip[1]!.trim();
+    zip = stateZip[2]!;
+    parts.pop();
+  } else if (/^\d{5}(?:-\d{4})?$/.test(tail)) {
+    zip = tail;
+    parts.pop();
+  } else if (/^[A-Za-z][A-Za-z. ]*$/.test(tail) && tail.length <= 20 && parts.length > 2) {
+    state = tail;
+    parts.pop();
+  }
+
+  const city = parts.length > 1 ? parts.pop()! : null;
+  return { street: parts.join(', ') || null, city, state, zip };
+}
 
 export type ReviewFieldState = 'read' | 'needs_look' | 'not_on_document' | 'confirmed';
 
@@ -673,103 +743,35 @@ export async function getBillReview(organizationId: string, paymentOrderId: stri
 
   const taxAmount = verifiedFields && 'taxAmount' in verifiedFields ? num(verifiedFields.taxAmount) : num(extracted.taxAmount);
 
-  // Flags outrank ambers: banner states, derived from the intake rules + reads.
-  const flags: Array<{ kind: string; severity: 'danger' | 'warning' | 'info'; message: string; blocking: boolean }> = [];
-  const ruleNames = new Set(triggeredRules.map((r) => str(r.rule)).filter(Boolean));
-  if (ruleNames.has('known_counterparty_wallet_changed') || ruleNames.has('near_duplicate_address')) {
-    flags.push({
-      kind: 'payee_mismatch',
-      severity: 'danger',
-      blocking: true,
-      message: `The payment details on this document don't match what's verified for ${order.counterparty?.displayName ?? order.counterpartyWallet.label}. This is how payment fraud usually starts.`,
-    });
-  }
-  if (ruleNames.has('invalid_extracted_wallet_address')) {
-    flags.push({
-      kind: 'unreadable_payment_details',
-      severity: 'danger',
-      blocking: true,
-      message: 'The payment details on this document could not be read reliably. Check them against the document before sending.',
-    });
-  }
-  if (ruleNames.has('unreviewed_counterparty') || ruleNames.has('new_counterparty_threshold')) {
-    flags.push({
-      kind: 'new_vendor',
-      severity: 'info',
-      blocking: false,
-      message: `First bill from ${order.counterparty?.displayName ?? order.counterpartyWallet.label}. Their payment details will be verified before anything is sent.`,
-    });
-  }
-  const billToName = str(extracted.billToName);
-  if (billToName) {
-    const org = await prisma.organization.findUniqueOrThrow({
-      where: { organizationId },
-      select: { organizationName: true },
-    });
-    if (!namesLookRelated(billToName, org.organizationName)) {
-      flags.push({
-        kind: 'addressed_elsewhere',
-        severity: 'danger',
-        blocking: true,
-        message: `This bill is addressed to "${billToName}", not ${org.organizationName}. Make sure it's actually yours to pay.`,
-      });
-    }
-  }
-
-  // Vendor payable gate (policy P0): a held/blocked vendor's bills can't
-  // leave Review — policy sits UNDER approvals and always wins. Not
-  // overridable per-bill: the hold is released on the VENDOR, where it was set.
-  const vendorHold = order.counterparty ? readPayableHold(order.counterparty.metadataJson) : null;
-  if (vendorHold) {
-    flags.push({
-      kind: vendorHold.status === 'blocked' ? 'vendor_blocked' : 'vendor_held',
-      severity: 'danger',
-      blocking: true,
-      message: describePayableHold(order.counterparty?.displayName ?? order.counterpartyWallet.label, vendorHold),
-    });
-  }
-
-  // Org bill ceiling (policy P1): a hard cap no bill crosses. Not overridable
-  // per-bill — the primary admin raises the ceiling itself (Policies page).
-  const ceilingMinor = await getBillCeilingMinor(prisma, organizationId);
-  if (ceilingMinor !== null && order.amountRaw > ceilingMinor) {
-    flags.push({
-      kind: 'over_ceiling',
-      severity: 'danger',
-      blocking: true,
-      message: `This bill (${usdText(order.amountRaw)}) is over your organization's bill ceiling of ${usdText(ceilingMinor)}. The primary admin can raise the ceiling on the Policies page.`,
-    });
-  }
-
-  // Duplicate gate (policy P0): on irreversible rails a duplicate payment is
-  // unrecoverable, so this BLOCKS confirm unless an admin explicitly clears
-  // it — and the clearance itself becomes the audit record.
-  const dupOverride = readDuplicateOverride(metadata);
-  const duplicates = await findDuplicateBills(organizationId, {
-    excludePaymentOrderId: order.paymentOrderId,
-    counterpartyId: order.counterpartyId,
-    counterpartyWalletId: order.counterpartyWalletId,
-    invoiceNumber: (verifiedFields ? str(verifiedFields.invoiceNumber) : null) ?? str(extracted.invoiceNumber) ?? order.invoiceNumber,
-    amountRaw: order.amountRaw,
-    createdAt: order.createdAt,
+  // Flags: every reason to pause, from the one module that defines them
+  // (bill-flags.ts). This screen and the workbench call the SAME evaluator, so
+  // they cannot disagree about whether a bill is safe.
+  const [ceilingMinor, duplicates] = await Promise.all([
+    getBillCeilingMinor(prisma, organizationId),
+    findDuplicateBills(organizationId, {
+      excludePaymentOrderId: order.paymentOrderId,
+      counterpartyId: order.counterpartyId,
+      counterpartyWalletId: order.counterpartyWalletId,
+      invoiceNumber: (verifiedFields ? str(verifiedFields.invoiceNumber) : null) ?? str(extracted.invoiceNumber) ?? order.invoiceNumber,
+      amountRaw: order.amountRaw,
+      createdAt: order.createdAt,
+    }),
+  ]);
+  const flagOrg = await prisma.organization.findUniqueOrThrow({
+    where: { organizationId },
+    select: { organizationName: true },
   });
-  if (duplicates.length > 0) {
-    if (dupOverride) {
-      flags.push({
-        kind: 'possible_duplicate',
-        severity: 'info',
-        blocking: false,
-        message: `Looked like a duplicate — cleared by ${dupOverride.byName}: “${dupOverride.reason}”.`,
-      });
-    } else {
-      flags.push({
-        kind: 'possible_duplicate',
-        severity: 'danger',
-        blocking: true,
-        message: `${describeDuplicate(duplicates[0]!)} If it's genuinely a new bill, an admin can clear this flag.`,
-      });
-    }
-  }
+  const flags = evaluateBillFlags({
+    vendorName: order.counterparty?.displayName ?? order.counterpartyWallet.label,
+    organizationName: flagOrg.organizationName,
+    amountRaw: order.amountRaw,
+    billToName: str(extracted.billToName),
+    triggeredRules: triggeredRules.map((r) => str(r.rule)).filter((r): r is string => Boolean(r)),
+    vendorHold: order.counterparty ? readPayableHold(order.counterparty.metadataJson) : null,
+    ceilingMinor,
+    duplicates,
+    duplicateOverride: readDuplicateOverride(metadata),
+  });
 
   const sentBackRaw = isRecord(metadata.sentBack) ? metadata.sentBack : null;
   return {
@@ -813,8 +815,7 @@ export async function getBillReview(organizationId: string, paymentOrderId: stri
       sendToLabel: order.counterpartyWallet.label,
       sourceTreasuryWalletId: order.sourceTreasuryWalletId,
       matchesVerified: order.counterpartyWallet.trustState === 'trusted'
-        && !ruleNames.has('known_counterparty_wallet_changed')
-        && !ruleNames.has('near_duplicate_address'),
+        && !flags.some((f) => f.kind === 'payee_mismatch'),
     },
     flags,
     verification: verification
@@ -829,67 +830,6 @@ export async function getBillReview(organizationId: string, paymentOrderId: stri
 
 // "Halcyon Labs, Inc." vs "Halcyon Labs" should not fire the addressed-elsewhere
 // flag; "Meridian Systems" vs "Halcyon Labs" should. Token overlap, not equality.
-// Legal wrappers, plus the industry words that half of B2B shares. Both are
-// stripped before comparing: matching on "labs" made "Decimal Labs" look
-// related to "Halcyon Labs, Inc." and silently passed a bill addressed to
-// someone else. A shared generic word is not evidence of the same company;
-// only the distinctive part of the name is.
-const NAME_NOISE = new Set([
-  'inc', 'llc', 'ltd', 'limited', 'corp', 'corporation', 'co', 'company', 'the',
-  'gmbh', 'bv', 'nv', 'plc', 'sa', 'ag', 'pvt', 'private', 'pte', 'pty',
-  'labs', 'lab', 'technologies', 'technology', 'tech', 'systems', 'system',
-  'solutions', 'services', 'group', 'holdings', 'partners', 'ventures',
-  'global', 'international', 'digital', 'capital', 'studio', 'studios',
-  'agency', 'media', 'consulting', 'software', 'industries', 'enterprises',
-]);
-
-// Invoices print the vendor address as one line ("450 Westlake Ave N, Seattle,
-// WA 98109"); the review screen wants it in four boxes. Anything this can't
-// confidently split stays whole in `street` — showing the address in the wrong
-// box is recoverable, showing "Not on document" is not.
-function splitPostalAddress(address: string | null): {
-  street: string | null; city: string | null; state: string | null; zip: string | null;
-} {
-  const empty = { street: null, city: null, state: null, zip: null };
-  if (!address) return empty;
-  const parts = address.split(',').map((p) => p.trim()).filter(Boolean);
-  if (parts.length === 0) return empty;
-  if (parts.length === 1) return { ...empty, street: parts[0]! };
-
-  let state: string | null = null;
-  let zip: string | null = null;
-  const tail = parts[parts.length - 1]!;
-  const stateZip = /^([A-Za-z][A-Za-z. ]*?)\s+(\d{5}(?:-\d{4})?)$/.exec(tail);
-  if (stateZip) {
-    state = stateZip[1]!.trim();
-    zip = stateZip[2]!;
-    parts.pop();
-  } else if (/^\d{5}(?:-\d{4})?$/.test(tail)) {
-    zip = tail;
-    parts.pop();
-  } else if (/^[A-Za-z][A-Za-z. ]*$/.test(tail) && tail.length <= 20 && parts.length > 2) {
-    state = tail;
-    parts.pop();
-  }
-
-  const city = parts.length > 1 ? parts.pop()! : null;
-  return { street: parts.join(', ') || null, city, state, zip };
-}
-
-export function namesLookRelated(a: string, b: string): boolean {
-  const tokens = (s: string) =>
-    new Set(
-      s.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
-        .filter((t) => t.length > 1 && !NAME_NOISE.has(t)),
-    );
-  const ta = tokens(a);
-  const tb = tokens(b);
-  // Nothing distinctive left on either side (e.g. "Labs Inc" vs "Labs LLC") —
-  // we genuinely can't tell, so don't cry wolf.
-  if (ta.size === 0 || tb.size === 0) return true;
-  for (const t of ta) if (tb.has(t)) return true;
-  return false;
-}
 
 // -----------------------------------------------------------------------------
 // Confirm & send for approval — the one commit (spec §6)
