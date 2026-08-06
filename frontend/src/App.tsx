@@ -2,7 +2,7 @@ import { Suspense, lazy, useMemo } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AppSidebar } from './Sidebar';
-import { api } from './api';
+import { api, ApiError } from './api';
 import type { AuthenticatedSession } from './api';
 import { ScreenState } from './ui-primitives';
 import { getOrganizations, queryKeys } from './lib/app-helpers';
@@ -56,7 +56,11 @@ export function App() {
   const capabilitiesQuery = useQuery({
     queryKey: ['capabilities'] as const,
     queryFn: () => api.getCapabilities(),
-    retry: false,
+    // Same transient-failure problem as the session query below: this is
+    // public runtime config, so a restart window should be retried, not
+    // silently left unset.
+    retry: 3,
+    retryDelay: (attempt) => Math.min(500 * 2 ** attempt, 4_000),
     staleTime: 60_000,
   });
   const shouldCheckSession =
@@ -64,11 +68,18 @@ export function App() {
     location.pathname !== '/register' &&
     location.pathname !== '/dev-login' &&
     api.hasSessionToken();
+  // Only a 401 means "you are signed out". Anything else — the API restarting
+  // under `tsx watch`, a dropped tunnel, a 5xx — is a transient failure, and
+  // treating it as a logout is what used to bounce you to /login every time a
+  // backend file was edited. The token was still in localStorage and the
+  // session still valid in the database; the app just gave up after one try.
   const sessionQuery = useQuery({
     queryKey: queryKeys().session,
     queryFn: () => api.getSession(),
     enabled: shouldCheckSession,
-    retry: false,
+    retry: (failureCount, error) =>
+      !(error instanceof ApiError && error.status === 401) && failureCount < 3,
+    retryDelay: (attempt) => Math.min(500 * 2 ** attempt, 4_000),
   });
 
   return (
@@ -109,6 +120,18 @@ function RequireSession({
 }) {
   if (sessionQuery.isLoading) {
     return <ScreenState title="Loading organization" description="Checking your session." />;
+  }
+
+  // A failure that is NOT a 401 means we could not ask, not that the answer was
+  // no. Sending someone to the sign-in page in that case tells them something
+  // untrue about their own account, and loses whatever they were doing.
+  if (sessionQuery.isError && !(sessionQuery.error instanceof ApiError && sessionQuery.error.status === 401)) {
+    return (
+      <ScreenState
+        title="Can't reach Decimal"
+        description="Your session is fine — we just couldn't reach the server. Retrying automatically."
+      />
+    );
   }
 
   if (!sessionQuery.data) {
