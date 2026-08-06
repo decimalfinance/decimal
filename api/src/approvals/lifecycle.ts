@@ -17,7 +17,7 @@ const LIVE_STATES = new Set(['scheduled', 'open', 'info_requested', 'delegated',
 
 export interface SubmitInput {
   organizationId: string;
-  type: 'review' | 'invoice' | 'vendor_change' | 'payment_run' | 'po';
+  type: 'invoice' | 'vendor_change' | 'payment_run' | 'po';
   requesterId: string;
   entererId?: string | null;
   vendorId?: string | null;
@@ -320,35 +320,6 @@ export async function spawnReleaseRun(sourceApprovableId: string): Promise<Submi
       lines: lines.map((l) => ({ amountMinor: l.amount_minor, currency: l.currency })),
     });
     return activate(tx, approvableId, 'release_spawned');
-  });
-}
-
-// --- stage 1 → 2: approved review → invoice approvable --------------------------
-
-/**
- * Spawn the approval ceremony from a completed REVIEW, mirroring
- * spawnReleaseRun (approved invoice → payment_run). Each pipeline stage is its
- * own approvable, chained, rather than steps inside one plan — that is the
- * shape release already established, and it keeps each stage's policy set,
- * SoD pass and audit trail independent.
- */
-export async function spawnInvoiceFromReview(sourceApprovableId: string): Promise<SubmitResult> {
-  return prisma.$transaction(async (tx) => {
-    const source = (await getApprovable(tx, sourceApprovableId))!;
-    if (!['approved', 'auto_approved'].includes(source.macro_state)) {
-      throw new ApprovalEngineError('invalid_state', 'approval requires a completed review');
-    }
-    const lines = await tx.$queryRaw<{ amount_minor: bigint; currency: string }[]>`
-      SELECT amount_minor, currency FROM approval.approvable_lines WHERE approvable_id = ${sourceApprovableId}::uuid`;
-    const approvableId = await createApprovable(tx, {
-      organizationId: source.organization_id, type: 'invoice', requesterId: source.requester_id,
-      vendorId: source.vendor_id, totalMinorBase: source.total_minor_base,
-      // Routing facts ride along so approval-flow splits evaluate on the
-      // invoice exactly as they would have without a review stage in front.
-      attributes: { ...(source.attributes ?? {}), reviewApprovableId: sourceApprovableId },
-      lines: lines.map((l) => ({ amountMinor: l.amount_minor, currency: l.currency })),
-    });
-    return activate(tx, approvableId, 'review_completed');
   });
 }
 

@@ -165,11 +165,7 @@ CREATE TABLE IF NOT EXISTS approval.authority_grants (
 CREATE TABLE IF NOT EXISTS approval.approvables (
   id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id  uuid NOT NULL REFERENCES organizations(organization_id),
-  -- 'review' is stage 1 of the three-stage pipeline (review -> approve -> release).
-  -- Each stage is its own approvable, chained: a review approvable spawns the
-  -- invoice one, which spawns the payment_run. Without this value a published
-  -- review flow could never execute, because policy sets are keyed by type.
-  type             text NOT NULL CHECK (type IN ('review','invoice','vendor_change','payment_run','po')),
+  type             text NOT NULL CHECK (type IN ('invoice','vendor_change','payment_run','po')),
   requester_id     uuid NOT NULL REFERENCES approval.people(id),
   enterer_id       uuid REFERENCES approval.people(id),
   vendor_id        uuid,                     -- counterparty reference (no FK: counterparty tables owned by control plane)
@@ -179,12 +175,6 @@ CREATE TABLE IF NOT EXISTS approval.approvables (
      'approved','auto_approved','rejected','cancelled')),
   attributes       jsonb NOT NULL DEFAULT '{}'
 );
-
--- Widen the type check on databases created before 'review' existed. Idempotent:
--- dropped and re-added on every startup, which is how every file here behaves.
-ALTER TABLE approval.approvables DROP CONSTRAINT IF EXISTS approvables_type_check;
-ALTER TABLE approval.approvables ADD CONSTRAINT approvables_type_check
-  CHECK (type IN ('review','invoice','vendor_change','payment_run','po'));
 
 CREATE TABLE IF NOT EXISTS approval.approvable_lines (
   approvable_id uuid NOT NULL REFERENCES approval.approvables(id),
