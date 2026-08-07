@@ -54,11 +54,23 @@ export async function ensureEngineSetup(organizationId: string): Promise<{ creat
  */
 export async function setupEngineInTx(tx: Tx, organizationId: string): Promise<{ created: boolean }> {
   {
-    // Kept as a guard for any caller that still arrives concurrently.
+    // Cheap read FIRST, before any lock. Every ingested bill calls through
+    // here, and for an established org the answer is always "already set up".
+    // Taking the advisory lock before checking serialized all concurrent
+    // ingestion for an organization and was itself the remaining source of
+    // deadlocks between racing sweeps. Established orgs now take no lock and
+    // write nothing on this path.
+    if (await getPolicySet(tx, organizationId, 'invoice')) {
+      await ensureRulePack(tx, organizationId); // no-op once the pack is present
+      return { created: false };
+    }
+
+    // Only a genuinely unconfigured org gets here. Serialize those: two bills
+    // arriving together must not both try to construct the same structure.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'engine-setup:' + organizationId}))`;
     const existing = await getPolicySet(tx, organizationId, 'invoice');
     await ensureRulePack(tx, organizationId); // rules-as-data: cards, relaxation FK targets, veto lookup
-    if (existing) return { created: false };
+    if (existing) return { created: false }; // built while we waited for the lock
 
     await ensureOrgSettings(tx, organizationId);
     const members = await tx.$queryRaw<{ user_id: string }[]>`

@@ -16,6 +16,17 @@ export type RuleCode = (typeof STANDARD_RULES)[number]['code'];
 
 /** Idempotent: every org gets the standard pack rows (cards + relaxation FK targets). */
 export async function ensureRulePack(tx: Tx, organizationId: string): Promise<void> {
+  // Read before writing. This is called on the ingestion path — every bill
+  // entering the engine runs it — and it used to issue one INSERT per standard
+  // rule regardless, taking write locks on constraint_rules for a set of rows
+  // that is already there in all but the very first call. Concurrent sweeps
+  // then deadlocked (40P01) against each other on those locks. A count is
+  // cheap and leaves the hot path read-only once an org is established.
+  const [{ count }] = await tx.$queryRaw<{ count: bigint }[]>`
+    SELECT count(*) AS count FROM approval.constraint_rules
+    WHERE organization_id = ${organizationId}::uuid`;
+  if (Number(count) >= STANDARD_RULES.length) return;
+
   for (const r of STANDARD_RULES) {
     await tx.$executeRaw`
       INSERT INTO approval.constraint_rules (organization_id, name, cap_a, cap_b, scope, remedy, relaxable)
