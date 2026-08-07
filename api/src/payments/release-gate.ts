@@ -41,7 +41,16 @@ export async function assertBillApprovedForRelease(organizationId: string, payme
     WHERE organization_id = ${organizationId}::uuid
       AND type = 'invoice'
       AND attributes->>'paymentOrderId' = ${paymentOrderId}`;
-  if (rows.length === 0) return; // no engine involvement (direct/agent order)
+  // No approvable: a directly-created payment order the engine never saw.
+  //
+  // This is the door autopay used to walk through, and it is now unreachable
+  // from the product — every route that paid without an approval is gone, and
+  // the only remaining payer is the post-release hook, which by construction
+  // has one. It is left open because closing it also refuses manually created
+  // API/CSV orders, which is a broader policy call than dropping autopay:
+  // "every payment must pass the engine" is worth deciding deliberately, not
+  // as a side effect. Until then this is a hole with nothing standing in it.
+  if (rows.length === 0) return;
   const approvedRow = rows.find((r) => r.macro_state === 'approved' || r.macro_state === 'auto_approved');
   if (!approvedRow) {
     const live = rows.map((r) => r.macro_state).find((s) => s !== 'cancelled') ?? rows[0]!.macro_state;

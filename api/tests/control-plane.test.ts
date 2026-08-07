@@ -1178,7 +1178,13 @@ test('Squads treasury creation prepares a signable transaction and persists the 
   );
 });
 
-test('automation agents can receive Squads spending limits and execute bounded payments', async () => {
+// SKIPPED 2026-08-07 — autopay dropped. This drives the agent-advance route,
+// which paid a bill without any approval; every such route is now gone.
+// Spending limits themselves are NOT dropped — reading the on-chain remaining
+// balance and listing past executions are still live. What went is the path
+// where the system spends against a limit on its own. Un-skip only if bounded
+// autonomous payment is deliberately brought back.
+test.skip('automation agents can receive Squads spending limits and execute bounded payments', async () => {
   const originalPrivyAppId = config.privyAppId;
   const originalPrivyAppSecret = config.privyAppSecret;
   const agentWalletAddress = Keypair.generate().publicKey.toBase58();
