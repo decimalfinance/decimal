@@ -30,6 +30,7 @@ export const BILL_FLAG_KINDS = [
   'vendor_held',
   'over_ceiling',
   'possible_duplicate',
+  'approval_weakened',
   'lines_do_not_sum',
   'total_does_not_reconcile',
   'new_vendor',
@@ -70,6 +71,12 @@ export type BillFlagFacts = {
    * plenty of real invoices carry no subtotal or tax line, and a missing
    * number is not a mismatch.
    */
+  /**
+   * Warnings the approval engine raised while compiling this bill's routing —
+   * most importantly a quorum it had to lower because too few people were
+   * eligible. Free text today, because that is how the engine emits them.
+   */
+  planAlerts: string[];
   amounts: {
     lineItemsTotal: number | null;
     subtotal: number | null;
@@ -208,6 +215,28 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
         message: `${describeDuplicate(facts.duplicates[0]!)} If it's genuinely a new bill, an admin can clear this flag.`,
       });
     }
+  }
+
+  // The routing the org configured is not always the routing that ran. When
+  // separation-of-duties removes the submitter and too few eligible approvers
+  // remain, the engine lowers the quorum so the bill can still move — the
+  // alternative is a bill nobody can ever approve. That is the right call, but
+  // it silently weakens a control the organization deliberately set, and until
+  // now it was recorded in the event log and shown to nobody. Someone checking
+  // "did two people sign this?" would find one signature and no explanation.
+  //
+  // Deliberately NOT blocking: the quorum was lowered precisely because nobody
+  // else can approve, so blocking would recreate the deadlock it avoided. It
+  // is loud, not obstructive.
+  const weakened = facts.planAlerts.filter((a) => /quorum lowered|no approvers/i.test(a));
+  if (weakened.length > 0) {
+    flags.push({
+      kind: 'approval_weakened',
+      severity: 'warning',
+      blocking: false,
+      short: 'Fewer approvers than your policy',
+      message: `This bill routed with weaker approval than your policy asks for, because too few people were eligible to sign it — ${weakened.join('; ')}. Anyone counting signatures should know why there are fewer.`,
+    });
   }
 
   // Arithmetic. Cheap, deterministic, no model involved — and it catches the

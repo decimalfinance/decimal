@@ -58,6 +58,7 @@ const baseFacts = {
   duplicates: [],
   duplicateOverride: null,
   amounts: { lineItemsTotal: null, subtotal: null, tax: null, total: null },
+  planAlerts: [] as string[],
 };
 
 test('a bill addressed to another company is flagged, danger, and blocking', () => {
@@ -176,4 +177,50 @@ test('a line the model could not read stops the sum being trusted', () => {
     amounts: { lineItemsTotal: null, subtotal: 4_820, tax: 0, total: 4_820 },
   });
   assert.deepEqual(flags, []);
+});
+
+// --- weakened approval --------------------------------------------------------
+//
+// The routing an org configures is not always the routing that runs. This is
+// the case where the engine did the right thing and told nobody.
+
+test('a quorum the engine had to lower is surfaced, not swallowed', () => {
+  const flags = evaluateBillFlags({
+    ...baseFacts,
+    planAlerts: ['step 0 quorum lowered 2 → 1: not enough eligible approvers'],
+  });
+  const flag = flags.find((f) => f.kind === 'approval_weakened');
+  assert.ok(flag, 'a 2-of-N that became 1-of-N must be visible to whoever signs');
+  assert.match(flag.message, /2 → 1/);
+});
+
+test('weakened approval warns but never blocks', () => {
+  // The quorum was lowered precisely because nobody else could approve.
+  // Blocking would recreate the deadlock it was lowered to avoid.
+  const flags = evaluateBillFlags({
+    ...baseFacts,
+    planAlerts: ['step 0 quorum lowered 2 → 1: not enough eligible approvers'],
+  });
+  assert.equal(flags[0]!.blocking, false);
+  assert.equal(summarizeBillFlags(flags).blocking, false);
+});
+
+test('routine compile notes are not dressed up as a warning', () => {
+  // Only genuine weakening counts. Everything the compiler chatters about
+  // must stay out, or the flag becomes noise and gets ignored.
+  const flags = evaluateBillFlags({
+    ...baseFacts,
+    planAlerts: ['step "approval" resolved via seat ladder', 'policy v3 selected'],
+  });
+  assert.deepEqual(flags, []);
+});
+
+test('a danger still outranks a weakened quorum in the row summary', () => {
+  const flags = evaluateBillFlags({
+    ...baseFacts,
+    billToName: 'Halcyon Labs, Inc.',
+    planAlerts: ['step 0 quorum lowered 2 → 1: not enough eligible approvers'],
+  });
+  assert.equal(summarizeBillFlags(flags).worst!.kind, 'addressed_elsewhere');
+  assert.ok(flags.some((f) => f.kind === 'approval_weakened'), 'but the warning is still carried');
 });

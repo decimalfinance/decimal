@@ -297,6 +297,30 @@ function reviewReadiness(args: {
 // from what was extracted; a line with no total contributes nothing rather than
 // silently counting as zero, because "we could not read this line" and "this
 // line is worth nothing" are different facts and only one of them is safe.
+// Compile-time warnings for a bill's routing, read from the engine's event log
+// — the only place they are recorded. Chiefly a quorum the engine had to lower
+// because separation-of-duties left too few eligible approvers: correct
+// behaviour, but a weakening of a control the org set, and it must not stay
+// invisible just because it lives in an append-only log nobody reads.
+async function planAlertsByOrder(organizationId: string, paymentOrderIds: string[]) {
+  const byOrder = new Map<string, string[]>();
+  if (paymentOrderIds.length === 0) return byOrder;
+  const rows = await prisma.$queryRaw<{ payment_order_id: string; alerts: unknown }[]>`
+    SELECT DISTINCT ON (a.attributes->>'paymentOrderId')
+           a.attributes->>'paymentOrderId' AS payment_order_id,
+           e.payload->'alerts'             AS alerts
+      FROM approval.approval_events e
+      JOIN approval.approvables a ON a.id = e.approvable_id
+     WHERE a.organization_id = ${organizationId}::uuid
+       AND a.attributes->>'paymentOrderId' = ANY(${paymentOrderIds})
+       AND e.payload->>'kind' = 'plan_compiled'
+     ORDER BY a.attributes->>'paymentOrderId', e.seq DESC`;
+  for (const r of rows) {
+    if (Array.isArray(r.alerts)) byOrder.set(r.payment_order_id, r.alerts.filter((a): a is string => typeof a === 'string'));
+  }
+  return byOrder;
+}
+
 function documentAmounts(extracted: Record<string, unknown> | null) {
   const lines = Array.isArray(extracted?.lineItems) ? (extracted!.lineItems as unknown[]) : [];
   const readable = lines.filter(isRecord).map((l) => num(l.total)).filter((n): n is number => n !== null);
@@ -345,6 +369,7 @@ export async function getBillsWorkbench(organizationId: string) {
   // one query per bill; matchDuplicates is the same rules against the same
   // candidate set, in memory. Grouped by vendor because that is how the query
   // scopes candidates, and cancelled orders are excluded for the same reason.
+  const alertsByOrder = await planAlertsByOrder(organizationId, orders.map((o) => o.paymentOrderId));
   const liveOrders = orders.filter((o) => o.state !== 'cancelled');
   const byVendor = new Map<string, typeof liveOrders>();
   for (const o of liveOrders) {
@@ -398,6 +423,7 @@ export async function getBillsWorkbench(organizationId: string) {
       ),
       duplicateOverride: readDuplicateOverride(order.metadataJson),
       amounts: documentAmounts(extracted),
+      planAlerts: alertsByOrder.get(order.paymentOrderId) ?? [],
     });
     const flagSummary = summarizeBillFlags(flags);
 
@@ -790,6 +816,7 @@ export async function getBillReview(organizationId: string, paymentOrderId: stri
     duplicates,
     duplicateOverride: readDuplicateOverride(metadata),
     amounts: documentAmounts(extracted),
+    planAlerts: (await planAlertsByOrder(organizationId, [order.paymentOrderId])).get(order.paymentOrderId) ?? [],
   });
 
   const sentBackRaw = isRecord(metadata.sentBack) ? metadata.sentBack : null;
