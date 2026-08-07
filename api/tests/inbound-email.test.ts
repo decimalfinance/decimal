@@ -810,6 +810,12 @@ test('two sweeps racing the same attachment fetch it once', async () => {
     receivedEvent({ attachments: [{ id: 'att_race', filename: 'invoice.pdf', content_type: 'application/pdf', content_disposition: 'attachment' }] }),
   );
   await Promise.all([runInboundEmailIntakeOnce(), runInboundEmailIntakeOnce(), runInboundEmailIntakeOnce()]);
+  // Four sweeps race here, not three: posting the webhook also fires the
+  // latency nudge. Awaiting only the explicit three left the nudge in flight
+  // while the assertions ran, which is what made this test fail about one run
+  // in four. The lease is what this test is really about, and it holds against
+  // all four — but the test has to wait for all four to find out.
+  await drainAsyncIntake();
 
   assert.equal(fetches, 1, 'the lease makes the claim exclusive');
   const attachment = await prisma.inboundEmailAttachment.findFirstOrThrow();
