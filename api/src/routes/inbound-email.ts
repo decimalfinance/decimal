@@ -5,6 +5,7 @@
 // before requireAuth() (a mail provider carries no session), the authed one
 // after.
 import crypto from 'node:crypto';
+import { trackBackgroundWork } from '../infra/background.js';
 import { Router } from 'express';
 import { z } from 'zod';
 import { ApiError } from '../infra/api-errors.js';
@@ -130,9 +131,11 @@ function requireDevSecret(secret: string) {
  * still the guarantee, this is only latency.
  */
 function nudgeSweep() {
-  void import('../agents/inbound-email-intake.js')
-    .then((module) => module.runInboundEmailIntakeOnce())
-    .catch((error) => logger.warn('inbound_email.nudge_failed', errorToLogFields(error)));
+  trackBackgroundWork(
+    import('../agents/inbound-email-intake.js')
+      .then((module) => module.runInboundEmailIntakeOnce())
+      .catch((error) => logger.warn('inbound_email.nudge_failed', errorToLogFields(error))),
+  );
 }
 
 function safeJson(buffer: Buffer): unknown {

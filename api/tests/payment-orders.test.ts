@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { drainAsyncIntake } from '../src/payments/invoice-intake.js';
 import crypto from 'node:crypto';
 import { after, before, beforeEach, test } from 'node:test';
 import { AddressInfo } from 'node:net';
@@ -66,6 +67,9 @@ before(async () => {
 });
 
 beforeEach(async () => {
+  // Drain detached intake before truncating: the previous test's extraction
+  // must not still be running against tables this one is wiping.
+  await drainAsyncIntake();
   setInvoiceIntakeRuntimeForTests(null);
   await executeWithDeadlockRetry(() => prisma.$executeRawUnsafe(TRUNCATE_SQL));
 });

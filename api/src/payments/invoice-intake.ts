@@ -1,6 +1,7 @@
 import type { Counterparty, CounterpartyWallet, Prisma } from '@prisma/client';
 import { logger } from '../infra/logger.js';
 import { prisma } from '../infra/prisma.js';
+import { trackBackgroundWork } from '../infra/background.js';
 import { deriveUsdcAtaForWallet, SOLANA_CHAIN, USDC_ASSET, USDC_DECIMALS } from '../solana.js';
 import { createPaymentOrder } from './orders.js';
 import {
@@ -426,7 +427,7 @@ export async function beginAsyncInvoiceIntake(args: {
     await setInvoiceDocumentStatus(stored.invoiceDocumentId, 'processing');
   }
 
-  void (async () => {
+  trackBackgroundWork((async () => {
     try {
       await processInvoiceDocument({ ...args, invoiceDocumentId: stored.invoiceDocumentId });
       await setInvoiceDocumentStatus(stored.invoiceDocumentId, 'processed');
@@ -439,10 +440,13 @@ export async function beginAsyncInvoiceIntake(args: {
       });
       await setInvoiceDocumentStatus(stored.invoiceDocumentId, 'failed', message).catch(() => {});
     }
-  })();
+  })());
 
   return { invoiceDocumentId: stored.invoiceDocumentId, reused: false };
 }
+
+/** Re-exported so tests keep one obvious place to drain from. */
+export { drainBackgroundWork as drainAsyncIntake } from '../infra/background.js';
 
 async function resolveInvoiceCounterpartyWallet(args: {
   organizationId: string;

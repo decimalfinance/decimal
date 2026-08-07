@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { drainAsyncIntake } from '../src/payments/invoice-intake.js';
 import { after, before, beforeEach, test } from 'node:test';
 import { AddressInfo } from 'node:net';
 import * as multisig from '@sqds/multisig';
@@ -72,6 +73,9 @@ before(async () => {
 });
 
 beforeEach(async () => {
+  // Drain detached intake before truncating: the previous test's extraction
+  // must not still be running against tables this one is wiping.
+  await drainAsyncIntake();
   resetRateLimitBuckets();
   config.rateLimitEnabled = false;
   config.autoProvisionWallets = false;

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, beforeEach, test } from 'node:test';
 import { AddressInfo } from 'node:net';
 import { createApp } from '../src/app.js';
+import { drainAsyncIntake } from '../src/payments/invoice-intake.js';
 import { config } from '../src/config.js';
 import { prisma } from '../src/infra/prisma.js';
 import { resetRateLimitBuckets } from '../src/infra/rate-limit.js';
@@ -58,6 +59,10 @@ before(async () => {
 });
 
 beforeEach(async () => {
+  // Let the previous test's detached intake finish BEFORE truncating. Without
+  // this the suite was not testing the software, it was testing a race: the
+  // last test's extraction ran on against tables this one was wiping.
+  await drainAsyncIntake();
   resetRateLimitBuckets();
   config.rateLimitEnabled = false;
   setInvoiceIntakeRuntimeForTests(null);

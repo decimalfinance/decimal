@@ -4,6 +4,7 @@
 // surface per role — reviewer can enter bills but never sees the payments
 // surface; nobody edits what their role doesn't include.
 import assert from 'node:assert/strict';
+import { drainAsyncIntake } from '../src/payments/invoice-intake.js';
 import crypto from 'node:crypto';
 import { after, before, beforeEach, test } from 'node:test';
 import { AddressInfo } from 'node:net';
@@ -25,6 +26,9 @@ before(async () => {
 });
 
 beforeEach(async () => {
+  // Drain detached intake before truncating: the previous test's extraction
+  // must not still be running against tables this one is wiping.
+  await drainAsyncIntake();
   setInvoiceIntakeRuntimeForTests(null);
   await prisma.$executeRawUnsafe(`TRUNCATE approval.person_roles, approval.approval_events, approval.tasks, approval.approval_plans,
     approval.policy_sets, approval.policies, approval.approvable_lines, approval.approvables, approval.rule_relaxations,
