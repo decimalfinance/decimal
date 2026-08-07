@@ -293,6 +293,23 @@ function reviewReadiness(args: {
   return { readiness: blocked || missing.length > 0 ? 'missing_info' : 'ready', missing, laterNeeded, blocked };
 }
 
+// The document's own figures, for the arithmetic gates. Line totals are summed
+// from what was extracted; a line with no total contributes nothing rather than
+// silently counting as zero, because "we could not read this line" and "this
+// line is worth nothing" are different facts and only one of them is safe.
+function documentAmounts(extracted: Record<string, unknown> | null) {
+  const lines = Array.isArray(extracted?.lineItems) ? (extracted!.lineItems as unknown[]) : [];
+  const readable = lines.filter(isRecord).map((l) => num(l.total)).filter((n): n is number => n !== null);
+  return {
+    lineItemsTotal: readable.length > 0 && readable.length === lines.length
+      ? readable.reduce((a, b) => a + b, 0)
+      : null,
+    subtotal: num(extracted?.subtotal),
+    tax: num(extracted?.taxAmount),
+    total: num(extracted?.amount),
+  };
+}
+
 export async function getBillsWorkbench(organizationId: string) {
   const [orders, engine, org, ceilingMinor] = await Promise.all([
     prisma.paymentOrder.findMany({
@@ -380,6 +397,7 @@ export async function getBillsWorkbench(organizationId: string) {
         },
       ),
       duplicateOverride: readDuplicateOverride(order.metadataJson),
+      amounts: documentAmounts(extracted),
     });
     const flagSummary = summarizeBillFlags(flags);
 
@@ -771,6 +789,7 @@ export async function getBillReview(organizationId: string, paymentOrderId: stri
     ceilingMinor,
     duplicates,
     duplicateOverride: readDuplicateOverride(metadata),
+    amounts: documentAmounts(extracted),
   });
 
   const sentBackRaw = isRecord(metadata.sentBack) ? metadata.sentBack : null;

@@ -30,6 +30,8 @@ export const BILL_FLAG_KINDS = [
   'vendor_held',
   'over_ceiling',
   'possible_duplicate',
+  'lines_do_not_sum',
+  'total_does_not_reconcile',
   'new_vendor',
 ] as const;
 
@@ -63,7 +65,24 @@ export type BillFlagFacts = {
   ceilingMinor: bigint | null;
   duplicates: DuplicateMatch[];
   duplicateOverride: DuplicateOverride | null;
+  /**
+   * The figures as read from the document, in dollars. Any may be absent —
+   * plenty of real invoices carry no subtotal or tax line, and a missing
+   * number is not a mismatch.
+   */
+  amounts: {
+    lineItemsTotal: number | null;
+    subtotal: number | null;
+    tax: number | null;
+    total: number | null;
+  };
 };
+
+// A cent. Invoices are printed to two decimal places, so anything at or under
+// this is rounding, not disagreement.
+const MONEY_EPSILON = 0.005;
+
+const money = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 
 const SEVERITY_ORDER: Record<BillFlagSeverity, number> = { danger: 0, warning: 1, info: 2 };
 
@@ -189,6 +208,33 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
         message: `${describeDuplicate(facts.duplicates[0]!)} If it's genuinely a new bill, an admin can clear this flag.`,
       });
     }
+  }
+
+  // Arithmetic. Cheap, deterministic, no model involved — and it catches the
+  // failure mode nothing else does: extraction that is confidently wrong.
+  // A total we cannot reconcile against the document's own parts is a total we
+  // should not pay on a rail with no recourse, so these block.
+  const { lineItemsTotal, subtotal, tax, total } = facts.amounts;
+  const against = subtotal ?? total;
+  if (lineItemsTotal !== null && against !== null
+      && Math.abs(lineItemsTotal - against) > MONEY_EPSILON) {
+    flags.push({
+      kind: 'lines_do_not_sum',
+      severity: 'danger',
+      blocking: true,
+      short: 'Lines do not add up',
+      message: `The line items add up to ${money(lineItemsTotal)}, but the document says ${money(against)}. Something was read wrong, or the document disagrees with itself — check it against the original before paying.`,
+    });
+  }
+  if (subtotal !== null && total !== null
+      && Math.abs(subtotal + (tax ?? 0) - total) > MONEY_EPSILON) {
+    flags.push({
+      kind: 'total_does_not_reconcile',
+      severity: 'danger',
+      blocking: true,
+      short: 'Total does not reconcile',
+      message: `${money(subtotal)} plus ${money(tax ?? 0)} tax comes to ${money(subtotal + (tax ?? 0))}, not the ${money(total)} this bill asks for. Check the figures against the document before paying.`,
+    });
   }
 
   // Informational, and deliberately last: it is context, not a problem.

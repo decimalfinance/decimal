@@ -57,6 +57,7 @@ const baseFacts = {
   ceilingMinor: null,
   duplicates: [],
   duplicateOverride: null,
+  amounts: { lineItemsTotal: null, subtotal: null, tax: null, total: null },
 };
 
 test('a bill addressed to another company is flagged, danger, and blocking', () => {
@@ -106,4 +107,73 @@ test('an info-only flag never blocks the bill', () => {
   assert.equal(flags.length, 1);
   assert.equal(flags[0]!.kind, 'new_vendor');
   assert.equal(summarizeBillFlags(flags).blocking, false);
+});
+
+// --- arithmetic ---------------------------------------------------------------
+//
+// The cheapest gate we have and the only one that catches extraction being
+// confidently wrong. Every case below asserts the dangerous bill is BLOCKED,
+// not merely that a clean one passes — a gate that never refuses anything is
+// decoration.
+
+test('line items that do not add up to the document total block the bill', () => {
+  const flags = evaluateBillFlags({
+    ...baseFacts,
+    amounts: { lineItemsTotal: 4_000, subtotal: null, tax: null, total: 4_820 },
+  });
+  const flag = flags.find((f) => f.kind === 'lines_do_not_sum');
+  assert.ok(flag, 'a total the lines do not support must be flagged');
+  assert.equal(flag.blocking, true);
+  assert.equal(summarizeBillFlags(flags).blocking, true);
+});
+
+test('subtotal plus tax that does not equal the total blocks the bill', () => {
+  const flags = evaluateBillFlags({
+    ...baseFacts,
+    amounts: { lineItemsTotal: null, subtotal: 4_000, tax: 320, total: 4_820 },
+  });
+  const flag = flags.find((f) => f.kind === 'total_does_not_reconcile');
+  assert.ok(flag, '4,000 + 320 is not 4,820 and must not pass silently');
+  assert.equal(flag.blocking, true);
+});
+
+test('a bill whose figures reconcile raises nothing', () => {
+  const flags = evaluateBillFlags({
+    ...baseFacts,
+    amounts: { lineItemsTotal: 4_500, subtotal: 4_500, tax: 320, total: 4_820 },
+  });
+  assert.deepEqual(flags, []);
+});
+
+test('sub-cent rounding is not treated as disagreement', () => {
+  // Invoices print to two decimals; a third-decimal remainder is arithmetic,
+  // not a discrepancy, and flagging it would train people to ignore the flag.
+  const flags = evaluateBillFlags({
+    ...baseFacts,
+    amounts: { lineItemsTotal: 4_820.001, subtotal: 4_820, tax: 0, total: 4_820 },
+  });
+  assert.deepEqual(flags, []);
+});
+
+test('missing figures are not mismatches', () => {
+  // Plenty of real invoices carry no subtotal or tax line. Absence must stay
+  // silent, or every simple invoice screams.
+  for (const amounts of [
+    { lineItemsTotal: null, subtotal: null, tax: null, total: 4_820 },
+    { lineItemsTotal: null, subtotal: 4_820, tax: null, total: 4_820 },
+    { lineItemsTotal: 4_820, subtotal: null, tax: null, total: null },
+  ]) {
+    assert.deepEqual(evaluateBillFlags({ ...baseFacts, amounts }), [], JSON.stringify(amounts));
+  }
+});
+
+test('a line the model could not read stops the sum being trusted', () => {
+  // If one line's total is unreadable, the remaining lines will not match the
+  // document — and claiming a mismatch would be blaming the document for our
+  // own gap. The check simply does not run.
+  const flags = evaluateBillFlags({
+    ...baseFacts,
+    amounts: { lineItemsTotal: null, subtotal: 4_820, tax: 0, total: 4_820 },
+  });
+  assert.deepEqual(flags, []);
 });
