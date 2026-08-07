@@ -270,6 +270,23 @@ export async function compilePlan(tx: Tx, approvable: ApprovableRow, at = new Da
       // No approver-role holders: admins hold every capability (Ramp rule),
       // so a non-requester ADMIN is the next-best real second pair of eyes —
       // before falling all the way to the owner-submitter (testbench 006 §2).
+      // Admins are found through MEMBERSHIP, not through an existing engine
+      // identity. Members are not enrolled in the approval engine just by
+      // joining the organization — that is an admin's deliberate act, so a
+      // viewer never becomes a signer by being added. But an admin who was
+      // never plugged in still holds every capability in the product, and
+      // letting a bill fall through to the submitter approving their own
+      // liability because nobody created a row for them is the wrong failure.
+      // Their identity is created here, on demand, only in this last-resort
+      // path — it grants no authority on its own; a person row is an identity,
+      // and seats and roles are what confer the power to approve.
+      const adminMembers = await tx.$queryRaw<{ user_id: string }[]>`
+        SELECT om.user_id::text AS user_id FROM organization_memberships om
+        WHERE om.organization_id = ${approvable.organization_id}::uuid
+          AND om.role IN ('owner', 'admin') AND om.status = 'active'`;
+      const { ensurePersonForUser } = await import('./wiring.js');
+      for (const m of adminMembers) await ensurePersonForUser(tx, approvable.organization_id, m.user_id);
+
       const adminRows = await tx.$queryRaw<{ id: string }[]>`
         SELECT p.id FROM approval.people p
         JOIN organization_memberships om

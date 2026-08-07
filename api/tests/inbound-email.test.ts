@@ -72,7 +72,14 @@ after(async () => {
 });
 
 async function createOrg(organizationName: string) {
-  return prisma.organization.create({ data: { organizationName } });
+  const org = await prisma.organization.create({ data: { organizationName } });
+  // Production builds the approval engine in the same transaction that creates
+  // the organization, so a bill never triggers it. Fixtures that insert an org
+  // directly must do the same, or the first ingested bill builds it lazily —
+  // and two sweeps arriving together then deadlock constructing it at once.
+  const { setupEngineInTx } = await import('../src/approvals/wiring.js');
+  await prisma.$transaction((tx) => setupEngineInTx(tx, org.organizationId));
+  return org;
 }
 
 // --- normalization -----------------------------------------------------------

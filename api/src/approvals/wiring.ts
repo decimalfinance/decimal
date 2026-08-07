@@ -32,14 +32,29 @@ export async function ensurePersonForUser(tx: Tx, organizationId: string, userId
  * behavior change: every active member can approve, quorum = min(2, members).
  */
 export async function ensureEngineSetup(organizationId: string): Promise<{ created: boolean }> {
-  return prisma.$transaction(async (tx) => {
-    // Serialize setup per organization. Bills now enter the engine at intake,
-    // so two invoices arriving together — one forwarded email with three
-    // attachments, or two sweeps racing — both land here at once. Each call
-    // creates a hierarchy, seats, grants and policies in one transaction, and
-    // concurrent runs deadlocked against each other (40P01). An advisory lock
-    // held for the transaction makes the second caller wait, find the setup
-    // already there, and return.
+  return prisma.$transaction((tx) => setupEngineInTx(tx, organizationId));
+}
+
+/**
+ * The setup itself, joinable to a caller's transaction.
+ *
+ * Organization creation runs this inside the same transaction that mints the
+ * inbound invoice address, so an org gets its email and its approval engine
+ * atomically: there is no window in which an address exists that leads to a
+ * bill nothing can route. That ordering is also what fixed the deadlock —
+ * building the engine used to happen lazily, on whichever bill arrived first,
+ * so two invoices landing together both tried to construct the same ten tables
+ * and collided. Nothing is left to build by the time a bill can arrive.
+ *
+ * Members are NOT auto-enrolled. At creation the org has exactly one member,
+ * the owner, who becomes the default approver and keyholder. Everyone who
+ * joins later is placed into the approval structure by an admin, deliberately
+ * — being in the organization and being able to authorize money are different
+ * things, and a viewer must never become a signer by simply being added.
+ */
+export async function setupEngineInTx(tx: Tx, organizationId: string): Promise<{ created: boolean }> {
+  {
+    // Kept as a guard for any caller that still arrives concurrently.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'engine-setup:' + organizationId}))`;
     const existing = await getPolicySet(tx, organizationId, 'invoice');
     await ensureRulePack(tx, organizationId); // rules-as-data: cards, relaxation FK targets, veto lookup
@@ -90,7 +105,7 @@ export async function ensureEngineSetup(organizationId: string): Promise<{ creat
     ]);
     await upsertPolicySet(tx, organizationId, 'payment_run', [], releasePolicy.id, releasePolicy.version);
     return { created: true };
-  });
+  }
 }
 
 /**

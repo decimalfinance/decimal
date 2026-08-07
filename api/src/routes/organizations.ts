@@ -130,6 +130,15 @@ organizationsRouter.post('/organizations', async (req, res, next) => {
       // The org's inbound invoice address, minted once and never re-minted.
       await mintIntakeSlug(tx, createdOrganization.organizationId, organizationName);
 
+      // The approval engine is built HERE, in the same transaction as the
+      // address. An organization that can receive a bill must already be able
+      // to route one — you cannot hand out an intake address that leads
+      // somewhere with no approvers. Building it lazily on the first bill is
+      // what made two invoices arriving together deadlock: both tried to
+      // construct the same structure at once.
+      const { setupEngineInTx } = await import('../approvals/wiring.js');
+      await setupEngineInTx(tx, createdOrganization.organizationId);
+
       return createdOrganization;
     });
     const [personalWalletProvisioning, agentProvisioning] = await Promise.all([
