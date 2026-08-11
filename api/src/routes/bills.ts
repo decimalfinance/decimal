@@ -6,7 +6,7 @@ import { isAdminRole } from '../auth/organization-access.js';
 import { asyncRoute } from '../infra/route-helpers.js';
 import { forbidden } from '../infra/api-errors.js';
 import { prisma } from '../infra/prisma.js';
-import { getBillsWorkbench, getBillReview, getBillDetail, getApprovalsInbox, confirmBillReview, markNotABill, updateBillFacts, overrideDuplicateFlag, addOrganizationTradingName, sendApprovedBillBackToReview } from '../payments/bills.js';
+import { getBillsWorkbench, getBillReview, getBillDetail, getApprovalsInbox, confirmBillReview, markNotABill, updateBillFacts, overrideDuplicateFlag, addOrganizationTradingName, listAskCandidates, askAboutBill, sendApprovedBillBackToReview } from '../payments/bills.js';
 
 export const billsRouter = Router();
 
@@ -150,6 +150,37 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/this-is-u
     if (/owner or admin/.test(message)) throw forbidden(message);
     throw error;
   }
+}));
+
+// Who this person could ask, most-answered first — the person who actually
+// replies is the useful default, not whoever sorts first alphabetically.
+billsRouter.get('/organizations/:organizationId/bills/:paymentOrderId/ask-candidates', asyncRoute(async (req, res) => {
+  const { organizationId } = billParamsSchema.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  res.json({ candidates: await listAskCandidates(organizationId, req.auth!.userId) });
+}));
+
+// Ask a colleague about a bill. No role gate on purpose: asking is never the
+// dangerous act, and it must never be the thing an approver cannot do.
+const askSchema = z.object({
+  askedOfUserId: z.string().uuid(),
+  question: z.string().trim().min(3).max(500),
+  aboutFlag: z.string().trim().max(60).nullable().optional(),
+});
+
+billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/ask', asyncRoute(async (req, res) => {
+  const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  const input = askSchema.parse(req.body);
+  const asked = await askAboutBill({
+    organizationId,
+    paymentOrderId,
+    askedByUserId: req.auth!.userId,
+    askedOfUserId: input.askedOfUserId,
+    question: input.question,
+    aboutFlag: input.aboutFlag ?? null,
+  });
+  res.status(201).json({ billQuestionId: asked.billQuestionId, review: await getBillReview(organizationId, paymentOrderId) });
 }));
 
 // Send an approved-but-unpaid bill back to Review (the recovery path when a

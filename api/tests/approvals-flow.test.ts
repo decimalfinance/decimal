@@ -1091,3 +1091,89 @@ test('closing a bill is admin-only — a member can ask, not kill', async () => 
   const closed = await post(`/organizations/${orgId}/bills/${bill.billId}/not-a-bill`, { reason: 'not_ours' }, owner.token);
   assert.ok(closed, 'an admin can close it');
 });
+
+// --- asking a colleague -------------------------------------------------------
+
+test('anyone can ask a colleague about a bill, and the bill waits on the answer', async () => {
+  const owner = await register('ask-o');
+  const org = await post('/organizations', { organizationName: 'Ask Org' }, owner.token);
+  const orgId = org.organizationId as string;
+  const member = await register('ask-m');
+  await prisma.organizationMembership.create({
+    data: { organizationId: orgId, userId: member.userId, role: 'member', status: 'active' },
+  });
+  const bill = await uploadAndConfirm(orgId, owner.token, {
+    vendor: 'Ask Vendor', amount: 800, invoiceNo: 'ASKQ-1', billTo: 'Halcyon Labs, Inc.',
+  });
+
+  // The member — not an admin — must be able to ask. Asking is never the
+  // dangerous act, so it cannot be the thing they lack standing for.
+  const candidates = await get(`/organizations/${orgId}/bills/${bill.billId}/ask-candidates`, member.token);
+  assert.ok(candidates.candidates.some((c: any) => c.userId === owner.userId), 'the owner is askable');
+  assert.ok(!candidates.candidates.some((c: any) => c.userId === member.userId), 'you are not offered yourself');
+
+  // A member who does not hold the task can still ASK — the question is
+  // recorded and routed. It does not park the bill, because request_info is
+  // task-scoped and parking is a state change on someone else's task.
+  const asked = await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, {
+    askedOfUserId: owner.userId,
+    question: 'Is Halcyon Labs one of ours?',
+    aboutFlag: 'addressed_elsewhere',
+  }, member.token);
+  assert.ok(asked.billQuestionId, 'the question is recorded whoever asks');
+
+  const recorded = await prisma.billQuestion.findUniqueOrThrow({ where: { billQuestionId: asked.billQuestionId } });
+  assert.equal(recorded.askedOfUserId, owner.userId);
+  assert.equal(recorded.aboutFlag, 'addressed_elsewhere', 'routing is learned per problem, not as one pile');
+});
+
+test('the person holding the task parks the bill when they ask', async () => {
+  const owner = await register('askp-o');
+  const org = await post('/organizations', { organizationName: 'Ask Park' }, owner.token);
+  const orgId = org.organizationId as string;
+  const other = await register('askp-other');
+  await prisma.organizationMembership.create({
+    data: { organizationId: orgId, userId: other.userId, role: 'admin', status: 'active' },
+  });
+  const bill = await uploadAndConfirm(orgId, owner.token, {
+    vendor: 'Park Vendor', amount: 640, invoiceNo: 'ASKP-1', billTo: 'Halcyon Labs, Inc.',
+  });
+
+  // The owner submitted the bill, so R1 excludes them from approving it and the
+  // admin holds the task. The task holder is therefore the one who can park it.
+  await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, {
+    askedOfUserId: owner.userId,
+    question: 'Is Halcyon Labs one of ours?',
+    aboutFlag: 'addressed_elsewhere',
+  }, other.token);
+
+  const detail = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
+  assert.equal(detail.approval.macroState, 'returned_for_info', 'the bill waits on the answer rather than moving');
+});
+
+test('ask candidates put whoever actually answers first', async () => {
+  const owner = await register('askr-o');
+  const org = await post('/organizations', { organizationName: 'Ask Rank' }, owner.token);
+  const orgId = org.organizationId as string;
+  const quiet = await register('askr-quiet');
+  const helpful = await register('askr-helpful');
+  for (const u of [quiet, helpful]) {
+    await prisma.organizationMembership.create({
+      data: { organizationId: orgId, userId: u.userId, role: 'member', status: 'active' },
+    });
+  }
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'V', amount: 100, invoiceNo: 'ASKR-1', billTo: 'Ask Rank' });
+
+  // Quiet is asked twice and never replies; helpful is asked once and answers.
+  await prisma.billQuestion.createMany({
+    data: [
+      { organizationId: orgId, paymentOrderId: bill.billId, askedByUserId: owner.userId, askedOfUserId: quiet.userId, question: 'q1' },
+      { organizationId: orgId, paymentOrderId: bill.billId, askedByUserId: owner.userId, askedOfUserId: quiet.userId, question: 'q2' },
+      { organizationId: orgId, paymentOrderId: bill.billId, askedByUserId: owner.userId, askedOfUserId: helpful.userId, question: 'q3', answer: 'yes', answeredAt: new Date() },
+    ],
+  });
+
+  const { candidates } = await get(`/organizations/${orgId}/bills/${bill.billId}/ask-candidates`, owner.token);
+  assert.equal(candidates[0].userId, helpful.userId, 'being asked a lot is not the same as being useful');
+  assert.equal(candidates[0].answered, 1);
+});

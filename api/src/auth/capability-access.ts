@@ -29,6 +29,13 @@ const RULES: Array<{ pattern: RegExp; view: Need; act: Need }> = [
   { pattern: /^\/approvals(\/|$)/, view: 'bills.view', act: 'bills.edit' },
   // GL coding is reviewer work even though it lives under payment-orders.
   { pattern: /^\/payment-orders\/[^/]+\/(gl-coding|accounting)(\/|$)/, view: 'bills.view', act: 'bills.edit' },
+  // Asking a colleague about a bill needs bill VISIBILITY and nothing more.
+  // Asking is never the dangerous act — it changes no figure and commits no
+  // money, it only parks the bill and routes a question. Requiring bills.edit
+  // would mean the people most likely to spot something wrong, and least likely
+  // to hold edit rights, are the ones who cannot raise it. The reply itself is
+  // still governed by the engine.
+  { pattern: /^\/bills\/[0-9a-f-]{36}\/(ask|ask-candidates)$/, view: 'bills.view', act: null },
   // Bills work surface.
   { pattern: /^\/(bills|invoices|invoice-documents)(\/|$)/, view: 'bills.view', act: 'bills.edit' },
   // The org's inbound invoice address is part of the bills surface: anyone who

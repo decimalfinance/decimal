@@ -1263,6 +1263,124 @@ export async function addOrganizationTradingName(args: {
   return { added: true, tradingNames: readTradingNames(updated.tradingNames) };
 }
 
+/**
+ * Who this person could ask about this bill — every other active member, with
+ * the history that makes the list meaningful rather than alphabetical.
+ *
+ * `answered` / `asked` is the beginning of routing: someone asked eight times
+ * who answered eight times is a different proposition from someone asked once.
+ * Nothing suggests yet; this only reports what happened, so a suggestion can
+ * later be built on evidence instead of a guess.
+ */
+export async function listAskCandidates(organizationId: string, viewerUserId: string) {
+  const members = await prisma.organizationMembership.findMany({
+    where: { organizationId, status: 'active', userId: { not: viewerUserId } },
+    select: { userId: true, role: true, user: { select: { displayName: true, email: true } } },
+  });
+  const history = await prisma.billQuestion.groupBy({
+    by: ['askedOfUserId'],
+    where: { organizationId },
+    _count: { _all: true },
+  });
+  const answered = await prisma.billQuestion.groupBy({
+    by: ['askedOfUserId'],
+    where: { organizationId, answeredAt: { not: null } },
+    _count: { _all: true },
+  });
+  const askedBy = new Map(history.map((h) => [h.askedOfUserId, h._count._all]));
+  const answeredBy = new Map(answered.map((h) => [h.askedOfUserId, h._count._all]));
+
+  return members
+    .map((m) => ({
+      userId: m.userId,
+      name: m.user.displayName,
+      email: m.user.email,
+      role: m.role,
+      asked: askedBy.get(m.userId) ?? 0,
+      answered: answeredBy.get(m.userId) ?? 0,
+    }))
+    // Most-answered first: the person who actually replies is the useful
+    // default, not the one who happens to sort first by name.
+    .sort((a, b) => b.answered - a.answered || b.asked - a.asked || a.name.localeCompare(b.name));
+}
+
+/**
+ * Ask a colleague about a bill.
+ *
+ * Two things happen together and must not drift apart: the engine parks the
+ * bill on the question (request_info), and we record who was asked about what.
+ * The park is what stops the bill moving; the record is what teaches routing.
+ *
+ * Available to anyone. Asking is never the dangerous act, so it must never be
+ * the thing an approver lacks the standing to do.
+ */
+export async function askAboutBill(args: {
+  organizationId: string;
+  paymentOrderId: string;
+  askedByUserId: string;
+  askedOfUserId: string;
+  question: string;
+  aboutFlag?: string | null;
+}) {
+  const question = args.question.trim();
+  if (question.length < 3) throw new Error('Say what you want to know.');
+
+  const target = await prisma.organizationMembership.findFirst({
+    where: { organizationId: args.organizationId, userId: args.askedOfUserId, status: 'active' },
+  });
+  if (!target) throw new Error('That person is not an active member of this organization.');
+
+  // Park the bill via the engine when it has a live task, so the question
+  // behaves like every other pause: it reminds, it escalates, it never
+  // auto-denies. Best-effort — a recorded question with no park is still far
+  // better than a park with no record of who was asked.
+  let taskId: string | null = null;
+  try {
+    const [{ id }] = await prisma.$queryRaw<{ id: string }[]>`
+      SELECT t.id FROM approval.tasks t
+      JOIN approval.approval_plans p ON p.id = t.plan_id
+      JOIN approval.approvables a ON a.id = p.approvable_id
+      WHERE a.organization_id = ${args.organizationId}::uuid
+        AND a.attributes->>'paymentOrderId' = ${args.paymentOrderId}
+        AND t.state IN ('open', 'info_requested')
+      ORDER BY t.step_index LIMIT 1`;
+    const { executeCommand } = await import('../approvals/lifecycle.js');
+    const asker = await prisma.$queryRaw<{ id: string }[]>`
+      SELECT id FROM approval.people
+      WHERE organization_id = ${args.organizationId}::uuid AND user_id = ${args.askedByUserId}::uuid LIMIT 1`;
+    const askedOf = await prisma.$queryRaw<{ id: string }[]>`
+      SELECT id FROM approval.people
+      WHERE organization_id = ${args.organizationId}::uuid AND user_id = ${args.askedOfUserId}::uuid LIMIT 1`;
+    if (id && asker[0] && askedOf[0]) {
+      await executeCommand({
+        taskId: id,
+        actorId: asker[0].id,
+        idempotencyKey: `ask:${args.paymentOrderId}:${Date.now()}`,
+        command: { kind: 'request_info', question, from: askedOf[0].id } as never,
+      });
+      taskId = id;
+    }
+  } catch (error) {
+    logger.warn('bill_ask.park_failed', {
+      organizationId: args.organizationId,
+      paymentOrderId: args.paymentOrderId,
+      ...(error instanceof Error ? { message: error.message } : {}),
+    });
+  }
+
+  return prisma.billQuestion.create({
+    data: {
+      organizationId: args.organizationId,
+      paymentOrderId: args.paymentOrderId,
+      taskId,
+      askedByUserId: args.askedByUserId,
+      askedOfUserId: args.askedOfUserId,
+      question,
+      aboutFlag: args.aboutFlag ?? null,
+    },
+  });
+}
+
 export async function overrideDuplicateFlag(args: {
   organizationId: string;
   paymentOrderId: string;
