@@ -1583,7 +1583,13 @@ export const billsApi = {
       `/organizations/${organizationId}/bills/${paymentOrderId}/ask-candidates`,
     );
   },
-  ask(organizationId: string, paymentOrderId: string, body: { askedOfUserId: string; question: string; aboutFlag?: string | null }) {
+  suggestAskFields(organizationId: string, paymentOrderId: string, question: string) {
+    return request<{ fields: string[] }>(
+      `/organizations/${organizationId}/bills/${paymentOrderId}/ask/suggest-fields`,
+      { method: 'POST', body: JSON.stringify({ question }) },
+    );
+  },
+  ask(organizationId: string, paymentOrderId: string, body: { askedOfUserId: string; question: string; aboutFlag?: string | null; highlightFields?: string[] | null }) {
     return request<{ billQuestionId: string }>(
       `/organizations/${organizationId}/bills/${paymentOrderId}/ask`,
       { method: 'POST', body: JSON.stringify(body) },

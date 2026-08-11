@@ -35,7 +35,7 @@ const RULES: Array<{ pattern: RegExp; view: Need; act: Need }> = [
   // would mean the people most likely to spot something wrong, and least likely
   // to hold edit rights, are the ones who cannot raise it. The reply itself is
   // still governed by the engine.
-  { pattern: /^\/bills\/[0-9a-f-]{36}\/(ask|ask-candidates)$/, view: 'bills.view', act: null },
+  { pattern: /^\/bills\/[0-9a-f-]{36}\/(ask|ask-candidates|ask\/suggest-fields)$/, view: 'bills.view', act: null },
   // Answering is the other half of asking. If someone can be asked, they can
   // reply — the function itself refuses anyone who was not the person asked.
   { pattern: /^\/bills\/[0-9a-f-]{36}\/questions\/[0-9a-f-]{36}\/answer$/, view: 'bills.view', act: null },

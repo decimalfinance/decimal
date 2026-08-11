@@ -1464,6 +1464,15 @@ export async function askAboutBill(args: {
   askedOfUserId: string;
   question: string;
   aboutFlag?: string | null;
+  /**
+   * The fields the ASKER confirmed they want filled.
+   *
+   * Suggested by the model, then shown to the asker before sending. Passing
+   * them explicitly is what makes the highlight trustworthy: person B is
+   * pointed at fields a human agreed to, not at a mapping nobody saw. Omitted
+   * (API callers, older clients) falls back to the suggestion.
+   */
+  highlightFields?: string[] | null;
 }) {
   const question = args.question.trim();
   if (question.length < 3) throw new Error('Say what you want to know.');
@@ -1511,11 +1520,15 @@ export async function askAboutBill(args: {
     });
   }
 
-  // Which fields is this about? Best-effort and never blocking: a question
-  // that arrives without a mapping is still a perfectly good question, and
-  // highlighting the WRONG fields would be worse than highlighting none.
-  const { fieldsForQuestion } = await import('./question-fields.js');
-  const highlightFields = await fieldsForQuestion(question);
+  // Prefer what the asker confirmed; fall back to the suggestion only when a
+  // caller did not go through the confirm step. Either way the closed
+  // vocabulary is enforced, so a bad list cannot point anyone at a field that
+  // does not exist.
+  const { fieldsForQuestion, HIGHLIGHTABLE_FIELDS } = await import('./question-fields.js');
+  const allowed = new Set<string>(HIGHLIGHTABLE_FIELDS);
+  const highlightFields = args.highlightFields
+    ? args.highlightFields.filter((f) => allowed.has(f))
+    : await fieldsForQuestion(question);
 
   return prisma.billQuestion.create({
     data: {

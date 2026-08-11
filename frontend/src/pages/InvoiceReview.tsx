@@ -125,6 +125,29 @@ function ReviewScreen(props: {
   const [resolutionValue, setResolutionValue] = useState('');
   const [resolving, setResolving] = useState(false);
   const [askOf, setAskOf] = useState('');
+  // The model suggests which fields a question is about; the ASKER confirms
+  // them before anything is sent. A suggestion nobody sees is an assertion, and
+  // if it is wrong the person asked gets pointed at the wrong part of the form
+  // with no way to know.
+  const [askFields, setAskFields] = useState<string[] | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
+
+  const suggestFields = async (question: string) => {
+    if (question.trim().length < 3) return;
+    setSuggesting(true);
+    try {
+      const { fields } = await billsApi.suggestAskFields(organizationId, review.paymentOrderId, question.trim());
+      setAskFields(fields);
+    } catch {
+      setAskFields([]); // no suggestion is fine; the question still sends
+    } finally {
+      setSuggesting(false);
+    }
+  };
+
+  const fieldLabel = (key: string) =>
+    [...review.fields, ...review.remitFields].find((f) => f.key === key)?.label
+    ?? (key === 'vendor.name' ? 'Vendor name' : key === 'vendor.email' ? 'Email' : key === 'lineItems' ? 'Line items' : key);
   // Fields an unanswered question named, and who asked. This is the payoff of
   // mapping the question: the person asked sees WHERE to look instead of
   // reading a sentence and hunting the form.
@@ -205,6 +228,7 @@ function ReviewScreen(props: {
       setActiveResolution({ flag: flagKind, action });
       setResolutionValue('');
       setAskOf('');
+      setAskFields(null);
       return;
     }
     // Prefill the name being claimed; it is almost always the right answer and
@@ -231,6 +255,7 @@ function ReviewScreen(props: {
           askedOfUserId: askOf,
           question: resolutionValue.trim(),
           aboutFlag: activeResolution.flag,
+          highlightFields: askFields,
         });
         toast.success('Asked. The bill waits on their answer rather than moving on.', 'Question sent');
       } else if (action === 'not_ours') {
@@ -626,13 +651,48 @@ function ReviewScreen(props: {
                               style={{ flex: 1, minWidth: 0, height: 32 }}
                             />
                             <button type="button" className="btn btn-primary btn-sm" style={{ flex: 'none' }}
-                              disabled={resolving || !ready} onClick={() => void runResolution()}>
-                              {resolving ? 'Saving…' : asking ? 'Ask' : ask!.cta}
+                              disabled={resolving || !ready || (asking && suggesting)}
+                              onClick={() => {
+                                // Two steps on purpose: suggest, then confirm.
+                                // The asker sees exactly what the other person
+                                // will be pointed at before it is sent.
+                                if (asking && askFields === null) { void suggestFields(resolutionValue); return; }
+                                void runResolution();
+                              }}>
+                              {resolving ? 'Saving…'
+                                : asking && suggesting ? 'Reading…'
+                                : asking && askFields === null ? 'Next'
+                                : asking ? 'Ask' : ask!.cta}
                             </button>
                           </span>
                         )}
+                        {asking && askFields !== null ? (
+                          <span style={{ display: 'block', marginTop: 10 }}>
+                            <strong style={{ display: 'block' }}>
+                              {askFields.length > 0
+                                ? 'These are the fields they will be asked to fill — right?'
+                                : 'This does not look like it is about a specific field.'}
+                            </strong>
+                            <span style={{ display: 'block', marginTop: 2, opacity: 0.85 }}>
+                              {askFields.length > 0
+                                ? 'They will be highlighted on their screen. Untick anything that does not belong.'
+                                : 'It will be sent as a plain question, with nothing highlighted.'}
+                            </span>
+                            {askFields.length > 0 ? (
+                              <span style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
+                                {askFields.map((key) => (
+                                  <label key={key} style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+                                    <input type="checkbox" checked
+                                      onChange={() => setAskFields(askFields.filter((k) => k !== key))} />
+                                    {fieldLabel(key)}
+                                  </label>
+                                ))}
+                              </span>
+                            ) : null}
+                          </span>
+                        ) : null}
                         <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} disabled={resolving}
-                          onClick={() => { setActiveResolution(null); setResolutionValue(''); setAskOf(''); }}>
+                          onClick={() => { setActiveResolution(null); setResolutionValue(''); setAskOf(''); setAskFields(null); }}>
                           Cancel
                         </button>
                       </span>

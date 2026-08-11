@@ -1242,3 +1242,50 @@ test('"I don\'t know" is a reply, not a resolution', async () => {
   assert.equal(q.stillOpen, true, 'it comes back to the asker as unresolved, not settled');
   assert.equal(q.answer, "I don't know man, it's all you.", 'the reply is still kept — it tells them who to ask next');
 });
+
+test('the asker\'s confirmed fields are what get highlighted, not the suggestion', async () => {
+  const owner = await register('cf-owner');
+  const org = await post('/organizations', { organizationName: 'CF Org' }, owner.token);
+  const orgId = org.organizationId as string;
+  const helper = await register('cf-helper');
+  await prisma.organizationMembership.create({
+    data: { organizationId: orgId, userId: helper.userId, role: 'admin', status: 'active' },
+  });
+  const bill = await uploadAndConfirm(orgId, owner.token, {
+    vendor: 'CF Vendor', amount: 410, invoiceNo: 'CF-1', billTo: 'Halcyon Labs, Inc.',
+  });
+
+  // The asker unticked everything except Street. That decision must win over
+  // whatever the model proposed — a suggestion the human edited and a
+  // suggestion nobody saw are not the same thing.
+  const asked = await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, {
+    askedOfUserId: helper.userId,
+    question: 'Can you confirm the vendor details?',
+    highlightFields: ['remitTo.street'],
+  }, owner.token);
+
+  const stored = await prisma.billQuestion.findUniqueOrThrow({ where: { billQuestionId: asked.billQuestionId } });
+  assert.deepEqual(stored.highlightFields, ['remitTo.street']);
+});
+
+test('a field the review screen cannot render is never highlighted', async () => {
+  // The closed vocabulary holds even when the list comes from a client rather
+  // than the model — otherwise the guarantee is only as good as the caller.
+  const owner = await register('cf2-owner');
+  const org = await post('/organizations', { organizationName: 'CF Two' }, owner.token);
+  const orgId = org.organizationId as string;
+  const helper = await register('cf2-helper');
+  await prisma.organizationMembership.create({
+    data: { organizationId: orgId, userId: helper.userId, role: 'admin', status: 'active' },
+  });
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'V', amount: 90, invoiceNo: 'CF2-1', billTo: 'CF Two' });
+
+  const asked = await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, {
+    askedOfUserId: helper.userId,
+    question: 'check this',
+    highlightFields: ['remitTo.city', 'totally.made.up', 'DROP TABLE'],
+  }, owner.token);
+
+  const stored = await prisma.billQuestion.findUniqueOrThrow({ where: { billQuestionId: asked.billQuestionId } });
+  assert.deepEqual(stored.highlightFields, ['remitTo.city'], 'invented keys are dropped, not stored');
+});

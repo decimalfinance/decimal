@@ -166,7 +166,20 @@ const askSchema = z.object({
   askedOfUserId: z.string().uuid(),
   question: z.string().trim().min(3).max(500),
   aboutFlag: z.string().trim().max(60).nullable().optional(),
+  // What the asker confirmed they want filled — the suggestion, as edited.
+  highlightFields: z.array(z.string()).max(20).nullable().optional(),
 });
+
+// What fields does this question look like it is about? A SUGGESTION, shown to
+// the asker before anything is sent — no side effects, nothing recorded. The
+// model proposes; the person asking decides.
+billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/ask/suggest-fields', asyncRoute(async (req, res) => {
+  const { organizationId } = billParamsSchema.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  const input = z.object({ question: z.string().trim().min(3).max(500) }).parse(req.body);
+  const { fieldsForQuestion } = await import('../payments/question-fields.js');
+  res.json({ fields: await fieldsForQuestion(input.question) });
+}));
 
 billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/ask', asyncRoute(async (req, res) => {
   const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
@@ -179,6 +192,7 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/ask', asy
     askedOfUserId: input.askedOfUserId,
     question: input.question,
     aboutFlag: input.aboutFlag ?? null,
+    highlightFields: input.highlightFields ?? null,
   });
   res.status(201).json({ billQuestionId: asked.billQuestionId, review: await getBillReview(organizationId, paymentOrderId, req.auth!.userId) });
 }));
