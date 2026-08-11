@@ -956,3 +956,42 @@ async function get(path: string, token: string) {
   assert.equal(res.status, 200, `GET ${path} → ${res.status}: ${text}`);
   return JSON.parse(text);
 }
+
+// --- a flagged bill must be actionable before anyone confirms it -------------
+//
+// The whole reason bills now enter the engine at intake. A reviewer who sees
+// something wrong needs somewhere to go other than "approve it" or "bin it" —
+// and the moment they need that is BEFORE confirming, which is exactly when
+// the bill used to have no task at all.
+
+test('a bill has an owner and an open task from the moment it is ingested', async () => {
+  const owner = await register('ask-owner');
+  const org = await post('/organizations', { organizationName: 'Ask Co' }, owner.token);
+  const orgId = org.organizationId as string;
+
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'Ask Vendor', amount: 900, invoiceNo: 'ASK-1', billTo: 'Ask Co' });
+  // Deliberately NOT confirmed — this is the pre-confirm state.
+
+  const detail = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
+  assert.ok(detail.approval, 'an ingested bill is already in the engine, not waiting for confirm');
+  assert.ok(detail.viewer.openTaskId, 'and somebody holds a task on it');
+});
+
+test('a reviewer can ask a question on a bill nobody has confirmed yet', async () => {
+  const owner = await register('ask2-owner');
+  const org = await post('/organizations', { organizationName: 'Ask Two' }, owner.token);
+  const orgId = org.organizationId as string;
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'Ask2 Vendor', amount: 700, invoiceNo: 'ASK-2', billTo: 'Ask Two' });
+
+  const before = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
+  const taskId = before.viewer.openTaskId as string;
+  const me = before.viewer.personId as string;
+
+  await post(`/organizations/${orgId}/approvals/tasks/${taskId}/command`, {
+    command: { kind: 'request_info', question: 'Is this bill actually ours?', from: me },
+    idempotencyKey: crypto.randomUUID(),
+  }, owner.token);
+
+  const after = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
+  assert.equal(after.approval.macroState, 'returned_for_info', 'the bill parks on the question rather than dying');
+});
