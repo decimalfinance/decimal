@@ -6,7 +6,7 @@ import { isAdminRole } from '../auth/organization-access.js';
 import { asyncRoute } from '../infra/route-helpers.js';
 import { forbidden } from '../infra/api-errors.js';
 import { prisma } from '../infra/prisma.js';
-import { getBillsWorkbench, getBillReview, getBillDetail, getApprovalsInbox, confirmBillReview, markNotABill, updateBillFacts, overrideDuplicateFlag, addOrganizationTradingName, listAskCandidates, askAboutBill, sendApprovedBillBackToReview } from '../payments/bills.js';
+import { getBillsWorkbench, getBillReview, getBillDetail, getApprovalsInbox, confirmBillReview, markNotABill, updateBillFacts, overrideDuplicateFlag, addOrganizationTradingName, listAskCandidates, askAboutBill, answerBillQuestion, sendApprovedBillBackToReview } from '../payments/bills.js';
 
 export const billsRouter = Router();
 
@@ -25,7 +25,7 @@ billsRouter.get('/organizations/:organizationId/bills/workbench', asyncRoute(asy
 billsRouter.get('/organizations/:organizationId/bills/:paymentOrderId/review', asyncRoute(async (req, res) => {
   const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
-  const review = await getBillReview(organizationId, paymentOrderId);
+  const review = await getBillReview(organizationId, paymentOrderId, req.auth!.userId);
   if (!review) {
     res.status(404).json({ error: 'Bill not found' });
     return;
@@ -144,7 +144,7 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/this-is-u
       actorName: user.displayName,
       fromPaymentOrderId: paymentOrderId,
     });
-    res.json({ ...result, review: await getBillReview(organizationId, paymentOrderId) });
+    res.json({ ...result, review: await getBillReview(organizationId, paymentOrderId, req.auth!.userId) });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not record that name.';
     if (/owner or admin/.test(message)) throw forbidden(message);
@@ -180,7 +180,32 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/ask', asy
     question: input.question,
     aboutFlag: input.aboutFlag ?? null,
   });
-  res.status(201).json({ billQuestionId: asked.billQuestionId, review: await getBillReview(organizationId, paymentOrderId) });
+  res.status(201).json({ billQuestionId: asked.billQuestionId, review: await getBillReview(organizationId, paymentOrderId, req.auth!.userId) });
+}));
+
+// Answer a question someone asked you about a bill. Visibility is enough to
+// answer, for the same reason it is enough to ask; the function itself refuses
+// anyone who was not the person asked.
+const answerSchema = z.object({ answer: z.string().trim().min(1).max(1000) });
+
+billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/questions/:billQuestionId/answer', asyncRoute(async (req, res) => {
+  const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
+  const billQuestionId = z.string().uuid().parse(req.params.billQuestionId);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  const input = answerSchema.parse(req.body);
+  try {
+    await answerBillQuestion({
+      organizationId,
+      billQuestionId,
+      answererUserId: req.auth!.userId,
+      answer: input.answer,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not answer.';
+    if (/person who was asked/.test(message)) throw forbidden(message);
+    throw error;
+  }
+  res.json(await getBillReview(organizationId, paymentOrderId, req.auth!.userId));
 }));
 
 // Send an approved-but-unpaid bill back to Review (the recovery path when a

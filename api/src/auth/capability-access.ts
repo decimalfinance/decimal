@@ -36,6 +36,9 @@ const RULES: Array<{ pattern: RegExp; view: Need; act: Need }> = [
   // to hold edit rights, are the ones who cannot raise it. The reply itself is
   // still governed by the engine.
   { pattern: /^\/bills\/[0-9a-f-]{36}\/(ask|ask-candidates)$/, view: 'bills.view', act: null },
+  // Answering is the other half of asking. If someone can be asked, they can
+  // reply — the function itself refuses anyone who was not the person asked.
+  { pattern: /^\/bills\/[0-9a-f-]{36}\/questions\/[0-9a-f-]{36}\/answer$/, view: 'bills.view', act: null },
   // Bills work surface.
   { pattern: /^\/(bills|invoices|invoice-documents)(\/|$)/, view: 'bills.view', act: 'bills.edit' },
   // The org's inbound invoice address is part of the bills surface: anyone who

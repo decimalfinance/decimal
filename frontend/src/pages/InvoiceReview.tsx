@@ -125,6 +125,25 @@ function ReviewScreen(props: {
   const [resolutionValue, setResolutionValue] = useState('');
   const [resolving, setResolving] = useState(false);
   const [askOf, setAskOf] = useState('');
+  const [answerFor, setAnswerFor] = useState<string | null>(null);
+  const [answerText, setAnswerText] = useState('');
+  const [answering, setAnswering] = useState(false);
+
+  const sendAnswer = async (billQuestionId: string) => {
+    if (answerText.trim().length < 1) return;
+    setAnswering(true);
+    try {
+      await billsApi.answerQuestion(organizationId, review.paymentOrderId, billQuestionId, { answer: answerText.trim() });
+      await queryClient.invalidateQueries({ queryKey: ['bill-review', organizationId, review.paymentOrderId] });
+      toast.success('Answered — the bill moves on.', 'Thanks');
+      setAnswerFor(null);
+      setAnswerText('');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Try again.', 'Could not send that');
+    } finally {
+      setAnswering(false);
+    }
+  };
   const askCandidates = useQuery({
     queryKey: ['ask-candidates', organizationId, review.paymentOrderId],
     queryFn: () => billsApi.askCandidates(organizationId, review.paymentOrderId),
@@ -471,6 +490,46 @@ function ReviewScreen(props: {
                 ) : null}
               </div>
             ) : null}
+
+            {/* Questions asked about this bill. Above the flags on purpose: if
+                someone is waiting on YOU, that is the most actionable thing on
+                the page, and a question nobody surfaces is worse than none. */}
+            {review.questions.map((q) => (
+              <div key={q.billQuestionId} className={`callout ${q.youWereAsked ? 'callout-warning' : 'callout-info'}`}>
+                <Ico.shield w={16} />
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <strong style={{ display: 'block' }}>
+                    {q.youWereAsked
+                      ? `${q.askedByName} asked you:`
+                      : q.answeredAt
+                        ? `${q.askedOfName} answered:`
+                        : `Waiting on ${q.askedOfName}:`}
+                  </strong>
+                  <span style={{ display: 'block', marginTop: 2 }}>“{q.question}”</span>
+                  {q.answer ? <span style={{ display: 'block', marginTop: 4 }}>— {q.answer}</span> : null}
+
+                  {q.youWereAsked && answerFor === q.billQuestionId ? (
+                    <span style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                      <input className="input" autoFocus value={answerText} placeholder="Your answer"
+                        onChange={(e) => setAnswerText(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') void sendAnswer(q.billQuestionId); }}
+                        style={{ flex: 1, minWidth: 0, height: 32 }} />
+                      <button type="button" className="btn btn-primary btn-sm" style={{ flex: 'none' }}
+                        disabled={answering || answerText.trim().length < 1}
+                        onClick={() => void sendAnswer(q.billQuestionId)}>
+                        {answering ? 'Sending…' : 'Answer'}
+                      </button>
+                    </span>
+                  ) : null}
+                </span>
+                {q.youWereAsked && answerFor !== q.billQuestionId ? (
+                  <button type="button" className="btn btn-secondary btn-sm" style={{ flex: 'none' }}
+                    onClick={() => { setAnswerFor(q.billQuestionId); setAnswerText(''); }}>
+                    Answer
+                  </button>
+                ) : null}
+              </div>
+            ))}
 
             {/* A flag states what is wrong AND what can be done about it. The
                 rule the backend enforces: every blocking flag offers at least

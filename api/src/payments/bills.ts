@@ -612,7 +612,7 @@ function buildChartOptions(chart: Awaited<ReturnType<typeof listChartOfAccounts>
     }));
 }
 
-export async function getBillReview(organizationId: string, paymentOrderId: string) {
+export async function getBillReview(organizationId: string, paymentOrderId: string, viewerUserId?: string) {
   const order = await prisma.paymentOrder.findFirst({
     where: { organizationId, paymentOrderId },
     include: {
@@ -858,7 +858,16 @@ export async function getBillReview(organizationId: string, paymentOrderId: stri
     paymentOrderId: order.paymentOrderId,
     // Named so a resolution can ask a real question — "is Halcyon Labs a name
     // Decimal Labs trades under?" rather than "your organization".
-    organizationName: flagOrg.organizationName,
+    organizationName: displayOrgName(flagOrg.organizationName),
+    // The thread, for BOTH people. A recorded question nothing reads back is
+    // worse than none: the asker believes they raised something and the person
+    // asked never learns they were asked.
+    questions: (await listBillQuestions(organizationId, order.paymentOrderId)).map((q) => ({
+      ...q,
+      // Whose move it is, decided here rather than by the client comparing ids.
+      youWereAsked: Boolean(viewerUserId && q.askedOfUserId === viewerUserId && !q.answeredAt),
+      youAsked: Boolean(viewerUserId && q.askedByUserId === viewerUserId),
+    })),
     state: order.state,
     readOnly: order.state !== 'needs_review',
     ...billSource(order.metadataJson, order.createdByUser?.displayName ?? null),
@@ -1297,6 +1306,93 @@ export async function addOrganizationTradingName(args: {
  * Nothing suggests yet; this only reports what happened, so a suggestion can
  * later be built on evidence instead of a guess.
  */
+/**
+ * Questions asked about a bill, newest first, with both people named.
+ *
+ * Recorded questions that nothing reads back are worse than no questions: the
+ * asker believes they have raised something and the person asked never learns
+ * they were asked. This is what puts the thread on the bill for both of them.
+ */
+export async function listBillQuestions(organizationId: string, paymentOrderId: string) {
+  const rows = await prisma.billQuestion.findMany({
+    where: { organizationId, paymentOrderId },
+    orderBy: { createdAt: 'desc' },
+    take: 50,
+  });
+  if (rows.length === 0) return [];
+  const userIds = [...new Set(rows.flatMap((r) => [r.askedByUserId, r.askedOfUserId]))];
+  const users = await prisma.user.findMany({
+    where: { userId: { in: userIds } },
+    select: { userId: true, displayName: true },
+  });
+  const nameOf = new Map(users.map((u) => [u.userId, u.displayName]));
+  return rows.map((r) => ({
+    billQuestionId: r.billQuestionId,
+    question: r.question,
+    aboutFlag: r.aboutFlag,
+    askedByUserId: r.askedByUserId,
+    askedByName: nameOf.get(r.askedByUserId) ?? 'Someone',
+    askedOfUserId: r.askedOfUserId,
+    askedOfName: nameOf.get(r.askedOfUserId) ?? 'Someone',
+    answer: r.answer,
+    answeredAt: r.answeredAt?.toISOString() ?? null,
+    askedAt: r.createdAt.toISOString(),
+  }));
+}
+
+/**
+ * Answer a question someone asked you about a bill.
+ *
+ * Only the person asked may answer — an answer from anyone else is not the
+ * thing the asker is waiting on. Un-parks the engine task when one is attached,
+ * so the bill resumes instead of sitting answered-but-still-waiting.
+ */
+export async function answerBillQuestion(args: {
+  organizationId: string;
+  billQuestionId: string;
+  answererUserId: string;
+  answer: string;
+}) {
+  const answer = args.answer.trim();
+  if (answer.length < 1) throw new Error('Write an answer.');
+  const question = await prisma.billQuestion.findFirst({
+    where: { billQuestionId: args.billQuestionId, organizationId: args.organizationId },
+  });
+  if (!question) throw new Error('Question not found');
+  if (question.askedOfUserId !== args.answererUserId) {
+    throw new Error('Only the person who was asked can answer this.');
+  }
+  if (question.answeredAt) throw new Error('That question has already been answered.');
+
+  if (question.taskId) {
+    try {
+      const { executeCommand } = await import('../approvals/lifecycle.js');
+      const person = await prisma.$queryRaw<{ id: string }[]>`
+        SELECT id FROM approval.people
+        WHERE organization_id = ${args.organizationId}::uuid AND user_id = ${args.answererUserId}::uuid LIMIT 1`;
+      if (person[0]) {
+        await executeCommand({
+          taskId: question.taskId,
+          actorId: person[0].id,
+          idempotencyKey: `answer:${args.billQuestionId}`,
+          command: { kind: 'provide_info', answer } as never,
+        });
+      }
+    } catch (error) {
+      logger.warn('bill_answer.resume_failed', {
+        organizationId: args.organizationId,
+        billQuestionId: args.billQuestionId,
+        ...(error instanceof Error ? { message: error.message } : {}),
+      });
+    }
+  }
+
+  return prisma.billQuestion.update({
+    where: { billQuestionId: args.billQuestionId },
+    data: { answer, answeredAt: new Date() },
+  });
+}
+
 export async function listAskCandidates(organizationId: string, viewerUserId: string) {
   const members = await prisma.organizationMembership.findMany({
     where: { organizationId, status: 'active', userId: { not: viewerUserId } },

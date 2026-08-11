@@ -1177,3 +1177,40 @@ test('ask candidates put whoever actually answers first', async () => {
   assert.equal(candidates[0].userId, helpful.userId, 'being asked a lot is not the same as being useful');
   assert.equal(candidates[0].answered, 1);
 });
+
+test('a question is visible to both sides, and only the person asked can answer', async () => {
+  const owner = await register('q-owner');
+  const org = await post('/organizations', { organizationName: 'Q Org' }, owner.token);
+  const orgId = org.organizationId as string;
+  const helper = await register('q-helper');
+  await prisma.organizationMembership.create({
+    data: { organizationId: orgId, userId: helper.userId, role: 'admin', status: 'active' },
+  });
+  const bill = await uploadAndConfirm(orgId, owner.token, {
+    vendor: 'Q Vendor', amount: 300, invoiceNo: 'Q-1', billTo: 'Halcyon Labs, Inc.',
+  });
+
+  const asked = await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, {
+    askedOfUserId: helper.userId, question: 'Can you confirm the vendor details?', aboutFlag: 'addressed_elsewhere',
+  }, owner.token);
+
+  // The asker sees it as outstanding; the person asked sees it as theirs.
+  const asAsker = await get(`/organizations/${orgId}/bills/${bill.billId}/review`, owner.token);
+  assert.equal(asAsker.questions.length, 1, 'the asker can see what they asked');
+  assert.equal(asAsker.questions[0].youAsked, true);
+  assert.equal(asAsker.questions[0].youWereAsked, false);
+
+  const asHelper = await get(`/organizations/${orgId}/bills/${bill.billId}/review`, helper.token);
+  assert.equal(asHelper.questions[0].youWereAsked, true, 'the person asked is told it is theirs');
+
+  // The asker cannot answer on their behalf — that is not what anyone is waiting for.
+  await assert.rejects(
+    () => post(`/organizations/${orgId}/bills/${bill.billId}/questions/${asked.billQuestionId}/answer`, { answer: 'sure' }, owner.token),
+    /403/,
+  );
+
+  const after = await post(`/organizations/${orgId}/bills/${bill.billId}/questions/${asked.billQuestionId}/answer`,
+    { answer: 'Yes, checked against their portal.' }, helper.token);
+  assert.equal(after.questions[0].answer, 'Yes, checked against their portal.');
+  assert.ok(after.questions[0].answeredAt, 'and it is marked answered');
+});

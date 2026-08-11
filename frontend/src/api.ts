@@ -1474,6 +1474,13 @@ export interface BillReview {
   totalUsd: number;
   paymentBlock: { method: string | null; bankName: string | null; accountLast4: string | null; sendToLabel: string; sourceTreasuryWalletId: string | null; matchesVerified: boolean };
   organizationName: string;
+  questions: Array<{
+    billQuestionId: string; question: string; aboutFlag: string | null;
+    askedByUserId: string; askedByName: string;
+    askedOfUserId: string; askedOfName: string;
+    answer: string | null; answeredAt: string | null; askedAt: string;
+    youWereAsked: boolean; youAsked: boolean;
+  }>;
   flags: Array<{
     kind: string;
     severity: 'danger' | 'warning' | 'info';
@@ -1561,6 +1568,12 @@ export const billsApi = {
       method: 'POST',
       body: JSON.stringify(body),
     });
+  },
+  answerQuestion(organizationId: string, paymentOrderId: string, billQuestionId: string, body: { answer: string }) {
+    return request<unknown>(
+      `/organizations/${organizationId}/bills/${paymentOrderId}/questions/${billQuestionId}/answer`,
+      { method: 'POST', body: JSON.stringify(body) },
+    );
   },
   askCandidates(organizationId: string, paymentOrderId: string) {
     return request<{ candidates: Array<{ userId: string; name: string; email: string; role: string; asked: number; answered: number }> }>(
