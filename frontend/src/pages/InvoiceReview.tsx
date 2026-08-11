@@ -117,23 +117,67 @@ function ReviewScreen(props: {
   const readOnly = review.readOnly;
   const queryClient = useQueryClient();
 
-  // Duplicate-flag override: admin asserts "genuinely new", with a logged reason.
-  const [dupReasonOpen, setDupReasonOpen] = useState(false);
-  const [dupReason, setDupReason] = useState('');
-  const [overridingDuplicate, setOverridingDuplicate] = useState(false);
-  const clearDuplicate = async () => {
-    if (dupReason.trim().length < 3) return;
-    setOverridingDuplicate(true);
+  // Flag resolutions. One mechanism for every flag rather than a bespoke path
+  // per kind — the backend says which are available and who may take them, so
+  // this only has to run the one the person chose.
+  type ResolutionAction = 'this_is_us' | 'not_ours' | 'ask_someone' | 'clear_duplicate' | 'fix_fields' | 'raise_ceiling' | 'release_vendor';
+  const [activeResolution, setActiveResolution] = useState<{ flag: string; action: ResolutionAction } | null>(null);
+  const [resolutionValue, setResolutionValue] = useState('');
+  const [resolving, setResolving] = useState(false);
+
+  const resolutionPrompt = (action: ResolutionAction) =>
+    action === 'this_is_us' ? 'Which name does your organization trade under?'
+      : action === 'not_ours' ? 'Why is this not yours to pay? Goes on the record.'
+      : action === 'clear_duplicate' ? 'Why is it not a duplicate? Goes on the record.'
+      : 'Add a note — it goes on the record.';
+
+  function startResolution(flagKind: string, action: ResolutionAction) {
+    // Actions that only point somewhere else need no input and no ceremony.
+    if (action === 'fix_fields') {
+      toast.info('Correct the fields below, then confirm the bill.', 'Check the details');
+      return;
+    }
+    if (action === 'raise_ceiling' || action === 'release_vendor') {
+      toast.info('This is changed where it was set, not on the bill — Policies for a ceiling, the vendor for a hold.', 'Needs an admin');
+      return;
+    }
+    if (action === 'ask_someone') {
+      toast.info('Open this bill’s detail view to ask a colleague — the bill waits on their answer.', 'Ask someone');
+      return;
+    }
+    // Prefill the name being claimed; it is almost always the right answer and
+    // retyping a company name off the screen is a needless chance to fat-finger it.
+    const flag = review.flags.find((f) => f.kind === flagKind);
+    const claimed = action === 'this_is_us' ? /addressed to "([^"]+)"/.exec(flag?.message ?? '')?.[1] ?? '' : '';
+    setActiveResolution({ flag: flagKind, action });
+    setResolutionValue(claimed);
+  }
+
+  const runResolution = async () => {
+    if (!activeResolution || resolutionValue.trim().length < 3) return;
+    const { action } = activeResolution;
+    setResolving(true);
     try {
-      await billsApi.overrideDuplicate(organizationId, review.paymentOrderId, dupReason.trim());
+      if (action === 'this_is_us') {
+        await billsApi.thisIsUs(organizationId, review.paymentOrderId, { name: resolutionValue.trim() });
+        toast.success('Recorded — bills addressed to that name will not be flagged again.', 'This is us');
+      } else if (action === 'clear_duplicate') {
+        await billsApi.overrideDuplicate(organizationId, review.paymentOrderId, resolutionValue.trim());
+        toast.success('Cleared — your reason is on the bill’s record.', 'Duplicate flag');
+      } else if (action === 'not_ours') {
+        await billsApi.notABill(organizationId, review.paymentOrderId, { reason: 'not_ours', note: resolutionValue.trim() });
+        toast.success('Closed as addressed to another company.', 'Not ours');
+        onDone();
+        return;
+      }
       await queryClient.invalidateQueries({ queryKey: ['bill-review', organizationId, review.paymentOrderId] });
-      toast.success('Cleared — your reason is on the bill’s record.', 'Duplicate flag');
-      setDupReasonOpen(false);
+      setActiveResolution(null);
+      setResolutionValue('');
       setConfirmError(null);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Try again.', 'Could not clear the flag');
+      toast.error(e instanceof Error ? e.message : 'Try again.', 'Could not resolve that');
     } finally {
-      setOverridingDuplicate(false);
+      setResolving(false);
     }
   };
 
@@ -370,28 +414,31 @@ function ReviewScreen(props: {
                   {/duplicate/i.test(confirmError) && !canOverrideDuplicate
                     ? ' Change the invoice number if this is a distinct bill, or ask an admin.'
                     : null}
-                  {/duplicate/i.test(confirmError) && canOverrideDuplicate && dupReasonOpen ? (
+                  {/duplicate/i.test(confirmError) && canOverrideDuplicate && activeResolution?.action === 'clear_duplicate' ? (
                     <span style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                      <input className="input" value={dupReason} autoFocus placeholder="Why is it not a duplicate? Goes on the record."
-                        onChange={(e) => setDupReason(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') void clearDuplicate(); }}
+                      <input className="input" value={resolutionValue} autoFocus placeholder="Why is it not a duplicate? Goes on the record."
+                        onChange={(e) => setResolutionValue(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') void runResolution(); }}
                         style={{ flex: 1, minWidth: 0, height: 32 }} />
                       <button type="button" className="btn btn-primary btn-sm" style={{ flex: 'none' }}
-                        disabled={overridingDuplicate || dupReason.trim().length < 3} onClick={() => void clearDuplicate()}>
-                        {overridingDuplicate ? 'Clearing…' : 'Clear flag'}
+                        disabled={resolving || resolutionValue.trim().length < 3} onClick={() => void runResolution()}>
+                        {resolving ? 'Clearing…' : 'Clear flag'}
                       </button>
                     </span>
                   ) : null}
                 </span>
-                {/duplicate/i.test(confirmError) && canOverrideDuplicate && !dupReasonOpen ? (
-                  <button type="button" className="btn btn-secondary btn-sm" style={{ flex: 'none' }} onClick={() => setDupReasonOpen(true)}>
+                {/duplicate/i.test(confirmError) && canOverrideDuplicate && activeResolution?.action !== 'clear_duplicate' ? (
+                  <button type="button" className="btn btn-secondary btn-sm" style={{ flex: 'none' }}
+                    onClick={() => startResolution('possible_duplicate', 'clear_duplicate')}>
                     Not a duplicate
                   </button>
                 ) : null}
               </div>
             ) : null}
 
-            {/* Flags outrank ambers */}
+            {/* A flag states what is wrong AND what can be done about it. The
+                rule the backend enforces: every blocking flag offers at least
+                one way out, so this never renders a dead end. */}
             {review.flags.map((flag) => (
               <div
                 key={flag.kind}
@@ -400,23 +447,56 @@ function ReviewScreen(props: {
                 <Ico.shield w={16} />
                 <span style={{ flex: 1, minWidth: 0 }}>
                   {flag.message}
-                  {flag.kind === 'possible_duplicate' && flag.blocking && canOverrideDuplicate && dupReasonOpen ? (
+                  {activeResolution?.flag === flag.kind ? (
                     <span style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                      <input className="input" value={dupReason} autoFocus placeholder="Why is it not a duplicate? Goes on the record."
-                        onChange={(e) => setDupReason(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') void clearDuplicate(); }}
-                        style={{ flex: 1, minWidth: 0, height: 32 }} />
-                      <button type="button" className="btn btn-primary btn-sm" style={{ flex: 'none' }}
-                        disabled={overridingDuplicate || dupReason.trim().length < 3} onClick={() => void clearDuplicate()}>
-                        {overridingDuplicate ? 'Clearing…' : 'Clear flag'}
+                      <input
+                        className="input"
+                        autoFocus
+                        value={resolutionValue}
+                        placeholder={resolutionPrompt(activeResolution.action)}
+                        onChange={(e) => setResolutionValue(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') void runResolution(); }}
+                        style={{ flex: 1, minWidth: 0, height: 32 }}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        style={{ flex: 'none' }}
+                        disabled={resolving || resolutionValue.trim().length < 3}
+                        onClick={() => void runResolution()}
+                      >
+                        {resolving ? 'Saving…' : 'Confirm'}
+                      </button>
+                      <button type="button" className="btn btn-ghost btn-sm" style={{ flex: 'none' }} disabled={resolving}
+                        onClick={() => { setActiveResolution(null); setResolutionValue(''); }}>
+                        Cancel
                       </button>
                     </span>
                   ) : null}
                 </span>
-                {flag.kind === 'possible_duplicate' && flag.blocking && canOverrideDuplicate && !dupReasonOpen ? (
-                  <button type="button" className="btn btn-secondary btn-sm" style={{ flex: 'none' }} onClick={() => setDupReasonOpen(true)}>
-                    Not a duplicate
-                  </button>
+                {activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
+                  <span style={{ display: 'flex', gap: 6, flex: 'none' }}>
+                    {flag.resolutions.map((r) => {
+                      // An admin-only action stays visible to everyone, disabled,
+                      // with the reason in the tooltip. Hiding it would leave a
+                      // reviewer staring at a blocked bill wondering what the
+                      // route forward even is.
+                      const blocked = r.requires === 'admin' && !canOverrideDuplicate;
+                      return (
+                        <button
+                          key={r.action}
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          style={{ flex: 'none' }}
+                          disabled={blocked}
+                          title={blocked ? 'Only an owner or admin can do this — ask one to look, or ask a question on this bill.' : r.detail}
+                          onClick={() => startResolution(flag.kind, r.action)}
+                        >
+                          {r.label}
+                        </button>
+                      );
+                    })}
+                  </span>
                 ) : null}
               </div>
             ))}
@@ -653,11 +733,16 @@ function ReviewScreen(props: {
       {!readOnly ? (
         <div className="commit-bar">
           <button type="button" className="btn btn-ghost" onClick={() => setNotABillOpen(true)}>
-            This isn't a bill
+            {/* It usually IS a bill — just not one to pay. The old label made
+                you assert something false to get unstuck. */}
+            Close this bill
           </button>
           <span className="cb-note">
+            {/* Name the flag and point at its own buttons. The old copy —
+                "resolve the flagged issue above" — was a promise nothing on the
+                page could keep, because resolutions did not exist yet. */}
             {blockingFlags.length > 0
-              ? 'Resolve the flagged issue above before sending.'
+              ? `${blockingFlags[0]!.short} — use the buttons on that flag to settle it.`
               : tier1Gap ?? 'Recorded with exactly what you see on this screen.'}
           </span>
           <span className="commit-spacer" />

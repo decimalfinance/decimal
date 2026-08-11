@@ -1473,7 +1473,20 @@ export interface BillReview {
   taxAmount: number | null;
   totalUsd: number;
   paymentBlock: { method: string | null; bankName: string | null; accountLast4: string | null; sendToLabel: string; sourceTreasuryWalletId: string | null; matchesVerified: boolean };
-  flags: Array<{ kind: string; severity: 'danger' | 'warning' | 'info'; message: string; blocking: boolean }>;
+  flags: Array<{
+    kind: string;
+    severity: 'danger' | 'warning' | 'info';
+    message: string;
+    blocking: boolean;
+    short: string;
+    /** What can be done about it — rendered on the flag, never in a footer. */
+    resolutions: Array<{
+      action: 'this_is_us' | 'not_ours' | 'ask_someone' | 'clear_duplicate' | 'fix_fields' | 'raise_ceiling' | 'release_vendor';
+      label: string;
+      requires: 'anyone' | 'admin';
+      detail: string;
+    }>;
+  }>;
   verification: { confirmedAt: string | null; confirmedByUserId: string | null; noteForApprovers: string | null } | null;
 }
 
@@ -1547,6 +1560,12 @@ export const billsApi = {
       method: 'POST',
       body: JSON.stringify(body),
     });
+  },
+  thisIsUs(organizationId: string, paymentOrderId: string, body: { name: string }) {
+    return request<{ added: boolean; tradingNames: string[]; review: unknown }>(
+      `/organizations/${organizationId}/bills/${paymentOrderId}/this-is-us`,
+      { method: 'POST', body: JSON.stringify(body) },
+    );
   },
   notABill(organizationId: string, paymentOrderId: string, body: { reason: 'duplicate' | 'statement' | 'not_ours' | 'unreadable' | 'other'; note?: string | null }) {
     return request<unknown>(`/organizations/${organizationId}/bills/${paymentOrderId}/not-a-bill`, {
