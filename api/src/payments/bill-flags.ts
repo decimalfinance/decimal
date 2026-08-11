@@ -277,13 +277,21 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
   // is loud, not obstructive.
   const weakened = facts.planAlerts.filter((a) => /quorum lowered|no approvers/i.test(a));
   if (weakened.length > 0) {
+    // Say the NUMBER, not the mechanism. The raw alerts are compiler output —
+    // "step 0 had no approvers after SoD/resolution" is true, unreadable, and
+    // useless to the person deciding whether to trust the signatures. What an
+    // operator needs is how many signed against how many the policy wanted. The
+    // internals stay in the event log, where anyone debugging routing will look.
+    const lowered = /quorum lowered (\d+) . (\d+)/.exec(weakened.join(' '));
     flags.push({
       kind: 'approval_weakened',
       severity: 'warning',
       blocking: false,
       short: 'Fewer approvers than your policy',
       resolutions: [],
-      message: `This bill routed with weaker approval than your policy asks for, because too few people were eligible to sign it — ${weakened.join('; ')}. Anyone counting signatures should know why there are fewer.`,
+      message: lowered
+        ? `Signed by ${lowered[2]} instead of the ${lowered[1]} your policy asks for — there weren't enough people eligible to sign this one.`
+        : `Fewer people signed this than your policy asks for — there weren't enough eligible approvers.`,
     });
   }
 

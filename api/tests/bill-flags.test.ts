@@ -192,7 +192,10 @@ test('a quorum the engine had to lower is surfaced, not swallowed', () => {
   });
   const flag = flags.find((f) => f.kind === 'approval_weakened');
   assert.ok(flag, 'a 2-of-N that became 1-of-N must be visible to whoever signs');
-  assert.match(flag.message, /2 → 1/);
+  // The numbers, in a sentence an operator can act on — not the compiler's
+  // "step 0 had no approvers after SoD/resolution", which is true and useless.
+  assert.match(flag.message, /Signed by 1 instead of the 2/);
+  assert.doesNotMatch(flag.message, /SoD|step \d|resolution/i, 'no internals leak into operator copy');
 });
 
 test('weakened approval warns but never blocks', () => {
