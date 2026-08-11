@@ -186,7 +186,12 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/ask', asy
 // Answer a question someone asked you about a bill. Visibility is enough to
 // answer, for the same reason it is enough to ask; the function itself refuses
 // anyone who was not the person asked.
-const answerSchema = z.object({ answer: z.string().trim().min(1).max(1000) });
+const answerSchema = z.object({
+  answer: z.string().trim().min(1).max(1000),
+  // The person answering says whether this resolves it. Inferring would be
+  // guessing at intent on something the asker is relying on.
+  outcome: z.enum(['answered', 'handed_back']).default('answered'),
+});
 
 billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/questions/:billQuestionId/answer', asyncRoute(async (req, res) => {
   const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
@@ -199,6 +204,7 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/questions
       billQuestionId,
       answererUserId: req.auth!.userId,
       answer: input.answer,
+      outcome: input.outcome,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not answer.';

@@ -130,7 +130,9 @@ function ReviewScreen(props: {
   // reading a sentence and hunting the form.
   const askedFields = new Map<string, { by: string; question: string }>();
   for (const q of review.questions) {
-    if (q.answeredAt) continue;
+    // A handed-back question is still open — the fields it named still want
+    // attention, just from someone else now.
+    if (!q.stillOpen) continue;
     for (const f of q.highlightFields) if (!askedFields.has(f)) askedFields.set(f, { by: q.askedByName, question: `${q.askedByName}: “${q.question}”` });
   }
 
@@ -138,13 +140,16 @@ function ReviewScreen(props: {
   const [answerText, setAnswerText] = useState('');
   const [answering, setAnswering] = useState(false);
 
-  const sendAnswer = async (billQuestionId: string) => {
+  const sendAnswer = async (billQuestionId: string, outcome: 'answered' | 'handed_back') => {
     if (answerText.trim().length < 1) return;
     setAnswering(true);
     try {
-      await billsApi.answerQuestion(organizationId, review.paymentOrderId, billQuestionId, { answer: answerText.trim() });
+      await billsApi.answerQuestion(organizationId, review.paymentOrderId, billQuestionId, { answer: answerText.trim(), outcome });
       await queryClient.invalidateQueries({ queryKey: ['bill-review', organizationId, review.paymentOrderId] });
-      toast.success('Answered — the bill moves on.', 'Thanks');
+      toast.success(
+        outcome === 'answered' ? 'Answered — the bill moves on.' : 'Sent back — they will see it is still open.',
+        outcome === 'answered' ? 'Thanks' : 'Handed back',
+      );
       setAnswerFor(null);
       setAnswerText('');
     } catch (e) {
@@ -507,26 +512,47 @@ function ReviewScreen(props: {
               <div key={q.billQuestionId} className={`callout ${q.youWereAsked ? 'callout-warning' : 'callout-info'}`}>
                 <Ico.shield w={16} />
                 <span style={{ flex: 1, minWidth: 0 }}>
+                  {/* A thread, in order: who asked what, then who said what
+                      back. A single blob made a hand-back look like a
+                      resolution. */}
                   <strong style={{ display: 'block' }}>
                     {q.youWereAsked
-                      ? `${q.askedByName} asked you:`
-                      : q.answeredAt
-                        ? `${q.askedOfName} answered:`
-                        : `Waiting on ${q.askedOfName}:`}
+                      ? `${q.askedByName} asked you`
+                      : q.outcome === 'answered'
+                        ? `${q.askedOfName} answered`
+                        : q.outcome === 'handed_back'
+                          ? `${q.askedOfName} couldn't answer — still open`
+                          : `Waiting on ${q.askedOfName}`}
                   </strong>
-                  <span style={{ display: 'block', marginTop: 2 }}>“{q.question}”</span>
-                  {q.answer ? <span style={{ display: 'block', marginTop: 4 }}>— {q.answer}</span> : null}
+                  <span style={{ display: 'block', marginTop: 4 }}>
+                    <strong>{q.askedByName}:</strong> “{q.question}”
+                  </span>
+                  {q.answer ? (
+                    <span style={{ display: 'block', marginTop: 2 }}>
+                      <strong>{q.askedOfName}:</strong> “{q.answer}”
+                    </span>
+                  ) : null}
 
                   {q.youWereAsked && answerFor === q.billQuestionId ? (
                     <span style={{ display: 'flex', gap: 8, marginTop: 8 }}>
                       <input className="input" autoFocus value={answerText} placeholder="Your answer"
                         onChange={(e) => setAnswerText(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') void sendAnswer(q.billQuestionId); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter') void sendAnswer(q.billQuestionId, 'answered'); }}
                         style={{ flex: 1, minWidth: 0, height: 32 }} />
+                      {/* Two outcomes, said plainly. Typing "I don't know" and
+                          pressing one button called Answer marked the question
+                          resolved when nothing had been resolved. */}
                       <button type="button" className="btn btn-primary btn-sm" style={{ flex: 'none' }}
                         disabled={answering || answerText.trim().length < 1}
-                        onClick={() => void sendAnswer(q.billQuestionId)}>
-                        {answering ? 'Sending…' : 'Answer'}
+                        title="Use this when you have checked or corrected what was asked."
+                        onClick={() => void sendAnswer(q.billQuestionId, 'answered')}>
+                        {answering ? 'Sending…' : 'This is answered'}
+                      </button>
+                      <button type="button" className="btn btn-secondary btn-sm" style={{ flex: 'none' }}
+                        disabled={answering || answerText.trim().length < 1}
+                        title="Your reply goes back but the question stays open for them."
+                        onClick={() => void sendAnswer(q.billQuestionId, 'handed_back')}>
+                        Can't answer
                       </button>
                     </span>
                   ) : null}

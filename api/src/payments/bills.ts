@@ -870,6 +870,9 @@ export async function getBillReview(organizationId: string, paymentOrderId: stri
       ...q,
       // Whose move it is, decided here rather than by the client comparing ids.
       youWereAsked: Boolean(viewerUserId && q.askedOfUserId === viewerUserId && !q.answeredAt),
+      // A handed-back question is still open work for the ASKER — it came back
+      // unresolved, so it must not look settled on their screen.
+      stillOpen: q.outcome !== 'answered',
       youAsked: Boolean(viewerUserId && q.askedByUserId === viewerUserId),
     })),
     state: order.state,
@@ -1340,6 +1343,7 @@ export async function listBillQuestions(organizationId: string, paymentOrderId: 
     askedOfUserId: r.askedOfUserId,
     askedOfName: nameOf.get(r.askedOfUserId) ?? 'Someone',
     answer: r.answer,
+    outcome: r.outcome as 'answered' | 'handed_back' | null,
     answeredAt: r.answeredAt?.toISOString() ?? null,
     askedAt: r.createdAt.toISOString(),
   }));
@@ -1357,6 +1361,16 @@ export async function answerBillQuestion(args: {
   billQuestionId: string;
   answererUserId: string;
   answer: string;
+  /**
+   * Did this actually resolve what was asked?
+   *
+   * 'answered' means the person confirmed or corrected what the asker wanted.
+   * 'handed_back' is a real and useful reply that does NOT resolve it — "I
+   * don't know", "ask procurement". Both are legitimate; conflating them is
+   * not. Treating a hand-back as an answer closes the asker's concern without
+   * touching it, which manufactures confidence nobody earned.
+   */
+  outcome: 'answered' | 'handed_back';
 }) {
   const answer = args.answer.trim();
   if (answer.length < 1) throw new Error('Write an answer.');
@@ -1369,7 +1383,10 @@ export async function answerBillQuestion(args: {
   }
   if (question.answeredAt) throw new Error('That question has already been answered.');
 
-  if (question.taskId) {
+  // Only a real answer un-parks the bill. A hand-back leaves it waiting,
+  // because nothing the asker wanted has happened yet — it just tells them who
+  // to ask next.
+  if (question.taskId && args.outcome === 'answered') {
     try {
       const { executeCommand } = await import('../approvals/lifecycle.js');
       const person = await prisma.$queryRaw<{ id: string }[]>`
@@ -1394,7 +1411,7 @@ export async function answerBillQuestion(args: {
 
   return prisma.billQuestion.update({
     where: { billQuestionId: args.billQuestionId },
-    data: { answer, answeredAt: new Date() },
+    data: { answer, answeredAt: new Date(), outcome: args.outcome },
   });
 }
 

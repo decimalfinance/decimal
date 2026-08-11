@@ -1210,7 +1210,35 @@ test('a question is visible to both sides, and only the person asked can answer'
   );
 
   const after = await post(`/organizations/${orgId}/bills/${bill.billId}/questions/${asked.billQuestionId}/answer`,
-    { answer: 'Yes, checked against their portal.' }, helper.token);
+    { answer: 'Yes, checked against their portal.', outcome: 'answered' }, helper.token);
   assert.equal(after.questions[0].answer, 'Yes, checked against their portal.');
   assert.ok(after.questions[0].answeredAt, 'and it is marked answered');
+  assert.equal(after.questions[0].stillOpen, false);
+});
+
+test('"I don\'t know" is a reply, not a resolution', async () => {
+  // The failure this exists to stop: a non-answer closed the question, the
+  // fields the asker wanted checked went back to normal, and the record said
+  // it was resolved. Worse than never asking — it manufactures confidence.
+  const owner = await register('hb-owner');
+  const org = await post('/organizations', { organizationName: 'HB Org' }, owner.token);
+  const orgId = org.organizationId as string;
+  const helper = await register('hb-helper');
+  await prisma.organizationMembership.create({
+    data: { organizationId: orgId, userId: helper.userId, role: 'admin', status: 'active' },
+  });
+  const bill = await uploadAndConfirm(orgId, owner.token, {
+    vendor: 'HB Vendor', amount: 210, invoiceNo: 'HB-1', billTo: 'Halcyon Labs, Inc.',
+  });
+  const asked = await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, {
+    askedOfUserId: helper.userId, question: 'Can you confirm the vendor address?', aboutFlag: 'addressed_elsewhere',
+  }, owner.token);
+
+  const after = await post(`/organizations/${orgId}/bills/${bill.billId}/questions/${asked.billQuestionId}/answer`,
+    { answer: "I don't know man, it's all you.", outcome: 'handed_back' }, helper.token);
+
+  const q = after.questions[0];
+  assert.equal(q.outcome, 'handed_back');
+  assert.equal(q.stillOpen, true, 'it comes back to the asker as unresolved, not settled');
+  assert.equal(q.answer, "I don't know man, it's all you.", 'the reply is still kept — it tells them who to ask next');
 });

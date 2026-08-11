@@ -924,6 +924,8 @@ model BillQuestion {
   /// Review-screen field keys this question concerns, for highlighting.
   highlightFields Json     @default("[]") @map("highlight_fields")
   answer         String?
+  /// 'answered' (resolved) or 'handed_back' (a reply that does not resolve it).
+  outcome        String?
   answeredAt     DateTime? @map("answered_at") @db.Timestamptz(6)
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
