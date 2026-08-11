@@ -1480,6 +1480,8 @@ export interface BillReview {
     askedOfUserId: string; askedOfName: string;
     answer: string | null; answeredAt: string | null; askedAt: string;
     youWereAsked: boolean; youAsked: boolean;
+    /** Review-screen field keys this question is about. */
+    highlightFields: string[];
   }>;
   flags: Array<{
     kind: string;

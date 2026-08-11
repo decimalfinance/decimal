@@ -921,6 +921,8 @@ model BillQuestion {
   askedOfUserId  String    @map("asked_of_user_id") @db.Uuid
   question       String
   aboutFlag      String?   @map("about_flag")
+  /// Review-screen field keys this question concerns, for highlighting.
+  highlightFields Json     @default("[]") @map("highlight_fields")
   answer         String?
   answeredAt     DateTime? @map("answered_at") @db.Timestamptz(6)
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)

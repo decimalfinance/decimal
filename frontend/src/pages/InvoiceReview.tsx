@@ -125,6 +125,15 @@ function ReviewScreen(props: {
   const [resolutionValue, setResolutionValue] = useState('');
   const [resolving, setResolving] = useState(false);
   const [askOf, setAskOf] = useState('');
+  // Fields an unanswered question named, and who asked. This is the payoff of
+  // mapping the question: the person asked sees WHERE to look instead of
+  // reading a sentence and hunting the form.
+  const askedFields = new Map<string, string>();
+  for (const q of review.questions) {
+    if (q.answeredAt) continue;
+    for (const f of q.highlightFields) if (!askedFields.has(f)) askedFields.set(f, q.askedByName);
+  }
+
   const [answerFor, setAnswerFor] = useState<string | null>(null);
   const [answerText, setAnswerText] = useState('');
   const [answering, setAnswering] = useState(false);
@@ -670,6 +679,7 @@ function ReviewScreen(props: {
                 {review.remitFields.map((f) => (
                   <ReviewField
                     key={f.key}
+                    askedBy={askedFields.get(f.key) ?? null}
                     def={f}
                     current={fields[f.key]!}
                     readOnly={readOnly}
@@ -697,6 +707,7 @@ function ReviewScreen(props: {
                 {review.fields.map((f) => (
                   <ReviewField
                     key={f.key}
+                    askedBy={askedFields.get(f.key) ?? null}
                     def={f}
                     current={fields[f.key]!}
                     readOnly={readOnly}
@@ -1080,14 +1091,18 @@ function ReviewField(props: {
   onChange: (value: string) => void;
   onConfirm: () => void;
   onFocusField?: () => void;
+  /** Set when an outstanding question named this field — "Priya asked about this". */
+  askedBy?: string | null;
 }) {
-  const { def, current, readOnly, onChange, onConfirm, onFocusField } = props;
+  const { def, current, readOnly, onChange, onConfirm, onFocusField, askedBy } = props;
   const needsLook = current.state === 'needs_look';
+  // Reuse the amber "needs attention" state rather than inventing a second
+  // visual language for the same idea: this field wants a human's eye.
   return (
     <div className="rev-field">
       <span className="field-label">{def.label}</span>
       <input
-        className={`input${needsLook ? ' is-look' : ''}`}
+        className={`input${needsLook || askedBy ? ' is-look' : ''}`}
         value={current.value}
         disabled={readOnly}
         placeholder={current.state === 'not_on_document' ? 'Not on document' : undefined}
@@ -1100,6 +1115,7 @@ function ReviewField(props: {
           }
         }}
       />
+      {askedBy ? <span className="input-help">{askedBy} asked about this</span> : null}
       {/* Green sparkle = read cleanly by AI; amber = double-check (with inline
           Confirm); green check = confirmed by a human. Empty fields carry only
           the placeholder. */}

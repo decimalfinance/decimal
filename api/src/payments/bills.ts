@@ -1330,6 +1330,7 @@ export async function listBillQuestions(organizationId: string, paymentOrderId: 
     billQuestionId: r.billQuestionId,
     question: r.question,
     aboutFlag: r.aboutFlag,
+    highlightFields: Array.isArray(r.highlightFields) ? (r.highlightFields as string[]) : [],
     askedByUserId: r.askedByUserId,
     askedByName: nameOf.get(r.askedByUserId) ?? 'Someone',
     askedOfUserId: r.askedOfUserId,
@@ -1489,6 +1490,12 @@ export async function askAboutBill(args: {
     });
   }
 
+  // Which fields is this about? Best-effort and never blocking: a question
+  // that arrives without a mapping is still a perfectly good question, and
+  // highlighting the WRONG fields would be worse than highlighting none.
+  const { fieldsForQuestion } = await import('./question-fields.js');
+  const highlightFields = await fieldsForQuestion(question);
+
   return prisma.billQuestion.create({
     data: {
       organizationId: args.organizationId,
@@ -1498,6 +1505,7 @@ export async function askAboutBill(args: {
       askedOfUserId: args.askedOfUserId,
       question,
       aboutFlag: args.aboutFlag ?? null,
+      highlightFields,
     },
   });
 }
