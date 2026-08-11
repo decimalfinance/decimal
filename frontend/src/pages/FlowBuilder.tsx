@@ -292,18 +292,15 @@ export function FlowBuilderPage({ session }: { session: AuthenticatedSession }) 
   const [selApprove, setSelApprove] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
 
-  // Describe the flow you want; the assistant builds it.
-  //
-  // The whole pipeline for this already existed server-side — assistFlow
-  // validates the model's tree against the flow shape AND the real roster, then
-  // simulates it so a deadlock is caught before you can publish one. Only the
-  // input was missing, so this is a text box in front of machinery that was
-  // already careful.
+  // Describe the flow you want; the assistant builds it. All of the careful
+  // parts — validating the model's tree against the real roster, simulating it
+  // so a deadlock is caught before publish — already existed server-side with
+  // no way to reach them from the page.
   const [prompt, setPrompt] = useState('');
   const [assisting, setAssisting] = useState(false);
   const [assistStatus, setAssistStatus] = useState<string | null>(null);
   const [assistResult, setAssistResult] = useState<{ explanation: string; outcome: string | null; deadlock?: boolean; clarify?: string | null } | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  const assistAbort = useRef<AbortController | null>(null);
 
   const runAssist = async () => {
     if (!prompt.trim() || assisting) return;
@@ -311,27 +308,21 @@ export function FlowBuilderPage({ session }: { session: AuthenticatedSession }) 
     setAssistResult(null);
     setAssistStatus('Reading your flow…');
     const controller = new AbortController();
-    abortRef.current = controller;
+    assistAbort.current = controller;
     try {
       const result = await flowApi.assistStream(organizationId, prompt.trim(), approve.flow ?? [], {
-        onStatus: (s) => setAssistStatus(s.label),
-        // The flow lands on the canvas as it is generated, so you watch it build
-        // rather than waiting at a spinner.
+        onStatus: (st) => setAssistStatus(st.label),
         onFlow: (f) => approve.commit(f),
         signal: controller.signal,
       });
       setAssistResult(result);
-      // A clarifying question means it did NOT guess — the flow is untouched and
-      // the question is the answer. Showing "done" here would be a lie.
       if (!result.clarify) setPrompt('');
     } catch (e) {
-      if (!controller.signal.aborted) {
-        toast.error(e instanceof Error ? e.message : 'Try again.', 'The assistant could not build that');
-      }
+      if (!controller.signal.aborted) toast.error(e instanceof Error ? e.message : 'Try again.', 'The assistant could not build that');
     } finally {
       setAssisting(false);
       setAssistStatus(null);
-      abortRef.current = null;
+      assistAbort.current = null;
     }
   };
 
@@ -394,32 +385,6 @@ export function FlowBuilderPage({ session }: { session: AuthenticatedSession }) 
           <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 19, letterSpacing: '-0.01em', margin: 0, color: 'var(--text-primary)' }}>How bills get approved &amp; paid</h1>
           {isOwner && dirty ? <span className="pill pill-min pill-warning"><span className="dot" />Unpublished changes</span> : null}
         </div>
-
-
-          {assistResult?.clarify ? (
-            // It asked instead of guessing. The flow is untouched.
-            <div className="callout callout-info" style={{ width: '100%' }}>
-              <Ico.info w={16} />
-              <span style={{ flex: 1, minWidth: 0 }}>
-                <strong style={{ display: 'block' }}>Before I build that</strong>
-                {assistResult.clarify}
-              </span>
-            </div>
-          ) : assistResult ? (
-            <div className={`callout ${assistResult.deadlock ? 'callout-danger' : 'callout-info'}`} style={{ width: '100%' }}>
-              <Ico.shield w={16} />
-              <span style={{ flex: 1, minWidth: 0 }}>
-                <strong style={{ display: 'block' }}>
-                  {assistResult.deadlock ? 'Built, but no bill could get through it' : 'Built — nothing is published yet'}
-                </strong>
-                {assistResult.explanation}
-                {assistResult.outcome ? <span style={{ display: 'block', marginTop: 2 }}>{assistResult.outcome}</span> : null}
-                <span style={{ display: 'block', marginTop: 4, opacity: 0.85 }}>
-                  Undo puts it back the way it was. Publish when you are happy with it.
-                </span>
-              </span>
-            </div>
-          ) : null}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 'none' }}>
           <button type="button" className={`btn btn-sm ${testOpen ? 'btn-dark' : 'btn-secondary'}`} onClick={toggleTest} aria-pressed={testOpen}>
             <Ico.shield w={13} /> Test
@@ -436,35 +401,45 @@ export function FlowBuilderPage({ session }: { session: AuthenticatedSession }) 
         </div>
       </div>
 
-      {/* Ask for the flow in words. Owner-only, because publishing is. */}
       {isOwner ? (
-        <div className="topbar" style={{ height: 'auto', padding: '10px 28px', gap: 10, alignItems: 'flex-start' }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%' }}>
-            <Ico.shield w={14} />
+        <div style={{ padding: '10px 28px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <input
               className="input"
               value={prompt}
               disabled={assisting}
-              placeholder="Describe the flow — “anything over $10k needs Nadia as well as Marcus”"
+              placeholder="Describe the flow — e.g. anything over $10,000 needs Nadia as well as Marcus"
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') void runAssist(); }}
               style={{ flex: 1, minWidth: 0, height: 34 }}
             />
             {assisting ? (
-              <button type="button" className="btn btn-secondary btn-sm" style={{ flex: 'none' }}
-                onClick={() => abortRef.current?.abort()}>
-                Stop
-              </button>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => assistAbort.current?.abort()}>Stop</button>
             ) : (
-              <button type="button" className="btn btn-primary btn-sm" style={{ flex: 'none' }}
-                disabled={!prompt.trim()} onClick={() => void runAssist()}>
-                Build it
-              </button>
+              <button type="button" className="btn btn-primary btn-sm" disabled={!prompt.trim()} onClick={() => void runAssist()}>Build it</button>
             )}
           </div>
-
-          {assistStatus ? (
-            <span style={{ display: 'block', width: '100%', color: 'var(--text-muted)' }}>{assistStatus}</span>
+          {assistStatus ? <span style={{ color: 'var(--text-muted)' }}>{assistStatus}</span> : null}
+          {assistResult?.clarify ? (
+            <div className="callout callout-info">
+              <Ico.info w={16} />
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <strong style={{ display: 'block' }}>Before I build that</strong>
+                {assistResult.clarify}
+              </span>
+            </div>
+          ) : assistResult ? (
+            <div className={`callout ${assistResult.deadlock ? 'callout-danger' : 'callout-info'}`}>
+              <Ico.shield w={16} />
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <strong style={{ display: 'block' }}>
+                  {assistResult.deadlock ? 'Built, but no bill could get through it' : 'Built — nothing is published yet'}
+                </strong>
+                {assistResult.explanation}
+                {assistResult.outcome ? <span style={{ display: 'block', marginTop: 2 }}>{assistResult.outcome}</span> : null}
+                <span style={{ display: 'block', marginTop: 4, opacity: 0.85 }}>Undo puts it back. Publish when you are happy with it.</span>
+              </span>
+            </div>
           ) : null}
         </div>
       ) : null}
