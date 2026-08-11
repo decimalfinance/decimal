@@ -124,12 +124,39 @@ function ReviewScreen(props: {
   const [activeResolution, setActiveResolution] = useState<{ flag: string; action: ResolutionAction } | null>(null);
   const [resolutionValue, setResolutionValue] = useState('');
   const [resolving, setResolving] = useState(false);
+  const [askOf, setAskOf] = useState('');
+  const askCandidates = useQuery({
+    queryKey: ['ask-candidates', organizationId, review.paymentOrderId],
+    queryFn: () => billsApi.askCandidates(organizationId, review.paymentOrderId),
+    enabled: activeResolution?.action === 'ask_someone',
+  });
 
-  const resolutionPrompt = (action: ResolutionAction) =>
-    action === 'this_is_us' ? 'Which name does your organization trade under?'
-      : action === 'not_ours' ? 'Why is this not yours to pay? Goes on the record.'
-      : action === 'clear_duplicate' ? 'Why is it not a duplicate? Goes on the record.'
-      : 'Add a note — it goes on the record.';
+  // The QUESTION being asked, stated above the input. A bare box under the
+  // flag's own sentence tells you nothing about what you are typing or what it
+  // will do — which was the complaint: three different actions all looked like
+  // the same unexplained field under the same red sentence.
+  const resolutionAsk = (action: ResolutionAction, claimed: string) =>
+    action === 'this_is_us'
+      ? {
+          title: `Is "${claimed}" a name ${review.organizationName ?? 'your organization'} trades under?`,
+          help: 'Confirm the name below. It is recorded against your organization, so bills addressed to it are never flagged again — and only an owner or admin can do this.',
+          label: 'Name to record',
+          cta: 'Yes, record it',
+        }
+      : action === 'not_ours'
+      ? {
+          title: 'Close this bill as not yours to pay?',
+          help: 'The bill stops here and no payment is made. Say why — it goes on the record, and it is what the vendor is told if anyone follows up.',
+          label: 'Why is it not yours?',
+          cta: 'Close the bill',
+        }
+      : {
+          title: 'Clear the duplicate flag?',
+          help: 'You are asserting this is a genuinely new bill, not one already paid. Your reason becomes the audit record for that decision.',
+          label: 'Why is it not a duplicate?',
+          cta: 'Clear the flag',
+        };
+
 
   function startResolution(flagKind: string, action: ResolutionAction) {
     // Actions that only point somewhere else need no input and no ceremony.
@@ -142,7 +169,9 @@ function ReviewScreen(props: {
       return;
     }
     if (action === 'ask_someone') {
-      toast.info('Open this bill’s detail view to ask a colleague — the bill waits on their answer.', 'Ask someone');
+      setActiveResolution({ flag: flagKind, action });
+      setResolutionValue('');
+      setAskOf('');
       return;
     }
     // Prefill the name being claimed; it is almost always the right answer and
@@ -164,6 +193,13 @@ function ReviewScreen(props: {
       } else if (action === 'clear_duplicate') {
         await billsApi.overrideDuplicate(organizationId, review.paymentOrderId, resolutionValue.trim());
         toast.success('Cleared — your reason is on the bill’s record.', 'Duplicate flag');
+      } else if (action === 'ask_someone') {
+        await billsApi.ask(organizationId, review.paymentOrderId, {
+          askedOfUserId: askOf,
+          question: resolutionValue.trim(),
+          aboutFlag: activeResolution.flag,
+        });
+        toast.success('Asked. The bill waits on their answer rather than moving on.', 'Question sent');
       } else if (action === 'not_ours') {
         await billsApi.notABill(organizationId, review.paymentOrderId, { reason: 'not_ours', note: resolutionValue.trim() });
         toast.success('Closed as addressed to another company.', 'Not ours');
@@ -447,32 +483,67 @@ function ReviewScreen(props: {
                 <Ico.shield w={16} />
                 <span style={{ flex: 1, minWidth: 0 }}>
                   {flag.message}
-                  {activeResolution?.flag === flag.kind ? (
-                    <span style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                      <input
-                        className="input"
-                        autoFocus
-                        value={resolutionValue}
-                        placeholder={resolutionPrompt(activeResolution.action)}
-                        onChange={(e) => setResolutionValue(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') void runResolution(); }}
-                        style={{ flex: 1, minWidth: 0, height: 32 }}
-                      />
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-sm"
-                        style={{ flex: 'none' }}
-                        disabled={resolving || resolutionValue.trim().length < 3}
-                        onClick={() => void runResolution()}
-                      >
-                        {resolving ? 'Saving…' : 'Confirm'}
-                      </button>
-                      <button type="button" className="btn btn-ghost btn-sm" style={{ flex: 'none' }} disabled={resolving}
-                        onClick={() => { setActiveResolution(null); setResolutionValue(''); }}>
-                        Cancel
-                      </button>
-                    </span>
-                  ) : null}
+                  {activeResolution?.flag === flag.kind ? (() => {
+                    const asking = activeResolution.action === 'ask_someone';
+                    const claimed = /addressed to "([^"]+)"/.exec(flag.message)?.[1] ?? '';
+                    const ask = asking ? null : resolutionAsk(activeResolution.action, claimed);
+                    const people = askCandidates.data?.candidates ?? [];
+                    const ready = asking
+                      ? Boolean(askOf) && resolutionValue.trim().length >= 3
+                      : resolutionValue.trim().length >= 3;
+                    return (
+                      <span style={{ display: 'block', marginTop: 10 }}>
+                        {/* State the question. A bare box under the flag's own
+                            sentence never said what you were typing or what it
+                            would do. */}
+                        <strong style={{ display: 'block' }}>
+                          {asking ? 'Who should answer this?' : ask!.title}
+                        </strong>
+                        <span style={{ display: 'block', marginTop: 2, opacity: 0.85 }}>
+                          {asking
+                            ? 'The bill waits for their answer instead of moving on. Anyone can ask.'
+                            : ask!.help}
+                        </span>
+
+                        {asking && people.length === 0 ? (
+                          <span style={{ display: 'block', marginTop: 8 }}>
+                            There is nobody else in this organization to ask yet. Invite a colleague from Members first.
+                          </span>
+                        ) : (
+                          <span style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
+                            {asking ? (
+                              <select className="input" value={askOf} onChange={(e) => setAskOf(e.target.value)}
+                                style={{ flex: '0 0 200px', height: 32 }}>
+                                <option value="">Choose a colleague…</option>
+                                {people.map((c) => (
+                                  <option key={c.userId} value={c.userId}>
+                                    {c.name}{c.answered > 0 ? ` — answered ${c.answered}` : ''}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : null}
+                            <input
+                              className="input"
+                              autoFocus={!asking}
+                              value={resolutionValue}
+                              placeholder={asking ? 'What do you want to know?' : ask!.label}
+                              onChange={(e) => setResolutionValue(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === 'Enter' && ready) void runResolution(); }}
+                              style={{ flex: 1, minWidth: 0, height: 32 }}
+                            />
+                            <button type="button" className="btn btn-primary btn-sm" style={{ flex: 'none' }}
+                              disabled={resolving || !ready} onClick={() => void runResolution()}>
+                              {resolving ? 'Saving…' : asking ? 'Ask' : ask!.cta}
+                            </button>
+                          </span>
+                        )}
+                        <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} disabled={resolving}
+                          onClick={() => { setActiveResolution(null); setResolutionValue(''); setAskOf(''); }}>
+                          Cancel
+                        </button>
+                      </span>
+                    );
+                  })() : null}
                 </span>
                 {activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
                   <span style={{ display: 'flex', gap: 6, flex: 'none' }}>

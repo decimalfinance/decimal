@@ -834,6 +834,9 @@ export async function getBillReview(organizationId: string, paymentOrderId: stri
   const sentBackRaw = isRecord(metadata.sentBack) ? metadata.sentBack : null;
   return {
     paymentOrderId: order.paymentOrderId,
+    // Named so a resolution can ask a real question — "is Halcyon Labs a name
+    // Decimal Labs trades under?" rather than "your organization".
+    organizationName: flagOrg.organizationName,
     state: order.state,
     readOnly: order.state !== 'needs_review',
     ...billSource(order.metadataJson, order.createdByUser?.displayName ?? null),
