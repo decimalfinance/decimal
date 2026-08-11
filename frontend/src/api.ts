@@ -1479,7 +1479,9 @@ export interface BillReview {
     askedByUserId: string; askedByName: string;
     askedOfUserId: string; askedOfName: string;
     answer: string | null; answeredAt: string | null; askedAt: string;
-    outcome: 'answered' | 'handed_back' | null; stillOpen: boolean;
+    outcome: 'answered' | 'partial' | 'handed_back' | 'forwarded' | null;
+    stillOpen: boolean; resolvedFields: string[]; openFields: string[];
+    forwardedFromQuestionId: string | null;
     youWereAsked: boolean; youAsked: boolean;
     /** Review-screen field keys this question is about. */
     highlightFields: string[];
@@ -1572,7 +1574,12 @@ export const billsApi = {
       body: JSON.stringify(body),
     });
   },
-  answerQuestion(organizationId: string, paymentOrderId: string, billQuestionId: string, body: { answer: string; outcome: 'answered' | 'handed_back' }) {
+  answerQuestion(organizationId: string, paymentOrderId: string, billQuestionId: string, body: {
+    answer: string;
+    outcome: 'answered' | 'partial' | 'handed_back' | 'forwarded';
+    resolvedFields?: string[] | null;
+    forwardTo?: { userId: string; question: string } | null;
+  }) {
     return request<unknown>(
       `/organizations/${organizationId}/bills/${paymentOrderId}/questions/${billQuestionId}/answer`,
       { method: 'POST', body: JSON.stringify(body) },

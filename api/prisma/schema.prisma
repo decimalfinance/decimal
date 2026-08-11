@@ -924,8 +924,13 @@ model BillQuestion {
   /// Review-screen field keys this question concerns, for highlighting.
   highlightFields Json     @default("[]") @map("highlight_fields")
   answer         String?
-  /// 'answered' (resolved) or 'handed_back' (a reply that does not resolve it).
+  /// 'answered' | 'partial' | 'handed_back' | 'forwarded'.
   outcome        String?
+  /// Which of the asked fields this reply actually settled.
+  resolvedFields Json      @default("[]") @map("resolved_fields")
+  /// The question raised when this one was passed along, and vice versa.
+  forwardedToQuestionId   String? @map("forwarded_to_question_id") @db.Uuid
+  forwardedFromQuestionId String? @map("forwarded_from_question_id") @db.Uuid
   answeredAt     DateTime? @map("answered_at") @db.Timestamptz(6)
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 

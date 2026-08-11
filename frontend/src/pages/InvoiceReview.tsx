@@ -156,25 +156,44 @@ function ReviewScreen(props: {
     // A handed-back question is still open — the fields it named still want
     // attention, just from someone else now.
     if (!q.stillOpen) continue;
-    for (const f of q.highlightFields) if (!askedFields.has(f)) askedFields.set(f, { by: q.askedByName, question: `${q.askedByName}: “${q.question}”` });
+    // openFields, not highlightFields: a partial answer must stop highlighting
+    // what it already settled, or the next person cannot tell which half is left.
+    for (const f of q.openFields) if (!askedFields.has(f)) askedFields.set(f, { by: q.askedByName, question: `${q.askedByName}: “${q.question}”` });
   }
 
   const [answerFor, setAnswerFor] = useState<string | null>(null);
   const [answerText, setAnswerText] = useState('');
   const [answering, setAnswering] = useState(false);
+  const [settled, setSettled] = useState<string[]>([]);
+  const [forwardTo, setForwardTo] = useState('');
 
-  const sendAnswer = async (billQuestionId: string, outcome: 'answered' | 'handed_back') => {
+  const sendAnswer = async (
+    billQuestionId: string,
+    outcome: 'answered' | 'partial' | 'handed_back' | 'forwarded',
+    openFields: string[],
+  ) => {
     if (answerText.trim().length < 1) return;
+    if (outcome === 'forwarded' && !forwardTo) return;
     setAnswering(true);
     try {
-      await billsApi.answerQuestion(organizationId, review.paymentOrderId, billQuestionId, { answer: answerText.trim(), outcome });
+      await billsApi.answerQuestion(organizationId, review.paymentOrderId, billQuestionId, {
+        answer: answerText.trim(),
+        outcome,
+        resolvedFields: outcome === 'answered' ? openFields : settled,
+        forwardTo: outcome === 'forwarded' ? { userId: forwardTo, question: answerText.trim() } : null,
+      });
       await queryClient.invalidateQueries({ queryKey: ['bill-review', organizationId, review.paymentOrderId] });
       toast.success(
-        outcome === 'answered' ? 'Answered — the bill moves on.' : 'Sent back — they will see it is still open.',
-        outcome === 'answered' ? 'Thanks' : 'Handed back',
+        outcome === 'answered' ? 'Answered — the bill moves on.'
+          : outcome === 'partial' ? 'Saved. What you could not answer stays open for them.'
+          : outcome === 'forwarded' ? 'Passed on. They will see what is still outstanding.'
+          : 'Sent back — they will see it is still open.',
+        outcome === 'answered' ? 'Thanks' : outcome === 'partial' ? 'Partly answered' : outcome === 'forwarded' ? 'Forwarded' : 'Handed back',
       );
       setAnswerFor(null);
       setAnswerText('');
+      setSettled([]);
+      setForwardTo('');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Try again.', 'Could not send that');
     } finally {
@@ -184,7 +203,7 @@ function ReviewScreen(props: {
   const askCandidates = useQuery({
     queryKey: ['ask-candidates', organizationId, review.paymentOrderId],
     queryFn: () => billsApi.askCandidates(organizationId, review.paymentOrderId),
-    enabled: activeResolution?.action === 'ask_someone',
+    enabled: activeResolution?.action === 'ask_someone' || answerFor !== null,
   });
 
   // The QUESTION being asked, stated above the input. A bare box under the
@@ -545,9 +564,13 @@ function ReviewScreen(props: {
                       ? `${q.askedByName} asked you`
                       : q.outcome === 'answered'
                         ? `${q.askedOfName} answered`
-                        : q.outcome === 'handed_back'
-                          ? `${q.askedOfName} couldn't answer — still open`
-                          : `Waiting on ${q.askedOfName}`}
+                        : q.outcome === 'partial'
+                          ? `${q.askedOfName} answered part of this — the rest is still open`
+                          : q.outcome === 'forwarded'
+                            ? `${q.askedOfName} passed this on`
+                            : q.outcome === 'handed_back'
+                              ? `${q.askedOfName} couldn't answer — still open`
+                              : `Waiting on ${q.askedOfName}`}
                   </strong>
                   <span style={{ display: 'block', marginTop: 4 }}>
                     <strong>{q.askedByName}:</strong> “{q.question}”
@@ -558,25 +581,63 @@ function ReviewScreen(props: {
                     </span>
                   ) : null}
 
+                  {q.youWereAsked && answerFor === q.billQuestionId && q.openFields.length > 1 ? (
+                    <span style={{ display: 'block', marginTop: 8 }}>
+                      {/* Which of these do you actually know? Nobody should have
+                          to answer all four to record the two they are sure of. */}
+                      <span style={{ display: 'block', opacity: 0.85 }}>Tick what you have checked:</span>
+                      <span style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 4 }}>
+                        {q.openFields.map((key) => (
+                          <label key={key} style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+                            <input type="checkbox" checked={settled.includes(key)}
+                              onChange={() => setSettled(settled.includes(key) ? settled.filter((k) => k !== key) : [...settled, key])} />
+                            {fieldLabel(key)}
+                          </label>
+                        ))}
+                      </span>
+                    </span>
+                  ) : null}
                   {q.youWereAsked && answerFor === q.billQuestionId ? (
-                    <span style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                    <span style={{ display: 'block', marginTop: 6 }}>
+                      <select className="input" value={forwardTo} onChange={(e) => setForwardTo(e.target.value)}
+                        style={{ height: 32, maxWidth: 260 }}>
+                        <option value="">Pass it to someone else…</option>
+                        {(askCandidates.data?.candidates ?? []).map((c) => (
+                          <option key={c.userId} value={c.userId}>{c.name}</option>
+                        ))}
+                      </select>
+                    </span>
+                  ) : null}
+                  {q.youWereAsked && answerFor === q.billQuestionId ? (
+                    <span style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
                       <input className="input" autoFocus value={answerText} placeholder="Your answer"
                         onChange={(e) => setAnswerText(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') void sendAnswer(q.billQuestionId, 'answered'); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter') void sendAnswer(q.billQuestionId, 'answered', q.openFields); }}
                         style={{ flex: 1, minWidth: 0, height: 32 }} />
-                      {/* Two outcomes, said plainly. Typing "I don't know" and
-                          pressing one button called Answer marked the question
-                          resolved when nothing had been resolved. */}
                       <button type="button" className="btn btn-primary btn-sm" style={{ flex: 'none' }}
                         disabled={answering || answerText.trim().length < 1}
-                        title="Use this when you have checked or corrected what was asked."
-                        onClick={() => void sendAnswer(q.billQuestionId, 'answered')}>
-                        {answering ? 'Sending…' : 'This is answered'}
+                        title="You have checked or corrected everything that was asked."
+                        onClick={() => void sendAnswer(q.billQuestionId, 'answered', q.openFields)}>
+                        {answering ? 'Sending…' : 'All answered'}
                       </button>
+                      {q.openFields.length > 1 ? (
+                        <button type="button" className="btn btn-secondary btn-sm" style={{ flex: 'none' }}
+                          disabled={answering || answerText.trim().length < 1 || settled.length === 0}
+                          title="Save what you know. The rest stays open for them."
+                          onClick={() => void sendAnswer(q.billQuestionId, 'partial', q.openFields)}>
+                          Answered some
+                        </button>
+                      ) : null}
                       <button type="button" className="btn btn-secondary btn-sm" style={{ flex: 'none' }}
+                        disabled={answering || answerText.trim().length < 1 || !forwardTo}
+                        title="Pass it to someone who would know. Only what is still outstanding goes with it."
+                        onClick={() => void sendAnswer(q.billQuestionId, 'forwarded', q.openFields)}>
+                        Ask someone else
+                      </button>
+                      <button type="button" className="btn btn-ghost btn-sm" style={{ flex: 'none' }}
                         disabled={answering || answerText.trim().length < 1}
                         title="Your reply goes back but the question stays open for them."
-                        onClick={() => void sendAnswer(q.billQuestionId, 'handed_back')}>
+                        onClick={() => void sendAnswer(q.billQuestionId, 'handed_back', q.openFields)}>
                         Can't answer
                       </button>
                     </span>

@@ -204,7 +204,12 @@ const answerSchema = z.object({
   answer: z.string().trim().min(1).max(1000),
   // The person answering says whether this resolves it. Inferring would be
   // guessing at intent on something the asker is relying on.
-  outcome: z.enum(['answered', 'handed_back']).default('answered'),
+  outcome: z.enum(['answered', 'partial', 'handed_back', 'forwarded']).default('answered'),
+  resolvedFields: z.array(z.string()).max(20).nullable().optional(),
+  forwardTo: z.object({
+    userId: z.string().uuid(),
+    question: z.string().trim().min(3).max(500),
+  }).nullable().optional(),
 });
 
 billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/questions/:billQuestionId/answer', asyncRoute(async (req, res) => {
@@ -219,6 +224,8 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/questions
       answererUserId: req.auth!.userId,
       answer: input.answer,
       outcome: input.outcome,
+      resolvedFields: input.resolvedFields ?? null,
+      forwardTo: input.forwardTo ?? null,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not answer.';

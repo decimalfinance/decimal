@@ -872,7 +872,11 @@ export async function getBillReview(organizationId: string, paymentOrderId: stri
       youWereAsked: Boolean(viewerUserId && q.askedOfUserId === viewerUserId && !q.answeredAt),
       // A handed-back question is still open work for the ASKER — it came back
       // unresolved, so it must not look settled on their screen.
-      stillOpen: q.outcome !== 'answered',
+      stillOpen: q.outcome !== 'answered' && q.outcome !== 'forwarded',
+      // What is still wanted: the asked fields minus anything already settled.
+      // A partial answer must stop highlighting what it DID resolve, or the
+      // next person cannot tell which half is left.
+      openFields: q.highlightFields.filter((f) => !q.resolvedFields.includes(f)),
       youAsked: Boolean(viewerUserId && q.askedByUserId === viewerUserId),
     })),
     state: order.state,
@@ -1343,7 +1347,9 @@ export async function listBillQuestions(organizationId: string, paymentOrderId: 
     askedOfUserId: r.askedOfUserId,
     askedOfName: nameOf.get(r.askedOfUserId) ?? 'Someone',
     answer: r.answer,
-    outcome: r.outcome as 'answered' | 'handed_back' | null,
+    outcome: r.outcome as 'answered' | 'partial' | 'handed_back' | 'forwarded' | null,
+    resolvedFields: Array.isArray(r.resolvedFields) ? (r.resolvedFields as string[]) : [],
+    forwardedFromQuestionId: r.forwardedFromQuestionId,
     answeredAt: r.answeredAt?.toISOString() ?? null,
     askedAt: r.createdAt.toISOString(),
   }));
@@ -1370,7 +1376,11 @@ export async function answerBillQuestion(args: {
    * not. Treating a hand-back as an answer closes the asker's concern without
    * touching it, which manufactures confidence nobody earned.
    */
-  outcome: 'answered' | 'handed_back';
+  outcome: 'answered' | 'partial' | 'handed_back' | 'forwarded';
+  /** Which of the asked fields this reply settled. Empty for a hand-back. */
+  resolvedFields?: string[] | null;
+  /** When forwarding: who now gets asked, and what. */
+  forwardTo?: { userId: string; question: string } | null;
 }) {
   const answer = args.answer.trim();
   if (answer.length < 1) throw new Error('Write an answer.');
@@ -1383,9 +1393,10 @@ export async function answerBillQuestion(args: {
   }
   if (question.answeredAt) throw new Error('That question has already been answered.');
 
-  // Only a real answer un-parks the bill. A hand-back leaves it waiting,
-  // because nothing the asker wanted has happened yet — it just tells them who
-  // to ask next.
+  // Only a COMPLETE answer un-parks the bill. Partial, handed back and
+  // forwarded all leave it waiting, because some of what the asker wanted is
+  // still outstanding — and a bill that resumes on a half-answer is exactly the
+  // false confidence this whole distinction exists to prevent.
   if (question.taskId && args.outcome === 'answered') {
     try {
       const { executeCommand } = await import('../approvals/lifecycle.js');
@@ -1409,9 +1420,40 @@ export async function answerBillQuestion(args: {
     }
   }
 
+  // Forwarding raises a NEW question to the next person, linked both ways so a
+  // chain reads end to end. It carries the fields still outstanding, not the
+  // original list — passing along what someone already settled would have the
+  // next person redo it.
+  let forwardedToQuestionId: string | null = null;
+  if (args.outcome === 'forwarded' && args.forwardTo) {
+    const settled = new Set(args.resolvedFields ?? []);
+    const stillOpen = (Array.isArray(question.highlightFields) ? (question.highlightFields as string[]) : [])
+      .filter((f) => !settled.has(f));
+    const next = await askAboutBill({
+      organizationId: args.organizationId,
+      paymentOrderId: question.paymentOrderId,
+      askedByUserId: args.answererUserId,
+      askedOfUserId: args.forwardTo.userId,
+      question: args.forwardTo.question,
+      aboutFlag: question.aboutFlag,
+      highlightFields: stillOpen,
+    });
+    forwardedToQuestionId = next.billQuestionId;
+    await prisma.billQuestion.update({
+      where: { billQuestionId: next.billQuestionId },
+      data: { forwardedFromQuestionId: args.billQuestionId },
+    });
+  }
+
   return prisma.billQuestion.update({
     where: { billQuestionId: args.billQuestionId },
-    data: { answer, answeredAt: new Date(), outcome: args.outcome },
+    data: {
+      answer,
+      answeredAt: new Date(),
+      outcome: args.outcome,
+      resolvedFields: args.resolvedFields ?? [],
+      ...(forwardedToQuestionId ? { forwardedToQuestionId } : {}),
+    },
   });
 }
 

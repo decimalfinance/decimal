@@ -1289,3 +1289,66 @@ test('a field the review screen cannot render is never highlighted', async () =>
   const stored = await prisma.billQuestion.findUniqueOrThrow({ where: { billQuestionId: asked.billQuestionId } });
   assert.deepEqual(stored.highlightFields, ['remitTo.city'], 'invented keys are dropped, not stored');
 });
+
+test('a partial answer keeps only the unanswered fields open', async () => {
+  const owner = await register('pa-owner');
+  const org = await post('/organizations', { organizationName: 'PA Org' }, owner.token);
+  const orgId = org.organizationId as string;
+  const helper = await register('pa-helper');
+  await prisma.organizationMembership.create({
+    data: { organizationId: orgId, userId: helper.userId, role: 'admin', status: 'active' },
+  });
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'PA', amount: 120, invoiceNo: 'PA-1', billTo: 'PA Org' });
+
+  const asked = await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, {
+    askedOfUserId: helper.userId, question: 'Confirm the vendor address',
+    highlightFields: ['remitTo.street', 'remitTo.city', 'remitTo.state', 'remitTo.zip'],
+  }, owner.token);
+
+  // Knows the street and city, not the rest. That must not be thrown away, and
+  // must not look like the whole thing was answered.
+  const after = await post(`/organizations/${orgId}/bills/${bill.billId}/questions/${asked.billQuestionId}/answer`, {
+    answer: 'Street and city are right, no idea on the rest.',
+    outcome: 'partial',
+    resolvedFields: ['remitTo.street', 'remitTo.city'],
+  }, helper.token);
+
+  const q = after.questions[0];
+  assert.equal(q.outcome, 'partial');
+  assert.equal(q.stillOpen, true, 'the bill does not move on a half-answer');
+  assert.deepEqual(q.openFields, ['remitTo.state', 'remitTo.zip'], 'only what is left stays highlighted');
+});
+
+test('forwarding raises a linked question carrying only what is outstanding', async () => {
+  const owner = await register('fw-owner');
+  const org = await post('/organizations', { organizationName: 'FW Org' }, owner.token);
+  const orgId = org.organizationId as string;
+  const b = await register('fw-b');
+  const c = await register('fw-c');
+  for (const u of [b, c]) {
+    await prisma.organizationMembership.create({
+      data: { organizationId: orgId, userId: u.userId, role: 'admin', status: 'active' },
+    });
+  }
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'FW', amount: 130, invoiceNo: 'FW-1', billTo: 'FW Org' });
+
+  const asked = await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, {
+    askedOfUserId: b.userId, question: 'Confirm the vendor address',
+    highlightFields: ['remitTo.street', 'remitTo.city', 'remitTo.state'],
+  }, owner.token);
+
+  // B knows the street, and knows C knows the rest.
+  await post(`/organizations/${orgId}/bills/${bill.billId}/questions/${asked.billQuestionId}/answer`, {
+    answer: 'Street is right. Procurement owns the rest — passing to them.',
+    outcome: 'forwarded',
+    resolvedFields: ['remitTo.street'],
+    forwardTo: { userId: c.userId, question: 'Can you confirm the city and state on this vendor?' },
+  }, b.token);
+
+  const asC = await get(`/organizations/${orgId}/bills/${bill.billId}/review`, c.token);
+  const mine = asC.questions.find((q: any) => q.youWereAsked);
+  assert.ok(mine, 'C is now the one being asked');
+  assert.deepEqual(mine.openFields, ['remitTo.city', 'remitTo.state'],
+    'C is not asked to redo the street B already settled');
+  assert.ok(mine.forwardedFromQuestionId, 'and the chain is linked, not orphaned');
+});
