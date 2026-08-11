@@ -1853,20 +1853,6 @@ export const releaseApi = {
 
 // Review stage (control point #1) — same shape as the approval flow, on its own
 // endpoint. A bill must clear this before it enters approval.
-export const reviewApi = {
-  get(organizationId: string) {
-    return request<{ flow: FlowNode[] | null; draft?: FlowNode[] | null; people: FlowPerson[]; vendors?: Array<{ id: string; name: string }>; categoryOptions?: string[]; version: number | null }>(`/organizations/${organizationId}/approvals/review`);
-  },
-  saveDraft(organizationId: string, flow: FlowNode[]) {
-    return request<{ ok: boolean }>(`/organizations/${organizationId}/approvals/review/draft`, { method: 'PUT', body: JSON.stringify({ flow }) });
-  },
-  clearDraft(organizationId: string) {
-    return request<{ ok: boolean }>(`/organizations/${organizationId}/approvals/review/draft`, { method: 'DELETE' });
-  },
-  publish(organizationId: string, flow: FlowNode[]) {
-    return request<{ policyId: string; version: number }>(`/organizations/${organizationId}/approvals/review/publish`, { method: 'POST', body: JSON.stringify({ flow }) });
-  },
-};
 
 // Separation-of-duties switches — the org's own choice, not ours.
 export interface SeparationSettings { reviewerCanApprove: boolean; submitterCanApprove: boolean; approverCanRelease: boolean }
@@ -1916,7 +1902,7 @@ export const paymentFlowApi = {
 export interface PipelineStage { chain: FlowSimResult['chain']; notes: string[]; stuck: string | null; resolvedIds: string[] }
 export interface PipelineSimResult { review: PipelineStage; approve: PipelineStage; release: PipelineStage; stuck: string | null; flags: SeparationSettings }
 export const pipelineApi = {
-  simulate(organizationId: string, input: { reviewFlow: FlowNode[]; approveFlow: FlowNode[]; releaseFlow: FlowNode[]; amountUsd: number; submitterPersonId: string | null; vendorId?: string | null; category?: string | null; firstBill?: boolean | null; separation?: SeparationSettings | null }) {
+  simulate(organizationId: string, input: { approveFlow: FlowNode[]; releaseFlow: FlowNode[]; amountUsd: number; submitterPersonId: string | null; vendorId?: string | null; category?: string | null; firstBill?: boolean | null; separation?: SeparationSettings | null }) {
     return request<PipelineSimResult>(`/organizations/${organizationId}/approvals/pipeline/simulate`, { method: 'POST', body: JSON.stringify(input) });
   },
 };

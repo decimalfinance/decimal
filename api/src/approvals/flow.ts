@@ -24,8 +24,8 @@ const USD_MINOR = 1_000_000;
 // A stage's flow: the approval flow (kind 'invoice') or the review flow (kind
 // 'review'). Both are the same builder JSON on their own policy set; only the
 // seed-name that counts as "not yet authored" differs.
-const SEED_NAME: Record<FlowKind, string> = { invoice: 'default approval', review: 'none', payment_run: 'default release' };
-const PUBLISHED_NAME: Record<FlowKind, string> = { invoice: 'Company approval flow', review: 'Company review flow', payment_run: 'Payment release flow' };
+const SEED_NAME: Record<FlowKind, string> = { invoice: 'default approval', payment_run: 'default release' };
+const PUBLISHED_NAME: Record<FlowKind, string> = { invoice: 'Company approval flow', payment_run: 'Payment release flow' };
 
 export async function getFlow(organizationId: string, kind: FlowKind = 'invoice') {
   const { ensureEngineSetup, ensurePersonForUser } = await import('./wiring.js');
@@ -83,7 +83,7 @@ export async function getFlow(organizationId: string, kind: FlowKind = 'invoice'
 
 // Per-org builder draft (unpublished edits). Survives navigation/reload. Keyed by
 // (org, kind) so the review flow and approval flow each keep their own draft.
-type FlowKind = 'invoice' | 'review' | 'payment_run';
+type FlowKind = 'invoice' | 'payment_run';
 
 export async function getFlowDraft(organizationId: string, kind: FlowKind = 'invoice'): Promise<FlowNode[] | null> {
   const rows = await prisma.$queryRaw<{ body: unknown }[]>`
@@ -203,8 +203,6 @@ export async function publishFlow(organizationId: string, flow: FlowNode[], kind
 // The Review stage: who must fill/confirm a bill's details before it can enter
 // approval. Same builder power as approval (steps · quorum · amount splits), on
 // its own 'review' policy set.
-export const getReviewFlow = (organizationId: string) => getFlow(organizationId, 'review');
-export const publishReviewFlow = (organizationId: string, flow: FlowNode[]) => publishFlow(organizationId, flow, 'review');
 
 // The Payment stage as a full flow (steps · quorums · splits) on the
 // payment_run policy — complex releases, same grammar as the other stages.
@@ -469,7 +467,8 @@ function resolveStage(flow: FlowNode[], opts: {
 }
 
 export async function simulatePipeline(organizationId: string, input: {
-  reviewFlow: FlowNode[]; approveFlow: FlowNode[]; releaseFlow: FlowNode[];
+  /** Who entered the bill — R2 keys on this, exactly as the engine does. */
+  entererId?: string | null; approveFlow: FlowNode[]; releaseFlow: FlowNode[];
   amountUsd: number; submitterPersonId: string | null; vendorId?: string | null; category?: string | null; firstBill?: boolean | null; flagsOverride?: SodFlags | null;
 }) {
   const people = await prisma.$queryRaw<{ id: string; name: string }[]>`
@@ -481,14 +480,20 @@ export async function simulatePipeline(organizationId: string, input: {
   const flags = input.flagsOverride ?? await getSodFlags(prisma, organizationId);
   const submitter = input.submitterPersonId;
 
-  // Review — the submitter may review their own bill (review is data entry, not authorization).
   const sampleBits = { amountUsd: input.amountUsd, vendorId: input.vendorId ?? null, category: input.category ?? null, firstBill: input.firstBill ?? null };
-  const review = resolveStage(input.reviewFlow, { ...sampleBits, excluded: new Map(), ownerId, nameOf });
 
-  // Approve — exclude reviewers (unless the org allows reviewer=approver) and the
-  // submitter (unless the org allows self-approval).
+  // Approve — exclude the person who entered the bill (R2) and the submitter
+  // (R1), unless the org has opted out of either separation.
+  //
+  // R2 used to be computed from "everyone the REVIEW flow resolves to", back
+  // when review was its own stage. There is no review stage now — checking a
+  // bill's details is the approver's job — so this asks the engine's question
+  // instead: the person who entered the bill is the one who may not also
+  // authorize it. That is what sod.ts has always keyed on (enterer_id); the
+  // simulator was answering a different question and could disagree with the
+  // engine it claims to preview.
   const approveExcluded = new Map<string, string>();
-  if (!flags.reviewerCanApprove) for (const id of review.resolvedIds) approveExcluded.set(id, 'reviewed this bill');
+  if (!flags.reviewerCanApprove && input.entererId) approveExcluded.set(input.entererId, 'entered this bill');
   if (!flags.submitterCanApprove && submitter) approveExcluded.set(submitter, 'submitted this bill');
   const approve = resolveStage(input.approveFlow, { ...sampleBits, excluded: approveExcluded, ownerId, nameOf });
 
@@ -497,7 +502,7 @@ export async function simulatePipeline(organizationId: string, input: {
   if (!flags.approverCanRelease) for (const id of approve.resolvedIds) releaseExcluded.set(id, 'approved this bill');
   const release = resolveStage(input.releaseFlow, { ...sampleBits, excluded: releaseExcluded, ownerId, nameOf });
 
-  return { review, approve, release, stuck: review.stuck ?? approve.stuck ?? release.stuck ?? null, flags };
+  return { approve, release, stuck: approve.stuck ?? release.stuck ?? null, flags };
 }
 
 // AI assist: natural language + the current flow + the org's people → a new

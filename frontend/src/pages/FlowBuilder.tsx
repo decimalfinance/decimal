@@ -8,7 +8,7 @@ import { createPortal } from 'react-dom';
 import { useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  flowApi, reviewApi, paymentFlowApi, separationApi, pipelineApi,
+  flowApi, paymentFlowApi, separationApi, pipelineApi,
   type AuthenticatedSession, type FlowNode, type FlowPerson, type FlowSplit, type PipelineSimResult, type SeparationSettings,
 } from '../api';
 import { Ico } from '../dec/icons';
@@ -82,7 +82,7 @@ function laneConnects(nodes: FlowNode[]): boolean {
   return false;
 }
 
-// ─── One editable stage (review or approve): its flow + draft persistence ────
+// ─── One editable stage (approve or pay): its flow + draft persistence ────
 interface StageClient {
   get(orgId: string): Promise<{ flow: FlowNode[] | null; draft?: FlowNode[] | null; people: FlowPerson[]; vendors?: Array<{ id: string; name: string }>; categoryOptions?: string[]; version: number | null }>;
   saveDraft(orgId: string, flow: FlowNode[]): Promise<unknown>;
@@ -153,17 +153,16 @@ export function FlowBuilderPage({ session }: { session: AuthenticatedSession }) 
   const toast = useToast();
   const isOwner = session.organizations.find((o) => o.organizationId === organizationId)?.role === 'owner';
 
-  const [lastEdited, setLastEdited] = useState<'review' | 'approve' | 'pay'>('approve');
-  const review = useFlowStage(organizationId, 'review', isOwner, reviewApi, () => setLastEdited('review'));
+  const [lastEdited, setLastEdited] = useState<'approve' | 'pay'>('approve');
   const approve = useFlowStage(organizationId, 'invoice', isOwner, flowApi, () => setLastEdited('approve'));
   const pay = useFlowStage(organizationId, 'payment_run', isOwner, paymentFlowApi, () => setLastEdited('pay'));
-  const stages = { review, approve, pay } as const;
+  const stages = { approve, pay } as const;
   // Topbar undo/redo act on the most-recently-edited stage, falling back to any other.
-  const doUndo = () => { const order = [stages[lastEdited], review, approve, pay]; (order.find((st) => st.canUndo) ?? review).undo(); };
-  const doRedo = () => { const order = [stages[lastEdited], review, approve, pay]; (order.find((st) => st.canRedo) ?? review).redo(); };
-  const canUndo = review.canUndo || approve.canUndo || pay.canUndo;
-  const canRedo = review.canRedo || approve.canRedo || pay.canRedo;
-  const people = approve.people.length ? approve.people : review.people.length ? review.people : pay.people;
+  const doUndo = () => { const order = [stages[lastEdited], approve, pay]; (order.find((st) => st.canUndo) ?? approve).undo(); };
+  const doRedo = () => { const order = [stages[lastEdited], approve, pay]; (order.find((st) => st.canRedo) ?? approve).redo(); };
+  const canUndo = approve.canUndo || pay.canUndo;
+  const canRedo = approve.canRedo || pay.canRedo;
+  const people = approve.people.length ? approve.people : pay.people;
   const personOf = useMemo(() => new Map(people.map((p) => [p.id, p])), [people]);
 
   // Separation-of-duties switches
@@ -263,9 +262,9 @@ export function FlowBuilderPage({ session }: { session: AuthenticatedSession }) 
     return () => c.removeEventListener('wheel', onWheel);
   }, [canvasEl]);
   useEffect(() => {
-    if (didFit.current || !review.ready || !approve.ready) return;
+    if (didFit.current || !approve.ready) return;
     if (canvasRef.current && treeRef.current) { didFit.current = true; requestAnimationFrame(fitToView); }
-  }, [review.ready, approve.ready]);
+  }, [approve.ready]);
 
   // Test rail — toggleable so the canvas can take the whole screen while building.
   const [testOpen, setTestOpen] = useState(() => {
@@ -289,30 +288,28 @@ export function FlowBuilderPage({ session }: { session: AuthenticatedSession }) 
   const [simFirstBill, setSimFirstBill] = useState(false);
   const [sim, setSim] = useState<PipelineSimResult | null>(null);
 
-  const [selReview, setSelReview] = useState<string | null>(null);
   const [selPay, setSelPay] = useState<string | null>(null);
   const [selApprove, setSelApprove] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
 
-  const dirty = review.dirty || approve.dirty || pay.dirty || sepDirty;
+  const dirty = approve.dirty || pay.dirty || sepDirty;
 
   useEffect(() => {
-    if (!testOpen || !review.flow || !approve.flow || !pay.flow || sep === null) return;
+    if (!testOpen || !approve.flow || !pay.flow || sep === null) return;
     const t = setTimeout(() => {
       pipelineApi.simulate(organizationId, {
-        reviewFlow: review.flow!, approveFlow: approve.flow!,
+        approveFlow: approve.flow!,
         releaseFlow: pay.flow!,
         amountUsd: amount, submitterPersonId: null, vendorId: simVendorId, category: simCategory, firstBill: simFirstBill, separation: sep,
       }).then(setSim).catch(() => setSim(null));
     }, 300);
     return () => clearTimeout(t);
-  }, [organizationId, review.flow, approve.flow, pay.flow, amount, simVendorId, simCategory, simFirstBill, sep, testOpen]);
+  }, [organizationId, approve.flow, pay.flow, amount, simVendorId, simCategory, simFirstBill, sep, testOpen]);
 
   const publish = async () => {
     if (!isOwner || !dirty || publishing) return;
     setPublishing(true);
     try {
-      if (review.dirty && review.flow && review.flow.length > 0) { await reviewApi.publish(organizationId, review.flow); review.markPublished(); }
       if (approve.dirty && approve.flow && approve.flow.length > 0) { await flowApi.publish(organizationId, approve.flow); approve.markPublished(); }
       if (pay.dirty && pay.flow && pay.flow.length > 0) { await paymentFlowApi.publish(organizationId, pay.flow); pay.markPublished(); }
       // Always persist the switches on publish — cheap and idempotent, and it
@@ -325,17 +322,16 @@ export function FlowBuilderPage({ session }: { session: AuthenticatedSession }) 
     } finally { setPublishing(false); }
   };
 
-  const selReviewNode = review.flow && selReview ? findNode(review.flow, selReview) : null;
   const selPayNode = pay.flow && selPay ? findNode(pay.flow, selPay) : null;
   const selApproveNode = approve.flow && selApprove ? findNode(approve.flow, selApprove) : null;
 
-  if (!review.ready || !approve.ready || !pay.ready || sep === null) {
+  if (!approve.ready || !pay.ready || sep === null) {
     return <div className="page page-wide"><div className="skeleton" style={{ height: 480 }} /></div>;
   }
 
-  const vendors = approve.vendors.length ? approve.vendors : review.vendors;
-  const categoryOptions = approve.categoryOptions.length ? approve.categoryOptions : review.categoryOptions;
-  const allNodes = [...(review.flow ?? []), ...(approve.flow ?? []), ...(pay.flow ?? [])];
+  const vendors = approve.vendors;
+  const categoryOptions = approve.categoryOptions;
+  const allNodes = [...(approve.flow ?? []), ...(pay.flow ?? [])];
   // The sample "Coded to" list must include every category the FLOW references
   // — the QBO chart alone can be empty while the flow still splits on coding.
   const collectCategories = (nodes: FlowNode[]): string[] => nodes.flatMap((n) => n.type === 'if'
@@ -352,7 +348,7 @@ export function FlowBuilderPage({ session }: { session: AuthenticatedSession }) 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
           <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-faint)' }}>Governance</span>
           <span style={{ color: 'var(--border-strong)' }}>/</span>
-          <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 19, letterSpacing: '-0.01em', margin: 0, color: 'var(--text-primary)' }}>How bills get reviewed, approved &amp; paid</h1>
+          <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 19, letterSpacing: '-0.01em', margin: 0, color: 'var(--text-primary)' }}>How bills get approved &amp; paid</h1>
           {isOwner && dirty ? <span className="pill pill-min pill-warning"><span className="dot" />Unpublished changes</span> : null}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 'none' }}>
@@ -383,27 +379,6 @@ export function FlowBuilderPage({ session }: { session: AuthenticatedSession }) 
             <div className="spine" />
             <div className="received" style={{ position: 'relative', alignSelf: 'flex-start' }}><Ico.doc w={14} />Bill received</div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}>
-            <LaneWires dep={JSON.stringify(review.flow) + isOwner} />
-            <div className="stage-div s-review" style={{ marginTop: 4 }}>
-              <Ico.search w={13} />
-              Review
-              <span className="tipico"><Ico.info w={12} /></span>
-              <span className="tipbox">Someone fills in and confirms the bill's details — vendor, amount, coding — before it can enter approval.</span>
-            </div>
-            <div className="conn" />
-
-            <CardLane
-              nodes={review.flow ?? []} verb="review"
-              personOf={personOf} isOwner={isOwner} selectedId={selReview} onSelect={setSelReview}
-              onInsertAfter={(id, kind) => { const n = makeNode(kind, 'Review step'); review.commit(insertStepAfter(review.flow!, id, n)); if (kind !== 'forward') setSelReview(n.id); }}
-              onInsertIntoBranch={(ifId, side, kind) => { const n = makeNode(kind, 'Review step'); review.commit(insertIntoBranch(review.flow!, ifId, side, n)); if (kind !== 'forward') setSelReview(n.id); }}
-              onRemoveNode={(id) => review.commit(removeNodeById(review.flow!, id))}
-              ghostText="Build the review flow"
-              onAddFirst={isOwner ? (kind) => { const n = makeNode(kind, 'Review step'); review.commit([n]); if (kind !== 'forward') setSelReview(n.id); } : undefined}
-            />
-            <LaneEnd text="Reviewed — forwarded for approval" to="approve" connected={!isOwner || laneConnects(review.flow ?? [])} />
-            </div>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}>
             <LaneWires dep={JSON.stringify(approve.flow) + isOwner} />
             <div className="stage-div s-approve" style={{ marginTop: 4 }}>
@@ -449,16 +424,6 @@ export function FlowBuilderPage({ session }: { session: AuthenticatedSession }) 
             <div className="terminal" style={{ alignSelf: 'flex-start' }}><span className="tcheck"><Ico.checkSm w={11} /></span>Money leaves the account</div>
           </div>
 
-          {selReviewNode && selReviewNode.type === 'step' ? (
-            <StepEditor node={selReviewNode} people={people} preferRole="Reviewer" onClose={() => setSelReview(null)}
-              onChange={(n) => review.commit(mapNodes(review.flow!, (x) => (x.id === n.id ? n : x)))}
-              onRemove={() => { review.commit(removeNodeById(review.flow!, selReviewNode.id)); setSelReview(null); }} />
-          ) : null}
-          {selReviewNode && selReviewNode.type === 'if' ? (
-            <SplitEditor node={selReviewNode} vendors={vendors} categoryOptions={categoryOptions} onClose={() => setSelReview(null)}
-              onChange={(n) => review.commit(mapNodes(review.flow!, (x) => (x.id === n.id ? n : x)))}
-              onRemove={() => { review.commit(removeNodeById(review.flow!, selReviewNode.id)); setSelReview(null); }} />
-          ) : null}
           {selApproveNode && selApproveNode.type === 'step' ? (
             <StepEditor node={selApproveNode} people={people} preferRole="Approver" onClose={() => setSelApprove(null)}
               onChange={(n) => approve.commit(mapNodes(approve.flow!, (x) => (x.id === n.id ? n : x)))}

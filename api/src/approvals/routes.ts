@@ -379,41 +379,6 @@ approvalsRouter.post('/organizations/:organizationId/approvals/flow/publish', as
 // --- Review stage (control point #1): who must confirm a bill's details before
 // it can enter approval. Same builder power as the approval flow. Read is open
 // to members (view-only); publishing/drafting is owner-only. -------------------
-approvalsRouter.get('/organizations/:organizationId/approvals/review', asyncRoute(async (req, res) => {
-  const { organizationId } = orgParams.parse(req.params);
-  await assertOrganizationAccess(organizationId, req.auth!);
-  const { getReviewFlow } = await import('./flow.js');
-  sendJson(res, await getReviewFlow(organizationId));
-}));
-
-approvalsRouter.post('/organizations/:organizationId/approvals/review/publish', asyncRoute(async (req, res) => {
-  const { organizationId } = orgParams.parse(req.params);
-  await assertOrganizationAccess(organizationId, req.auth!);
-  const { isOwnerRole, getOrganizationMembership } = await import('../auth/organization-access.js');
-  const m = await getOrganizationMembership(req.auth!.userId, organizationId);
-  if (!isOwnerRole(m?.role)) throw forbidden('Only the primary admin can publish the review stage.');
-  const body = z.object({ flow: flowSchema.min(1) }).parse(req.body);
-  const { publishReviewFlow } = await import('./flow.js');
-  sendJson(res, await publishReviewFlow(organizationId, body.flow as never));
-}));
-
-approvalsRouter.put('/organizations/:organizationId/approvals/review/draft', asyncRoute(async (req, res) => {
-  const { organizationId } = orgParams.parse(req.params);
-  await assertOrganizationAccess(organizationId, req.auth!);
-  const body = z.object({ flow: flowSchema }).parse(req.body);
-  const { saveFlowDraft } = await import('./flow.js');
-  await saveFlowDraft(organizationId, body.flow as never, 'review');
-  sendJson(res, { ok: true });
-}));
-
-approvalsRouter.delete('/organizations/:organizationId/approvals/review/draft', asyncRoute(async (req, res) => {
-  const { organizationId } = orgParams.parse(req.params);
-  await assertOrganizationAccess(organizationId, req.auth!);
-  const { clearFlowDraft } = await import('./flow.js');
-  await clearFlowDraft(organizationId, 'review');
-  sendJson(res, { ok: true });
-}));
-
 // --- Payment stage as a full flow (steps · quorums · splits) on the
 // payment_run policy. Read member-open; publish/draft owner-only. -----------------
 approvalsRouter.get('/organizations/:organizationId/approvals/payment-flow', asyncRoute(async (req, res) => {
@@ -483,7 +448,9 @@ approvalsRouter.post('/organizations/:organizationId/approvals/pipeline/simulate
   const { organizationId } = orgParams.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
   const body = z.object({
-    reviewFlow: flowSchema,
+    // Accepted and ignored: review is no longer a stage, but an older client
+    // may still send it and should not get a 400 for it.
+    reviewFlow: flowSchema.optional(),
     approveFlow: flowSchema,
     releaseFlow: flowSchema,
     amountUsd: z.number().min(0),
@@ -499,11 +466,11 @@ approvalsRouter.post('/organizations/:organizationId/approvals/pipeline/simulate
   }).parse(req.body);
   const { simulatePipeline } = await import('./flow.js');
   sendJson(res, await simulatePipeline(organizationId, {
-    reviewFlow: body.reviewFlow as never,
     approveFlow: body.approveFlow as never,
     releaseFlow: body.releaseFlow as never,
     amountUsd: body.amountUsd,
     submitterPersonId: body.submitterPersonId,
+    entererId: body.submitterPersonId,
     vendorId: body.vendorId ?? null,
     category: body.category ?? null,
     firstBill: body.firstBill ?? null,
