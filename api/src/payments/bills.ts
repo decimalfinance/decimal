@@ -18,7 +18,7 @@ import { listChartOfAccounts } from '../accounting/ocr-coding.js';
 import { extractPdfTextLayer, refineInvoiceSources, PROVENANCE_VERSION } from './doc-provenance.js';
 import { findDuplicateBills, readDuplicateOverride, describeDuplicate, matchDuplicates } from './duplicate-check.js';
 import { readPayableHold, describePayableHold } from './vendor-payable.js';
-import { evaluateBillFlags, summarizeBillFlags } from './bill-flags.js';
+import { evaluateBillFlags, summarizeBillFlags, displayOrgName } from './bill-flags.js';
 import { getBillCeilingMinor } from '../approvals/store.js';
 import type { ExtractedInvoice } from './document-extract.js';
 
@@ -818,7 +818,7 @@ export async function getBillReview(organizationId: string, paymentOrderId: stri
   });
   const flags = evaluateBillFlags({
     vendorName: order.counterparty?.displayName ?? order.counterpartyWallet.label,
-    organizationName: flagOrg.organizationName,
+    organizationName: displayOrgName(flagOrg.organizationName),
     tradingNames: readTradingNames(flagOrg.tradingNames),
     amountRaw: order.amountRaw,
     billToName: str(extracted.billToName),

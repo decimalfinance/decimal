@@ -123,6 +123,15 @@ const money = (n: number) => n.toLocaleString('en-US', { style: 'currency', curr
 
 const SEVERITY_ORDER: Record<BillFlagSeverity, number> = { danger: 0, warning: 1, info: 2 };
 
+// Organization names are stored as typed. "decimal labs" reads as a typo in the
+// middle of a sentence about a company. Only touched when the name is entirely
+// lowercase — capitalising unconditionally would turn "IBM" into "Ibm" and
+// "eBay" into "Ebay", which is worse than the problem.
+export function displayOrgName(name: string): string {
+  if (name !== name.toLowerCase()) return name;
+  return name.replace(/\b[a-z]/g, (c) => c.toUpperCase());
+}
+
 function usdText(amountRaw: bigint): string {
   const usd = Number(amountRaw) / 1_000_000;
   return usd.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
@@ -199,7 +208,7 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
       blocking: true,
       short: `Addressed to ${facts.billToName}`,
       resolutions: [{ action: 'this_is_us', label: 'This is us', requires: 'admin', detail: `Record "${facts.billToName}" as a name your organization trades under. Permanent, and it stops this being asked again.` }, { action: 'not_ours', label: 'Not ours', requires: 'admin', detail: 'Close this bill as addressed to another company.' }, ASK],
-      message: `This bill is addressed to "${facts.billToName}", not ${facts.organizationName}. Make sure it's actually yours to pay.`,
+      message: `This bill is addressed to "${facts.billToName}", not ${displayOrgName(facts.organizationName)}. Make sure it's actually yours to pay.`,
     });
   }
 
