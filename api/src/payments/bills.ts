@@ -1208,6 +1208,61 @@ export async function markNotABill(args: {
 // Clear the duplicate flag: an ADMIN asserts this is genuinely a new bill.
 // The override is a structured, logged policy event — never a silent bypass
 // (SYNTHESIS-decimal-policies.md D4).
+/**
+ * Record a name this organization also answers to, clearing the
+ * addressed_elsewhere flag for it from now on.
+ *
+ * Owner/admin only, and the restriction is the point. This is not a judgement
+ * about one invoice — it permanently changes what the organization answers to
+ * for every future bill, which is an identity claim. An approver who
+ * recognizes the name asks for it; an admin decides it.
+ *
+ * Additive and idempotent: adding a name already on file is a no-op rather
+ * than a duplicate, so a second click cannot corrupt the list.
+ */
+export async function addOrganizationTradingName(args: {
+  organizationId: string;
+  name: string;
+  actorUserId: string;
+  actorName: string;
+  fromPaymentOrderId?: string | null;
+}) {
+  const name = args.name.trim();
+  if (!name) throw new Error('A trading name cannot be blank.');
+
+  const { getOrganizationMembership, isAdminRole } = await import('../auth/organization-access.js');
+  const membership = await getOrganizationMembership(args.actorUserId, args.organizationId);
+  // isAdminRole covers the owner too — one vocabulary, rather than this file
+  // inventing its own idea of who counts as an admin.
+  if (!isAdminRole(membership?.role)) {
+    throw new Error('Only an owner or admin can record a name your organization trades under.');
+  }
+
+  const org = await prisma.organization.findUniqueOrThrow({
+    where: { organizationId: args.organizationId },
+    select: { tradingNames: true },
+  });
+  const existing = Array.isArray(org.tradingNames) ? (org.tradingNames as unknown[]) : [];
+  if (readTradingNames(existing).some((n) => n.toLowerCase() === name.toLowerCase())) {
+    return { added: false, tradingNames: readTradingNames(existing) };
+  }
+
+  // Who claimed this, and off which bill. An identity claim should say who made it.
+  const entry = {
+    name,
+    addedByUserId: args.actorUserId,
+    addedByName: args.actorName,
+    addedAt: new Date().toISOString(),
+    fromPaymentOrderId: args.fromPaymentOrderId ?? null,
+  };
+  const updated = await prisma.organization.update({
+    where: { organizationId: args.organizationId },
+    data: { tradingNames: [...existing, entry] as never },
+    select: { tradingNames: true },
+  });
+  return { added: true, tradingNames: readTradingNames(updated.tradingNames) };
+}
+
 export async function overrideDuplicateFlag(args: {
   organizationId: string;
   paymentOrderId: string;

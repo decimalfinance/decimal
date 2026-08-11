@@ -995,3 +995,50 @@ test('a reviewer can ask a question on a bill nobody has confirmed yet', async (
   const after = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
   assert.equal(after.approval.macroState, 'returned_for_info', 'the bill parks on the question rather than dying');
 });
+
+// --- recording a name the organization trades under ---------------------------
+//
+// An identity claim about the organization, not a judgement about one invoice —
+// so an approver may ask for it and an admin decides it.
+
+test('an owner can record a trading name, and the flag stops firing for it', async () => {
+  const owner = await register('tn-owner');
+  const org = await post('/organizations', { organizationName: 'Decimal Labs' }, owner.token);
+  const orgId = org.organizationId as string;
+
+  const { addOrganizationTradingName } = await import('../src/payments/bills.js');
+  const first = await addOrganizationTradingName({
+    organizationId: orgId, name: 'Halcyon Labs',
+    actorUserId: owner.userId, actorName: 'Owner',
+  });
+  assert.equal(first.added, true);
+  assert.deepEqual(first.tradingNames, ['Halcyon Labs']);
+
+  // Idempotent: clicking twice must not corrupt the list.
+  const again = await addOrganizationTradingName({
+    organizationId: orgId, name: 'halcyon labs',
+    actorUserId: owner.userId, actorName: 'Owner',
+  });
+  assert.equal(again.added, false, 'the same name in different case is the same name');
+  assert.deepEqual(again.tradingNames, ['Halcyon Labs']);
+});
+
+test('a member who is not an admin cannot decide that another company is us', async () => {
+  const owner = await register('tn2-owner');
+  const org = await post('/organizations', { organizationName: 'Decimal Two' }, owner.token);
+  const orgId = org.organizationId as string;
+  const member = await register('tn2-member');
+  await prisma.organizationMembership.create({
+    data: { organizationId: orgId, userId: member.userId, role: 'member', status: 'active' },
+  });
+
+  const { addOrganizationTradingName } = await import('../src/payments/bills.js');
+  await assert.rejects(
+    () => addOrganizationTradingName({
+      organizationId: orgId, name: 'Halcyon Labs',
+      actorUserId: member.userId, actorName: 'Member',
+    }),
+    /owner or admin/,
+    'a regular member must not be able to widen what the org answers to',
+  );
+});
