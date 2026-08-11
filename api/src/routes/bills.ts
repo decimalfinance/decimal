@@ -5,7 +5,7 @@ import { assertOrganizationAccess } from '../auth/organization-access.js';
 import { asyncRoute } from '../infra/route-helpers.js';
 import { forbidden } from '../infra/api-errors.js';
 import { prisma } from '../infra/prisma.js';
-import { getBillsWorkbench, getBillReview, getBillDetail, getApprovalsInbox, confirmBillReview, markNotABill, updateBillFacts, overrideDuplicateFlag, sendApprovedBillBackToReview } from '../payments/bills.js';
+import { getBillsWorkbench, getBillReview, getBillDetail, getApprovalsInbox, confirmBillReview, markNotABill, updateBillFacts, overrideDuplicateFlag, addOrganizationTradingName, sendApprovedBillBackToReview } from '../payments/bills.js';
 
 export const billsRouter = Router();
 
@@ -119,6 +119,36 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/duplicate
     reason: input.reason,
   });
   res.json(review);
+}));
+
+// "This is us" — record a name the organization also trades under, resolving
+// the addressed_elsewhere flag for it permanently rather than dismissing it
+// once. Authority lives in addOrganizationTradingName; the route reports its
+// refusal as a 403 rather than a 500 so the UI can say something useful.
+const tradingNameSchema = z.object({ name: z.string().trim().min(2).max(120) });
+
+billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/this-is-us', asyncRoute(async (req, res) => {
+  const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  const input = tradingNameSchema.parse(req.body);
+  const user = await prisma.user.findUniqueOrThrow({
+    where: { userId: req.auth!.userId },
+    select: { displayName: true },
+  });
+  try {
+    const result = await addOrganizationTradingName({
+      organizationId,
+      name: input.name,
+      actorUserId: req.auth!.userId,
+      actorName: user.displayName,
+      fromPaymentOrderId: paymentOrderId,
+    });
+    res.json({ ...result, review: await getBillReview(organizationId, paymentOrderId) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not record that name.';
+    if (/owner or admin/.test(message)) throw forbidden(message);
+    throw error;
+  }
 }));
 
 // Send an approved-but-unpaid bill back to Review (the recovery path when a

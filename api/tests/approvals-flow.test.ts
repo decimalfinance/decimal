@@ -1042,3 +1042,30 @@ test('a member who is not an admin cannot decide that another company is us', as
     'a regular member must not be able to widen what the org answers to',
   );
 });
+
+test('"this is us" clears the flag through the API, and a member is refused', async () => {
+  const owner = await register('tiu-owner');
+  const org = await post('/organizations', { organizationName: 'Decimal Labs' }, owner.token);
+  const orgId = org.organizationId as string;
+  const bill = await uploadAndConfirm(orgId, owner.token, {
+    vendor: 'Acme Cloud', amount: 4820, invoiceNo: 'TIU-1', billTo: 'Halcyon Labs, Inc.',
+  });
+
+  const before = await get(`/organizations/${orgId}/bills/${bill.billId}/review`, owner.token);
+  assert.ok(before.flags.some((f: any) => f.kind === 'addressed_elsewhere'), 'flagged to begin with');
+
+  const member = await register('tiu-member');
+  await prisma.organizationMembership.create({
+    data: { organizationId: orgId, userId: member.userId, role: 'member', status: 'active' },
+  });
+  await assert.rejects(
+    () => post(`/organizations/${orgId}/bills/${bill.billId}/this-is-us`, { name: 'Halcyon Labs' }, member.token),
+    /403/,
+    'a member cannot decide that another company is us',
+  );
+
+  const res = await post(`/organizations/${orgId}/bills/${bill.billId}/this-is-us`, { name: 'Halcyon Labs' }, owner.token);
+  assert.equal(res.added, true);
+  assert.ok(!res.review.flags.some((f: any) => f.kind === 'addressed_elsewhere'),
+    'the flag is gone in the same response — no reload needed to see it resolved');
+});
