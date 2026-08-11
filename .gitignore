@@ -103,3 +103,6 @@ ramp_billpay/
 applications/
 design_handoff_decimal_landing/
 decimal-screen/
+
+# Local test-org credentials — passwords never belong in the repo
+TESTING-LABS.md
