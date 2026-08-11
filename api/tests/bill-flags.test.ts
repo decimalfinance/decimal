@@ -260,3 +260,54 @@ test('trading names are matched as loosely as the org name is', () => {
     );
   }
 });
+
+// --- no dead ends -------------------------------------------------------------
+//
+// The governing rule: it must be hard for a bill to FAIL — to reach a state
+// with no exit. A flag that stops a bill and offers nothing is a dead end, and
+// a bill stuck because nobody can resolve it fails as surely as one paid
+// wrongly, just later and more confusingly. This is the invariant, asserted
+// against every blocking flag the evaluator can produce rather than a list
+// someone has to remember to update.
+
+test('every blocking flag offers at least one way out', () => {
+  const everyBadThing = evaluateBillFlags({
+    ...baseFacts,
+    billToName: 'Halcyon Labs, Inc.',
+    triggeredRules: ['known_counterparty_wallet_changed', 'invalid_extracted_wallet_address', 'unreviewed_counterparty'],
+    ceilingMinor: 1_000_000n,
+    vendorHold: { status: 'blocked', reason: 'under review', byName: 'Zaid', at: new Date().toISOString() } as never,
+    amounts: { lineItemsTotal: 4_000, subtotal: 4_000, tax: 0, total: 4_820 },
+    planAlerts: ['step 0 quorum lowered 2 → 1: not enough eligible approvers'],
+  });
+
+  const blocking = everyBadThing.filter((f) => f.blocking);
+  assert.ok(blocking.length >= 4, 'the fixture must actually produce blocking flags');
+  for (const f of blocking) {
+    assert.ok(f.resolutions.length > 0, `${f.kind} blocks the bill and offers no way forward`);
+  }
+});
+
+test('asking is always available on a blocked bill', () => {
+  // Asking is never the dangerous act, so it must never be the thing an
+  // approver lacks the standing to do.
+  const flags = evaluateBillFlags({ ...baseFacts, billToName: 'Halcyon Labs, Inc.' });
+  const ask = flags.find((f) => f.blocking)!.resolutions.find((r) => r.action === 'ask_someone');
+  assert.ok(ask, 'every blocking flag can be asked about');
+  assert.equal(ask.requires, 'anyone');
+});
+
+test('deciding another company is us is admin-only, and says it is permanent', () => {
+  const flags = evaluateBillFlags({ ...baseFacts, billToName: 'Halcyon Labs, Inc.' });
+  const flag = flags.find((f) => f.kind === 'addressed_elsewhere')!;
+  const thisIsUs = flag.resolutions.find((r) => r.action === 'this_is_us')!;
+  assert.equal(thisIsUs.requires, 'admin');
+  assert.match(thisIsUs.detail, /Halcyon Labs, Inc\./, 'names the company being claimed');
+  assert.match(thisIsUs.detail, /Permanent/i, 'and warns that it is not a one-off dismissal');
+});
+
+test('flags that are context rather than problems offer nothing', () => {
+  const flags = evaluateBillFlags({ ...baseFacts, triggeredRules: ['unreviewed_counterparty'] });
+  assert.equal(flags[0]!.kind, 'new_vendor');
+  assert.deepEqual(flags[0]!.resolutions, [], 'there is nothing to resolve about a first bill');
+});

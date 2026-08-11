@@ -38,6 +38,17 @@ export const BILL_FLAG_KINDS = [
 
 export type BillFlagKind = (typeof BILL_FLAG_KINDS)[number];
 
+/** What a person can do about a flag, offered on the flag itself. */
+export type FlagResolution = {
+  /** Stable identifier the UI posts back. */
+  action: 'this_is_us' | 'not_ours' | 'ask_someone' | 'clear_duplicate' | 'fix_fields' | 'raise_ceiling' | 'release_vendor';
+  label: string;
+  /** Who may take it. The UI greys what the viewer cannot do and says why. */
+  requires: 'anyone' | 'admin';
+  /** One line under the button — what happens, and whether it is permanent. */
+  detail: string;
+};
+
 export type BillFlag = {
   kind: BillFlagKind;
   severity: BillFlagSeverity;
@@ -47,6 +58,20 @@ export type BillFlag = {
   message: string;
   /** A few words, for a table row where there is not. */
   short: string;
+  /**
+   * Every blocking flag MUST offer at least one resolution. A flag that stops a
+   * bill and offers no way forward is a dead end, and a bill stuck because
+   * nobody can resolve it fails as surely as one paid wrongly — just later and
+   * more confusingly. Asking is always available: it is never the dangerous act.
+   */
+  resolutions: FlagResolution[];
+};
+
+const ASK: FlagResolution = {
+  action: 'ask_someone',
+  label: 'Ask someone',
+  requires: 'anyone',
+  detail: 'Put a question to a colleague. The bill waits for their answer instead of moving.',
 };
 
 /**
@@ -148,6 +173,7 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
       severity: 'danger',
       blocking: true,
       short: 'Payment details changed',
+      resolutions: [{ action: 'fix_fields', label: 'Check the details', requires: 'anyone', detail: 'Compare the payment details against the document and correct them.' }, ASK],
       message: `The payment details on this document don't match what's verified for ${facts.vendorName}. This is how payment fraud usually starts.`,
     });
   }
@@ -158,6 +184,7 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
       severity: 'danger',
       blocking: true,
       short: 'Payment details unreadable',
+      resolutions: [{ action: 'fix_fields', label: 'Enter them by hand', requires: 'anyone', detail: 'Read the details off the document and type them in.' }, ASK],
       message: 'The payment details on this document could not be read reliably. Check them against the document before sending.',
     });
   }
@@ -171,6 +198,7 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
       severity: 'danger',
       blocking: true,
       short: `Addressed to ${facts.billToName}`,
+      resolutions: [{ action: 'this_is_us', label: 'This is us', requires: 'admin', detail: `Record "${facts.billToName}" as a name your organization trades under. Permanent, and it stops this being asked again.` }, { action: 'not_ours', label: 'Not ours', requires: 'admin', detail: 'Close this bill as addressed to another company.' }, ASK],
       message: `This bill is addressed to "${facts.billToName}", not ${facts.organizationName}. Make sure it's actually yours to pay.`,
     });
   }
@@ -184,6 +212,7 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
       severity: 'danger',
       blocking: true,
       short: facts.vendorHold.status === 'blocked' ? 'Vendor blocked' : 'Vendor on hold',
+      resolutions: [{ action: 'release_vendor', label: 'Review the vendor', requires: 'admin', detail: 'The hold is released on the vendor, where it was set — not here.' }, ASK],
       message: describePayableHold(facts.vendorName, facts.vendorHold),
     });
   }
@@ -196,6 +225,7 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
       severity: 'danger',
       blocking: true,
       short: 'Over bill ceiling',
+      resolutions: [{ action: 'raise_ceiling', label: 'Review the ceiling', requires: 'admin', detail: 'Only the primary admin can raise the organization ceiling, on the Policies page.' }, ASK],
       message: `This bill (${usdText(facts.amountRaw)}) is over your organization's bill ceiling of ${usdText(facts.ceilingMinor)}. The primary admin can raise the ceiling on the Policies page.`,
     });
   }
@@ -210,6 +240,7 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
         severity: 'info',
         blocking: false,
         short: 'Duplicate cleared',
+        resolutions: [],
         message: `Looked like a duplicate — cleared by ${facts.duplicateOverride.byName}: “${facts.duplicateOverride.reason}”.`,
       });
     } else {
@@ -218,6 +249,7 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
         severity: 'danger',
         blocking: true,
         short: 'Possible duplicate',
+        resolutions: [{ action: 'clear_duplicate', label: 'Not a duplicate', requires: 'admin', detail: 'Clear the flag with a reason. The clearance itself becomes the audit record.' }, ASK],
         message: `${describeDuplicate(facts.duplicates[0]!)} If it's genuinely a new bill, an admin can clear this flag.`,
       });
     }
@@ -241,6 +273,7 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
       severity: 'warning',
       blocking: false,
       short: 'Fewer approvers than your policy',
+      resolutions: [],
       message: `This bill routed with weaker approval than your policy asks for, because too few people were eligible to sign it — ${weakened.join('; ')}. Anyone counting signatures should know why there are fewer.`,
     });
   }
@@ -258,6 +291,7 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
       severity: 'danger',
       blocking: true,
       short: 'Lines do not add up',
+      resolutions: [{ action: 'fix_fields', label: 'Correct the figures', requires: 'anyone', detail: 'Fix the lines or the total so they agree with the document.' }, ASK],
       message: `The line items add up to ${money(lineItemsTotal)}, but the document says ${money(against)}. Something was read wrong, or the document disagrees with itself — check it against the original before paying.`,
     });
   }
@@ -268,6 +302,7 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
       severity: 'danger',
       blocking: true,
       short: 'Total does not reconcile',
+      resolutions: [{ action: 'fix_fields', label: 'Correct the figures', requires: 'anyone', detail: 'Fix the subtotal, tax or total so they agree with the document.' }, ASK],
       message: `${money(subtotal)} plus ${money(tax ?? 0)} tax comes to ${money(subtotal + (tax ?? 0))}, not the ${money(total)} this bill asks for. Check the figures against the document before paying.`,
     });
   }
@@ -279,6 +314,7 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
       severity: 'info',
       blocking: false,
       short: 'First bill from vendor',
+      resolutions: [],
       message: `First bill from ${facts.vendorName}. Their payment details will be verified before anything is sent.`,
     });
   }
