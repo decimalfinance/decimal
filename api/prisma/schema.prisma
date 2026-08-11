@@ -14,6 +14,8 @@ model Organization {
   /// Minted once at creation and never re-minted on rename — customers put this
   /// address in their vendors' address books, so stability beats prettiness.
   intakeSlug       String?                  @unique @map("intake_slug")
+  /// Other names this org answers to (subsidiaries, DBAs, former names).
+  tradingNames     Json                     @default("[]") @map("trading_names")
   status           String                   @default("active")
   createdAt        DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
