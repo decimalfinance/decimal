@@ -128,10 +128,10 @@ function ReviewScreen(props: {
   // Fields an unanswered question named, and who asked. This is the payoff of
   // mapping the question: the person asked sees WHERE to look instead of
   // reading a sentence and hunting the form.
-  const askedFields = new Map<string, string>();
+  const askedFields = new Map<string, { by: string; question: string }>();
   for (const q of review.questions) {
     if (q.answeredAt) continue;
-    for (const f of q.highlightFields) if (!askedFields.has(f)) askedFields.set(f, q.askedByName);
+    for (const f of q.highlightFields) if (!askedFields.has(f)) askedFields.set(f, { by: q.askedByName, question: `${q.askedByName}: “${q.question}”` });
   }
 
   const [answerFor, setAnswerFor] = useState<string | null>(null);
@@ -679,7 +679,8 @@ function ReviewScreen(props: {
                 {review.remitFields.map((f) => (
                   <ReviewField
                     key={f.key}
-                    askedBy={askedFields.get(f.key) ?? null}
+                    askedBy={askedFields.get(f.key)?.by ?? null}
+                    askedQuestion={askedFields.get(f.key)?.question ?? null}
                     def={f}
                     current={fields[f.key]!}
                     readOnly={readOnly}
@@ -707,7 +708,8 @@ function ReviewScreen(props: {
                 {review.fields.map((f) => (
                   <ReviewField
                     key={f.key}
-                    askedBy={askedFields.get(f.key) ?? null}
+                    askedBy={askedFields.get(f.key)?.by ?? null}
+                    askedQuestion={askedFields.get(f.key)?.question ?? null}
                     def={f}
                     current={fields[f.key]!}
                     readOnly={readOnly}
@@ -1091,10 +1093,12 @@ function ReviewField(props: {
   onChange: (value: string) => void;
   onConfirm: () => void;
   onFocusField?: () => void;
-  /** Set when an outstanding question named this field — "Priya asked about this". */
+  /** Set when an outstanding question named this field. */
   askedBy?: string | null;
+  /** The question itself, shown on hover rather than printed under every field. */
+  askedQuestion?: string | null;
 }) {
-  const { def, current, readOnly, onChange, onConfirm, onFocusField, askedBy } = props;
+  const { def, current, readOnly, onChange, onConfirm, onFocusField, askedBy, askedQuestion } = props;
   const needsLook = current.state === 'needs_look';
   // Reuse the amber "needs attention" state rather than inventing a second
   // visual language for the same idea: this field wants a human's eye.
@@ -1115,15 +1119,28 @@ function ReviewField(props: {
           }
         }}
       />
-      {askedBy ? <span className="input-help">{askedBy} asked about this</span> : null}
-      {/* Green sparkle = read cleanly by AI; amber = double-check (with inline
-          Confirm); green check = confirmed by a human. Empty fields carry only
-          the placeholder. */}
+      {/* ONE note per field, never two stacked.
+          These fields sit four to a row, so a sentence wraps to three lines and
+          repeats across every column. Worse, they had different authors: "Zaid
+          asked about this" is a colleague waiting, while "the document was hard
+          to read here" is OUR uncertainty — phrased as if the reader had been
+          present when we read it. To someone who was asked a question, that
+          second line is noise they cannot act on.
+          So: one word, and the detail on hover. A question outranks our own
+          uncertainty, because a person waiting is more actionable than a low
+          confidence score, and the top banner already says who asked what. */}
       {current.state === 'confirmed' ? (
         <span className="ftag is-confirmed"><Ico.checkSm w={11} /> Confirmed by you</span>
+      ) : askedBy ? (
+        <span className="ftag is-look" title={askedQuestion ?? `${askedBy} asked about this`}>
+          Asked ·{' '}
+          {!readOnly ? (
+            <button type="button" className="ftag-btn" onClick={onConfirm}>Confirm</button>
+          ) : null}
+        </span>
       ) : needsLook ? (
-        <span className="ftag is-look">
-          {def.reason ?? 'Needs a look'} ·{' '}
+        <span className="ftag is-look" title={def.reason ?? 'Worth a second look before this is paid'}>
+          Check ·{' '}
           {!readOnly ? (
             <button type="button" className="ftag-btn" onClick={onConfirm}>Confirm</button>
           ) : null}

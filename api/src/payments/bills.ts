@@ -580,7 +580,11 @@ function fieldState(args: {
   if (empty) return { state: 'not_on_document', reason: null };
   const confidence = num(args.fieldConfidence?.[args.key]);
   if (confidence != null && confidence < FIELD_CONFIDENCE_THRESHOLD) {
-    return { state: 'needs_look', reason: 'The document was hard to read here' };
+    // Written to be read on HOVER, not printed under every field. The tag says
+    // "Check"; this explains why, and says whose uncertainty it is — the reader
+    // was not there when we read the document, so "hard to read here" told them
+    // nothing they could act on.
+    return { state: 'needs_look', reason: 'We were not confident reading this off the document — check it against the page' };
   }
   return { state: 'read', reason: null };
 }
