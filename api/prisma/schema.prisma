@@ -960,3 +960,39 @@ model BillFieldChange {
   @@index([organizationId, fieldKey, changedAt(sort: Desc)])
   @@map("bill_field_changes")
 }
+
+/// What we proposed, written unconditionally at suggestion time.
+model AiSuggestion {
+  aiSuggestionId String   @id @default(uuid()) @map("ai_suggestion_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  stage          String
+  subjectType    String   @map("subject_type")
+  subjectId      String?  @map("subject_id") @db.Uuid
+  suggested      Json
+  confidence     Float?
+  producer       String
+  inputs         Json     @default("{}")
+  correlationId  String?  @map("correlation_id")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  outcomes AiSuggestionOutcome[]
+
+  @@index([organizationId, stage, createdAt(sort: Desc)])
+  @@index([subjectType, subjectId])
+  @@map("ai_suggestions")
+}
+
+/// What the human did about it.
+model AiSuggestionOutcome {
+  aiSuggestionOutcomeId String   @id @default(uuid()) @map("ai_suggestion_outcome_id") @db.Uuid
+  aiSuggestionId        String   @map("ai_suggestion_id") @db.Uuid
+  outcome               String
+  finalValue            Json?    @map("final_value")
+  decidedByUserId       String?  @map("decided_by_user_id") @db.Uuid
+  decidedAt             DateTime @default(now()) @map("decided_at") @db.Timestamptz(6)
+
+  suggestion AiSuggestion @relation(fields: [aiSuggestionId], references: [aiSuggestionId])
+
+  @@index([aiSuggestionId])
+  @@map("ai_suggestion_outcomes")
+}

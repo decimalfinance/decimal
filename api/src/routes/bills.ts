@@ -168,17 +168,33 @@ const askSchema = z.object({
   aboutFlag: z.string().trim().max(60).nullable().optional(),
   // What the asker confirmed they want filled — the suggestion, as edited.
   highlightFields: z.array(z.string()).max(20).nullable().optional(),
+  // Ties what was sent back to what we proposed.
+  suggestionId: z.string().uuid().nullable().optional(),
 });
 
 // What fields does this question look like it is about? A SUGGESTION, shown to
 // the asker before anything is sent — no side effects, nothing recorded. The
 // model proposes; the person asking decides.
 billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/ask/suggest-fields', asyncRoute(async (req, res) => {
-  const { organizationId } = billParamsSchema.parse(req.params);
+  const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
   const input = z.object({ question: z.string().trim().min(3).max(500) }).parse(req.body);
   const { fieldsForQuestion } = await import('../payments/question-fields.js');
-  res.json({ fields: await fieldsForQuestion(input.question) });
+  const { logSuggestion } = await import('../payments/suggestion-log.js');
+  const fields = await fieldsForQuestion(input.question);
+  // Logged BEFORE knowing what the asker does with it. If we only recorded
+  // accepted suggestions we would have no negatives, and no way to tell a
+  // suggestion nobody edited from one nobody was shown.
+  const suggestionId = await logSuggestion({
+    organizationId,
+    stage: 'question_fields',
+    subjectType: 'payment_order',
+    subjectId: paymentOrderId,
+    suggested: fields,
+    producer: 'question-fields/v1',
+    inputs: { question: input.question },
+  });
+  res.json({ fields, suggestionId });
 }));
 
 billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/ask', asyncRoute(async (req, res) => {
@@ -194,6 +210,25 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/ask', asy
     aboutFlag: input.aboutFlag ?? null,
     highlightFields: input.highlightFields ?? null,
   });
+
+  // What the asker did with the suggestion. 'edited' is the informative one —
+  // the difference between what we proposed and what they kept is the only
+  // signal that says WHERE we were wrong.
+  if (input.suggestionId) {
+    const { logSuggestionOutcome, sameFieldSet } = await import('../payments/suggestion-log.js');
+    const kept = input.highlightFields ?? [];
+    const suggested = await prisma.aiSuggestion.findUnique({
+      where: { aiSuggestionId: input.suggestionId },
+      select: { suggested: true },
+    });
+    const proposed = Array.isArray(suggested?.suggested) ? (suggested!.suggested as string[]) : [];
+    await logSuggestionOutcome({
+      aiSuggestionId: input.suggestionId,
+      outcome: kept.length === 0 ? 'rejected' : sameFieldSet(proposed, kept) ? 'accepted' : 'edited',
+      finalValue: kept,
+      decidedByUserId: req.auth!.userId,
+    });
+  }
   res.status(201).json({ billQuestionId: asked.billQuestionId, review: await getBillReview(organizationId, paymentOrderId, req.auth!.userId) });
 }));
 

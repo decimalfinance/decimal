@@ -1591,12 +1591,12 @@ export const billsApi = {
     );
   },
   suggestAskFields(organizationId: string, paymentOrderId: string, question: string) {
-    return request<{ fields: string[] }>(
+    return request<{ fields: string[]; suggestionId: string | null }>(
       `/organizations/${organizationId}/bills/${paymentOrderId}/ask/suggest-fields`,
       { method: 'POST', body: JSON.stringify({ question }) },
     );
   },
-  ask(organizationId: string, paymentOrderId: string, body: { askedOfUserId: string; question: string; aboutFlag?: string | null; highlightFields?: string[] | null }) {
+  ask(organizationId: string, paymentOrderId: string, body: { askedOfUserId: string; question: string; aboutFlag?: string | null; highlightFields?: string[] | null; suggestionId?: string | null }) {
     return request<{ billQuestionId: string }>(
       `/organizations/${organizationId}/bills/${paymentOrderId}/ask`,
       { method: 'POST', body: JSON.stringify(body) },

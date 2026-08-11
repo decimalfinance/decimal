@@ -131,13 +131,17 @@ function ReviewScreen(props: {
   // with no way to know.
   const [askFields, setAskFields] = useState<string[] | null>(null);
   const [suggesting, setSuggesting] = useState(false);
+  // Ties what the asker sends back to what we proposed, so an edit is
+  // measurable rather than invisible.
+  const [suggestionId, setSuggestionId] = useState<string | null>(null);
 
   const suggestFields = async (question: string) => {
     if (question.trim().length < 3) return;
     setSuggesting(true);
     try {
-      const { fields } = await billsApi.suggestAskFields(organizationId, review.paymentOrderId, question.trim());
-      setAskFields(fields);
+      const res = await billsApi.suggestAskFields(organizationId, review.paymentOrderId, question.trim());
+      setAskFields(res.fields);
+      setSuggestionId(res.suggestionId);
     } catch {
       setAskFields([]); // no suggestion is fine; the question still sends
     } finally {
@@ -248,6 +252,7 @@ function ReviewScreen(props: {
       setResolutionValue('');
       setAskOf('');
       setAskFields(null);
+      setSuggestionId(null);
       return;
     }
     // Prefill the name being claimed; it is almost always the right answer and
@@ -275,6 +280,7 @@ function ReviewScreen(props: {
           question: resolutionValue.trim(),
           aboutFlag: activeResolution.flag,
           highlightFields: askFields,
+          suggestionId,
         });
         toast.success('Asked. The bill waits on their answer rather than moving on.', 'Question sent');
       } else if (action === 'not_ours') {

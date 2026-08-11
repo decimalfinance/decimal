@@ -1414,3 +1414,55 @@ test('an audit row cannot be edited or deleted, even by us', async () => {
     /append-only/,
   );
 });
+
+test('what we suggested is recorded whatever the human does with it', async () => {
+  const owner = await register('sg-owner');
+  const org = await post('/organizations', { organizationName: 'SG Org' }, owner.token);
+  const orgId = org.organizationId as string;
+  const helper = await register('sg-helper');
+  await prisma.organizationMembership.create({
+    data: { organizationId: orgId, userId: helper.userId, role: 'admin', status: 'active' },
+  });
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'SG', amount: 250, invoiceNo: 'SG-1', billTo: 'SG Org' });
+
+  const suggested = await post(`/organizations/${orgId}/bills/${bill.billId}/ask/suggest-fields`,
+    { question: 'Can you confirm the vendor address?' }, owner.token);
+  assert.ok(suggested.suggestionId, 'the proposal is recorded before anyone reacts to it');
+
+  const row = await prisma.aiSuggestion.findUniqueOrThrow({ where: { aiSuggestionId: suggested.suggestionId } });
+  assert.equal(row.stage, 'question_fields');
+  assert.equal(row.producer, 'question-fields/v1', 'so a change in behaviour is attributable to a change in us');
+  assert.deepEqual((row.inputs as { question: string }).question, 'Can you confirm the vendor address?',
+    'the inputs are snapshotted, not reconstructed later');
+
+  // The asker keeps only one of the proposed fields. That is an EDIT, and the
+  // delta is the only signal that says where we were wrong.
+  await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, {
+    askedOfUserId: helper.userId,
+    question: 'Can you confirm the vendor address?',
+    highlightFields: ['remitTo.street'],
+    suggestionId: suggested.suggestionId,
+  }, owner.token);
+
+  const outcome = await prisma.aiSuggestionOutcome.findFirstOrThrow({
+    where: { aiSuggestionId: suggested.suggestionId },
+  });
+  assert.equal(outcome.outcome, 'edited');
+  assert.deepEqual(outcome.finalValue, ['remitTo.street']);
+  assert.equal(outcome.decidedByUserId, owner.userId);
+});
+
+test('a suggestion record cannot be rewritten after the fact', async () => {
+  const owner = await register('sg2-owner');
+  const org = await post('/organizations', { organizationName: 'SG Two' }, owner.token);
+  const orgId = org.organizationId as string;
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'SG2', amount: 100, invoiceNo: 'SG2-1', billTo: 'SG Two' });
+  const suggested = await post(`/organizations/${orgId}/bills/${bill.billId}/ask/suggest-fields`,
+    { question: 'What is the PO number?' }, owner.token);
+
+  // Otherwise "we suggested the right thing all along" is one UPDATE away.
+  await assert.rejects(
+    () => prisma.$executeRaw`UPDATE ai_suggestions SET suggested = '["total"]'::jsonb WHERE ai_suggestion_id = ${suggested.suggestionId}::uuid`,
+    /append-only/,
+  );
+});
