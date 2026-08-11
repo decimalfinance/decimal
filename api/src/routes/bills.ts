@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { assertOrganizationAccess } from '../auth/organization-access.js';
+import { isAdminRole } from '../auth/organization-access.js';
 import { asyncRoute } from '../infra/route-helpers.js';
 import { forbidden } from '../infra/api-errors.js';
 import { prisma } from '../infra/prisma.js';
@@ -204,9 +205,16 @@ const notABillSchema = z.object({
   note: z.string().trim().max(500).nullable().optional(),
 });
 
+// Dismissing a bill kills a payable, which costs the organization as much as
+// paying a false one — it just surfaces later, as a vendor chasing an invoice
+// everyone believes was handled. It carries the same weight as approving, so it
+// carries the same standing: admin only. Previously any member could do it.
 billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/not-a-bill', asyncRoute(async (req, res) => {
   const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
-  await assertOrganizationAccess(organizationId, req.auth!);
+  const { membership } = await assertOrganizationAccess(organizationId, req.auth!);
+  if (!isAdminRole(membership?.role)) {
+    throw forbidden('Only an owner or admin can close a bill — ask one to look, or ask a question on it instead.');
+  }
   const input = notABillSchema.parse(req.body);
   const detail = await markNotABill({
     organizationId,

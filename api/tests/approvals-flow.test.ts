@@ -1069,3 +1069,25 @@ test('"this is us" clears the flag through the API, and a member is refused', as
   assert.ok(!res.review.flags.some((f: any) => f.kind === 'addressed_elsewhere'),
     'the flag is gone in the same response — no reload needed to see it resolved');
 });
+
+test('closing a bill is admin-only — a member can ask, not kill', async () => {
+  const owner = await register('nb-owner');
+  const org = await post('/organizations', { organizationName: 'Close Co' }, owner.token);
+  const orgId = org.organizationId as string;
+  const bill = await uploadAndConfirm(orgId, owner.token, {
+    vendor: 'Close Vendor', amount: 500, invoiceNo: 'NB-1', billTo: 'Halcyon Labs, Inc.',
+  });
+  const member = await register('nb-member');
+  await prisma.organizationMembership.create({
+    data: { organizationId: orgId, userId: member.userId, role: 'member', status: 'active' },
+  });
+
+  await assert.rejects(
+    () => post(`/organizations/${orgId}/bills/${bill.billId}/not-a-bill`, { reason: 'not_ours' }, member.token),
+    /403/,
+    'killing a payable costs as much as paying a false one and needs the same standing',
+  );
+
+  const closed = await post(`/organizations/${orgId}/bills/${bill.billId}/not-a-bill`, { reason: 'not_ours' }, owner.token);
+  assert.ok(closed, 'an admin can close it');
+});
