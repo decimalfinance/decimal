@@ -321,6 +321,16 @@ async function planAlertsByOrder(organizationId: string, paymentOrderIds: string
   return byOrder;
 }
 
+// Stored as objects carrying who added the name and when, because an identity
+// claim about the organization should say who made it. The matcher only needs
+// the names.
+export function readTradingNames(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((e) => (typeof e === 'string' ? e : isRecord(e) ? str(e.name) : null))
+    .filter((n): n is string => Boolean(n));
+}
+
 function documentAmounts(extracted: Record<string, unknown> | null) {
   const lines = Array.isArray(extracted?.lineItems) ? (extracted!.lineItems as unknown[]) : [];
   const readable = lines.filter(isRecord).map((l) => num(l.total)).filter((n): n is number => n !== null);
@@ -360,7 +370,7 @@ export async function getBillsWorkbench(organizationId: string) {
     loadEngineState(organizationId),
     prisma.organization.findUniqueOrThrow({
       where: { organizationId },
-      select: { organizationName: true },
+      select: { organizationName: true, tradingNames: true },
     }),
     getBillCeilingMinor(prisma, organizationId),
   ]);
@@ -407,6 +417,7 @@ export async function getBillsWorkbench(organizationId: string) {
     const flags = evaluateBillFlags({
       vendorName: order.counterparty?.displayName ?? order.counterpartyWallet.label,
       organizationName: org.organizationName,
+      tradingNames: readTradingNames(org.tradingNames),
       amountRaw: order.amountRaw,
       billToName: str(extracted?.billToName),
       triggeredRules: triggeredRules.map((r) => str(r.rule)).filter((r): r is string => Boolean(r)),
@@ -803,11 +814,12 @@ export async function getBillReview(organizationId: string, paymentOrderId: stri
   ]);
   const flagOrg = await prisma.organization.findUniqueOrThrow({
     where: { organizationId },
-    select: { organizationName: true },
+    select: { organizationName: true, tradingNames: true },
   });
   const flags = evaluateBillFlags({
     vendorName: order.counterparty?.displayName ?? order.counterpartyWallet.label,
     organizationName: flagOrg.organizationName,
+    tradingNames: readTradingNames(flagOrg.tradingNames),
     amountRaw: order.amountRaw,
     billToName: str(extracted.billToName),
     triggeredRules: triggeredRules.map((r) => str(r.rule)).filter((r): r is string => Boolean(r)),

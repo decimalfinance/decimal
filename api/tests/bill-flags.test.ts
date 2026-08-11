@@ -50,6 +50,7 @@ test('when nothing distinctive remains, stay quiet rather than cry wolf', () => 
 const baseFacts = {
   vendorName: 'Acme Cloud Services, Inc.',
   organizationName: 'Decimal Labs',
+  tradingNames: [] as string[],
   amountRaw: 4_820_000_000n,
   billToName: null,
   triggeredRules: [] as string[],
@@ -223,4 +224,39 @@ test('a danger still outranks a weakened quorum in the row summary', () => {
   });
   assert.equal(summarizeBillFlags(flags).worst!.kind, 'addressed_elsewhere');
   assert.ok(flags.some((f) => f.kind === 'approval_weakened'), 'but the warning is still carried');
+});
+
+// --- trading names ------------------------------------------------------------
+//
+// The half that makes the flag worth keeping. A flag you can only dismiss is
+// one you dismiss every month until you stop reading it.
+
+test('a bill addressed to a name we trade under is not flagged', () => {
+  const flags = evaluateBillFlags({
+    ...baseFacts,
+    billToName: 'Halcyon Labs, Inc.',
+    tradingNames: ['Halcyon Labs'],
+  });
+  assert.deepEqual(flags, [], 'once told Halcyon Labs is us, it must stop asking');
+});
+
+test('recording one name does not blunt the check for others', () => {
+  const flags = evaluateBillFlags({
+    ...baseFacts,
+    billToName: 'Northwind Trading',
+    tradingNames: ['Halcyon Labs'],
+  });
+  assert.ok(flags.some((f) => f.kind === 'addressed_elsewhere'),
+    'a genuinely unrelated company must still be caught');
+});
+
+test('trading names are matched as loosely as the org name is', () => {
+  // "Halcyon Labs" on file, "Halcyon Labs, Inc." on the invoice — the legal
+  // suffix is noise here exactly as it is for the org's own name.
+  for (const billTo of ['Halcyon Labs, Inc.', 'HALCYON LABS', 'Halcyon Labs LLC']) {
+    assert.deepEqual(
+      evaluateBillFlags({ ...baseFacts, billToName: billTo, tradingNames: ['Halcyon Labs'] }),
+      [], billTo,
+    );
+  }
 });

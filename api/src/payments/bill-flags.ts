@@ -56,6 +56,11 @@ export type BillFlag = {
 export type BillFlagFacts = {
   vendorName: string;
   organizationName: string;
+  /**
+   * Other names this org answers to — subsidiaries, DBAs, former names. A bill
+   * addressed to any of them is addressed to us.
+   */
+  tradingNames: string[];
   amountRaw: bigint;
   /** The entity the invoice is made out to, as extracted. */
   billToName: string | null;
@@ -159,7 +164,8 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
 
   // Is this bill even ours? Cheap, and the failure it catches is paying a
   // stranger's invoice in full.
-  if (facts.billToName && !namesLookRelated(facts.billToName, facts.organizationName)) {
+  const ourNames = [facts.organizationName, ...facts.tradingNames];
+  if (facts.billToName && !ourNames.some((ours) => namesLookRelated(facts.billToName!, ours))) {
     flags.push({
       kind: 'addressed_elsewhere',
       severity: 'danger',
