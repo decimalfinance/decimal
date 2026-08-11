@@ -726,6 +726,12 @@ test('an attachment that keeps failing is marked failed after the attempt budget
     },
   });
   await postWebhook(receivedEvent({ attachments: [{ id: 'att_doomed', filename: 'invoice.pdf', content_type: 'application/pdf', content_disposition: 'attachment' }] }));
+  // Posting the webhook also fires the latency nudge — a seventh sweep sharing
+  // the same six-attempt budget. Left in flight it could consume the attempt
+  // between a reset and the sweep below, so the loop would land fewer than six
+  // real attempts and the row would still be pending at the end. Let it finish
+  // first, so the budget is spent only by the sweeps this test controls.
+  await drainAsyncIntake();
 
   // Drive it past the budget, ignoring backoff by resetting the due time.
   for (let i = 0; i < 6; i += 1) {
