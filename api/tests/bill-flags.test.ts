@@ -60,6 +60,7 @@ const baseFacts = {
   duplicateOverride: null,
   amounts: { lineItemsTotal: null, subtotal: null, tax: null, total: null },
   planAlerts: [] as string[],
+  documentType: { invoiceNumber: null as string | null, lineInvoiceRefs: [] as string[] },
 };
 
 test('a bill addressed to another company is flagged, danger, and blocking', () => {
@@ -313,4 +314,60 @@ test('flags that are context rather than problems offer nothing', () => {
   const flags = evaluateBillFlags({ ...baseFacts, triggeredRules: ['unreviewed_counterparty'] });
   assert.equal(flags[0]!.kind, 'new_vendor');
   assert.deepEqual(flags[0]!.resolutions, [], 'there is nothing to resolve about a first bill');
+});
+
+// --- is it an invoice at all? -------------------------------------------------
+//
+// The two documents that look like invoices to anything asked to extract
+// invoice fields, and the only flags here whose failure costs real money on the
+// first occurrence rather than the tenth.
+
+test('a document listing several invoice numbers is treated as a statement', () => {
+  const flags = evaluateBillFlags({
+    ...baseFacts,
+    documentType: { invoiceNumber: 'STMT-9', lineInvoiceRefs: ['INV-1001', 'INV-1002', 'INV-1003'] },
+  });
+  const flag = flags.find((f) => f.kind === 'looks_like_statement');
+  assert.ok(flag, 'paying a statement pays every invoice on it a second time');
+  assert.equal(flag.blocking, true);
+  assert.match(flag.message, /INV-1001/);
+});
+
+test('a real invoice referencing one number is not a statement', () => {
+  // An invoice may legitimately cite its own number, or a PO, in a line.
+  const flags = evaluateBillFlags({
+    ...baseFacts,
+    documentType: { invoiceNumber: 'INV-20455', lineInvoiceRefs: ['INV-20455'] },
+  });
+  assert.deepEqual(flags, [], 'one reference is an invoice describing itself');
+});
+
+test('a credit-note series is not paid', () => {
+  for (const n of ['CN-4471', 'CM 220', 'cn_88']) {
+    const flags = evaluateBillFlags({ ...baseFacts, documentType: { invoiceNumber: n, lineInvoiceRefs: [] } });
+    const flag = flags.find((f) => f.kind === 'looks_like_credit_note');
+    assert.ok(flag, `${n} is a credit-note series`);
+    assert.equal(flag.blocking, true);
+  }
+});
+
+test('a negative total is a credit note whatever it is called', () => {
+  const flags = evaluateBillFlags({
+    ...baseFacts,
+    amounts: { lineItemsTotal: null, subtotal: null, tax: null, total: -820 },
+  });
+  const flag = flags.find((f) => f.kind === 'looks_like_credit_note');
+  assert.ok(flag, 'money owed TO us must never be paid out');
+  assert.match(flag.message, /negative/i);
+});
+
+test('ordinary invoice numbers are not mistaken for credit notes', () => {
+  // The check keys on the SERIES, so an invoice number that merely starts with
+  // those letters must not trip it.
+  for (const n of ['CNC-1001', 'CONTRACT-42', 'INV-CN-9', 'C-1234']) {
+    assert.deepEqual(
+      evaluateBillFlags({ ...baseFacts, documentType: { invoiceNumber: n, lineInvoiceRefs: [] } }),
+      [], n,
+    );
+  }
 });

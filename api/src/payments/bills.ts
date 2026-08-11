@@ -331,6 +331,26 @@ export function readTradingNames(raw: unknown): string[] {
     .filter((n): n is string => Boolean(n));
 }
 
+// What the document calls itself. A real invoice carries exactly one invoice
+// number, referring to itself; a statement lists many. Pulled from the line
+// items rather than a new model call — the references are already extracted,
+// they were simply never read as a signal about the document's TYPE.
+function documentTypeSignals(extracted: Record<string, unknown> | null, invoiceNumber: string | null) {
+  const lines = Array.isArray(extracted?.lineItems) ? (extracted!.lineItems as unknown[]) : [];
+  const refs: string[] = [];
+  const INVOICE_REF = /\b(?:INV|BILL|INVOICE)[-\s#]?\d{2,}|\b\d{4,}-\d{2,}\b/gi;
+  for (const line of lines) {
+    if (!isRecord(line)) continue;
+    for (const field of [str(line.description), str(line.reference)]) {
+      for (const m of (field ?? '').matchAll(INVOICE_REF)) refs.push(m[0]);
+    }
+  }
+  return {
+    invoiceNumber: str(extracted?.invoiceNumber) ?? invoiceNumber,
+    lineInvoiceRefs: refs,
+  };
+}
+
 function documentAmounts(extracted: Record<string, unknown> | null) {
   const lines = Array.isArray(extracted?.lineItems) ? (extracted!.lineItems as unknown[]) : [];
   const readable = lines.filter(isRecord).map((l) => num(l.total)).filter((n): n is number => n !== null);
@@ -435,6 +455,7 @@ export async function getBillsWorkbench(organizationId: string) {
       duplicateOverride: readDuplicateOverride(order.metadataJson),
       amounts: documentAmounts(extracted),
       planAlerts: alertsByOrder.get(order.paymentOrderId) ?? [],
+      documentType: documentTypeSignals(extracted, order.invoiceNumber),
     });
     const flagSummary = summarizeBillFlags(flags);
 
@@ -829,6 +850,7 @@ export async function getBillReview(organizationId: string, paymentOrderId: stri
     duplicateOverride: readDuplicateOverride(metadata),
     amounts: documentAmounts(extracted),
     planAlerts: (await planAlertsByOrder(organizationId, [order.paymentOrderId])).get(order.paymentOrderId) ?? [],
+    documentType: documentTypeSignals(extracted, order.invoiceNumber),
   });
 
   const sentBackRaw = isRecord(metadata.sentBack) ? metadata.sentBack : null;

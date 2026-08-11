@@ -30,6 +30,8 @@ export const BILL_FLAG_KINDS = [
   'vendor_held',
   'over_ceiling',
   'possible_duplicate',
+  'looks_like_statement',
+  'looks_like_credit_note',
   'approval_weakened',
   'lines_do_not_sum',
   'total_does_not_reconcile',
@@ -107,6 +109,16 @@ export type BillFlagFacts = {
    * eligible. Free text today, because that is how the engine emits them.
    */
   planAlerts: string[];
+  /**
+   * What the document calls itself, and the invoice references printed on it.
+   * Used to tell an invoice from documents that merely look like one.
+   */
+  documentType: {
+    /** invoiceNumber as extracted — a CN-/CM- series is a credit note's tell. */
+    invoiceNumber: string | null;
+    /** Distinct invoice references appearing in the line items. */
+    lineInvoiceRefs: string[];
+  };
   amounts: {
     lineItemsTotal: number | null;
     subtotal: number | null;
@@ -262,6 +274,59 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
         message: `${describeDuplicate(facts.duplicates[0]!)} If it's genuinely a new bill, an admin can clear this flag.`,
       });
     }
+  }
+
+  // Is this an invoice at all?
+  //
+  // Two documents look like invoices to a model asked to extract invoice
+  // fields, because it is never asked whether it IS one — and both are
+  // expensive in a way nothing else here is.
+  //
+  // A STATEMENT OF ACCOUNT lists invoices already in the system. Paying it pays
+  // every one of them a second time. A real invoice carries exactly one invoice
+  // number, referring to itself; several distinct references in the line items
+  // is the structural tell, and it needs no model to see.
+  //
+  // A CREDIT NOTE means the vendor owes US. Paying it sends money the wrong
+  // way, and unlike an overpayment nobody is expecting a refund. Its series is
+  // deliberately distinct from the invoice series — CN-, CM- — and a negative
+  // total is unambiguous.
+  //
+  // Both block. Deterministic, cheap, and refusing to pay a document we cannot
+  // confidently call an invoice is the right default on a rail with no recall.
+  const refs = [...new Set(facts.documentType.lineInvoiceRefs.map((r) => r.toUpperCase()))];
+  if (refs.length > 1) {
+    flags.push({
+      kind: 'looks_like_statement',
+      severity: 'danger',
+      blocking: true,
+      short: 'Looks like a statement',
+      resolutions: [
+        { action: 'not_ours', label: 'Close it', requires: 'admin', detail: 'A statement is not a payable. Close it and pay the individual invoices.' },
+        ASK,
+      ],
+      message: `This lists ${refs.length} invoice numbers (${refs.slice(0, 3).join(', ')}${refs.length > 3 ? '…' : ''}), so it looks like a statement of account rather than one invoice. Paying a statement pays every invoice on it again — settle the individual invoices instead.`,
+    });
+  }
+
+  const creditSeries = facts.documentType.invoiceNumber
+    ? /^(CN|CM)[-\s_]?\d/i.test(facts.documentType.invoiceNumber.trim())
+    : false;
+  const negativeTotal = facts.amounts.total !== null && facts.amounts.total < 0;
+  if (creditSeries || negativeTotal) {
+    flags.push({
+      kind: 'looks_like_credit_note',
+      severity: 'danger',
+      blocking: true,
+      short: 'Looks like a credit note',
+      resolutions: [
+        { action: 'not_ours', label: 'Close it', requires: 'admin', detail: 'A credit note reduces what you owe. Close it here and apply it against the vendor instead.' },
+        ASK,
+      ],
+      message: negativeTotal
+        ? `The total on this document is negative, which makes it a credit note — money the vendor owes you, not money to send. Apply it against their balance rather than paying it.`
+        : `"${facts.documentType.invoiceNumber}" is a credit-note series, not an invoice series. A credit note reduces what you owe — paying it sends money the wrong way.`,
+    });
   }
 
   // The routing the org configured is not always the routing that ran. When
