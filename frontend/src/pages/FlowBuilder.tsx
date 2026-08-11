@@ -546,8 +546,8 @@ export function FlowBuilderPage({ session }: { session: AuthenticatedSession }) 
               <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-faint)' }}>Org rule — publishes with your flow</span>
               <div className="set-row" style={{ padding: '6px 0 0', borderBottom: 'none' }}>
                 <div className="sr-info">
-                  <span className="sr-title">A reviewer can also approve</span>
-                  <span className="sr-desc">{sep.reviewerCanApprove ? 'On — one person may review and approve the same bill.' : 'Off — approving takes a second person.'}</span>
+                  <span className="sr-title">The person who entered a bill can also approve it</span>
+                  <span className="sr-desc">{sep.reviewerCanApprove ? 'On — whoever entered a bill may also approve it.' : 'Off — approving takes a second person.'}</span>
                 </div>
                 <div className="sr-action">
                   <button type="button" className={`switch${sep.reviewerCanApprove ? ' on' : ''}`} role="switch" aria-checked={sep.reviewerCanApprove}
@@ -609,11 +609,10 @@ export function FlowBuilderPage({ session }: { session: AuthenticatedSession }) 
               </div>
             ) : null}
 
-            <TestStage title="Review" dot="review" stage={sim?.review} emptyText="Any team member can confirm it." />
             <TestStage title="Approve" dot="approve" stage={sim?.approve} emptyText="No approval step — straight to payment." />
             <TestStage title="Pay" dot="payment" stage={sim?.release} emptyText="No payment signers set yet." />
 
-            {sim && !sim.stuck && (sim.review.chain.length || sim.approve.chain.length || sim.release.chain.length) ? (
+            {sim && !sim.stuck && (sim.approve.chain.length || sim.release.chain.length) ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 11px', borderRadius: 'var(--r-sm)', background: 'color-mix(in srgb, var(--success) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--success) 30%, var(--border))' }}>
                 <Ico.checkSm w={14} /><span style={{ fontSize: 12, color: 'var(--text-primary)' }}>
                   {sim && sim.release.chain.length > 0
@@ -880,7 +879,7 @@ function CardLane(props: LaneProps) {
 }
 
 // One stage's resolved chain in the Test rail — dot color ties it to the canvas.
-function TestStage(props: { title: string; dot: 'review' | 'approve' | 'payment'; stage: PipelineSimResult['review'] | undefined; emptyText: string }) {
+function TestStage(props: { title: string; dot: 'approve' | 'payment'; stage: PipelineSimResult['approve'] | undefined; emptyText: string }) {
   const { title, dot, stage } = props;
   return (
     <div>

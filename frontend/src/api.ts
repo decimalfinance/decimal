@@ -1900,7 +1900,7 @@ export const paymentFlowApi = {
 
 // Whole-pipeline dry run for the Test rail.
 export interface PipelineStage { chain: FlowSimResult['chain']; notes: string[]; stuck: string | null; resolvedIds: string[] }
-export interface PipelineSimResult { review: PipelineStage; approve: PipelineStage; release: PipelineStage; stuck: string | null; flags: SeparationSettings }
+export interface PipelineSimResult { approve: PipelineStage; release: PipelineStage; stuck: string | null; flags: SeparationSettings }
 export const pipelineApi = {
   simulate(organizationId: string, input: { approveFlow: FlowNode[]; releaseFlow: FlowNode[]; amountUsd: number; submitterPersonId: string | null; vendorId?: string | null; category?: string | null; firstBill?: boolean | null; separation?: SeparationSettings | null }) {
     return request<PipelineSimResult>(`/organizations/${organizationId}/approvals/pipeline/simulate`, { method: 'POST', body: JSON.stringify(input) });
