@@ -1352,3 +1352,65 @@ test('forwarding raises a linked question carrying only what is outstanding', as
     'C is not asked to redo the street B already settled');
   assert.ok(mine.forwardedFromQuestionId, 'and the chain is linked, not orphaned');
 });
+
+test('a field edit is recorded with who, when, and what it was before', async () => {
+  const owner = await register('fc-owner');
+  const org = await post('/organizations', { organizationName: 'FC Org' }, owner.token);
+  const orgId = org.organizationId as string;
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'FC', amount: 500, invoiceNo: 'FC-1', billTo: 'FC Org' });
+
+  const edit = await fetch(`${baseUrl}/organizations/${orgId}/bills/${bill.billId}/facts`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${owner.token}` },
+    body: JSON.stringify({ poNumber: 'PO-77' }),
+  });
+  assert.ok(edit.ok, `edit failed: ${edit.status} ${await edit.text()}`);
+
+  const changes = await prisma.billFieldChange.findMany({ where: { paymentOrderId: bill.billId } });
+  const po = changes.find((c) => c.fieldKey === 'poNumber');
+  assert.ok(po, 'the change is queryable on its own, not buried in the bill');
+  assert.equal(po.newValue, 'PO-77');
+  assert.equal(po.changedByUserId, owner.userId, 'and it says who');
+  assert.ok(po.changedAt, 'and when — which the old jsonb trail never recorded');
+});
+
+test('the audit trail never blocks a correction', async () => {
+  // An audit write must not be the reason someone cannot fix a bill. The trail
+  // is valuable; the edit is essential.
+  const owner = await register('fc2-owner');
+  const org = await post('/organizations', { organizationName: 'FC Two' }, owner.token);
+  const orgId = org.organizationId as string;
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'FC2', amount: 300, invoiceNo: 'FC2-1', billTo: 'FC Two' });
+
+  const res = await fetch(`${baseUrl}/organizations/${orgId}/bills/${bill.billId}/facts`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${owner.token}` },
+    body: JSON.stringify({ terms: 'Net 45' }),
+  });
+  assert.ok(res.ok, 'the edit succeeds regardless of what the audit write did');
+});
+
+test('an audit row cannot be edited or deleted, even by us', async () => {
+  // Enforced by a trigger, not by grants: REVOKE does not stop a table's owner,
+  // and the application connects as the owner. A trigger fires for everyone,
+  // including a bug in our own code.
+  const owner = await register('im-owner');
+  const org = await post('/organizations', { organizationName: 'IM Org' }, owner.token);
+  const orgId = org.organizationId as string;
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'IM', amount: 400, invoiceNo: 'IM-1', billTo: 'IM Org' });
+  await fetch(`${baseUrl}/organizations/${orgId}/bills/${bill.billId}/facts`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${owner.token}` },
+    body: JSON.stringify({ terms: 'Net 60' }),
+  });
+  const row = await prisma.billFieldChange.findFirstOrThrow({ where: { paymentOrderId: bill.billId } });
+
+  await assert.rejects(
+    () => prisma.$executeRaw`UPDATE bill_field_changes SET new_value = 'tampered' WHERE bill_field_change_id = ${row.billFieldChangeId}::uuid`,
+    /append-only/,
+  );
+  await assert.rejects(
+    () => prisma.$executeRaw`DELETE FROM bill_field_changes WHERE bill_field_change_id = ${row.billFieldChangeId}::uuid`,
+    /append-only/,
+  );
+});

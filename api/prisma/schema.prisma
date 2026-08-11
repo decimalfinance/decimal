@@ -938,3 +938,25 @@ model BillQuestion {
   @@index([paymentOrderId, createdAt(sort: Desc)])
   @@map("bill_questions")
 }
+
+/// Every change to a bill's facts. INSERT-only: the current value lives on the
+/// bill, this is the record of how it got there.
+model BillFieldChange {
+  billFieldChangeId String   @id @default(uuid()) @map("bill_field_change_id") @db.Uuid
+  organizationId    String   @map("organization_id") @db.Uuid
+  paymentOrderId    String   @map("payment_order_id") @db.Uuid
+  fieldKey          String   @map("field_key")
+  previousValue     String?  @map("previous_value")
+  newValue          String?  @map("new_value")
+  changedByUserId   String?  @map("changed_by_user_id") @db.Uuid
+  phase             String?
+  reason            String?
+  correlationId     String?  @map("correlation_id")
+  actorType         String   @default("user") @map("actor_type")
+  changedAt         DateTime @default(now()) @map("changed_at") @db.Timestamptz(6)
+
+  @@index([paymentOrderId, changedAt(sort: Desc)])
+  @@index([organizationId, changedByUserId, changedAt(sort: Desc)])
+  @@index([organizationId, fieldKey, changedAt(sort: Desc)])
+  @@map("bill_field_changes")
+}

@@ -1014,6 +1014,21 @@ export async function confirmBillReview(input: ConfirmBillInput) {
     }
   }
 
+  // The confirm path recorded corrections with no user at all — the one moment
+  // a person accepts responsibility for what the machine read, and the trail did
+  // not say who. It does now.
+  await recordFieldChanges({
+    organizationId: input.organizationId,
+    paymentOrderId: order.paymentOrderId,
+    changedByUserId: input.actorUserId,
+    phase: 'review',
+    reason: 'confirm',
+    changes: corrections.map((c) => {
+      const r = c as { field: string; readValue: unknown; correctedValue: unknown };
+      return { field: r.field, from: r.readValue, to: r.correctedValue };
+    }),
+  });
+
   const confirmedTotal = input.fields.total ?? num(extracted.amount) ?? amountRawToUsd(order.amountRaw);
   if (!Number.isFinite(confirmedTotal) || confirmedTotal <= 0) {
     throw new Error('Total must be a positive amount.');
@@ -1952,6 +1967,52 @@ export type BillFactsInput = {
   };
 };
 
+/**
+ * Record field changes to the audit table.
+ *
+ * Best-effort by design: an audit write must never be the reason a person
+ * cannot correct a bill. The trail is valuable, the edit is essential, and
+ * inverting that would be the wrong trade — the `corrections` array on the bill
+ * is still written either way, so nothing is lost outright if this fails.
+ */
+async function recordFieldChanges(args: {
+  organizationId: string;
+  paymentOrderId: string;
+  changedByUserId: string | null;
+  phase: 'review' | 'approval';
+  reason: string;
+  /** Which request caused this, so a change can be explained after the fact. */
+  correlationId?: string | null;
+  /** A sweep must not look like a person. */
+  actorType?: 'user' | 'system' | 'agent';
+  changes: Array<{ field: string; key?: string; from: unknown; to: unknown }>;
+}) {
+  if (args.changes.length === 0) return;
+  const text = (v: unknown) => (v === null || v === undefined ? null : String(v));
+  try {
+    await prisma.billFieldChange.createMany({
+      data: args.changes.map((c) => ({
+        organizationId: args.organizationId,
+        paymentOrderId: args.paymentOrderId,
+        fieldKey: c.key ?? c.field,
+        previousValue: text(c.from),
+        newValue: text(c.to),
+        changedByUserId: args.changedByUserId,
+        phase: args.phase,
+        reason: args.reason,
+        correlationId: args.correlationId ?? null,
+        actorType: args.actorType ?? (args.changedByUserId ? 'user' : 'system'),
+      })),
+    });
+  } catch (error) {
+    logger.warn('bill_field_changes.write_failed', {
+      organizationId: args.organizationId,
+      paymentOrderId: args.paymentOrderId,
+      ...(error instanceof Error ? { message: error.message } : {}),
+    });
+  }
+}
+
 export async function updateBillFacts(input: BillFactsInput) {
   const order = await prisma.paymentOrder.findFirst({
     where: { organizationId: input.organizationId, paymentOrderId: input.paymentOrderId },
@@ -1967,7 +2028,7 @@ export async function updateBillFacts(input: BillFactsInput) {
   const fields = isRecord(verification.fields) ? { ...verification.fields } : {};
   const corrections: unknown[] = Array.isArray(verification.corrections) ? [...verification.corrections] : [];
 
-  const changes: Array<{ field: string; from: unknown; to: unknown }> = [];
+  const changes: Array<{ field: string; key?: string; from: unknown; to: unknown }> = [];
   const applyText = (key: keyof BillFactsInput['facts'] & string, label: string) => {
     const next = input.facts[key];
     if (next === undefined) return;
@@ -1975,7 +2036,10 @@ export async function updateBillFacts(input: BillFactsInput) {
     const value = typeof next === 'string' ? (next.trim() || null) : next;
     if (value === prev) return;
     fields[key] = value;
-    changes.push({ field: label, from: prev, to: value });
+    // The label is for the human-readable event; the KEY is what the audit
+    // trail stores. A trail keyed on display text cannot be joined to the
+    // review fields and fragments the moment anyone renames a label.
+    changes.push({ field: label, key, from: prev, to: value });
   };
   applyText('invoiceNumber', 'Invoice number');
   applyText('invoiceDate', 'Invoice date');
@@ -2010,6 +2074,15 @@ export async function updateBillFacts(input: BillFactsInput) {
   const nextDueAt = dueDateInput !== undefined && dueDateInput
     ? new Date(dueDateInput)
     : undefined;
+
+  await recordFieldChanges({
+    organizationId: input.organizationId,
+    paymentOrderId: order.paymentOrderId,
+    changedByUserId: input.actorUserId,
+    phase: order.state === 'draft' ? 'approval' : 'review',
+    reason: 'edit',
+    changes,
+  });
 
   await prisma.$transaction([
     prisma.paymentOrder.update({
