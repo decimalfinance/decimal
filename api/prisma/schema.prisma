@@ -908,3 +908,24 @@ model TransferRequestNote {
   @@index([organizationId, createdAt(sort: Desc)])
   @@map("transfer_request_notes")
 }
+
+/// A question asked of a colleague about a bill. The record of WHO gets asked
+/// what, and whether they answer, is the point — it is what eventually lets the
+/// product suggest a recipient rather than presenting an empty dropdown.
+model BillQuestion {
+  billQuestionId String    @id @default(uuid()) @map("bill_question_id") @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  paymentOrderId String    @map("payment_order_id") @db.Uuid
+  taskId         String?   @map("task_id") @db.Uuid
+  askedByUserId  String    @map("asked_by_user_id") @db.Uuid
+  askedOfUserId  String    @map("asked_of_user_id") @db.Uuid
+  question       String
+  aboutFlag      String?   @map("about_flag")
+  answer         String?
+  answeredAt     DateTime? @map("answered_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([organizationId, askedOfUserId, answeredAt])
+  @@index([paymentOrderId, createdAt(sort: Desc)])
+  @@map("bill_questions")
+}
