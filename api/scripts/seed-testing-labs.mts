@@ -26,7 +26,8 @@ const PEOPLE = [
   { email: 'tom.proc@dev.decimal.test', name: 'Tom Whitfield', access: 'member', part: 'Procurement — owns vendor relationships' },
 ] as const;
 
-const INVITE = 'phoenixkia625@gmail.com';
+// pheonix — e then o. Worth copying rather than typing.
+const INVITE = 'pheonixdiaz625@gmail.com';
 
 async function call(path: string, body?: unknown, token?: string, method = 'POST') {
   const res = await fetch(`${API}${path}`, {
