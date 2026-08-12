@@ -71,3 +71,35 @@ confident face.
 4. Review payload carries the viewer's task, so the page can offer Ask
 5. Render resolutions on each blocking flag; remove the footer's promise
 6. Record ask-routing data; suggest later
+
+---
+
+# Why Pay stays on the approval-flow canvas
+
+Decided 2026-08-12, after the review stage was removed left two lanes where
+there had been three, and the canvas looked sparse enough to question.
+
+The tempting move is to take Pay off the canvas and put it in Policies: it is
+usually configured once and never touched, which makes it look like settings.
+
+**It stays, because we are self-custodial.**
+
+In a custodial AP product — Bill.com and everything shaped like it — the
+provider holds your money. Release is invisible plumbing; there is no person to
+show, because the platform moves its own float. Putting "who releases" in a
+settings page there would be honest.
+
+We do not hold the money. Someone with a key has to sign, every time. Hiding
+that behind a settings list would misrepresent how the product actually works,
+and on a rail with no recall the release step is the single most consequential
+thing in it. The failure mode of "too prominent" is mild annoyance; the failure
+mode of "buried" is somebody not realising one person can send money alone.
+
+The page keeps the name **Approval flow**, even though it also covers release.
+"Approval flow" is the term of art in accounts payable — it is what the words
+mean to the people using it, and inventing a more accurate label would cost more
+comprehension than the slight mismatch does. Terminology that is precise and
+unrecognised is worse than terminology that is loose and instantly understood.
+
+Revisit only if Pay never grows past a single quorum in real use. If it takes
+amount splits or per-vendor signers, the canvas is obviously right.
