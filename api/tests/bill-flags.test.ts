@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { namesLookRelated, evaluateBillFlags, summarizeBillFlags } from '../src/payments/bill-flags.js';
+import { pickAddressConfidenceKey } from '../src/payments/bills.js';
 
 // The "addressed to someone else" gate. Getting this wrong in the permissive
 // direction means a bill made out to another company passes review silently,
@@ -370,4 +371,19 @@ test('ordinary invoice numbers are not mistaken for credit notes', () => {
       [], n,
     );
   }
+});
+
+// --- which confidence governs which field -------------------------------------
+//
+// The address boxes sit under Vendor and fall back to the letterhead address
+// when an invoice prints no Remit-To panel. They were still judged by the
+// model's remitTo confidence — which, for a panel that is not on the page, is a
+// hedge rather than a reading. Every bill came up amber for a value the model
+// had read at 1.0, which teaches people to click through the amber.
+
+test('a value read from the letterhead is judged on the letterhead read', () => {
+  assert.equal(pickAddressConfidenceKey(true), 'vendorAddress',
+    'showing the vendor address means asking how well the vendor address was read');
+  assert.equal(pickAddressConfidenceKey(false), 'remitTo',
+    'a real Remit-To panel is still judged as remitTo');
 });

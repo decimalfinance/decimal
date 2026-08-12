@@ -351,6 +351,11 @@ function documentTypeSignals(extracted: Record<string, unknown> | null, invoiceN
   };
 }
 
+/** Which confidence answers "how well did we read the value on screen?". */
+export function pickAddressConfidenceKey(usedVendorAddress: boolean): 'vendorAddress' | 'remitTo' {
+  return usedVendorAddress ? 'vendorAddress' : 'remitTo';
+}
+
 function documentAmounts(extracted: Record<string, unknown> | null) {
   const lines = Array.isArray(extracted?.lineItems) ? (extracted!.lineItems as unknown[]) : [];
   const readable = lines.filter(isRecord).map((l) => num(l.total)).filter((n): n is number => n !== null);
@@ -699,7 +704,13 @@ export async function getBillReview(organizationId: string, paymentOrderId: stri
       key: `remitTo.${part}`,
       label: part === 'zip' ? 'ZIP code' : part[0]!.toUpperCase() + part.slice(1),
       value,
-      ...fieldState({ key: 'remitTo', value, fieldConfidence, confirmedKeys }),
+      // Judge the value we are actually SHOWING. When these boxes fall back to
+      // the letterhead address, the model's remitTo confidence is about a
+      // remit-to panel that is not on the document — it hedges at 0.8 for the
+      // absence, and every bill came up amber for a value it had read cleanly.
+      // "We could not read this" and "this section does not exist" are
+      // different statements, and only one of them is the reader's problem.
+      ...fieldState({ key: pickAddressConfidenceKey(usedVendorAddress), value, fieldConfidence, confirmedKeys }),
       source: usedVendorAddress
         ? sourceOf('vendorAddress')
         : sourceOf(remitPartSourceKey[part]) ?? sourceOf('remitTo'),
