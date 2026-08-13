@@ -18,6 +18,7 @@ import { prisma } from '../infra/prisma.js';
 import { beginAsyncInvoiceIntake } from '../payments/invoice-intake.js';
 import { decideFetchedBytes, POST_FETCH_SKIP_REASONS } from '../payments/inbound-email/policy.js';
 import { rollUpMessageDisposition } from '../payments/inbound-email/messages.js';
+import { notifySenderIfNeeded } from '../payments/inbound-email/notify-sender.js';
 import {
   PermanentAttachmentError,
   fetchInboundAttachment,
@@ -201,9 +202,18 @@ export async function runInboundEmailIntakeOnce(now: Date = new Date()): Promise
   }
 
   for (const inboundEmailMessageId of touchedMessages) {
-    await rollUpMessageDisposition(inboundEmailMessageId).catch((error) => {
+    const disposition = await rollUpMessageDisposition(inboundEmailMessageId).catch((error) => {
       logger.warn('inbound_email.rollup_failed', { inboundEmailMessageId, ...errorToLogFields(error) });
+      return null;
     });
+    // The other place a member's email can dead-end: everything the handler
+    // accepted turned out to be junk, or we never got the bytes. Same rule as
+    // the handler — the person who sent it finds out.
+    if (disposition === 'rejected' || disposition === 'failed') {
+      await notifySenderIfNeeded(inboundEmailMessageId).catch((error) => {
+        logger.warn('inbound_email.sender_notice_failed', { inboundEmailMessageId, ...errorToLogFields(error) });
+      });
+    }
   }
 
   return summary;

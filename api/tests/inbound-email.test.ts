@@ -13,6 +13,9 @@ import {
   clearSimulatedAttachmentBytes,
   setResendInboundRuntimeForTests,
 } from '../src/payments/inbound-email/resend-inbound.js';
+import { drainBackgroundWork } from '../src/infra/background.js';
+import { setOutboundEmailRuntimeForTests, type OutboundEmail } from '../src/infra/email.js';
+import { notifySenderIfNeeded } from '../src/payments/inbound-email/notify-sender.js';
 import { decideAttachment, decideFetchedBytes } from '../src/payments/inbound-email/policy.js';
 import { signSvixPayloadForTests, verifySvixSignature } from '../src/payments/inbound-email/svix-signature.js';
 import {
@@ -59,11 +62,17 @@ before(async () => {
     });
 });
 
+/** Notices sent during the current test, newest last. */
+let sentNotices: OutboundEmail[] = [];
+
 beforeEach(async () => {
   // Let the previous test's detached intake finish BEFORE truncating. Without
   // this the suite was not testing the software, it was testing a race: the
   // last test's extraction ran on against tables this one was wiping.
   await drainAsyncIntake();
+  await drainBackgroundWork();
+  sentNotices = [];
+  setOutboundEmailRuntimeForTests({ send: async (email) => { sentNotices.push(email); } });
   resetRateLimitBuckets();
   config.rateLimitEnabled = false;
   setInvoiceIntakeRuntimeForTests(null);
@@ -73,6 +82,7 @@ beforeEach(async () => {
 });
 
 after(async () => {
+  setOutboundEmailRuntimeForTests(null);
   if (closeServer) await closeServer();
   await prisma.$disconnect();
 });
@@ -412,11 +422,13 @@ function receivedEvent(over: {
   from?: string;
   attachments?: Array<{ id: string; filename: string; content_type?: string; content_disposition?: string }>;
   emailId?: string;
+  headers?: Record<string, string>;
 } = {}) {
   emailSeq += 1;
   return {
     type: 'email.received',
     data: {
+      ...(over.headers ? { headers: over.headers } : {}),
       email_id: over.emailId ?? `email_${emailSeq}`,
       from: over.from ?? 'Priya Sharma <priya@acme.test>',
       to: [over.to ?? `acme@${DOMAIN}`],
@@ -584,6 +596,141 @@ test('a message whose attachments are all unsupported is rejected for no_support
     }),
   );
   assert.equal((await response.json()).reason, 'no_supported_attachments');
+});
+
+// --- telling the sender ------------------------------------------------------
+
+/** The webhook fires the notice detached, so wait for it before asserting. */
+async function settleNotices() {
+  await drainBackgroundWork();
+}
+
+test('a member whose email carried no invoice is told, rather than left assuming it worked', async () => {
+  await seedOrgWithMember('Acme', 'priya@acme.test');
+
+  await postWebhook(receivedEvent({ attachments: [] }));
+  await settleNotices();
+
+  assert.equal(sentNotices.length, 1, 'one notice');
+  const notice = sentNotices[0]!;
+  assert.equal(notice.to, 'priya@acme.test');
+  assert.match(notice.text, /no attachment on it/);
+  assert.match(notice.text, /Hi Priya,/, 'addressed by first name');
+  assert.match(notice.text, /acme@bills\.decimal\.test/, 'says which address they sent it to');
+  assert.equal(notice.headers?.['Auto-Submitted'], 'auto-replied', 'RFC 3834: says a machine wrote it');
+
+  const message = await prisma.inboundEmailMessage.findFirstOrThrow();
+  assert.ok(message.senderNotifiedAt, 'recorded, so it can never be sent twice');
+  assert.equal(message.senderNoticeKind, 'no_attachments');
+});
+
+test('someone outside the organization is never answered', async () => {
+  // The anti-backscatter rule, and the reason we can afford to reply at all:
+  // we only ever write to an address we have already recognised as a member.
+  await seedOrgWithMember('Acme', 'priya@acme.test');
+
+  await postWebhook(receivedEvent({ from: 'stranger@elsewhere.test', attachments: [] }));
+  await settleNotices();
+
+  assert.equal(sentNotices.length, 0, 'a forged sender must not be able to make us write to them');
+});
+
+test('the notice names what we found instead of an invoice', async () => {
+  await seedOrgWithMember('Acme', 'priya@acme.test');
+
+  await postWebhook(
+    receivedEvent({
+      attachments: [
+        { id: 'att_doc', filename: 'contract.docx', content_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', content_disposition: 'attachment' },
+      ],
+    }),
+  );
+  await settleNotices();
+
+  assert.equal(sentNotices.length, 1);
+  assert.match(sentNotices[0]!.text, /contract\.docx: we can only read PDFs and images/);
+});
+
+test('winmail.dat tells the sender the one setting that fixes it', async () => {
+  await seedOrgWithMember('Acme', 'priya@acme.test');
+
+  await postWebhook(
+    receivedEvent({
+      attachments: [{ id: 'att_tnef', filename: 'winmail.dat', content_type: 'application/ms-tnef', content_disposition: 'attachment' }],
+    }),
+  );
+  await settleNotices();
+
+  assert.match(sentNotices[0]!.text, /Outlook, setting this contact to HTML or plain text/);
+});
+
+test('an out-of-office reply is not answered — that is how a mail loop starts', async () => {
+  await seedOrgWithMember('Acme', 'priya@acme.test');
+
+  await postWebhook(
+    receivedEvent({ attachments: [], headers: { 'Auto-Submitted': 'auto-replied' } }),
+  );
+  await settleNotices();
+
+  assert.equal(sentNotices.length, 0, 'RFC 3834: never answer something a machine sent');
+  const message = await prisma.inboundEmailMessage.findFirstOrThrow();
+  assert.equal(message.senderNotifiedAt, null);
+});
+
+test('mailing list traffic is not answered either', async () => {
+  await seedOrgWithMember('Acme', 'priya@acme.test');
+
+  await postWebhook(receivedEvent({ attachments: [], headers: { 'List-Id': '<vendors.example.test>' } }));
+  await settleNotices();
+
+  assert.equal(sentNotices.length, 0);
+});
+
+test('a sender is told once and only once', async () => {
+  await seedOrgWithMember('Acme', 'priya@acme.test');
+  await postWebhook(receivedEvent({ attachments: [] }));
+  await settleNotices();
+
+  const message = await prisma.inboundEmailMessage.findFirstOrThrow();
+  const again = await notifySenderIfNeeded(message.inboundEmailMessageId);
+
+  assert.deepEqual(again, { sent: false, skipped: 'already_notified' });
+  assert.equal(sentNotices.length, 1, 'the guard is in the database, not in the caller');
+});
+
+test('accepted mail says nothing — the bill is the notification', async () => {
+  await seedOrgWithMember('Acme', 'priya@acme.test');
+  stubExtraction();
+
+  await queueAndSweep();
+  await waitForPaymentOrders(1);
+  await settleNotices();
+
+  assert.equal(sentNotices.length, 0, 'nothing went wrong, so there is nothing to say');
+});
+
+test('an email whose only attachments were junk tells the sender after the sweep, not before', async () => {
+  // The handler cannot know: image001.png passes every check it can make
+  // without the bytes. So this notice comes from the sweep's roll-up.
+  await seedOrgWithMember('Acme', 'priya@acme.test');
+  stubFetchById({
+    att_a: { bytes: logoBytes(4), contentType: 'image/png', filename: 'image001.png' },
+    att_b: { bytes: logoBytes(3), contentType: 'image/png', filename: 'image002.png' },
+  });
+
+  await postWebhook(
+    receivedEvent({
+      attachments: [
+        { id: 'att_a', filename: 'image001.png', content_type: 'image/png', content_disposition: 'attachment' },
+        { id: 'att_b', filename: 'image002.png', content_type: 'image/png', content_disposition: 'attachment' },
+      ],
+    }),
+  );
+  await waitForQueueDrain();
+  await settleNotices();
+
+  assert.equal(sentNotices.length, 1);
+  assert.match(sentNotices[0]!.text, /image001\.png: looks like a signature logo/);
 });
 
 // --- what counts as a document ----------------------------------------------
