@@ -16,7 +16,7 @@ import { config } from '../config.js';
 import { errorToLogFields, logger } from '../infra/logger.js';
 import { prisma } from '../infra/prisma.js';
 import { beginAsyncInvoiceIntake } from '../payments/invoice-intake.js';
-import { decideFetchedBytes } from '../payments/inbound-email/policy.js';
+import { decideFetchedBytes, POST_FETCH_SKIP_REASONS } from '../payments/inbound-email/policy.js';
 import { rollUpMessageDisposition } from '../payments/inbound-email/messages.js';
 import {
   PermanentAttachmentError,
@@ -108,13 +108,27 @@ export async function runInboundEmailIntakeOnce(now: Date = new Date()): Promise
         contentType: attachment.contentType,
       });
 
-      const sizeDecision = decideFetchedBytes(fetched.bytes.length);
+      const mimeType = attachment.contentType ?? fetched.contentType ?? 'application/octet-stream';
+      const sizeDecision = decideFetchedBytes({
+        byteLength: fetched.bytes.length,
+        filename: attachment.filename,
+        mimeType,
+        isOnlyCandidate: (await countCandidates(message.inboundEmailMessageId)) <= 1,
+      });
       if (!sizeDecision.accept) {
-        // One oversized or empty file never fails the whole message.
+        // One oversized, empty or junk file never fails the whole message.
         await markAttachment(attachment.inboundEmailAttachmentId, 'skipped', sizeDecision.reason, {
           byteSize: fetched.bytes.length,
         });
         summary.skipped += 1;
+        // Logged with the size so the thresholds in policy.ts can be corrected
+        // from real traffic instead of argued about.
+        logger.info('inbound_email.attachment_skipped', {
+          inboundEmailMessageId: message.inboundEmailMessageId,
+          reason: sizeDecision.reason,
+          filename: attachment.filename,
+          byteSize: fetched.bytes.length,
+        });
         continue;
       }
 
@@ -128,7 +142,7 @@ export async function runInboundEmailIntakeOnce(now: Date = new Date()): Promise
         actorUserId: message.senderUserId,
         fileBytes: fetched.bytes,
         filename: attachment.filename,
-        mimeType: attachment.contentType ?? fetched.contentType ?? 'application/octet-stream',
+        mimeType,
         intakeChannel: {
           kind: 'email',
           inboundEmailMessageId: message.inboundEmailMessageId,
@@ -193,6 +207,27 @@ export async function runInboundEmailIntakeOnce(now: Date = new Date()): Promise
   }
 
   return summary;
+}
+
+/**
+ * How many attachments this message actually offered as possible invoices —
+ * the ones the handler queued, whatever became of them since.
+ *
+ * Counted against the queued set rather than the surviving one so the answer
+ * does not depend on the order the sweep happens to work through a batch. Two
+ * signature logos on one message are two candidates, and neither gets the
+ * lone-attachment reprieve; a single small receipt is one candidate, and does.
+ */
+async function countCandidates(inboundEmailMessageId: string): Promise<number> {
+  return prisma.inboundEmailAttachment.count({
+    where: {
+      inboundEmailMessageId,
+      OR: [
+        { status: { in: ['pending', 'ingested', 'failed'] } },
+        { status: 'skipped', statusReason: { in: [...POST_FETCH_SKIP_REASONS] } },
+      ],
+    },
+  });
 }
 
 async function markAttachment(

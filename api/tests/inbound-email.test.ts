@@ -13,6 +13,7 @@ import {
   clearSimulatedAttachmentBytes,
   setResendInboundRuntimeForTests,
 } from '../src/payments/inbound-email/resend-inbound.js';
+import { decideAttachment, decideFetchedBytes } from '../src/payments/inbound-email/policy.js';
 import { signSvixPayloadForTests, verifySvixSignature } from '../src/payments/inbound-email/svix-signature.js';
 import {
   RESERVED_INTAKE_SLUGS,
@@ -585,6 +586,82 @@ test('a message whose attachments are all unsupported is rejected for no_support
   assert.equal((await response.json()).reason, 'no_supported_attachments');
 });
 
+// --- what counts as a document ----------------------------------------------
+
+const KB = 1024;
+const skipReason = (decision: ReturnType<typeof decideFetchedBytes>) =>
+  decision.accept ? null : decision.reason;
+
+test('winmail.dat gets its own reason — the sender can fix that one themselves', () => {
+  const decision = decideAttachment(
+    { filename: 'winmail.dat', contentType: 'application/ms-tnef', contentDisposition: 'attachment' },
+    0,
+  );
+  assert.deepEqual(decision, { accept: false, reason: 'rich_text_wrapper' });
+});
+
+test('a signature logo that arrives as a normal attachment is still a signature logo', () => {
+  // The inline check misses this one: plenty of clients label embedded images
+  // `attachment`. Outlook's image001.png naming is what gives it away.
+  const decision = decideFetchedBytes({
+    byteLength: 4 * KB,
+    filename: 'image001.png',
+    mimeType: 'image/png',
+    isOnlyCandidate: false,
+  });
+  assert.equal(skipReason(decision), 'signature_image');
+});
+
+test('a large image named like a signature asset is kept — the name alone never decides', () => {
+  const decision = decideFetchedBytes({
+    byteLength: 400 * KB,
+    filename: 'image001.png',
+    mimeType: 'image/png',
+    isOnlyCandidate: false,
+  });
+  assert.equal(decision.accept, true);
+});
+
+test('a tiny image alongside a real invoice is dropped', () => {
+  assert.equal(
+    skipReason(decideFetchedBytes({ byteLength: 2 * KB, filename: 'icon.png', mimeType: 'image/png', isOnlyCandidate: false })),
+    'attachment_too_small',
+  );
+});
+
+test('the same tiny image on its own is kept — it may be a photographed receipt', () => {
+  // The floor is the rule most likely to throw away a real invoice, so it
+  // stands down when dropping it would leave the email with nothing.
+  const decision = decideFetchedBytes({
+    byteLength: 2 * KB,
+    filename: 'icon.png',
+    mimeType: 'image/png',
+    isOnlyCandidate: true,
+  });
+  assert.equal(decision.accept, true);
+});
+
+test('a small PDF is never junk — the size rules are for images only', () => {
+  const decision = decideFetchedBytes({
+    byteLength: 900,
+    filename: 'invoice.pdf',
+    mimeType: 'application/pdf',
+    isOnlyCandidate: false,
+  });
+  assert.equal(decision.accept, true);
+});
+
+test('an empty or oversized file is still refused, lone attachment or not', () => {
+  assert.equal(
+    skipReason(decideFetchedBytes({ byteLength: 0, filename: 'invoice.pdf', mimeType: 'application/pdf', isOnlyCandidate: true })),
+    'empty_attachment',
+  );
+  assert.equal(
+    skipReason(decideFetchedBytes({ byteLength: 200 * 1024 * 1024, filename: 'invoice.pdf', mimeType: 'application/pdf', isOnlyCandidate: true })),
+    'attachment_too_large',
+  );
+});
+
 // --- ingestion sweep ---------------------------------------------------------
 
 const PDF_BYTES = Buffer.from('%PDF-1.4 fake invoice bytes for the test suite', 'utf8');
@@ -697,6 +774,78 @@ test('the same invoice forwarded twice reuses the stored document and creates no
 
   assert.equal(await prisma.invoiceDocument.count(), 1, 'identical bytes reuse the stored document');
   assert.equal(await prisma.paymentOrder.count(), 1, 'and do not produce a duplicate bill');
+});
+
+/** Bytes per attachment id, so one message can carry a logo and a real bill. */
+function stubFetchById(byId: Record<string, { bytes: Buffer; contentType: string; filename: string }>) {
+  setResendInboundRuntimeForTests({
+    fetchAttachment: async ({ attachmentId }) => {
+      const found = byId[attachmentId];
+      if (!found) throw new Error(`test stub has no bytes for ${attachmentId}`);
+      return found;
+    },
+  });
+}
+
+const logoBytes = (kb: number) => Buffer.alloc(kb * 1024, 7);
+
+test('a signature logo sent as a real attachment is dropped, and the invoice beside it still lands', async () => {
+  await seedOrgWithMember('Acme', 'priya@acme.test');
+  stubExtraction();
+  stubFetchById({
+    att_logo: { bytes: logoBytes(4), contentType: 'image/png', filename: 'image001.png' },
+    att_bill: { bytes: PDF_BYTES, contentType: 'application/pdf', filename: 'invoice.pdf' },
+  });
+
+  // Note the disposition: `attachment`, not `inline`. This is the case the
+  // inline check cannot catch, and the one that used to become a bill.
+  await postWebhook(
+    receivedEvent({
+      attachments: [
+        { id: 'att_logo', filename: 'image001.png', content_type: 'image/png', content_disposition: 'attachment' },
+        { id: 'att_bill', filename: 'invoice.pdf', content_type: 'application/pdf', content_disposition: 'attachment' },
+      ],
+    }),
+  );
+  await waitForQueueDrain();
+
+  const rows = await prisma.inboundEmailAttachment.findMany({ orderBy: { filename: 'asc' } });
+  assert.deepEqual(
+    rows.map((r) => [r.filename, r.status, r.statusReason]),
+    [
+      ['image001.png', 'skipped', 'signature_image'],
+      ['invoice.pdf', 'ingested', null],
+    ],
+  );
+  assert.equal((await waitForPaymentOrders(1)).length, 1, 'one bill, from the PDF');
+});
+
+test('two signature logos are two candidates, so neither is reprieved and no bill is made', async () => {
+  // Order-independence: whichever the sweep reaches second must not be treated
+  // as "the only attachment" just because the first one was already dropped.
+  await seedOrgWithMember('Acme', 'priya@acme.test');
+  stubExtraction();
+  stubFetchById({
+    att_a: { bytes: logoBytes(4), contentType: 'image/png', filename: 'image001.png' },
+    att_b: { bytes: logoBytes(3), contentType: 'image/png', filename: 'image002.png' },
+  });
+
+  await postWebhook(
+    receivedEvent({
+      attachments: [
+        { id: 'att_a', filename: 'image001.png', content_type: 'image/png', content_disposition: 'attachment' },
+        { id: 'att_b', filename: 'image002.png', content_type: 'image/png', content_disposition: 'attachment' },
+      ],
+    }),
+  );
+  await waitForQueueDrain();
+
+  const rows = await prisma.inboundEmailAttachment.findMany();
+  assert.deepEqual(
+    rows.map((r) => r.statusReason).sort(),
+    ['signature_image', 'signature_image'],
+  );
+  assert.equal(await prisma.paymentOrder.count(), 0, 'a signature block is not an invoice');
 });
 
 test('a transient fetch failure is retried with backoff and the attachment stays pending', async () => {
