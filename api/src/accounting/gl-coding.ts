@@ -31,7 +31,42 @@ export interface GlCodingPrediction {
  * Predict the expense account for a payment: the most-common account this vendor's
  * prior payments were coded to (confidence = its share), else the org default.
  */
+/**
+ * Predict, and record what we predicted.
+ *
+ * The prediction is logged BEFORE anyone sees it, whatever they do next. Storing
+ * only the code that ends up on the bill makes "we suggested it", "we suggested
+ * something else and were overridden" and "nobody consulted us" the same row —
+ * and none of that is recoverable afterwards. GL coding is the biggest source of
+ * suggestions in the product and was the one not recording any of this.
+ */
 export async function predictGlExpenseAccount(
+  organizationId: string,
+  paymentOrderId: string,
+): Promise<GlCodingPrediction> {
+  const prediction = await predictGlExpenseAccountInner(organizationId, paymentOrderId);
+  if (prediction.codedExpenseAccountName) {
+    const { logSuggestion } = await import('../payments/suggestion-log.js');
+    await logSuggestion({
+      organizationId,
+      stage: 'gl_coding',
+      subjectType: 'payment_order',
+      subjectId: paymentOrderId,
+      suggested: {
+        accountId: prediction.codedExpenseAccountId,
+        accountName: prediction.codedExpenseAccountName,
+      },
+      confidence: prediction.confidenceScore,
+      // The waterfall step that won — a rule, vendor memory, or the model. A
+      // change in accuracy should be attributable to which arm produced it.
+      producer: `gl-coding/${prediction.predictionSource}`,
+      inputs: { supportCount: prediction.supportCount },
+    });
+  }
+  return prediction;
+}
+
+async function predictGlExpenseAccountInner(
   organizationId: string,
   paymentOrderId: string,
 ): Promise<GlCodingPrediction> {
@@ -141,6 +176,34 @@ export async function setPaymentOrderGlCoding(
     const amount = order ? Number(order.amountRaw) / 1e6 : 0;
     lines = [{ accountId: input.codedExpenseAccountId, accountName: input.codedExpenseAccountName ?? null, amount, description: null }];
   }
+  // What the operator did with the suggestion. Matched against the most recent
+  // gl_coding suggestion for this bill rather than a threaded id, because the
+  // caller does not carry one — good enough to learn from, and it costs nothing
+  // when there was no suggestion to override.
+  try {
+    const { logSuggestionOutcome } = await import('../payments/suggestion-log.js');
+    const last = await prisma.aiSuggestion.findFirst({
+      where: { organizationId, stage: 'gl_coding', subjectId: paymentOrderId },
+      orderBy: { createdAt: 'desc' },
+      select: { aiSuggestionId: true, suggested: true },
+    });
+    if (last) {
+      const proposed = (last.suggested ?? {}) as { accountId?: string | null };
+      const suggestedId = proposed.accountId ?? '';
+      const chosenId = lines[0]?.accountId ?? input.codedExpenseAccountId ?? '';
+      await logSuggestionOutcome({
+        aiSuggestionId: last.aiSuggestionId,
+        // 'edited' is the informative one: the delta between what we proposed
+        // and what they kept is the only thing that says where we were wrong.
+        outcome: chosenId && suggestedId === chosenId ? 'accepted' : 'edited',
+        finalValue: { accountId: chosenId, accountName: lines[0]?.accountName ?? input.codedExpenseAccountName ?? null },
+        decidedByUserId: actorUserId,
+      });
+    }
+  } catch {
+    // Instrumentation must never block someone coding a bill.
+  }
+
   // normalize: 2dp amounts, trimmed descriptions
   const normalized = lines.map((l) => ({
     accountId: l.accountId,

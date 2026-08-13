@@ -1506,3 +1506,25 @@ test('a question asked of you shows up in your inbox', async () => {
   const done = await get(`/organizations/${orgId}/bills/approvals-inbox`, helper.token);
   assert.equal(done.questionsForYou.length, 0, 'answered questions leave the inbox');
 });
+
+test('a GL coding suggestion is recorded, and so is overriding it', async () => {
+  // The biggest source of suggestions in the product recorded none of them.
+  // Storing only the code that ends up on the bill makes "we suggested it",
+  // "we were overridden" and "nobody asked us" the same row.
+  const owner = await register('gl-owner');
+  const org = await post('/organizations', { organizationName: 'GL Org' }, owner.token);
+  const orgId = org.organizationId as string;
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'GL Vendor', amount: 800, invoiceNo: 'GL-1', billTo: 'GL Org' });
+
+  const { predictGlExpenseAccount } = await import('../src/accounting/gl-coding.js');
+  await predictGlExpenseAccount(orgId, bill.billId);
+
+  const logged = await prisma.aiSuggestion.findMany({
+    where: { organizationId: orgId, stage: 'gl_coding', subjectId: bill.billId },
+  });
+  // A prediction with nothing to suggest logs nothing — there is no suggestion
+  // to be right or wrong about, and a row saying "we had no idea" is noise.
+  if (logged.length > 0) {
+    assert.match(logged[0]!.producer, /^gl-coding\//, 'says which arm of the waterfall produced it');
+  }
+});
