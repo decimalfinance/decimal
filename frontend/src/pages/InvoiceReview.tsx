@@ -155,11 +155,15 @@ function ReviewScreen(props: {
   // Fields an unanswered question named, and who asked. This is the payoff of
   // mapping the question: the person asked sees WHERE to look instead of
   // reading a sentence and hunting the form.
+  const [openThreadDetail, setOpenThreadDetail] = useState<string | null>(null);
+  // Hovering an exchange highlights the fields it concerns, so a reader does
+  // not have to hold "which fields was that about" in their head.
+  const [hoveredQuestion, setHoveredQuestion] = useState<string | null>(null);
   const askedFields = new Map<string, { by: string; question: string }>();
   for (const q of review.questions) {
     // A handed-back question is still open — the fields it named still want
     // attention, just from someone else now.
-    if (!q.stillOpen) continue;
+    if (!q.stillOpen && hoveredQuestion !== q.billQuestionId) continue;
     // openFields, not highlightFields: a partial answer must stop highlighting
     // what it already settled, or the next person cannot tell which half is left.
     for (const f of q.openFields) if (!askedFields.has(f)) askedFields.set(f, { by: q.askedByName, question: `${q.askedByName}: “${q.question}”` });
@@ -562,158 +566,105 @@ function ReviewScreen(props: {
               </div>
             ) : null}
 
-            {/* Where this bill has got to. A strip, not a panel: fixed height,
-                always visible, and it reads left to right so "three of five
-                done" is a glance rather than a count. Progress is what makes
-                someone move a bill — knowing others already put work into it —
-                which a destination alone does not convey. */}
+            {/* Progress and the conversation are one component: both answer
+                "where is this bill", so they belong above the same rule rather
+                than the thread appearing to be page content. */}
             {review.route.length > 0 ? (
-              // Sits between two rules: .rev-head's border-bottom above, its own
-              // below. To look centred it has to be centred BETWEEN THEM, which
-              // means counting everything in that space, not just this padding:
-              //
-              //   above  20px  .stack-20's flex gap  +  12px  padding-top
-              //   below  12px  padding-bottom
-              //
-              // Symmetric padding was not enough — the gap sits outside the box
-              // and pushed the content down by 20px. marginTop: -20 cancels it,
-              // leaving a true 12/12. The -24px sides are the .rev-head idiom:
-              // bleed past .rev-panel's 24px padding so the rule reaches the
-              // edges and lines up with the one above.
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', margin: '-20px -24px 0', padding: '12px 24px', borderBottom: '1px solid var(--border)' }}>
-                {review.route.map((n, i) => (
-                  <span key={`${n.name}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span className={`pill pill-min ${n.state === 'done' ? 'pill-success' : n.state === 'waiting' ? 'pill-warning' : n.state === 'declined' ? 'pill-danger' : 'pill-neutral'}`}>
-                      <span className="dot" />{n.name.split(' ')[0]}
-                    </span>
-                    {i < review.route.length - 1 ? <span style={{ color: 'var(--text-faint)' }}>→</span> : null}
-                  </span>
-                ))}
-                <span style={{ marginLeft: 4, color: 'var(--text-muted)' }}>
-                  {review.route.filter((n) => n.state === 'done').length} of {review.route.length} approved
-                </span>
-                <span style={{ flex: 1 }} />
-                {/* The thread is on demand: it grows without bound and would push
-                    the document off screen if it were always open. */}
-                {/* A chevron, not a word: the strip is a glance, and a label
-                    competes with the names that carry the meaning. The count
-                    stays, because an unread question is worth interrupting for. */}
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-icon btn-sm"
-                  aria-expanded={showThread}
-                  aria-label={showThread ? 'Hide conversation' : 'Show conversation'}
-                  title={showThread ? 'Hide conversation' : 'Show conversation'}
-                  onClick={() => setShowThread(!showThread)}
-                >
-                  {review.questions.length ? <span style={{ marginRight: 4 }}>{review.questions.length}</span> : null}
-                  <Ico.chevDown w={14} style={{ transform: showThread ? 'rotate(180deg)' : undefined, transition: 'transform 120ms' }} />
-                </button>
-              </div>
-            ) : null}
-
-            {/* Questions asked about this bill. An unanswered one always shows,
-                even with the thread collapsed — someone waiting on you is not
-                something to hide behind a toggle. */}
-            {review.questions.filter((q) => showThread || (q.youWereAsked && q.stillOpen)).map((q) => (
-              <div key={q.billQuestionId} className={`callout ${q.youWereAsked ? 'callout-warning' : 'callout-info'}`}>
-                <Ico.shield w={16} />
-                <span style={{ flex: 1, minWidth: 0 }}>
-                  {/* A thread, in order: who asked what, then who said what
-                      back. A single blob made a hand-back look like a
-                      resolution. */}
-                  <strong style={{ display: 'block' }}>
-                    {q.youWereAsked
-                      ? `${q.askedByName} asked you`
-                      : q.outcome === 'answered'
-                        ? `${q.askedOfName} answered`
-                        : q.outcome === 'partial'
-                          ? `${q.askedOfName} answered part of this — the rest is still open`
-                          : q.outcome === 'forwarded'
-                            ? `${q.askedOfName} passed this on`
-                            : q.outcome === 'handed_back'
-                              ? `${q.askedOfName} couldn't answer — still open`
-                              : `Waiting on ${q.askedOfName}`}
-                  </strong>
-                  <span style={{ display: 'block', marginTop: 4 }}>
-                    <strong>{q.askedByName}:</strong> “{q.question}”
-                  </span>
-                  {q.answer ? (
-                    <span style={{ display: 'block', marginTop: 2 }}>
-                      <strong>{q.askedOfName}:</strong> “{q.answer}”
-                    </span>
-                  ) : null}
-
-                  {q.youWereAsked && answerFor === q.billQuestionId && q.openFields.length > 1 ? (
-                    <span style={{ display: 'block', marginTop: 8 }}>
-                      {/* Which of these do you actually know? Nobody should have
-                          to answer all four to record the two they are sure of. */}
-                      <span style={{ display: 'block', opacity: 0.85 }}>Tick what you have checked:</span>
-                      <span style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 4 }}>
-                        {q.openFields.map((key) => (
-                          <label key={key} style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
-                            <input type="checkbox" checked={settled.includes(key)}
-                              onChange={() => setSettled(settled.includes(key) ? settled.filter((k) => k !== key) : [...settled, key])} />
-                            {fieldLabel(key)}
-                          </label>
-                        ))}
+              <div style={{ margin: '-20px -24px 0', padding: '12px 24px', borderBottom: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  {review.route.map((n, i) => (
+                    <span key={`${n.name}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span className={`pill pill-min ${n.state === 'done' ? 'pill-success' : n.state === 'waiting' ? 'pill-warning' : n.state === 'declined' ? 'pill-danger' : 'pill-neutral'}`}>
+                        <span className="dot" />{n.name.split(' ')[0]}
                       </span>
+                      {i < review.route.length - 1 ? <span style={{ color: 'var(--text-faint)' }}>→</span> : null}
                     </span>
+                  ))}
+                  <span style={{ marginLeft: 4, color: 'var(--text-muted)' }}>
+                    {review.route.filter((n) => n.state === 'done').length} of {review.route.length} approved
+                  </span>
+                  <span style={{ flex: 1 }} />
+                  {/* Count OUTSIDE the button: a number crammed into a round
+                      icon button reads as a badge on nothing and crowds the
+                      chevron it sits next to. */}
+                  {review.questions.length > 0 ? (
+                    <span style={{ color: 'var(--text-muted)' }}>{review.questions.length}</span>
                   ) : null}
-                  {q.youWereAsked && answerFor === q.billQuestionId ? (
-                    <span style={{ display: 'block', marginTop: 6 }}>
-                      <select className="input" value={forwardTo} onChange={(e) => setForwardTo(e.target.value)}
-                        style={{ height: 32, maxWidth: 260 }}>
-                        <option value="">Pass it to someone else…</option>
-                        {(askCandidates.data?.candidates ?? []).map((c) => (
-                          <option key={c.userId} value={c.userId}>{c.name}</option>
-                        ))}
-                      </select>
-                    </span>
-                  ) : null}
-                  {q.youWereAsked && answerFor === q.billQuestionId ? (
-                    <span style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-                      <input className="input" autoFocus value={answerText} placeholder="Your answer"
-                        onChange={(e) => setAnswerText(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') void sendAnswer(q.billQuestionId, 'answered', q.openFields); }}
-                        style={{ flex: 1, minWidth: 0, height: 32 }} />
-                      <button type="button" className="btn btn-primary btn-sm" style={{ flex: 'none' }}
-                        disabled={answering || answerText.trim().length < 1}
-                        title="You have checked or corrected everything that was asked."
-                        onClick={() => void sendAnswer(q.billQuestionId, 'answered', q.openFields)}>
-                        {answering ? 'Sending…' : 'All answered'}
-                      </button>
-                      {q.openFields.length > 1 ? (
-                        <button type="button" className="btn btn-secondary btn-sm" style={{ flex: 'none' }}
-                          disabled={answering || answerText.trim().length < 1 || settled.length === 0}
-                          title="Save what you know. The rest stays open for them."
-                          onClick={() => void sendAnswer(q.billQuestionId, 'partial', q.openFields)}>
-                          Answered some
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-icon btn-sm"
+                    aria-expanded={showThread}
+                    aria-label={showThread ? 'Hide conversation' : 'Show conversation'}
+                    title={showThread ? 'Hide conversation' : 'Show conversation'}
+                    onClick={() => setShowThread(!showThread)}
+                  >
+                    <Ico.chevDown w={14} style={{ transform: showThread ? 'rotate(180deg)' : undefined, transition: 'transform 120ms' }} />
+                  </button>
+                </div>
+
+                {/* A conversation, not a stack of alert boxes. Each exchange is
+                    one line you can scan — who asked whom, and whether it is
+                    settled — with the detail folded away underneath. */}
+                {review.questions.filter((q) => showThread || (q.youWereAsked && q.stillOpen)).map((q) => {
+                  const settled = q.outcome === 'answered';
+                  const fields = q.openFields.length ? q.openFields : q.highlightFields;
+                  return (
+                    <div
+                      key={q.billQuestionId}
+                      style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}
+                      // Hovering an exchange lights the fields it is about, so
+                      // "which bits does this concern" needs no reading.
+                      onMouseEnter={() => setHoveredQuestion(q.billQuestionId)}
+                      onMouseLeave={() => setHoveredQuestion(null)}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <strong>{q.askedByName}</strong>
+                        <span style={{ color: 'var(--text-muted)' }}>asked</span>
+                        <strong>{q.askedOfName}</strong>
+                        <span className={`pill pill-min ${settled ? 'pill-success' : 'pill-warning'}`}>
+                          <span className="dot" />
+                          {settled ? `${q.askedOfName.split(' ')[0]} confirmed these details`
+                            : q.outcome === 'partial' ? 'Partly answered'
+                            : q.outcome === 'forwarded' ? 'Passed on'
+                            : q.outcome === 'handed_back' ? `${q.askedOfName.split(' ')[0]} could not answer`
+                            : `Waiting on ${q.askedOfName.split(' ')[0]}`}
+                        </span>
+                        <span style={{ flex: 1 }} />
+                        {fields.length > 0 ? (
+                          <button type="button" className="btn btn-ghost btn-sm"
+                            onClick={() => setOpenThreadDetail(openThreadDetail === q.billQuestionId ? null : q.billQuestionId)}>
+                            {fields.length} field{fields.length === 1 ? '' : 's'}
+                            <Ico.chevDown w={12} style={{ marginLeft: 4, transform: openThreadDetail === q.billQuestionId ? 'rotate(180deg)' : undefined }} />
+                          </button>
+                        ) : null}
+                      </div>
+
+                      <div style={{ marginTop: 4 }}>“{q.question}”</div>
+                      {q.answer ? (
+                        <div style={{ marginTop: 2, color: 'var(--text-muted)' }}>
+                          <strong>{q.askedOfName.split(' ')[0]}:</strong> “{q.answer}”
+                        </div>
+                      ) : null}
+
+                      {openThreadDetail === q.billQuestionId && fields.length > 0 ? (
+                        <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          {fields.map((f) => (
+                            <span key={f} className="pill pill-min pill-neutral">{fieldLabel(f)}</span>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {q.youWereAsked && answerFor === q.billQuestionId ? null : q.youWereAsked ? (
+                        <button type="button" className="btn btn-secondary btn-sm" style={{ marginTop: 8 }}
+                          onClick={() => { setAnswerFor(q.billQuestionId); setAnswerText(''); setSettled([]); }}>
+                          Answer
                         </button>
                       ) : null}
-                      <button type="button" className="btn btn-secondary btn-sm" style={{ flex: 'none' }}
-                        disabled={answering || answerText.trim().length < 1 || !forwardTo}
-                        title="Pass it to someone who would know. Only what is still outstanding goes with it."
-                        onClick={() => void sendAnswer(q.billQuestionId, 'forwarded', q.openFields)}>
-                        Ask someone else
-                      </button>
-                      <button type="button" className="btn btn-ghost btn-sm" style={{ flex: 'none' }}
-                        disabled={answering || answerText.trim().length < 1}
-                        title="Your reply goes back but the question stays open for them."
-                        onClick={() => void sendAnswer(q.billQuestionId, 'handed_back', q.openFields)}>
-                        Can't answer
-                      </button>
-                    </span>
-                  ) : null}
-                </span>
-                {q.youWereAsked && answerFor !== q.billQuestionId ? (
-                  <button type="button" className="btn btn-secondary btn-sm" style={{ flex: 'none' }}
-                    onClick={() => { setAnswerFor(q.billQuestionId); setAnswerText(''); }}>
-                    Answer
-                  </button>
-                ) : null}
+                    </div>
+                  );
+                })}
               </div>
-            ))}
+            ) : null}
 
             {/* A flag states what is wrong AND what can be done about it. The
                 rule the backend enforces: every blocking flag offers at least
