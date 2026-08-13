@@ -568,7 +568,7 @@ function ReviewScreen(props: {
                 someone move a bill — knowing others already put work into it —
                 which a destination alone does not convey. */}
             {review.route.length > 0 ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', padding: '2px 0' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', padding: '2px 0 10px', borderBottom: '1px solid var(--border)' }}>
                 {review.route.map((n, i) => (
                   <span key={`${n.name}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span className={`pill pill-min ${n.state === 'done' ? 'pill-success' : n.state === 'waiting' ? 'pill-warning' : n.state === 'declined' ? 'pill-danger' : 'pill-neutral'}`}>
@@ -583,8 +583,19 @@ function ReviewScreen(props: {
                 <span style={{ flex: 1 }} />
                 {/* The thread is on demand: it grows without bound and would push
                     the document off screen if it were always open. */}
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowThread(!showThread)}>
-                  {showThread ? 'Hide conversation' : `Conversation${review.questions.length ? ` (${review.questions.length})` : ''}`}
+                {/* A chevron, not a word: the strip is a glance, and a label
+                    competes with the names that carry the meaning. The count
+                    stays, because an unread question is worth interrupting for. */}
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-icon btn-sm"
+                  aria-expanded={showThread}
+                  aria-label={showThread ? 'Hide conversation' : 'Show conversation'}
+                  title={showThread ? 'Hide conversation' : 'Show conversation'}
+                  onClick={() => setShowThread(!showThread)}
+                >
+                  {review.questions.length ? <span style={{ marginRight: 4 }}>{review.questions.length}</span> : null}
+                  <Ico.chevDown w={14} style={{ transform: showThread ? 'rotate(180deg)' : undefined, transition: 'transform 120ms' }} />
                 </button>
               </div>
             ) : null}
