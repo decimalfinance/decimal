@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { after, before, beforeEach, test } from 'node:test';
 import { AddressInfo } from 'node:net';
 import { createApp } from '../src/app.js';
@@ -11,6 +12,7 @@ import { runInboundEmailIntakeOnce } from '../src/agents/inbound-email-intake.js
 import { setInvoiceIntakeRuntimeForTests } from '../src/payments/invoice-intake.js';
 import {
   clearSimulatedAttachmentBytes,
+  seedSimulatedAttachmentBytes,
   setResendInboundRuntimeForTests,
 } from '../src/payments/inbound-email/resend-inbound.js';
 import { drainBackgroundWork } from '../src/infra/background.js';
@@ -965,6 +967,35 @@ test('a signature logo sent as a real attachment is dropped, and the invoice bes
     ],
   );
   assert.equal((await waitForPaymentOrders(1)).length, 1, 'one bill, from the PDF');
+});
+
+test('the bench fixture for an Outlook signature does what TESTBENCH.md says it does', async () => {
+  // The fixture is what a person reaches for when testing this by hand. If the
+  // thresholds move and nobody re-cuts it, it quietly stops demonstrating the
+  // rule it exists to demonstrate — so the suite drives the real file.
+  const { slug } = await seedOrgWithMember('Acme', 'priya@acme.test');
+  stubExtraction();
+
+  const fixture = JSON.parse(
+    await readFile(new URL('./fixtures/inbound-email/email-received.outlook-signature.json', import.meta.url), 'utf8'),
+  ) as { payload: { data: { to: string[]; attachments: Array<{ id: string }> } }; attachmentBytes: Record<string, string> };
+
+  // The fixture addresses the production domain; the suite runs on its own.
+  fixture.payload.data.to = [`${slug}@${DOMAIN}`];
+  seedSimulatedAttachmentBytes(fixture.attachmentBytes);
+
+  await postWebhook(fixture.payload);
+  await waitForQueueDrain();
+
+  const rows = await prisma.inboundEmailAttachment.findMany({ orderBy: { filename: 'asc' } });
+  assert.deepEqual(
+    rows.map((r) => [r.filename, r.status, r.statusReason]),
+    [
+      ['image001.png', 'skipped', 'signature_image'],
+      ['invoice.pdf', 'ingested', null],
+    ],
+    'the fixture still demonstrates the rule TESTBENCH.md claims for it',
+  );
 });
 
 test('two signature logos are two candidates, so neither is reprieved and no bill is made', async () => {
