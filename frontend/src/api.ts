@@ -1474,6 +1474,7 @@ export interface BillReview {
   totalUsd: number;
   paymentBlock: { method: string | null; bankName: string | null; accountLast4: string | null; sendToLabel: string; sourceTreasuryWalletId: string | null; matchesVerified: boolean };
   organizationName: string;
+  route: Array<{ name: string; stepIndex: number; state: 'done' | 'waiting' | 'upcoming' | 'declined' }>;
   questions: Array<{
     billQuestionId: string; question: string; aboutFlag: string | null;
     askedByUserId: string; askedByName: string;

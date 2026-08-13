@@ -165,6 +165,13 @@ function ReviewScreen(props: {
     for (const f of q.openFields) if (!askedFields.has(f)) askedFields.set(f, { by: q.askedByName, question: `${q.askedByName}: “${q.question}”` });
   }
 
+  // Conversation is behind a toggle, not always open: the thread grows without
+  // bound and would push the document off screen. The strip below is fixed
+  // height and always visible, because progress is the thing you want at a
+  // glance and the thread is the thing you want on demand.
+  const [showThread, setShowThread] = useState(false);
+  const openQuestions = review.questions.filter((q) => q.stillOpen).length;
+
   const [answerFor, setAnswerFor] = useState<string | null>(null);
   const [answerText, setAnswerText] = useState('');
   const [answering, setAnswering] = useState(false);
@@ -555,10 +562,37 @@ function ReviewScreen(props: {
               </div>
             ) : null}
 
-            {/* Questions asked about this bill. Above the flags on purpose: if
-                someone is waiting on YOU, that is the most actionable thing on
-                the page, and a question nobody surfaces is worse than none. */}
-            {review.questions.map((q) => (
+            {/* Where this bill has got to. A strip, not a panel: fixed height,
+                always visible, and it reads left to right so "three of five
+                done" is a glance rather than a count. Progress is what makes
+                someone move a bill — knowing others already put work into it —
+                which a destination alone does not convey. */}
+            {review.route.length > 0 ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', padding: '2px 0' }}>
+                {review.route.map((n, i) => (
+                  <span key={`${n.name}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span className={`pill pill-min ${n.state === 'done' ? 'pill-success' : n.state === 'waiting' ? 'pill-warning' : n.state === 'declined' ? 'pill-danger' : 'pill-neutral'}`}>
+                      <span className="dot" />{n.name.split(' ')[0]}
+                    </span>
+                    {i < review.route.length - 1 ? <span style={{ color: 'var(--text-faint)' }}>→</span> : null}
+                  </span>
+                ))}
+                <span style={{ marginLeft: 4, color: 'var(--text-muted)' }}>
+                  {review.route.filter((n) => n.state === 'done').length} of {review.route.length} approved
+                </span>
+                <span style={{ flex: 1 }} />
+                {/* The thread is on demand: it grows without bound and would push
+                    the document off screen if it were always open. */}
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowThread(!showThread)}>
+                  {showThread ? 'Hide conversation' : `Conversation${review.questions.length ? ` (${review.questions.length})` : ''}`}
+                </button>
+              </div>
+            ) : null}
+
+            {/* Questions asked about this bill. An unanswered one always shows,
+                even with the thread collapsed — someone waiting on you is not
+                something to hide behind a toggle. */}
+            {review.questions.filter((q) => showThread || (q.youWereAsked && q.stillOpen)).map((q) => (
               <div key={q.billQuestionId} className={`callout ${q.youWereAsked ? 'callout-warning' : 'callout-info'}`}>
                 <Ico.shield w={16} />
                 <span style={{ flex: 1, minWidth: 0 }}>

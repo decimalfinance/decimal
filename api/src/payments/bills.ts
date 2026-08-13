@@ -356,6 +356,39 @@ export function pickAddressConfidenceKey(usedVendorAddress: boolean): 'vendorAdd
   return usedVendorAddress ? 'vendorAddress' : 'remitTo';
 }
 
+/**
+ * The approval chain, flattened to what a progress strip needs: who, in order,
+ * and where each of them stands.
+ *
+ * Deliberately not the full chain getBillDetail builds — that carries threads,
+ * decline reasons and per-step rules, which a strip has no room for and no use
+ * for. This exists so a reviewer can see how far a bill has come and how far is
+ * left BEFORE they act on it: three people having already signed is a reason to
+ * move, and a bill that has not started is a different kind of ask.
+ */
+async function approvalRouteFor(organizationId: string, paymentOrderId: string) {
+  const rows = await prisma.$queryRaw<{ name: string; state: string; step_index: number }[]>`
+    SELECT p2.name, t.state, t.step_index
+      FROM approval.tasks t
+      JOIN approval.approval_plans pl ON pl.id = t.plan_id AND pl.superseded_by IS NULL
+      JOIN approval.approvables a ON a.id = pl.approvable_id
+      JOIN approval.people p2 ON p2.id = t.person_id
+     WHERE a.organization_id = ${organizationId}::uuid
+       AND a.type = 'invoice'
+       AND a.attributes->>'paymentOrderId' = ${paymentOrderId}
+     ORDER BY t.step_index, p2.name`;
+  return rows.map((r) => ({
+    name: r.name,
+    stepIndex: r.step_index,
+    // Collapsed to three words a strip can render. 'waiting' is the one that
+    // matters — it is where the bill actually is.
+    state: r.state === 'approved' ? 'done'
+      : r.state === 'rejected' ? 'declined'
+      : ['open', 'info_requested', 'escalated'].includes(r.state) ? 'waiting'
+      : 'upcoming',
+  }));
+}
+
 function documentAmounts(extracted: Record<string, unknown> | null) {
   const lines = Array.isArray(extracted?.lineItems) ? (extracted!.lineItems as unknown[]) : [];
   const readable = lines.filter(isRecord).map((l) => num(l.total)).filter((n): n is number => n !== null);
@@ -877,6 +910,7 @@ export async function getBillReview(organizationId: string, paymentOrderId: stri
     // The thread, for BOTH people. A recorded question nothing reads back is
     // worse than none: the asker believes they raised something and the person
     // asked never learns they were asked.
+    route: await approvalRouteFor(organizationId, order.paymentOrderId),
     questions: (await listBillQuestions(organizationId, order.paymentOrderId)).map((q) => ({
       ...q,
       // Whose move it is, decided here rather than by the client comparing ids.
