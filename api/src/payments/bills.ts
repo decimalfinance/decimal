@@ -2395,9 +2395,58 @@ export async function getApprovalsInbox(organizationId: string, viewerUserId: st
     (r.overdueDays ? -1000 - r.overdueDays : 0) + (r.signal.clean ? 0 : -100);
   waitingOnYou.sort((a, b) => urgencyRank(a as never) - urgencyRank(b as never));
 
+  // Questions asked OF you.
+  //
+  // These do not appear in the task query above and never could: request_info
+  // parks the ASKER's task and names you only inside the command payload, so
+  // there is no row anywhere that says "this is yours". A question that only
+  // surfaces if somebody separately tells you to go and open that bill is not a
+  // question the product asked on their behalf.
+  const asked = await prisma.billQuestion.findMany({
+    where: {
+      organizationId,
+      askedOfUserId: viewerUserId,
+      OR: [{ answeredAt: null }, { outcome: { notIn: ['answered'] } }],
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+  const questionsForYou = await (async () => {
+    if (asked.length === 0) return [];
+    const orders = await prisma.paymentOrder.findMany({
+      where: { paymentOrderId: { in: [...new Set(asked.map((q) => q.paymentOrderId))] } },
+      select: {
+        paymentOrderId: true, amountRaw: true, invoiceNumber: true,
+        counterparty: { select: { displayName: true } },
+        counterpartyWallet: { select: { label: true } },
+      },
+    });
+    const byOrder = new Map(orders.map((o) => [o.paymentOrderId, o]));
+    const askers = await prisma.user.findMany({
+      where: { userId: { in: [...new Set(asked.map((q) => q.askedByUserId))] } },
+      select: { userId: true, displayName: true },
+    });
+    const askerName = new Map(askers.map((u) => [u.userId, u.displayName]));
+    return asked
+      .filter((q) => byOrder.has(q.paymentOrderId))
+      .map((q) => {
+        const order = byOrder.get(q.paymentOrderId)!;
+        return {
+          billQuestionId: q.billQuestionId,
+          paymentOrderId: q.paymentOrderId,
+          question: q.question,
+          askedByName: askerName.get(q.askedByUserId) ?? 'Someone',
+          askedAt: q.createdAt.toISOString(),
+          vendorName: order.counterparty?.displayName ?? order.counterpartyWallet.label,
+          invoiceNumber: order.invoiceNumber,
+          amountUsd: amountRawToUsd(order.amountRaw),
+        };
+      });
+  })();
+
   return {
     waitingOnYou,
     inFlight,
-    summary: { flagCount, cleanCount, totalWaitingUsd },
+    questionsForYou,
+    summary: { flagCount, cleanCount, totalWaitingUsd, questionCount: questionsForYou.length },
   };
 }

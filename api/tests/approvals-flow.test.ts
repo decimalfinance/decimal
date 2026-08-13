@@ -1466,3 +1466,43 @@ test('a suggestion record cannot be rewritten after the fact', async () => {
     /append-only/,
   );
 });
+
+test('a question asked of you shows up in your inbox', async () => {
+  // The gap this closes: request_info parks the ASKER's task and names the
+  // other person only inside the command payload, so nothing anywhere said
+  // "this is yours". The question was reachable only by opening that exact
+  // bill, which means it was reachable only if somebody told you to.
+  const owner = await register('inb-owner');
+  const org = await post('/organizations', { organizationName: 'Inbox Org' }, owner.token);
+  const orgId = org.organizationId as string;
+  const helper = await register('inb-helper');
+  await prisma.organizationMembership.create({
+    data: { organizationId: orgId, userId: helper.userId, role: 'admin', status: 'active' },
+  });
+  const bill = await uploadAndConfirm(orgId, owner.token, {
+    vendor: 'Inbox Vendor', amount: 640, invoiceNo: 'INB-1', billTo: 'Inbox Org',
+  });
+
+  const before = await get(`/organizations/${orgId}/bills/approvals-inbox`, helper.token);
+  assert.equal(before.questionsForYou.length, 0, 'nothing to answer yet');
+
+  const asked = await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, {
+    askedOfUserId: helper.userId, question: 'Is this the right vendor?',
+  }, owner.token);
+
+  const after = await get(`/organizations/${orgId}/bills/approvals-inbox`, helper.token);
+  assert.equal(after.questionsForYou.length, 1, 'the person asked can find it without being told where');
+  assert.equal(after.questionsForYou[0].question, 'Is this the right vendor?');
+  assert.equal(after.questionsForYou[0].askedByName, 'inb-owner');
+  assert.equal(after.questionsForYou[0].vendorName, 'Inbox Vendor', 'with enough context to know which bill');
+
+  // The asker does not see their own question as something to answer.
+  const asAsker = await get(`/organizations/${orgId}/bills/approvals-inbox`, owner.token);
+  assert.equal(asAsker.questionsForYou.length, 0);
+
+  // Answering clears it; a hand-back does not, because it is still open.
+  await post(`/organizations/${orgId}/bills/${bill.billId}/questions/${asked.billQuestionId}/answer`,
+    { answer: 'Yes, confirmed.', outcome: 'answered' }, helper.token);
+  const done = await get(`/organizations/${orgId}/bills/approvals-inbox`, helper.token);
+  assert.equal(done.questionsForYou.length, 0, 'answered questions leave the inbox');
+});

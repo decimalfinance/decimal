@@ -18,7 +18,7 @@ export function ApprovalsPage() {
   const navigate = useNavigate();
   const toast = useToast();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<'you' | 'flight'>('you');
+  const [tab, setTab] = useState<'you' | 'flight' | 'asked'>('you');
   const [search, setSearch] = useState('');
   const [approvingId, setApprovingId] = useState<string | null>(null);
 
@@ -120,11 +120,52 @@ export function ApprovalsPage() {
             <button type="button" className={`tab${tab === 'flight' ? ' on' : ''}`} onClick={() => setTab('flight')}>
               In flight<span className="tab-count">{data?.inFlight.length ?? 0}</span>
             </button>
+            {/* Questions asked OF you. A separate tab rather than mixed into
+                "waiting on you": both are your move, but one is a decision and
+                the other is knowledge only you have. */}
+            <button type="button" className={`tab${tab === 'asked' ? ' on' : ''}`} onClick={() => setTab('asked')}>
+              Asked of you<span className="tab-count">{data?.questionsForYou.length ?? 0}</span>
+            </button>
           </div>
         </div>
 
         {inbox.isLoading ? (
           <div className="skeleton" style={{ height: 320 }} />
+        ) : tab === 'asked' ? (
+          (data?.questionsForYou ?? []).length === 0 ? (
+            <div className="empty" style={{ margin: '40px 0' }}>
+              <h4>Nobody is waiting on you</h4>
+              <p>When a colleague asks you something about a bill, it shows up here.</p>
+            </div>
+          ) : (
+            <div className="tbl-card">
+              <table className="tbl">
+                <thead>
+                  <tr><th>Question</th><th>Bill</th><th className="num">Amount</th><th /></tr>
+                </thead>
+                <tbody>
+                  {(data?.questionsForYou ?? []).map((row) => (
+                    <tr key={row.billQuestionId} onClick={() => navigate(`/organizations/${organizationId}/bills/${row.paymentOrderId}/review`)} style={{ cursor: 'pointer' }}>
+                      <td>
+                        <div className="cell-vendor">
+                          <span className="v-name">{row.askedByName} asked</span>
+                          <span className="v-sub">“{row.question}”</span>
+                        </div>
+                      </td>
+                      <td>
+                        <div className="cell-vendor">
+                          <span className="v-name">{row.vendorName}</span>
+                          <span className="v-sub">{row.invoiceNumber ?? '—'}</span>
+                        </div>
+                      </td>
+                      <td className="td-num">{usd(row.amountUsd)}</td>
+                      <td className="row-arrow"><Ico.chevRight w={14} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
         ) : tab === 'you' ? (
           waiting.length === 0 ? (
             <div className="empty" style={{ margin: '40px 0' }}>

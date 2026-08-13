@@ -1828,10 +1828,16 @@ export interface InboxInFlightRow {
   nowWith: string | null;
   stalledDays: number | null;
 }
+export interface InboxQuestionRow {
+  billQuestionId: string; paymentOrderId: string; question: string;
+  askedByName: string; askedAt: string;
+  vendorName: string; invoiceNumber: string | null; amountUsd: number;
+}
 export interface ApprovalsInbox {
   waitingOnYou: InboxWaitingRow[];
   inFlight: InboxInFlightRow[];
-  summary: { flagCount: number; cleanCount: number; totalWaitingUsd: number };
+  questionsForYou: InboxQuestionRow[];
+  summary: { flagCount: number; cleanCount: number; totalWaitingUsd: number; questionCount: number };
 }
 
 export const approvalsInboxApi = {
