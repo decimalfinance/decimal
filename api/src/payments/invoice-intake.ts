@@ -317,6 +317,33 @@ export async function processInvoiceDocument(args: {
       //
       // Best-effort — an engine failure must not lose an ingested bill. The
       // order exists either way and confirm will submit as a fallback.
+      // What we proposed for each LINE, recorded before anyone sees it.
+      //
+      // The bill-level GL prediction is already logged; per-line categories were
+      // not, so the one thing a person visibly corrects most often — a line in
+      // the wrong category — produced no record of having been suggested. The
+      // override you can see by eye is exactly the signal worth keeping.
+      try {
+        const { logSuggestion } = await import('./suggestion-log.js');
+        const hinted = (row.source_invoice?.lineItems ?? []) as Array<Record<string, unknown>>;
+        const perLine = hinted
+          .map((l, i) => ({ index: i, description: String(l.description ?? ''), categoryHint: l.categoryHint ?? null }))
+          .filter((l) => l.categoryHint);
+        if (perLine.length > 0) {
+          await logSuggestion({
+            organizationId: args.organizationId,
+            stage: 'gl_coding',
+            subjectType: 'payment_order_lines',
+            subjectId: paymentOrder.paymentOrderId,
+            suggested: perLine,
+            producer: 'extraction/line-category-v1',
+            inputs: { lineCount: hinted.length },
+          });
+        }
+      } catch {
+        // Instrumentation never blocks an ingest.
+      }
+
       try {
         const { submitInvoiceForApproval } = await import('../approvals/wiring.js');
         await submitInvoiceForApproval({

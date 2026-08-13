@@ -37,9 +37,12 @@ export const INBOUND_MAX_ATTACHMENTS = 10;
 
 export type AttachmentSkipReason =
   | 'inline_attachment'
+  | 'rich_text_wrapper'
   | 'unsupported_content_type'
   | 'too_many_attachments'
   | 'empty_attachment'
+  | 'signature_image'
+  | 'attachment_too_small'
   | 'attachment_too_large';
 
 export type AttachmentDecision =
@@ -78,6 +81,15 @@ export function decideAttachment(
     return { accept: false, reason: 'inline_attachment' };
   }
 
+  // winmail.dat: Outlook set to send Rich Text wraps every real attachment
+  // inside one proprietary blob. This lands as unreadable either way, but the
+  // sender's own mail client caused it and they can fix it in one setting —
+  // so it earns a reason of its own rather than the generic "not a PDF or an
+  // image", which would send them hunting for a problem that isn't theirs.
+  if (isTnef(contentType, attachment.filename)) {
+    return { accept: false, reason: 'rich_text_wrapper' };
+  }
+
   let mimeType: string | null = null;
   if (contentType && INBOUND_ALLOWED_CONTENT_TYPES.has(contentType)) {
     mimeType = contentType === 'image/jpg' ? 'image/jpeg' : contentType;
@@ -99,12 +111,92 @@ export function decideAttachment(
 }
 
 /**
+ * Outlook renames every image it embeds in a message body to image001.png,
+ * image002.jpg and so on. That is where signature logos, social icons and
+ * letterhead come from, and it is the single most common junk shape here.
+ *
+ * Deliberately narrow: three or four digits, nothing else in the name. A phone
+ * photo is IMG_4021.jpg and a scan is Scan_2026-08-13.pdf — neither matches.
+ * Never used on its own, only in combination with the size ceiling below,
+ * because a genuine invoice COULD be named this way if someone scanned it
+ * straight into a message body.
+ */
+const SIGNATURE_FILENAME = /^image\d{3,4}\.(png|jpe?g|gif|bmp)$/i;
+
+/**
+ * Thresholds, and how much to trust them.
+ *
+ * Both numbers are judgement, not measurement — there is no published spec for
+ * "how small is too small to be an invoice", and every AP vendor treats this as
+ * proprietary. They are set where a signature logo (typically 1–15 KB) falls on
+ * one side and a legible page scan on the other, and every skip is written to
+ * the attachment row with its byte size, so they can be corrected from real
+ * traffic rather than argued about.
+ *
+ * The risk runs one way: a size floor is the rule most likely to throw away a
+ * real invoice — a compressed phone photo of a small receipt can land under
+ * 10 KB. Hence the escape hatch in decideFetchedBytes, which is the important
+ * half of this policy.
+ */
+const SIGNATURE_IMAGE_MAX_BYTES = 20 * 1024;
+const MIN_IMAGE_BYTES = 8 * 1024;
+
+/**
+ * The reasons that cannot be decided from the webhook payload alone, because
+ * they need the bytes. The sweep uses this to tell its own skips apart from the
+ * handler's when it works out how many attachments a message really offered.
+ */
+export const POST_FETCH_SKIP_REASONS: readonly AttachmentSkipReason[] = [
+  'empty_attachment',
+  'attachment_too_large',
+  'signature_image',
+  'attachment_too_small',
+];
+
+export type FetchedBytesContext = {
+  byteLength: number;
+  filename: string;
+  mimeType: string;
+  /**
+   * True when this is the last attachment on the message still standing. A lone
+   * small image is far more likely to be a real (if low-resolution) receipt than
+   * a stray logo, so the junk rules stand down and let it through — a bill we
+   * can flag beats mail that vanished.
+   */
+  isOnlyCandidate: boolean;
+};
+
+/**
  * Size can only be checked after the bytes arrive — the webhook payload carries
  * no length. One oversized file never fails the whole message; its siblings
  * still ingest.
  */
-export function decideFetchedBytes(byteLength: number): { accept: true } | { accept: false; reason: AttachmentSkipReason } {
+export function decideFetchedBytes(
+  context: FetchedBytesContext,
+): { accept: true } | { accept: false; reason: AttachmentSkipReason } {
+  const { byteLength, filename, mimeType, isOnlyCandidate } = context;
+
   if (byteLength === 0) return { accept: false, reason: 'empty_attachment' };
   if (byteLength > MAX_DOCUMENT_BYTES) return { accept: false, reason: 'attachment_too_large' };
+
+  // A PDF is never signature junk — nobody embeds a logo as a PDF — and a
+  // small one is a real, if minimal, invoice. Size rules are for images only.
+  if (mimeType === 'application/pdf') return { accept: true };
+
+  if (isOnlyCandidate) return { accept: true };
+
+  if (SIGNATURE_FILENAME.test(filename.trim()) && byteLength < SIGNATURE_IMAGE_MAX_BYTES) {
+    return { accept: false, reason: 'signature_image' };
+  }
+
+  if (byteLength < MIN_IMAGE_BYTES) {
+    return { accept: false, reason: 'attachment_too_small' };
+  }
+
   return { accept: true };
+}
+
+function isTnef(contentType: string | null, filename: string): boolean {
+  if (contentType === 'application/ms-tnef' || contentType === 'application/vnd.ms-tnef') return true;
+  return filename.trim().toLowerCase() === 'winmail.dat';
 }

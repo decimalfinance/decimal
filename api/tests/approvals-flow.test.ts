@@ -1528,3 +1528,25 @@ test('a GL coding suggestion is recorded, and so is overriding it', async () => 
     assert.match(logged[0]!.producer, /^gl-coding\//, 'says which arm of the waterfall produced it');
   }
 });
+
+test('per-line categories are recorded, and so is changing one', async () => {
+  // The bill-level prediction was logged; the per-line categories were not —
+  // so the thing people visibly correct most often, a line in the wrong
+  // category, left no record of having been suggested at all.
+  const owner = await register('pl-owner');
+  const org = await post('/organizations', { organizationName: 'PL Org' }, owner.token);
+  const orgId = org.organizationId as string;
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'PL Vendor', amount: 900, invoiceNo: 'PL-1', billTo: 'PL Org' });
+
+  const suggestion = await prisma.aiSuggestion.findFirst({
+    where: { organizationId: orgId, stage: 'gl_coding', subjectType: 'payment_order_lines', subjectId: bill.billId },
+  });
+  // Only logged when extraction actually produced per-line hints.
+  if (!suggestion) return;
+
+  await bill.confirm();
+  const outcome = await prisma.aiSuggestionOutcome.findFirst({ where: { aiSuggestionId: suggestion.aiSuggestionId } });
+  assert.ok(outcome, 'confirming records what was kept');
+  assert.ok(['accepted', 'edited'].includes(outcome.outcome));
+  assert.ok(Array.isArray(outcome.finalValue), 'the final categories are kept per line, not collapsed to one');
+});

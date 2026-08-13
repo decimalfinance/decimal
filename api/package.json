@@ -7,7 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prisma:generate": "prisma generate",
-    "test": "NODE_ENV=test INBOUND_EMAIL_DOMAIN=bills.decimal.test RESEND_INBOUND_WEBHOOK_SECRET=\"whsec_$(printf 'decimal-test-only-not-a-secret' | base64)\" tsx --test --test-concurrency=1 tests/**/*.test.ts"
+    "test": "NODE_ENV=test INBOUND_EMAIL_DOMAIN=bills.decimal.test RESEND_API_KEY=re_test_only_not_a_secret RESEND_FROM_EMAIL=notices@decimal.test RESEND_INBOUND_WEBHOOK_SECRET=\"whsec_$(printf 'decimal-test-only-not-a-secret' | base64)\" tsx --test --test-concurrency=1 tests/**/*.test.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.0.0",

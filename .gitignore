@@ -4,7 +4,7 @@ CLAUDE.md
 .env.*
 !.env.example
 !**/.env.example
-node_modules/
+node_modules
 *.jsonl
 *.jsonl.gz
 *.tsbuildinfo
@@ -14,12 +14,12 @@ node_modules/
 *.p12
 *.pfx
 
-api/node_modules/
+api/node_modules
 api/dist/
 api/.env
 api/.secrets/
 
-frontend/node_modules/
+frontend/node_modules
 frontend/dist/
 frontend/.env
 frontend/*.tsbuildinfo
