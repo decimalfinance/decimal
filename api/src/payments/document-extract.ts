@@ -72,6 +72,7 @@ Return ONLY a JSON object with this exact shape, nothing else:
           "quantity": number or null,
           "unitPrice": number or null,
           "total": number or null,
+          "categoryHint": "string or null",
           "source": { "page": 1, "box": [x, y, w, h] } or null
         }
       ],
@@ -108,6 +109,7 @@ Rules copied from the AP intake agent:
 - currency: use whatever 3-letter ISO code the document explicitly states (USD, EUR, GBP, INR, SGD, JPY, AUD, CAD, CHF, HKD, AED, etc.). If no currency is mentioned anywhere, default to USD.
 - Optional fields: use null when missing, not empty strings.
 - lineItems: empty array [] if not itemized.
+- lineItems[].categoryHint: a short 2-5 word spend category for THAT LINE, judged on its own. Lines on one invoice often belong in different categories — freight and a documentation fee are not the same expense, and a software invoice may carry a one-off setup charge. Do not copy the invoice-level hint down onto every line.
 - categoryHint: a short 2-5 word plain-English summary of what this invoice is FOR — the spend category (e.g. "Inbound freight", "Monthly phone service", "Office supplies", "Cloud hosting", "Legal services"). Derive it from the line items and invoice context. Use null only if truly indeterminable.
 - confidence: three keys (vendor, amount, overall), each 0.0 to 1.0.
 - fieldConfidence: 0.0-1.0 per field, for every field you attempted to read. 1.0 = printed clearly and unambiguously; below 0.85 means a human should double-check it. A field that is genuinely absent from the document gets confidence 1.0 with value null (absence read with certainty is not uncertainty).
@@ -177,6 +179,8 @@ const ExtractedInvoiceSchema = z.object({
       quantity: z.number().nullable(),
       unitPrice: z.number().nullable(),
       total: z.number().nullable(),
+      /** What THIS line is for, which is often not what the invoice is for. */
+      categoryHint: z.string().nullable().default(null).catch(null),
       source: SourceBoxSchema.nullish().default(null).catch(null),
     }),
   ),

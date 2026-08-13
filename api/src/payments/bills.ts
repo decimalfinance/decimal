@@ -856,12 +856,35 @@ export async function getBillReview(organizationId: string, paymentOrderId: stri
     if (!page || page < 1 || !box || box.length !== 4 || box.some((v) => v == null || v < 0 || v > 1)) return null;
     return { page: Math.round(page), box: box as [number, number, number, number] };
   };
+  // Each line carries its own category when the document supports one.
+  //
+  // Every line used to inherit ONE bill-level suggestion, so an invoice with
+  // ocean freight and a documentation fee coded both as freight — the second
+  // line was never classified at all, it just inherited. categoryHint is
+  // explicitly "what this INVOICE is for", which is the wrong question to ask
+  // of a line.
+  //
+  // The bill-level suggestion is still the fallback, and a vendor RULE still
+  // outranks everything: a rule is somebody's stated decision about this
+  // vendor, and a per-line guess must not quietly overturn it.
+  const resolveLineCategory = (hint: string | null): string | null => {
+    // A vendor rule is the DEFAULT, not an override. It says "bills from this
+    // vendor usually code to X", which is true of the bill and not necessarily
+    // of every line on it — the travel line of a security-audit invoice is
+    // still travel. A hint the picker recognises is specific evidence about
+    // THIS line and wins; anything else falls back to the rule.
+    if (!hint) return codingSuggestion;
+    const match = categoryOptions.find((o) => o.value.toLowerCase() === hint.toLowerCase())
+      ?? categoryOptions.find((o) => o.value.toLowerCase().includes(hint.toLowerCase()))
+      ?? categoryOptions.find((o) => hint.toLowerCase().includes(o.value.toLowerCase()));
+    return match?.value ?? codingSuggestion;
+  };
   const lines = verifiedLines ?? extractedLines.filter(isRecord).map((line) => ({
     description: str(line.description) ?? '',
     quantity: num(line.quantity),
     unitPrice: num(line.unitPrice),
     amount: num(line.total),
-    category: codingSuggestion,
+    category: resolveLineCategory(str(line.categoryHint)),
     source: lineSource(line),
   }));
 
