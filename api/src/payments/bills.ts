@@ -1082,6 +1082,36 @@ export async function confirmBillReview(input: ConfirmBillInput) {
     }
   }
 
+  // What the operator kept, per line. 'edited' whenever any line's category
+  // differs from what we proposed — the delta is the only thing that says which
+  // KIND of line we get wrong, which a bill-level accept/reject cannot show.
+  try {
+    const { logSuggestionOutcome } = await import('./suggestion-log.js');
+    const lineSuggestion = await prisma.aiSuggestion.findFirst({
+      where: { organizationId: input.organizationId, stage: 'gl_coding', subjectType: 'payment_order_lines', subjectId: input.paymentOrderId },
+      orderBy: { createdAt: 'desc' },
+      select: { aiSuggestionId: true, suggested: true },
+    });
+    if (lineSuggestion) {
+      const proposed = Array.isArray(lineSuggestion.suggested)
+        ? (lineSuggestion.suggested as Array<{ index: number; categoryHint?: string | null }>)
+        : [];
+      const chosen = input.lines.map((l, i) => ({ index: i, category: l.category ?? null }));
+      const changed = chosen.some((c) => {
+        const p = proposed.find((x) => x.index === c.index);
+        return p ? (p.categoryHint ?? null) !== c.category : false;
+      });
+      await logSuggestionOutcome({
+        aiSuggestionId: lineSuggestion.aiSuggestionId,
+        outcome: changed ? 'edited' : 'accepted',
+        finalValue: chosen,
+        decidedByUserId: input.actorUserId,
+      });
+    }
+  } catch {
+    // Never block a confirm to record a measurement.
+  }
+
   // The confirm path recorded corrections with no user at all — the one moment
   // a person accepts responsibility for what the machine read, and the trail did
   // not say who. It does now.
