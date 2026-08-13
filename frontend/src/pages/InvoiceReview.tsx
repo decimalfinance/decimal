@@ -568,7 +568,11 @@ function ReviewScreen(props: {
                 someone move a bill — knowing others already put work into it —
                 which a destination alone does not convey. */}
             {review.route.length > 0 ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', padding: '2px 0 10px', borderBottom: '1px solid var(--border)' }}>
+              // Same idiom as .rev-head above it: bleed past the panel's 24px
+              // padding so the rule reaches the edges, then pad the content back
+              // in. Rolling my own inset border left it visibly shorter than the
+              // rule directly above, which looks like a mistake because it is one.
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', margin: '0 -24px', padding: '12px 24px', borderBottom: '1px solid var(--border)', minHeight: 44 }}>
                 {review.route.map((n, i) => (
                   <span key={`${n.name}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span className={`pill pill-min ${n.state === 'done' ? 'pill-success' : n.state === 'waiting' ? 'pill-warning' : n.state === 'declined' ? 'pill-danger' : 'pill-neutral'}`}>
