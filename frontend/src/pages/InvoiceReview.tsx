@@ -568,11 +568,19 @@ function ReviewScreen(props: {
                 someone move a bill — knowing others already put work into it —
                 which a destination alone does not convey. */}
             {review.route.length > 0 ? (
-              // Same idiom as .rev-head above it: bleed past the panel's 24px
-              // padding so the rule reaches the edges, then pad the content back
-              // in. Rolling my own inset border left it visibly shorter than the
-              // rule directly above, which looks like a mistake because it is one.
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', margin: '0 -24px', padding: '12px 24px', borderBottom: '1px solid var(--border)', minHeight: 44 }}>
+              // Sits between two rules: .rev-head's border-bottom above, its own
+              // below. To look centred it has to be centred BETWEEN THEM, which
+              // means counting everything in that space, not just this padding:
+              //
+              //   above  20px  .stack-20's flex gap  +  12px  padding-top
+              //   below  12px  padding-bottom
+              //
+              // Symmetric padding was not enough — the gap sits outside the box
+              // and pushed the content down by 20px. marginTop: -20 cancels it,
+              // leaving a true 12/12. The -24px sides are the .rev-head idiom:
+              // bleed past .rev-panel's 24px padding so the rule reaches the
+              // edges and lines up with the one above.
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', margin: '-20px -24px 0', padding: '12px 24px', borderBottom: '1px solid var(--border)' }}>
                 {review.route.map((n, i) => (
                   <span key={`${n.name}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span className={`pill pill-min ${n.state === 'done' ? 'pill-success' : n.state === 'waiting' ? 'pill-warning' : n.state === 'declined' ? 'pill-danger' : 'pill-neutral'}`}>
