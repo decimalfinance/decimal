@@ -426,6 +426,71 @@ test('bills workbench triages uploads; review confirm sends the bill onward', as
   assert.equal(confirmedField.state, 'confirmed');
 });
 
+test('an approver approves over HTTP and the bill leaves review', async () => {
+  // The engine's own tests drive executeCommand directly. Nothing exercised the
+  // path a person actually takes: session auth, the user→person lookup, the
+  // engine's refusals mapped to status codes, and the post-commit bridge that
+  // moves the bill. That is the whole distance between "the engine works" and
+  // "someone can approve a bill".
+  const setup = await createPaymentOrderSetup();
+  const vendorWallet = Keypair.generate().publicKey.toBase58();
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [{
+        counterparty: 'Approvable Vendor Co',
+        amount: 1200,
+        currency: 'USD',
+        reference: 'INV-APPROVE-1',
+        due_date: '2026-09-01',
+        wallet_address: vendorWallet,
+        notes: 'Services',
+        source_invoice: null,
+      }],
+      modelLatencyMs: 1,
+      pageCount: 1,
+    }),
+  });
+
+  const org = setup.organization.organizationId;
+  const upload = await post(
+    `/organizations/${org}/invoices/upload`,
+    {
+      filename: 'approvable.pdf',
+      mimeType: 'application/pdf',
+      dataBase64: Buffer.from('%PDF-1.4 approvable').toString('base64'),
+      sourceTreasuryWalletId: setup.sourceTreasuryWallet.treasuryWalletId,
+      autoAdvance: false,
+    },
+    setup.sessionToken,
+  );
+  const billId = upload.paymentOrders[0].paymentOrder.paymentOrderId;
+
+  await post(
+    `/organizations/${org}/bills/${billId}/confirm`,
+    {
+      fields: { invoiceNumber: 'INV-APPROVE-1', currency: 'USD', total: 1200 },
+      lines: [{ description: 'Services', quantity: 1, unitPrice: 1200, amount: 1200, category: 'Professional services' }],
+      confirmedFieldKeys: [],
+    },
+    setup.sessionToken,
+  );
+
+  const detail = await get(`/organizations/${org}/bills/${billId}/detail`, setup.sessionToken);
+  assert.ok(detail.approval, 'the confirmed bill is in the engine');
+  assert.ok(detail.viewer.openTaskId, 'somebody has an open task on it');
+
+  const result = await post(
+    `/organizations/${org}/approvals/tasks/${detail.viewer.openTaskId}/command`,
+    { command: { kind: 'approve' }, idempotencyKey: `test-approve-${billId}` },
+    setup.sessionToken,
+  );
+  assert.equal(result.macroState, 'approved', 'the chain completed');
+
+  const after = await get(`/organizations/${org}/bills/${billId}/detail`, setup.sessionToken);
+  assert.notEqual(after.review.state, 'needs_review', 'approving took the bill out of review');
+  assert.equal(after.approval.macroState, 'approved');
+});
+
 test('async intake returns the document immediately and processes in the background', async () => {
   const setup = await createPaymentOrderSetup();
   const newVendorWallet = Keypair.generate().publicKey.toBase58();
