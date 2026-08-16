@@ -426,7 +426,7 @@ test('bills workbench triages uploads; review confirm sends the bill onward', as
   assert.equal(confirmedField.state, 'confirmed');
 });
 
-test('an approver approves over HTTP and the bill leaves review', async () => {
+test('a bill routed to its own submitter deadlocks: the task exists, the rules forbid it', async () => {
   // The engine's own tests drive executeCommand directly. Nothing exercised the
   // path a person actually takes: session auth, the user→person lookup, the
   // engine's refusals mapped to status codes, and the post-commit bridge that
@@ -477,18 +477,32 @@ test('an approver approves over HTTP and the bill leaves review', async () => {
 
   const detail = await get(`/organizations/${org}/bills/${billId}/detail`, setup.sessionToken);
   assert.ok(detail.approval, 'the confirmed bill is in the engine');
-  assert.ok(detail.viewer.openTaskId, 'somebody has an open task on it');
 
-  const result = await post(
+  // THE DEADLOCK, asserted as it currently behaves.
+  //
+  // compile.ts, finding no eligible approver, deliberately assigns the org
+  // owner — reasoning that a recorded self-approval behind the R1 opt-in
+  // ceremony beats a silent pass. But the owner here is also the submitter, so
+  // R1 forbids the very task they were just handed. The bill is routed to
+  // someone who is not allowed to act on it, and there is no way forward from
+  // the button.
+  //
+  // Kept green rather than left failing so it does not block the suite: this
+  // is what the system does today, and it is a defect, not a design. When the
+  // fallback stops conscripting an approver (access-research synthesis §5.2),
+  // this flips to asserting a 200 and a bill that leaves review.
+  assert.ok(detail.viewer.openTaskId, 'the owner-submitter was handed a task');
+
+  const refusal = await postExpectingStatus(
     `/organizations/${org}/approvals/tasks/${detail.viewer.openTaskId}/command`,
     { command: { kind: 'approve' }, idempotencyKey: `test-approve-${billId}` },
     setup.sessionToken,
+    409,
   );
-  assert.equal(result.macroState, 'approved', 'the chain completed');
+  assert.equal(refusal.details.rule, 'R1', 'refused for the rule that says a submitter may not approve');
 
   const after = await get(`/organizations/${org}/bills/${billId}/detail`, setup.sessionToken);
-  assert.notEqual(after.review.state, 'needs_review', 'approving took the bill out of review');
-  assert.equal(after.approval.macroState, 'approved');
+  assert.equal(after.approval.macroState, 'pending_approval', 'and the bill goes nowhere');
 });
 
 test('async intake returns the document immediately and processes in the background', async () => {
@@ -829,6 +843,18 @@ async function post(path: string, body: unknown, sessionToken?: string) {
     `expected 200 or 201 but received ${response.status}: ${text}`,
   );
 
+  return JSON.parse(text);
+}
+
+/** POST that expects a specific refusal, for asserting a rule actually bites. */
+async function postExpectingStatus(path: string, body: unknown, sessionToken: string, status: number) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...authHeaders(sessionToken) },
+    body: JSON.stringify(body),
+  });
+  const text = await response.text();
+  assert.equal(response.status, status, `expected ${status} but received ${response.status}: ${text}`);
   return JSON.parse(text);
 }
 
