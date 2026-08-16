@@ -783,14 +783,14 @@ test('an oversized attachment is skipped while its siblings still ingest', async
 });
 
 test('the workbench labels an emailed bill with who sent it', async () => {
-  const { org } = await seedOrgWithMember('Acme', 'priya@acme.test');
+  const { org, user } = await seedOrgWithMember('Acme', 'priya@acme.test');
   stubExtraction();
 
   await queueAndSweep();
   await waitForPaymentOrders(1);
 
   const { getBillsWorkbench } = await import('../src/payments/bills.js');
-  const workbench = await getBillsWorkbench(org.organizationId);
+  const workbench = await getBillsWorkbench(org.organizationId, user.userId);
 
   assert.equal(workbench.bills.length, 1);
   assert.equal(workbench.bills[0]!.source, 'email');

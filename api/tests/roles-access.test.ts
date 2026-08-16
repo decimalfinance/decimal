@@ -219,3 +219,69 @@ async function status(method: string, path: string, token: string, body?: unknow
   await res.text();
   return res.status;
 }
+
+// --- record scope --------------------------------------------------------------
+//
+// Roles say which SCREENS you get. This says which BILLS belong on them. Seven
+// of ten AP products scope an approver to the bills routed to them; we were the
+// documented outlier that showed everyone everything (access-research §2).
+
+function stubOneBill(vendor: string, invoiceNo: string) {
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [{
+        counterparty: vendor, amount: 900, currency: 'USD', reference: invoiceNo, due_date: '2026-08-30',
+        wallet_address: null, notes: null, source_invoice: null,
+      }],
+      modelLatencyMs: 1, pageCount: 1,
+    }) as never,
+  });
+}
+
+test('an approver sees the bills they are involved in, not the whole queue', async () => {
+  const { orgId, owner, member } = await makeOrg();
+  // A second admin, so the bill routes to somebody who is not our approver.
+  const other = await register('other-admin');
+  await prisma.organizationMembership.create({
+    data: { organizationId: orgId, userId: other.userId, role: 'admin', status: 'active' },
+  });
+
+  stubOneBill('Acme', 'INV-SCOPE-1');
+  const upload = await post(`/organizations/${orgId}/invoices/upload`, {
+    filename: 'scope.pdf', mimeType: 'application/pdf',
+    dataBase64: Buffer.from(`%PDF ${crypto.randomUUID()}`).toString('base64'), autoAdvance: false,
+  }, owner.token);
+  const billId = upload.paymentOrders[0].paymentOrder.paymentOrderId;
+
+  // Before the role: the viewer default, which is the whole queue. This is the
+  // behaviour everyone had, and it is why assigning the role is what turns
+  // scoping on rather than a migration.
+  const asViewer = await get(`/organizations/${orgId}/bills/workbench`, member.token);
+  assert.equal(asViewer.bills.length, 1, 'no roles means the viewer bundle: sees everything');
+
+  // Granting Approver AFTER the bill was routed leaves them genuinely
+  // uninvolved — the plan is pinned, so they are on no step of it.
+  await post(`/organizations/${orgId}/roles/approver/holders`, { userId: member.userId }, owner.token);
+
+  const scoped = await get(`/organizations/${orgId}/bills/workbench`, member.token);
+  assert.equal(scoped.bills.length, 0, "an approver's queue is their bills, not the company's");
+  assert.equal(
+    await status('GET', `/organizations/${orgId}/bills/${billId}/detail`, member.token),
+    404,
+    'and a bill they cannot see reads as absent, not as forbidden — a 403 would confirm it exists',
+  );
+
+  // Being asked about a bill is involvement. Otherwise the question is a riddle:
+  // "what do you think of the bill you are not allowed to open?"
+  await post(`/organizations/${orgId}/bills/${billId}/ask`, {
+    askedOfUserId: member.userId, question: 'Is this the right vendor for hosting?',
+  }, owner.token);
+
+  const afterAsk = await get(`/organizations/${orgId}/bills/workbench`, member.token);
+  assert.equal(afterAsk.bills.length, 1, 'asked about it, so now they can open it');
+  await get(`/organizations/${orgId}/bills/${billId}/detail`, member.token);
+
+  // The owner is unaffected: administering the workspace still means seeing it.
+  const asOwner = await get(`/organizations/${orgId}/bills/workbench`, owner.token);
+  assert.equal(asOwner.bills.length, 1);
+});

@@ -20,6 +20,7 @@ import { findDuplicateBills, readDuplicateOverride, describeDuplicate, matchDupl
 import { readPayableHold, describePayableHold } from './vendor-payable.js';
 import { evaluateBillFlags, summarizeBillFlags, displayOrgName } from './bill-flags.js';
 import { getBillCeilingMinor } from '../approvals/store.js';
+import { involvedBillIds } from './bill-visibility.js';
 import type { ExtractedInvoice } from './document-extract.js';
 
 // Exact field→document boxes for ANY bill, whenever it is reviewed: if this
@@ -402,10 +403,16 @@ function documentAmounts(extracted: Record<string, unknown> | null) {
   };
 }
 
-export async function getBillsWorkbench(organizationId: string) {
+export async function getBillsWorkbench(organizationId: string, viewerUserId: string) {
+  // An approver's queue is the bills they are involved in, not the company's.
+  // null means "entitled to all of them", which is every other job here.
+  const visible = await involvedBillIds(organizationId, viewerUserId);
   const [orders, engine, org, ceilingMinor] = await Promise.all([
     prisma.paymentOrder.findMany({
-      where: { organizationId },
+      where: {
+        organizationId,
+        ...(visible === null ? {} : { paymentOrderId: { in: [...visible] } }),
+      },
       orderBy: { createdAt: 'desc' },
       select: {
         paymentOrderId: true,

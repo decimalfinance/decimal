@@ -5,6 +5,7 @@ import { assertOrganizationAccess } from '../auth/organization-access.js';
 import { isAdminRole } from '../auth/organization-access.js';
 import { asyncRoute } from '../infra/route-helpers.js';
 import { forbidden } from '../infra/api-errors.js';
+import { assertBillVisible } from '../payments/bill-visibility.js';
 import { prisma } from '../infra/prisma.js';
 import { getBillsWorkbench, getBillReview, getBillDetail, getApprovalsInbox, confirmBillReview, markNotABill, updateBillFacts, overrideDuplicateFlag, addOrganizationTradingName, listAskCandidates, askAboutBill, answerBillQuestion, sendApprovedBillBackToReview } from '../payments/bills.js';
 
@@ -19,12 +20,13 @@ const billParamsSchema = z.object({
 billsRouter.get('/organizations/:organizationId/bills/workbench', asyncRoute(async (req, res) => {
   const { organizationId } = orgParamsSchema.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
-  res.json(await getBillsWorkbench(organizationId));
+  res.json(await getBillsWorkbench(organizationId, req.auth!.userId));
 }));
 
 billsRouter.get('/organizations/:organizationId/bills/:paymentOrderId/review', asyncRoute(async (req, res) => {
   const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
+  await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
   const review = await getBillReview(organizationId, paymentOrderId, req.auth!.userId);
   if (!review) {
     res.status(404).json({ error: 'Bill not found' });
@@ -42,6 +44,7 @@ billsRouter.get('/organizations/:organizationId/bills/approvals-inbox', asyncRou
 billsRouter.get('/organizations/:organizationId/bills/:paymentOrderId/detail', asyncRoute(async (req, res) => {
   const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
+  await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
   const detail = await getBillDetail(organizationId, paymentOrderId, req.auth!.userId);
   if (!detail) {
     res.status(404).json({ error: 'Bill not found' });
@@ -85,6 +88,7 @@ const confirmSchema = z.object({
 billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/confirm', asyncRoute(async (req, res) => {
   const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
+  await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
   const input = confirmSchema.parse(req.body);
   const result = await confirmBillReview({
     organizationId,
@@ -110,6 +114,7 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/duplicate
   if (!membership || (membership.role !== 'owner' && membership.role !== 'admin')) {
     throw forbidden('Only an admin can clear a duplicate flag — ask one to review this bill.');
   }
+  await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
   const input = duplicateOverrideSchema.parse(req.body);
   const user = await prisma.user.findUniqueOrThrow({ where: { userId: req.auth!.userId }, select: { displayName: true } });
   const review = await overrideDuplicateFlag({
@@ -131,6 +136,7 @@ const tradingNameSchema = z.object({ name: z.string().trim().min(2).max(120) });
 billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/this-is-us', asyncRoute(async (req, res) => {
   const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
+  await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
   const input = tradingNameSchema.parse(req.body);
   const user = await prisma.user.findUniqueOrThrow({
     where: { userId: req.auth!.userId },
@@ -155,8 +161,9 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/this-is-u
 // Who this person could ask, most-answered first — the person who actually
 // replies is the useful default, not whoever sorts first alphabetically.
 billsRouter.get('/organizations/:organizationId/bills/:paymentOrderId/ask-candidates', asyncRoute(async (req, res) => {
-  const { organizationId } = billParamsSchema.parse(req.params);
+  const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
+  await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
   res.json({ candidates: await listAskCandidates(organizationId, req.auth!.userId) });
 }));
 
@@ -178,6 +185,7 @@ const askSchema = z.object({
 billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/ask/suggest-fields', asyncRoute(async (req, res) => {
   const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
+  await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
   const input = z.object({ question: z.string().trim().min(3).max(500) }).parse(req.body);
   const { fieldsForQuestion } = await import('../payments/question-fields.js');
   const { logSuggestion } = await import('../payments/suggestion-log.js');
@@ -200,6 +208,7 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/ask/sugge
 billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/ask', asyncRoute(async (req, res) => {
   const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
+  await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
   const input = askSchema.parse(req.body);
   const asked = await askAboutBill({
     organizationId,
@@ -251,6 +260,9 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/questions
   const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
   const billQuestionId = z.string().uuid().parse(req.params.billQuestionId);
   await assertOrganizationAccess(organizationId, req.auth!);
+  // Being asked about a bill is itself involvement, so this always passes for
+  // the person answering — it refuses everyone else.
+  await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
   const input = answerSchema.parse(req.body);
   try {
     await answerBillQuestion({
@@ -280,6 +292,7 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/send-back
   if (!membership || (membership.role !== 'owner' && membership.role !== 'admin')) {
     throw forbidden('Only an admin can send an approved bill back to review.');
   }
+  await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
   const input = sendBackSchema.parse(req.body);
   const user = await prisma.user.findUniqueOrThrow({ where: { userId: req.auth!.userId }, select: { displayName: true } });
   const review = await sendApprovedBillBackToReview({
@@ -313,6 +326,7 @@ const factsSchema = z.object({
 billsRouter.patch('/organizations/:organizationId/bills/:paymentOrderId/facts', asyncRoute(async (req, res) => {
   const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
+  await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
   const facts = factsSchema.parse(req.body);
   const result = await updateBillFacts({ organizationId, paymentOrderId, actorUserId: req.auth!.userId, facts });
   res.json(result);
@@ -333,6 +347,7 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/not-a-bil
   if (!isAdminRole(membership?.role)) {
     throw forbidden('Only an owner or admin can close a bill — ask one to look, or ask a question on it instead.');
   }
+  await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
   const input = notABillSchema.parse(req.body);
   const detail = await markNotABill({
     organizationId,

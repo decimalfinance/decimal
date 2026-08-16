@@ -42,11 +42,43 @@ export const ROLE_DEFINITIONS: Array<{ key: RoleKey; name: string; summary: stri
   { key: 'viewer', name: 'Viewer', summary: 'Sees everything, changes nothing. For auditors and stakeholders.' },
 ];
 
+/**
+ * Which BILLS a person may see, as opposed to which SCREENS. The roles round
+ * mapped the feature surface and deferred this one; access-research found it is
+ * the axis that actually matters — seven of ten AP products scope the approver
+ * to the bills routed to them, and Xero, the documented outlier that shows
+ * everyone everything, is what we were.
+ *
+ * One axis, deliberately. Department, entity and project scoping are all
+ * enterprise-tier in the products that have them at all, and we would be
+ * building them for nobody.
+ */
+export type BillScope = 'all' | 'involved';
+
 export interface OrgAccess {
   membershipRole: string;          // owner | admin | member
   roles: RoleKey[];                // prebuilt roles held (empty = viewer default)
   capabilities: Capability[];
   isOwnerOrAdmin: boolean;
+  billScope: BillScope;
+}
+
+/**
+ * An approver sees the bills they are involved in. Everyone else sees the queue.
+ *
+ * Union semantics, like the capabilities: holding any role whose job needs the
+ * whole queue widens you to `all`. Someone who is both Approver and Reviewer is
+ * doing the reviewing job too, and a reviewer who can only see bills already
+ * routed to them cannot do it.
+ *
+ * A member with no roles gets the viewer bundle, which is an auditor's job —
+ * `all`, read-only. That keeps existing orgs working the day this ships, and it
+ * is why assigning the Approver role is what actually turns scoping on.
+ */
+export function billScopeFor(membershipRole: string, roles: RoleKey[]): BillScope {
+  if (membershipRole === 'owner' || membershipRole === 'admin') return 'all';
+  if (roles.length === 0) return 'all';
+  return roles.every((r) => r === 'approver') ? 'involved' : 'all';
 }
 
 export function capabilitiesFor(membershipRole: string, roles: RoleKey[]): Capability[] {
@@ -75,5 +107,6 @@ export async function getOrgAccess(organizationId: string, userId: string): Prom
     roles,
     capabilities: capabilitiesFor(membershipRole, roles),
     isOwnerOrAdmin: membershipRole === 'owner' || membershipRole === 'admin',
+    billScope: billScopeFor(membershipRole, roles),
   };
 }
