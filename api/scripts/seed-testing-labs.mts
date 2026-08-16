@@ -19,11 +19,11 @@ const API = process.env.API_BASE_URL ?? 'http://localhost:3100';
 // code from. Everything else about these accounts is ordinary.
 const PASSWORD = 'TestingLabs123!';
 const PEOPLE = [
-  { email: 'zara.owner@dev.decimal.test', name: 'Zara Okafor', access: 'owner', part: 'Primary admin — owns policy and the ceiling' },
-  { email: 'priya.ap@dev.decimal.test', name: 'Priya Raman', access: 'member', part: 'AP clerk — enters and codes bills' },
-  { email: 'marcus.ops@dev.decimal.test', name: 'Marcus Bell', access: 'member', part: 'Ops lead — approves spend for his team' },
-  { email: 'nadia.fin@dev.decimal.test', name: 'Nadia Haddad', access: 'admin', part: 'Finance manager — second pair of eyes' },
-  { email: 'tom.proc@dev.decimal.test', name: 'Tom Whitfield', access: 'member', part: 'Procurement — owns vendor relationships' },
+  { email: 'zara.owner@dev.decimal.test', name: 'Zara Okafor', access: 'owner', role: null, part: 'Primary admin — owns policy and the ceiling' },
+  { email: 'priya.ap@dev.decimal.test', name: 'Priya Raman', access: 'member', role: 'reviewer', part: 'AP clerk — enters and codes bills' },
+  { email: 'marcus.ops@dev.decimal.test', name: 'Marcus Bell', access: 'member', role: 'approver', part: 'Ops lead — approves spend for his team' },
+  { email: 'nadia.fin@dev.decimal.test', name: 'Nadia Haddad', access: 'admin', role: null, part: 'Finance manager — second pair of eyes' },
+  { email: 'tom.proc@dev.decimal.test', name: 'Tom Whitfield', access: 'member', role: 'approver', part: 'Procurement — owns vendor relationships' },
 ] as const;
 
 // pheonix — e then o. Worth copying rather than typing.
@@ -73,6 +73,22 @@ for (const p of PEOPLE.slice(1)) {
   if (!token) { console.log(`  WARN  no invite token returned for ${p.email}`); continue; }
   await call(`/invites/${token}/accept`, {}, sessions.get(p.email)!.token);
   console.log(`  join  ${p.email.padEnd(34)} as ${p.access}`);
+}
+
+// Give everyone the job the `part` line describes.
+//
+// Roles were shipped and then never assigned, which meant every seeded org ran
+// on the two fallbacks — owner/admin bypasses everything, and a member with no
+// roles gets the viewer bundle. So the org read as having no access model at
+// all, and the record scoping an Approver is supposed to get never engaged.
+//
+// Admins take no roles by design (they already hold every capability, and the
+// roles endpoint refuses the assignment), which is why Zara and Nadia have none.
+for (const p of PEOPLE) {
+  if (!p.role) continue;
+  await call(`/organizations/${org.organizationId}/roles/${p.role}/holders`,
+    { userId: sessions.get(p.email)!.userId }, owner.token);
+  console.log(`  role  ${p.email.padEnd(34)} ${p.role}`);
 }
 
 // The human tester, invited for real — they accept from their own inbox.
