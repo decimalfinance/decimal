@@ -1232,10 +1232,18 @@ export async function confirmBillReview(input: ConfirmBillInput) {
     reviewNote: 'Confirmed on the review screen',
   });
 
-  // Bills now enter the engine at INTAKE, so by the time anyone confirms, an
-  // approvable usually already exists. Confirm's job is then to push the
-  // corrected facts onto it — not to create a second one, which would leave
-  // two competing plans for one bill.
+  // Confirm is the door into the approval engine, and the only one.
+  //
+  // Intake used to submit as well, which meant routing was compiled on figures
+  // nobody had checked and then recompiled here. Now a bill routes once, on
+  // data a person has settled — which is what every AP product checked does,
+  // and what this file's own header always claimed.
+  //
+  // The recompile path below still exists because it is genuinely needed: a
+  // bill sent back for changes is re-confirmed, and a bill can be confirmed
+  // twice. When an approvable is already there, push the corrected facts onto
+  // it rather than creating a second one, which would leave two competing
+  // plans for one bill.
   let approvableId: string | null = null;
   // Vendor + line categories ride along so vendor/category splits can route.
   const lineCategories = [...new Set(input.lines.map((l) => l.category).filter((c): c is string => Boolean(c)))];
@@ -1293,8 +1301,7 @@ export async function confirmBillReview(input: ConfirmBillInput) {
     }
   }
 
-  // Fallback: intake's submit is best-effort, so a bill can still arrive here
-  // with no approvable. Submitting at confirm keeps that bill routable.
+  // The normal path: this bill has never been routed, so route it now.
   if (!approvableId) try {
     const { submitInvoiceForApproval } = await import('../approvals/wiring.js');
     const submitted = await submitInvoiceForApproval({
@@ -2350,11 +2357,75 @@ function classifySignal(args: {
   return { clean: true, label: 'Looks normal', detail: `Within ${vendorName}'s usual range · nothing changed after reading` };
 }
 
+
+/**
+ * Open questions put TO this person, with enough of each bill to know which one.
+ *
+ * Lifted out of the inbox because it is needed on both sides of the
+ * engine-identity check: someone with no approval tasks can still have been
+ * asked something, and that is precisely when they most need telling.
+ */
+async function questionsAskedOf(organizationId: string, viewerUserId: string) {
+  const asked = await prisma.billQuestion.findMany({
+    where: {
+      organizationId,
+      askedOfUserId: viewerUserId,
+      OR: [{ answeredAt: null }, { outcome: { notIn: ['answered'] } }],
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+  if (asked.length === 0) return [];
+
+  const orders = await prisma.paymentOrder.findMany({
+    where: { paymentOrderId: { in: [...new Set(asked.map((q) => q.paymentOrderId))] } },
+    select: {
+      paymentOrderId: true, amountRaw: true, invoiceNumber: true,
+      counterparty: { select: { displayName: true } },
+      counterpartyWallet: { select: { label: true } },
+    },
+  });
+  const byOrder = new Map(orders.map((o) => [o.paymentOrderId, o]));
+  const askers = await prisma.user.findMany({
+    where: { userId: { in: [...new Set(asked.map((q) => q.askedByUserId))] } },
+    select: { userId: true, displayName: true },
+  });
+  const askerName = new Map(askers.map((u) => [u.userId, u.displayName]));
+
+  return asked
+    .filter((q) => byOrder.has(q.paymentOrderId))
+    .map((q) => {
+      const order = byOrder.get(q.paymentOrderId)!;
+      return {
+        billQuestionId: q.billQuestionId,
+        paymentOrderId: q.paymentOrderId,
+        question: q.question,
+        askedByName: askerName.get(q.askedByUserId) ?? 'Someone',
+        askedAt: q.createdAt.toISOString(),
+        vendorName: order.counterparty?.displayName ?? order.counterpartyWallet.label,
+        invoiceNumber: order.invoiceNumber,
+        amountUsd: amountRawToUsd(order.amountRaw),
+      };
+    });
+}
+
 export async function getApprovalsInbox(organizationId: string, viewerUserId: string) {
   const person = await prisma.$queryRaw<{ id: string }[]>`
     SELECT id FROM approval.people WHERE organization_id = ${organizationId}::uuid AND user_id = ${viewerUserId}::uuid LIMIT 1`;
   const personId = person[0]?.id ?? null;
-  if (!personId) return { waitingOnYou: [], inFlight: [], summary: { flagCount: 0, cleanCount: 0, totalWaitingUsd: 0 } };
+  if (!personId) {
+    // No engine identity — so no approval tasks, by definition. But questions
+    // are not tasks: anyone can be asked about a bill, including someone who
+    // will never approve one, and dropping their questions here was how a
+    // person could be asked something they had no way of finding. Being asked
+    // is the whole reason to open this screen for them.
+    const questionsOnly = await questionsAskedOf(organizationId, viewerUserId);
+    return {
+      waitingOnYou: [],
+      inFlight: [],
+      questionsForYou: questionsOnly,
+      summary: { flagCount: 0, cleanCount: 0, totalWaitingUsd: 0, questionCount: questionsOnly.length },
+    };
+  }
 
   // Tasks that are mine and still need me (waiting-on-you), plus tasks I already
   // approved on approvables that are still moving (in-flight).
@@ -2509,46 +2580,7 @@ export async function getApprovalsInbox(organizationId: string, viewerUserId: st
   // there is no row anywhere that says "this is yours". A question that only
   // surfaces if somebody separately tells you to go and open that bill is not a
   // question the product asked on their behalf.
-  const asked = await prisma.billQuestion.findMany({
-    where: {
-      organizationId,
-      askedOfUserId: viewerUserId,
-      OR: [{ answeredAt: null }, { outcome: { notIn: ['answered'] } }],
-    },
-    orderBy: { createdAt: 'asc' },
-  });
-  const questionsForYou = await (async () => {
-    if (asked.length === 0) return [];
-    const orders = await prisma.paymentOrder.findMany({
-      where: { paymentOrderId: { in: [...new Set(asked.map((q) => q.paymentOrderId))] } },
-      select: {
-        paymentOrderId: true, amountRaw: true, invoiceNumber: true,
-        counterparty: { select: { displayName: true } },
-        counterpartyWallet: { select: { label: true } },
-      },
-    });
-    const byOrder = new Map(orders.map((o) => [o.paymentOrderId, o]));
-    const askers = await prisma.user.findMany({
-      where: { userId: { in: [...new Set(asked.map((q) => q.askedByUserId))] } },
-      select: { userId: true, displayName: true },
-    });
-    const askerName = new Map(askers.map((u) => [u.userId, u.displayName]));
-    return asked
-      .filter((q) => byOrder.has(q.paymentOrderId))
-      .map((q) => {
-        const order = byOrder.get(q.paymentOrderId)!;
-        return {
-          billQuestionId: q.billQuestionId,
-          paymentOrderId: q.paymentOrderId,
-          question: q.question,
-          askedByName: askerName.get(q.askedByUserId) ?? 'Someone',
-          askedAt: q.createdAt.toISOString(),
-          vendorName: order.counterparty?.displayName ?? order.counterpartyWallet.label,
-          invoiceNumber: order.invoiceNumber,
-          amountUsd: amountRawToUsd(order.amountRaw),
-        };
-      });
-  })();
+  const questionsForYou = await questionsAskedOf(organizationId, viewerUserId);
 
   return {
     waitingOnYou,

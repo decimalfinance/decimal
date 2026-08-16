@@ -964,17 +964,27 @@ async function get(path: string, token: string) {
 // and the moment they need that is BEFORE confirming, which is exactly when
 // the bill used to have no task at all.
 
-test('a bill has an owner and an open task from the moment it is ingested', async () => {
+test('an ingested bill is a draft — it does not enter the engine until Confirm', async () => {
+  // Bills used to route at intake, so every bill was `needs_review` and
+  // `pending_approval` at once: the plan compiled on figures nobody had
+  // checked, then recompiled when Confirm corrected them. No AP product models
+  // a bill as both (review-vs-approve/lifecycle-states.md). Draft is a stage —
+  // it is where preparation happens — and approval starts after it.
   const owner = await register('ask-owner');
   const org = await post('/organizations', { organizationName: 'Ask Co' }, owner.token);
   const orgId = org.organizationId as string;
 
   const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'Ask Vendor', amount: 900, invoiceNo: 'ASK-1', billTo: 'Ask Co' });
-  // Deliberately NOT confirmed — this is the pre-confirm state.
+  // Deliberately NOT confirmed — this is the draft state.
 
   const detail = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
-  assert.ok(detail.approval, 'an ingested bill is already in the engine, not waiting for confirm');
-  assert.ok(detail.viewer.openTaskId, 'and somebody holds a task on it');
+  assert.equal(detail.approval, null, 'a draft is not routing');
+  assert.equal(detail.viewer.openTaskId, null, 'so nobody holds a task on it yet');
+
+  // Confirm is the door, and the only one.
+  await bill.confirm();
+  const after = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
+  assert.ok(after.approval, 'confirming is what puts it in the engine');
 });
 
 test('a reviewer can ask a question on a bill nobody has confirmed yet', async () => {
@@ -983,17 +993,23 @@ test('a reviewer can ask a question on a bill nobody has confirmed yet', async (
   const orgId = org.organizationId as string;
   const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'Ask2 Vendor', amount: 700, invoiceNo: 'ASK-2', billTo: 'Ask Two' });
 
-  const before = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
-  const taskId = before.viewer.openTaskId as string;
-  const me = before.viewer.personId as string;
+  const helper = await register('ask2-helper');
+  await prisma.organizationMembership.create({
+    data: { organizationId: orgId, userId: helper.userId, role: 'member', status: 'active' },
+  });
 
-  await post(`/organizations/${orgId}/approvals/tasks/${taskId}/command`, {
-    command: { kind: 'request_info', question: 'Is this bill actually ours?', from: me },
-    idempotencyKey: crypto.randomUUID(),
+  // A draft has no approval task, so there is nothing to park — but asking is
+  // not an approval act, and a reviewer spotting something wrong during
+  // preparation is exactly when a question is most useful.
+  const asked = await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, {
+    askedOfUserId: helper.userId, question: 'Is this bill actually ours?',
   }, owner.token);
+  assert.ok(asked.billQuestionId, 'the question is recorded against the draft');
 
-  const after = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
-  assert.equal(after.approval.macroState, 'returned_for_info', 'the bill parks on the question rather than dying');
+  // And it reaches them, even though they hold no task and may never approve.
+  const inbox = await get(`/organizations/${orgId}/bills/approvals-inbox`, helper.token);
+  assert.equal(inbox.questionsForYou.length, 1, 'being asked is enough to be told');
+  assert.equal(inbox.questionsForYou[0].question, 'Is this bill actually ours?');
 });
 
 // --- recording a name the organization trades under ---------------------------
@@ -1135,16 +1151,19 @@ test('the person holding the task parks the bill when they ask', async () => {
   await prisma.organizationMembership.create({
     data: { organizationId: orgId, userId: other.userId, role: 'admin', status: 'active' },
   });
+  // Addressed to us, so nothing blocks Confirm. Parking needs a live task, and
+  // a bill with a blocking flag never gets one — you fix the flag first. That
+  // ordering is the point of the draft stage, not an obstacle to it.
   const bill = await uploadAndConfirm(orgId, owner.token, {
-    vendor: 'Park Vendor', amount: 640, invoiceNo: 'ASKP-1', billTo: 'Halcyon Labs, Inc.',
+    vendor: 'Park Vendor', amount: 640, invoiceNo: 'ASKP-1', billTo: 'Ask Park',
   });
+  await bill.confirm();
 
   // The owner submitted the bill, so R1 excludes them from approving it and the
   // admin holds the task. The task holder is therefore the one who can park it.
   await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, {
     askedOfUserId: owner.userId,
-    question: 'Is Halcyon Labs one of ours?',
-    aboutFlag: 'addressed_elsewhere',
+    question: 'Is this the right vendor for the freight work?',
   }, other.token);
 
   const detail = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);

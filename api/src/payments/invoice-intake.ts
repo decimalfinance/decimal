@@ -344,27 +344,28 @@ export async function processInvoiceDocument(args: {
         // Instrumentation never blocks an ingest.
       }
 
-      try {
-        const { submitInvoiceForApproval } = await import('../approvals/wiring.js');
-        await submitInvoiceForApproval({
-          organizationId: args.organizationId,
-          requesterUserId: args.actorUserId,
-          totalMinorBase: amountRaw,
-          vendorId: counterpartyWallet.counterpartyId ?? null,
-          attributes: {
-            paymentOrderId: paymentOrder.paymentOrderId,
-            inputSource: 'invoice_upload',
-            ...(args.intakeChannel ? { intakeChannel: args.intakeChannel } : {}),
-          },
-          lines: [{ amountMinor: amountRaw, currency: 'USD', description: row.notes ?? row.counterparty }],
-        });
-      } catch (error) {
-        logger.warn('invoice_intake.approval_submit_failed', {
-          organizationId: args.organizationId,
-          paymentOrderId: paymentOrder.paymentOrderId,
-          ...(error instanceof Error ? { message: error.message } : {}),
-        });
-      }
+      // A bill does NOT enter the approval engine here.
+      //
+      // It used to, so that a flagged bill had a task to ask about or escalate.
+      // The cost was that every bill was `needs_review` and `pending_approval`
+      // at the same time — routing compiled on figures nobody had checked yet,
+      // then recompiled when Confirm corrected them. No AP product models a
+      // bill as awaiting review and pending approval simultaneously; the ones
+      // that were checked either withhold the record until it is verified
+      // (Bill.com) or keep a wide Draft state that approval never starts from
+      // (Ramp, Xero, Coupa, NetSuite). Ramp is explicit about the direction:
+      // a bill created through their API with data already confirmed skips
+      // Draft entirely, because routing is gated on the data being settled,
+      // not on the bill existing. See review-vs-approve/lifecycle-states.md.
+      //
+      // Nothing is lost by waiting. Flagging never needed the engine —
+      // evaluateBillFlags is a pure function over the bill's own facts plus a
+      // duplicate match against other bills, so addressed-elsewhere,
+      // arithmetic, duplicates, vendor holds and the ceiling all still fire in
+      // draft. The one flag that does need it, approval_weakened, is about an
+      // approval that has not started yet.
+      //
+      // Confirm is the door. It is the only door.
 
       created.push({
         rowIndex: index,
