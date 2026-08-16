@@ -1080,7 +1080,7 @@ export const api = {
   // Agent-aware invoice upload. Creates payment orders from the document and,
   // when autoAdvance is true (default), asks the Decimal org agent to route
   // any proposal-ready rows. Risky
-  // rows come back as needs_review and the user clears them via
+  // rows come back as draft and the user clears them via
   // clearPaymentOrderReview.
   uploadInvoice(
     organizationId: string,
@@ -1097,7 +1097,7 @@ export const api = {
       { method: 'POST', body: JSON.stringify(input) },
     );
   },
-  // Clear a needs_review payment order. With autoAdvance the backend will
+  // Clear a draft payment order. With autoAdvance the backend will
   // also kicks the agent router in the same call, returning the result in
   // `automation`.
   clearPaymentOrderReview(
@@ -1399,7 +1399,7 @@ export const invoiceDocumentsApi = {
   },
 };
 
-export type BillBucket = 'needs_review' | 'in_approval' | 'to_pay' | 'done' | 'needs_attention';
+export type BillBucket = 'draft' | 'in_approval' | 'to_pay' | 'done' | 'needs_attention';
 
 export interface WorkbenchBill {
   paymentOrderId: string;

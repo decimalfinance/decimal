@@ -658,7 +658,7 @@ async function waitForPaymentOrders(expected = 1, timeoutMs = 8_000) {
   }
 }
 
-test('the sweep fetches a queued attachment and lands a bill in needs_review', async () => {
+test('the sweep fetches a queued attachment and lands a bill in draft', async () => {
   await seedOrgWithMember('Acme', 'priya@acme.test');
   stubExtraction();
 
@@ -666,7 +666,7 @@ test('the sweep fetches a queued attachment and lands a bill in needs_review', a
 
   const orders = await waitForPaymentOrders(1);
   assert.equal(orders.length, 1, 'the email produced a bill');
-  assert.equal(orders[0]!.state, 'needs_review', 'email never skips the review gate');
+  assert.equal(orders[0]!.state, 'draft', 'email never skips the review gate');
 
   const attachment = await prisma.inboundEmailAttachment.findFirstOrThrow();
   assert.equal(attachment.status, 'ingested');

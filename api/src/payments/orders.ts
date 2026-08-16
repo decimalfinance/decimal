@@ -76,7 +76,7 @@ export async function createPaymentOrder(
     metadataJson?: Prisma.InputJsonValue;
     inputBatchId?: string | null;
     inputBatchLabel?: string | null;
-    initialState?: Extract<PaymentOrderState, 'draft' | 'needs_review'>;
+    initialState?: Extract<PaymentOrderState, 'submitted' | 'draft'>;
   },
 ) {
   const [counterpartyWallet, sourceTreasuryWallet] = await Promise.all([
@@ -119,7 +119,7 @@ export async function createPaymentOrder(
   // duplicate is VISIBLE — a flagged bill an admin can inspect and clear.
   // Erroring here destroyed that whole flow (testbench report 001). Direct
   // creations (CSV/API drafts) keep the hard check — they skip Review.
-  if (args.initialState !== 'needs_review') {
+  if (args.initialState !== 'draft') {
     await enforceDuplicatePaymentOrder({
       organizationId: args.organizationId,
       counterpartyWalletId: counterpartyWallet.counterpartyWalletId,
@@ -145,7 +145,7 @@ export async function createPaymentOrder(
         attachmentUrl: normalizeOptionalText(args.attachmentUrl),
         invoiceDocumentId: args.invoiceDocumentId ?? null,
         dueAt: args.dueAt ?? undefined,
-        state: args.initialState ?? 'draft',
+        state: args.initialState ?? 'submitted',
         sourceBalanceSnapshotJson: (args.sourceBalanceSnapshotJson ?? { status: 'unknown' }) as Prisma.InputJsonValue,
         metadataJson: (args.metadataJson ?? {}) as Prisma.InputJsonValue,
         createdByUserId: args.actorUserId ?? undefined,
@@ -231,7 +231,7 @@ export async function updatePaymentOrder(
     include: paymentOrderInclude,
   });
 
-  if (!['draft', 'needs_review'].includes(current.state)) {
+  if (!['submitted', 'draft'].includes(current.state)) {
     throw new Error(`Payment order ${current.state} cannot be edited`);
   }
 
@@ -334,11 +334,11 @@ export async function ensurePaymentOrderAuditRequest(
     return getPaymentOrderDetail(args.organizationId, args.paymentOrderId);
   }
 
-  if (current.state === 'needs_review') {
+  if (current.state === 'draft') {
     throw new Error('Payment orders that need review must be cleared before routing');
   }
 
-  if (current.state !== 'draft') {
+  if (current.state !== 'submitted') {
     throw new Error(`Payment order ${current.state} cannot be routed`);
   }
 
@@ -426,7 +426,7 @@ export async function clearPaymentOrderReview(args: PaymentActorInput & {
     return getPaymentOrderDetail(args.organizationId, args.paymentOrderId);
   }
 
-  if (current.state !== 'needs_review') {
+  if (current.state !== 'draft') {
     throw new Error(`Payment order ${current.state} does not need review`);
   }
 
@@ -476,7 +476,7 @@ export async function clearPaymentOrderReview(args: PaymentActorInput & {
     await tx.paymentOrder.update({
       where: { paymentOrderId: current.paymentOrderId },
       data: {
-        state: 'draft',
+        state: 'submitted',
         metadataJson: nextMetadata as Prisma.InputJsonValue,
       },
     });
@@ -487,7 +487,7 @@ export async function clearPaymentOrderReview(args: PaymentActorInput & {
       eventType: 'payment_order_review_cleared',
       ...buildPaymentEventActor(args),
       beforeState: current.state,
-      afterState: 'draft',
+      afterState: 'submitted',
       payloadJson: {
         reviewNote: normalizeOptionalText(args.reviewNote),
         trustedCounterpartyWallet:
@@ -501,7 +501,7 @@ export async function clearPaymentOrderReview(args: PaymentActorInput & {
 
 /**
  * When a counterparty wallet becomes trusted (e.g. from the address book), advance any
- * payment orders parked in needs_review solely because that wallet wasn't trusted yet.
+ * payment orders parked in draft solely because that wallet wasn't trusted yet.
  * Every review rule is trust-based, so trusting the wallet resolves the block. Each order
  * moves to `draft` (not auto-paid) so the operator still routes it. Idempotent.
  */
@@ -514,7 +514,7 @@ export async function advancePendingReviewsForWallet(args: {
     where: {
       organizationId: args.organizationId,
       counterpartyWalletId: args.counterpartyWalletId,
-      state: 'needs_review',
+      state: 'draft',
       transferRequests: { none: {} },
     },
     select: { paymentOrderId: true },
@@ -741,13 +741,13 @@ function derivePaymentOrderState(
       !hasSignature
       && (latest.state === 'ready_for_execution' || latest.state === 'broadcast_failed');
     if (awaitingWallet) {
-      return 'draft';
+      return 'submitted';
     }
     return 'executed';
   }
 
   if (reconciliationDetail.status === 'approved' || reconciliationDetail.status === 'ready_for_execution') {
-    return 'draft';
+    return 'submitted';
   }
 
   if (reconciliationDetail.status === 'rejected') {
@@ -773,7 +773,7 @@ function derivePaymentProductLifecycle(
   return {
     productState,
     source: isSquadsPayment ? 'squads_v4' : 'legacy',
-    steps: ['needs_review', 'draft', 'proposed', 'executed', 'settled', 'proof'],
+    steps: ['draft', 'submitted', 'proposed', 'executed', 'settled', 'proof'],
   };
 }
 
@@ -825,15 +825,15 @@ function mapSquadsProposalStatusToPaymentState(proposal: DecimalProposal, status
   if (status === 'rejected' || status === 'cancelled' || status === 'failed') {
     return 'cancelled';
   }
-  return 'draft';
+  return 'submitted';
 }
 
 function mapInternalPaymentStateToSquadsProductState(state: string): PaymentOrderState {
   switch (state) {
-    case 'needs_review':
-      return 'needs_review';
     case 'draft':
       return 'draft';
+    case 'submitted':
+      return 'submitted';
     case 'proposed':
       return 'proposed';
     case 'executed':
@@ -843,7 +843,7 @@ function mapInternalPaymentStateToSquadsProductState(state: string): PaymentOrde
     case 'cancelled':
       return 'cancelled';
     default:
-      return 'draft';
+      return 'submitted';
   }
 }
 

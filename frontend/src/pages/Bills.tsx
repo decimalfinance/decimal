@@ -10,7 +10,7 @@ import { PageHead } from '../dec/primitives';
 import { useToast } from '../ui/Toast';
 
 const TABS: Array<{ key: BillBucket; label: string }> = [
-  { key: 'needs_review', label: 'Needs review' },
+  { key: 'draft', label: 'Draft' },
   { key: 'in_approval', label: 'In approval' },
   { key: 'to_pay', label: 'To pay' },
   { key: 'done', label: 'Done' },
@@ -59,7 +59,7 @@ export function BillsPage() {
   const navigate = useNavigate();
   const toast = useToast();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<BillBucket>('needs_review');
+  const [tab, setTab] = useState<BillBucket>('draft');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<'urgent' | 'due' | 'newest'>('urgent');
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -96,7 +96,7 @@ export function BillsPage() {
   }, [allBills, tab, search, sort]);
 
   const openBill = (bill: WorkbenchBill) => {
-    if (bill.bucket === 'needs_review') {
+    if (bill.bucket === 'draft') {
       navigate(`/organizations/${organizationId}/bills/${bill.paymentOrderId}/review`);
     } else {
       navigate(`/organizations/${organizationId}/bills/${bill.paymentOrderId}`);
@@ -115,7 +115,7 @@ export function BillsPage() {
   };
 
   const emptyCopy: Record<BillBucket, string> = {
-    needs_review: 'Nothing waiting on a check.',
+    draft: 'Nothing waiting on a check.',
     in_approval: 'Nothing with the approvers right now.',
     to_pay: 'Nothing cleared and queued to go out.',
     done: 'No paid bills yet.',
@@ -153,12 +153,12 @@ export function BillsPage() {
             <div className="metrics" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
               <button
                 type="button"
-                className={`metric${(counts?.needs_review ?? 0) > 0 ? ' is-alert' : ''}`}
-                onClick={() => setTab('needs_review')}
+                className={`metric${(counts?.draft ?? 0) > 0 ? ' is-alert' : ''}`}
+                onClick={() => setTab('draft')}
                 style={{ cursor: 'pointer', textAlign: 'left' }}
               >
                 <div className="m-label">Waiting on you</div>
-                <div className="m-value">{counts?.needs_review ?? 0}</div>
+                <div className="m-value">{counts?.draft ?? 0}</div>
                 <div className="m-sub">
                   {(workbench.data?.reviewCounts.ready ?? 0) > 0 || (workbench.data?.reviewCounts.missingInfo ?? 0) > 0
                     ? `${workbench.data?.reviewCounts.ready ?? 0} ready for approval · ${workbench.data?.reviewCounts.missingInfo ?? 0} missing info`

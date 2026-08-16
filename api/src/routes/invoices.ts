@@ -42,7 +42,7 @@ invoicesRouter.post('/organizations/:organizationId/invoices/upload', asyncRoute
     mimeType: input.mimeType,
     sourceTreasuryWalletId: input.sourceTreasuryWalletId,
   });
-  // Pipeline v3: every uploaded bill lands in needs_review. Nothing advances at
+  // Pipeline v3: every uploaded bill lands in draft. Nothing advances at
   // upload time — the review screen's "Confirm & send for approval" is the only
   // door into routing, and execution follows approval via the bridge.
   sendCreated(res, {

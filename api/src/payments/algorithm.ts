@@ -23,7 +23,7 @@ export type PaymentReviewDecision =
       reasons?: never;
     }
   | {
-      status: 'needs_review';
+      status: 'draft';
       reasons: PaymentReviewReason[];
     };
 
@@ -65,7 +65,7 @@ export type PaymentRoutingDependencies<
   ) => Promise<PaymentReviewDecision>;
   markNeedsReview: (
     payment: TPayment,
-    decision: Extract<PaymentReviewDecision, { status: 'needs_review' }>,
+    decision: Extract<PaymentReviewDecision, { status: 'draft' }>,
     context: PaymentRoutingContext,
   ) => Promise<TReviewResult>;
   findBestMatchingSpendingLimit: (
@@ -116,7 +116,7 @@ export type PaymentRoutingDecision<
       reason: 'cancelled' | 'settled';
     }
   | {
-      status: 'needs_review';
+      status: 'draft';
       route: 'human_review';
       payment: TPayment;
       reasons: PaymentReviewReason[];
@@ -186,10 +186,10 @@ export async function routePayment<
   }
 
   const reviewDecision = await dependencies.evaluateReviewGate(payment, context);
-  if (reviewDecision.status === 'needs_review') {
+  if (reviewDecision.status === 'draft') {
     const reviewResult = await dependencies.markNeedsReview(payment, reviewDecision, context);
     return {
-      status: 'needs_review',
+      status: 'draft',
       route: 'human_review',
       payment,
       reasons: reviewDecision.reasons,

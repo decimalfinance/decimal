@@ -607,14 +607,48 @@ ALTER TABLE execution_records
     )
   );
 
+-- Bill state vocabulary, renamed 2026-08-16 so the names are literal.
+--
+--   needs_review -> draft      the bill is being PREPARED. AI has read it, a
+--                              person is completing and checking it. It is not
+--                              in the approval engine and nobody is waiting.
+--   draft        -> submitted  a person confirmed it, so it was handed to the
+--                              approval engine. Where it is after that is the
+--                              engine's business, not this column's.
+--
+-- `draft` used to mean the opposite of what it means now, which is exactly why
+-- it had to change: "draft" naturally reads as "not finished yet", and it was
+-- being used for bills that were finished and already routing.
+--
+-- The conversion lives here rather than in a later numbered file because the
+-- CHECK below is what defines the vocabulary — the data has to be moved before
+-- the constraint that forbids the old values is applied. Guarded on the
+-- constraint's own text, which is the only honest record of which vocabulary a
+-- given database is on: a fresh database has no constraint and no rows, an
+-- already-converted one does not match, and both skip it.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'chk_payment_orders_state'
+      AND pg_get_constraintdef(oid) LIKE '%needs_review%'
+  ) THEN
+    ALTER TABLE payment_orders DROP CONSTRAINT chk_payment_orders_state;
+    -- Order matters. Vacate 'draft' before anything is renamed into it, or the
+    -- two states collapse into one and prepared bills look confirmed.
+    UPDATE payment_orders SET state = 'submitted' WHERE state = 'draft';
+    UPDATE payment_orders SET state = 'draft' WHERE state = 'needs_review';
+  END IF;
+END $$;
+
 ALTER TABLE payment_orders
   DROP CONSTRAINT IF EXISTS chk_payment_orders_state;
 
 ALTER TABLE payment_orders
   ADD CONSTRAINT chk_payment_orders_state CHECK (
     state IN (
-      'needs_review',
       'draft',
+      'submitted',
       'proposed',
       'executed',
       'settled',
@@ -839,19 +873,20 @@ BEGIN
   IF EXISTS (
     SELECT 1 FROM pg_indexes
     WHERE indexname = 'idx_payment_orders_unique_active_reference'
-      AND indexdef NOT LIKE '%needs_review%'
+      AND indexdef NOT LIKE '%''draft''%'
   ) THEN
     DROP INDEX idx_payment_orders_unique_active_reference;
   END IF;
 END $$;
--- Race backstop for directly-created orders (CSV/API drafts skip Review).
--- Review-bound bills are exempt: duplicates must be able to LAND in review to
--- be flagged, and an admin-overridden twin must be able to proceed past it —
--- the app-level gate (payments/duplicate-check.ts) owns those paths.
+-- Race backstop for directly-created orders (CSV/API rows skip preparation).
+-- Bills still in draft are exempt: a duplicate must be able to LAND in the
+-- draft stage to be flagged there, and an admin-overridden twin must be able to
+-- proceed past it — the app-level gate (payments/duplicate-check.ts) owns those
+-- paths.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_unique_active_reference
   ON payment_orders(organization_id, counterparty_wallet_id, amount_raw, lower(coalesce(external_reference, invoice_number)))
   WHERE coalesce(external_reference, invoice_number) IS NOT NULL
-    AND state NOT IN ('settled', 'cancelled', 'needs_review')
+    AND state NOT IN ('settled', 'cancelled', 'draft')
     AND NOT (metadata_json ? 'duplicateOverride');
 CREATE INDEX IF NOT EXISTS idx_payment_order_events_order_created_at
   ON payment_order_events(payment_order_id, created_at ASC);

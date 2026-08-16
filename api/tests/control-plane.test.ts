@@ -1487,7 +1487,7 @@ test('Squads vault payment proposals turn payment orders into executable treasur
     `/organizations/${organization.organizationId}/payment-orders?inputBatchId=${importedBatch.inputBatchId}`,
     register.sessionToken,
   );
-  assert.equal(preparedBatch.items.every((order: { derivedState: string }) => order.derivedState === 'draft'), true);
+  assert.equal(preparedBatch.items.every((order: { derivedState: string }) => order.derivedState === 'submitted'), true);
 
   proposalsByPda.set(runProposal.intent.proposalPda, {
     transactionIndex: { toString: () => '2' },

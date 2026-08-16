@@ -113,7 +113,7 @@ export async function buildPaymentOrderProofPacket(organizationId: string, payme
     agentSummary: {
       recommendedAction: reconciliationExplanation?.recommendedAction ?? readiness.recommendedAction,
       canTreatAsFinal: readiness.status === 'complete',
-      needsHumanReview: readiness.status === 'needs_review' || readiness.status === 'blocked',
+      needsHumanReview: readiness.status === 'draft' || readiness.status === 'blocked',
     },
     auditTrail: reconciliation?.timeline ?? [],
   };
@@ -165,7 +165,7 @@ function deriveProofReadiness(args: {
     buildProofCheck(
       'approval_cleared',
       'Approval is cleared',
-      args.approvalState === 'approved' || args.derivedState !== 'needs_review' || args.proofStatus === 'complete'
+      args.approvalState === 'approved' || args.derivedState !== 'draft' || args.proofStatus === 'complete'
         ? 'pass'
         : args.approvalState === 'rejected'
           ? 'fail'
@@ -177,7 +177,7 @@ function deriveProofReadiness(args: {
       'Execution evidence is present',
       args.latestExecution?.submittedSignature || externalExecutionReference
         ? 'pass'
-        : args.derivedState === 'draft' || args.derivedState === 'needs_review' || args.derivedState === 'proposed'
+        : args.derivedState === 'submitted' || args.derivedState === 'draft' || args.derivedState === 'proposed'
           ? 'pending'
           : 'warn',
       args.latestExecution?.submittedSignature
@@ -213,7 +213,7 @@ function deriveProofReadiness(args: {
   const status = blockers.length
     ? 'blocked'
     : warnings.length
-      ? 'needs_review'
+      ? 'draft'
       : pending.length
         ? 'in_progress'
         : 'complete';

@@ -148,7 +148,7 @@ export function BillDetailPage() {
   const operatorMode = viewer.isRequester && !viewerHasDecision;
   // Approved but unpaid: an admin may unwind the approval — the recovery path
   // when a release gate refuses (pinned destination, ceiling).
-  const canSendBack = approvedOverall && review.state === 'draft' && Boolean(myAccess.data?.isOwnerOrAdmin);
+  const canSendBack = approvedOverall && review.state === 'submitted' && Boolean(myAccess.data?.isOwnerOrAdmin);
 
   const composerMeta: Record<ComposerKind, { title: string; desc: string; placeholder: string; btn: string; btnClass: string }> = {
     reject: { title: 'Reject this bill', desc: `A reason is required — ${requester?.name ?? 'the submitter'} and the route will see it.`, placeholder: 'Why is this being rejected?', btn: 'Reject bill', btnClass: 'btn-danger' },
@@ -312,7 +312,7 @@ export function BillDetailPage() {
 
           {/* Right: calm reference */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
-            {(review.state === 'draft' || review.state === 'needs_review') ? (
+            {(review.state === 'submitted' || review.state === 'draft') ? (
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: -8 }}>
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFactsOpen(true)}>
                   Complete details

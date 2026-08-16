@@ -29,7 +29,7 @@ export async function markPaymentOrderSquadsProposalPrepared(args: {
   await prisma.$transaction(async (tx) => {
     await tx.paymentOrder.update({
       where: { paymentOrderId: args.paymentOrderId },
-      data: { state: 'draft' },
+      data: { state: 'submitted' },
     });
     await tx.paymentOrderEvent.create({
       data: {
@@ -39,7 +39,7 @@ export async function markPaymentOrderSquadsProposalPrepared(args: {
         actorType: args.actorType ?? 'user',
         actorId: args.actorId ?? args.actorUserId,
         beforeState: args.beforeState,
-        afterState: 'draft',
+        afterState: 'submitted',
         linkedTransferRequestId: args.transferRequestId,
         payloadJson: {
           decimalProposalId: args.decimalProposalId,
@@ -69,7 +69,7 @@ export async function markPaymentBatchSquadsProposalPrepared(args: {
     for (const item of args.items) {
       await tx.paymentOrder.update({
         where: { paymentOrderId: item.paymentOrderId },
-        data: { state: 'draft' },
+        data: { state: 'submitted' },
       });
       await tx.paymentOrderEvent.create({
         data: {
@@ -79,7 +79,7 @@ export async function markPaymentBatchSquadsProposalPrepared(args: {
           actorType: args.actorType ?? 'user',
           actorId: args.actorId ?? args.actorUserId,
           beforeState: item.beforeState,
-          afterState: 'draft',
+          afterState: 'submitted',
           linkedTransferRequestId: item.transferRequestId,
           payloadJson: {
             inputBatchId: args.inputBatchId,

@@ -75,7 +75,7 @@ type VendorGroup = {
   lastPaidAt: string | null;
   totalPaidRaw: string;
   paymentCount: number;
-  needsReviewCount: number;
+  isDraftCount: number;
 };
 
 export function CounterpartiesPage({ session: _session }: { session: AuthenticatedSession }) {
@@ -326,12 +326,12 @@ export function CounterpartiesPage({ session: _session }: { session: Authenticat
       let totalRaw = 0n;
       let paymentCount = 0;
       let lastPaidAt: string | null = null;
-      let needsReviewCount = 0;
+      let isDraftCount = 0;
       for (const a of addresses) {
         try { totalRaw += BigInt(a.totalPaidRaw); } catch { /* ignore */ }
         paymentCount += a.paymentCount;
         if (a.lastPaidAt && (!lastPaidAt || a.lastPaidAt > lastPaidAt)) lastPaidAt = a.lastPaidAt;
-        if (a.wallet.trustState !== 'trusted') needsReviewCount += 1;
+        if (a.wallet.trustState !== 'trusted') isDraftCount += 1;
       }
       // Trusted addresses first, then the ones awaiting review.
       addresses.sort(
@@ -345,7 +345,7 @@ export function CounterpartiesPage({ session: _session }: { session: Authenticat
         lastPaidAt,
         totalPaidRaw: totalRaw.toString(),
         paymentCount,
-        needsReviewCount,
+        isDraftCount,
       });
     }
     return out.sort((a, b) => a.name.localeCompare(b.name));
@@ -476,8 +476,8 @@ export function CounterpartiesPage({ session: _session }: { session: Authenticat
                             }
                             return only ? (
                               <Pill tone={trustTone(only.wallet.trustState)}>{trustLabel(only.wallet.trustState)}</Pill>
-                            ) : g.needsReviewCount > 0 ? (
-                              <Pill tone="warning">{g.needsReviewCount} need review</Pill>
+                            ) : g.isDraftCount > 0 ? (
+                              <Pill tone="warning">{g.isDraftCount} need review</Pill>
                             ) : (
                               <Pill tone="success">Verified</Pill>
                             );

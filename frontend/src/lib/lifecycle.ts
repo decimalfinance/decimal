@@ -40,8 +40,12 @@ const EXECUTION_DONE_STATES = new Set([
 ]);
 
 const READY_TO_PROPOSE_STATES = new Set(['ready', 'ready_for_execution']);
-const PRE_PROPOSAL_STATES = new Set(['draft', 'pending_approval']);
-const AGENT_FLAGGED_STATES = new Set(['needs_review', 'agent_flagged']);
+// Matched against either a payment-order state or a transfer-request state, so
+// both vocabularies live here. `draft` is a bill being prepared and `submitted`
+// is one handed to approval — both sit before any proposal exists.
+const PRE_PROPOSAL_STATES = new Set(['draft', 'submitted', 'pending_approval']);
+// A bill in draft is covered above; what is left here is the agent's own flag.
+const AGENT_FLAGGED_STATES = new Set(['agent_flagged']);
 
 /**
  * 5-stage payment lifecycle. Shared by single-payment detail and payment-run

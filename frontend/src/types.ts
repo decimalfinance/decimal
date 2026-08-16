@@ -912,8 +912,8 @@ export type ReconciliationRow = {
 // matter (vote counts, on-chain submission/execution) live on the related
 // DecimalProposal/ExecutionRecord, not on the order itself.
 export type PaymentOrderState =
-  | 'needs_review'
   | 'draft'
+  | 'submitted'
   | 'proposed'
   | 'executed'
   | 'settled'
@@ -942,7 +942,7 @@ export type BatchCsvImportedRow = {
   status: 'imported';
   inputBatchId: string;
   inputBatchLabel: string;
-  decision: 'drafted' | 'needs_review';
+  decision: 'drafted' | 'draft';
   counterpartyWallet: CounterpartyWallet;
   paymentOrder: PaymentOrder;
 };
@@ -1100,7 +1100,7 @@ export type PaymentProofPacket = {
 };
 
 export type ProofReadiness = {
-  status: 'complete' | 'in_progress' | 'needs_review' | 'blocked';
+  status: 'complete' | 'in_progress' | 'draft' | 'blocked';
   blockers: string[];
   warnings: string[];
   pending: string[];
@@ -1388,7 +1388,7 @@ export type PaymentOrderAgentAdvanceResult =
       status:
         | 'already_has_proposal'
         | 'already_has_spending_limit_execution'
-        | 'needs_review'
+        | 'draft'
         | 'needs_source_treasury'
         | 'unsupported_source_treasury'
         | 'not_applicable'
@@ -1404,7 +1404,7 @@ export type PaymentOrderAgentAdvanceResult =
 
 export type InvoiceIntakeCreatedRow = {
   rowIndex: number;
-  decision: 'drafted' | 'needs_review' | string;
+  decision: 'drafted' | 'draft' | string;
   triggeredRules: Array<{ rule: string } & Record<string, unknown>>;
   paymentOrder: PaymentOrder;
 };

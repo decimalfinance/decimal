@@ -6,10 +6,12 @@ import type {
 } from './api';
 
 const PAYMENT_STATUS: Record<PaymentOrderState, string> = {
-  needs_review: 'Needs review',
-  // Internally approved, agent will propose next. Display as "Reviewing"
-  // because from the user's perspective the system is still working on it.
-  draft: 'Reviewing',
+  // Being prepared: read by the machine, not yet finished by a person, and not
+  // in the approval engine. Nobody is waiting on it.
+  draft: 'Draft',
+  // A person confirmed it, so it was handed to approval. Where it is after
+  // that is the engine's business — this column only says it left the desk.
+  submitted: 'In approval',
   proposed: 'Proposal active',
   executed: 'Executed',
   settled: 'Completed',
@@ -25,12 +27,12 @@ export function statusToneForPayment(derivedState: string): 'success' | 'warning
   switch (derivedState) {
     case 'settled':
       return 'success';
-    case 'draft':
+    case 'submitted':
       return 'neutral';
     case 'proposed':
     case 'executed':
       return 'warning';
-    case 'needs_review':
+    case 'draft':
       return 'warning';
     case 'cancelled':
       return 'danger';

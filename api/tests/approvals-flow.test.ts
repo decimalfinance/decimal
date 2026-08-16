@@ -224,7 +224,7 @@ test('agent preconditions: autonomy is earned per vendor and vetoed by holds/dup
   const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'Fresh Agent Vendor', amount: 200, invoiceNo: 'FA-1' });
   await prisma.paymentOrder.update({
     where: { paymentOrderId: bill.billId },
-    data: { state: 'draft' }, // past review, so the review-state reason doesn't mask the autonomy one
+    data: { state: 'submitted' }, // past review, so the review-state reason doesn't mask the autonomy one
   });
   await prisma.counterpartyWallet.updateMany({
     where: { organizationId: orgId },
@@ -232,7 +232,7 @@ test('agent preconditions: autonomy is earned per vendor and vetoed by holds/dup
   });
   const { tryAdvancePaymentOrderWithAgent } = await import('../src/agents/payment-automation.js');
   const first = await tryAdvancePaymentOrderWithAgent({ organizationId: orgId, paymentOrderId: bill.billId, actorUserId: owner.userId });
-  assert.equal(first.status, 'needs_review');
+  assert.equal(first.status, 'draft');
   assert.match(first.reason ?? '', /agent pays a vendor on its own only after/i);
 
   // Give the vendor a settled human track record → the autonomy reason clears
@@ -253,7 +253,7 @@ test('agent preconditions: autonomy is earned per vendor and vetoed by holds/dup
     status: 'held', reason: 'under review', actorUserId: owner.userId, actorName: 'Owner',
   });
   const third = await tryAdvancePaymentOrderWithAgent({ organizationId: orgId, paymentOrderId: bill.billId, actorUserId: owner.userId });
-  assert.equal(third.status, 'needs_review');
+  assert.equal(third.status, 'draft');
   assert.match(third.reason ?? '', /never pays a held or blocked vendor/i);
 });
 
@@ -581,7 +581,7 @@ test('bank-only upload creates a pending-method vendor and a needs-review bill',
     filename: 'b.pdf', mimeType: 'application/pdf', dataBase64: Buffer.from('%PDF x').toString('base64'), autoAdvance: false,
   }, owner.token);
   assert.equal(up.createdCount, 1);
-  assert.equal(up.paymentOrders[0].paymentOrder.state, 'needs_review');
+  assert.equal(up.paymentOrders[0].paymentOrder.state, 'draft');
   const wallet = await prisma.counterpartyWallet.findFirstOrThrow({ where: { organizationId: orgId } });
   assert.equal(wallet.walletType, 'pending_method');
   assert.equal(wallet.trustState, 'unreviewed');
@@ -599,7 +599,7 @@ test('coding uncertainty never blocks: uncoded lines park in Uncategorized expen
 
   const uncoded = await uploadAndConfirm(orgId, owner.token, { amount: 15000 }, { skipCategory: true });
   const res = await uncoded.confirm();
-  assert.equal(res.detail.state, 'draft', 'uncoded bill confirms and enters approval');
+  assert.equal(res.detail.state, 'submitted', 'uncoded bill confirms and enters approval');
   // The line landed in the catch-all, visible on the approvable's attributes.
   const rows = await prisma.$queryRaw<{ attributes: { categories?: string[] } }[]>`
     SELECT attributes FROM approval.approvables
@@ -608,7 +608,7 @@ test('coding uncertainty never blocks: uncoded lines park in Uncategorized expen
 
   const coded = await uploadAndConfirm(orgId, owner.token, { amount: 15000, invoiceNo: 'INV-2' });
   const res2 = await coded.confirm();
-  assert.equal(res2.detail.state, 'draft');
+  assert.equal(res2.detail.state, 'submitted');
 });
 
 test('confirm routes the bill; the chain, inbox signal, approve/reject all work', async () => {
@@ -683,7 +683,7 @@ test('request-info blocks approval until answered; reject stops the route', asyn
 
   // …the order is back in review, carrying the approver's homework
   const sentBack = await get(`/organizations/${orgId}/bills/${b2.billId}/review`, owner.token);
-  assert.equal(sentBack.state, 'needs_review');
+  assert.equal(sentBack.state, 'draft');
   assert.equal(sentBack.sentBack.reason, 'Needs its own PO first.');
   assert.ok(sentBack.sentBack.byName, 'send-back names the approver');
 
@@ -965,7 +965,7 @@ async function get(path: string, token: string) {
 // the bill used to have no task at all.
 
 test('an ingested bill is a draft — it does not enter the engine until Confirm', async () => {
-  // Bills used to route at intake, so every bill was `needs_review` and
+  // Bills used to route at intake, so every bill was `draft` and
   // `pending_approval` at once: the plan compiled on figures nobody had
   // checked, then recompiled when Confirm corrected them. No AP product models
   // a bill as both (review-vs-approve/lifecycle-states.md). Draft is a stage —

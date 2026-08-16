@@ -33,7 +33,7 @@ import { Pill, SLPill, OriginPill, type PillTone } from '../dec/primitives';
 import { orbTransactionUrl } from '../lib/app';
 
 type ActionVariant =
-  | 'needs_review'
+  | 'draft'
   | 'needs_route'
   | 'ready_to_propose'
   | 'proposal_in_progress'
@@ -104,15 +104,15 @@ function withAccountingEvent(order: PaymentOrder): PaymentOrderEvent[] {
 
 function determineVariant(order: PaymentOrder): ActionVariant {
   const s = order.productLifecycle?.productState ?? order.derivedState;
-  // needs_review: agent flagged the invoice; a human must clear it first.
+  // draft: agent flagged the invoice; a human must clear it first.
   // draft: clear payment intent with no execution route yet. It can be routed
   //   through an agent spending limit or a Squads proposal.
   // proposed: a Squads proposal exists; the substate (collecting votes /
   //   executing) is tracked on the proposal, not the order.
   // executed: on-chain transfer landed, settlement verification in flight.
   // settled: counterparty wallet confirmed receipt.
-  if (s === 'needs_review') return 'needs_review';
-  if (s === 'draft') {
+  if (s === 'draft') return 'draft';
+  if (s === 'submitted') {
     return order.sourceTreasuryWallet?.source === 'squads_v4' && order.canCreateSquadsPaymentProposal !== false
       ? 'ready_to_propose'
       : 'needs_route';
@@ -198,7 +198,7 @@ export function PaymentDetailPage() {
       if (proposal) {
         await api.reconcileProposalFromChain(organizationId!, proposal.decimalProposalId);
       }
-      if (fresh?.derivedState === 'draft') {
+      if (fresh?.derivedState === 'submitted') {
         try {
           await api.advancePaymentOrder(organizationId!, paymentOrderId!);
         } catch {
@@ -224,7 +224,7 @@ export function PaymentDetailPage() {
     onError: (err) => toastError(err instanceof Error ? err.message : 'Could not retry the sync.'),
   });
 
-  // "Approve & continue" on a needs_review order. Clears the AP-intake
+  // "Approve & continue" on a draft order. Clears the AP-intake
   // flag, trusts the counterparty wallet, and asks the agent router to either
   // use a spending limit or create a Squads proposal in the same call.
   const clearReviewMutation = useMutation({
@@ -905,7 +905,7 @@ function describeActor(e: PaymentOrderEvent, createdByEmail: string | null): str
 
 // ─── ActionBar (.action-bar) ────────────────────────────────────────────
 // Compact horizontal action bar driven by the payment's variant. Each
-// variant has its own tone (amber for needs_review, neutral for ready /
+// variant has its own tone (amber for draft, neutral for ready /
 // signing, success for autopaid / settled) and an inline control set.
 
 function ActionBarShell({
@@ -1060,7 +1060,7 @@ function ActionBar(props: {
   } = props;
 
 
-  if (variant === 'needs_review') {
+  if (variant === 'draft') {
     return (
       <ActionBarShell
         tone="amber"

@@ -27,7 +27,7 @@ type ImportedCsvItem =
       status: 'imported';
       inputBatchId: string;
       inputBatchLabel: string;
-      decision: 'drafted' | 'needs_review';
+      decision: 'drafted' | 'draft';
       counterpartyWallet: SerializedCounterpartyWallet;
       paymentOrder: Awaited<ReturnType<typeof createPaymentOrder>>;
     }
@@ -56,7 +56,7 @@ export async function importPaymentOrdersFromCsv(args: {
     }
 
     try {
-      const needsReview = item.counterpartyWallet.trustState !== 'trusted';
+      const isDraft = item.counterpartyWallet.trustState !== 'trusted';
       const paymentOrder = await createPaymentOrder({
         organizationId: args.organizationId,
         actorUserId: args.actorUserId,
@@ -77,7 +77,7 @@ export async function importPaymentOrdersFromCsv(args: {
           inputBatchLabel,
           counterpartyName: item.parsed.counterpartyName,
         },
-        initialState: needsReview ? 'needs_review' : 'draft',
+        initialState: isDraft ? 'draft' : 'submitted',
       });
 
       items.push({
@@ -85,7 +85,7 @@ export async function importPaymentOrdersFromCsv(args: {
         status: 'imported' as const,
         inputBatchId,
         inputBatchLabel,
-        decision: needsReview ? 'needs_review' : 'drafted',
+        decision: isDraft ? 'draft' : 'drafted',
         counterpartyWallet: item.counterpartyWallet,
         paymentOrder,
       });

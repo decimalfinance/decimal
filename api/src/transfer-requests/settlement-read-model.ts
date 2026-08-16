@@ -135,7 +135,7 @@ export async function getReconciliationExplanation(organizationId: string, trans
     summary: buildSettlementSummary(detail, outcome),
     confidence: {
       score: detail.match?.confidenceScore ?? null,
-      band: detail.match?.confidenceBand ?? (detail.exceptions.length ? 'needs_review' : 'unknown'),
+      band: detail.match?.confidenceBand ?? (detail.exceptions.length ? 'draft' : 'unknown'),
       rule: detail.match?.matchRule ?? null,
       candidateCount: detail.match?.candidateCount ?? 0,
     },

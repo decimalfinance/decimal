@@ -42,7 +42,7 @@ export function registerPaymentApprovalBridge(): void {
           where: { organizationId: approvable.organization_id, paymentOrderId },
           select: { state: true },
         });
-        if (order?.state === 'needs_review') {
+        if (order?.state === 'draft') {
           await clearPaymentOrderReview({
             organizationId: approvable.organization_id,
             paymentOrderId,
@@ -71,7 +71,7 @@ export function registerPaymentApprovalBridge(): void {
           where: { organizationId: approvable.organization_id, paymentOrderId },
           select: { state: true, metadataJson: true, transferRequests: { select: { transferRequestId: true }, take: 1 } },
         });
-        if (order && order.state === 'draft' && order.transferRequests.length === 0) {
+        if (order && order.state === 'submitted' && order.transferRequests.length === 0) {
           const { reason, byName } = await latestRejection(approvable.id);
           const metadata = order.metadataJson && typeof order.metadataJson === 'object' && !Array.isArray(order.metadataJson)
             ? (order.metadataJson as Record<string, unknown>) : {};
@@ -80,7 +80,7 @@ export function registerPaymentApprovalBridge(): void {
             prisma.paymentOrder.update({
               where: { paymentOrderId },
               data: {
-                state: 'needs_review',
+                state: 'draft',
                 metadataJson: { ...metadata, sentBack: { reason, byName, at: sentBackAt, approvableId: approvable.id } },
               },
             }),
@@ -90,8 +90,8 @@ export function registerPaymentApprovalBridge(): void {
                 paymentOrderId,
                 eventType: 'payment_order_sent_back',
                 actorType: 'system',
-                beforeState: 'draft',
-                afterState: 'needs_review',
+                beforeState: 'submitted',
+                afterState: 'draft',
                 payloadJson: { reason, byName, approvableId: approvable.id },
               },
             }),
@@ -114,11 +114,11 @@ export function registerPaymentApprovalBridge(): void {
           where: { organizationId: approvable.organization_id, paymentOrderId },
           select: { state: true, transferRequests: { select: { transferRequestId: true }, take: 1 } },
         });
-        if (order && order.state === 'draft' && order.transferRequests.length === 0) {
+        if (order && order.state === 'submitted' && order.transferRequests.length === 0) {
           await prisma.$transaction([
             prisma.paymentOrder.update({
               where: { paymentOrderId },
-              data: { state: 'needs_review' },
+              data: { state: 'draft' },
             }),
             prisma.paymentOrderEvent.create({
               data: {
@@ -126,8 +126,8 @@ export function registerPaymentApprovalBridge(): void {
                 paymentOrderId,
                 eventType: 'payment_order_review_reopened',
                 actorType: 'system',
-                beforeState: 'draft',
-                afterState: 'needs_review',
+                beforeState: 'submitted',
+                afterState: 'draft',
                 payloadJson: { reason: 'recalled_from_approval', approvableId: approvable.id },
               },
             }),

@@ -1007,7 +1007,7 @@ async function createSquadsPaymentProposalIntentForCreator(args: {
     });
     paymentOrder = await loadPaymentOrderForSquadsProposal(organizationId, input.paymentOrderId);
   }
-  if (!paymentOrder.transferRequests.length && paymentOrder.state === 'draft') {
+  if (!paymentOrder.transferRequests.length && paymentOrder.state === 'submitted') {
     await ensurePaymentOrderAuditRequest({
       organizationId,
       paymentOrderId: paymentOrder.paymentOrderId,
@@ -1262,7 +1262,7 @@ export async function createSquadsBatchedPaymentProposalIntent(
   });
 
   for (const order of paymentOrders) {
-    if (!order.transferRequests.length && order.state === 'draft') {
+    if (!order.transferRequests.length && order.state === 'submitted') {
       await ensurePaymentOrderAuditRequest({
         organizationId,
         paymentOrderId: order.paymentOrderId,

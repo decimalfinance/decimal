@@ -104,8 +104,8 @@ test('manual payment orders are the single payment intent entity', async () => {
 
   assert.equal(paymentOrder.memo, 'Invoice 1234 payout');
   assert.equal(paymentOrder.externalReference, 'INV-1234');
-  assert.equal(paymentOrder.state, 'draft');
-  assert.equal(paymentOrder.derivedState, 'draft');
+  assert.equal(paymentOrder.state, 'submitted');
+  assert.equal(paymentOrder.derivedState, 'submitted');
   assert.equal(paymentOrder.inputBatchId, null);
   assert.equal(paymentOrder.transferRequests.length, 0);
   assert.equal(paymentOrder.balanceWarning.status, 'sufficient');
@@ -156,11 +156,11 @@ test('invoice upload parks every bill in review; clearing review advances it', a
   assert.equal(result.createdCount, 2);
   assert.equal(result.skippedCount, 0);
   // Review is mandatory for every uploaded bill — trusted vendor or not.
-  assert.equal(result.paymentOrders[0].decision, 'needs_review');
-  assert.equal(result.paymentOrders[0].paymentOrder.state, 'needs_review');
+  assert.equal(result.paymentOrders[0].decision, 'draft');
+  assert.equal(result.paymentOrders[0].paymentOrder.state, 'draft');
   assert.equal(result.paymentOrders[0].paymentOrder.transferRequests.length, 0);
-  assert.equal(result.paymentOrders[1].decision, 'needs_review');
-  assert.equal(result.paymentOrders[1].paymentOrder.state, 'needs_review');
+  assert.equal(result.paymentOrders[1].decision, 'draft');
+  assert.equal(result.paymentOrders[1].paymentOrder.state, 'draft');
   assert.equal(result.paymentOrders[1].paymentOrder.transferRequests.length, 0);
 
   const reviewOrder = result.paymentOrders[1].paymentOrder;
@@ -173,8 +173,8 @@ test('invoice upload parks every bill in review; clearing review advances it', a
     setup.sessionToken,
   );
 
-  assert.equal(cleared.state, 'draft');
-  assert.equal(cleared.derivedState, 'draft');
+  assert.equal(cleared.state, 'submitted');
+  assert.equal(cleared.derivedState, 'submitted');
   assert.equal(cleared.transferRequests.length, 0);
 
   const wallet = await prisma.counterpartyWallet.findUniqueOrThrow({
@@ -338,7 +338,7 @@ test('bills workbench triages uploads; review confirm sends the bill onward', as
     setup.sessionToken,
   );
   const billId = upload.paymentOrders[0].paymentOrder.paymentOrderId;
-  assert.equal(upload.paymentOrders[0].paymentOrder.state, 'needs_review');
+  assert.equal(upload.paymentOrders[0].paymentOrder.state, 'draft');
   // v3 pipeline: no bill enters the approval engine at upload — Confirm is the door.
   assert.equal(upload.paymentOrders[0].approvableId ?? null, null);
 
@@ -346,9 +346,9 @@ test('bills workbench triages uploads; review confirm sends the bill onward', as
     `/organizations/${setup.organization.organizationId}/bills/workbench`,
     setup.sessionToken,
   );
-  assert.equal(workbench.counts.needs_review, 1);
+  assert.equal(workbench.counts.draft, 1);
   const row = workbench.bills.find((b: { paymentOrderId: string }) => b.paymentOrderId === billId);
-  assert.equal(row.bucket, 'needs_review');
+  assert.equal(row.bucket, 'draft');
   assert.equal(row.vendorName, 'Acme Cloud Services');
   assert.equal(row.description, 'Cloud hosting — compute (July 2026)');
   assert.equal(row.amountUsd, 4820);
@@ -395,15 +395,15 @@ test('bills workbench triages uploads; review confirm sends the bill onward', as
     },
     setup.sessionToken,
   );
-  assert.equal(confirmed.detail.state, 'draft');
+  assert.equal(confirmed.detail.state, 'submitted');
 
   const after = await get(
     `/organizations/${setup.organization.organizationId}/bills/workbench`,
     setup.sessionToken,
   );
-  assert.equal(after.counts.needs_review, 0);
+  assert.equal(after.counts.draft, 0);
   const afterRow = after.bills.find((b: { paymentOrderId: string }) => b.paymentOrderId === billId);
-  assert.notEqual(afterRow.bucket, 'needs_review');
+  assert.notEqual(afterRow.bucket, 'draft');
 
   // Bill detail (Screen 3): review facts + the approval side, viewer-aware.
   const detail = await get(
@@ -555,7 +555,7 @@ test('async intake returns the document immediately and processes in the backgro
   }
   assert.equal(status!.status, 'processed', status!.processingError ?? '');
   assert.equal(status!.paymentOrders.length, 1);
-  assert.equal(status!.paymentOrders[0]!.state, 'needs_review');
+  assert.equal(status!.paymentOrders[0]!.state, 'draft');
 
   // The same file again dedupes to the already-processed document.
   const again = await post(
@@ -657,7 +657,7 @@ test('CSV batch import creates PaymentOrders with a shared input batch id', asyn
     assert.equal(item.status, 'imported');
     assert.equal(item.paymentOrder.inputBatchId, imported.inputBatchId);
     assert.equal(item.paymentOrder.inputBatchLabel, 'April vendor batch');
-    assert.equal(item.paymentOrder.state, 'draft');
+    assert.equal(item.paymentOrder.state, 'submitted');
     assert.equal(item.paymentOrder.transferRequests.length, 0);
   }
 

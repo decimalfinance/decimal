@@ -121,7 +121,7 @@ export function InboxPage({ session }: { session: AuthenticatedSession }) {
   const review: ReviewItem[] = useMemo(
     () =>
       orders
-        .filter((o) => o.derivedState === 'needs_review')
+        .filter((o) => o.derivedState === 'draft')
         .slice(0, 5)
         .map((o) => ({
           id: o.paymentOrderId,
@@ -191,7 +191,7 @@ export function InboxPage({ session }: { session: AuthenticatedSession }) {
                 <b>{approvalCount} payment{approvalCount === 1 ? '' : 's'}</b>{' '}
                 {approvalCount === 0 ? 'waiting on your approval' : (approvalCount === 1 ? 'is waiting on your approval' : 'are waiting on your approval')}.
                 This month your agent auto-paid <b>{autopaidCount} bill{autopaidCount === 1 ? '' : 's'}</b> on its own
-                and flagged <b>{reviewCount}</b> for review.
+                and left <b>{reviewCount}</b> in draft.
               </>
             )}
           </p>
@@ -314,12 +314,12 @@ export function InboxPage({ session }: { session: AuthenticatedSession }) {
           </InboxColumn>
 
           <InboxColumn
-            title="Needs review"
+            title="Draft"
             icon={<Ico.shield w={15} />}
             count={reviewCount}
             alert
-            footerHref={`${orgBase}/payments?filter=needs_review`}
-            footerLabel="View all needing review"
+            footerHref={`${orgBase}/payments?filter=draft`}
+            footerLabel="View all drafts"
             empty="Nothing flagged"
           >
             {review.map((r) => (

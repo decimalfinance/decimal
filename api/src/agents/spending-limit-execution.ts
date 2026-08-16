@@ -233,7 +233,7 @@ export async function executePaymentOrderWithSpendingLimit(
     });
   }
 
-  if (!paymentOrder.transferRequests.length && paymentOrder.state === 'draft') {
+  if (!paymentOrder.transferRequests.length && paymentOrder.state === 'submitted') {
     await ensurePaymentOrderAuditRequest({
       organizationId,
       paymentOrderId,

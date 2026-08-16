@@ -317,7 +317,7 @@ export function ProofJsonMockup() {
       "total": 7,
       "complete": 7,
       "in_progress": 0,
-      "needs_review": 0,
+      "draft": 0,
       "blocked": 0
     },
     "recommendedAction": "archive_or_share_run_proof"
@@ -344,7 +344,7 @@ export function ProofJsonMockup() {
     "openExceptionCount": 0,
     "completedCount": 7,
     "completionRatio": 1,
-    "needsReview": false
+    "isDraft": false
   },
   "orders": [
     {

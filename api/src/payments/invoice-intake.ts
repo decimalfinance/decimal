@@ -249,7 +249,7 @@ export async function processInvoiceDocument(args: {
       // from the document; "Confirm & send for approval" is the only door into
       // routing. triggeredRules still matter: they become the review screen's
       // flags and banners.
-      const decision = 'needs_review';
+      const decision = 'draft';
 
       const paymentOrder = await createPaymentOrder({
         organizationId: args.organizationId,
@@ -300,7 +300,7 @@ export async function processInvoiceDocument(args: {
             },
           },
         },
-        initialState: 'needs_review',
+        initialState: 'draft',
       });
 
       // The bill enters the approval engine HERE, not at confirm.
@@ -347,7 +347,7 @@ export async function processInvoiceDocument(args: {
       // A bill does NOT enter the approval engine here.
       //
       // It used to, so that a flagged bill had a task to ask about or escalate.
-      // The cost was that every bill was `needs_review` and `pending_approval`
+      // The cost was that every bill was `draft` and `pending_approval`
       // at the same time — routing compiled on figures nobody had checked yet,
       // then recompiled when Confirm corrected them. No AP product models a
       // bill as awaiting review and pending approval simultaneously; the ones

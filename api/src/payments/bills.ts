@@ -80,7 +80,7 @@ async function ensureProvenance(order: {
   }
 }
 
-export type BillBucket = 'needs_review' | 'in_approval' | 'to_pay' | 'done' | 'needs_attention';
+export type BillBucket = 'draft' | 'in_approval' | 'to_pay' | 'done' | 'needs_attention';
 
 // Below this per-field read confidence, the review screen marks the field
 // "needs a look" instead of "read by AI".
@@ -146,12 +146,12 @@ function bucketAndStatus(args: {
 }): { bucket: BillBucket; subStatus: SubStatus } {
   const { state, invoice, release, firstOpenPerson } = args;
 
-  if (state === 'needs_review') {
+  if (state === 'draft') {
     // An approver sent it back: it's in review again, but with homework.
     if (invoice?.macro_state === 'rejected') {
-      return { bucket: 'needs_review', subStatus: { kind: 'loud', text: 'Sent back — needs changes', tone: 'warning' } };
+      return { bucket: 'draft', subStatus: { kind: 'loud', text: 'Sent back — needs changes', tone: 'warning' } };
     }
-    return { bucket: 'needs_review', subStatus: { kind: 'plain', text: 'Needs a check', tone: 'info' } };
+    return { bucket: 'draft', subStatus: { kind: 'plain', text: 'Needs a check', tone: 'info' } };
   }
   if (state === 'cancelled') {
     return invoice?.macro_state === 'rejected'
@@ -454,7 +454,7 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
   }
 
   const counts: Record<BillBucket, number> = {
-    needs_review: 0, in_approval: 0, to_pay: 0, done: 0, needs_attention: 0,
+    draft: 0, in_approval: 0, to_pay: 0, done: 0, needs_attention: 0,
   };
 
   const bills = orders.map((order) => {
@@ -506,7 +506,7 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
 
     let readiness: 'ready' | 'missing_info' | null = null;
     let missing: string[] = [];
-    if (bucket === 'needs_review') {
+    if (bucket === 'draft') {
       const r = reviewReadiness({
         amountUsd: amountRawToUsd(order.amountRaw),
         invoiceNumber: order.invoiceNumber,
@@ -775,7 +775,7 @@ export async function getBillReview(organizationId: string, paymentOrderId: stri
   // the live chart once and cache the result on the order.
   let ocrCoding: Record<string, unknown> | null = isRecord(metadata.ocrCoding) ? { ...metadata.ocrCoding } : null;
   const chartNames = new Set(chart.flatMap((a) => [a.name, a.fullyQualifiedName]));
-  if (chart.length > 0 && order.state === 'needs_review' && metadata.ocrCodingChart !== 'quickbooks') {
+  if (chart.length > 0 && order.state === 'draft' && metadata.ocrCodingChart !== 'quickbooks') {
     const top = ocrCoding && Array.isArray(ocrCoding.suggestions) && isRecord(ocrCoding.suggestions[0])
       ? (ocrCoding.suggestions[0] as Record<string, unknown>)
       : null;
@@ -955,10 +955,10 @@ export async function getBillReview(organizationId: string, paymentOrderId: stri
       youAsked: Boolean(viewerUserId && q.askedByUserId === viewerUserId),
     })),
     state: order.state,
-    readOnly: order.state !== 'needs_review',
+    readOnly: order.state !== 'draft',
     ...billSource(order.metadataJson, order.createdByUser?.displayName ?? null),
     // An approver sent this bill back for changes — the reviewer's homework.
-    sentBack: sentBackRaw && order.state === 'needs_review'
+    sentBack: sentBackRaw && order.state === 'draft'
       ? { reason: str(sentBackRaw.reason), byName: str(sentBackRaw.byName), at: str(sentBackRaw.at) }
       : null,
     vendor: {
@@ -1043,7 +1043,7 @@ export async function confirmBillReview(input: ConfirmBillInput) {
     include: { counterpartyWallet: true, counterparty: true, transferRequests: true },
   });
   if (!order) throw new Error('Bill not found');
-  if (order.state !== 'needs_review') {
+  if (order.state !== 'draft') {
     throw new Error(`This bill is ${order.state} — it has already left verification.`);
   }
   // Payable gate, re-checked at the moment of commitment (the vendor may have
@@ -1349,7 +1349,7 @@ export async function markNotABill(args: {
     select: { paymentOrderId: true, state: true, metadataJson: true },
   });
   if (!order) throw new Error('Bill not found');
-  if (order.state !== 'needs_review' && order.state !== 'draft') {
+  if (order.state !== 'draft' && order.state !== 'submitted') {
     throw new Error(`This bill is ${order.state} — it can no longer be dismissed here.`);
   }
 
@@ -1775,7 +1775,7 @@ export async function sendApprovedBillBackToReview(args: {
     select: { paymentOrderId: true, state: true, metadataJson: true, transferRequests: { select: { transferRequestId: true }, take: 1 } },
   });
   if (!order) throw new Error('Bill not found');
-  if (order.state !== 'draft' || order.transferRequests.length > 0) {
+  if (order.state !== 'submitted' || order.transferRequests.length > 0) {
     throw new Error(`This bill is ${order.state} — it can only be sent back before any payment starts moving.`);
   }
 
@@ -1798,7 +1798,7 @@ export async function sendApprovedBillBackToReview(args: {
     await tx.paymentOrder.update({
       where: { paymentOrderId: order.paymentOrderId },
       data: {
-        state: 'needs_review',
+        state: 'draft',
         metadataJson: {
           ...metadata,
           sentBack: { reason: args.reason, byName: args.actorName, at: sentBackAt, afterApproval: true },
@@ -1812,8 +1812,8 @@ export async function sendApprovedBillBackToReview(args: {
         eventType: 'payment_order_sent_back',
         actorType: 'user',
         actorId: args.actorUserId,
-        beforeState: 'draft',
-        afterState: 'needs_review',
+        beforeState: 'submitted',
+        afterState: 'draft',
         payloadJson: { reason: args.reason, byName: args.actorName, afterApproval: true },
       },
     });
@@ -2178,7 +2178,7 @@ export async function updateBillFacts(input: BillFactsInput) {
     select: { paymentOrderId: true, state: true, invoiceNumber: true, dueAt: true, metadataJson: true },
   });
   if (!order) throw new Error('Bill not found');
-  if (order.state !== 'needs_review' && order.state !== 'draft') {
+  if (order.state !== 'draft' && order.state !== 'submitted') {
     throw new Error(`This bill is ${order.state} — its details are settled.`);
   }
 
@@ -2224,7 +2224,7 @@ export async function updateBillFacts(input: BillFactsInput) {
       readValue: c.from,
       correctedValue: c.to,
       byUserId: input.actorUserId,
-      phase: order.state === 'draft' ? 'approval' : 'review',
+      phase: order.state === 'submitted' ? 'approval' : 'review',
       at: new Date().toISOString(),
     });
   }
@@ -2238,7 +2238,7 @@ export async function updateBillFacts(input: BillFactsInput) {
     organizationId: input.organizationId,
     paymentOrderId: order.paymentOrderId,
     changedByUserId: input.actorUserId,
-    phase: order.state === 'draft' ? 'approval' : 'review',
+    phase: order.state === 'submitted' ? 'approval' : 'review',
     reason: 'edit',
     changes,
   });

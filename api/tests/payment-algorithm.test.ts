@@ -42,11 +42,11 @@ const context: PaymentRoutingContext = {
 test('payment router sends unsafe payments to one review gate', async () => {
   const calls: string[] = [];
   const decision = await routePayment(context, buildDeps({
-    payment: { organizationId: 'org_1', paymentOrderId: 'payment_1', state: 'draft', trusted: false, policyPasses: true },
+    payment: { organizationId: 'org_1', paymentOrderId: 'payment_1', state: 'submitted', trusted: false, policyPasses: true },
     calls,
   }));
 
-  assert.equal(decision.status, 'needs_review');
+  assert.equal(decision.status, 'draft');
   assert.deepEqual(calls, ['load', 'existing', 'review', 'mark_review']);
   assert.equal(decision.reasons[0]?.code, 'counterparty_wallet_not_trusted');
 });
@@ -54,7 +54,7 @@ test('payment router sends unsafe payments to one review gate', async () => {
 test('payment router uses spending limit when it matches and fits', async () => {
   const calls: string[] = [];
   const decision = await routePayment(context, buildDeps({
-    payment: { organizationId: 'org_1', paymentOrderId: 'payment_1', state: 'draft', trusted: true, policyPasses: true },
+    payment: { organizationId: 'org_1', paymentOrderId: 'payment_1', state: 'submitted', trusted: true, policyPasses: true },
     limit: { spendingLimitPolicyId: 'limit_1', fits: true },
     calls,
   }));
@@ -66,7 +66,7 @@ test('payment router uses spending limit when it matches and fits', async () => 
 
 test('payment router creates proposal when no spending limit exists', async () => {
   const decision = await routePayment(context, buildDeps({
-    payment: { organizationId: 'org_1', paymentOrderId: 'payment_1', state: 'draft', trusted: true, policyPasses: true },
+    payment: { organizationId: 'org_1', paymentOrderId: 'payment_1', state: 'submitted', trusted: true, policyPasses: true },
     limit: null,
   }));
 
@@ -77,7 +77,7 @@ test('payment router creates proposal when no spending limit exists', async () =
 
 test('payment router falls back to proposal when spending limit does not fit', async () => {
   const decision = await routePayment(context, buildDeps({
-    payment: { organizationId: 'org_1', paymentOrderId: 'payment_1', state: 'draft', trusted: true, policyPasses: true },
+    payment: { organizationId: 'org_1', paymentOrderId: 'payment_1', state: 'submitted', trusted: true, policyPasses: true },
     limit: { spendingLimitPolicyId: 'limit_1', fits: false },
   }));
 
@@ -93,7 +93,7 @@ test('payment batch router preserves order and captures per-payment failures', a
       { ...context, paymentOrderId: 'payment_2' },
     ],
     buildDeps({
-      payment: { organizationId: 'org_1', paymentOrderId: 'payment_1', state: 'draft', trusted: true, policyPasses: true },
+      payment: { organizationId: 'org_1', paymentOrderId: 'payment_1', state: 'submitted', trusted: true, policyPasses: true },
       loadPaymentOrder: async (nextContext) => {
         if (nextContext.paymentOrderId === 'payment_2') {
           throw new Error('boom');
@@ -101,7 +101,7 @@ test('payment batch router preserves order and captures per-payment failures', a
         return {
           organizationId: nextContext.organizationId,
           paymentOrderId: nextContext.paymentOrderId,
-          state: 'draft',
+          state: 'submitted',
           trusted: true,
           policyPasses: true,
         };
@@ -142,13 +142,13 @@ function buildDeps(input: {
       calls.push('review');
       if (!payment.trusted) {
         return {
-          status: 'needs_review',
+          status: 'draft',
           reasons: [{ code: 'counterparty_wallet_not_trusted', message: 'Counterparty wallet is not trusted.' }],
         };
       }
       if (!payment.policyPasses) {
         return {
-          status: 'needs_review',
+          status: 'draft',
           reasons: [{ code: 'payment_policy_failed', message: 'Payment policy failed.' }],
         };
       }

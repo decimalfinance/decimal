@@ -69,7 +69,7 @@ export type PaymentOrderAgentAdvanceResult =
       status:
         | 'already_has_proposal'
         | 'already_has_spending_limit_execution'
-        | 'needs_review'
+        | 'draft'
         | 'needs_source_treasury'
         | 'unsupported_source_treasury'
         | 'not_applicable'
@@ -313,9 +313,9 @@ const EARNED_AUTONOMY_MIN_BILLS = 2;
 async function evaluateReviewGate(paymentOrder: AgentPaymentOrder, context: PaymentRoutingContext): Promise<PaymentReviewDecision> {
   const reasons: PaymentReviewReason[] = [];
 
-  if (paymentOrder.state === 'needs_review') {
+  if (paymentOrder.state === 'draft') {
     reasons.push({
-      code: 'payment_order_needs_review',
+      code: 'payment_order_draft',
       message: 'Payment order requires human review before automation.',
     });
   }
@@ -393,15 +393,15 @@ async function evaluateReviewGate(paymentOrder: AgentPaymentOrder, context: Paym
     });
   }
 
-  return reasons.length ? { status: 'needs_review', reasons } : { status: 'pass' };
+  return reasons.length ? { status: 'draft', reasons } : { status: 'pass' };
 }
 
 async function markNeedsReview(
   paymentOrder: AgentPaymentOrder,
-  decision: Extract<PaymentReviewDecision, { status: 'needs_review' }>,
+  decision: Extract<PaymentReviewDecision, { status: 'draft' }>,
   context: PaymentRoutingContext,
 ) {
-  if (paymentOrder.state === 'needs_review') {
+  if (paymentOrder.state === 'draft') {
     return { updated: false };
   }
 
@@ -409,11 +409,11 @@ async function markNeedsReview(
     await tx.paymentOrder.update({
       where: { paymentOrderId: paymentOrder.paymentOrderId },
       data: {
-        state: 'needs_review',
+        state: 'draft',
         metadataJson: {
           ...(isRecordLike(paymentOrder.metadataJson) ? paymentOrder.metadataJson : {}),
           automationReview: {
-            status: 'needs_review',
+            status: 'draft',
             reasons: decision.reasons.map(serializeReviewReason),
             markedAt: new Date().toISOString(),
           },
@@ -424,11 +424,11 @@ async function markNeedsReview(
       data: {
         paymentOrderId: paymentOrder.paymentOrderId,
         organizationId: paymentOrder.organizationId,
-        eventType: 'payment_order_needs_review',
+        eventType: 'payment_order_draft',
         actorType: 'agent',
         actorId: context.actorUserId,
         beforeState: paymentOrder.state,
-        afterState: 'needs_review',
+        afterState: 'draft',
         payloadJson: { reasons: decision.reasons.map(serializeReviewReason) },
       },
     });
@@ -568,9 +568,9 @@ function serializeRoutingDecision(
     };
   }
 
-  if (decision.status === 'needs_review') {
+  if (decision.status === 'draft') {
     return {
-      status: decision.reasons.some((reason) => reason.code === 'unsupported_asset') ? 'blocked' : 'needs_review',
+      status: decision.reasons.some((reason) => reason.code === 'unsupported_asset') ? 'blocked' : 'draft',
       paymentOrderId: decision.payment.paymentOrderId,
       treasuryWalletId: decision.payment.sourceTreasuryWalletId,
       reason: decision.reasons.map((reason) => reason.message).join(' '),

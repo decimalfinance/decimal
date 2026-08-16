@@ -1,6 +1,6 @@
 export const PAYMENT_ORDER_STATES = [
-  'needs_review',
   'draft',
+  'submitted',
   'proposed',
   'executed',
   'settled',

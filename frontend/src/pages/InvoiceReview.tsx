@@ -60,7 +60,7 @@ export function InvoiceReviewPage() {
     enabled: Boolean(organizationId),
   });
   const queue = useMemo(
-    () => (workbench.data?.bills ?? []).filter((b) => b.bucket === 'needs_review').map((b) => b.paymentOrderId),
+    () => (workbench.data?.bills ?? []).filter((b) => b.bucket === 'draft').map((b) => b.paymentOrderId),
     [workbench.data],
   );
 
