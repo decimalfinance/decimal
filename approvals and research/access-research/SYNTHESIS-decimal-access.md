@@ -92,13 +92,33 @@ We currently conscript the org owner. `compile.ts` says so deliberately, citing
 a past deadlock, and reasons that "a recorded self-approval behind the R1
 opt-in ceremony beats a silent pass."
 
-**Recommendation, offered as judgement and not as a state-of-the-art claim:**
-stop inventing an approver. If a step resolves to nobody eligible, refuse to
-route and say why, naming the person who can fix it and where. Conscripting the
-owner is how the owner ends up on every chain, and a self-approval nobody chose
-is a silent pass with a name attached to it. Failing loudly at the one person
-who can fix it is the same instinct that governs intake, and it is the instinct
-that killed autopay.
+**Recommendation, first draft — WRONG, corrected below.** The original argument
+here was: stop inventing an approver, refuse to route, name the fix.
+Conscripting the owner is how the owner ends up on every chain, and a
+self-approval nobody chose is a silent pass with a name attached.
+
+**What building it showed (2026-08-16).** Both halves of that were wrong.
+
+*It is not a silent pass.* The conscripted task cannot be actioned until the
+owner relaxes R1 through the Protections ceremony — owner-only, password
+re-auth, a written reason, hashed acknowledgment, all on the record. That is a
+deliberate decision by a named person, which is precisely what the argument
+demanded. Removing the fallback deletes the only route a genuinely one-person
+organization has to ever pay a bill, and the test that documents that path
+(`approvals-flow.test.ts`, solo owner relaxes then approves) failed the moment
+the fallback came out.
+
+*It is not why the owner is on every chain.* Tier 3 only fires when tiers 1 and
+2 find nobody, and tier 2 sweeps every non-requester admin. In Testing Labs the
+bills route to Marcus and Priya; Zara is on none of them. The fallback fires in
+decimal labs, where the owner is also the submitter and the only admin — which
+is the case where refusing to route helps least.
+
+**The actual defect was the dead end, not the conscription.** The engine's
+refusal was correct and arrived as a 409 on the only button offered, naming a
+rule code. The fix shipped instead: `viewer.cannotApprove` runs the same veto
+check up front, so the screen says which rule, why it applies to you, and what
+an admin can change — before you press anything.
 
 ## 4. The abstraction
 
@@ -138,15 +158,18 @@ have.
 1. **Record scope on the Approver role.** The approvals inbox already scopes
    correctly; the bills list and bill detail are what leak. One enum, one
    filter, two screens.
-2. **Stop the owner fallback conscripting an approver.** Refuse to route, name
-   the fix. This also removes the R1 deadlock, which is the same bug seen from
-   the other end: the fallback assigns a task the SoD rules then forbid.
+2. ~~Stop the owner fallback conscripting an approver.~~ **Superseded — see the
+   correction in §3.** The fallback stays; what shipped is `cannotApprove`, so
+   the refusal is legible before the click instead of a 409 after it.
 3. **Assign the roles.** They exist and nobody holds one — every org is running
    on "owner bypasses everything" and "no roles means viewer." The roles layer
    is built and switched off, which is why the product feels like it has no
    access model.
 4. Later, and only on evidence of need: department scoping, field-level
    masking, custom roles.
+
+**Status 2026-08-16:** 1, 2 (as corrected) and 3 are shipped on
+`feat/approver-actions`.
 
 ## 6. Confidence
 
