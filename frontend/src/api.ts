@@ -1697,6 +1697,13 @@ export interface BillDetail {
     name: string | null;
     isRequester: boolean;
     openTaskId: string | null;
+    /**
+     * Set when the viewer holds the open task but the engine would refuse their
+     * approval anyway — they submitted or entered this bill and the org
+     * separates those jobs. Present so the screen never offers a button it
+     * already knows will 409.
+     */
+    cannotApprove: { rule: string; why: string; remedy: string } | null;
     viewerHasOpenAsk?: boolean;
     openAskTaskId?: string | null;
     anyTaskId: string | null;

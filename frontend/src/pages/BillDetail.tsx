@@ -406,8 +406,14 @@ export function BillDetailPage() {
         ) : viewerHasDecision ? (
           <>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-              <span className="cb-note" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Your approval is needed</span>
-              <span className="cb-note">You're authorizing {usd(review.totalUsd)} to {review.vendor.name}.</span>
+              <span className="cb-note" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                {viewer.cannotApprove ? "You can't approve this one" : 'Your approval is needed'}
+              </span>
+              <span className="cb-note">
+                {viewer.cannotApprove
+                  ? `${viewer.cannotApprove.why} ${viewer.cannotApprove.remedy}`
+                  : `You're authorizing ${usd(review.totalUsd)} to ${review.vendor.name}.`}
+              </span>
             </div>
             {detail.signal ? (
               // Advisory only — the same routine/worth-a-look classifier as the
@@ -421,7 +427,12 @@ export function BillDetailPage() {
             <button type="button" className="btn btn-secondary" disabled={acting}
               onClick={() => void act(viewer.openTaskId, { kind: 'push_back' }, 'Pushed back — the route was flagged.')}>Push back</button>
             <button type="button" className="btn btn-danger-ghost" onClick={() => setComposer('reject')} disabled={acting}>Reject</button>
-            <button type="button" className="btn btn-primary" disabled={acting}
+            {/* The engine re-checks separation of duties at decision time and
+                refuses. It always did — but the refusal arrived as an error
+                toast after the click, naming a rule code. Now the screen knows
+                first, so it stops offering the one thing it cannot do. */}
+            <button type="button" className="btn btn-primary" disabled={acting || Boolean(viewer.cannotApprove)}
+              title={viewer.cannotApprove ? viewer.cannotApprove.why : undefined}
               onClick={() => void act(viewer.openTaskId, { kind: 'approve' }, 'Approved.')}>
               <Ico.checkSm w={15} /> Approve
             </button>

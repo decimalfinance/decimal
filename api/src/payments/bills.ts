@@ -1830,6 +1830,52 @@ const MACRO_RANK: Record<string, number> = {
   approved: 3, auto_approved: 3, rejected: 4, cancelled: 5, draft: 6,
 };
 
+/**
+ * Would this person's approval be refused, and why — asked BEFORE they press
+ * anything.
+ *
+ * The engine re-checks separation of duties at decision time, which is right:
+ * roles change mid-flight and a check done at routing time can be stale by the
+ * time someone acts. But the only place that answer surfaced was a 409 on the
+ * button, and the button was the sole thing the screen offered. A person who
+ * submitted their own bill in a small org got "Separation-of-duties rule blocks
+ * this action" after clicking Approve, with no indication of which rule, why it
+ * applied to them, or what would change it.
+ *
+ * Same call the engine makes, run early. The engine still decides — this only
+ * stops the UI offering an action it already knows will be refused.
+ */
+async function approvalBlockedFor(
+  approvable: { id: string; organization_id: string } & Record<string, unknown>,
+  personId: string | null,
+  openTaskId: string | null,
+): Promise<{ rule: string; why: string; remedy: string } | null> {
+  if (!personId || !openTaskId) return null;
+  const { vetoRule } = await import('../approvals/sod.js');
+  const veto = await vetoRule(prisma, approvable as never, personId);
+  if (!veto || veto.relaxed) return null;
+
+  const WHY: Record<string, { why: string; remedy: string }> = {
+    R1: {
+      why: 'You submitted this bill, and your organization separates submitting from approving.',
+      remedy: "An admin can turn that separation off on the Approval flow page if your team is too small for it, or add someone else to the flow. Either way it goes on the record.",
+    },
+    R2: {
+      why: "You entered this bill's details, and your organization separates entering from approving.",
+      remedy: 'An admin can turn that separation off on the Approval flow page, or add someone else to the flow.',
+    },
+    R7: {
+      why: 'You asked for this payout detail change, so you cannot be the one who verifies it.',
+      remedy: 'Someone else has to check it. This one cannot be turned off.',
+    },
+  };
+  const copy = WHY[veto.rule] ?? {
+    why: 'Your organization separates this decision from something else you already did on this bill.',
+    remedy: 'An admin can review the separation settings on the Approval flow page.',
+  };
+  return { rule: veto.rule, ...copy };
+}
+
 export async function getBillDetail(organizationId: string, paymentOrderId: string, viewerUserId: string) {
   const review = await getBillReview(organizationId, paymentOrderId);
   if (!review) return null;
@@ -1863,8 +1909,8 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
 
   // The order's invoice approvable — prefer the live one over dead history
   // (a recalled bill that was resubmitted has several).
-  const approvables = await prisma.$queryRaw<{ id: string; macro_state: string; requester_id: string }[]>`
-    SELECT id, macro_state, requester_id FROM approval.approvables
+  const approvables = await prisma.$queryRaw<{ id: string; macro_state: string; requester_id: string; organization_id: string; enterer_id: string | null; type: string; attributes: Record<string, unknown> | null }[]>`
+    SELECT id, macro_state, requester_id, organization_id, enterer_id, type, attributes FROM approval.approvables
     WHERE organization_id = ${organizationId}::uuid AND type = 'invoice'
       AND attributes->>'paymentOrderId' = ${paymentOrderId}`;
   approvables.sort((a, b) => (MACRO_RANK[a.macro_state] ?? 9) - (MACRO_RANK[b.macro_state] ?? 9));
@@ -2041,6 +2087,7 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
       name: viewerPerson?.name ?? null,
       isRequester: viewerPerson != null && viewerPerson.id === approvable.requester_id,
       openTaskId: viewerOpenTask?.id ?? null,
+      cannotApprove: await approvalBlockedFor(approvable, viewerPerson?.id ?? null, viewerOpenTask?.id ?? null),
       viewerHasOpenAsk: Boolean(openAskTask),
       openAskTaskId: openAskTask?.id ?? null,
       anyTaskId: tasks[0]?.id ?? null,

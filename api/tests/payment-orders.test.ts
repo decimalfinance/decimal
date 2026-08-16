@@ -493,6 +493,13 @@ test('a bill routed to its own submitter deadlocks: the task exists, the rules f
   // this flips to asserting a 200 and a bill that leaves review.
   assert.ok(detail.viewer.openTaskId, 'the owner-submitter was handed a task');
 
+  // …and the screen is told so BEFORE offering the button. This is the whole
+  // fix: the engine's answer was always correct, it just arrived as a 409 after
+  // the click, naming a rule code and nothing a person could act on.
+  assert.equal(detail.viewer.cannotApprove.rule, 'R1');
+  assert.match(detail.viewer.cannotApprove.why, /You submitted this bill/);
+  assert.match(detail.viewer.cannotApprove.remedy, /Approval flow page/);
+
   const refusal = await postExpectingStatus(
     `/organizations/${org}/approvals/tasks/${detail.viewer.openTaskId}/command`,
     { command: { kind: 'approve' }, idempotencyKey: `test-approve-${billId}` },
