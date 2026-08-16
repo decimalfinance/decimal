@@ -122,7 +122,13 @@ export function BillDetailPage() {
   const dueDate = review.fields.find((f) => f.key === 'dueDate')?.value ?? null;
   const discount = review.fields.find((f) => f.key === 'discount')?.value ?? null;
 
-  const progressText = rejected
+  // Draft is a stage now, and a common one: the bill is being prepared and has
+  // not entered approval at all. Without this it read "0 of 0 approved", which
+  // describes an approval that is going badly rather than one not yet asked for.
+  const isDraft = approval === null;
+  const progressText = isDraft
+    ? 'Draft · not sent for approval yet'
+    : rejected
     ? `Declined${declinedNode?.person ? ` by ${declinedNode.person.name.split(' ')[0]}` : ''} · route stopped`
     : recalled
       ? 'Recalled by the submitter'
@@ -440,9 +446,13 @@ export function BillDetailPage() {
         ) : operatorMode ? (
           <>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-              <span className="cb-note" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>You submitted this bill</span>
+              <span className="cb-note" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                {isDraft ? 'This bill is still a draft' : 'You submitted this bill'}
+              </span>
               <span className="cb-note">
-                {viewer.viewerHasOpenAsk
+                {isDraft
+                  ? "Check the details are right, then confirm it to send it for approval. Nobody is waiting on it yet."
+                  : viewer.viewerHasOpenAsk
                   ? 'An approver asked a question — reply to keep it moving.'
                   : approvedOverall
                     ? 'Approved — moving to payment.'
