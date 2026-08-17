@@ -24,21 +24,30 @@ DB ?= $(DEV_DB)
 .SILENT:
 .PHONY: dev stop test reset bench bench-stop help sync-postgres-schema
 
-# Every line is chained with `;`, not `&&`, on purpose.
+# Two rules here, both learned the hard way.
 #
-# `&` binds looser than `&&` in the shell, so in the previous version the first
-# `&` backgrounded EVERYTHING before it — the schema sync, prisma generate and
-# the pids array declaration all ran inside a subshell. The parent was left
-# with no array and a `$!` that could be 0, so `wait` failed with "pid 0 is not
-# a child of this shell" and the EXIT trap immediately tore the whole thing
-# down. It looked like the API had crashed; nothing had started at all.
+# 1. Nothing is silenced without a fallback that says what happened. The old
+#    recipe sent prisma generate to /dev/null, so when it failed you got no
+#    error from it at all.
+#
+# 2. The failure you DID get was a lie. On any early exit the EXIT trap ran
+#    `wait "$${pids[@]}"` on an array that was still empty, and an empty array
+#    in that position expands to a single empty string — so zsh reported
+#    "pid 0 is not a child of this shell" and make reported a termination.
+#    Both described the trap, not the thing that actually broke. Named pids and
+#    `;` chaining remove the array and the ambiguity together.
 dev: ## start everything (db + api + web) -> localhost:5174
 	set -euo pipefail; \
 	if [[ -f api/.env ]]; then set -a; source api/.env; set +a; fi; \
 	export DATABASE_URL="$(PG)/$(DEV_DB)?schema=public"; \
 	export PORT=3100; \
 	$(MAKE) sync-postgres-schema DB=$(DEV_DB); \
-	(cd api && npm run prisma:generate >/dev/null); \
+	(cd api && npm run prisma:generate >/dev/null) || { \
+	  echo ""; \
+	  echo "prisma generate failed. Its output was hidden; run it directly to see why:"; \
+	  echo "    cd api && npm run prisma:generate"; \
+	  exit 1; \
+	}; \
 	(cd api && exec npm run dev) & \
 	api_pid=$$!; \
 	(cd frontend && exec npm run dev) & \
