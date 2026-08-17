@@ -10,7 +10,7 @@
  *
  * Wallet addresses are extracted only when printed on the invoice. The
  * downstream import path still validates/routes them through the destination
- * registry and review gates.
+ * registry and draft gates.
  */
 
 import { execFile } from 'node:child_process';

@@ -194,7 +194,7 @@ export function ProtectionsPage() {
             <div className="setting-row">
               <div className="sr-text">
                 <span className="sr-name">Duplicate bills</span>
-                <span className="sr-desc">Same vendor and invoice number — or same amount within 14 days — is blocked in review and re-checked at release. Admins clear false positives with a logged reason.</span>
+                <span className="sr-desc">Same vendor and invoice number — or same amount within 14 days — is blocked while still a draft and re-checked at release. Admins clear false positives with a logged reason.</span>
               </div>
               <div className="sr-controls">
                 {policiesQuery.data && policiesQuery.data.gates.duplicate.overridesLast30Days > 0 ? (
@@ -206,7 +206,7 @@ export function ProtectionsPage() {
             <div className="setting-row">
               <div className="sr-text">
                 <span className="sr-name">Vendor payable status</span>
-                <span className="sr-desc">A held or blocked vendor's bills can't leave review, no matter who approves. Holds are set and released on the Vendors page.</span>
+                <span className="sr-desc">A held or blocked vendor's bills can't leave draft, no matter who approves. Holds are set and released on the Vendors page.</span>
               </div>
               <div className="sr-controls">
                 {policiesQuery.data && (policiesQuery.data.gates.payable.held > 0 || policiesQuery.data.gates.payable.blocked > 0) ? (

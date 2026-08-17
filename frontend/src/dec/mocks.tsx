@@ -293,7 +293,7 @@ export function FlowCanvas() {
         <div className="spine" />
         <div className="received" style={{ position: 'relative', alignSelf: 'flex-start' }}><Ico.doc w={14} />Bill received</div>
 
-        {/* Review stage */}
+        {/* draft stage */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           <div className="stage-div s-review" style={{ marginTop: 4 }}><Ico.search w={13} /> Review <span className="tipico"><Ico.info w={12} /></span></div>
           <div className="conn" />

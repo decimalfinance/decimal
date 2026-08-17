@@ -1,11 +1,11 @@
-// The bills workbench + invoice review backend (AP workbench redesign,
+// The bills workbench + bill draft backend (AP workbench redesign,
 // uploads/ap-claude-code-handoff.md).
 //
 // Workbench: every payment order, grouped into the five operator buckets
-// (needs review / in approval / to pay / done / needs attention) with the
+// (draft / in approval / to pay / done / needs attention) with the
 // row facts the triage table renders.
 //
-// Review: one bill's verification packet — the stored document, what was
+// Draft: one bill's verification packet — the stored document, what was
 // read from it (per-field), flags — and the Confirm ceremony, which is the
 // call site for submitInvoiceForApproval in the v3 pipeline: verification
 // happens BEFORE a bill enters routing.
@@ -72,7 +72,7 @@ async function ensureProvenance(order: {
     });
     return refreshed;
   } catch (error) {
-    logger.warn('bill_review.provenance_backfill_failed', {
+    logger.warn('bill_draft.provenance_backfill_failed', {
       paymentOrderId: order.paymentOrderId,
       ...(error instanceof Error ? { message: error.message } : {}),
     });
@@ -147,7 +147,7 @@ function bucketAndStatus(args: {
   const { state, invoice, release, firstOpenPerson } = args;
 
   if (state === 'draft') {
-    // An approver sent it back: it's in review again, but with homework.
+    // An approver sent it back: it's a draft again, but with homework.
     if (invoice?.macro_state === 'rejected') {
       return { bucket: 'draft', subStatus: { kind: 'loud', text: 'Sent back — needs changes', tone: 'warning' } };
     }
@@ -217,7 +217,7 @@ function bucketAndStatus(args: {
 /**
  * How this bill arrived. `intakeChannel` is stamped by invoice intake when the
  * door was email; everything else is an ordinary upload. The label names the
- * person because it tells a reviewer who to ask — "Emailed by Priya" beats
+ * person because it tells an approver who to ask — "Emailed by Priya" beats
  * "Emailed in".
  */
 function billSource(
@@ -265,7 +265,7 @@ function amountRawToUsd(amountRaw: bigint): number {
 // Workbench
 // -----------------------------------------------------------------------------
 
-// Ramp-style split of the review queue: a bill is "ready for approval" when
+// Ramp-style split of the draft queue: a bill is "ready for approval" when
 // the facts an approver needs are present and nothing security-shaped is open;
 // otherwise it's "missing information" and the row says what's missing.
 // Tier 1 (blocks entering approval): amount + line items to route on.
@@ -1758,7 +1758,7 @@ export async function overrideDuplicateFlag(args: {
   return getBillDraft(args.organizationId, args.paymentOrderId);
 }
 
-// Send an already-APPROVED (but unpaid) bill back to Review — the recovery
+// Send an already-APPROVED (but unpaid) bill back to draft — the recovery
 // path when release is refused (pinned destination, ceiling) or the approval
 // simply needs redoing. Unwinds the approval: the invoice approvable and any
 // pending release run are cancelled; re-confirming starts a fresh run under

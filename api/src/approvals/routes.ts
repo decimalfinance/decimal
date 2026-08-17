@@ -376,7 +376,7 @@ approvalsRouter.post('/organizations/:organizationId/approvals/flow/publish', as
   sendJson(res, await publishFlow(organizationId, body.flow as never));
 }));
 
-// --- Review stage (control point #1): who must confirm a bill's details before
+// --- draft stage (control point #1): who must confirm a bill's details before
 // it can enter approval. Same builder power as the approval flow. Read is open
 // to members (view-only); publishing/drafting is owner-only. -------------------
 // --- Payment stage as a full flow (steps · quorums · splits) on the

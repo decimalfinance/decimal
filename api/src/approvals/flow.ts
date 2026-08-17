@@ -200,7 +200,7 @@ export async function publishFlow(organizationId: string, flow: FlowNode[], kind
   return result;
 }
 
-// The Review stage: who must fill/confirm a bill's details before it can enter
+// The draft stage: who must fill/confirm a bill's details before it can enter
 // approval. Same builder power as approval (steps · quorum · amount splits), on
 // its own 'review' policy set.
 

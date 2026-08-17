@@ -19,7 +19,7 @@ before(async () => {
   await prisma.$connect();
   await requireTestDatabase();
   // The product wires this at boot (index.ts): approve clears review + spawns
-  // the release run; reject sends the bill back to review. The loop tests here
+  // the release run; reject sends the bill back to draft. The loop tests here
   // exercise exactly those bridge behaviors.
   const { registerPaymentApprovalBridge } = await import('../src/payments/approval-bridge.js');
   registerPaymentApprovalBridge();
@@ -378,7 +378,7 @@ test('owner+admin org: with no approver-role holders, the admin is the second pa
   assert.equal(row.bucket, 'to_pay');
 });
 
-test('org bill ceiling: over-ceiling bills are blocked in review and unblocked when raised', async () => {
+test('org bill ceiling: over-ceiling bills are blocked while still a draft and unblocked when raised', async () => {
   const { orgId, owner, a2 } = await makeOrg();
 
   // Only the primary admin touches the ceiling.
@@ -455,7 +455,7 @@ test('pinned destination: a rail change after approval blocks release until re-a
   );
 });
 
-test('vendor payable gate: held and blocked vendors cannot leave review', async () => {
+test('vendor payable gate: held and blocked vendors cannot leave draft', async () => {
   const { orgId, owner, a2 } = await makeOrg();
   const first = await uploadAndConfirm(orgId, owner.token, { vendor: 'Gate Vendor Co', amount: 500, invoiceNo: 'GV-1' });
   await first.confirm();

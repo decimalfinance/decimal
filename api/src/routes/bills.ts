@@ -282,7 +282,7 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/questions
   res.json(await getBillDraft(organizationId, paymentOrderId, req.auth!.userId));
 }));
 
-// Send an approved-but-unpaid bill back to Review (the recovery path when a
+// Send an approved-but-unpaid bill back to draft (the recovery path when a
 // release gate refuses, e.g. pinned destination). Admin-tier; reason logged.
 const sendBackSchema = z.object({ reason: z.string().trim().min(3).max(300) });
 
@@ -290,7 +290,7 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/send-back
   const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
   const { membership } = await assertOrganizationAccess(organizationId, req.auth!);
   if (!membership || (membership.role !== 'owner' && membership.role !== 'admin')) {
-    throw forbidden('Only an admin can send an approved bill back to review.');
+    throw forbidden('Only an admin can send an approved bill back to draft.');
   }
   await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
   const input = sendBackSchema.parse(req.body);

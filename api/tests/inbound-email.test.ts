@@ -666,7 +666,7 @@ test('the sweep fetches a queued attachment and lands a bill in draft', async ()
 
   const orders = await waitForPaymentOrders(1);
   assert.equal(orders.length, 1, 'the email produced a bill');
-  assert.equal(orders[0]!.state, 'draft', 'email never skips the review gate');
+  assert.equal(orders[0]!.state, 'draft', 'email never skips the draft gate');
 
   const attachment = await prisma.inboundEmailAttachment.findFirstOrThrow();
   assert.equal(attachment.status, 'ingested');

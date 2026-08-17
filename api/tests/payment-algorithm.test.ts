@@ -39,7 +39,7 @@ const context: PaymentRoutingContext = {
   actorUserId: 'user_1',
 };
 
-test('payment router sends unsafe payments to one review gate', async () => {
+test('payment router sends unsafe payments to one draft gate', async () => {
   const calls: string[] = [];
   const decision = await routePayment(context, buildDeps({
     payment: { organizationId: 'org_1', paymentOrderId: 'payment_1', state: 'submitted', trusted: false, policyPasses: true },

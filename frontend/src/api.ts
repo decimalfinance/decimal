@@ -1622,7 +1622,7 @@ export const billsApi = {
       body: JSON.stringify({ reason }),
     });
   },
-  // Admin-only: unwind an approved-but-unpaid bill back to review (the
+  // Admin-only: unwind an approved-but-unpaid bill back to draft (the
   // recovery path when a release gate refuses).
   sendBack(organizationId: string, paymentOrderId: string, reason: string) {
     return request<BillDraft>(`/organizations/${organizationId}/bills/${paymentOrderId}/send-back`, {
@@ -1865,7 +1865,7 @@ export const releaseApi = {
   },
 };
 
-// Review stage (control point #1) — same shape as the approval flow, on its own
+// draft stage (control point #1) — same shape as the approval flow, on its own
 // endpoint. A bill must clear this before it enters approval.
 
 // Separation-of-duties switches — the org's own choice, not ours.

@@ -186,7 +186,7 @@ export const API_ENDPOINTS = [
   }),
   endpoint('update_counterparty_wallet', 'PATCH', '/organizations/{organizationId}/counterparty-wallets/{counterpartyWalletId}', ['address book'], 'Update counterparty wallet', 'session', { scope: 'organization:write' }),
 
-  endpoint('upload_invoice', 'POST', '/organizations/{organizationId}/invoices/upload', ['inputs', 'payment orders'], 'Upload an invoice document, run AP intake, and create payment orders that are either proposal-ready or human-review gated', 'session', {
+  endpoint('upload_invoice', 'POST', '/organizations/{organizationId}/invoices/upload', ['inputs', 'payment orders'], 'Upload an invoice document, run AP intake, and create payment orders that are either proposal-ready or human-draft gated', 'session', {
     scope: 'payments:write',
     requestBody: { filename: 'string', mimeType: 'string', dataBase64: 'string base64', sourceTreasuryWalletId: 'uuid optional', autoAdvance: 'boolean default true' },
     response: { primaryPaymentOrder: 'payment order', paymentOrders: 'created payment orders with AP intake decisions', skippedRows: 'rows that could not become payment orders', automation: 'per-order routing results: review, spending-limit execution, or Squads proposal' },
