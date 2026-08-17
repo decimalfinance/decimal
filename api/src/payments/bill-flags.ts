@@ -12,7 +12,7 @@
 // having it appear everywhere, rather than remembering all the call sites.
 //
 // evaluateBillFlags is deliberately PURE — no Prisma, no I/O. Callers gather
-// the facts however is cheapest for them (the review screen queries per bill;
+// the facts however is cheapest for them (the draft screen queries per bill;
 // the workbench batches across all rows) and the verdict cannot diverge
 // between them, because there is only one copy of the reasoning.
 import type { DuplicateMatch, DuplicateOverride } from './duplicate-check.js';

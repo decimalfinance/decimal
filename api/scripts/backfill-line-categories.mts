@@ -102,7 +102,7 @@ if (targets.length === 0 || !apply) {
 }
 
 // The picker's own vocabulary. Categorising into anything else produces a
-// label the review screen cannot use, which is how the first attempt at this
+// label the draft screen cannot use, which is how the first attempt at this
 // silently changed nothing.
 // Taken from getBillDraft, which is what the picker actually renders.
 // listChartOfAccounts is the QuickBooks chart and is empty without QBO

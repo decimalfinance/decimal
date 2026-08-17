@@ -234,7 +234,7 @@ export type DocumentExtractProgressEvent =
   | { stage: 'extracting'; pageCount: number };
 
 // Render an uploaded document (PDF or image) to page images without running
-// extraction — the review screen stores and displays these.
+// extraction — the draft screen stores and displays these.
 export async function renderDocumentToImages(args: {
   fileBytes: Buffer;
   filename: string;

@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { HIGHLIGHTABLE_FIELDS, fieldsForQuestion } from '../src/payments/question-fields.js';
 
-test('the vocabulary matches keys the review screen actually renders', () => {
+test('the vocabulary matches keys the draft screen actually renders', () => {
   // These are the keys getBillDraft emits. If a field is renamed there and not
   // here, highlighting silently stops working for it — this is the tripwire.
   for (const key of ['remitTo.street', 'remitTo.city', 'remitTo.state', 'remitTo.zip',

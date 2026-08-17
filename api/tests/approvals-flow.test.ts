@@ -1287,7 +1287,7 @@ test('the asker\'s confirmed fields are what get highlighted, not the suggestion
   assert.deepEqual(stored.highlightFields, ['remitTo.street']);
 });
 
-test('a field the review screen cannot render is never highlighted', async () => {
+test('a field the draft screen cannot render is never highlighted', async () => {
   // The closed vocabulary holds even when the list comes from a client rather
   // than the model — otherwise the guarantee is only as good as the caller.
   const owner = await register('cf2-owner');

@@ -52,7 +52,7 @@ export type InvoiceIntakeSkippedRow = {
 /**
  * How a bill got here, when it wasn't a person clicking Upload. Purely
  * descriptive — it carries no actor semantics (the bill is still attributed to
- * a real user) and does not change `inputSource`, which the review screen and
+ * a real user) and does not change `inputSource`, which the draft screen and
  * duplicate gate key off. Email is an invoice upload; this records the door.
  */
 export type IntakeChannel = {
@@ -107,7 +107,7 @@ export async function uploadInvoiceToPaymentOrders(args: {
 
 // Everything after document storage: render pages → extract → create orders.
 // The async intake path calls this in the background while the operator is
-// already looking at the stored document on the review screen.
+// already looking at the stored document on the draft screen.
 export async function processInvoiceDocument(args: {
   organizationId: string;
   actorUserId: string;
@@ -118,7 +118,7 @@ export async function processInvoiceDocument(args: {
   sourceTreasuryWalletId?: string | null;
   intakeChannel?: IntakeChannel | null;
 }) {
-  // Render page images once — the review screen displays these (never a PDF
+  // Render page images once — the draft screen displays these (never a PDF
   // viewer), and extraction reuses the same renders. Best-effort: if rendering
   // fails, extraction falls back to its own render and reports the real error.
   let prerenderedPages: Awaited<ReturnType<typeof renderDocumentToImages>> | undefined;
@@ -237,17 +237,17 @@ export async function processInvoiceDocument(args: {
         organizationId: args.organizationId,
         wallet: counterpartyWallet,
       });
-      const triggeredRules = deriveReviewRules({
+      const triggeredRules = deriveIntakeFlags({
         row,
         amountRaw,
         counterpartyWallet,
         vendorAddressContext,
         nearDuplicate,
       });
-      // Review is mandatory for EVERY uploaded bill — known vendor or not
+      // Preparation is mandatory for EVERY uploaded bill — known vendor or not
       // (pipeline v3 ruling, 2026-07-07). The operator confirms what was read
       // from the document; "Confirm & send for approval" is the only door into
-      // routing. triggeredRules still matter: they become the review screen's
+      // routing. triggeredRules still matter: they become the draft screen's
       // flags and banners.
       const decision = 'draft';
 
@@ -307,13 +307,13 @@ export async function processInvoiceDocument(args: {
       //
       // Until this, a bill sat outside the engine until someone confirmed it,
       // so it had no TASK — and without a task none of the engine's commands
-      // are reachable. That is precisely backwards: the moment a reviewer most
+      // are reachable. That is precisely backwards: the moment a bill clerk most
       // needs to ask a question, delegate, push back or escalate is when a flag
       // says something is wrong, which is BEFORE they would ever confirm.
       //
       // Editing the bill afterwards is safe: applyMaterialChange treats a
       // change with no decisions yet as a silent recompile, so correcting an
-      // amount during review re-routes without disturbing anyone.
+      // amount while it is still a draft re-routes without disturbing anyone.
       //
       // Best-effort — an engine failure must not lose an ingested bill. The
       // order exists either way and confirm will submit as a fallback.
@@ -422,7 +422,7 @@ export async function processInvoiceDocument(args: {
   };
 }
 
-// Async intake: store the document and return immediately so the review screen
+// Async intake: store the document and return immediately so the draft screen
 // can open with the document visible while extraction runs in the background.
 // Progress is observed via the document's status (processing → processed/failed).
 export async function beginAsyncInvoiceIntake(args: {
@@ -768,7 +768,7 @@ async function computeNearDuplicateAddress(args: {
   return null;
 }
 
-function deriveReviewRules(args: {
+function deriveIntakeFlags(args: {
   row: ExtractedRow;
   amountRaw: bigint;
   counterpartyWallet: Pick<CounterpartyWallet, 'trustState' | 'label' | 'walletAddress'> & { counterparty: Counterparty | null };

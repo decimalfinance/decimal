@@ -288,7 +288,7 @@ export function BillDetailPage() {
               <section>
                 <div className="sec-head">
                   <div className="sh-titles">
-                    <h2>Changed during review</h2>
+                    <h2>Changed while it is still a draft</h2>
                     <p className="sh-desc">What a person corrected after the document was read — so you approve numbers a human stands behind, not raw machine output.</p>
                   </div>
                 </div>

@@ -8,7 +8,7 @@
 //
 // Two rules shape everything here:
 //
-//   1. Closed vocabulary. The model may only return keys the review screen can
+//   1. Closed vocabulary. The model may only return keys the draft screen can
 //      actually highlight. Anything else is dropped rather than trusted, so a
 //      hallucinated field name can never point somebody at nothing.
 //   2. Empty is a safe answer, a wrong one is not. If the mapping fails, is
@@ -21,7 +21,7 @@ import { logger } from '../infra/logger.js';
 
 const OPENAI_CHAT_COMPLETIONS_URL = 'https://api.openai.com/v1/chat/completions';
 
-/** Every field the review screen renders and can highlight. */
+/** Every field the draft screen renders and can highlight. */
 export const HIGHLIGHTABLE_FIELDS = [
   'vendor.name', 'vendor.email',
   'remitTo.street', 'remitTo.city', 'remitTo.state', 'remitTo.zip',

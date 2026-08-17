@@ -82,7 +82,7 @@ async function ensureProvenance(order: {
 
 export type BillBucket = 'draft' | 'in_approval' | 'to_pay' | 'done' | 'needs_attention';
 
-// Below this per-field read confidence, the review screen marks the field
+// Below this per-field read confidence, the draft screen marks the field
 // "needs a look" instead of "read by AI".
 const FIELD_CONFIDENCE_THRESHOLD = 0.85;
 
@@ -475,7 +475,7 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
       ? (agentRecord.triggeredRules as Array<Record<string, unknown>>)
       : [];
 
-    // The SAME evaluator the review screen uses. A bill made out to another
+    // The SAME evaluator the draft screen uses. A bill made out to another
     // company used to read "Ready for approval" here, because this row had its
     // own idea of "ready" that never consulted the flags. It no longer has one.
     const vendorKey = order.counterpartyId ?? `wallet:${order.counterpartyWalletId}`;
@@ -580,7 +580,7 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
 // -----------------------------------------------------------------------------
 
 // Invoices print the vendor address as one line ("450 Westlake Ave N, Seattle,
-// WA 98109"); the review screen wants it in four boxes. Anything this can't
+// WA 98109"); the draft screen wants it in four boxes. Anything this can't
 // confidently split stays whole in `street` — showing the address in the wrong
 // box is recoverable, showing "Not on document" is not.
 function splitPostalAddress(address: string | null): {
@@ -1229,7 +1229,7 @@ export async function submitBillForApproval(input: SubmitBillInput) {
     paymentOrderId: input.paymentOrderId,
     actorUserId: input.actorUserId,
     actorType: 'user',
-    submitNote: 'Confirmed on the review screen',
+    submitNote: 'Confirmed on the draft screen',
   });
 
   // Confirm is the door into the approval engine, and the only one.
@@ -2106,7 +2106,7 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
 // -----------------------------------------------------------------------------
 // Fill-later facts (Tier 2/3): fields that never block approval can be added or
 // corrected while the bill is already routing — logged into the same correction
-// trail the review screen feeds. Material fields (total, currency, lines,
+// trail the draft screen feeds. Material fields (total, currency, lines,
 // categories) are NOT accepted here: changing what the route was compiled on
 // goes through recall/push-back so the plan re-forms, never a silent edit.
 export type BillFactsInput = {

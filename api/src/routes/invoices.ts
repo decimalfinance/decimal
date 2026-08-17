@@ -43,7 +43,7 @@ invoicesRouter.post('/organizations/:organizationId/invoices/upload', asyncRoute
     sourceTreasuryWalletId: input.sourceTreasuryWalletId,
   });
   // Pipeline v3: every uploaded bill lands in draft. Nothing advances at
-  // upload time — the review screen's "Confirm & send for approval" is the only
+  // upload time — the draft screen's "Confirm & send for approval" is the only
   // door into routing, and execution follows approval via the bridge.
   sendCreated(res, {
     ...result,
@@ -52,7 +52,7 @@ invoicesRouter.post('/organizations/:organizationId/invoices/upload', asyncRoute
 }));
 
 // Async intake: returns the stored document id immediately; extraction runs in
-// the background and the review screen polls the status endpoint below.
+// the background and the draft screen polls the status endpoint below.
 invoicesRouter.post('/organizations/:organizationId/invoices/upload-async', asyncRoute(async (req, res) => {
   const { organizationId } = organizationParamsSchema.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
@@ -94,7 +94,7 @@ const pageParamsSchema = z.object({
   pageIndex: z.coerce.number().int().min(0).max(500),
 });
 
-// A rendered page image — what the review screen displays (no PDF viewer chrome).
+// A rendered page image — what the draft screen displays (no PDF viewer chrome).
 invoicesRouter.get('/organizations/:organizationId/invoice-documents/:invoiceDocumentId/pages/:pageIndex', asyncRoute(async (req, res) => {
   const { organizationId, invoiceDocumentId, pageIndex } = pageParamsSchema.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
@@ -108,7 +108,7 @@ invoicesRouter.get('/organizations/:organizationId/invoice-documents/:invoiceDoc
   res.send(Buffer.from(page.data));
 }));
 
-// Metadata only — the review screen lists filename/pages without pulling bytes.
+// Metadata only — the draft screen lists filename/pages without pulling bytes.
 invoicesRouter.get('/organizations/:organizationId/invoice-documents/:invoiceDocumentId/meta', asyncRoute(async (req, res) => {
   const { organizationId, invoiceDocumentId } = documentParamsSchema.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);

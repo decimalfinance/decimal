@@ -1,6 +1,6 @@
 // Invoice document storage. The uploaded file is persisted BEFORE extraction runs,
 // so even a failed or empty extraction leaves the original document retrievable —
-// the review screen renders it next to the extracted fields.
+// the draft screen renders it next to the extracted fields.
 import { createHash } from 'node:crypto';
 import { prisma } from '../infra/prisma.js';
 import { logger } from '../infra/logger.js';

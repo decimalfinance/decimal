@@ -1,5 +1,5 @@
 // QuickBooks' standard expense chart, built in. Used whenever an org hasn't
-// connected its books yet: the review screen's category picker and the intake
+// connected its books yet: the draft screen's category picker and the intake
 // coding suggestions work out of the box, and once QuickBooks IS connected the
 // real chart takes over. Builtin ids are namespaced so they can never be
 // mistaken for (or synced as) real QuickBooks account ids.

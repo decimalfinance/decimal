@@ -4,7 +4,7 @@
  * Bills used to enter the engine only when someone confirmed them. They now
  * enter at intake, which is what gives a flagged bill a task — something to ask
  * about, delegate or escalate. Bills ingested before that change have no
- * approvable, so they sit in review with no actions and no owner: not broken,
+ * approvable, so they sit in draft with no actions and no owner: not broken,
  * just stranded on the far side of a behaviour change.
  *
  * Idempotent and additive. It only INSERTS an approvable for a bill that has

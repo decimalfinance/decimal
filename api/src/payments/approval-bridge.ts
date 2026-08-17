@@ -1,5 +1,5 @@
 // The bridge that closes the payment loop (pipeline v2, target-architecture.md):
-//   invoice approvable APPROVED  -> clear the order's review + spawn the release run
+//   invoice approvable APPROVED  -> mark the order submitted + spawn the release run
 //   payment_run APPROVED         -> hand off to the existing execution path
 //                                   (spending-limit lane or Squads proposal)
 //   invoice REJECTED             -> send the bill BACK TO REVIEW with the reason
@@ -63,7 +63,7 @@ export function registerPaymentApprovalBridge(): void {
           sourceApprovableId: approvable.id, releaseRunId: release.approvableId, paymentOrderId,
         });
       } else if (transition === 'rejected') {
-        // Send back for changes: the bill returns to the Review stage carrying
+        // Send back for changes: the bill returns to the draft stage carrying
         // the approver's reason. Re-confirming submits a FRESH approval run
         // (fresh consents). Only possible while no money has moved; otherwise
         // fall back to cancelling.
@@ -96,7 +96,7 @@ export function registerPaymentApprovalBridge(): void {
               },
             }),
           ]);
-          logger.info('approval_bridge.sent_back_to_review', {
+          logger.info('approval_bridge.sent_back_to_draft', {
             sourceApprovableId: approvable.id, paymentOrderId, byName,
           });
         } else {
@@ -109,7 +109,7 @@ export function registerPaymentApprovalBridge(): void {
         }
       } else if (transition === 'cancelled') {
         // Recall: the submitter pulled the bill out of approval — it goes back
-        // to their review queue (only while nothing has moved money yet).
+        // to their draft queue (only while nothing has moved money yet).
         const order = await prisma.paymentOrder.findFirst({
           where: { organizationId: approvable.organization_id, paymentOrderId },
           select: { state: true, transferRequests: { select: { transferRequestId: true }, take: 1 } },
@@ -124,7 +124,7 @@ export function registerPaymentApprovalBridge(): void {
               data: {
                 organizationId: approvable.organization_id,
                 paymentOrderId,
-                eventType: 'payment_order_review_reopened',
+                eventType: 'payment_order_returned_to_draft',
                 actorType: 'system',
                 beforeState: 'submitted',
                 afterState: 'draft',
@@ -132,7 +132,7 @@ export function registerPaymentApprovalBridge(): void {
               },
             }),
           ]);
-          logger.info('approval_bridge.recalled_to_review', {
+          logger.info('approval_bridge.recalled_to_draft', {
             sourceApprovableId: approvable.id, paymentOrderId,
           });
         }

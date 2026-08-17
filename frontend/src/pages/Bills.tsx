@@ -1,6 +1,6 @@
 // Bills workbench — the operator's home (uploads/ap-claude-code-handoff.md §2).
 // A triage surface: five lifecycle tabs over one bills query, urgency-sorted,
-// rows routing to the review screen (needs-review) or detail (everything else).
+// rows routing to the draft screen (needs-review) or detail (everything else).
 import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
