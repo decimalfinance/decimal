@@ -21,8 +21,8 @@ export type FlowNode =
 // (dollars x 10^6) — match that scale, not cents.
 const USD_MINOR = 1_000_000;
 
-// A stage's flow: the approval flow (kind 'invoice') or the review flow (kind
-// 'review'). Both are the same builder JSON on their own policy set; only the
+// A stage's flow: the approval flow (kind 'invoice') or the release flow
+// (kind 'payment_run'). Both are the same builder JSON on their own policy set; only the
 // seed-name that counts as "not yet authored" differs.
 const SEED_NAME: Record<FlowKind, string> = { invoice: 'default approval', payment_run: 'default release' };
 const PUBLISHED_NAME: Record<FlowKind, string> = { invoice: 'Company approval flow', payment_run: 'Payment release flow' };
@@ -68,7 +68,7 @@ export async function getFlow(organizationId: string, kind: FlowKind = 'invoice'
   // ensureEngineSetup seeds a "default approval" policy so the engine can route
   // bills from day one. That is NOT a flow the user authored — the builder shows
   // it as blank (empty canvas) until they actually build and publish one. (Review
-  // has no seed, so any published review policy is authored.)
+  // has no seed, so any published release policy is authored.)
   const authored = policy != null && policy.name !== SEED_NAME[kind];
   return {
     flow: authored ? body.map(engineNodeToFlow).filter((n): n is FlowNode => n !== null) : [],
@@ -82,7 +82,7 @@ export async function getFlow(organizationId: string, kind: FlowKind = 'invoice'
 }
 
 // Per-org builder draft (unpublished edits). Survives navigation/reload. Keyed by
-// (org, kind) so the review flow and approval flow each keep their own draft.
+// (org, kind) so the release flow and approval flow each keep their own draft.
 type FlowKind = 'invoice' | 'payment_run';
 
 export async function getFlowDraft(organizationId: string, kind: FlowKind = 'invoice'): Promise<FlowNode[] | null> {
@@ -202,7 +202,7 @@ export async function publishFlow(organizationId: string, flow: FlowNode[], kind
 
 // The draft stage: who must fill/confirm a bill's details before it can enter
 // approval. Same builder power as approval (steps · quorum · amount splits), on
-// its own 'review' policy set.
+// its own 'payment_run' policy set.
 
 // The Payment stage as a full flow (steps · quorums · splits) on the
 // payment_run policy — complex releases, same grammar as the other stages.
@@ -403,7 +403,7 @@ type PipelineChainEntry = { personId: string; name: string; step: string; why: s
 type StageResult = { chain: PipelineChainEntry[]; notes: string[]; stuck: string | null; resolvedIds: string[] };
 
 // One stage's routing. `excluded` maps a personId → why they can't act here
-// (e.g. "reviewed this bill"); the owner stands in if an exclusion empties a step.
+// (e.g. "approved this bill"); the owner stands in if an exclusion empties a step.
 function resolveStage(flow: FlowNode[], opts: {
   amountUsd: number; vendorId?: string | null; category?: string | null; firstBill?: boolean | null;
   excluded: Map<string, string>; ownerId: string | null; nameOf: Map<string, string>;

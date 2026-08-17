@@ -23,7 +23,7 @@ import { getBillCeilingMinor } from '../approvals/store.js';
 import { involvedBillIds } from './bill-visibility.js';
 import type { ExtractedInvoice } from './document-extract.js';
 
-// Exact field→document boxes for ANY bill, whenever it is reviewed: if this
+// Exact field→document boxes for ANY bill, whenever it is opened: if this
 // order's extraction predates the provenance pass (or the matcher improved),
 // re-locate the extracted values in the stored document's text layer now and
 // cache the result back onto the order. Needs no model call — just the stored
@@ -281,7 +281,7 @@ function draftReadiness(args: {
   invoiceNumber: string | null;
   dueAt: Date | null;
   hasLineItems: boolean;
-  /** Any flag that blocks the bill leaving review, per bill-flags.ts. */
+  /** Any flag that blocks the bill leaving draft, per bill-flags.ts. */
   blockedByFlag: boolean;
 }): { readiness: 'ready' | 'missing_info'; missing: string[]; laterNeeded: string[]; blocked: boolean } {
   const missing: string[] = [];
@@ -524,7 +524,7 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
         subStatus = { kind: 'plain', text: 'Ready for approval', tone: 'success' };
       }
     } else if (flagSummary.worst?.severity === 'danger' && bucket !== 'done') {
-      // A danger flag does not stop mattering once a bill leaves review. A bill
+      // A danger flag does not stop mattering once a bill leaves draft. A bill
       // sitting in approval or queued to pay while addressed to another company
       // is the same failure, one stage later and with less scrutiny left. Paid
       // bills are excluded: the warning is spent, and the row is now history.
@@ -802,7 +802,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
           },
         });
       } catch (error) {
-        logger.warn('bill_review.suggestion_refresh_failed', {
+        logger.warn('bill_draft.suggestion_refresh_failed', {
           paymentOrderId: order.paymentOrderId,
           ...(error instanceof Error ? { message: error.message } : {}),
         });
@@ -821,7 +821,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       // Validate against the SAME vocabulary the picker offers — the QBO chart
       // when connected, the builtin categories otherwise. Checking the QBO
       // chart alone made every pre-QBO rule silently fall through to OCR
-      // (testbench 007: the Vendors page promised a default the review
+      // (testbench 007: the Vendors page promised a default the draft
       // screen never applied).
       const ruleAccount = chart.find((a) => a.name === rule.accountName || a.fullyQualifiedName === rule.accountName);
       const pickerHasIt = chart.length > 0
@@ -1047,7 +1047,7 @@ export async function submitBillForApproval(input: SubmitBillInput) {
     throw new Error(`This bill is ${order.state} — it has already left verification.`);
   }
   // Payable gate, re-checked at the moment of commitment (the vendor may have
-  // been held while this review screen sat open).
+  // been held while this draft sat open).
   const confirmHold = order.counterparty ? readPayableHold(order.counterparty.metadataJson) : null;
   if (confirmHold) {
     throw new Error(describePayableHold(order.counterparty?.displayName ?? order.counterpartyWallet.label, confirmHold));
@@ -1055,8 +1055,8 @@ export async function submitBillForApproval(input: SubmitBillInput) {
   // Org ceiling, same re-check (and against the CONFIRMED total, below).
   const confirmCeiling = await getBillCeilingMinor(prisma, input.organizationId);
 
-  const review = await getBillDraft(input.organizationId, input.paymentOrderId);
-  const blocking = (review?.flags ?? []).filter((f) => f.blocking);
+  const billDraft = await getBillDraft(input.organizationId, input.paymentOrderId);
+  const blocking = (billDraft?.flags ?? []).filter((f) => f.blocking);
   if (blocking.length > 0) {
     throw new Error(`Resolve the flagged issue first: ${blocking[0]!.message}`);
   }
@@ -1126,7 +1126,7 @@ export async function submitBillForApproval(input: SubmitBillInput) {
     organizationId: input.organizationId,
     paymentOrderId: order.paymentOrderId,
     changedByUserId: input.actorUserId,
-    phase: 'review',
+    phase: 'draft',
     reason: 'confirm',
     changes: corrections.map((c) => {
       const r = c as { field: string; readValue: unknown; correctedValue: unknown };
@@ -1162,7 +1162,7 @@ export async function submitBillForApproval(input: SubmitBillInput) {
     throw new Error(`This bill (${usdText(confirmedAmountRaw)}) is over your organization's bill ceiling of ${usdText(confirmCeiling)}. The primary admin can raise the ceiling on the Policies page.`);
   }
   // Re-run the duplicate gate against the CONFIRMED values — the bill clerk may
-  // have just edited the invoice number or total, and the review-time flag
+  // have just edited the invoice number or total, and the draft-time flag
   // only saw the extracted ones.
   if (!readDuplicateOverride(metadata)) {
     const confirmedDuplicates = await findDuplicateBills(input.organizationId, {
@@ -1221,9 +1221,9 @@ export async function submitBillForApproval(input: SubmitBillInput) {
     });
   });
 
-  // Clears review, trusts the wallet (the operator just verified the document's
+  // Marks it submitted, trusts the wallet (the operator just verified the document's
   // payment details — the R7 payment-method ceremony replaces this later), and
-  // emits the review-cleared event.
+  // emits the submitted event.
   await markBillSubmitted({
     organizationId: input.organizationId,
     paymentOrderId: input.paymentOrderId,
@@ -2138,7 +2138,7 @@ async function recordFieldChanges(args: {
   organizationId: string;
   paymentOrderId: string;
   changedByUserId: string | null;
-  phase: 'review' | 'approval';
+  phase: 'draft' | 'approval';
   reason: string;
   /** Which request caused this, so a change can be explained after the fact. */
   correlationId?: string | null;
@@ -2224,7 +2224,7 @@ export async function updateBillFacts(input: BillFactsInput) {
       readValue: c.from,
       correctedValue: c.to,
       byUserId: input.actorUserId,
-      phase: order.state === 'submitted' ? 'approval' : 'review',
+      phase: order.state === 'submitted' ? 'approval' : 'draft',
       at: new Date().toISOString(),
     });
   }
@@ -2238,7 +2238,7 @@ export async function updateBillFacts(input: BillFactsInput) {
     organizationId: input.organizationId,
     paymentOrderId: order.paymentOrderId,
     changedByUserId: input.actorUserId,
-    phase: order.state === 'submitted' ? 'approval' : 'review',
+    phase: order.state === 'submitted' ? 'approval' : 'draft',
     reason: 'edit',
     changes,
   });
