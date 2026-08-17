@@ -661,7 +661,7 @@ function LaneEnd({ text, to, connected }: { text: string; to: 'approve' | 'payme
   return (
     <>
       <div style={{ flex: 1, minHeight: 56 }} />
-      {/* Terminal pill wears ITS OWN stage's ink + icon (Review's terminal is
+      {/* Terminal pill wears ITS OWN stage's ink + icon (Approve's terminal is
           purple/search), pairing it visually with the stage pill above it. */}
       <span className={`lane-end to-${to}`} data-lane-pill style={{ flex: 'none', opacity: connected ? 1 : 0.55 }}>
         {to === 'approve' ? <Ico.search w={13} /> : to === 'payment' ? <Ico.check w={13} /> : <Ico.payments w={13} />}
@@ -722,7 +722,6 @@ function LaneWires({ dep }: { dep: string }) {
 
 // What "this path is done" means per stage — menu action, terminal chip, chip ink.
 const FORWARD = {
-  review: { menu: 'Forward for approval', chip: 'Forwarded for approval', to: 'approve' as const },
   approve: { menu: 'Forward for payment', chip: 'Forwarded for payment', to: 'payment' as const },
   pay: { menu: 'Release the payment', chip: 'Payment released', to: 'done' as const },
 };
@@ -758,7 +757,7 @@ function CardLane(props: LaneProps) {
           const stepPeople = node.approvers.map((id) => personOf.get(id)).filter((pp): pp is FlowPerson => Boolean(pp));
           const names = stepPeople.map((pp) => pp.name.split(' ')[0]!);
           const cap = quorumText(node.quorum, node.approvers.length);
-          const customTitle = node.title && !/^(Review|Approval|Payment) step$/.test(node.title) ? node.title : null;
+          const customTitle = node.title && !/^(Approval|Payment) step$/.test(node.title) ? node.title : null;
           return (
             <div key={node.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
               {needsLeadIn ? <div className="conn" /> : null}

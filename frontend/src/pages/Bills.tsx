@@ -1,6 +1,6 @@
 // Bills workbench — the operator's home (uploads/ap-claude-code-handoff.md §2).
 // A triage surface: five lifecycle tabs over one bills query, urgency-sorted,
-// rows routing to the draft screen (needs-review) or detail (everything else).
+// rows routing to the draft screen or detail (everything else).
 import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -103,7 +103,7 @@ export function BillsPage() {
     }
   };
 
-  // The moment the file is stored, the operator is looking at it — the review
+  // The moment the file is stored, the operator is looking at it — the draft
   // screen opens immediately and fills in as the document is read.
   const onUploaded = (invoiceDocumentId: string, reused: boolean) => {
     setUploadOpen(false);
@@ -407,7 +407,7 @@ function ForwardByEmailDialog(props: { organizationId: string; onClose: () => vo
         <div className="dialog-head">
           <div>
             <h2>Forward bills by email</h2>
-            <p>Send invoices straight into your review queue.</p>
+            <p>Send invoices straight into your drafts.</p>
           </div>
           <button type="button" className="drawer-x" onClick={props.onClose} aria-label="Close">
             ×

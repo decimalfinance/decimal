@@ -942,7 +942,7 @@ export type BatchCsvImportedRow = {
   status: 'imported';
   inputBatchId: string;
   inputBatchLabel: string;
-  decision: 'drafted' | 'draft';
+  decision: 'submitted' | 'draft';
   counterpartyWallet: CounterpartyWallet;
   paymentOrder: PaymentOrder;
 };
@@ -1404,7 +1404,7 @@ export type PaymentOrderAgentAdvanceResult =
 
 export type InvoiceIntakeCreatedRow = {
   rowIndex: number;
-  decision: 'drafted' | 'draft' | string;
+  decision: 'submitted' | 'draft' | string;
   triggeredRules: Array<{ rule: string } & Record<string, unknown>>;
   paymentOrder: PaymentOrder;
 };
