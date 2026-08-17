@@ -1,5 +1,5 @@
 // Prebuilt roles (supersedes free-form role seats). The role set is fixed —
-// Reviewer / Approver / Payer / Viewer — and each carries a permission bundle
+// Bill Clerk / Approver / Payer / Viewer — and each carries a permission bundle
 // (permissions.ts). This module handles listing and assignment; enforcement
 // lives in the access middleware. Legacy seat-roles were migrated by
 // postgres/init/007-prebuilt-roles.sql.

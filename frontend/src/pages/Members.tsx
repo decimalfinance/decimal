@@ -1,5 +1,5 @@
 // Members & roles. The core split: ACCESS tiers (owner/admin/member = settings
-// power, quiet) vs ROLES (Reviewer/Approver/Payer/Viewer = prebuilt permission
+// power, quiet) vs ROLES (Bill Clerk/Approver/Payer/Viewer = prebuilt permission
 // bundles for the AP pipeline, prominent). The role set is fixed — you assign
 // roles, you don't design them (roles-research/SYNTHESIS-decimal-roles.md).
 import { useState } from 'react';
@@ -17,7 +17,9 @@ const initialsOf = (name: string, email = '') => {
   const p = src.split(/[\s@._-]+/).filter(Boolean);
   return p.length >= 2 ? (p[0]![0]! + p[1]![0]!).toUpperCase() : src.slice(0, 2).toUpperCase();
 };
-const titleCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+// Role keys are snake_case ('bill_clerk'), so a bare capitalise would render
+// "Bill_clerk". Only a fallback — the real names come from the API.
+const titleCase = (s: string) => s.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 // Access tiers, in product words: 'owner' is the primary admin (one per org).
 const accessLabel = (a: string) => (a === 'owner' ? 'Primary admin' : titleCase(a));
 
@@ -410,7 +412,7 @@ function InviteDialog(props: { organizationId: string; canInviteAdmins: boolean;
             </div>
             <div className="field">
               <span className="field-label">Role <span style={{ color: 'var(--text-faint)', fontWeight: 400 }}>· assign after they join</span></span>
-              <div className="input-help">Pick their job (Reviewer, Approver, Payer, Viewer) from the roster once they've joined.</div>
+              <div className="input-help">Pick their job (Bill Clerk, Approver, Payer, Viewer) from the roster once they've joined.</div>
             </div>
           </div>
           <div className="dialog-foot">

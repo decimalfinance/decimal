@@ -497,7 +497,7 @@ function DraftScreen(props: {
           <button type="button" className="btn btn-ghost tb-back" onClick={onBack}>
             <Ico.chevLeft w={15} /> Bills
           </button>
-          {/* Who put this bill here — a reviewer's first question when a bill
+          {/* Who put this bill here — a bill clerk's first question when a bill
               they didn't upload appears in their queue. */}
           {billDraft.source === 'email' && billDraft.sourceLabel ? (
             <span className="cell-source" style={{ marginLeft: 12 }}>

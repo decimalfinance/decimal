@@ -168,7 +168,7 @@ async function flowItems(organizationId: string, nodes: any[], depth: number): P
   return out;
 }
 
-// --- Prebuilt roles (fixed permission bundles: reviewer/approver/payer/viewer) --
+// --- Prebuilt roles (fixed bundles: bill_clerk/approver/payer/viewer) ----------
 
 approvalsRouter.get('/organizations/:organizationId/roles', asyncRoute(async (req, res) => {
   const { organizationId } = orgParams.parse(req.params);

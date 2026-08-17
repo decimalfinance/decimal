@@ -363,7 +363,7 @@ export function pickAddressConfidenceKey(usedVendorAddress: boolean): 'vendorAdd
  *
  * Deliberately not the full chain getBillDetail builds — that carries threads,
  * decline reasons and per-step rules, which a strip has no room for and no use
- * for. This exists so a reviewer can see how far a bill has come and how far is
+ * for. This exists so a bill clerk can see how far a bill has come and how far is
  * left BEFORE they act on it: three people having already signed is a reason to
  * move, and a bill that has not started is a different kind of ask.
  */
@@ -731,7 +731,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   // "Remit To" panel. Most invoices just carry the address on the letterhead,
   // which extraction puts in the flat `vendorAddress` string — so the fields
   // rendered "Not on document" about an address plainly on the page. Fall back
-  // to the letterhead address rather than tell the reviewer it isn't there.
+  // to the letterhead address rather than tell the bill clerk it isn't there.
   const remitTo = (['street', 'city', 'state', 'zip'] as const).some((p) => str(remitToRaw[p]))
     ? remitToRaw
     : splitPostalAddress(str(extracted.vendorAddress));
@@ -1161,7 +1161,7 @@ export async function submitBillForApproval(input: SubmitBillInput) {
   if (confirmCeiling !== null && confirmedAmountRaw > confirmCeiling) {
     throw new Error(`This bill (${usdText(confirmedAmountRaw)}) is over your organization's bill ceiling of ${usdText(confirmCeiling)}. The primary admin can raise the ceiling on the Policies page.`);
   }
-  // Re-run the duplicate gate against the CONFIRMED values — the reviewer may
+  // Re-run the duplicate gate against the CONFIRMED values — the bill clerk may
   // have just edited the invoice number or total, and the review-time flag
   // only saw the extracted ones.
   if (!readDuplicateOverride(metadata)) {

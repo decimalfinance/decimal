@@ -27,7 +27,7 @@ const RULES: Array<{ pattern: RegExp; view: Need; act: Need }> = [
   // in the flow must be able to act even before roles catch up).
   { pattern: /^\/approvals\/tasks(\/|$)/, view: 'bills.view', act: null },
   { pattern: /^\/approvals(\/|$)/, view: 'bills.view', act: 'bills.edit' },
-  // GL coding is reviewer work even though it lives under payment-orders.
+  // GL coding is bill clerk work even though it lives under payment-orders.
   { pattern: /^\/payment-orders\/[^/]+\/(gl-coding|accounting)(\/|$)/, view: 'bills.view', act: 'bills.edit' },
   // Asking a colleague about a bill needs bill VISIBILITY and nothing more.
   // Asking is never the dangerous act — it changes no figure and commits no
@@ -45,7 +45,7 @@ const RULES: Array<{ pattern: RegExp; view: Need; act: Need }> = [
   // can see bills can see where to forward them. The ignored-mail log inside
   // this prefix re-checks admin in its own route.
   { pattern: /^\/inbound-email(\/|$)/, view: 'bills.view', act: 'bills.edit' },
-  // Creating/editing payment orders is entering payables (reviewer work);
+  // Creating/editing payment orders is entering payables (bill clerk work);
   // cancel/execute/advance actually move or stop money.
   { pattern: /^\/payment-orders\/[^/]+\/(cancel|execute-with-spending-limit|agent\/advance)$/, view: 'payments.sign', act: 'payments.sign' },
   { pattern: /^\/payment-orders(\/|$)/, view: 'payments.view', act: 'bills.edit' },

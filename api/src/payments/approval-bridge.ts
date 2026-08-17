@@ -4,7 +4,7 @@
 //                                   (spending-limit lane or Squads proposal)
 //   invoice REJECTED             -> send the bill BACK TO REVIEW with the reason
 //                                   (flow-research: a terminal reject is the
-//                                   industry's worst anti-pattern — the reviewer
+//                                   industry's worst anti-pattern — the bill clerk
 //                                   fixes and re-confirms, which submits fresh)
 // Registered once at app boot. Handlers are post-commit and best-effort by contract.
 import { prisma } from '../infra/prisma.js';

@@ -1932,7 +1932,7 @@ export interface FlowAssistResult {
 }
 
 
-// Prebuilt roles: a fixed set of permission bundles (reviewer/approver/payer/
+// Prebuilt roles: a fixed set of permission bundles (bill_clerk/approver/payer/
 // viewer). Assignment only — the set itself is not editable.
 export type RoleKey = 'bill_clerk' | 'approver' | 'payer' | 'viewer';
 export interface OrgRole { key: RoleKey; name: string; summary: string; holders: { personId: string; name: string; userId: string | null }[] }
