@@ -65,7 +65,7 @@ export function BillDetailPage() {
     enabled: Boolean(organizationId && paymentOrderId),
   });
   const detail = detailQuery.data;
-  // Admin tier gates "send back to review" on an approved bill.
+  // Admin tier gates "send back to billDraft" on an approved bill.
   const myAccess = useQuery({
     queryKey: ['my-access', organizationId],
     queryFn: () => accessApi.get(organizationId),
@@ -105,7 +105,7 @@ export function BillDetailPage() {
     );
   }
 
-  const { review, corrections, approval, viewer, requester, status } = detail;
+  const { draft: billDraft, corrections, approval, viewer, requester, status } = detail;
   const macro = approval?.macroState ?? null;
   const rejected = macro === 'rejected';
   const recalled = macro === 'cancelled';
@@ -116,11 +116,11 @@ export function BillDetailPage() {
   const declinedNode = steps.find((s) => s.state === 'declined') ?? null;
   const infoOpenNode = steps.find((s) => s.thread?.open) ?? null;
 
-  const invoiceNumber = String(review.fields.find((f) => f.key === 'invoiceNumber')?.value ?? review.vendor.name);
-  const invoiceDate = review.fields.find((f) => f.key === 'invoiceDate')?.value ?? null;
-  const terms = review.fields.find((f) => f.key === 'terms')?.value ?? null;
-  const dueDate = review.fields.find((f) => f.key === 'dueDate')?.value ?? null;
-  const discount = review.fields.find((f) => f.key === 'discount')?.value ?? null;
+  const invoiceNumber = String(billDraft.fields.find((f) => f.key === 'invoiceNumber')?.value ?? billDraft.vendor.name);
+  const invoiceDate = billDraft.fields.find((f) => f.key === 'invoiceDate')?.value ?? null;
+  const terms = billDraft.fields.find((f) => f.key === 'terms')?.value ?? null;
+  const dueDate = billDraft.fields.find((f) => f.key === 'dueDate')?.value ?? null;
+  const discount = billDraft.fields.find((f) => f.key === 'discount')?.value ?? null;
 
   // Draft is a stage now, and a common one: the bill is being prepared and has
   // not entered approval at all. Without this it read "0 of 0 approved", which
@@ -148,13 +148,13 @@ export function BillDetailPage() {
   const operatorMode = viewer.isRequester && !viewerHasDecision;
   // Approved but unpaid: an admin may unwind the approval — the recovery path
   // when a release gate refuses (pinned destination, ceiling).
-  const canSendBack = approvedOverall && review.state === 'submitted' && Boolean(myAccess.data?.isOwnerOrAdmin);
+  const canSendBack = approvedOverall && billDraft.state === 'submitted' && Boolean(myAccess.data?.isOwnerOrAdmin);
 
   const composerMeta: Record<ComposerKind, { title: string; desc: string; placeholder: string; btn: string; btnClass: string }> = {
     reject: { title: 'Reject this bill', desc: `A reason is required — ${requester?.name ?? 'the submitter'} and the route will see it.`, placeholder: 'Why is this being rejected?', btn: 'Reject bill', btnClass: 'btn-danger' },
     info: { title: 'Request more info', desc: `Send it back to ${requester?.name ?? 'the submitter'} for a detail — the bill stays with you, not reset.`, placeholder: 'What do you need to see before approving?', btn: 'Send request', btnClass: 'btn-primary' },
     reply: { title: 'Reply', desc: 'Your answer goes to the approver who asked, and the route keeps moving.', placeholder: 'Answer the question…', btn: 'Send answer', btnClass: 'btn-primary' },
-    sendback: { title: 'Send back to review', desc: 'Unwinds the approval: the bill returns to review, and re-confirming starts a fresh approval run under current rules.', placeholder: 'Why is it going back? Goes on the record.', btn: 'Send back', btnClass: 'btn-danger' },
+    sendback: { title: 'Send back to billDraft', desc: 'Unwinds the approval: the bill returns to billDraft, and re-confirming starts a fresh approval run under current rules.', placeholder: 'Why is it going back? Goes on the record.', btn: 'Send back', btnClass: 'btn-danger' },
   };
 
   const submitComposer = () => {
@@ -167,7 +167,7 @@ export function BillDetailPage() {
       setActing(true);
       billsApi.sendBack(organizationId, paymentOrderId, text)
         .then(() => {
-          toast.success('Back in review — the approval was unwound.');
+          toast.success('Back in billDraft — the approval was unwound.');
           setComposer(null);
           setComposerText('');
           refresh();
@@ -196,7 +196,7 @@ export function BillDetailPage() {
               </span>
             </>
           ) : null}
-          {review.document ? (
+          {billDraft.document ? (
             <button type="button" className="btn btn-secondary btn-sm" onClick={() => setDocOpen(true)}>
               <Ico.doc w={14} /> View invoice
             </button>
@@ -217,12 +217,12 @@ export function BillDetailPage() {
               </span>
             </div>
             <div style={{ fontSize: 13.5, color: 'var(--text-muted)', marginTop: 4 }}>
-              {review.vendor.name}{review.lines[0]?.description ? ` · ${review.lines[0].description}` : ''}
+              {billDraft.vendor.name}{billDraft.lines[0]?.description ? ` · ${billDraft.lines[0].description}` : ''}
             </div>
           </div>
           <div style={{ textAlign: 'right', flex: 'none' }}>
             <div className="mono" style={{ fontSize: 25, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--text-primary)' }}>
-              {usd(review.totalUsd)}
+              {usd(billDraft.totalUsd)}
             </div>
             {dueDate ? (
               <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 3 }}>
@@ -236,7 +236,7 @@ export function BillDetailPage() {
           <div style={{ padding: '20px 32px 0' }}>
             <div className="callout callout-danger" style={{ alignItems: 'center' }}>
               <Ico.x w={16} />
-              <span><b>This bill was recalled.</b> It's out of approval and back in the review queue — the approvers were notified.</span>
+              <span><b>This bill was recalled.</b> It's out of approval and back in the billDraft queue — the approvers were notified.</span>
             </div>
           </div>
         ) : null}
@@ -312,7 +312,7 @@ export function BillDetailPage() {
 
           {/* Right: calm reference */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
-            {(review.state === 'submitted' || review.state === 'draft') ? (
+            {(billDraft.state === 'submitted' || billDraft.state === 'draft') ? (
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: -8 }}>
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFactsOpen(true)}>
                   Complete details
@@ -323,8 +323,8 @@ export function BillDetailPage() {
               <div className="ref-row">
                 <span className="ref-k">Vendor</span>
                 <span className="ref-v">
-                  {review.vendor.name}
-                  {review.vendor.email ? (<><br /><span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{review.vendor.email}</span></>) : null}
+                  {billDraft.vendor.name}
+                  {billDraft.vendor.email ? (<><br /><span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{billDraft.vendor.email}</span></>) : null}
                 </span>
               </div>
               <div className="ref-row"><span className="ref-k">Invoice</span><span className="ref-v mono">{invoiceNumber}</span></div>
@@ -333,11 +333,11 @@ export function BillDetailPage() {
               <div className="ref-row">
                 <span className="ref-k">Pay to</span>
                 <span className="ref-v mono">
-                  {review.paymentBlock.accountLast4
-                    ? `Bank account ••••${review.paymentBlock.accountLast4}`
-                    : review.paymentBlock.sendToLabel}
+                  {billDraft.paymentBlock.accountLast4
+                    ? `Bank account ••••${billDraft.paymentBlock.accountLast4}`
+                    : billDraft.paymentBlock.sendToLabel}
                   <br />
-                  {review.paymentBlock.matchesVerified
+                  {billDraft.paymentBlock.matchesVerified
                     ? <span style={{ color: 'var(--success)', fontSize: 11.5 }}>✓ Verified method</span>
                     : <span style={{ color: 'var(--text-muted)', fontSize: 11.5 }}>Verification pending</span>}
                 </span>
@@ -350,7 +350,7 @@ export function BillDetailPage() {
                   <tr><th>Description</th><th>Category</th><th className="num">Amount</th></tr>
                 </thead>
                 <tbody>
-                  {review.lines.map((line, i) => (
+                  {billDraft.lines.map((line, i) => (
                     <tr key={i}>
                       <td>{line.description}</td>
                       <td><span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{line.category ?? '—'}</span></td>
@@ -362,13 +362,13 @@ export function BillDetailPage() {
               <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 190 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24, fontSize: 12.5, color: 'var(--text-muted)' }}>
-                    <span>Line items</span><span className="mono" style={{ color: 'var(--text-primary)' }}>{usd(review.lines.reduce((sum, l) => sum + (l.amount ?? 0), 0))}</span>
+                    <span>Line items</span><span className="mono" style={{ color: 'var(--text-primary)' }}>{usd(billDraft.lines.reduce((sum, l) => sum + (l.amount ?? 0), 0))}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24, fontSize: 12.5, color: 'var(--text-muted)' }}>
-                    <span>Tax</span><span className="mono" style={{ color: 'var(--text-primary)' }}>{usd(review.taxAmount ?? 0)}</span>
+                    <span>Tax</span><span className="mono" style={{ color: 'var(--text-primary)' }}>{usd(billDraft.taxAmount ?? 0)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24, fontSize: 14, fontWeight: 600, borderTop: '1px solid var(--border)', marginTop: 2, paddingTop: 6 }}>
-                    <span>Total</span><span className="mono">{usd(review.totalUsd)}</span>
+                    <span>Total</span><span className="mono">{usd(billDraft.totalUsd)}</span>
                   </div>
                 </div>
               </div>
@@ -389,12 +389,12 @@ export function BillDetailPage() {
           </>
         ) : recalled ? (
           <>
-            <span className="cb-note" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Bill recalled — back in the review queue</span>
+            <span className="cb-note" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Bill recalled — back in the billDraft queue</span>
             <span className="commit-spacer" />
             <button type="button" className="btn btn-secondary" disabled={acting}
               onClick={() => void act(viewer.anyTaskId, { kind: 'resubmit' }, 'Back in approval.')}>Undo recall</button>
             <button type="button" className="btn btn-primary" onClick={() => navigate(`/organizations/${organizationId}/bills/${paymentOrderId}/draft`)}>
-              Open in review
+              Open in billDraft
             </button>
           </>
         ) : viewerHasDecision && viewerBlockedByOwnAsk ? (
@@ -418,7 +418,7 @@ export function BillDetailPage() {
               <span className="cb-note">
                 {viewer.cannotApprove
                   ? `${viewer.cannotApprove.why} ${viewer.cannotApprove.remedy}`
-                  : `You're authorizing ${usd(review.totalUsd)} to ${review.vendor.name}.`}
+                  : `You're authorizing ${usd(billDraft.totalUsd)} to ${billDraft.vendor.name}.`}
               </span>
             </div>
             {detail.signal ? (
@@ -465,13 +465,13 @@ export function BillDetailPage() {
             ) : null}
             {!approvedOverall ? (
               <button type="button" className="btn btn-secondary" disabled={acting}
-                onClick={() => void act(viewer.anyTaskId, { kind: 'recall' }, 'Recalled — back in your review queue.')}>
+                onClick={() => void act(viewer.anyTaskId, { kind: 'recall' }, 'Recalled — back in your billDraft queue.')}>
                 <Ico.reset w={14} /> Recall bill
               </button>
             ) : null}
             {canSendBack ? (
               <button type="button" className="btn btn-secondary" disabled={acting} onClick={() => setComposer('sendback')}>
-                <Ico.reset w={14} /> Send back to review
+                <Ico.reset w={14} /> Send back to billDraft
               </button>
             ) : null}
           </>
@@ -481,7 +481,7 @@ export function BillDetailPage() {
             <span className="commit-spacer" />
             {canSendBack ? (
               <button type="button" className="btn btn-secondary" disabled={acting} onClick={() => setComposer('sendback')}>
-                <Ico.reset w={14} /> Send back to review
+                <Ico.reset w={14} /> Send back to billDraft
               </button>
             ) : null}
           </>
@@ -524,25 +524,25 @@ export function BillDetailPage() {
         <FactsDialog
           organizationId={organizationId}
           paymentOrderId={paymentOrderId}
-          review={review}
+          billDraft={billDraft}
           onClose={() => setFactsOpen(false)}
           onSaved={() => { setFactsOpen(false); refresh(); }}
         />
       ) : null}
 
       {/* Document drawer */}
-      {docOpen && review.document ? (
+      {docOpen && billDraft.document ? (
         <div className="overlay" style={{ position: 'fixed', inset: 0, zIndex: 60 }}
           onClick={(e) => { if (e.target === e.currentTarget) setDocOpen(false); }}>
           <div className="drawer drawer-wide" style={{ width: 680, display: 'flex', flexDirection: 'column' }}>
             <div className="drawer-head">
               <div>
                 <h2 style={{ margin: 0 }}>The invoice</h2>
-                <p style={{ margin: '2px 0 0' }}>{review.document.filename} · exactly as {review.vendor.name} sent it</p>
+                <p style={{ margin: '2px 0 0' }}>{billDraft.document.filename} · exactly as {billDraft.vendor.name} sent it</p>
               </div>
               <button type="button" className="drawer-x" onClick={() => setDocOpen(false)} aria-label="Close">×</button>
             </div>
-            <DocumentPane organizationId={organizationId} document={review.document} width="100%" />
+            <DocumentPane organizationId={organizationId} document={billDraft.document} width="100%" />
           </div>
         </div>
       ) : null}
@@ -628,18 +628,18 @@ function StepRow({ node, last }: { node: BillDetailStepNode; last: boolean }) {
 function FactsDialog(props: {
   organizationId: string;
   paymentOrderId: string;
-  review: BillDetail['review'];
+  billDraft: BillDetail['draft'];
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const { review } = props;
+  const { billDraft } = props;
   const toast = useToast();
   const valueOf = (key: string) => {
-    const v = review.fields.find((f) => f.key === key)?.value;
+    const v = billDraft.fields.find((f) => f.key === key)?.value;
     return v == null ? '' : String(v);
   };
   const remitOf = (part: string) => {
-    const v = review.remitFields.find((f) => f.key === `remitTo.${part}`)?.value;
+    const v = billDraft.remitFields.find((f) => f.key === `remitTo.${part}`)?.value;
     return v == null ? '' : String(v);
   };
   const [form, setForm] = useState<Record<string, string>>({
@@ -649,7 +649,7 @@ function FactsDialog(props: {
     terms: valueOf('terms'),
     poNumber: valueOf('poNumber'),
     discount: valueOf('discount'),
-    vendorEmail: review.vendor.email ?? '',
+    vendorEmail: billDraft.vendor.email ?? '',
     street: remitOf('street'),
     city: remitOf('city'),
     state: remitOf('state'),

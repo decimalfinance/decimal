@@ -1884,8 +1884,8 @@ async function approvalBlockedFor(
 }
 
 export async function getBillDetail(organizationId: string, paymentOrderId: string, viewerUserId: string) {
-  const review = await getBillDraft(organizationId, paymentOrderId);
-  if (!review) return null;
+  const billDraft = await getBillDraft(organizationId, paymentOrderId);
+  if (!billDraft) return null;
 
   const order = await prisma.paymentOrder.findFirstOrThrow({
     where: { organizationId, paymentOrderId },
@@ -1935,7 +1935,7 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
 
   if (!approvable) {
     return {
-      review,
+      draft: billDraft,
       corrections,
       status: { macroState: null, subStatus },
       approval: null,
@@ -2067,13 +2067,13 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
   // shown to the approver next to their decision. Advisory only — never acts.
   const signal = classifySignal({
     amountUsd: amountRawToUsd(order.amountRaw),
-    vendorName: review.vendor.name,
+    vendorName: billDraft.vendor.name,
     history: await vendorHistory(organizationId, { counterpartyId: order.counterpartyId, counterpartyWalletId: order.counterpartyWalletId, paymentOrderId }),
     corrections,
   });
 
   return {
-    review,
+    draft: billDraft,
     corrections,
     signal,
     status: { macroState: approvable.macro_state, subStatus },

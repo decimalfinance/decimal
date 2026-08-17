@@ -1,4 +1,4 @@
-// Invoice review — verify what was read from the document, then send for
+// Invoice billDraft — verify what was read from the document, then send for
 // approval (uploads/ap-claude-code-handoff.md §3). Document left, one flat
 // field list right, user-resizable split, sticky commit bar.
 //
@@ -40,9 +40,9 @@ export function BillDraftPage() {
   const toast = useToast();
   const queryClient = useQueryClient();
 
-  const review = useQuery({
-    queryKey: ['bill-review', organizationId, paymentOrderId],
-    queryFn: () => billsApi.review(organizationId, paymentOrderId),
+  const billDraft = useQuery({
+    queryKey: ['bill-billDraft', organizationId, paymentOrderId],
+    queryFn: () => billsApi.draft(organizationId, paymentOrderId),
     enabled: Boolean(organizationId && paymentOrderId),
   });
   // Admin tier decides who may clear a duplicate flag (policy override).
@@ -53,7 +53,7 @@ export function BillDraftPage() {
     staleTime: 60_000,
   });
 
-  // Prev/next walks the Needs-review queue.
+  // Prev/next walks the Needs-billDraft queue.
   const workbench = useQuery({
     queryKey: ['bills-workbench', organizationId],
     queryFn: () => billsApi.workbench(organizationId),
@@ -64,7 +64,7 @@ export function BillDraftPage() {
     [workbench.data],
   );
 
-  if (review.isLoading) {
+  if (billDraft.isLoading) {
     return (
       <div className="page page-wide">
         <div className="stack stack-24">
@@ -74,7 +74,7 @@ export function BillDraftPage() {
       </div>
     );
   }
-  if (!review.data) {
+  if (!billDraft.data) {
     return (
       <div className="page">
         <div className="empty">
@@ -87,15 +87,15 @@ export function BillDraftPage() {
   }
 
   return (
-    <ReviewScreen
+    <DraftScreen
       key={paymentOrderId}
       organizationId={organizationId}
-      review={review.data}
+      billDraft={billDraft.data}
       canOverrideDuplicate={Boolean(myAccess.data?.isOwnerOrAdmin)}
       onBack={() => navigate(`/organizations/${organizationId}/bills`)}
       onDone={() => {
         void queryClient.invalidateQueries({ queryKey: ['bills-workbench', organizationId] });
-        void queryClient.invalidateQueries({ queryKey: ['bill-review', organizationId, paymentOrderId] });
+        void queryClient.invalidateQueries({ queryKey: ['bill-billDraft', organizationId, paymentOrderId] });
         const next = queue.find((id) => id !== paymentOrderId);
         if (next) navigate(`/organizations/${organizationId}/bills/${next}/draft`);
         else navigate(`/organizations/${organizationId}/bills`);
@@ -105,16 +105,16 @@ export function BillDraftPage() {
   );
 }
 
-function ReviewScreen(props: {
+function DraftScreen(props: {
   organizationId: string;
-  review: BillDraft;
+  billDraft: BillDraft;
   canOverrideDuplicate: boolean;
   onBack: () => void;
   onDone: () => void;
   toast: ReturnType<typeof useToast>;
 }) {
-  const { organizationId, review, canOverrideDuplicate, onBack, onDone, toast } = props;
-  const readOnly = review.readOnly;
+  const { organizationId, billDraft, canOverrideDuplicate, onBack, onDone, toast } = props;
+  const readOnly = billDraft.readOnly;
   const queryClient = useQueryClient();
 
   // Flag resolutions. One mechanism for every flag rather than a bespoke path
@@ -139,7 +139,7 @@ function ReviewScreen(props: {
     if (question.trim().length < 3) return;
     setSuggesting(true);
     try {
-      const res = await billsApi.suggestAskFields(organizationId, review.paymentOrderId, question.trim());
+      const res = await billsApi.suggestAskFields(organizationId, billDraft.paymentOrderId, question.trim());
       setAskFields(res.fields);
       setSuggestionId(res.suggestionId);
     } catch {
@@ -150,7 +150,7 @@ function ReviewScreen(props: {
   };
 
   const fieldLabel = (key: string) =>
-    [...review.fields, ...review.remitFields].find((f) => f.key === key)?.label
+    [...billDraft.fields, ...billDraft.remitFields].find((f) => f.key === key)?.label
     ?? (key === 'vendor.name' ? 'Vendor name' : key === 'vendor.email' ? 'Email' : key === 'lineItems' ? 'Line items' : key);
   // Fields an unanswered question named, and who asked. This is the payoff of
   // mapping the question: the person asked sees WHERE to look instead of
@@ -160,7 +160,7 @@ function ReviewScreen(props: {
   // not have to hold "which fields was that about" in their head.
   const [hoveredQuestion, setHoveredQuestion] = useState<string | null>(null);
   const askedFields = new Map<string, { by: string; question: string }>();
-  for (const q of review.questions) {
+  for (const q of billDraft.questions) {
     // A handed-back question is still open — the fields it named still want
     // attention, just from someone else now.
     if (!q.stillOpen && hoveredQuestion !== q.billQuestionId) continue;
@@ -174,7 +174,7 @@ function ReviewScreen(props: {
   // height and always visible, because progress is the thing you want at a
   // glance and the thread is the thing you want on demand.
   const [showThread, setShowThread] = useState(false);
-  const openQuestions = review.questions.filter((q) => q.stillOpen).length;
+  const openQuestions = billDraft.questions.filter((q) => q.stillOpen).length;
 
   const [answerFor, setAnswerFor] = useState<string | null>(null);
   const [answerText, setAnswerText] = useState('');
@@ -191,13 +191,13 @@ function ReviewScreen(props: {
     if (outcome === 'forwarded' && !forwardTo) return;
     setAnswering(true);
     try {
-      await billsApi.answerQuestion(organizationId, review.paymentOrderId, billQuestionId, {
+      await billsApi.answerQuestion(organizationId, billDraft.paymentOrderId, billQuestionId, {
         answer: answerText.trim(),
         outcome,
         resolvedFields: outcome === 'answered' ? openFields : settled,
         forwardTo: outcome === 'forwarded' ? { userId: forwardTo, question: answerText.trim() } : null,
       });
-      await queryClient.invalidateQueries({ queryKey: ['bill-review', organizationId, review.paymentOrderId] });
+      await queryClient.invalidateQueries({ queryKey: ['bill-billDraft', organizationId, billDraft.paymentOrderId] });
       toast.success(
         outcome === 'answered' ? 'Answered — the bill moves on.'
           : outcome === 'partial' ? 'Saved. What you could not answer stays open for them.'
@@ -216,8 +216,8 @@ function ReviewScreen(props: {
     }
   };
   const askCandidates = useQuery({
-    queryKey: ['ask-candidates', organizationId, review.paymentOrderId],
-    queryFn: () => billsApi.askCandidates(organizationId, review.paymentOrderId),
+    queryKey: ['ask-candidates', organizationId, billDraft.paymentOrderId],
+    queryFn: () => billsApi.askCandidates(organizationId, billDraft.paymentOrderId),
     enabled: activeResolution?.action === 'ask_someone' || answerFor !== null,
   });
 
@@ -228,7 +228,7 @@ function ReviewScreen(props: {
   const resolutionAsk = (action: ResolutionAction, claimed: string) =>
     action === 'this_is_us'
       ? {
-          title: `Is "${claimed}" a name ${review.organizationName ?? 'your organization'} trades under?`,
+          title: `Is "${claimed}" a name ${billDraft.organizationName ?? 'your organization'} trades under?`,
           help: 'Confirm the name below. It is recorded against your organization, so bills addressed to it are never flagged again — and only an owner or admin can do this.',
           label: 'Name to record',
           cta: 'Yes, record it',
@@ -268,7 +268,7 @@ function ReviewScreen(props: {
     }
     // Prefill the name being claimed; it is almost always the right answer and
     // retyping a company name off the screen is a needless chance to fat-finger it.
-    const flag = review.flags.find((f) => f.kind === flagKind);
+    const flag = billDraft.flags.find((f) => f.kind === flagKind);
     const claimed = action === 'this_is_us' ? /addressed to "([^"]+)"/.exec(flag?.message ?? '')?.[1] ?? '' : '';
     setActiveResolution({ flag: flagKind, action });
     setResolutionValue(claimed);
@@ -280,13 +280,13 @@ function ReviewScreen(props: {
     setResolving(true);
     try {
       if (action === 'this_is_us') {
-        await billsApi.thisIsUs(organizationId, review.paymentOrderId, { name: resolutionValue.trim() });
+        await billsApi.thisIsUs(organizationId, billDraft.paymentOrderId, { name: resolutionValue.trim() });
         toast.success('Recorded — bills addressed to that name will not be flagged again.', 'This is us');
       } else if (action === 'clear_duplicate') {
-        await billsApi.overrideDuplicate(organizationId, review.paymentOrderId, resolutionValue.trim());
+        await billsApi.overrideDuplicate(organizationId, billDraft.paymentOrderId, resolutionValue.trim());
         toast.success('Cleared — your reason is on the bill’s record.', 'Duplicate flag');
       } else if (action === 'ask_someone') {
-        await billsApi.ask(organizationId, review.paymentOrderId, {
+        await billsApi.ask(organizationId, billDraft.paymentOrderId, {
           askedOfUserId: askOf,
           question: resolutionValue.trim(),
           aboutFlag: activeResolution.flag,
@@ -295,12 +295,12 @@ function ReviewScreen(props: {
         });
         toast.success('Asked. The bill waits on their answer rather than moving on.', 'Question sent');
       } else if (action === 'not_ours') {
-        await billsApi.notABill(organizationId, review.paymentOrderId, { reason: 'not_ours', note: resolutionValue.trim() });
+        await billsApi.notABill(organizationId, billDraft.paymentOrderId, { reason: 'not_ours', note: resolutionValue.trim() });
         toast.success('Closed as addressed to another company.', 'Not ours');
         onDone();
         return;
       }
-      await queryClient.invalidateQueries({ queryKey: ['bill-review', organizationId, review.paymentOrderId] });
+      await queryClient.invalidateQueries({ queryKey: ['bill-billDraft', organizationId, billDraft.paymentOrderId] });
       setActiveResolution(null);
       setResolutionValue('');
       setConfirmError(null);
@@ -314,17 +314,17 @@ function ReviewScreen(props: {
   // --- field state ---------------------------------------------------------
   const [fields, setFields] = useState<FieldStateMap>(() => {
     const map: FieldStateMap = {};
-    for (const f of [...review.fields, ...review.remitFields]) {
+    for (const f of [...billDraft.fields, ...billDraft.remitFields]) {
       map[f.key] = { value: f.value == null ? '' : String(f.value), state: f.state };
     }
     return map;
   });
   const [lines, setLines] = useState<BillDraftLine[]>(() =>
-    review.lines.length > 0 ? review.lines : [{ description: '', quantity: 1, unitPrice: null, amount: null, category: null }],
+    billDraft.lines.length > 0 ? billDraft.lines : [{ description: '', quantity: 1, unitPrice: null, amount: null, category: null }],
   );
-  const [tax, setTax] = useState<string>(review.taxAmount != null ? String(review.taxAmount) : '0');
-  const [vendorName, setVendorName] = useState(review.vendor.name);
-  const [vendorEmail, setVendorEmail] = useState(review.vendor.email ?? '');
+  const [tax, setTax] = useState<string>(billDraft.taxAmount != null ? String(billDraft.taxAmount) : '0');
+  const [vendorName, setVendorName] = useState(billDraft.vendor.name);
+  const [vendorEmail, setVendorEmail] = useState(billDraft.vendor.email ?? '');
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
@@ -333,7 +333,7 @@ function ReviewScreen(props: {
   const [activeSource, setActiveSource] = useState<DocSource>(null);
 
   // Chart of accounts for the category picker — same source and cache as the
-  // coding inbox. Falls back to the review packet's options, then to whatever
+  // coding inbox. Falls back to the billDraft packet's options, then to whatever
   // categories the lines already carry, so the list is stable and never
   // shrinks when a selection changes.
   const accountsQuery = useQuery({
@@ -345,25 +345,25 @@ function ReviewScreen(props: {
   });
   const categoryOptions = useMemo<CategoryOption[]>(() => {
     // Prefer the live chart (full, numbered, grouped like the books); fall back
-    // to the review packet's options (builtin chart when QBO isn't connected).
+    // to the billDraft packet's options (builtin chart when QBO isn't connected).
     const fromBooks: CategoryOption[] = (accountsQuery.data?.items ?? []).map((a) => ({
       value: a.fullyQualifiedName ?? a.name,
       label: a.acctNum ? `${a.acctNum} · ${a.fullyQualifiedName ?? a.name}` : (a.fullyQualifiedName ?? a.name),
       group: a.accountType,
     }));
-    const seed = fromBooks.length > 0 ? fromBooks : review.categoryOptions;
+    const seed = fromBooks.length > 0 ? fromBooks : billDraft.categoryOptions;
     // A category already on a line (an older suggestion, or from before a chart
     // change) stays selectable instead of silently disappearing.
     const known = new Set(seed.map((o) => o.value));
     const extras: CategoryOption[] = [];
-    for (const line of review.lines) {
+    for (const line of billDraft.lines) {
       if (line.category && !known.has(line.category)) {
         known.add(line.category);
         extras.push({ value: line.category, label: line.category, num: null, group: 'Suggestions' });
       }
     }
     return [...extras, ...seed];
-  }, [accountsQuery.data, review.categoryOptions, review.lines]);
+  }, [accountsQuery.data, billDraft.categoryOptions, billDraft.lines]);
 
   const setFieldValue = (key: string, value: string) => {
     setFields((prev) => ({
@@ -387,7 +387,7 @@ function ReviewScreen(props: {
   // Approval routes on amount + coded lines: those must exist before sending.
   // Everything else (due date, invoice number, address…) can be filled while
   // the bill is already in approval.
-  const blockingFlags = review.flags.filter((f) => f.blocking);
+  const blockingFlags = billDraft.flags.filter((f) => f.blocking);
   const realLines = lines.filter((l) => l.description.trim());
   const tier1Gap = documentTotal <= 0
     ? 'Add the total due before sending.'
@@ -442,7 +442,7 @@ function ReviewScreen(props: {
           .map(([key]) => key),
         noteForApprovers: note.trim() || null,
       };
-      await billsApi.confirm(organizationId, review.paymentOrderId, body);
+      await billsApi.confirm(organizationId, billDraft.paymentOrderId, body);
       toast.success('Sent for approval', 'Recorded exactly as shown on this screen.');
       onDone();
     } catch (err) {
@@ -454,7 +454,7 @@ function ReviewScreen(props: {
     } finally {
       setSubmitting(false);
     }
-  }, [canConfirm, fields, lines, documentTotal, taxNumber, note, vendorName, vendorEmail, organizationId, review.paymentOrderId, toast, onDone]);
+  }, [canConfirm, fields, lines, documentTotal, taxNumber, note, vendorName, vendorEmail, organizationId, billDraft.paymentOrderId, toast, onDone]);
 
   // ⌘↵ confirms.
   useEffect(() => {
@@ -499,10 +499,10 @@ function ReviewScreen(props: {
           </button>
           {/* Who put this bill here — a reviewer's first question when a bill
               they didn't upload appears in their queue. */}
-          {review.source === 'email' && review.sourceLabel ? (
+          {billDraft.source === 'email' && billDraft.sourceLabel ? (
             <span className="cell-source" style={{ marginLeft: 12 }}>
               <Ico.mail w={15} />
-              <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{review.sourceLabel}</span>
+              <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{billDraft.sourceLabel}</span>
             </span>
           ) : null}
         </div>
@@ -523,12 +523,12 @@ function ReviewScreen(props: {
             </div>
 
             {/* Sent back by an approver — the reviewer's homework, above all flags */}
-            {review.sentBack ? (
+            {billDraft.sentBack ? (
               <div className="callout callout-warning">
                 <Ico.reset w={16} />
                 <span>
-                  <b>{review.sentBack.byName ?? 'An approver'} sent this bill back{review.sentBack.reason ? ':' : '.'}</b>
-                  {review.sentBack.reason ? ` “${review.sentBack.reason}”` : ''} Fix it below and confirm again — it will go through approval fresh.
+                  <b>{billDraft.sentBack.byName ?? 'An approver'} sent this bill back{billDraft.sentBack.reason ? ':' : '.'}</b>
+                  {billDraft.sentBack.reason ? ` “${billDraft.sentBack.reason}”` : ''} Fix it below and confirm again — it will go through approval fresh.
                 </span>
               </div>
             ) : null}
@@ -569,26 +569,26 @@ function ReviewScreen(props: {
             {/* Progress and the conversation are one component: both answer
                 "where is this bill", so they belong above the same rule rather
                 than the thread appearing to be page content. */}
-            {review.route.length > 0 ? (
+            {billDraft.route.length > 0 ? (
               <div style={{ margin: '-20px -24px 0', padding: '12px 24px', borderBottom: '1px solid var(--border)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                  {review.route.map((n, i) => (
+                  {billDraft.route.map((n, i) => (
                     <span key={`${n.name}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span className={`pill pill-min ${n.state === 'done' ? 'pill-success' : n.state === 'waiting' ? 'pill-warning' : n.state === 'declined' ? 'pill-danger' : 'pill-neutral'}`}>
                         <span className="dot" />{n.name.split(' ')[0]}
                       </span>
-                      {i < review.route.length - 1 ? <span style={{ color: 'var(--text-faint)' }}>→</span> : null}
+                      {i < billDraft.route.length - 1 ? <span style={{ color: 'var(--text-faint)' }}>→</span> : null}
                     </span>
                   ))}
                   <span style={{ marginLeft: 4, color: 'var(--text-muted)' }}>
-                    {review.route.filter((n) => n.state === 'done').length} of {review.route.length} approved
+                    {billDraft.route.filter((n) => n.state === 'done').length} of {billDraft.route.length} approved
                   </span>
                   <span style={{ flex: 1 }} />
                   {/* Count OUTSIDE the button: a number crammed into a round
                       icon button reads as a badge on nothing and crowds the
                       chevron it sits next to. */}
-                  {review.questions.length > 0 ? (
-                    <span style={{ color: 'var(--text-muted)' }}>{review.questions.length}</span>
+                  {billDraft.questions.length > 0 ? (
+                    <span style={{ color: 'var(--text-muted)' }}>{billDraft.questions.length}</span>
                   ) : null}
                   <button
                     type="button"
@@ -605,7 +605,7 @@ function ReviewScreen(props: {
                 {/* A conversation, not a stack of alert boxes. Each exchange is
                     one line you can scan — who asked whom, and whether it is
                     settled — with the detail folded away underneath. */}
-                {review.questions.filter((q) => showThread || (q.youWereAsked && q.stillOpen)).map((q) => {
+                {billDraft.questions.filter((q) => showThread || (q.youWereAsked && q.stillOpen)).map((q) => {
                   const settled = q.outcome === 'answered';
                   const fields = q.openFields.length ? q.openFields : q.highlightFields;
                   return (
@@ -669,7 +669,7 @@ function ReviewScreen(props: {
             {/* A flag states what is wrong AND what can be done about it. The
                 rule the backend enforces: every blocking flag offers at least
                 one way out, so this never renders a dead end. */}
-            {review.flags.map((flag) => (
+            {billDraft.flags.map((flag) => (
               <div
                 key={flag.kind}
                 className={`callout ${flag.severity === 'danger' ? 'callout-danger' : flag.severity === 'warning' ? 'callout-warning' : 'callout-info'}`}
@@ -807,7 +807,7 @@ function ReviewScreen(props: {
                 <div className="sh-titles">
                   <h2>Vendor</h2>
                   <p className="sh-desc">
-                    {review.vendor.isNew
+                    {billDraft.vendor.isNew
                       ? 'First bill from this vendor — payment details go through verification.'
                       : 'A vendor you already pay.'}
                   </p>
@@ -820,7 +820,7 @@ function ReviewScreen(props: {
                     className="input"
                     value={vendorName}
                     disabled={readOnly}
-                    onFocus={() => setActiveSource(review.vendor.nameSource ?? null)}
+                    onFocus={() => setActiveSource(billDraft.vendor.nameSource ?? null)}
                     onChange={(e) => setVendorName(e.target.value)}
                   />
                 </div>
@@ -831,14 +831,14 @@ function ReviewScreen(props: {
                     value={vendorEmail}
                     disabled={readOnly}
                     placeholder="Not on document"
-                    onFocus={() => setActiveSource(review.vendor.emailSource ?? null)}
+                    onFocus={() => setActiveSource(billDraft.vendor.emailSource ?? null)}
                     onChange={(e) => setVendorEmail(e.target.value)}
                   />
                 </div>
               </div>
               <div className="rev-grid" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr' }}>
-                {review.remitFields.map((f) => (
-                  <ReviewField
+                {billDraft.remitFields.map((f) => (
+                  <DraftField
                     key={f.key}
                     askedBy={askedFields.get(f.key)?.by ?? null}
                     askedQuestion={askedFields.get(f.key)?.question ?? null}
@@ -859,15 +859,15 @@ function ReviewScreen(props: {
                 <div className="sh-titles">
                   <h2>Bill details</h2>
                   <p className="sh-desc">
-                    {review.fields.some((f) => f.state === 'needs_look') && !readOnly
+                    {billDraft.fields.some((f) => f.state === 'needs_look') && !readOnly
                       ? 'A few fields need a look — confirm or correct them.'
                       : 'Everything checks out.'}
                   </p>
                 </div>
               </div>
               <div className="rev-grid">
-                {review.fields.map((f) => (
-                  <ReviewField
+                {billDraft.fields.map((f) => (
+                  <DraftField
                     key={f.key}
                     askedBy={askedFields.get(f.key)?.by ?? null}
                     askedQuestion={askedFields.get(f.key)?.question ?? null}
@@ -887,8 +887,8 @@ function ReviewScreen(props: {
               <div className="sec-head">
                 <div className="sh-titles">
                   <h2>Line items</h2>
-                  {review.codingSuggestionSource ? (
-                    <p className="sh-desc">Categories pre-filled — {review.codingSuggestionSource.detail}. Change any that look wrong.</p>
+                  {billDraft.codingSuggestionSource ? (
+                    <p className="sh-desc">Categories pre-filled — {billDraft.codingSuggestionSource.detail}. Change any that look wrong.</p>
                   ) : null}
                 </div>
                 {!readOnly ? (
@@ -961,8 +961,8 @@ function ReviewScreen(props: {
                       beside them, not on its own row (per the design). */}
                   <tfoot>
                     <tr
-                      onClick={() => setActiveSource(review.totalsSources?.lineItems ?? null)}
-                      style={review.totalsSources?.lineItems ? { cursor: 'pointer' } : undefined}
+                      onClick={() => setActiveSource(billDraft.totalsSources?.lineItems ?? null)}
+                      style={billDraft.totalsSources?.lineItems ? { cursor: 'pointer' } : undefined}
                     >
                       <td colSpan={3} rowSpan={3} className="arith-cell">
                         <span className={`arith-note${arithmeticOk ? '' : ' bad'}`}>
@@ -975,7 +975,7 @@ function ReviewScreen(props: {
                       <td className="lt-label">Line items</td>
                       <td className="td-num">{usd(linesTotal)}</td>
                     </tr>
-                    <tr onFocus={() => setActiveSource(review.totalsSources?.tax ?? null)}>
+                    <tr onFocus={() => setActiveSource(billDraft.totalsSources?.tax ?? null)}>
                       <td className="lt-label">Tax</td>
                       <td>
                         <MoneyInput value={taxNumber} disabled={readOnly} onChange={(v) => setTax(v == null ? '' : String(v))} />
@@ -983,8 +983,8 @@ function ReviewScreen(props: {
                     </tr>
                     <tr
                       className="grand"
-                      onClick={() => setActiveSource(review.totalsSources?.total ?? null)}
-                      style={review.totalsSources?.total ? { cursor: 'pointer' } : undefined}
+                      onClick={() => setActiveSource(billDraft.totalsSources?.total ?? null)}
+                      style={billDraft.totalsSources?.total ? { cursor: 'pointer' } : undefined}
                     >
                       <td className="lt-label">Total</td>
                       <td className="td-num">{usd(computedTotal)}</td>
@@ -1005,13 +1005,13 @@ function ReviewScreen(props: {
                   maxLength={500}
                 />
               </div>
-            ) : review.verification ? (
+            ) : billDraft.verification ? (
               <div className="callout">
                 <Ico.checkSm w={16} />
                 <span>
                   Confirmed and sent for approval
-                  {review.verification.confirmedAt ? ` on ${new Date(review.verification.confirmedAt).toLocaleDateString()}` : ''}.
-                  {review.verification.noteForApprovers ? ` Note: "${review.verification.noteForApprovers}"` : ''}
+                  {billDraft.verification.confirmedAt ? ` on ${new Date(billDraft.verification.confirmedAt).toLocaleDateString()}` : ''}.
+                  {billDraft.verification.noteForApprovers ? ` Note: "${billDraft.verification.noteForApprovers}"` : ''}
                 </span>
               </div>
             ) : null}
@@ -1027,7 +1027,7 @@ function ReviewScreen(props: {
 
         <DocumentPane
           organizationId={organizationId}
-          document={review.document}
+          document={billDraft.document}
           activeSource={activeSource}
           width={`${panelPct}%`}
         />
@@ -1060,7 +1060,7 @@ function ReviewScreen(props: {
       {notABillOpen ? (
         <NotABillDialog
           organizationId={organizationId}
-          paymentOrderId={review.paymentOrderId}
+          paymentOrderId={billDraft.paymentOrderId}
           onClose={() => setNotABillOpen(false)}
           onDone={() => { setNotABillOpen(false); onDone(); }}
           toast={toast}
@@ -1247,7 +1247,7 @@ function AccountPicker(props: {
   );
 }
 
-function ReviewField(props: {
+function DraftField(props: {
   def: BillDraftField;
   current: { value: string; state: BillDraftField['state'] };
   readOnly: boolean;
@@ -1473,7 +1473,7 @@ export function DocumentDraftPage() {
 
   const data = status.data;
 
-  // Read complete → swap to the real review of the first created bill.
+  // Read complete → swap to the real billDraft of the first created bill.
   useEffect(() => {
     if (data?.status === 'processed' && data.paymentOrders[0]) {
       navigate(

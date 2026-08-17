@@ -410,7 +410,7 @@ test('bills workbench triages uploads; review confirm sends the bill onward', as
     `/organizations/${setup.organization.organizationId}/bills/${billId}/detail`,
     setup.sessionToken,
   );
-  assert.equal(detail.review.paymentOrderId, billId);
+  assert.equal(detail.draft.paymentOrderId, billId);
   assert.ok(detail.approval, 'the confirmed bill has an approvable');
   assert.equal(detail.viewer.isRequester, true);
   assert.ok(Array.isArray(detail.approval.steps));

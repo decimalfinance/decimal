@@ -1557,7 +1557,7 @@ export const billsApi = {
   workbench(organizationId: string) {
     return request<{ counts: Record<BillBucket, number>; reviewCounts: { ready: number; missingInfo: number }; bills: WorkbenchBill[] }>(`/organizations/${organizationId}/bills/workbench`);
   },
-  review(organizationId: string, paymentOrderId: string) {
+  draft(organizationId: string, paymentOrderId: string) {
     return request<BillDraft>(`/organizations/${organizationId}/bills/${paymentOrderId}/draft`);
   },
   detail(organizationId: string, paymentOrderId: string) {
@@ -1679,7 +1679,7 @@ export interface BillDetailStepNode {
 }
 
 export interface BillDetail {
-  review: BillDraft;
+  draft: BillDraft;
   corrections: Array<{ field: string; from: string; to: string; by: string | null }>;
   // Advisory: routine vs worth-a-look, same classifier as the approvals inbox.
   signal?: InboxSignal;

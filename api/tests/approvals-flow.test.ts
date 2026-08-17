@@ -1082,7 +1082,7 @@ test('"this is us" clears the flag through the API, and a member is refused', as
 
   const res = await post(`/organizations/${orgId}/bills/${bill.billId}/this-is-us`, { name: 'Halcyon Labs' }, owner.token);
   assert.equal(res.added, true);
-  assert.ok(!res.review.flags.some((f: any) => f.kind === 'addressed_elsewhere'),
+  assert.ok(!res.draft.flags.some((f: any) => f.kind === 'addressed_elsewhere'),
     'the flag is gone in the same response — no reload needed to see it resolved');
 });
 

@@ -1,4 +1,4 @@
-// Bills workbench + invoice review routes (AP workbench redesign).
+// Bills workbench + bill draft routes (AP workbench redesign).
 import { Router } from 'express';
 import { z } from 'zod';
 import { assertOrganizationAccess } from '../auth/organization-access.js';
@@ -27,12 +27,12 @@ billsRouter.get('/organizations/:organizationId/bills/:paymentOrderId/draft', as
   const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
   await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
-  const review = await getBillDraft(organizationId, paymentOrderId, req.auth!.userId);
-  if (!review) {
+  const billDraft = await getBillDraft(organizationId, paymentOrderId, req.auth!.userId);
+  if (!billDraft) {
     res.status(404).json({ error: 'Bill not found' });
     return;
   }
-  res.json(review);
+  res.json(billDraft);
 }));
 
 billsRouter.get('/organizations/:organizationId/bills/approvals-inbox', asyncRoute(async (req, res) => {
@@ -117,14 +117,14 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/duplicate
   await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
   const input = duplicateOverrideSchema.parse(req.body);
   const user = await prisma.user.findUniqueOrThrow({ where: { userId: req.auth!.userId }, select: { displayName: true } });
-  const review = await overrideDuplicateFlag({
+  const billDraft = await overrideDuplicateFlag({
     organizationId,
     paymentOrderId,
     actorUserId: req.auth!.userId,
     actorName: user.displayName,
     reason: input.reason,
   });
-  res.json(review);
+  res.json(billDraft);
 }));
 
 // "This is us" — record a name the organization also trades under, resolving
@@ -150,7 +150,7 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/this-is-u
       actorName: user.displayName,
       fromPaymentOrderId: paymentOrderId,
     });
-    res.json({ ...result, review: await getBillDraft(organizationId, paymentOrderId, req.auth!.userId) });
+    res.json({ ...result, draft: await getBillDraft(organizationId, paymentOrderId, req.auth!.userId) });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not record that name.';
     if (/owner or admin/.test(message)) throw forbidden(message);
@@ -238,7 +238,7 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/ask', asy
       decidedByUserId: req.auth!.userId,
     });
   }
-  res.status(201).json({ billQuestionId: asked.billQuestionId, review: await getBillDraft(organizationId, paymentOrderId, req.auth!.userId) });
+  res.status(201).json({ billQuestionId: asked.billQuestionId, draft: await getBillDraft(organizationId, paymentOrderId, req.auth!.userId) });
 }));
 
 // Answer a question someone asked you about a bill. Visibility is enough to
@@ -295,14 +295,14 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/send-back
   await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
   const input = sendBackSchema.parse(req.body);
   const user = await prisma.user.findUniqueOrThrow({ where: { userId: req.auth!.userId }, select: { displayName: true } });
-  const review = await sendApprovedBillBackToReview({
+  const billDraft = await sendApprovedBillBackToReview({
     organizationId,
     paymentOrderId,
     actorUserId: req.auth!.userId,
     actorName: user.displayName,
     reason: input.reason,
   });
-  res.json(review);
+  res.json(billDraft);
 }));
 
 const factsSchema = z.object({
