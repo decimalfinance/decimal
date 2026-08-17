@@ -54,9 +54,9 @@ const AGENT_FLAGGED_STATES = new Set(['agent_flagged']);
  * The five stages map to user-facing language, not backend mechanics:
  *
  *   Received   — agent extracted the payment from an invoice
- *   Reviewed   — human cleared it (or policy auto-cleared it). Proposal
- *                creation lives inside this stage; the user doesn't care
- *                that there's a separate "propose" step.
+ *   Submitted  — a person finished the draft and sent it onward (or policy
+ *                did). Proposal creation lives inside this stage; the user
+ *                doesn't care that there's a separate "propose" step.
  *   Signing    — multisig members are signing
  *   Sent       — executed on chain
  *   Settled    — reconciliation confirms the transfer landed
@@ -74,7 +74,7 @@ export function buildSquadsPaymentLifecycle(args: {
   /**
    * If true, when the product is in a non-mismatch blocked state (e.g.
    * `exception`/`partially_settled` on a payment run) the Settled sub-text
-   * surfaces "Needs review" instead of falling through to the regular
+   * surfaces "Needs attention" instead of falling through to the regular
    * verifying state. Defaults to false.
    */
   showBlockedDraftState?: boolean;
@@ -102,10 +102,10 @@ export function buildSquadsPaymentLifecycle(args: {
 
   const agentFlagged = AGENT_FLAGGED_STATES.has(s);
   const isReadyToPropose = READY_TO_PROPOSE_STATES.has(s);
-  const reviewStillPending = agentFlagged || PRE_PROPOSAL_STATES.has(s);
+  const draftStillPending = agentFlagged || PRE_PROPOSAL_STATES.has(s);
 
   const verifyingNow = executionDone && !settled && settlementVerification === 'pending';
-  const showBlockedReview = !verifyMismatch && blocked && Boolean(args.showBlockedDraftState);
+  const showBlockedDraft = !verifyMismatch && blocked && Boolean(args.showBlockedDraftState);
 
   return [
     {
@@ -115,8 +115,8 @@ export function buildSquadsPaymentLifecycle(args: {
       state: 'complete',
     },
     {
-      id: 'reviewed',
-      label: proposedDone || isReadyToPropose ? 'Reviewed' : agentFlagged ? 'Review' : 'Reviewing',
+      id: 'submitted',
+      label: proposedDone || isReadyToPropose ? 'Submitted' : agentFlagged ? 'Draft' : 'Preparing',
       sub: cancelled
         ? 'Cancelled'
         : proposedDone
@@ -125,14 +125,14 @@ export function buildSquadsPaymentLifecycle(args: {
             ? 'Ready to sign'
             : agentFlagged
               ? 'Needs your eyes'
-              : reviewStillPending
+              : draftStillPending
                 ? 'Auto-checking'
                 : 'Pending',
       state: cancelled
         ? 'blocked'
         : proposedDone || isReadyToPropose
           ? 'complete'
-          : agentFlagged || reviewStillPending
+          : agentFlagged || draftStillPending
             ? 'current'
             : 'pending',
     },
@@ -155,14 +155,14 @@ export function buildSquadsPaymentLifecycle(args: {
     {
       id: 'sent',
       label: executionDone ? 'Sent' : 'Send',
-      sub: showBlockedReview
+      sub: showBlockedDraft
         ? 'Blocked'
         : executionDone
           ? 'On chain'
           : approvalDone
             ? 'Ready'
             : 'Pending',
-      state: showBlockedReview
+      state: showBlockedDraft
         ? 'blocked'
         : executionDone
           ? 'complete'
@@ -175,8 +175,8 @@ export function buildSquadsPaymentLifecycle(args: {
       label: verifyMismatch ? 'Mismatch' : settled ? 'Settled' : 'Settle',
       sub: verifyMismatch
         ? 'Amounts did not match'
-        : showBlockedReview
-          ? 'Needs review'
+        : showBlockedDraft
+          ? 'Needs attention'
           : settled
             ? args.settledSub
             : verifyingNow
@@ -184,7 +184,7 @@ export function buildSquadsPaymentLifecycle(args: {
               : executionDone
                 ? 'Pending'
                 : 'Pending',
-      state: verifyMismatch || showBlockedReview
+      state: verifyMismatch || showBlockedDraft
         ? 'blocked'
         : settled
           ? 'complete'
