@@ -13,7 +13,7 @@ import { SLPill } from '../dec/primitives';
 
 type ApprovalItem = { id: string; vendor: string; amt: string; approved: number; total: number };
 type AutopaidItem = { id: string; vendor: string; amt: string; policy: string };
-type ReviewItem = { id: string; vendor: string; amt: string; reason: string };
+type DraftItem = { id: string; vendor: string; amt: string; reason: string };
 
 function vendorName(order: PaymentOrder): string {
   return order.counterparty?.displayName
@@ -21,7 +21,7 @@ function vendorName(order: PaymentOrder): string {
     ?? 'Untitled vendor';
 }
 
-function reviewReason(order: PaymentOrder): string {
+function draftReason(order: PaymentOrder): string {
   if (order.counterpartyWallet?.trustState && order.counterpartyWallet.trustState !== 'trusted') {
     return 'Vendor wallet unreviewed';
   }
@@ -118,7 +118,7 @@ export function InboxPage({ session }: { session: AuthenticatedSession }) {
     [orders],
   );
 
-  const review: ReviewItem[] = useMemo(
+  const review: DraftItem[] = useMemo(
     () =>
       orders
         .filter((o) => o.derivedState === 'draft')
@@ -127,7 +127,7 @@ export function InboxPage({ session }: { session: AuthenticatedSession }) {
           id: o.paymentOrderId,
           vendor: vendorName(o),
           amt: `${formatRawUsdcCompact(o.amountRaw)} USDC`,
-          reason: reviewReason(o),
+          reason: draftReason(o),
         })),
     [orders],
   );
@@ -156,7 +156,7 @@ export function InboxPage({ session }: { session: AuthenticatedSession }) {
 
   const approvalCount = approval.length;
   const autopaidCount = autopaid.length;
-  const reviewCount = review.length;
+  const draftCount = review.length;
   const treasuryCount = treasuries.length;
   // First-run: org exists but no treasury yet. Per the design (pages-onboard
   // → FirstRunDashboard), Overview replaces the 3-column grid with a
@@ -191,7 +191,7 @@ export function InboxPage({ session }: { session: AuthenticatedSession }) {
                 <b>{approvalCount} payment{approvalCount === 1 ? '' : 's'}</b>{' '}
                 {approvalCount === 0 ? 'waiting on your approval' : (approvalCount === 1 ? 'is waiting on your approval' : 'are waiting on your approval')}.
                 This month your agent auto-paid <b>{autopaidCount} bill{autopaidCount === 1 ? '' : 's'}</b> on its own
-                and left <b>{reviewCount}</b> in draft.
+                and left <b>{draftCount}</b> in draft.
               </>
             )}
           </p>
@@ -235,7 +235,7 @@ export function InboxPage({ session }: { session: AuthenticatedSession }) {
               <GetStartedRow
                 n="3"
                 title="Invite your team"
-                desc="Add the people who'll review and approve payments."
+                desc="Add the people who'll prepare and approve bills."
                 cta={
                   <button
                     type="button"
@@ -316,7 +316,7 @@ export function InboxPage({ session }: { session: AuthenticatedSession }) {
           <InboxColumn
             title="Draft"
             icon={<Ico.shield w={15} />}
-            count={reviewCount}
+            count={draftCount}
             alert
             footerHref={`${orgBase}/payments?filter=draft`}
             footerLabel="View all drafts"

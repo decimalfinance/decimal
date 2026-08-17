@@ -77,7 +77,7 @@ export function buildSquadsPaymentLifecycle(args: {
    * surfaces "Needs review" instead of falling through to the regular
    * verifying state. Defaults to false.
    */
-  showBlockedReviewState?: boolean;
+  showBlockedDraftState?: boolean;
   /**
    * The Squads proposal has reached its approval threshold (ready to execute) while the
    * product state is still `proposed`. Threshold-met lives on the proposal, not the
@@ -105,7 +105,7 @@ export function buildSquadsPaymentLifecycle(args: {
   const reviewStillPending = agentFlagged || PRE_PROPOSAL_STATES.has(s);
 
   const verifyingNow = executionDone && !settled && settlementVerification === 'pending';
-  const showBlockedReview = !verifyMismatch && blocked && Boolean(args.showBlockedReviewState);
+  const showBlockedReview = !verifyMismatch && blocked && Boolean(args.showBlockedDraftState);
 
   return [
     {

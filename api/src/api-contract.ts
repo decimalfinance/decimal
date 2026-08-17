@@ -201,7 +201,7 @@ export const API_ENDPOINTS = [
   endpoint('create_payment_order', 'POST', '/organizations/{organizationId}/payment-orders', ['payment orders'], 'Create payment order', 'session', { scope: 'payments:write' }),
   endpoint('get_payment_order', 'GET', '/organizations/{organizationId}/payment-orders/{paymentOrderId}', ['payment orders'], 'Get payment order detail', 'session', { scope: 'organization:read' }),
   endpoint('update_payment_order', 'PATCH', '/organizations/{organizationId}/payment-orders/{paymentOrderId}', ['payment orders'], 'Update payment order', 'session', { scope: 'payments:write' }),
-  endpoint('clear_payment_order_review', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/clear-review', ['payment orders'], 'Clear an AP-intake flagged payment order and advance it to the proposal-ready path', 'session', {
+  endpoint('submit_payment_order', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/submit', ['payment orders'], 'Clear an AP-intake flagged payment order and advance it to the proposal-ready path', 'session', {
     scope: 'payments:write',
     requestBody: { submitNote: 'string optional', trustCounterpartyWallet: 'boolean default true', autoAdvance: 'boolean default true' },
     response: { automation: 'agent routing result when autoAdvance is true' },

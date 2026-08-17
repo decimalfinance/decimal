@@ -1359,7 +1359,7 @@ export type ReplaceSpendingLimitPolicyIntentResponse = SpendingLimitPolicyIntent
 };
 
 // ─── Agent-aware invoice intake + advance ──────────────────────────────────
-// Per-row outcome from POST /invoices/upload (and /clear-review,
+// Per-row outcome from POST /invoices/upload (and /submit,
 // /agent/advance). Mirrors PaymentOrderAgentAdvanceResult in the backend.
 // `proposal_submitted` and `spending_limit_executed` are success cases where
 // the org agent routed the payment on chain. Other statuses carry a `reason`
@@ -1452,10 +1452,10 @@ export type InvoiceUploadResult = {
   automation: PaymentOrderAgentAdvanceResult[];
 };
 
-// Response shape from POST /payment-orders/:id/clear-review when
+// Response shape from POST /payment-orders/:id/submit when
 // autoAdvance is true. It is a PaymentOrder detail with an extra
 // `automation` field describing what the agent did (or null if
 // autoAdvance was false).
-export type PaymentOrderClearReviewResult = PaymentOrder & {
+export type PaymentOrderSubmitResult = PaymentOrder & {
   automation: PaymentOrderAgentAdvanceResult | null;
 };

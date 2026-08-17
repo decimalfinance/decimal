@@ -227,7 +227,7 @@ export function PaymentDetailPage() {
   // "Approve & continue" on a draft order. Clears the AP-intake
   // flag, trusts the counterparty wallet, and asks the agent router to either
   // use a spending limit or create a Squads proposal in the same call.
-  const clearReviewMutation = useMutation({
+  const submitMutation = useMutation({
     mutationFn: () =>
       api.markBillSubmitted(organizationId!, paymentOrderId!, {
         autoAdvance: true,
@@ -623,11 +623,11 @@ export function PaymentDetailPage() {
             amountLabel={amountLabel}
             submittedSignature={submittedSig}
             routing={routeMutation.isPending}
-            approvingReview={clearReviewMutation.isPending}
+            submitting={submitMutation.isPending}
             exporting={proofMutation.isPending}
             cancelling={cancelMutation.isPending}
             onRoute={() => routeMutation.mutate()}
-            onApproveReview={() => clearReviewMutation.mutate()}
+            onSubmit={() => submitMutation.mutate()}
             onExportProof={() => proofMutation.mutate()}
             onCancel={() => cancelMutation.mutate()}
             ownPersonalWallets={ownPersonalWallets}
@@ -1008,11 +1008,11 @@ function ActionBar(props: {
   amountLabel: string;
   submittedSignature: string | null;
   routing: boolean;
-  approvingReview: boolean;
+  submitting: boolean;
   exporting: boolean;
   cancelling: boolean;
   onRoute: () => void;
-  onApproveReview: () => void;
+  onSubmit: () => void;
   onExportProof: () => void;
   onCancel: () => void;
   ownPersonalWallets: UserWallet[];
@@ -1037,10 +1037,10 @@ function ActionBar(props: {
     amountLabel,
     submittedSignature,
     routing,
-    approvingReview,
+    submitting,
     exporting,
     onRoute,
-    onApproveReview,
+    onSubmit,
     onExportProof,
     ownPersonalWallets,
     proposalCreatorWalletId,
@@ -1081,11 +1081,11 @@ function ActionBar(props: {
             <button
               type="button"
               className="btn btn-primary"
-              onClick={onApproveReview}
-              disabled={approvingReview}
-              aria-busy={approvingReview}
+              onClick={onSubmit}
+              disabled={submitting}
+              aria-busy={submitting}
             >
-              {approvingReview ? 'Approving…' : (
+              {submitting ? 'Approving…' : (
                 <>Approve &amp; continue<Ico.arrowRight w={14} /></>
               )}
             </button>

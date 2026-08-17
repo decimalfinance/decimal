@@ -169,7 +169,7 @@ paymentOrdersRouter.patch('/organizations/:organizationId/payment-orders/:paymen
   }
 });
 
-paymentOrdersRouter.post('/organizations/:organizationId/payment-orders/:paymentOrderId/clear-review', asyncRoute(async (req, res) => {
+paymentOrdersRouter.post('/organizations/:organizationId/payment-orders/:paymentOrderId/submit', asyncRoute(async (req, res) => {
     const { organizationId, paymentOrderId } = paymentOrderParamsSchema.parse(req.params);
     await assertOrganizationAccess(organizationId, req.auth!);
     const input = clearReviewSchema.parse(req.body);

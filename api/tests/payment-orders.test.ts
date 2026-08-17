@@ -165,7 +165,7 @@ test('invoice upload parks every bill in review; clearing review advances it', a
 
   const reviewOrder = result.paymentOrders[1].paymentOrder;
   const cleared = await post(
-    `/organizations/${setup.organization.organizationId}/payment-orders/${reviewOrder.paymentOrderId}/clear-review`,
+    `/organizations/${setup.organization.organizationId}/payment-orders/${reviewOrder.paymentOrderId}/submit`,
     {
       submitNote: 'Verified invoice and wallet by email.',
       autoAdvance: false,

@@ -522,7 +522,7 @@ function DraftScreen(props: {
               <div className="rh-amount">{usd(documentTotal)}</div>
             </div>
 
-            {/* Sent back by an approver — the reviewer's homework, above all flags */}
+            {/* Sent back by an approver — the bill clerk's homework, above all flags */}
             {billDraft.sentBack ? (
               <div className="callout callout-warning">
                 <Ico.reset w={16} />

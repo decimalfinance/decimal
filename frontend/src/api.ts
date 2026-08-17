@@ -27,7 +27,7 @@ import type {
   BatchCsvPdraftResult,
   InvoiceUploadResult,
   PaymentOrderAgentAdvanceResult,
-  PaymentOrderClearReviewResult,
+  PaymentOrderSubmitResult,
   PublicInvite,
   ConfirmSquadsTreasuryRequest,
   RegisterSquadsTreasuryVaultRequest,
@@ -1109,8 +1109,8 @@ export const api = {
       autoAdvance?: boolean;
     },
   ) {
-    return request<PaymentOrderClearReviewResult>(
-      `/organizations/${organizationId}/payment-orders/${paymentOrderId}/clear-review`,
+    return request<PaymentOrderSubmitResult>(
+      `/organizations/${organizationId}/payment-orders/${paymentOrderId}/submit`,
       { method: 'POST', body: JSON.stringify(input ?? {}) },
     );
   },
@@ -1459,7 +1459,7 @@ export interface BillDraft {
   // How the bill arrived; sourceLabel names who forwarded it.
   source: 'email' | 'upload';
   sourceLabel: string | null;
-  // An approver sent this bill back for changes — shown as the reviewer's homework.
+  // An approver sent this bill back for changes — shown as the bill clerk's homework.
   sentBack: { reason: string | null; byName: string | null; at: string | null } | null;
   vendor: { name: string; email: string | null; nameSource?: DocSource; emailSource?: DocSource; isNew: boolean; trustState: string };
   document: { invoiceDocumentId: string; filename: string; mimeType: string; byteSize: number; pageCount: number | null } | null;
@@ -1484,7 +1484,7 @@ export interface BillDraft {
     stillOpen: boolean; resolvedFields: string[]; openFields: string[];
     forwardedFromQuestionId: string | null;
     youWereAsked: boolean; youAsked: boolean;
-    /** Review-screen field keys this question is about. */
+    /** Draft-screen field keys this question is about. */
     highlightFields: string[];
   }>;
   flags: Array<{

@@ -298,7 +298,7 @@ function SectionBlock({ title, sub, children }: { title: string; sub: string; ch
   );
 }
 
-function ReviewScreen() {
+function DraftScreen() {
   return (
     <div className="rev-shell" style={{ minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', borderBottom: '1px solid var(--border)', fontSize: 12, color: 'var(--text-muted)' }}>
@@ -516,7 +516,7 @@ function ProductFrame() {
       <div style={{ position: 'relative', boxSizing: 'border-box', background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: '0 24px 70px rgba(10,10,10,.10)', overflow: 'hidden', display: 'grid', gridTemplateColumns: '50px 1fr' }}>
         <Sidebar />
         <div style={{ position: 'relative', minWidth: 0 }}>
-          <ReviewScreen />
+          <DraftScreen />
           <BillsOverlay />
           <Cursor style={{ position: 'absolute', top: 14, left: 24, zIndex: 20, filter: 'drop-shadow(0 1px 2px rgba(0,0,0,.3))', animation: `b2Cur ${LOOP}` }} />
         </div>

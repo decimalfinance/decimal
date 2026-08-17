@@ -957,7 +957,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     state: order.state,
     readOnly: order.state !== 'draft',
     ...billSource(order.metadataJson, order.createdByUser?.displayName ?? null),
-    // An approver sent this bill back for changes — the reviewer's homework.
+    // An approver sent this bill back for changes — the bill clerk's homework.
     sentBack: sentBackRaw && order.state === 'draft'
       ? { reason: str(sentBackRaw.reason), byName: str(sentBackRaw.byName), at: str(sentBackRaw.at) }
       : null,

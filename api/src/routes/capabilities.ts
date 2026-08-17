@@ -60,7 +60,7 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
         summary: 'Upload an invoice, let AP intake create payment orders, let the Decimal agent create Squads proposals for green rows, clear any needs-review item, execute approved proposals, verify settlement by RPC, then export proof.',
         steps: [
           'POST /organizations/:organizationId/invoices/upload with autoAdvance=true',
-          'POST /organizations/:organizationId/payment-orders/:paymentOrderId/clear-review with autoAdvance=true when review is required',
+          'POST /organizations/:organizationId/payment-orders/:paymentOrderId/submit with autoAdvance=true when review is required',
           'POST /organizations/:organizationId/payment-orders/:paymentOrderId/agent/advance for idempotent router retry/manual agent routing',
           'POST /organizations/:organizationId/proposals/:decimalProposalId/approve-intent for human Squads votes',
           'POST /organizations/:organizationId/proposals/:decimalProposalId/execute-intent once threshold is met',
@@ -184,7 +184,7 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
         routes: [
           'GET /organizations/:organizationId/payment-orders',
           'POST /organizations/:organizationId/payment-orders',
-          'POST /organizations/:organizationId/payment-orders/:paymentOrderId/clear-review',
+          'POST /organizations/:organizationId/payment-orders/:paymentOrderId/submit',
           'POST /organizations/:organizationId/payment-orders/:paymentOrderId/agent/advance',
           'PATCH /organizations/:organizationId/counterparty-wallets/:counterpartyWalletId',
           'POST /organizations/:organizationId/payment-orders/:paymentOrderId/execute-with-spending-limit',
