@@ -13,7 +13,7 @@
 // the answer, and the person who submitted it needs to watch it move. All of
 // those are the same bill, and none of them is an open task.
 //
-// Everyone else — reviewers, payers, accountants, auditors, admins — keeps the
+// Everyone else — bill clerks, payers, accountants, auditors, admins — keeps the
 // whole queue, because their jobs are defined by having it.
 import { prisma } from '../infra/prisma.js';
 import { notFound } from '../infra/api-errors.js';

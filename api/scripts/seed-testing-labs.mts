@@ -20,7 +20,7 @@ const API = process.env.API_BASE_URL ?? 'http://localhost:3100';
 const PASSWORD = 'TestingLabs123!';
 const PEOPLE = [
   { email: 'zara.owner@dev.decimal.test', name: 'Zara Okafor', access: 'owner', role: null, part: 'Primary admin — owns policy and the ceiling' },
-  { email: 'priya.ap@dev.decimal.test', name: 'Priya Raman', access: 'member', role: 'reviewer', part: 'AP clerk — enters and codes bills' },
+  { email: 'priya.ap@dev.decimal.test', name: 'Priya Raman', access: 'member', role: 'bill_clerk', part: 'AP clerk — enters and codes bills' },
   { email: 'marcus.ops@dev.decimal.test', name: 'Marcus Bell', access: 'member', role: 'approver', part: 'Ops lead — approves spend for his team' },
   { email: 'nadia.fin@dev.decimal.test', name: 'Nadia Haddad', access: 'admin', role: null, part: 'Finance manager — second pair of eyes' },
   { email: 'tom.proc@dev.decimal.test', name: 'Tom Whitfield', access: 'member', role: 'approver', part: 'Procurement — owns vendor relationships' },

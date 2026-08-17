@@ -687,7 +687,7 @@ test('request-info blocks approval until answered; reject stops the route', asyn
   assert.equal(sentBack.sentBack.reason, 'Needs its own PO first.');
   assert.ok(sentBack.sentBack.byName, 'send-back names the approver');
 
-  // …the reviewer fixes and re-confirms → a FRESH approval run (fresh consents)
+  // …the bill clerk fixes and re-confirms → a FRESH approval run (fresh consents)
   await b2.confirm();
   const resubmitted = await get(`/organizations/${orgId}/bills/${b2.billId}/detail`, owner.token);
   assert.equal(resubmitted.approval.macroState, 'pending_approval', 'resubmit starts a fresh run');
@@ -712,7 +712,7 @@ test('a stalled approval escalates to the primary admin — it never auto-denies
 
   // a3 enters the bill (Reviewer role) so the owner is NOT the requester —
   // the stand-in rule allows the owner to take the stalled step.
-  await post(`/organizations/${orgId}/roles/reviewer/holders`, { userId: a3.userId }, owner.token);
+  await post(`/organizations/${orgId}/roles/bill_clerk/holders`, { userId: a3.userId }, owner.token);
   const bill = await uploadAndConfirm(orgId, a3.token, { vendor: 'Meridian Networks', amount: 700, invoiceNo: 'MN-1' });
   await bill.confirm();
 
@@ -783,7 +783,7 @@ test('out-of-office: a fill-in covers waiting bills and new ones, and can act', 
   const byUser = new Map(flow.people.map((p: { user_id: string; id: string }) => [p.user_id, p.id]));
   const ownerP = byUser.get(owner.userId) as string;
   await publishLadder(orgId, owner.token, [byUser.get(a2.userId) as string], byUser.get(a3.userId) as string);
-  await post(`/organizations/${orgId}/roles/reviewer/holders`, { userId: a3.userId }, owner.token);
+  await post(`/organizations/${orgId}/roles/bill_clerk/holders`, { userId: a3.userId }, owner.token);
 
   // A bill already waiting on a2…
   const b1 = await uploadAndConfirm(orgId, a3.token, { vendor: 'Northwind Data', amount: 800, invoiceNo: 'ND-1' });
@@ -959,7 +959,7 @@ async function get(path: string, token: string) {
 
 // --- a flagged bill must be actionable before anyone confirms it -------------
 //
-// The whole reason bills now enter the engine at intake. A reviewer who sees
+// The whole reason bills now enter the engine at intake. A bill clerk who sees
 // something wrong needs somewhere to go other than "approve it" or "bin it" —
 // and the moment they need that is BEFORE confirming, which is exactly when
 // the bill used to have no task at all.
@@ -987,7 +987,7 @@ test('an ingested bill is a draft — it does not enter the engine until Confirm
   assert.ok(after.approval, 'confirming is what puts it in the engine');
 });
 
-test('a reviewer can ask a question on a bill nobody has confirmed yet', async () => {
+test('a bill clerk can ask a question on a bill nobody has confirmed yet', async () => {
   const owner = await register('ask2-owner');
   const org = await post('/organizations', { organizationName: 'Ask Two' }, owner.token);
   const orgId = org.organizationId as string;
@@ -999,7 +999,7 @@ test('a reviewer can ask a question on a bill nobody has confirmed yet', async (
   });
 
   // A draft has no approval task, so there is nothing to park — but asking is
-  // not an approval act, and a reviewer spotting something wrong during
+  // not an approval act, and a bill clerk spotting something wrong during
   // preparation is exactly when a question is most useful.
   const asked = await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, {
     askedOfUserId: helper.userId, question: 'Is this bill actually ours?',

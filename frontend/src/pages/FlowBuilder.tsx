@@ -547,12 +547,12 @@ export function FlowBuilderPage({ session }: { session: AuthenticatedSession }) 
               <div className="set-row" style={{ padding: '6px 0 0', borderBottom: 'none' }}>
                 <div className="sr-info">
                   <span className="sr-title">The person who entered a bill can also approve it</span>
-                  <span className="sr-desc">{sep.reviewerCanApprove ? 'On — whoever entered a bill may also approve it.' : 'Off — approving takes a second person.'}</span>
+                  <span className="sr-desc">{sep.clerkCanApprove ? 'On — whoever entered a bill may also approve it.' : 'Off — approving takes a second person.'}</span>
                 </div>
                 <div className="sr-action">
-                  <button type="button" className={`switch${sep.reviewerCanApprove ? ' on' : ''}`} role="switch" aria-checked={sep.reviewerCanApprove}
+                  <button type="button" className={`switch${sep.clerkCanApprove ? ' on' : ''}`} role="switch" aria-checked={sep.clerkCanApprove}
                     disabled={!isOwner} style={!isOwner ? { opacity: 0.6, cursor: 'default' } : undefined}
-                    onClick={() => isOwner && setSepFlag('reviewerCanApprove', !sep.reviewerCanApprove)}>
+                    onClick={() => isOwner && setSepFlag('clerkCanApprove', !sep.clerkCanApprove)}>
                     <span className="knob" />
                   </button>
                 </div>

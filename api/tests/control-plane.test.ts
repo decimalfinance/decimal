@@ -489,7 +489,7 @@ test('dev seed builds a whole org — users, memberships, roles, sessions — in
       owner: { email: 'zaid@dev.decimal.test', displayName: 'Zaid Owner' },
       members: [
         { email: 'ana@dev.decimal.test', displayName: 'Ana Admin', access: 'admin' },
-        { email: 'rio@dev.decimal.test', displayName: 'Rio Reviewer', roles: ['Reviewer', 'Approver'] },
+        { email: 'rio@dev.decimal.test', displayName: 'Rio Clerk', roles: ['Bill Clerk', 'Approver'] },
         { email: 'vi@dev.decimal.test', displayName: 'Vi Viewer' },
       ],
     });
@@ -498,7 +498,7 @@ test('dev seed builds a whole org — users, memberships, roles, sessions — in
     const owner = seed.users.find((u: { email: string }) => u.email === 'zaid@dev.decimal.test');
     const rio = seed.users.find((u: { email: string }) => u.email === 'rio@dev.decimal.test');
     assert.equal(owner.access, 'owner');
-    assert.deepEqual(rio.roles, ['reviewer', 'approver']);
+    assert.deepEqual(rio.roles, ['bill_clerk', 'approver']);
 
     // Every persona got a working session.
     for (const u of seed.users) {
@@ -517,7 +517,7 @@ test('dev seed builds a whole org — users, memberships, roles, sessions — in
     assert.equal(roster.status, 200);
     const rosterBody = await roster.json();
     const rioMember = rosterBody.members.find((m: { email: string }) => m.email === 'rio@dev.decimal.test');
-    assert.deepEqual([...rioMember.roles].sort(), ['approver', 'reviewer']);
+    assert.deepEqual([...rioMember.roles].sort(), ['approver', 'bill_clerk']);
 
     // Seed hands back a working session per persona, so an agent can act as
     // each of them without a login round-trip.

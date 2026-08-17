@@ -1869,7 +1869,7 @@ export const releaseApi = {
 // endpoint. A bill must clear this before it enters approval.
 
 // Separation-of-duties switches — the org's own choice, not ours.
-export interface SeparationSettings { reviewerCanApprove: boolean; submitterCanApprove: boolean; approverCanRelease: boolean }
+export interface SeparationSettings { clerkCanApprove: boolean; submitterCanApprove: boolean; approverCanRelease: boolean }
 export const separationApi = {
   get(organizationId: string) {
     return request<SeparationSettings>(`/organizations/${organizationId}/approvals/separation`);
@@ -1934,7 +1934,7 @@ export interface FlowAssistResult {
 
 // Prebuilt roles: a fixed set of permission bundles (reviewer/approver/payer/
 // viewer). Assignment only — the set itself is not editable.
-export type RoleKey = 'reviewer' | 'approver' | 'payer' | 'viewer';
+export type RoleKey = 'bill_clerk' | 'approver' | 'payer' | 'viewer';
 export interface OrgRole { key: RoleKey; name: string; summary: string; holders: { personId: string; name: string; userId: string | null }[] }
 export interface MemberWithRoles { userId: string; personId: string | null; name: string; email: string; access: string; roles: RoleKey[] }
 export interface MembersAndRoles { members: MemberWithRoles[]; roles: OrgRole[] }

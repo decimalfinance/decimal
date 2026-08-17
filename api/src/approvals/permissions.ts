@@ -3,6 +3,11 @@
 // job needs and nothing else. Access = union of held roles; owner/admin
 // memberships bypass everything. A member with NO roles gets the viewer bundle
 // (can see, can't act) so existing orgs keep working the day this ships.
+//
+// Bill Clerk was called Reviewer until 2026-08-17. The job never changed — it
+// enters and codes bills — but "reviewer" named a stage we established does not
+// exist, and every AP product already has a word for this person: Bill.com's
+// Clerk, QuickBooks' Bill Clerk, Tipalti's AP Clerk.
 import { prisma } from '../infra/prisma.js';
 
 export type Capability =
@@ -15,8 +20,8 @@ export type Capability =
   | 'members.view' | 'members.manage'
   | 'governance.view' | 'governance.edit';
 
-export type RoleKey = 'reviewer' | 'approver' | 'payer' | 'viewer';
-export const ROLE_KEYS: RoleKey[] = ['reviewer', 'approver', 'payer', 'viewer'];
+export type RoleKey = 'bill_clerk' | 'approver' | 'payer' | 'viewer';
+export const ROLE_KEYS: RoleKey[] = ['bill_clerk', 'approver', 'payer', 'viewer'];
 
 const ALL_VIEW: Capability[] = [
   'bills.view', 'payments.view', 'treasury.view', 'vendors.view',
@@ -28,7 +33,7 @@ const ALL_VIEW: Capability[] = [
 const BASE: Capability[] = ['members.view', 'governance.view'];
 
 export const ROLE_BUNDLES: Record<RoleKey, Capability[]> = {
-  reviewer: [...BASE, 'bills.view', 'bills.edit', 'vendors.view', 'accounting.view'],
+  bill_clerk: [...BASE, 'bills.view', 'bills.edit', 'vendors.view', 'accounting.view'],
   approver: [...BASE, 'bills.view', 'approvals.act', 'vendors.view'],
   payer: [...BASE, 'bills.view', 'payments.view', 'payments.sign', 'treasury.view', 'vendors.view'],
   viewer: [...ALL_VIEW],
@@ -36,7 +41,7 @@ export const ROLE_BUNDLES: Record<RoleKey, Capability[]> = {
 
 // Shown on the Members page and used as the role's explanation everywhere.
 export const ROLE_DEFINITIONS: Array<{ key: RoleKey; name: string; summary: string }> = [
-  { key: 'reviewer', name: 'Reviewer', summary: "Enters and confirms a bill's details and coding. Cannot approve bills or see payments." },
+  { key: 'bill_clerk', name: 'Bill Clerk', summary: "Enters and confirms a bill's details and coding. Cannot approve bills or see payments." },
   { key: 'approver', name: 'Approver', summary: 'Signs off on bills assigned to them. Cannot edit bills, send payments, or see bank details.' },
   { key: 'payer', name: 'Payer', summary: 'Sends approved payments and sees balances. Cannot create, edit, or approve bills.' },
   { key: 'viewer', name: 'Viewer', summary: 'Sees everything, changes nothing. For auditors and stakeholders.' },
@@ -67,9 +72,9 @@ export interface OrgAccess {
  * An approver sees the bills they are involved in. Everyone else sees the queue.
  *
  * Union semantics, like the capabilities: holding any role whose job needs the
- * whole queue widens you to `all`. Someone who is both Approver and Reviewer is
- * doing the reviewing job too, and a reviewer who can only see bills already
- * routed to them cannot do it.
+ * whole queue widens you to `all`. Somebody who is both Approver and Bill Clerk
+ * is doing the clerk's job too, and a clerk who can only see bills already
+ * routed to them cannot prepare the ones that are not.
  *
  * A member with no roles gets the viewer bundle, which is an auditor's job —
  * `all`, read-only. That keeps existing orgs working the day this ships, and it

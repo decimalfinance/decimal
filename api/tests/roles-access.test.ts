@@ -1,7 +1,7 @@
 // Prebuilt roles end to end: the fixed role set is listed and assignable, a
 // member's access is the union of their role bundles (viewer bundle when they
 // hold none), and the capability middleware actually blocks/permits the HTTP
-// surface per role — reviewer can enter bills but never sees the payments
+// surface per role — bill clerk can enter bills but never sees the payments
 // surface; nobody edits what their role doesn't include.
 import assert from 'node:assert/strict';
 import { drainAsyncIntake } from '../src/payments/invoice-intake.js';
@@ -59,7 +59,7 @@ test('prebuilt roles: fixed set, assignment, my-access, and HTTP enforcement per
 
   // The role set is fixed and self-describing.
   const list = await get(`/organizations/${orgId}/roles`, owner.token);
-  assert.deepEqual(list.roles.map((r: { key: string }) => r.key), ['reviewer', 'approver', 'payer', 'viewer']);
+  assert.deepEqual(list.roles.map((r: { key: string }) => r.key), ['bill_clerk', 'approver', 'payer', 'viewer']);
   assert.ok(list.roles.every((r: { summary: string }) => r.summary.length > 10), 'each role carries a plain-English summary');
 
   // A member with NO roles = viewer bundle: sees everything, changes nothing.
@@ -74,20 +74,20 @@ test('prebuilt roles: fixed set, assignment, my-access, and HTTP enforcement per
   assert.ok(before.capabilities.includes('payments.view') && !before.capabilities.includes('bills.edit'));
 
   // Assign Reviewer (admin-only action; the member cannot self-assign).
-  assert.equal(await status('POST', `/organizations/${orgId}/roles/reviewer/holders`, member.token, { userId: member.userId }), 403);
-  await post(`/organizations/${orgId}/roles/reviewer/holders`, { userId: member.userId }, owner.token);
+  assert.equal(await status('POST', `/organizations/${orgId}/roles/bill_clerk/holders`, member.token, { userId: member.userId }), 403);
+  await post(`/organizations/${orgId}/roles/bill_clerk/holders`, { userId: member.userId }, owner.token);
 
   const afterList = await get(`/organizations/${orgId}/roles`, owner.token);
-  const reviewerRole = afterList.roles.find((r: { key: string }) => r.key === 'reviewer');
-  assert.equal(reviewerRole.holders.length, 1);
+  const clerkRole = afterList.roles.find((r: { key: string }) => r.key === 'bill_clerk');
+  assert.equal(clerkRole.holders.length, 1);
   const me = afterList.members.find((m: { userId: string }) => m.userId === member.userId);
-  assert.deepEqual(me.roles, ['reviewer']);
+  assert.deepEqual(me.roles, ['bill_clerk']);
 
   const access = await get(`/organizations/${orgId}/my-access`, member.token);
-  assert.deepEqual(access.roles, ['reviewer']);
-  assert.ok(access.capabilities.includes('bills.edit'), 'reviewer can enter bills');
-  assert.ok(!access.capabilities.includes('payments.view'), 'reviewer has NO payments surface');
-  assert.ok(!access.capabilities.includes('approvals.act'), 'reviewer cannot approve');
+  assert.deepEqual(access.roles, ['bill_clerk']);
+  assert.ok(access.capabilities.includes('bills.edit'), 'bill clerk can enter bills');
+  assert.ok(!access.capabilities.includes('payments.view'), 'bill clerk has NO payments surface');
+  assert.ok(!access.capabilities.includes('approvals.act'), 'bill clerk cannot approve');
 
   // Reviewer can now actually enter a bill over HTTP…
   setInvoiceIntakeRuntimeForTests({
@@ -112,11 +112,11 @@ test('prebuilt roles: fixed set, assignment, my-access, and HTTP enforcement per
   }, member.token);
 
   // …but the payments/treasury surface stays closed — the role NARROWS reads too.
-  assert.equal(await status('GET', `/organizations/${orgId}/payment-orders`, member.token), 403, 'reviewer has no payment queue');
+  assert.equal(await status('GET', `/organizations/${orgId}/payment-orders`, member.token), 403, 'bill clerk has no payment queue');
   assert.equal(await status('POST', `/organizations/${orgId}/automation-agents`, member.token, {}), 403);
 
   // Unassign → back to the viewer default.
-  await del(`/organizations/${orgId}/roles/reviewer/holders/${me.personId}`, owner.token);
+  await del(`/organizations/${orgId}/roles/bill_clerk/holders/${me.personId}`, owner.token);
   const reverted = await get(`/organizations/${orgId}/my-access`, member.token);
   assert.deepEqual(reverted.roles, []);
   await get(`/organizations/${orgId}/payment-orders`, member.token); // viewer sees the queue again
@@ -132,7 +132,7 @@ test('payer role opens payment surface without granting bill entry', async () =>
   assert.ok(!access.capabilities.includes('bills.edit'));
   await get(`/organizations/${orgId}/payment-orders`, member.token);
   assert.equal(await status('POST', `/organizations/${orgId}/invoices/upload`, member.token, {}), 403, 'payer cannot enter bills');
-  assert.equal(await status('POST', `/organizations/${orgId}/approvals/separation`, member.token, { reviewerCanApprove: true, submitterCanApprove: true, approverCanRelease: true }), 403, 'payer cannot edit governance');
+  assert.equal(await status('POST', `/organizations/${orgId}/approvals/separation`, member.token, { clerkCanApprove: true, submitterCanApprove: true, approverCanRelease: true }), 403, 'payer cannot edit governance');
 });
 
 test('primary-admin tier: only the seat holder manages admins, and the seat transfers atomically', async () => {
@@ -153,8 +153,8 @@ test('primary-admin tier: only the seat holder manages admins, and the seat tran
 
   // Admins take no pipeline roles (full access already) — assignment refuses,
   // and promotion sheds any roles held before.
-  assert.equal(await status('POST', `/organizations/${orgId}/roles/reviewer/holders`, owner.token, { userId: member.userId }), 400, 'cannot assign a role to an admin');
-  await post(`/organizations/${orgId}/roles/reviewer/holders`, { userId: third.userId }, owner.token);
+  assert.equal(await status('POST', `/organizations/${orgId}/roles/bill_clerk/holders`, owner.token, { userId: member.userId }), 400, 'cannot assign a role to an admin');
+  await post(`/organizations/${orgId}/roles/bill_clerk/holders`, { userId: third.userId }, owner.token);
   await fetchOk('PATCH', `/organizations/${orgId}/members/${third.userId}/access`, owner.token, { access: 'admin' });
   const listAfterPromo = await get(`/organizations/${orgId}/roles`, owner.token);
   const thirdRow = listAfterPromo.members.find((m: { userId: string }) => m.userId === third.userId);

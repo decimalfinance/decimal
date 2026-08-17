@@ -4,11 +4,11 @@
 
 -- 1) Separation-of-duties switches. Defaults preserve today's behavior (fully
 --    separated): the engine's R1/R2/R5 exclusions are ON unless the org opts out.
---      reviewer_can_approve   → R2 (the person who entered/coded a bill may approve it)
+--      clerk_can_approve      → R2 (the person who entered/coded a bill may approve it)
 --      submitter_can_approve  → R1 (a person may approve their own bill; +R7 vendor_change)
 --      approver_can_release   → R5 (an approver of a bill may also release its payment)
 ALTER TABLE approval.org_settings
-  ADD COLUMN IF NOT EXISTS reviewer_can_approve  boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS clerk_can_approve     boolean NOT NULL DEFAULT false,
   ADD COLUMN IF NOT EXISTS submitter_can_approve boolean NOT NULL DEFAULT false,
   ADD COLUMN IF NOT EXISTS approver_can_release  boolean NOT NULL DEFAULT false;
 

@@ -1,12 +1,12 @@
 -- Prebuilt roles (roles-research/SYNTHESIS-decimal-roles.md). Roles stop being
--- permission-free seat labels and become fixed permission bundles: reviewer,
+-- permission-free seat labels and become fixed permission bundles: bill clerk,
 -- approver, payer, viewer (owner/admin come from the membership). A person may
 -- hold several roles; access = union. Idempotent.
 
 CREATE TABLE IF NOT EXISTS approval.person_roles (
   organization_id uuid NOT NULL REFERENCES organizations(organization_id),
   person_id       uuid NOT NULL REFERENCES approval.people(id) ON DELETE CASCADE,
-  role            text NOT NULL CHECK (role IN ('reviewer','approver','payer','viewer')),
+  role            text NOT NULL CHECK (role IN ('bill_clerk','approver','payer','viewer')),
   created_at      timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (organization_id, person_id, role)
 );
@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS approval.person_roles (
 -- role (case-insensitive). Non-matching labels (e.g. "CFO") are dropped — the
 -- owner re-assigns from the fixed set.
 INSERT INTO approval.person_roles (organization_id, person_id, role)
-SELECT h.organization_id, sa.person_id, lower(s.name)
+SELECT h.organization_id, sa.person_id,
+       CASE lower(s.name) WHEN 'reviewer' THEN 'bill_clerk' ELSE lower(s.name) END
 FROM approval.seat_assignments sa
 JOIN approval.seats s ON s.id = sa.seat_id AND s.is_approval_role = true
 JOIN approval.nodes n ON n.id = s.node_id

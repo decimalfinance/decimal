@@ -44,7 +44,7 @@ async function rawVetoRule(tx: Tx, approvable: ApprovableRow, personId: string, 
   if (!flags.submitterCanApprove && personId === approvable.requester_id && approvable.type !== 'payment_run') {
     return approvable.type === 'vendor_change' ? 'R7' : 'R1';
   }
-  if (!flags.reviewerCanApprove && approvable.enterer_id && personId === approvable.enterer_id) return 'R2';
+  if (!flags.clerkCanApprove && approvable.enterer_id && personId === approvable.enterer_id) return 'R2';
   if (!flags.approverCanRelease && approvable.type === 'payment_run') {
     const sourceId = approvable.attributes?.sourceApprovableId;
     if (typeof sourceId === 'string') {

@@ -364,11 +364,14 @@ authRouter.post('/auth/dev/seed', async (req, res, next) => {
       throw badRequest('Each persona needs a distinct email.');
     }
     const { isRoleKey, assignRole } = await import('../approvals/roles.js');
-    // Role keys are lowercase ('reviewer'); accept any casing from callers.
-    const normalizedRoles = input.members.map((m) => m.roles.map((r) => r.trim().toLowerCase()));
+    // Role keys are lowercase snake_case ('bill_clerk'). Accept any casing and
+    // a space where the key has an underscore, so a caller can write the name
+    // as it appears on screen ("Bill Clerk") rather than the storage form.
+    const normalizedRoles = input.members.map((m) =>
+      m.roles.map((r) => r.trim().toLowerCase().replace(/\s+/g, '_')));
     for (const roles of normalizedRoles) {
       for (const role of roles) {
-        if (!isRoleKey(role)) throw badRequest(`Unknown role "${role}". Valid: reviewer, approver, payer, viewer.`);
+        if (!isRoleKey(role)) throw badRequest(`Unknown role "${role}". Valid: bill_clerk, approver, payer, viewer.`);
       }
     }
 

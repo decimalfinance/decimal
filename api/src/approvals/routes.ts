@@ -177,7 +177,7 @@ approvalsRouter.get('/organizations/:organizationId/roles', asyncRoute(async (re
   sendJson(res, await getMembersAndRoles(organizationId));
 }));
 
-const roleKeyParam = z.object({ roleKey: z.enum(['reviewer', 'approver', 'payer', 'viewer']) });
+const roleKeyParam = z.object({ roleKey: z.enum(['bill_clerk', 'approver', 'payer', 'viewer']) });
 
 approvalsRouter.post('/organizations/:organizationId/roles/:roleKey/holders', asyncRoute(async (req, res) => {
   const { organizationId } = orgParams.parse(req.params);
@@ -433,7 +433,7 @@ approvalsRouter.post('/organizations/:organizationId/approvals/separation', asyn
   const m = await getOrganizationMembership(req.auth!.userId, organizationId);
   if (!isOwnerRole(m?.role)) throw forbidden('Only the primary admin can change separation of duties.');
   const body = z.object({
-    reviewerCanApprove: z.boolean(),
+    clerkCanApprove: z.boolean(),
     submitterCanApprove: z.boolean(),
     approverCanRelease: z.boolean(),
   }).parse(req.body);
@@ -459,7 +459,7 @@ approvalsRouter.post('/organizations/:organizationId/approvals/pipeline/simulate
     category: z.string().nullable().optional(),
     firstBill: z.boolean().nullable().optional(),
     separation: z.object({
-      reviewerCanApprove: z.boolean(),
+      clerkCanApprove: z.boolean(),
       submitterCanApprove: z.boolean(),
       approverCanRelease: z.boolean(),
     }).nullable().optional(),

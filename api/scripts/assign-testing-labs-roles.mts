@@ -17,8 +17,8 @@ const API = process.env.API_BASE_URL ?? 'http://localhost:3100';
 const PASSWORD = 'TestingLabs123!';
 const OWNER = 'zara.owner@dev.decimal.test';
 
-const ROLES: Array<{ email: string; role: 'reviewer' | 'approver' | 'payer' }> = [
-  { email: 'priya.ap@dev.decimal.test', role: 'reviewer' },
+const ROLES: Array<{ email: string; role: 'bill_clerk' | 'approver' | 'payer' }> = [
+  { email: 'priya.ap@dev.decimal.test', role: 'bill_clerk' },
   { email: 'marcus.ops@dev.decimal.test', role: 'approver' },
   { email: 'tom.proc@dev.decimal.test', role: 'approver' },
 ];

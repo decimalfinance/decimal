@@ -493,7 +493,7 @@ export async function simulatePipeline(organizationId: string, input: {
   // simulator was answering a different question and could disagree with the
   // engine it claims to preview.
   const approveExcluded = new Map<string, string>();
-  if (!flags.reviewerCanApprove && input.entererId) approveExcluded.set(input.entererId, 'entered this bill');
+  if (!flags.clerkCanApprove && input.entererId) approveExcluded.set(input.entererId, 'entered this bill');
   if (!flags.submitterCanApprove && submitter) approveExcluded.set(submitter, 'submitted this bill');
   const approve = resolveStage(input.approveFlow, { ...sampleBits, excluded: approveExcluded, ownerId, nameOf });
 

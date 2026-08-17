@@ -197,15 +197,15 @@ export async function createSeat(tx: Tx, nodeId: string, name: string, kind: 'si
 // Separation-of-duties switches (approval.org_settings). Each maps to one of the
 // engine's veto rules; ON here means the org has OPTED OUT of that separation.
 // Defaults (all false) preserve fully-separated behavior.
-export type SodFlags = { reviewerCanApprove: boolean; submitterCanApprove: boolean; approverCanRelease: boolean };
+export type SodFlags = { clerkCanApprove: boolean; submitterCanApprove: boolean; approverCanRelease: boolean };
 
 export async function getSodFlags(tx: Tx, organizationId: string): Promise<SodFlags> {
-  const rows = await tx.$queryRaw<{ reviewer_can_approve: boolean; submitter_can_approve: boolean; approver_can_release: boolean }[]>`
-    SELECT reviewer_can_approve, submitter_can_approve, approver_can_release
+  const rows = await tx.$queryRaw<{ clerk_can_approve: boolean; submitter_can_approve: boolean; approver_can_release: boolean }[]>`
+    SELECT clerk_can_approve, submitter_can_approve, approver_can_release
     FROM approval.org_settings WHERE organization_id = ${organizationId}::uuid`;
   const r = rows[0];
   return {
-    reviewerCanApprove: r?.reviewer_can_approve ?? false,
+    clerkCanApprove: r?.clerk_can_approve ?? false,
     submitterCanApprove: r?.submitter_can_approve ?? false,
     approverCanRelease: r?.approver_can_release ?? false,
   };
@@ -215,7 +215,7 @@ export async function setSodFlags(tx: Tx, organizationId: string, flags: SodFlag
   await ensureOrgSettings(tx, organizationId);
   await tx.$executeRaw`
     UPDATE approval.org_settings
-    SET reviewer_can_approve = ${flags.reviewerCanApprove},
+    SET clerk_can_approve = ${flags.clerkCanApprove},
         submitter_can_approve = ${flags.submitterCanApprove},
         approver_can_release = ${flags.approverCanRelease}
     WHERE organization_id = ${organizationId}::uuid`;
