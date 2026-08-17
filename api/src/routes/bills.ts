@@ -7,7 +7,7 @@ import { asyncRoute } from '../infra/route-helpers.js';
 import { forbidden } from '../infra/api-errors.js';
 import { assertBillVisible } from '../payments/bill-visibility.js';
 import { prisma } from '../infra/prisma.js';
-import { getBillsWorkbench, getBillReview, getBillDetail, getApprovalsInbox, confirmBillReview, markNotABill, updateBillFacts, overrideDuplicateFlag, addOrganizationTradingName, listAskCandidates, askAboutBill, answerBillQuestion, sendApprovedBillBackToReview } from '../payments/bills.js';
+import { getBillsWorkbench, getBillDraft, getBillDetail, getApprovalsInbox, submitBillForApproval, markNotABill, updateBillFacts, overrideDuplicateFlag, addOrganizationTradingName, listAskCandidates, askAboutBill, answerBillQuestion, sendApprovedBillBackToReview } from '../payments/bills.js';
 
 export const billsRouter = Router();
 
@@ -23,11 +23,11 @@ billsRouter.get('/organizations/:organizationId/bills/workbench', asyncRoute(asy
   res.json(await getBillsWorkbench(organizationId, req.auth!.userId));
 }));
 
-billsRouter.get('/organizations/:organizationId/bills/:paymentOrderId/review', asyncRoute(async (req, res) => {
+billsRouter.get('/organizations/:organizationId/bills/:paymentOrderId/draft', asyncRoute(async (req, res) => {
   const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
   await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
-  const review = await getBillReview(organizationId, paymentOrderId, req.auth!.userId);
+  const review = await getBillDraft(organizationId, paymentOrderId, req.auth!.userId);
   if (!review) {
     res.status(404).json({ error: 'Bill not found' });
     return;
@@ -90,7 +90,7 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/confirm',
   await assertOrganizationAccess(organizationId, req.auth!);
   await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
   const input = confirmSchema.parse(req.body);
-  const result = await confirmBillReview({
+  const result = await submitBillForApproval({
     organizationId,
     paymentOrderId,
     actorUserId: req.auth!.userId,
@@ -150,7 +150,7 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/this-is-u
       actorName: user.displayName,
       fromPaymentOrderId: paymentOrderId,
     });
-    res.json({ ...result, review: await getBillReview(organizationId, paymentOrderId, req.auth!.userId) });
+    res.json({ ...result, review: await getBillDraft(organizationId, paymentOrderId, req.auth!.userId) });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not record that name.';
     if (/owner or admin/.test(message)) throw forbidden(message);
@@ -238,7 +238,7 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/ask', asy
       decidedByUserId: req.auth!.userId,
     });
   }
-  res.status(201).json({ billQuestionId: asked.billQuestionId, review: await getBillReview(organizationId, paymentOrderId, req.auth!.userId) });
+  res.status(201).json({ billQuestionId: asked.billQuestionId, review: await getBillDraft(organizationId, paymentOrderId, req.auth!.userId) });
 }));
 
 // Answer a question someone asked you about a bill. Visibility is enough to
@@ -279,7 +279,7 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/questions
     if (/person who was asked/.test(message)) throw forbidden(message);
     throw error;
   }
-  res.json(await getBillReview(organizationId, paymentOrderId, req.auth!.userId));
+  res.json(await getBillDraft(organizationId, paymentOrderId, req.auth!.userId));
 }));
 
 // Send an approved-but-unpaid bill back to Review (the recovery path when a

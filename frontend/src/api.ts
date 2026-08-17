@@ -24,7 +24,7 @@ import type {
   PaymentOrder,
   PaymentProofPacket,
   BatchCsvUploadResult,
-  BatchCsvPreviewResult,
+  BatchCsvPdraftResult,
   InvoiceUploadResult,
   PaymentOrderAgentAdvanceResult,
   PaymentOrderClearReviewResult,
@@ -1063,7 +1063,7 @@ export const api = {
     );
   },
   previewBatchCsv(organizationId: string, csv: string) {
-    return request<BatchCsvPreviewResult>(
+    return request<BatchCsvPdraftResult>(
       `/organizations/${organizationId}/payment-orders/batch-csv/preview`,
       { method: 'POST', body: JSON.stringify({ csv }) },
     );
@@ -1081,7 +1081,7 @@ export const api = {
   // when autoAdvance is true (default), asks the Decimal org agent to route
   // any proposal-ready rows. Risky
   // rows come back as draft and the user clears them via
-  // clearPaymentOrderReview.
+  // markBillSubmitted.
   uploadInvoice(
     organizationId: string,
     input: {
@@ -1100,11 +1100,11 @@ export const api = {
   // Clear a draft payment order. With autoAdvance the backend will
   // also kicks the agent router in the same call, returning the result in
   // `automation`.
-  clearPaymentOrderReview(
+  markBillSubmitted(
     organizationId: string,
     paymentOrderId: string,
     input?: {
-      reviewNote?: string | null;
+      submitNote?: string | null;
       trustCounterpartyWallet?: boolean;
       autoAdvance?: boolean;
     },
@@ -1432,7 +1432,7 @@ export interface WorkbenchBill {
 
 export type DocSource = { page: number; box: [number, number, number, number] } | null;
 
-export interface BillReviewField {
+export interface BillDraftField {
   key: string;
   label: string;
   value: string | number | null;
@@ -1443,7 +1443,7 @@ export interface BillReviewField {
 
 export interface CategoryOption { value: string; label: string; num?: string | null; group: string }
 
-export interface BillReviewLine {
+export interface BillDraftLine {
   description: string;
   quantity: number | null;
   unitPrice: number | null;
@@ -1452,7 +1452,7 @@ export interface BillReviewLine {
   source?: DocSource;
 }
 
-export interface BillReview {
+export interface BillDraft {
   paymentOrderId: string;
   state: string;
   readOnly: boolean;
@@ -1463,9 +1463,9 @@ export interface BillReview {
   sentBack: { reason: string | null; byName: string | null; at: string | null } | null;
   vendor: { name: string; email: string | null; nameSource?: DocSource; emailSource?: DocSource; isNew: boolean; trustState: string };
   document: { invoiceDocumentId: string; filename: string; mimeType: string; byteSize: number; pageCount: number | null } | null;
-  fields: BillReviewField[];
-  remitFields: BillReviewField[];
-  lines: BillReviewLine[];
+  fields: BillDraftField[];
+  remitFields: BillDraftField[];
+  lines: BillDraftLine[];
   categoryOptions: CategoryOption[];
   // Why the pre-filled category was suggested (vendor rule vs the document).
   codingSuggestionSource: { kind: 'rule' | 'ocr'; detail: string } | null;
@@ -1558,7 +1558,7 @@ export const billsApi = {
     return request<{ counts: Record<BillBucket, number>; reviewCounts: { ready: number; missingInfo: number }; bills: WorkbenchBill[] }>(`/organizations/${organizationId}/bills/workbench`);
   },
   review(organizationId: string, paymentOrderId: string) {
-    return request<BillReview>(`/organizations/${organizationId}/bills/${paymentOrderId}/review`);
+    return request<BillDraft>(`/organizations/${organizationId}/bills/${paymentOrderId}/draft`);
   },
   detail(organizationId: string, paymentOrderId: string) {
     return request<BillDetail>(`/organizations/${organizationId}/bills/${paymentOrderId}/detail`);
@@ -1617,7 +1617,7 @@ export const billsApi = {
   },
   // Admin-only: clear the duplicate-bill flag with a logged reason.
   overrideDuplicate(organizationId: string, paymentOrderId: string, reason: string) {
-    return request<BillReview>(`/organizations/${organizationId}/bills/${paymentOrderId}/duplicate-override`, {
+    return request<BillDraft>(`/organizations/${organizationId}/bills/${paymentOrderId}/duplicate-override`, {
       method: 'POST',
       body: JSON.stringify({ reason }),
     });
@@ -1625,7 +1625,7 @@ export const billsApi = {
   // Admin-only: unwind an approved-but-unpaid bill back to review (the
   // recovery path when a release gate refuses).
   sendBack(organizationId: string, paymentOrderId: string, reason: string) {
-    return request<BillReview>(`/organizations/${organizationId}/bills/${paymentOrderId}/send-back`, {
+    return request<BillDraft>(`/organizations/${organizationId}/bills/${paymentOrderId}/send-back`, {
       method: 'POST',
       body: JSON.stringify({ reason }),
     });
@@ -1679,7 +1679,7 @@ export interface BillDetailStepNode {
 }
 
 export interface BillDetail {
-  review: BillReview;
+  review: BillDraft;
   corrections: Array<{ field: string; from: string; to: string; by: string | null }>;
   // Advisory: routine vs worth-a-look, same classifier as the approvals inbox.
   signal?: InboxSignal;

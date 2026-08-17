@@ -138,7 +138,7 @@ function buildDeps(input: {
         ? { status: 'exists', route: input.existingRoute }
         : { status: 'none' };
     },
-    evaluateReviewGate: async (payment) => {
+    evaluateDraftGate: async (payment) => {
       calls.push('review');
       if (!payment.trusted) {
         return {
@@ -154,7 +154,7 @@ function buildDeps(input: {
       }
       return { status: 'pass' };
     },
-    markNeedsReview: async () => {
+    markAsDraft: async () => {
       calls.push('mark_review');
       return { marked: true };
     },

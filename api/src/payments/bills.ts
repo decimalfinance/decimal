@@ -13,7 +13,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../infra/prisma.js';
 import { logger } from '../infra/logger.js';
 import { USDC_DECIMALS } from '../solana.js';
-import { clearPaymentOrderReview, cancelPaymentOrder, getPaymentOrderDetail } from './orders.js';
+import { markBillSubmitted, cancelPaymentOrder, getPaymentOrderDetail } from './orders.js';
 import { listChartOfAccounts } from '../accounting/ocr-coding.js';
 import { extractPdfTextLayer, refineInvoiceSources, PROVENANCE_VERSION } from './doc-provenance.js';
 import { findDuplicateBills, readDuplicateOverride, describeDuplicate, matchDuplicates } from './duplicate-check.js';
@@ -276,7 +276,7 @@ function amountRawToUsd(amountRaw: bigint): number {
 // the flag definitions — so a flag could be marked blocking and this function
 // would still call the bill ready. Blocking-ness now has exactly one owner:
 // bill-flags.ts. This only asks whether something is missing.
-function reviewReadiness(args: {
+function draftReadiness(args: {
   amountUsd: number;
   invoiceNumber: string | null;
   dueAt: Date | null;
@@ -507,7 +507,7 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
     let readiness: 'ready' | 'missing_info' | null = null;
     let missing: string[] = [];
     if (bucket === 'draft') {
-      const r = reviewReadiness({
+      const r = draftReadiness({
         amountUsd: amountRawToUsd(order.amountRaw),
         invoiceNumber: order.invoiceNumber,
         dueAt: order.dueAt,
@@ -661,7 +661,7 @@ function buildChartOptions(chart: Awaited<ReturnType<typeof listChartOfAccounts>
     }));
 }
 
-export async function getBillReview(organizationId: string, paymentOrderId: string, viewerUserId?: string) {
+export async function getBillDraft(organizationId: string, paymentOrderId: string, viewerUserId?: string) {
   const order = await prisma.paymentOrder.findFirst({
     where: { organizationId, paymentOrderId },
     include: {
@@ -1013,7 +1013,7 @@ export async function getBillReview(organizationId: string, paymentOrderId: stri
 // Confirm & send for approval — the one commit (spec §6)
 // -----------------------------------------------------------------------------
 
-export type ConfirmBillInput = {
+export type SubmitBillInput = {
   organizationId: string;
   paymentOrderId: string;
   actorUserId: string;
@@ -1037,7 +1037,7 @@ export type ConfirmBillInput = {
   sourceTreasuryWalletId?: string | null;
 };
 
-export async function confirmBillReview(input: ConfirmBillInput) {
+export async function submitBillForApproval(input: SubmitBillInput) {
   const order = await prisma.paymentOrder.findFirst({
     where: { organizationId: input.organizationId, paymentOrderId: input.paymentOrderId },
     include: { counterpartyWallet: true, counterparty: true, transferRequests: true },
@@ -1055,7 +1055,7 @@ export async function confirmBillReview(input: ConfirmBillInput) {
   // Org ceiling, same re-check (and against the CONFIRMED total, below).
   const confirmCeiling = await getBillCeilingMinor(prisma, input.organizationId);
 
-  const review = await getBillReview(input.organizationId, input.paymentOrderId);
+  const review = await getBillDraft(input.organizationId, input.paymentOrderId);
   const blocking = (review?.flags ?? []).filter((f) => f.blocking);
   if (blocking.length > 0) {
     throw new Error(`Resolve the flagged issue first: ${blocking[0]!.message}`);
@@ -1224,12 +1224,12 @@ export async function confirmBillReview(input: ConfirmBillInput) {
   // Clears review, trusts the wallet (the operator just verified the document's
   // payment details — the R7 payment-method ceremony replaces this later), and
   // emits the review-cleared event.
-  await clearPaymentOrderReview({
+  await markBillSubmitted({
     organizationId: input.organizationId,
     paymentOrderId: input.paymentOrderId,
     actorUserId: input.actorUserId,
     actorType: 'user',
-    reviewNote: 'Confirmed on the review screen',
+    submitNote: 'Confirmed on the review screen',
   });
 
   // Confirm is the door into the approval engine, and the only one.
@@ -1755,7 +1755,7 @@ export async function overrideDuplicateFlag(args: {
       },
     }),
   ]);
-  return getBillReview(args.organizationId, args.paymentOrderId);
+  return getBillDraft(args.organizationId, args.paymentOrderId);
 }
 
 // Send an already-APPROVED (but unpaid) bill back to Review — the recovery
@@ -1818,7 +1818,7 @@ export async function sendApprovedBillBackToReview(args: {
       },
     });
   });
-  return getBillReview(args.organizationId, args.paymentOrderId);
+  return getBillDraft(args.organizationId, args.paymentOrderId);
 }
 
 // -----------------------------------------------------------------------------
@@ -1884,7 +1884,7 @@ async function approvalBlockedFor(
 }
 
 export async function getBillDetail(organizationId: string, paymentOrderId: string, viewerUserId: string) {
-  const review = await getBillReview(organizationId, paymentOrderId);
+  const review = await getBillDraft(organizationId, paymentOrderId);
   if (!review) return null;
 
   const order = await prisma.paymentOrder.findFirstOrThrow({

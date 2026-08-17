@@ -15,8 +15,8 @@ import { useLiveOrgEvents } from './lib/use-live-org-events';
 const InboxPage = lazy(() => import('./pages/Inbox').then((m) => ({ default: m.InboxPage })));
 const ProposalRedirectPage = lazy(() => import('./pages/ProposalRedirect').then((m) => ({ default: m.ProposalRedirectPage })));
 const BillsPage = lazy(() => import('./pages/Bills').then((m) => ({ default: m.BillsPage })));
-const InvoiceReviewPage = lazy(() => import('./pages/InvoiceReview').then((m) => ({ default: m.InvoiceReviewPage })));
-const DocumentReviewPage = lazy(() => import('./pages/InvoiceReview').then((m) => ({ default: m.DocumentReviewPage })));
+const BillDraftPage = lazy(() => import('./pages/BillDraft').then((m) => ({ default: m.BillDraftPage })));
+const DocumentDraftPage = lazy(() => import('./pages/BillDraft').then((m) => ({ default: m.DocumentDraftPage })));
 const BillDetailPage = lazy(() => import('./pages/BillDetail').then((m) => ({ default: m.BillDetailPage })));
 const FlowBuilderPage = lazy(() => import('./pages/FlowBuilder').then((m) => ({ default: m.FlowBuilderPage })));
 const PaymentDetailPageV2 = lazy(() => import('./pages/PaymentDetail').then((m) => ({ default: m.PaymentDetailPage })));
@@ -225,8 +225,8 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
               <Route path="/organizations/:organizationId/destinations" element={<OrgRedirect to="counterparties" />} />
               <Route path="/organizations/:organizationId/bills" element={<BillsPage />} />
               <Route path="/organizations/:organizationId/bills/:paymentOrderId" element={<BillDetailPage />} />
-              <Route path="/organizations/:organizationId/bills/:paymentOrderId/review" element={<InvoiceReviewPage />} />
-              <Route path="/organizations/:organizationId/bills/documents/:invoiceDocumentId/review" element={<DocumentReviewPage />} />
+              <Route path="/organizations/:organizationId/bills/:paymentOrderId/draft" element={<BillDraftPage />} />
+              <Route path="/organizations/:organizationId/bills/documents/:invoiceDocumentId/review" element={<DocumentDraftPage />} />
               {/* The Payments list is retired — Bills IS the payments surface. Old links land on Bills. */}
               <Route path="/organizations/:organizationId/payments" element={<OrgRedirect to="bills" />} />
               <Route path="/organizations/:organizationId/payments/:paymentOrderId" element={<PaymentDetailPageV2 />} />

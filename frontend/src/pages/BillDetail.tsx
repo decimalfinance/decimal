@@ -16,7 +16,7 @@ import {
 import { Ico } from '../dec/icons';
 import { useToast } from '../ui/Toast';
 import { approvalActErrorMessage } from '../lib/app-helpers';
-import { DocumentPane } from './InvoiceReview';
+import { DocumentPane } from './BillDraft';
 
 function usd(amount: number): string {
   return amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
@@ -393,7 +393,7 @@ export function BillDetailPage() {
             <span className="commit-spacer" />
             <button type="button" className="btn btn-secondary" disabled={acting}
               onClick={() => void act(viewer.anyTaskId, { kind: 'resubmit' }, 'Back in approval.')}>Undo recall</button>
-            <button type="button" className="btn btn-primary" onClick={() => navigate(`/organizations/${organizationId}/bills/${paymentOrderId}/review`)}>
+            <button type="button" className="btn btn-primary" onClick={() => navigate(`/organizations/${organizationId}/bills/${paymentOrderId}/draft`)}>
               Open in review
             </button>
           </>

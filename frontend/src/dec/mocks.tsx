@@ -130,7 +130,7 @@ export function BillList() {
 }
 
 // ─── 2. Bill review — document + extracted fields + GL coding ────────────────
-export function BillReview() {
+export function BillDraft() {
   const codeCell = (account: string) => (
     <span className="picker-trigger" style={{ display: 'inline-flex' }}>{account}</span>
   );

@@ -11,20 +11,20 @@ export type PaymentRoutingPayment = {
   state: string;
 };
 
-export type PaymentReviewReason = {
+export type PaymentDraftReason = {
   code: string;
   message: string;
   details?: unknown;
 };
 
-export type PaymentReviewDecision =
+export type PaymentDraftDecision =
   | {
       status: 'pass';
       reasons?: never;
     }
   | {
       status: 'draft';
-      reasons: PaymentReviewReason[];
+      reasons: PaymentDraftReason[];
     };
 
 export type SpendingLimitFitDecision =
@@ -34,7 +34,7 @@ export type SpendingLimitFitDecision =
     }
   | {
       status: 'not_applicable' | 'does_not_fit';
-      reason: PaymentReviewReason;
+      reason: PaymentDraftReason;
     };
 
 export type ExistingPaymentRoute<TExistingRoute> =
@@ -59,13 +59,13 @@ export type PaymentRoutingDependencies<
     payment: TPayment,
     context: PaymentRoutingContext,
   ) => Promise<ExistingPaymentRoute<TExistingRoute>>;
-  evaluateReviewGate: (
+  evaluateDraftGate: (
     payment: TPayment,
     context: PaymentRoutingContext,
-  ) => Promise<PaymentReviewDecision>;
-  markNeedsReview: (
+  ) => Promise<PaymentDraftDecision>;
+  markAsDraft: (
     payment: TPayment,
-    decision: Extract<PaymentReviewDecision, { status: 'draft' }>,
+    decision: Extract<PaymentDraftDecision, { status: 'draft' }>,
     context: PaymentRoutingContext,
   ) => Promise<TReviewResult>;
   findBestMatchingSpendingLimit: (
@@ -92,7 +92,7 @@ export type PaymentRoutingDependencies<
 export type SquadsProposalFallbackReason = {
   code: 'no_spending_limit' | 'spending_limit_not_applicable' | 'spending_limit_does_not_fit';
   message: string;
-  spendingLimitReason?: PaymentReviewReason;
+  spendingLimitReason?: PaymentDraftReason;
 };
 
 export type PaymentRoutingDecision<
@@ -119,8 +119,8 @@ export type PaymentRoutingDecision<
       status: 'draft';
       route: 'human_review';
       payment: TPayment;
-      reasons: PaymentReviewReason[];
-      reviewResult: TReviewResult;
+      reasons: PaymentDraftReason[];
+      draftResult: TReviewResult;
     }
   | {
       status: 'agent_executed';
@@ -185,15 +185,15 @@ export async function routePayment<
     };
   }
 
-  const reviewDecision = await dependencies.evaluateReviewGate(payment, context);
-  if (reviewDecision.status === 'draft') {
-    const reviewResult = await dependencies.markNeedsReview(payment, reviewDecision, context);
+  const draftDecision = await dependencies.evaluateDraftGate(payment, context);
+  if (draftDecision.status === 'draft') {
+    const draftResult = await dependencies.markAsDraft(payment, draftDecision, context);
     return {
       status: 'draft',
       route: 'human_review',
       payment,
-      reasons: reviewDecision.reasons,
-      reviewResult,
+      reasons: draftDecision.reasons,
+      draftResult,
     };
   }
 

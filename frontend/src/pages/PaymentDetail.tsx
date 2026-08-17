@@ -229,7 +229,7 @@ export function PaymentDetailPage() {
   // use a spending limit or create a Squads proposal in the same call.
   const clearReviewMutation = useMutation({
     mutationFn: () =>
-      api.clearPaymentOrderReview(organizationId!, paymentOrderId!, {
+      api.markBillSubmitted(organizationId!, paymentOrderId!, {
         autoAdvance: true,
         trustCounterpartyWallet: true,
       }),

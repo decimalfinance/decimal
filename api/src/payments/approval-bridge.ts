@@ -12,7 +12,7 @@ import { logger } from '../infra/logger.js';
 import { registerApprovalHook } from '../approvals/hooks.js';
 import { spawnReleaseRun } from '../approvals/lifecycle.js';
 import { tryAdvancePaymentOrderWithAgent } from '../agents/payment-automation.js';
-import { cancelPaymentOrder, clearPaymentOrderReview } from './orders.js';
+import { cancelPaymentOrder, markBillSubmitted } from './orders.js';
 
 // The most recent reject command's reason + who said it, for the send-back note.
 async function latestRejection(approvableId: string): Promise<{ reason: string | null; byName: string | null }> {
@@ -43,12 +43,12 @@ export function registerPaymentApprovalBridge(): void {
           select: { state: true },
         });
         if (order?.state === 'draft') {
-          await clearPaymentOrderReview({
+          await markBillSubmitted({
             organizationId: approvable.organization_id,
             paymentOrderId,
             actorUserId: null,
             actorType: 'system',
-            reviewNote: 'Cleared by approval engine: bill approved',
+            submitNote: 'Cleared by approval engine: bill approved',
           });
         }
         // Approved ≠ paid: the release ceremony is its own consent (H rows).

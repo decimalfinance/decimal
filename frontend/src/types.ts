@@ -964,7 +964,7 @@ export type BatchCsvUploadResult = {
   automation: PaymentOrderAgentAdvanceResult[];
 };
 
-export type BatchCsvPreviewResult = {
+export type BatchCsvPdraftResult = {
   totalRows: number;
   ready: number;
   warnings: number;

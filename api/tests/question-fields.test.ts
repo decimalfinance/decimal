@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import { HIGHLIGHTABLE_FIELDS, fieldsForQuestion } from '../src/payments/question-fields.js';
 
 test('the vocabulary matches keys the review screen actually renders', () => {
-  // These are the keys getBillReview emits. If a field is renamed there and not
+  // These are the keys getBillDraft emits. If a field is renamed there and not
   // here, highlighting silently stops working for it — this is the tripwire.
   for (const key of ['remitTo.street', 'remitTo.city', 'remitTo.state', 'remitTo.zip',
                      'invoiceNumber', 'invoiceDate', 'dueDate', 'terms', 'poNumber',

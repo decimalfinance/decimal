@@ -15,7 +15,7 @@ import { extractPdfTextLayer, refineInvoiceSources, PROVENANCE_VERSION } from '.
 import { suggestOcrCodings } from '../accounting/ocr-coding.js';
 import { INVOICE_IMPORT_REVIEW_NOTE } from '../counterparty-wallets.js';
 
-const NEW_COUNTERPARTY_REVIEW_THRESHOLD_RAW = 1_000n * 10n ** BigInt(USDC_DECIMALS);
+const NEW_COUNTERPARTY_DRAFT_THRESHOLD_RAW = 1_000n * 10n ** BigInt(USDC_DECIMALS);
 const LOW_CONFIDENCE_OVERALL_THRESHOLD = 0.72;
 const LOW_CONFIDENCE_AMOUNT_THRESHOLD = 0.72;
 
@@ -779,11 +779,11 @@ function deriveReviewRules(args: {
 
   if (args.counterpartyWallet.trustState === 'unreviewed') {
     rules.push({
-      rule: args.amountRaw > NEW_COUNTERPARTY_REVIEW_THRESHOLD_RAW
+      rule: args.amountRaw > NEW_COUNTERPARTY_DRAFT_THRESHOLD_RAW
         ? 'new_counterparty_threshold'
         : 'unreviewed_counterparty',
       reason:
-        args.amountRaw > NEW_COUNTERPARTY_REVIEW_THRESHOLD_RAW
+        args.amountRaw > NEW_COUNTERPARTY_DRAFT_THRESHOLD_RAW
           ? `New counterparty "${args.counterpartyWallet.label}" exceeds the $1000 review threshold.`
           : `Counterparty wallet "${args.counterpartyWallet.label}" has not been reviewed yet.`,
     });

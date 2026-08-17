@@ -1,7 +1,7 @@
 // Every reason a bill should give a human pause, in one place.
 //
 // This module exists because the flags used to be built inline inside
-// getBillReview. The workbench, which is the screen you actually use to decide
+// getBillDraft. The workbench, which is the screen you actually use to decide
 // what to open, computed its own unrelated notion of "ready" and never
 // consulted them — so a bill addressed to another company sat in the list
 // reading "Ready for approval". The check existed. It just had no path to that

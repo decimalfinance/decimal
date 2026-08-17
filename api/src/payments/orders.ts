@@ -408,10 +408,10 @@ export async function ensurePaymentOrderAuditRequest(
   return getPaymentOrderDetail(args.organizationId, args.paymentOrderId);
 }
 
-export async function clearPaymentOrderReview(args: PaymentActorInput & {
+export async function markBillSubmitted(args: PaymentActorInput & {
   organizationId: string;
   paymentOrderId: string;
-  reviewNote?: string | null;
+  submitNote?: string | null;
   trustCounterpartyWallet?: boolean;
 }): Promise<Awaited<ReturnType<typeof getPaymentOrderDetail>>> {
   const current = await prisma.paymentOrder.findFirstOrThrow({
@@ -447,7 +447,7 @@ export async function clearPaymentOrderReview(args: PaymentActorInput & {
         status: 'cleared',
         clearedAt: new Date().toISOString(),
         clearedByUserId: args.actorUserId,
-        note: normalizeOptionalText(args.reviewNote),
+        note: normalizeOptionalText(args.submitNote),
       },
     };
 
@@ -489,7 +489,7 @@ export async function clearPaymentOrderReview(args: PaymentActorInput & {
       beforeState: current.state,
       afterState: 'submitted',
       payloadJson: {
-        reviewNote: normalizeOptionalText(args.reviewNote),
+        submitNote: normalizeOptionalText(args.submitNote),
         trustedCounterpartyWallet:
           args.trustCounterpartyWallet !== false && current.counterpartyWallet.trustState === 'unreviewed',
       },
@@ -522,12 +522,12 @@ export async function advancePendingReviewsForWallet(args: {
   let advanced = 0;
   for (const order of pending) {
     try {
-      await clearPaymentOrderReview({
+      await markBillSubmitted({
         organizationId: args.organizationId,
         paymentOrderId: order.paymentOrderId,
         actorUserId: args.actorUserId,
         trustCounterpartyWallet: false,
-        reviewNote: 'Wallet trusted from the address book.',
+        submitNote: 'Wallet trusted from the address book.',
       });
       advanced += 1;
     } catch {

@@ -167,7 +167,7 @@ test('invoice upload parks every bill in review; clearing review advances it', a
   const cleared = await post(
     `/organizations/${setup.organization.organizationId}/payment-orders/${reviewOrder.paymentOrderId}/clear-review`,
     {
-      reviewNote: 'Verified invoice and wallet by email.',
+      submitNote: 'Verified invoice and wallet by email.',
       autoAdvance: false,
     },
     setup.sessionToken,
@@ -357,7 +357,7 @@ test('bills workbench triages uploads; review confirm sends the bill onward', as
   assert.equal(row.subStatus.text, 'Ready for approval');
 
   const review = await get(
-    `/organizations/${setup.organization.organizationId}/bills/${billId}/review`,
+    `/organizations/${setup.organization.organizationId}/bills/${billId}/draft`,
     setup.sessionToken,
   );
   assert.equal(review.readOnly, false);
@@ -417,7 +417,7 @@ test('bills workbench triages uploads; review confirm sends the bill onward', as
   assert.ok(Array.isArray(detail.corrections));
 
   const reviewAfter = await get(
-    `/organizations/${setup.organization.organizationId}/bills/${billId}/review`,
+    `/organizations/${setup.organization.organizationId}/bills/${billId}/draft`,
     setup.sessionToken,
   );
   assert.equal(reviewAfter.readOnly, true);

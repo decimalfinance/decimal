@@ -119,7 +119,7 @@ test('duplicate gate: same invoice number blocks confirm until an admin clears i
   // Same vendor + same invoice number (normalization eats case/punctuation)
   // → blocking review flag, and confirm refuses.
   const second = await uploadAndConfirm(orgId, owner.token, { vendor: 'Dupe Systems', amount: 900, invoiceNo: 'ds 100' });
-  const review = await get(`/organizations/${orgId}/bills/${second.billId}/review`, owner.token);
+  const review = await get(`/organizations/${orgId}/bills/${second.billId}/draft`, owner.token);
   const dupFlag = review.flags.find((f: { kind: string; blocking: boolean }) => f.kind === 'possible_duplicate');
   assert.ok(dupFlag?.blocking, 'duplicate flag is a hard block');
   let confirmFailed = false;
@@ -149,7 +149,7 @@ test('duplicate gate: same invoice number blocks confirm until an admin clears i
   // by the old intake check — invisible, no override path (testbench 001).
   // Review-bound bills now flow through and get the visible flag instead.
   const exactTwin = await uploadAndConfirm(orgId, owner.token, { vendor: 'Dupe Systems', amount: 1200, invoiceNo: 'DS-100' });
-  const twinReview = await get(`/organizations/${orgId}/bills/${exactTwin.billId}/review`, owner.token);
+  const twinReview = await get(`/organizations/${orgId}/bills/${exactTwin.billId}/draft`, owner.token);
   const twinFlag = twinReview.flags.find((f: { kind: string; blocking: boolean }) => f.kind === 'possible_duplicate');
   assert.ok(twinFlag?.blocking, 'exact twin lands in review, flagged — not rejected at upload');
 });
@@ -309,11 +309,11 @@ test('vendor coding rules: agreeing history promotes a default; manual rules nev
   // the PICKER's vocabulary — with no QBO chart, that's the builtin
   // categories. A rule the picker knows pre-fills; the ACC-CLOUD learned
   // rule above (not a picker option) correctly does not.
-  const before = await get(`/organizations/${orgId}/bills/${await mk(11)}/review`, owner.token);
+  const before = await get(`/organizations/${orgId}/bills/${await mk(11)}/draft`, owner.token);
   assert.notEqual(before.codingSuggestionSource?.kind, 'rule', 'non-picker rule falls through to the document signal');
   await gl.setVendorCodingRule({ organizationId: orgId, counterpartyId, accountId: 'builtin:cloud-hosting', accountName: 'Cloud hosting & infrastructure', actorUserId: owner.userId });
   const b12 = await mk(12);
-  const review = await get(`/organizations/${orgId}/bills/${b12}/review`, owner.token);
+  const review = await get(`/organizations/${orgId}/bills/${b12}/draft`, owner.token);
   assert.equal(review.codingSuggestionSource?.kind, 'rule', 'builtin-account rule pre-fills without QuickBooks');
   assert.match(review.codingSuggestionSource?.detail ?? '', /coding default/);
 });
@@ -398,7 +398,7 @@ test('org bill ceiling: over-ceiling bills are blocked in review and unblocked w
 
   // A $15k bill is blocked at review and at confirm.
   const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'Ceiling Vendor', amount: 15000, invoiceNo: 'CV-1' });
-  const review = await get(`/organizations/${orgId}/bills/${bill.billId}/review`, owner.token);
+  const review = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, owner.token);
   const flag = review.flags.find((f: { kind: string; blocking: boolean }) => f.kind === 'over_ceiling');
   assert.ok(flag?.blocking, 'over-ceiling flag blocks');
   let failed = false;
@@ -482,7 +482,7 @@ test('vendor payable gate: held and blocked vendors cannot leave review', async 
   const held = await setStatus(owner.token, { status: 'held', reason: 'Bank details under investigation' });
   assert.ok(held.ok);
   const second = await uploadAndConfirm(orgId, owner.token, { vendor: 'Gate Vendor Co', amount: 700, invoiceNo: 'GV-2' });
-  const review = await get(`/organizations/${orgId}/bills/${second.billId}/review`, owner.token);
+  const review = await get(`/organizations/${orgId}/bills/${second.billId}/draft`, owner.token);
   const flag = review.flags.find((f: { kind: string; blocking: boolean }) => f.kind === 'vendor_held');
   assert.ok(flag?.blocking, 'held vendor puts a blocking flag on the bill');
   let confirmFailed = false;
@@ -498,7 +498,7 @@ test('vendor payable gate: held and blocked vendors cannot leave review', async 
   const blocked = await setStatus(owner.token, { status: 'blocked', reason: 'Confirmed fraudulent invoices' });
   assert.ok(blocked.ok);
   const third = await uploadAndConfirm(orgId, owner.token, { vendor: 'Gate Vendor Co', amount: 900, invoiceNo: 'GV-3' });
-  const thirdReview = await get(`/organizations/${orgId}/bills/${third.billId}/review`, owner.token);
+  const thirdReview = await get(`/organizations/${orgId}/bills/${third.billId}/draft`, owner.token);
   assert.ok(
     thirdReview.flags.find((f: { kind: string; blocking: boolean }) => f.kind === 'vendor_blocked')?.blocking,
     'blocked vendor flag',
@@ -682,7 +682,7 @@ test('request-info blocks approval until answered; reject stops the route', asyn
   assert.equal(rejected.approval.macroState, 'rejected');
 
   // …the order is back in review, carrying the approver's homework
-  const sentBack = await get(`/organizations/${orgId}/bills/${b2.billId}/review`, owner.token);
+  const sentBack = await get(`/organizations/${orgId}/bills/${b2.billId}/draft`, owner.token);
   assert.equal(sentBack.state, 'draft');
   assert.equal(sentBack.sentBack.reason, 'Needs its own PO first.');
   assert.ok(sentBack.sentBack.byName, 'send-back names the approver');
@@ -692,7 +692,7 @@ test('request-info blocks approval until answered; reject stops the route', asyn
   const resubmitted = await get(`/organizations/${orgId}/bills/${b2.billId}/detail`, owner.token);
   assert.equal(resubmitted.approval.macroState, 'pending_approval', 'resubmit starts a fresh run');
   assert.ok(resubmitted.approval.flowVersion >= 1, 'provenance: the flow version that routed this bill');
-  const cleared = await get(`/organizations/${orgId}/bills/${b2.billId}/review`, owner.token);
+  const cleared = await get(`/organizations/${orgId}/bills/${b2.billId}/draft`, owner.token);
   assert.equal(cleared.sentBack, null, 'the sent-back note clears on re-confirm');
 
   // …and the fresh run is decidable end to end
@@ -1067,7 +1067,7 @@ test('"this is us" clears the flag through the API, and a member is refused', as
     vendor: 'Acme Cloud', amount: 4820, invoiceNo: 'TIU-1', billTo: 'Halcyon Labs, Inc.',
   });
 
-  const before = await get(`/organizations/${orgId}/bills/${bill.billId}/review`, owner.token);
+  const before = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, owner.token);
   assert.ok(before.flags.some((f: any) => f.kind === 'addressed_elsewhere'), 'flagged to begin with');
 
   const member = await register('tiu-member');
@@ -1214,12 +1214,12 @@ test('a question is visible to both sides, and only the person asked can answer'
   }, owner.token);
 
   // The asker sees it as outstanding; the person asked sees it as theirs.
-  const asAsker = await get(`/organizations/${orgId}/bills/${bill.billId}/review`, owner.token);
+  const asAsker = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, owner.token);
   assert.equal(asAsker.questions.length, 1, 'the asker can see what they asked');
   assert.equal(asAsker.questions[0].youAsked, true);
   assert.equal(asAsker.questions[0].youWereAsked, false);
 
-  const asHelper = await get(`/organizations/${orgId}/bills/${bill.billId}/review`, helper.token);
+  const asHelper = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, helper.token);
   assert.equal(asHelper.questions[0].youWereAsked, true, 'the person asked is told it is theirs');
 
   // The asker cannot answer on their behalf — that is not what anyone is waiting for.
@@ -1364,7 +1364,7 @@ test('forwarding raises a linked question carrying only what is outstanding', as
     forwardTo: { userId: c.userId, question: 'Can you confirm the city and state on this vendor?' },
   }, b.token);
 
-  const asC = await get(`/organizations/${orgId}/bills/${bill.billId}/review`, c.token);
+  const asC = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, c.token);
   const mine = asC.questions.find((q: any) => q.youWereAsked);
   assert.ok(mine, 'C is now the one being asked');
   assert.deepEqual(mine.openFields, ['remitTo.city', 'remitTo.state'],

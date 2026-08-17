@@ -12,9 +12,9 @@ import {
   api,
   billsApi,
   invoiceIntakeApi,
-  type BillReview,
-  type BillReviewField,
-  type BillReviewLine,
+  type BillDraft,
+  type BillDraftField,
+  type BillDraftLine,
   type CategoryOption,
   type ConfirmBillBody,
   type DocSource,
@@ -32,9 +32,9 @@ function initialsOf(name: string): string {
   return name.slice(0, 2).toUpperCase();
 }
 
-type FieldStateMap = Record<string, { value: string; state: BillReviewField['state'] }>;
+type FieldStateMap = Record<string, { value: string; state: BillDraftField['state'] }>;
 
-export function InvoiceReviewPage() {
+export function BillDraftPage() {
   const { organizationId = '', paymentOrderId = '' } = useParams();
   const navigate = useNavigate();
   const toast = useToast();
@@ -97,7 +97,7 @@ export function InvoiceReviewPage() {
         void queryClient.invalidateQueries({ queryKey: ['bills-workbench', organizationId] });
         void queryClient.invalidateQueries({ queryKey: ['bill-review', organizationId, paymentOrderId] });
         const next = queue.find((id) => id !== paymentOrderId);
-        if (next) navigate(`/organizations/${organizationId}/bills/${next}/review`);
+        if (next) navigate(`/organizations/${organizationId}/bills/${next}/draft`);
         else navigate(`/organizations/${organizationId}/bills`);
       }}
       toast={toast}
@@ -107,7 +107,7 @@ export function InvoiceReviewPage() {
 
 function ReviewScreen(props: {
   organizationId: string;
-  review: BillReview;
+  review: BillDraft;
   canOverrideDuplicate: boolean;
   onBack: () => void;
   onDone: () => void;
@@ -319,7 +319,7 @@ function ReviewScreen(props: {
     }
     return map;
   });
-  const [lines, setLines] = useState<BillReviewLine[]>(() =>
+  const [lines, setLines] = useState<BillDraftLine[]>(() =>
     review.lines.length > 0 ? review.lines : [{ description: '', quantity: 1, unitPrice: null, amount: null, category: null }],
   );
   const [tax, setTax] = useState<string>(review.taxAmount != null ? String(review.taxAmount) : '0');
@@ -1248,8 +1248,8 @@ function AccountPicker(props: {
 }
 
 function ReviewField(props: {
-  def: BillReviewField;
-  current: { value: string; state: BillReviewField['state'] };
+  def: BillDraftField;
+  current: { value: string; state: BillDraftField['state'] };
   readOnly: boolean;
   onChange: (value: string) => void;
   onConfirm: () => void;
@@ -1319,7 +1319,7 @@ const ZOOM_MAX_PCT = 300;
 // The document rendered as clean page images — never a PDF viewer.
 export function DocumentPane(props: {
   organizationId: string;
-  document: BillReview['document'] | null;
+  document: BillDraft['document'] | null;
   // While processing, the caller passes a live pagesStored count so pages
   // appear as soon as they exist.
   pagesStored?: number;
@@ -1452,7 +1452,7 @@ export function DocumentPane(props: {
 
 // Live intake: the operator lands here the moment the upload finishes. The
 // document shows immediately; the read panel fills in when the read completes.
-export function DocumentReviewPage() {
+export function DocumentDraftPage() {
   const { organizationId = '', invoiceDocumentId = '' } = useParams();
   const navigate = useNavigate();
 
@@ -1477,7 +1477,7 @@ export function DocumentReviewPage() {
   useEffect(() => {
     if (data?.status === 'processed' && data.paymentOrders[0]) {
       navigate(
-        `/organizations/${organizationId}/bills/${data.paymentOrders[0].paymentOrderId}/review`,
+        `/organizations/${organizationId}/bills/${data.paymentOrders[0].paymentOrderId}/draft`,
         { replace: true },
       );
     }

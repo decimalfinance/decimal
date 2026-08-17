@@ -145,7 +145,7 @@ export function ApprovalsPage() {
                 </thead>
                 <tbody>
                   {(data?.questionsForYou ?? []).map((row) => (
-                    <tr key={row.billQuestionId} onClick={() => navigate(`/organizations/${organizationId}/bills/${row.paymentOrderId}/review`)} style={{ cursor: 'pointer' }}>
+                    <tr key={row.billQuestionId} onClick={() => navigate(`/organizations/${organizationId}/bills/${row.paymentOrderId}/draft`)} style={{ cursor: 'pointer' }}>
                       <td>
                         <div className="cell-vendor">
                           <span className="v-name">{row.askedByName} asked</span>

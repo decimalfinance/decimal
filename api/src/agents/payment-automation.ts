@@ -8,8 +8,8 @@ import { SQUADS_SOURCE } from '../squads/shared.js';
 import {
   routePayment,
   type ExistingPaymentRoute,
-  type PaymentReviewDecision,
-  type PaymentReviewReason,
+  type PaymentDraftDecision,
+  type PaymentDraftReason,
   type PaymentRoutingContext,
   type SpendingLimitFitDecision,
 } from '../payments/algorithm.js';
@@ -129,8 +129,8 @@ async function advancePaymentOrderWithAgent(args: {
     {
       loadPaymentOrder,
       findExistingRoute,
-      evaluateReviewGate,
-      markNeedsReview,
+      evaluateDraftGate,
+      markAsDraft,
       findBestMatchingSpendingLimit,
       canUseSpendingLimit,
       executeWithSpendingLimit: async (paymentOrder, spendingLimitPolicyId, context) => {
@@ -310,8 +310,8 @@ async function findExistingRoute(paymentOrder: AgentPaymentOrder): Promise<Exist
 // takes over only once the vendor has this many settled bills on record.
 const EARNED_AUTONOMY_MIN_BILLS = 2;
 
-async function evaluateReviewGate(paymentOrder: AgentPaymentOrder, context: PaymentRoutingContext): Promise<PaymentReviewDecision> {
-  const reasons: PaymentReviewReason[] = [];
+async function evaluateDraftGate(paymentOrder: AgentPaymentOrder, context: PaymentRoutingContext): Promise<PaymentDraftDecision> {
+  const reasons: PaymentDraftReason[] = [];
 
   if (paymentOrder.state === 'draft') {
     reasons.push({
@@ -396,9 +396,9 @@ async function evaluateReviewGate(paymentOrder: AgentPaymentOrder, context: Paym
   return reasons.length ? { status: 'draft', reasons } : { status: 'pass' };
 }
 
-async function markNeedsReview(
+async function markAsDraft(
   paymentOrder: AgentPaymentOrder,
-  decision: Extract<PaymentReviewDecision, { status: 'draft' }>,
+  decision: Extract<PaymentDraftDecision, { status: 'draft' }>,
   context: PaymentRoutingContext,
 ) {
   if (paymentOrder.state === 'draft') {
@@ -623,7 +623,7 @@ function isRecordLike(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function serializeReviewReason(reason: PaymentReviewReason): Prisma.InputJsonObject {
+function serializeReviewReason(reason: PaymentDraftReason): Prisma.InputJsonObject {
   return {
     code: reason.code,
     message: reason.message,

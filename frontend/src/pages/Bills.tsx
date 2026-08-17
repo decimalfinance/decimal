@@ -97,7 +97,7 @@ export function BillsPage() {
 
   const openBill = (bill: WorkbenchBill) => {
     if (bill.bucket === 'draft') {
-      navigate(`/organizations/${organizationId}/bills/${bill.paymentOrderId}/review`);
+      navigate(`/organizations/${organizationId}/bills/${bill.paymentOrderId}/draft`);
     } else {
       navigate(`/organizations/${organizationId}/bills/${bill.paymentOrderId}`);
     }
@@ -111,7 +111,7 @@ export function BillsPage() {
     // Same file again: SAY so — silently opening the old bill reads as the
     // upload having vanished (testbench 001).
     if (reused) toast.info('This exact file is already in Decimal — opening it.', 'Already uploaded');
-    navigate(`/organizations/${organizationId}/bills/documents/${invoiceDocumentId}/review`);
+    navigate(`/organizations/${organizationId}/bills/documents/${invoiceDocumentId}/draft`);
   };
 
   const emptyCopy: Record<BillBucket, string> = {

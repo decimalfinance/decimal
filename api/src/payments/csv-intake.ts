@@ -114,7 +114,7 @@ export async function previewPaymentOrdersCsv(args: {
   organizationId: string;
   csv: string;
 }) {
-  const parsedRows = await parseAndResolvePaymentCsv(args.organizationId, args.csv, { previewOnly: true });
+  const parsedRows = await parseAndResolvePaymentCsv(args.organizationId, args.csv, { pdraftOnly: true });
   return {
     totalRows: parsedRows.items.length,
     ready: parsedRows.items.filter((item) => item.status === 'ready').length,
@@ -128,7 +128,7 @@ export async function previewPaymentOrdersCsv(args: {
 async function parseAndResolvePaymentCsv(
   organizationId: string,
   csv: string,
-  options: { previewOnly?: boolean } = {},
+  options: { pdraftOnly?: boolean } = {},
 ): Promise<{ items: ResolvedCsvItem[] }> {
   const rows = parseCsv(csv);
   if (!rows.length) {
@@ -148,7 +148,7 @@ async function parseAndResolvePaymentCsv(
       const parsed = parsePaymentCsvRecord(record);
       const importKey = buildCsvImportRowKey(parsed);
       const duplicateRowNumber = seenImportKeys.get(importKey) ?? null;
-      if (duplicateRowNumber && !options.previewOnly) {
+      if (duplicateRowNumber && !options.pdraftOnly) {
         throw new Error(`Duplicate CSV row. Same destination, amount, and reference already appeared on row ${duplicateRowNumber}`);
       }
       seenImportKeys.set(importKey, duplicateRowNumber ?? rowNumber);
@@ -158,7 +158,7 @@ async function parseAndResolvePaymentCsv(
         destinationInput: parsed.destinationInput,
         counterpartyName: parsed.counterpartyName,
         rowNumber,
-        createIfMissing: !options.previewOnly,
+        createIfMissing: !options.pdraftOnly,
       });
       const duplicate = counterpartyWallet
         ? await findActivePaymentDuplicate({

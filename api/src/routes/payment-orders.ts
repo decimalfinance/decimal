@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import {
   cancelPaymentOrder,
-  clearPaymentOrderReview,
+  markBillSubmitted,
   createPaymentOrder,
   getPaymentOrderDetail,
   listPaymentOrders,
@@ -72,7 +72,7 @@ const proofQuerySchema = z.object({
 });
 
 const clearReviewSchema = z.object({
-  reviewNote: z.string().trim().max(2000).optional().nullable(),
+  submitNote: z.string().trim().max(2000).optional().nullable(),
   trustCounterpartyWallet: z.boolean().default(true),
 });
 
@@ -175,11 +175,11 @@ paymentOrdersRouter.post('/organizations/:organizationId/payment-orders/:payment
     const input = clearReviewSchema.parse(req.body);
     const actor = actorFromAuth(req.auth!);
 
-    await clearPaymentOrderReview({
+    await markBillSubmitted({
       organizationId,
       paymentOrderId,
       ...actor,
-      reviewNote: input.reviewNote,
+      submitNote: input.submitNote,
       trustCounterpartyWallet: input.trustCounterpartyWallet,
     });
     sendJson(res, await getPaymentOrderDetail(organizationId, paymentOrderId));

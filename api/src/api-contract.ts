@@ -203,7 +203,7 @@ export const API_ENDPOINTS = [
   endpoint('update_payment_order', 'PATCH', '/organizations/{organizationId}/payment-orders/{paymentOrderId}', ['payment orders'], 'Update payment order', 'session', { scope: 'payments:write' }),
   endpoint('clear_payment_order_review', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/clear-review', ['payment orders'], 'Clear an AP-intake flagged payment order and advance it to the proposal-ready path', 'session', {
     scope: 'payments:write',
-    requestBody: { reviewNote: 'string optional', trustCounterpartyWallet: 'boolean default true', autoAdvance: 'boolean default true' },
+    requestBody: { submitNote: 'string optional', trustCounterpartyWallet: 'boolean default true', autoAdvance: 'boolean default true' },
     response: { automation: 'agent routing result when autoAdvance is true' },
   }),
   endpoint('advance_payment_order_with_agent', 'POST', '/organizations/{organizationId}/payment-orders/{paymentOrderId}/agent/advance', ['payment orders', 'automation agents', 'squads'], 'Ask the Decimal agent to route a green payment through a spending limit or Squads proposal', 'session', {
