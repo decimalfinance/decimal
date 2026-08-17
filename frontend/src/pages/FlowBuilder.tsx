@@ -1,6 +1,7 @@
-// AP Pipeline Control. The owner configures how the org controls its whole AP
-// pipeline as THREE first-class stages — Review → Approve → Release — each with
-// people + quorum + amount conditions. Separation of duties is the org's own
+// AP Pipeline Control. The owner configures the two stages that route people —
+// Approve → Release — each with people + quorum + amount conditions. A bill is
+// prepared in DRAFT before either of them, which is work rather than routing:
+// there is nobody to configure, so there is nothing here to draw. Separation of duties is the org's own
 // choice (switches at the stage boundaries), never hardcoded by us. Owner edits;
 // everyone else views. Publish is the only commit.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -174,7 +175,7 @@ export function FlowBuilderPage({ session }: { session: AuthenticatedSession }) 
       // Two separations are intentionally NOT controls: nobody "owns" a bill (it's
       // just received), so self-approval doesn't apply; and release signers are
       // high-authority who may also have approved. Force both to allowed. The one
-      // real control is reviewer ≠ approver.
+      // real control is bill clerk ≠ approver.
       const norm = { ...sepQuery.data, submitterCanApprove: true, approverCanRelease: true };
       setSep(norm); setSepPublished(JSON.stringify(norm));
     }
@@ -634,7 +635,7 @@ export function FlowBuilderPage({ session }: { session: AuthenticatedSession }) 
 // Yes/No labels. No container boxes — the canvas is the container.
 type InsertKind = 'step' | 'split' | 'forward';
 interface LaneProps {
-  nodes: FlowNode[]; verb: 'review' | 'approve' | 'pay';
+  nodes: FlowNode[]; verb: 'approve' | 'pay';
   personOf: Map<string, FlowPerson>; isOwner: boolean; selectedId: string | null;
   onSelect: (id: string) => void;
   onInsertAfter: (id: string, kind: InsertKind) => void;
@@ -643,11 +644,10 @@ interface LaneProps {
   ghostText?: string; onAddFirst?: (kind: InsertKind) => void;
 }
 
-function stepSentence(names: string[], quorum: 'all' | 'any' | number, verb: 'review' | 'approve' | 'pay') {
+function stepSentence(names: string[], quorum: 'all' | 'any' | number, verb: 'approve' | 'pay') {
   const bolded = names.map((n, i) => (
     <span key={i}>{i > 0 ? (i === names.length - 1 ? (quorum === 'all' ? ' and ' : ' or ') : ', ') : ''}<b>{n}</b></span>
   ));
-  if (verb === 'review') return <>{bolded} confirm{names.length === 1 ? 's' : ''} the details</>;
   if (verb === 'pay') return <>{bolded} sign{names.length === 1 || quorum !== 'all' ? 's' : ''} to send the money</>;
   return <>Request approval from {bolded}</>;
 }

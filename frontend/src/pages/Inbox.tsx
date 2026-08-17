@@ -50,7 +50,7 @@ export function InboxPage({ session }: { session: AuthenticatedSession }) {
     refetchOnWindowFocus: true,
   });
 
-  // All payment orders — used to compute auto-paid, review, and to join
+  // All payment orders — used to compute auto-paid, drafts, and to join
   // proposals back to their vendor + amount.
   const ordersQuery = useQuery({
     queryKey: ['payment-orders', organizationId] as const,
@@ -118,7 +118,7 @@ export function InboxPage({ session }: { session: AuthenticatedSession }) {
     [orders],
   );
 
-  const review: DraftItem[] = useMemo(
+  const drafts: DraftItem[] = useMemo(
     () =>
       orders
         .filter((o) => o.derivedState === 'draft')
@@ -156,7 +156,7 @@ export function InboxPage({ session }: { session: AuthenticatedSession }) {
 
   const approvalCount = approval.length;
   const autopaidCount = autopaid.length;
-  const draftCount = review.length;
+  const draftCount = drafts.length;
   const treasuryCount = treasuries.length;
   // First-run: org exists but no treasury yet. Per the design (pages-onboard
   // → FirstRunDashboard), Overview replaces the 3-column grid with a
@@ -322,7 +322,7 @@ export function InboxPage({ session }: { session: AuthenticatedSession }) {
             footerLabel="View all drafts"
             empty="Nothing flagged"
           >
-            {review.map((r) => (
+            {drafts.map((r) => (
               <InboxRow
                 key={r.id}
                 vendor={r.vendor}
