@@ -52,7 +52,7 @@ export type PaymentRoutingDependencies<
   TExecution,
   TProposal,
   TExistingRoute = unknown,
-  TReviewResult = unknown,
+  TDraftResult = unknown,
 > = {
   loadPaymentOrder: (context: PaymentRoutingContext) => Promise<TPayment>;
   findExistingRoute?: (
@@ -67,7 +67,7 @@ export type PaymentRoutingDependencies<
     payment: TPayment,
     decision: Extract<PaymentDraftDecision, { status: 'draft' }>,
     context: PaymentRoutingContext,
-  ) => Promise<TReviewResult>;
+  ) => Promise<TDraftResult>;
   findBestMatchingSpendingLimit: (
     payment: TPayment,
     context: PaymentRoutingContext,
@@ -101,7 +101,7 @@ export type PaymentRoutingDecision<
   TExecution,
   TProposal,
   TExistingRoute = unknown,
-  TReviewResult = unknown,
+  TDraftResult = unknown,
 > =
   | {
       status: 'already_routed';
@@ -120,7 +120,7 @@ export type PaymentRoutingDecision<
       route: 'human_review';
       payment: TPayment;
       reasons: PaymentDraftReason[];
-      draftResult: TReviewResult;
+      draftResult: TDraftResult;
     }
   | {
       status: 'agent_executed';
@@ -157,11 +157,11 @@ export async function routePayment<
   TExecution,
   TProposal,
   TExistingRoute = unknown,
-  TReviewResult = unknown,
+  TDraftResult = unknown,
 >(
   context: PaymentRoutingContext,
-  dependencies: PaymentRoutingDependencies<TPayment, TSpendingLimit, TExecution, TProposal, TExistingRoute, TReviewResult>,
-): Promise<PaymentRoutingDecision<TPayment, TSpendingLimit, TExecution, TProposal, TExistingRoute, TReviewResult>> {
+  dependencies: PaymentRoutingDependencies<TPayment, TSpendingLimit, TExecution, TProposal, TExistingRoute, TDraftResult>,
+): Promise<PaymentRoutingDecision<TPayment, TSpendingLimit, TExecution, TProposal, TExistingRoute, TDraftResult>> {
   const payment = await dependencies.loadPaymentOrder(context);
 
   if (payment.state === 'cancelled' || payment.state === 'settled') {
@@ -236,17 +236,17 @@ export async function routePaymentsBatch<
   TExecution,
   TProposal,
   TExistingRoute = unknown,
-  TReviewResult = unknown,
+  TDraftResult = unknown,
 >(
   contexts: PaymentRoutingContext[],
-  dependencies: PaymentRoutingDependencies<TPayment, TSpendingLimit, TExecution, TProposal, TExistingRoute, TReviewResult>,
+  dependencies: PaymentRoutingDependencies<TPayment, TSpendingLimit, TExecution, TProposal, TExistingRoute, TDraftResult>,
   options: RoutePaymentsBatchOptions = {},
 ): Promise<Array<RoutePaymentsBatchResult<
-  PaymentRoutingDecision<TPayment, TSpendingLimit, TExecution, TProposal, TExistingRoute, TReviewResult>
+  PaymentRoutingDecision<TPayment, TSpendingLimit, TExecution, TProposal, TExistingRoute, TDraftResult>
 >>> {
   const concurrency = normalizeConcurrency(options.concurrency ?? contexts.length);
   const results: Array<RoutePaymentsBatchResult<
-    PaymentRoutingDecision<TPayment, TSpendingLimit, TExecution, TProposal, TExistingRoute, TReviewResult>
+    PaymentRoutingDecision<TPayment, TSpendingLimit, TExecution, TProposal, TExistingRoute, TDraftResult>
   >> = [];
   let nextIndex = 0;
 

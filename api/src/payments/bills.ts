@@ -567,12 +567,12 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
     };
   });
 
-  const reviewCounts = {
+  const draftCounts = {
     ready: bills.filter((b) => b.readiness === 'ready').length,
     missingInfo: bills.filter((b) => b.readiness === 'missing_info').length,
   };
 
-  return { counts, reviewCounts, bills };
+  return { counts, draftCounts, bills };
 }
 
 // -----------------------------------------------------------------------------

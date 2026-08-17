@@ -18,7 +18,7 @@ export function InviteAcceptPage() {
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
 
-  const previewQuery = useQuery({
+  const pdraftQuery = useQuery({
     queryKey: ['invite-preview', inviteToken] as const,
     queryFn: () => api.previewInvite(inviteToken!),
     enabled: Boolean(inviteToken),
@@ -51,18 +51,18 @@ export function InviteAcceptPage() {
   });
 
   const sessionEmail = sessionQuery.data?.user.email ?? null;
-  const invite = previewQuery.data;
+  const invite = pdraftQuery.data;
 
   const status = useMemo(
     () =>
       deriveStatus({
         inviteToken,
-        previewQuery,
+        pdraftQuery,
         sessionQuery,
         sessionEmail,
         invite,
       }),
-    [inviteToken, previewQuery, sessionQuery, sessionEmail, invite],
+    [inviteToken, pdraftQuery, sessionQuery, sessionEmail, invite],
   );
 
   const orgName = invite?.organization.organizationName ?? 'this workspace';
@@ -100,18 +100,18 @@ type InviteScreenStatus =
 
 function deriveStatus(args: {
   inviteToken: string | undefined;
-  previewQuery: ReturnType<typeof useQuery<PublicInvite>>;
+  pdraftQuery: ReturnType<typeof useQuery<PublicInvite>>;
   sessionQuery: ReturnType<typeof useQuery<AuthenticatedSession>>;
   sessionEmail: string | null;
   invite: PublicInvite | undefined;
 }): InviteScreenStatus {
-  const { inviteToken, previewQuery, sessionQuery, sessionEmail, invite } = args;
+  const { inviteToken, pdraftQuery, sessionQuery, sessionEmail, invite } = args;
   if (!inviteToken) return { kind: 'invalid', message: 'Invite link is missing a token.' };
-  if (previewQuery.isLoading) return { kind: 'loading' };
-  if (previewQuery.error) {
+  if (pdraftQuery.isLoading) return { kind: 'loading' };
+  if (pdraftQuery.error) {
     const message =
-      previewQuery.error instanceof Error
-        ? previewQuery.error.message
+      pdraftQuery.error instanceof Error
+        ? pdraftQuery.error.message
         : 'Invite link is invalid.';
     return { kind: 'invalid', message };
   }

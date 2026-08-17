@@ -1555,7 +1555,7 @@ export const inboundEmailApi = {
 
 export const billsApi = {
   workbench(organizationId: string) {
-    return request<{ counts: Record<BillBucket, number>; reviewCounts: { ready: number; missingInfo: number }; bills: WorkbenchBill[] }>(`/organizations/${organizationId}/bills/workbench`);
+    return request<{ counts: Record<BillBucket, number>; draftCounts: { ready: number; missingInfo: number }; bills: WorkbenchBill[] }>(`/organizations/${organizationId}/bills/workbench`);
   },
   draft(organizationId: string, paymentOrderId: string) {
     return request<BillDraft>(`/organizations/${organizationId}/bills/${paymentOrderId}/draft`);
