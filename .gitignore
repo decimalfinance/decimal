@@ -58,7 +58,7 @@ assets/samples/single_payment.pdf
 deliverables
 
 # Synthetic test data — bulky PDFs, easy to regenerate locally via
-# `node synthetic_data/generate-invoices.mjs`
+# `node scripts/invoice-gen/generate.mjs` (spec: TESTING-INVOICES.md)
 synthetic_data/
 
 # Local scratch artifacts
