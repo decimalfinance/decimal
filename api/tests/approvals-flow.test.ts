@@ -2001,3 +2001,58 @@ test('a bill that went round twice shows the round trip, not two identical submi
   assert.equal(recalled.person, null);
   assert.ok(recalled.at, 'but it is timed, like everything else on the rail');
 });
+
+// --- bringing a bill in is not the same as preparing it ----------------------
+//
+// bills.create is deliberately wide (anyone but a Viewer can put an invoice
+// into the system) and bills.edit is narrow (checking the figures is the
+// clerk's job). The capability middleware has always refused an approver's
+// save; the draft screen offered the form anyway, so an approver who uploaded
+// an invoice could type into every field and lose the lot on navigating away.
+
+test('an approver who uploads a bill gets a draft they can read, not edit', async () => {
+  const { orgId, owner, a2, a3 } = await makeOrg();
+  const flow = await get(`/organizations/${orgId}/approvals/flow`, owner.token);
+  const byUser = new Map(flow.people.map((p: { user_id: string; id: string }) => [p.user_id, p.id]));
+  await post(`/organizations/${orgId}/roles/approver/holders`, { userId: a2.userId }, owner.token);
+  await post(`/organizations/${orgId}/roles/bill_clerk/holders`, { userId: a3.userId }, owner.token);
+  void byUser;
+
+  // The approver brings the invoice in — allowed, and the point of bills.create.
+  const bill = await uploadAndConfirm(orgId, a2.token, { vendor: 'Wrong Hands Co', amount: 900, invoiceNo: 'WH-1' });
+
+  const asApprover = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, a2.token);
+  assert.equal(asApprover.readOnly, true, 'the approver may not prepare it');
+  assert.equal(asApprover.readOnlyReason, 'not_your_job', 'and the screen is told why');
+
+  // The clerk picks it up and the same bill is editable.
+  const asClerk = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, a3.token);
+  assert.equal(asClerk.readOnly, false, 'preparing it is the clerk’s job');
+  assert.equal(asClerk.readOnlyReason, null);
+
+  // And the server agrees with the screen: the approver's save is refused.
+  const refused = await fetch(`${baseUrl}/organizations/${orgId}/bills/${bill.billId}/facts`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${a2.token}` },
+    body: JSON.stringify({ facts: { poNumber: 'PO-NOPE' } }),
+  });
+  assert.equal(refused.status, 403, 'the form was never going to save');
+});
+
+test('a bill that has left draft is read-only for its own stage, not for who is looking', async () => {
+  const { orgId, owner, a2, a3 } = await makeOrg();
+  const flow = await get(`/organizations/${orgId}/approvals/flow`, owner.token);
+  const byUser = new Map(flow.people.map((p: { user_id: string; id: string }) => [p.user_id, p.id]));
+  await publishLadder(orgId, owner.token, [byUser.get(a2.userId) as string], byUser.get(a2.userId) as string);
+  await post(`/organizations/${orgId}/roles/bill_clerk/holders`, { userId: a3.userId }, owner.token);
+
+  const bill = await uploadAndConfirm(orgId, a3.token, { vendor: 'Settled Co', amount: 900, invoiceNo: 'ST-1' });
+  const before = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, a3.token);
+  assert.equal(before.readOnly, false);
+
+  await bill.confirm();
+
+  const after = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, a3.token);
+  assert.equal(after.readOnly, true, 'the clerk still holds bills.edit — the BILL has moved on');
+  assert.equal(after.readOnlyReason, 'settled', 'and that is the reason given, not the role');
+});

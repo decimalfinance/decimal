@@ -685,6 +685,18 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   });
   if (!order) return null;
 
+  // Same source of truth the capability middleware uses to refuse the save, so
+  // the screen and the server cannot disagree about who may prepare a bill.
+  // Without a viewer (internal callers) nothing is being rendered to anybody,
+  // so there is no one to mislead — treat it as editable and let the route
+  // enforce.
+  let viewerCanEdit = true;
+  if (viewerUserId) {
+    const { getOrgAccess } = await import('../approvals/permissions.js');
+    const access = await getOrgAccess(organizationId, viewerUserId);
+    viewerCanEdit = Boolean(access?.capabilities.includes('bills.edit'));
+  }
+
   const metadata = isRecord(order.metadataJson) ? order.metadataJson : {};
   const agent = isRecord(metadata.agent) ? metadata.agent : {};
   // Compute (and cache) exact document boxes on demand, so highlighting works
@@ -1024,7 +1036,21 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       youAsked: Boolean(viewerUserId && q.askedByUserId === viewerUserId),
     })),
     state: order.state,
-    readOnly: order.state !== 'draft',
+    // Two different reasons a bill cannot be edited, and the screen needs both.
+    //
+    // The bill's own stage is one: a bill that has left draft is settled.
+    // The reader's standing is the other, and it was missing — every field on
+    // a draft was editable by anyone who could open it. Bringing a bill IN is
+    // deliberately open to everyone but a Viewer (bills.create); PREPARING one
+    // is the clerk's job (bills.edit), and the capability middleware has always
+    // refused the save. So an approver who uploaded an invoice got a form that
+    // typed, and lost the lot on navigating away.
+    readOnly: order.state !== 'draft' || !viewerCanEdit,
+    // Which of the two, so the screen can say something true rather than
+    // greying out fields for no stated reason.
+    readOnlyReason: order.state !== 'draft'
+      ? 'settled' as const
+      : (!viewerCanEdit ? 'not_your_job' as const : null),
     ...billSource(order.metadataJson, order.createdByUser?.displayName ?? null),
     // An approver sent this bill back for changes — the bill clerk's homework.
     sentBack: sentBackRaw && order.state === 'draft'

@@ -1456,6 +1456,9 @@ export interface BillDraft {
   paymentOrderId: string;
   state: string;
   readOnly: boolean;
+  /** Why, when it is read-only: the bill has left draft, or preparing it
+   *  is not this reader's job. Null when the form is editable. */
+  readOnlyReason?: 'settled' | 'not_your_job' | null;
   // How the bill arrived; sourceLabel names who forwarded it.
   source: 'email' | 'upload';
   sourceLabel: string | null;

@@ -123,7 +123,12 @@ function DraftScreen(props: {
   toast: ReturnType<typeof useToast>;
 }) {
   const { organizationId, billDraft, canOverrideDuplicate, canEditBills, onBack, onDone, toast } = props;
-  const readOnly = billDraft.readOnly;
+  // The server already refuses the save and now says so in `readOnly`; this
+  // also folds in the viewer's own capabilities, which the Confirm button has
+  // always consulted. Both, because myAccess assumes editable while it loads —
+  // relying on it alone would flash an editable form at somebody who cannot
+  // save it, which is the bug in miniature.
+  const readOnly = billDraft.readOnly || !canEditBills;
   const queryClient = useQueryClient();
 
   // Flag resolutions. One mechanism for every flag rather than a bespoke path
@@ -536,6 +541,21 @@ function DraftScreen(props: {
               </div>
               <div className="rh-amount">{usd(documentTotal)}</div>
             </div>
+
+            {/* Why the form is locked, when it is locked because of WHO is
+                reading it rather than where the bill has got to. Greying every
+                field out with no reason given is its own small mystery. */}
+            {billDraft.readOnlyReason === 'not_your_job' ? (
+              <div className="callout callout-info">
+                <Ico.info w={16} />
+                <span>
+                  <b>You can read this bill, not prepare it.</b>{' '}
+                  Anyone can bring an invoice in; checking the figures and sending it for
+                  approval is the Bill Clerk's job. Ask one to pick it up — or if something
+                  here looks wrong, ask a question on it.
+                </span>
+              </div>
+            ) : null}
 
             {/* Sent back by an approver — the bill clerk's homework, above all flags */}
             {billDraft.sentBack ? (
