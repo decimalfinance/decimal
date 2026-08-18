@@ -1654,3 +1654,89 @@ test('a submitter cannot recall a bill that is already approved', async () => {
   const after = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
   assert.equal(after.approval.macroState, 'approved', 'and the approval still stands');
 });
+
+// --- recall over HTTP: the submitter asks, an admin answers ------------------
+//
+// The engine tests prove the rules. This proves the product actually wires them
+// together — that raising freezes the real bill, that a plain member is refused
+// at the door, and above all that granting puts the PAYMENT ORDER back to
+// draft. That last hop runs through the post-commit bridge, and it is exactly
+// the link that was silently broken before: the engine said cancelled while the
+// order stayed `submitted`, so the bill came back read-only and you could not
+// fix the thing you asked for it back to fix.
+
+test('recall over HTTP: raising freezes the bill, a member cannot decide, granting returns it to draft', async () => {
+  const { orgId, owner, a2, a3 } = await makeOrg();
+  const flow = await get(`/organizations/${orgId}/approvals/flow`, owner.token);
+  const byUser = new Map(flow.people.map((p: { user_id: string; id: string }) => [p.user_id, p.id]));
+  await publishLadder(orgId, owner.token, [byUser.get(a2.userId) as string], byUser.get(a3.userId) as string);
+  // a3 prepares bills, so a3 is the one who would ever need one back.
+  await post(`/organizations/${orgId}/roles/bill_clerk/holders`, { userId: a3.userId }, owner.token);
+
+  // a3 submits; a2 is the approver waiting on it.
+  const bill = await uploadAndConfirm(orgId, a3.token, { vendor: 'Recall Co', amount: 1200, invoiceNo: 'RC-1' });
+  await bill.confirm();
+  let detail = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, a3.token);
+  assert.equal(detail.status.macroState, 'pending_approval');
+  assert.equal(detail.recall.open, null, 'nothing asked yet');
+
+  // Raising freezes it, on the bill everyone can see.
+  const raised = await post(`/organizations/${orgId}/bills/${bill.billId}/recall-request`,
+    { reason: 'wrong invoice number' }, a3.token);
+  assert.equal(raised.state, 'pending');
+  detail = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, a2.token);
+  assert.equal(detail.status.macroState, 'on_hold', 'frozen while it waits');
+  assert.equal(detail.recall.open.reason, 'wrong invoice number');
+
+  // A plain member is refused at the route, not merely inside the engine.
+  const refused = await fetch(`${baseUrl}/organizations/${orgId}/recall-requests/${raised.recallRequestId}/decision`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${a2.token}` },
+    body: JSON.stringify({ grant: true }),
+  });
+  assert.equal(refused.status, 403, 'only an owner or admin decides');
+
+  // The owner grants it, and the bill lands back in the submitter's drafts —
+  // editable, which is the entire point of asking for it.
+  const decided = await post(`/organizations/${orgId}/recall-requests/${raised.recallRequestId}/decision`,
+    { grant: true, note: 'go ahead' }, owner.token);
+  assert.equal(decided.state, 'granted');
+
+  const order = await prisma.paymentOrder.findFirstOrThrow({
+    where: { organizationId: orgId, paymentOrderId: bill.billId },
+    select: { state: true },
+  });
+  assert.equal(order.state, 'draft', 'the bridge fired: the order is back in draft, not stuck submitted');
+
+  detail = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, a3.token);
+  assert.equal(detail.recall.open, null, 'no longer pending');
+  assert.equal(detail.recall.history[0].state, 'granted');
+  assert.equal(detail.recall.history[0].decisionNote, 'go ahead');
+});
+
+test('recall over HTTP: denying gives the bill straight back, approvals untouched', async () => {
+  const { orgId, owner, a2, a3 } = await makeOrg();
+  const flow = await get(`/organizations/${orgId}/approvals/flow`, owner.token);
+  const byUser = new Map(flow.people.map((p: { user_id: string; id: string }) => [p.user_id, p.id]));
+  await publishLadder(orgId, owner.token, [byUser.get(a2.userId) as string], byUser.get(a3.userId) as string);
+  await post(`/organizations/${orgId}/roles/bill_clerk/holders`, { userId: a3.userId }, owner.token);
+
+  const bill = await uploadAndConfirm(orgId, a3.token, { vendor: 'Denied Co', amount: 1200, invoiceNo: 'DC-1' });
+  await bill.confirm();
+  const raised = await post(`/organizations/${orgId}/bills/${bill.billId}/recall-request`,
+    { reason: 'thought the amount was wrong' }, a3.token);
+
+  await post(`/organizations/${orgId}/recall-requests/${raised.recallRequestId}/decision`,
+    { grant: false, note: 'amount is right, carry on' }, owner.token);
+
+  const detail = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, a2.token);
+  assert.equal(detail.status.macroState, 'pending_approval', 'resumed, not recalled');
+  assert.equal(detail.recall.open, null);
+  assert.equal(detail.recall.history[0].state, 'denied');
+
+  const order = await prisma.paymentOrder.findFirstOrThrow({
+    where: { organizationId: orgId, paymentOrderId: bill.billId },
+    select: { state: true },
+  });
+  assert.equal(order.state, 'submitted', 'a denial costs the bill nothing');
+});
