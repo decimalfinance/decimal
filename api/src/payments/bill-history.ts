@@ -21,6 +21,12 @@ export type BillHistoryKind =
   | 'uploaded'
   | 'forwarded'
   | 'submitted'
+  // The ways a bill comes back out of approval. Without these a bill that went
+  // round twice shows two identical "submitted it for approval" rows and reads
+  // as a duplicate or a bug, when what actually happened is a round trip.
+  | 'sent_back'
+  | 'recalled'
+  | 'cancelled'
   | 'release_pending'
   | 'released'
   | 'paid';
@@ -55,8 +61,12 @@ export async function billHistory(input: {
     created_at: Date;
     display_name: string | null;
     avatar_url: string | null;
+    by_name: string | null;
   }>>`
-    SELECT e.event_type, e.after_state, e.created_at, u.display_name, u.avatar_url
+    SELECT e.event_type, e.after_state, e.created_at, u.display_name, u.avatar_url,
+           -- The bridge records these as the system acting, but the payload
+           -- knows whose decision it was.
+           e.payload_json->>'byName' AS by_name
     FROM payment_order_events e
     LEFT JOIN users u ON u.user_id::text = e.actor_id AND e.actor_type = 'user'
     WHERE e.payment_order_id = ${input.paymentOrderId}::uuid
@@ -80,6 +90,16 @@ export async function billHistory(input: {
       // this bill in front of the approvers, and until now the screen never
       // said their name.
       before.push({ kind: 'submitted', at: e.created_at.toISOString(), person: person(e) });
+    } else if (e.event_type === 'payment_order_sent_back') {
+      before.push({
+        kind: 'sent_back',
+        at: e.created_at.toISOString(),
+        person: e.by_name ? { name: e.by_name, avatarUrl: null } : null,
+      });
+    } else if (e.event_type === 'payment_order_returned_to_draft') {
+      before.push({ kind: 'recalled', at: e.created_at.toISOString(), person: person(e) });
+    } else if (e.event_type === 'payment_order_cancelled') {
+      before.push({ kind: 'cancelled', at: e.created_at.toISOString(), person: person(e) });
     } else if (e.after_state === 'executed' || e.after_state === 'settled') {
       after.push({ kind: 'paid', at: e.created_at.toISOString(), person: person(e) });
     }

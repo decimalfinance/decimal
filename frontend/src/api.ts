@@ -1729,7 +1729,11 @@ export interface BillRecall {
  * it in and who submitted it, and who releases the money afterwards.
  */
 export interface BillHistoryEntry {
-  kind: 'uploaded' | 'forwarded' | 'submitted' | 'release_pending' | 'released' | 'paid';
+  kind: 'uploaded' | 'forwarded' | 'submitted'
+    // How a bill came back out of approval — without these, two trips
+    // through the flow render as two identical 'submitted' rows.
+    | 'sent_back' | 'recalled' | 'cancelled'
+    | 'release_pending' | 'released' | 'paid';
   /** Null when it has not happened yet. */
   at: string | null;
   person: { name: string; avatarUrl: string | null } | null;

@@ -1970,3 +1970,34 @@ test('keeping the proposed category records nothing — a default is not a corre
   const recode = detail.corrections.find((c: { field: string }) => c.field.startsWith('Category'));
   assert.equal(recode, undefined, 'agreeing with the machine is not something a person did');
 });
+
+test('a bill that went round twice shows the round trip, not two identical submissions', async () => {
+  const { orgId, owner, a2, a3 } = await makeOrg();
+  const flow = await get(`/organizations/${orgId}/approvals/flow`, owner.token);
+  const byUser = new Map(flow.people.map((p: { user_id: string; id: string }) => [p.user_id, p.id]));
+  await publishLadder(orgId, owner.token, [byUser.get(a2.userId) as string], byUser.get(a2.userId) as string);
+  await post(`/organizations/${orgId}/roles/bill_clerk/holders`, { userId: a3.userId }, owner.token);
+
+  const bill = await uploadAndConfirm(orgId, a3.token, { vendor: 'Round Trip Co', amount: 1200, invoiceNo: 'RT-1' });
+  await bill.confirm();
+
+  // Out of approval and back in — the shape that used to render as two
+  // "submitted it for approval" rows in a row, which reads as a duplicate.
+  const raised = await post(`/organizations/${orgId}/bills/${bill.billId}/recall-request`,
+    { reason: 'wrong figures' }, a3.token);
+  await post(`/organizations/${orgId}/recall-requests/${raised.recallRequestId}/decision`,
+    { grant: true }, owner.token);
+  await bill.confirm();
+
+  const detail = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
+  const kinds = detail.history.before.map((e: { kind: string }) => e.kind);
+  assert.deepEqual(kinds, ['uploaded', 'submitted', 'recalled', 'submitted'],
+    `the trip out is between the two submissions — got ${JSON.stringify(kinds)}`);
+
+  // The recall is the system putting the bill back, so it carries no person.
+  // A row about a recall attributed to "Someone" would be worse than one that
+  // plainly says the bill moved.
+  const recalled = detail.history.before[2];
+  assert.equal(recalled.person, null);
+  assert.ok(recalled.at, 'but it is timed, like everything else on the rail');
+});

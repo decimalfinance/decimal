@@ -759,12 +759,36 @@ const HISTORY_LABEL: Record<BillHistoryEntry['kind'], string> = {
   uploaded: 'Uploaded the invoice',
   forwarded: 'Forwarded the invoice in',
   submitted: 'Submitted it for approval',
+  sent_back: 'Sent it back for changes',
+  recalled: 'Came back to draft — recalled',
+  cancelled: 'Cancelled it',
   release_pending: 'Releases the payment',
   released: 'Released the payment',
   paid: 'Paid',
 };
 
+// Something the system did on the bill's behalf, with no one person behind it.
+// Rendered without an avatar: inventing "Someone" for a row about a recall is
+// worse than saying plainly that the bill moved.
+const SYSTEM_KINDS = new Set<BillHistoryEntry['kind']>(['recalled', 'cancelled', 'sent_back']);
+
 function HistoryRow({ entry, last }: { entry: BillHistoryEntry; last: boolean }) {
+  if (!entry.person && SYSTEM_KINDS.has(entry.kind)) {
+    return (
+      <div style={{ position: 'relative', paddingBottom: 22 }}>
+        {!last ? <span className="bd-rail is-done" /> : null}
+        <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+          <span style={{ width: 36, display: 'flex', justifyContent: 'center', flex: 'none', zIndex: 1 }}>
+            <span className="dot" />
+          </span>
+          <span className="pill pill-min pill-neutral">
+            <span className="dot" />
+            {HISTORY_LABEL[entry.kind]}{entry.at ? ` \u00b7 ${timeLabel(entry.at)}` : ''}
+          </span>
+        </div>
+      </div>
+    );
+  }
   const name = entry.person?.name ?? 'Someone';
   const pending = entry.at === null;
   const bg = pending
