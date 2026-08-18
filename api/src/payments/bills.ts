@@ -2075,6 +2075,19 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
       const openQuestion = questions.length > answers.length;
       const waitingOnId = openQuestion ? str(questions[questions.length - 1]!.command.from) : null;
 
+      // An alternative who was never called on drops off the route entirely.
+      //
+      // On a satisfied "any" step the runner-up did nothing and is needed for
+      // nothing, so a row for them says only that they exist — under a repeat
+      // of the same routing reason, which is the noisiest way possible to say
+      // it. The record does not depend on the row: the compiled plan keeps
+      // every candidate forever, and the flow page says who was eligible.
+      //
+      // Unless they actually did something. Someone who asked a question
+      // before the step settled is part of what happened to this bill, and
+      // their thread stays whether or not their signature ended up mattering.
+      if (state === 'skipped' && messages.length === 0) continue;
+
       nodes.push({
         stepIndex: step.index,
         person: personView(approver.personId),
@@ -2518,16 +2531,27 @@ export async function getApprovalsInbox(organizationId: string, viewerUserId: st
       ? await prisma.$queryRaw<{ step_index: number; person_id: string; state: string }[]>`
           SELECT step_index, person_id, state FROM approval.tasks WHERE plan_id = ${plan.id}::uuid`
       : [];
-    const nodes: Array<{ personId: string; state: string }> = [];
-    for (const step of steps) {
-      const approvers = Array.isArray(step.approvers) ? step.approvers : [];
-      for (const ap of approvers as Array<Record<string, unknown>>) {
-        const pid = String(ap.personId);
-        const task = planTasks.find((t) => t.step_index === Number(step.index) && t.person_id === pid);
-        nodes.push({ personId: pid, state: task?.state ?? 'scheduled' });
-      }
-    }
-    return nodes;
+    // Grouped by STEP, because a step is the sequential unit and a person is
+    // not: two people on one 'any' step come after each other in this array
+    // while being alternatives to each other in the flow. Flattening them lost
+    // that, and the inbox told the first approver "then Sam Okonkwo" about
+    // somebody who was never going to follow them.
+    return steps.map((step) => {
+      const approvers = (Array.isArray(step.approvers) ? step.approvers : []) as Array<Record<string, unknown>>;
+      const inner = isRecord(step.step) ? step.step : {};
+      const mode = typeof inner.mode === 'string' ? inner.mode : 'all';
+      const quorumM = typeof inner.m === 'number' ? inner.m : null;
+      const required = mode === 'any' ? 1 : mode === 'quorum' ? (quorumM ?? 1) : approvers.length;
+      return {
+        index: Number(step.index),
+        required,
+        people: approvers.map((ap) => {
+          const pid = String(ap.personId);
+          const task = planTasks.find((t) => t.step_index === Number(step.index) && t.person_id === pid);
+          return { personId: pid, state: task?.state ?? 'scheduled' };
+        }),
+      };
+    });
   };
 
   const waitingOnYou: unknown[] = [];
@@ -2559,11 +2583,21 @@ export async function getApprovalsInbox(organizationId: string, viewerUserId: st
       ? str(((extracted.lineItems as unknown[])[0] as Record<string, unknown>).description) : null;
     const what = firstLine ?? str(order.memo) ?? 'Bill';
 
-    const nodes = await buildChain(task.approvable_id);
-    const myIndex = nodes.findIndex((n) => n.personId === personId);
-    const total = nodes.length;
-    const doneNames = nodes.filter((n) => n.state === 'approved').map((n) => nameOf.get(n.personId)?.split(' ')[0]).filter(Boolean);
-    const afterMe = nodes.slice(myIndex + 1).map((n) => nameOf.get(n.personId)).filter(Boolean);
+    const chain = await buildChain(task.approvable_id);
+    const myIndex = chain.findIndex((s) => s.people.some((p) => p.personId === personId));
+    const total = chain.length;
+    const doneNames = chain.flatMap((s) => s.people)
+      .filter((p) => p.state === 'approved')
+      .map((p) => nameOf.get(p.personId)?.split(' ')[0]).filter(Boolean);
+    // Only people in LATER steps come after me. My own step's other members
+    // are alternatives, and calling them "then" invents a queue.
+    const afterMe = chain.slice(myIndex + 1).flatMap((s) => s.people)
+      .map((p) => nameOf.get(p.personId)).filter(Boolean);
+    const myStep = myIndex >= 0 ? chain[myIndex] : null;
+    const alongsideMe = myStep && myStep.required < myStep.people.length
+      ? myStep.people.filter((p) => p.personId !== personId)
+          .map((p) => nameOf.get(p.personId)).filter(Boolean)
+      : [];
 
     const overdueDays = order.dueAt ? daysBetween(now, order.dueAt) : 0;
 
@@ -2593,6 +2627,8 @@ export async function getApprovalsInbox(organizationId: string, viewerUserId: st
         : `${myIndex + 1} of ${total} · your turn now`;
       const hintParts: string[] = [];
       if (doneNames.length) hintParts.push(`${doneNames.join(', ')} approved`);
+      // Say it plainly when someone else can take this off your plate.
+      if (alongsideMe.length) hintParts.push(`${alongsideMe.join(', ')} can approve instead`);
       if (afterMe.length) hintParts.push(`then ${afterMe.join(', ')}`);
 
       waitingOnYou.push({
@@ -2611,7 +2647,8 @@ export async function getApprovalsInbox(organizationId: string, viewerUserId: st
       });
     } else {
       // In-flight: I approved, it's still moving. Where is it now?
-      const openNode = nodes.find((n) => n.state === 'open' || n.state === 'info_requested');
+      const openNode = chain.flatMap((s) => s.people)
+        .find((p) => p.state === 'open' || p.state === 'info_requested');
       const nowWith = openNode ? nameOf.get(openNode.personId) ?? null : null;
       inFlight.push({
         taskId: task.task_id,

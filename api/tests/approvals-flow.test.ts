@@ -11,6 +11,7 @@ import { createApp } from '../src/app.js';
 import { prisma } from '../src/infra/prisma.js';
 import { requireTestDatabase } from './helpers/require-test-database.js';
 import { setInvoiceIntakeRuntimeForTests } from '../src/payments/invoice-intake.js';
+import { config } from '../src/config.js';
 
 let baseUrl = '';
 let close: (() => Promise<void>) | undefined;
@@ -18,6 +19,12 @@ let close: (() => Promise<void>) | undefined;
 before(async () => {
   await prisma.$connect();
   await requireTestDatabase();
+  // Every test in this file registers two or three users, and the public bucket
+  // is 120 requests a minute — a production safeguard the harness has no
+  // business being measured against. Left alone it surfaces as a 429 partway
+  // down the file, which reads as a product failure rather than as this suite
+  // knocking on the door faster than a human ever would.
+  config.publicRateLimitMax = 1_000_000;
   // The product wires this at boot (index.ts): approve clears review + spawns
   // the release run; reject sends the bill back to draft. The loop tests here
   // exercise exactly those bridge behaviors.
@@ -1780,8 +1787,71 @@ test('an any-of-two step reports one approval needed, and the runner-up is not n
 
   detail = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
   assert.equal(detail.status.macroState, 'approved', 'one approval finished the step');
-  const approved = detail.approval.steps.filter((s: { state: string }) => s.state === 'done');
-  const skipped = detail.approval.steps.filter((s: { state: string }) => s.state === 'skipped');
-  assert.equal(approved.length, 1);
-  assert.equal(skipped.length, 1, 'the other was never going to be asked — not "not yet their turn"');
+  // The runner-up did nothing and is needed for nothing, so the route stops
+  // mentioning them: a row saying only "Sam Okonkwo — not needed", under a
+  // repeat of the same routing reason, is noise on a settled bill.
+  assert.equal(detail.approval.steps.length, 1, 'only the person who actually approved remains');
+  assert.equal(detail.approval.steps[0].state, 'done');
+  assert.equal(detail.approval.steps[0].person.personId, byUser.get(a2.userId));
+  // Dropped from the SCREEN, never from the record — the compiled plan still
+  // names every candidate the rule picked out.
+  const plan = await prisma.$queryRaw<Array<{ steps: unknown }>>`
+    SELECT steps FROM approval.approval_plans p
+    JOIN approval.approvables a ON a.id = p.approvable_id
+    WHERE a.attributes->>'paymentOrderId' = ${bill.billId} AND p.superseded_by IS NULL`;
+  const pinned = (plan[0]!.steps as Array<{ approvers: unknown[] }>)[0]!;
+  assert.equal(pinned.approvers.length, 2, 'both candidates stay pinned in the plan');
+});
+
+test('an alternative who asked a question stays on the route even once their signature stops mattering', async () => {
+  const { orgId, owner, a2, a3 } = await makeOrg();
+  const flow = await get(`/organizations/${orgId}/approvals/flow`, owner.token);
+  const byUser = new Map(flow.people.map((p: { user_id: string; id: string }) => [p.user_id, p.id]));
+  await publishLadder(orgId, owner.token,
+    [byUser.get(a2.userId) as string, byUser.get(a3.userId) as string],
+    byUser.get(a2.userId) as string);
+
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'Asked First Co', amount: 312.4, invoiceNo: 'AF-1' });
+  await bill.confirm();
+
+  // a3 asks something, then a2 approves — a3's signature is now moot, but the
+  // exchange is part of what happened to this bill and must not vanish with it.
+  const a3Inbox = await get(`/organizations/${orgId}/bills/approvals-inbox`, a3.token);
+  const a3Task = a3Inbox.waitingOnYou.find((r: { paymentOrderId: string }) => r.paymentOrderId === bill.billId);
+  await post(`/organizations/${orgId}/approvals/tasks/${a3Task.taskId}/command`,
+    { command: { kind: 'request_info', question: 'is this the right cost centre?', from: byUser.get(owner.userId) },
+      idempotencyKey: `ask-${bill.billId}` }, a3.token);
+
+  const a2Inbox = await get(`/organizations/${orgId}/bills/approvals-inbox`, a2.token);
+  const a2Task = a2Inbox.waitingOnYou.find((r: { paymentOrderId: string }) => r.paymentOrderId === bill.billId);
+  await post(`/organizations/${orgId}/approvals/tasks/${a2Task.taskId}/command`,
+    { command: { kind: 'approve' }, idempotencyKey: `ok-${bill.billId}` }, a2.token);
+
+  const detail = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
+  assert.equal(detail.approval.steps.length, 2, 'the asker is kept, unlike a silent runner-up');
+  const asker = detail.approval.steps.find((s: { person: { personId: string } }) => s.person.personId === byUser.get(a3.userId));
+  assert.ok(asker, 'a3 is still on the route');
+  assert.equal(asker.state, 'skipped', 'their signature is not needed…');
+  assert.equal(asker.thread.messages[0].body, 'is this the right cost centre?', '…but their question survives');
+});
+
+test('the approvals inbox calls an alternative an alternative, not the next person in a queue', async () => {
+  const { orgId, owner, a2, a3 } = await makeOrg();
+  const flow = await get(`/organizations/${orgId}/approvals/flow`, owner.token);
+  const byUser = new Map(flow.people.map((p: { user_id: string; id: string }) => [p.user_id, p.id]));
+  await publishLadder(orgId, owner.token,
+    [byUser.get(a2.userId) as string, byUser.get(a3.userId) as string],
+    byUser.get(a2.userId) as string);
+
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'Alt Co', amount: 312.4, invoiceNo: 'ALT-1' });
+  await bill.confirm();
+
+  const inbox = await get(`/organizations/${orgId}/bills/approvals-inbox`, a2.token);
+  const row = inbox.waitingOnYou.find((r: { paymentOrderId: string }) => r.paymentOrderId === bill.billId);
+  assert.ok(row, 'a2 is asked');
+  // The old flattening put both people in one list and sliced it, so the first
+  // of them was told the second would follow. They are alternatives.
+  assert.ok(!/then /.test(row.hint ?? ''), `no phantom queue in "${row.hint}"`);
+  assert.match(row.hint ?? '', /can approve instead/, 'says someone else can take it');
+  assert.equal(row.chainPosition ?? 'You start the chain', 'You start the chain');
 });
