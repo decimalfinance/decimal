@@ -17,6 +17,7 @@ import { Ico } from '../dec/icons';
 import { useToast } from '../ui/Toast';
 import { approvalActErrorMessage } from '../lib/app-helpers';
 import { DocumentPane } from './BillDraft';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 
 function usd(amount: number): string {
   return amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
@@ -57,6 +58,7 @@ export function BillDetailPage() {
   const [composerText, setComposerText] = useState('');
   const [docOpen, setDocOpen] = useState(false);
   const [acting, setActing] = useState(false);
+  const [approveOpen, setApproveOpen] = useState(false);
   const [factsOpen, setFactsOpen] = useState(false);
 
   const detailQuery = useQuery({
@@ -439,7 +441,7 @@ export function BillDetailPage() {
                 first, so it stops offering the one thing it cannot do. */}
             <button type="button" className="btn btn-primary" disabled={acting || Boolean(viewer.cannotApprove)}
               title={viewer.cannotApprove ? viewer.cannotApprove.why : undefined}
-              onClick={() => void act(viewer.openTaskId, { kind: 'approve' }, 'Approved.')}>
+              onClick={() => setApproveOpen(true)}>
               <Ico.checkSm w={15} /> Approve
             </button>
           </>
@@ -489,6 +491,18 @@ export function BillDetailPage() {
       </div>
 
       {/* Composer */}
+      {approveOpen ? (
+        <ConfirmDialog
+          title="Approve this bill?"
+          body={`This records your approval of ${usd(billDraft.totalUsd)} to ${billDraft.vendor.name}, with your name on it. It cannot be taken back — an admin would have to send the bill back to draft.`}
+          confirmLabel="Approve"
+          busyLabel="Approving…"
+          busy={acting}
+          onConfirm={() => { setApproveOpen(false); void act(viewer.openTaskId, { kind: 'approve' }, 'Approved.'); }}
+          onClose={() => setApproveOpen(false)}
+        />
+      ) : null}
+
       {composer ? (
         <div className="overlay" style={{ position: 'fixed', inset: 0, zIndex: 60 }}
           onClick={(e) => { if (e.target === e.currentTarget && !acting) setComposer(null); }}>

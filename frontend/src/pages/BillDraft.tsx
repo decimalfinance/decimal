@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 import {
   accessApi,
   api,
@@ -97,9 +98,15 @@ export function BillDraftPage() {
       onDone={() => {
         void queryClient.invalidateQueries({ queryKey: ['bills-workbench', organizationId] });
         void queryClient.invalidateQueries({ queryKey: ['bill-billDraft', organizationId, paymentOrderId] });
-        const next = queue.find((id) => id !== paymentOrderId);
-        if (next) navigate(`/organizations/${organizationId}/bills/${next}/draft`);
-        else navigate(`/organizations/${organizationId}/bills`);
+        // Stay on the bill you just sent.
+        //
+        // This used to jump to the next unprepared bill, on the theory that a
+        // clerk works a queue. It reads as the bill vanishing: you press a
+        // button and a DIFFERENT invoice is on screen, so there is no moment
+        // where you see that what you did worked. The detail page shows the
+        // approval chain it just entered and who it is now waiting on, which
+        // is the confirmation the action deserves.
+        navigate(`/organizations/${organizationId}/bills/${paymentOrderId}`);
       }}
       toast={toast}
     />
@@ -331,6 +338,7 @@ function DraftScreen(props: {
   const [submitting, setSubmitting] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [notABillOpen, setNotABillOpen] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   // Field ↔ document linking: focusing a field highlights where it was read.
   const [activeSource, setActiveSource] = useState<DocSource>(null);
 
@@ -1060,10 +1068,22 @@ function DraftScreen(props: {
           </span>
           <span className="commit-spacer" />
           <button type="button" className="btn btn-secondary" onClick={onBack}>Save for later</button>
-          <button type="button" className="btn btn-primary" disabled={!canConfirm} onClick={() => void confirm()}>
+          <button type="button" className="btn btn-primary" disabled={!canConfirm} onClick={() => setConfirmOpen(true)}>
             {submitting ? 'Sending…' : 'Confirm & send for approval'}
           </button>
         </div>
+      ) : null}
+
+      {confirmOpen ? (
+        <ConfirmDialog
+          title="Send this for approval?"
+          body={`This records the figures exactly as they are on this screen and puts ${vendorName || 'the bill'} in front of the approvers. Correcting it afterwards restarts their approvals.`}
+          confirmLabel="Send for approval"
+          busyLabel="Sending…"
+          busy={submitting}
+          onConfirm={() => { setConfirmOpen(false); void confirm(); }}
+          onClose={() => setConfirmOpen(false)}
+        />
       ) : null}
 
       {notABillOpen ? (
