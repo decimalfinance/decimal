@@ -1921,3 +1921,52 @@ test('the history carries on past approval to whoever releases the money', async
   assert.equal(pending.at, null, 'it has not happened yet');
   assert.ok(pending.person.name, 'and the screen can name them');
 });
+
+// --- recoding a line is a correction, and says so ----------------------------
+//
+// Coding is a judgement the approver is being asked to trust. A line somebody
+// deliberately recoded used to look exactly like one the machine got right:
+// BW-2201's analytics retainer read "Contractors" with nothing anywhere saying
+// the machine had proposed advertising and a person disagreed.
+
+test('changing a line category is recorded against the line, with who changed it', async () => {
+  const { orgId, owner } = await makeOrg();
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'Recode Co', amount: 4200, invoiceNo: 'RC-9' });
+
+  // Reading the draft is what fixes the baseline — it is the moment the screen
+  // proposes something, so it is the thing a later change is measured against.
+  const draft = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, owner.token);
+  const proposed = draft.lines[0].category ?? null;
+  assert.ok(proposed, 'the screen proposed a category to begin with');
+  assert.notEqual(proposed, 'Contractors', 'and it is not what we are about to pick');
+
+  await post(`/organizations/${orgId}/bills/${bill.billId}/confirm`, {
+    fields: { invoiceNumber: 'RC-9', invoiceDate: '2026-08-02', dueDate: '2026-08-30', terms: 'Net 30', currency: 'USD', total: 4200, taxAmount: 0 },
+    lines: [{ description: draft.lines[0].description, quantity: 1, unitPrice: 4200, amount: 4200, category: 'Contractors' }],
+    confirmedFieldKeys: [],
+  }, owner.token);
+
+  const detail = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
+  const recode = detail.corrections.find((c: { field: string }) => c.field.startsWith('Category'));
+  assert.ok(recode, `the recode is in the trail — got ${JSON.stringify(detail.corrections)}`);
+  assert.match(recode.field, /Cloud hosting/, 'named by the line it is about, not just "Category"');
+  assert.equal(recode.from, proposed, 'what the machine proposed');
+  assert.equal(recode.to, 'Contractors', 'what the person chose');
+  assert.ok(recode.by, 'and who chose it');
+});
+
+test('keeping the proposed category records nothing — a default is not a correction', async () => {
+  const { orgId, owner } = await makeOrg();
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'Agreed Co', amount: 4200, invoiceNo: 'AG-9' });
+  const draft = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, owner.token);
+
+  await post(`/organizations/${orgId}/bills/${bill.billId}/confirm`, {
+    fields: { invoiceNumber: 'AG-9', invoiceDate: '2026-08-02', dueDate: '2026-08-30', terms: 'Net 30', currency: 'USD', total: 4200, taxAmount: 0 },
+    lines: [{ description: draft.lines[0].description, quantity: 1, unitPrice: 4200, amount: 4200, category: draft.lines[0].category }],
+    confirmedFieldKeys: [],
+  }, owner.token);
+
+  const detail = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
+  const recode = detail.corrections.find((c: { field: string }) => c.field.startsWith('Category'));
+  assert.equal(recode, undefined, 'agreeing with the machine is not something a person did');
+});

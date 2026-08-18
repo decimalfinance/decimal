@@ -896,7 +896,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       ?? categoryOptions.find((o) => hint.toLowerCase().includes(o.value.toLowerCase()));
     return match?.value ?? codingSuggestion;
   };
-  const lines = verifiedLines ?? extractedLines.filter(isRecord).map((line) => ({
+  const proposedLines = extractedLines.filter(isRecord).map((line) => ({
     description: str(line.description) ?? '',
     quantity: num(line.quantity),
     unitPrice: num(line.unitPrice),
@@ -904,6 +904,32 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     category: resolveLineCategory(str(line.categoryHint)),
     source: lineSource(line),
   }));
+  const lines = verifiedLines ?? proposedLines;
+
+  // Remember the categories this screen is about to propose.
+  //
+  // Same rule the field corrections above already follow: "what was read" has
+  // to mean what the DRAFT SCREEN SHOWED. For fields the raw extraction is
+  // close enough to serve as that baseline; for categories it is not, because
+  // the machine's per-line output is a document hint ("Analytics services")
+  // and what the picker offers is a GL account ("Contractors"). Diffing those
+  // two marks every bill edited and can say nothing about which line changed.
+  //
+  // Once a bill is confirmed the proposal is gone — verifiedLines replaces it —
+  // so it has to be written down while it still exists. Recomputed on read
+  // like the OCR coding above, and only written when it actually moved.
+  if (!verifiedLines && proposedLines.length > 0) {
+    const proposed = proposedLines.map((l, i) => ({ index: i, description: l.description, category: l.category ?? null }));
+    const stored = metadata.proposedLineCategories;
+    if (JSON.stringify(stored ?? null) !== JSON.stringify(proposed)) {
+      await prisma.paymentOrder.update({
+        where: { paymentOrderId: order.paymentOrderId },
+        data: {
+          metadataJson: { ...metadata, proposedLineCategories: proposed } as unknown as Prisma.InputJsonValue,
+        },
+      }).catch(() => { /* a baseline is worth having, never worth failing the read for */ });
+    }
+  }
 
   const taxAmount = verifiedFields && 'taxAmount' in verifiedFields ? num(verifiedFields.taxAmount) : num(extracted.taxAmount);
 
@@ -1114,6 +1140,33 @@ export async function submitBillForApproval(input: SubmitBillInput) {
     }
   }
 
+  // A category the operator changed is a correction, and belongs in the trail
+  // beside the others.
+  //
+  // Coding is a judgement an approver is being asked to trust, and until now a
+  // line that a person deliberately recoded looked exactly like one the machine
+  // got right: BW-2201's analytics retainer read "Contractors" on the bill with
+  // nothing anywhere saying the machine had proposed advertising and a human
+  // disagreed. The person who made the call got no credit and the approver got
+  // no warning.
+  const proposedLines = Array.isArray(metadata.proposedLineCategories)
+    ? (metadata.proposedLineCategories as Array<{ index?: number; description?: string; category?: string | null }>)
+    : [];
+  for (const [i, line] of input.lines.entries()) {
+    const was = proposedLines.find((p) => p.index === i);
+    if (!was) continue;
+    const before = was.category ?? null;
+    const after = line.category ?? null;
+    if (before === after) continue;
+    corrections.push({
+      // Named by the line it is about — "Category" alone, three times over,
+      // tells the reader nothing about which line moved.
+      field: `Category — ${line.description.trim() || was.description || `line ${i + 1}`}`,
+      readValue: before,
+      correctedValue: after,
+    });
+  }
+
   // What the operator kept, per line. 'edited' whenever any line's category
   // differs from what we proposed — the delta is the only thing that says which
   // KIND of line we get wrong, which a bill-level accept/reject cannot show.
@@ -1125,13 +1178,16 @@ export async function submitBillForApproval(input: SubmitBillInput) {
       select: { aiSuggestionId: true, suggested: true },
     });
     if (lineSuggestion) {
-      const proposed = Array.isArray(lineSuggestion.suggested)
-        ? (lineSuggestion.suggested as Array<{ index: number; categoryHint?: string | null }>)
-        : [];
       const chosen = input.lines.map((l, i) => ({ index: i, category: l.category ?? null }));
+      // Measured against what the screen proposed, not against the raw
+      // document hint. The hint is prose off the invoice ("Analytics
+      // services") and the choice is a GL account ("Contractors"), so
+      // comparing them reported every bill as edited and the number meant
+      // nothing. proposedLineCategories is the same baseline the corrections
+      // above use, so the measurement and the audit trail agree.
       const changed = chosen.some((c) => {
-        const p = proposed.find((x) => x.index === c.index);
-        return p ? (p.categoryHint ?? null) !== c.category : false;
+        const p = proposedLines.find((x) => x.index === c.index);
+        return p ? (p.category ?? null) !== c.category : false;
       });
       await logSuggestionOutcome({
         aiSuggestionId: lineSuggestion.aiSuggestionId,
