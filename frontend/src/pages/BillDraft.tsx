@@ -92,6 +92,7 @@ export function BillDraftPage() {
       organizationId={organizationId}
       billDraft={billDraft.data}
       canOverrideDuplicate={Boolean(myAccess.data?.isOwnerOrAdmin)}
+      canEditBills={myAccess.data ? myAccess.data.capabilities.includes('bills.edit') : true}
       onBack={() => navigate(`/organizations/${organizationId}/bills`)}
       onDone={() => {
         void queryClient.invalidateQueries({ queryKey: ['bills-workbench', organizationId] });
@@ -109,11 +110,12 @@ function DraftScreen(props: {
   organizationId: string;
   billDraft: BillDraft;
   canOverrideDuplicate: boolean;
+  canEditBills: boolean;
   onBack: () => void;
   onDone: () => void;
   toast: ReturnType<typeof useToast>;
 }) {
-  const { organizationId, billDraft, canOverrideDuplicate, onBack, onDone, toast } = props;
+  const { organizationId, billDraft, canOverrideDuplicate, canEditBills, onBack, onDone, toast } = props;
   const readOnly = billDraft.readOnly;
   const queryClient = useQueryClient();
 
@@ -400,7 +402,12 @@ function DraftScreen(props: {
           // "Uncategorized expense" for the accountant to place later.
           return null;
         })();
-  const canConfirm = !readOnly && blockingFlags.length === 0 && !submitting && !tier1Gap;
+  // Preparing a bill is the Bill Clerk's job. An Approver or a Payer can read
+  // every word of this screen — that is deliberate, they are the ones who will
+  // carry the decision — but confirming it is not theirs to do, and the server
+  // refuses. Offering the button anyway produced "Your role doesn't include
+  // this" AFTER the click, which is the same dead end the approve path had.
+  const canConfirm = canEditBills && !readOnly && blockingFlags.length === 0 && !submitting && !tier1Gap;
 
   // --- commit ---------------------------------------------------------------
   const confirm = useCallback(async () => {
@@ -1045,7 +1052,9 @@ function DraftScreen(props: {
             {/* Name the flag and point at its own buttons. The old copy —
                 "resolve the flagged issue above" — was a promise nothing on the
                 page could keep, because resolutions did not exist yet. */}
-            {blockingFlags.length > 0
+            {!canEditBills
+              ? 'Preparing a bill is the Bill Clerk\u2019s job — you can read it, but not send it for approval.'
+              : blockingFlags.length > 0
               ? `${blockingFlags[0]!.short} — use the buttons on that flag to settle it.`
               : tier1Gap ?? 'Recorded with exactly what you see on this screen.'}
           </span>

@@ -69,21 +69,31 @@ export interface OrgAccess {
 }
 
 /**
- * An approver sees the bills they are involved in. Everyone else sees the queue.
+ * Everyone in the organization sees every bill. What differs is what they can
+ * DO to one.
  *
- * Union semantics, like the capabilities: holding any role whose job needs the
- * whole queue widens you to `all`. Somebody who is both Approver and Bill Clerk
- * is doing the clerk's job too, and a clerk who can only see bills already
- * routed to them cannot prepare the ones that are not.
+ * This was briefly the other way round — an Approver was scoped to bills routed
+ * to them, following the seven-of-ten pattern in the scoping research. It was
+ * changed deliberately, and the argument that won is about the job rather than
+ * the data: the people who approve and pay are the ones carrying the decision,
+ * and a bill should not land in front of them out of nowhere. Seeing it being
+ * prepared — what the machine read, what a person corrected, who corrected it —
+ * is the context that makes an approval mean something rather than a rubber
+ * stamp on a number.
  *
- * A member with no roles gets the viewer bundle, which is an auditor's job —
- * `all`, read-only. That keeps existing orgs working the day this ships, and it
- * is why assigning the Approver role is what actually turns scoping on.
+ * The cost is accepted knowingly: an approver can read bills they will never be
+ * asked about. That is a confidentiality trade, not a control one — authority
+ * still comes from the role bundle and, per bill, from the engine's task
+ * assignment and its separation-of-duties rules. Nobody can act on a bill just
+ * because they can see it.
+ *
+ * The `involved` machinery in bill-visibility.ts is kept, unused, because the
+ * deferred work it exists for is narrowing by DEPARTMENT or ENTITY — the axes
+ * the research found in the enterprise tier. If that arrives, this function is
+ * where it switches back on.
  */
-export function billScopeFor(membershipRole: string, roles: RoleKey[]): BillScope {
-  if (membershipRole === 'owner' || membershipRole === 'admin') return 'all';
-  if (roles.length === 0) return 'all';
-  return roles.every((r) => r === 'approver') ? 'involved' : 'all';
+export function billScopeFor(_membershipRole: string, _roles: RoleKey[]): BillScope {
+  return 'all';
 }
 
 export function capabilitiesFor(membershipRole: string, roles: RoleKey[]): Capability[] {

@@ -238,9 +238,20 @@ function stubOneBill(vendor: string, invoiceNo: string) {
   });
 }
 
-test('an approver sees the bills they are involved in, not the whole queue', async () => {
+test('everyone sees every bill; what differs is what they can do to it', async () => {
+  // The opposite of what this test used to assert, changed deliberately.
+  //
+  // An Approver was scoped to bills routed to them, following the seven-of-ten
+  // pattern in the scoping research. The argument that overturned it is about
+  // the job: the people who approve and pay carry the decision, and a bill
+  // should not land in front of them out of nowhere. Watching it being prepared
+  // — what the machine read, what a person corrected — is what makes an
+  // approval mean something instead of a rubber stamp on a number.
+  //
+  // Authority is unaffected, which is the whole point of the split: seeing a
+  // bill grants nothing. It still takes the role bundle to act, and per bill it
+  // still takes a task from the engine and a pass from separation of duties.
   const { orgId, owner, member } = await makeOrg();
-  // A second admin, so the bill routes to somebody who is not our approver.
   const other = await register('other-admin');
   await prisma.organizationMembership.create({
     data: { organizationId: orgId, userId: other.userId, role: 'admin', status: 'active' },
@@ -253,35 +264,21 @@ test('an approver sees the bills they are involved in, not the whole queue', asy
   }, owner.token);
   const billId = upload.paymentOrders[0].paymentOrder.paymentOrderId;
 
-  // Before the role: the viewer default, which is the whole queue. This is the
-  // behaviour everyone had, and it is why assigning the role is what turns
-  // scoping on rather than a migration.
-  const asViewer = await get(`/organizations/${orgId}/bills/workbench`, member.token);
-  assert.equal(asViewer.bills.length, 1, 'no roles means the viewer bundle: sees everything');
-
-  // Granting Approver AFTER the bill was routed leaves them genuinely
-  // uninvolved — the plan is pinned, so they are on no step of it.
+  // Granted Approver AFTER the bill was routed, so they are on no step of it.
   await post(`/organizations/${orgId}/roles/approver/holders`, { userId: member.userId }, owner.token);
 
-  const scoped = await get(`/organizations/${orgId}/bills/workbench`, member.token);
-  assert.equal(scoped.bills.length, 0, "an approver's queue is their bills, not the company's");
-  assert.equal(
-    await status('GET', `/organizations/${orgId}/bills/${billId}/detail`, member.token),
-    404,
-    'and a bill they cannot see reads as absent, not as forbidden — a 403 would confirm it exists',
-  );
-
-  // Being asked about a bill is involvement. Otherwise the question is a riddle:
-  // "what do you think of the bill you are not allowed to open?"
-  await post(`/organizations/${orgId}/bills/${billId}/ask`, {
-    askedOfUserId: member.userId, question: 'Is this the right vendor for hosting?',
-  }, owner.token);
-
-  const afterAsk = await get(`/organizations/${orgId}/bills/workbench`, member.token);
-  assert.equal(afterAsk.bills.length, 1, 'asked about it, so now they can open it');
+  const asApprover = await get(`/organizations/${orgId}/bills/workbench`, member.token);
+  assert.equal(asApprover.bills.length, 1, 'an approver sees a bill they are not routed');
   await get(`/organizations/${orgId}/bills/${billId}/detail`, member.token);
 
-  // The owner is unaffected: administering the workspace still means seeing it.
+  // Seeing is not acting. The approver holds no bills.edit, so preparing the
+  // bill is refused even though they can read every word of it.
+  assert.equal(
+    await status('PATCH', `/organizations/${orgId}/bills/${billId}/facts`, member.token, { facts: { invoiceNumber: 'X' } }),
+    403,
+    'visibility grants nothing — editing still needs the job that does it',
+  );
+
   const asOwner = await get(`/organizations/${orgId}/bills/workbench`, owner.token);
   assert.equal(asOwner.bills.length, 1);
 });
