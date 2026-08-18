@@ -226,7 +226,7 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
               <Route path="/organizations/:organizationId/bills" element={<BillsPage />} />
               <Route path="/organizations/:organizationId/bills/:paymentOrderId" element={<BillDetailPage />} />
               <Route path="/organizations/:organizationId/bills/:paymentOrderId/draft" element={<BillDraftPage />} />
-              <Route path="/organizations/:organizationId/bills/documents/:invoiceDocumentId/review" element={<DocumentDraftPage />} />
+              <Route path="/organizations/:organizationId/bills/documents/:invoiceDocumentId/draft" element={<DocumentDraftPage />} />
               {/* The Payments list is retired — Bills IS the payments surface. Old links land on Bills. */}
               <Route path="/organizations/:organizationId/payments" element={<OrgRedirect to="bills" />} />
               <Route path="/organizations/:organizationId/payments/:paymentOrderId" element={<PaymentDetailPageV2 />} />
