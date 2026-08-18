@@ -1371,15 +1371,28 @@ export function DocumentPane(props: {
   const { organizationId, document: doc, activeSource, width } = props;
   const [pageUrls, setPageUrls] = useState<string[]>([]);
   const [failed, setFailed] = useState(false);
-  const [zoomPct, setZoomPct] = useState(100);
+  // Two numbers, because the percentage is a promise to the reader.
+  //
+  //   basePct  — the page's width, as a share of the scroller, at 100%
+  //   scalePct — what the reader sees and drives with the buttons
+  //
+  // 100% has to mean "the view you were given", or the default reads as
+  // something already shrunk: the drawer opened correctly fitted and announced
+  // 82%, inviting a hunt for the missing 18%. What differs between the two
+  // places this pane appears is only what 100% is anchored to — filling the
+  // width in the split, the whole page in the drawer — and that is basePct.
+  const [basePct, setBasePct] = useState(100);
+  const [scalePct, setScalePct] = useState(100);
+  const widthPct = (basePct * scalePct) / 100;
   const knownPages = props.pagesStored ?? doc?.pageCount ?? 0;
   const pageRefs = useRef<Array<HTMLDivElement | null>>([]);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const fittedRef = useRef(false);
 
-  // Zoom that makes one page fit the visible box, from the image's own
-  // proportions — the page is `zoomPct` of the scroller's content width, and
-  // the image keeps its aspect ratio inside that.
+  // Anchor 100% to the whole page: find the width, as a share of the scroller,
+  // at which one page fits the visible box, and call that the baseline. The
+  // image keeps its aspect ratio inside that width, so its own proportions are
+  // all the arithmetic needs.
   const fitWholePage = (img: HTMLImageElement) => {
     const box = scrollRef.current;
     if (!box || !img.naturalWidth || !img.naturalHeight) return;
@@ -1395,9 +1408,10 @@ export function DocumentPane(props: {
     // DOM as width:"NaN%" and blank the page. Leaving the zoom alone just
     // means filling the width, which is what it did before any of this.
     if (!Number.isFinite(pct)) return;
-    // Never zoom past filling the width: a small page should not be blown up
-    // to fill a tall drawer.
-    setZoomPct(Math.max(ZOOM_MIN_PCT, Math.min(100, pct)));
+    // Never past filling the width: a short page should not be blown up to
+    // fill a tall drawer just because there is room.
+    setBasePct(Math.max(1, Math.min(100, pct)));
+    setScalePct(100);
   };
 
   // Bring the highlighted region into view when focus moves.
@@ -1432,15 +1446,15 @@ export function DocumentPane(props: {
     };
   }, [organizationId, doc?.invoiceDocumentId, knownPages]);
 
-  const zoomBy = (delta: number) => setZoomPct((p) => Math.min(ZOOM_MAX_PCT, Math.max(ZOOM_MIN_PCT, p + delta)));
+  const zoomBy = (delta: number) => setScalePct((p) => Math.min(ZOOM_MAX_PCT, Math.max(ZOOM_MIN_PCT, p + delta)));
   const resetView = () => {
-    // "Fit to view" means the whole page where that is what the pane is for,
-    // and fill-the-width in the split, where the reader is working down it.
+    // "Fit to view" re-measures rather than restoring a remembered number, so
+    // it still does the right thing after the window has been resized.
     const firstImg = props.fitPageOnOpen
       ? pageRefs.current[0]?.querySelector('img') ?? null
       : null;
     if (firstImg) fitWholePage(firstImg);
-    else setZoomPct(100);
+    else { setBasePct(100); setScalePct(100); }
     pageRefs.current[0]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
@@ -1471,7 +1485,7 @@ export function DocumentPane(props: {
           key={i}
           className="doc-page"
           ref={(el) => { pageRefs.current[i] = el; }}
-          style={{ width: `${zoomPct}%` }}
+          style={{ width: `${widthPct}%` }}
         >
           <img
             src={url}
@@ -1513,11 +1527,11 @@ export function DocumentPane(props: {
             ) : null}
           </div>
           <div className="dh-zoom">
-            <button type="button" className="btn btn-icon btn-sm" aria-label="Zoom out" onClick={() => zoomBy(-10)} disabled={zoomPct <= ZOOM_MIN_PCT}>
+            <button type="button" className="btn btn-icon btn-sm" aria-label="Zoom out" onClick={() => zoomBy(-10)} disabled={scalePct <= ZOOM_MIN_PCT}>
               <Ico.minus w={13} />
             </button>
-            <span className="dh-pct">{zoomPct}%</span>
-            <button type="button" className="btn btn-icon btn-sm" aria-label="Zoom in" onClick={() => zoomBy(10)} disabled={zoomPct >= ZOOM_MAX_PCT}>
+            <span className="dh-pct">{scalePct}%</span>
+            <button type="button" className="btn btn-icon btn-sm" aria-label="Zoom in" onClick={() => zoomBy(10)} disabled={scalePct >= ZOOM_MAX_PCT}>
               <Ico.plus w={13} />
             </button>
             <button type="button" className="btn btn-icon btn-sm" aria-label="Fit to view" onClick={resetView}>
