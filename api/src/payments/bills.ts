@@ -785,11 +785,19 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   // the live chart once and cache the result on the order.
   let ocrCoding: Record<string, unknown> | null = isRecord(metadata.ocrCoding) ? { ...metadata.ocrCoding } : null;
   const chartNames = new Set(chart.flatMap((a) => [a.name, a.fullyQualifiedName]));
-  if (chart.length > 0 && order.state === 'draft' && metadata.ocrCodingChart !== 'quickbooks') {
+  // A suggestion made before per-line coding existed has no `lines` key at all.
+  // Those bills would otherwise keep the one-account-for-everything answer for
+  // the rest of their draft life, since the refresh below only ever fired when
+  // QuickBooks arrived. Asking once fixes them; the answer is written back with
+  // a `lines` array either way, so it is asked once and not on every view.
+  const missingLineCoding = ocrCoding != null && !Array.isArray(ocrCoding.lines);
+  const chartArrived = chart.length > 0 && metadata.ocrCodingChart !== 'quickbooks';
+  if (order.state === 'draft' && (chartArrived || missingLineCoding)) {
     const top = ocrCoding && Array.isArray(ocrCoding.suggestions) && isRecord(ocrCoding.suggestions[0])
       ? (ocrCoding.suggestions[0] as Record<string, unknown>)
       : null;
-    const stale = !top
+    const stale = missingLineCoding
+      || !top
       || (typeof top.accountId === 'string' && top.accountId.startsWith('builtin:'))
       || !chartNames.has(str(top.accountName) ?? '');
     const categoryHint = (ocrCoding ? str(ocrCoding.categoryHint) : null) ?? str(extracted.categoryHint);
@@ -801,13 +809,19 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
         const { suggestOcrCodings } = await import('../accounting/ocr-coding.js');
         const [fresh] = await suggestOcrCodings(organizationId, [{ categoryHint, lineItems: lineDescriptions }]);
         if (fresh) ocrCoding = fresh as unknown as Record<string, unknown>;
+        // Always leave a `lines` key behind, even when the model was
+        // unavailable and there is nothing to put in it. Without one the
+        // "never asked" test above stays true and every view of this draft
+        // asks again.
+        const settled = (fresh ?? ocrCoding) as Record<string, unknown> | null;
         await prisma.paymentOrder.update({
           where: { paymentOrderId: order.paymentOrderId },
           data: {
             metadataJson: {
               ...metadata,
-              ocrCoding: fresh ?? ocrCoding ?? null,
-              ocrCodingChart: 'quickbooks',
+              ocrCoding: settled ? { lines: [], ...settled } : { categoryHint: null, rationale: null, suggestions: [], lines: [] },
+              // Only claim the suggestion came from the real chart when it did.
+              ...(chartArrived ? { ocrCodingChart: 'quickbooks' } : {}),
             } as unknown as Prisma.InputJsonValue,
           },
         });
@@ -884,6 +898,23 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   // The bill-level suggestion is still the fallback, and a vendor RULE still
   // outranks everything: a rule is somebody's stated decision about this
   // vendor, and a per-line guess must not quietly overturn it.
+  // What the model said about THIS line, by position. This is the only signal
+  // here that was actually formed by looking at the line; the hint below is
+  // prose off the document, and the bill-level suggestion is about the invoice
+  // as a whole. Resolved against the picker's vocabulary like everything else,
+  // because an account the picker cannot offer is not a suggestion.
+  const modelLines = ocrCoding && Array.isArray(ocrCoding.lines)
+    ? (ocrCoding.lines as Array<{ index?: unknown; accountName?: unknown }>)
+    : [];
+  const resolveModelLine = (index: number): string | null => {
+    const hit = modelLines.find((l) => Number(l.index) === index);
+    const name = hit ? str(hit.accountName) : null;
+    if (!name) return null;
+    const account = chart.find((a) => a.name === name || a.fullyQualifiedName === name);
+    if (chart.length > 0) return account?.fullyQualifiedName ?? (chartNames.has(name) ? name : null);
+    return categoryOptions.some((o) => o.value === name) ? name : null;
+  };
+
   const resolveLineCategory = (hint: string | null): string | null => {
     // A vendor rule is the DEFAULT, not an override. It says "bills from this
     // vendor usually code to X", which is true of the bill and not necessarily
@@ -896,12 +927,14 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       ?? categoryOptions.find((o) => hint.toLowerCase().includes(o.value.toLowerCase()));
     return match?.value ?? codingSuggestion;
   };
-  const proposedLines = extractedLines.filter(isRecord).map((line) => ({
+  const proposedLines = extractedLines.filter(isRecord).map((line, i) => ({
     description: str(line.description) ?? '',
     quantity: num(line.quantity),
     unitPrice: num(line.unitPrice),
     amount: num(line.total),
-    category: resolveLineCategory(str(line.categoryHint)),
+    // The model's own reading of this line first; the document hint and the
+    // bill-level guess are the fallbacks they always were.
+    category: resolveModelLine(i) ?? resolveLineCategory(str(line.categoryHint)),
     source: lineSource(line),
   }));
   const lines = verifiedLines ?? proposedLines;

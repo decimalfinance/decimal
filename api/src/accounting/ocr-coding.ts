@@ -32,10 +32,24 @@ export interface ChartAccount {
 
 export type OcrSuggestion = { accountId: string; accountName: string; weight: number };
 
+/**
+ * One line's own account. The bill-level suggestion answers "what is this
+ * invoice for"; this answers "what is THIS line for", which is a different
+ * question on any invoice carrying more than one kind of spend.
+ */
+export type OcrLineCoding = {
+  index: number;
+  accountId: string;
+  accountName: string;
+  weight: number;
+  why: string | null;
+};
+
 export type OcrCoding = {
   categoryHint: string | null;
   rationale: string | null;
   suggestions: OcrSuggestion[];
+  lines: OcrLineCoding[];
 };
 
 /** The org's FULL active chart of accounts from QuickBooks; [] if not connected. */
@@ -80,8 +94,8 @@ export async function matchExpenseAccounts(args: {
   categoryHint: string | null;
   lineItems: { description: string }[];
   accounts: ExpenseAccount[];
-}): Promise<{ rationale: string | null; suggestions: OcrSuggestion[] }> {
-  const empty = { rationale: null, suggestions: [] as OcrSuggestion[] };
+}): Promise<{ rationale: string | null; suggestions: OcrSuggestion[]; lines: OcrLineCoding[] }> {
+  const empty = { rationale: null, suggestions: [] as OcrSuggestion[], lines: [] as OcrLineCoding[] };
   if (!config.openAiApiKey || args.accounts.length === 0) return empty;
   const hint = args.categoryHint?.trim() || null;
   const items = args.lineItems.map((l) => l.description).filter(Boolean).slice(0, 10);
@@ -90,15 +104,25 @@ export async function matchExpenseAccounts(args: {
   const accountList = args.accounts
     .map((a) => (a.description ? `- ${a.name} — ${a.description}` : `- ${a.name}`))
     .join('\n');
+  // Both questions in one call: what the invoice is for, and what each line is
+  // for. They are genuinely different — an ocean-freight invoice can carry a
+  // legal review and contract labour — and asking only the first meant every
+  // line inherited one answer, which is how a font licence and a photography
+  // licence ended up sharing a category with everything else on the bill.
   const prompt =
-    `Map this vendor purchase to the best-fitting general-ledger expense account(s).\n\n` +
+    `Code a vendor invoice to general-ledger expense accounts.\n\n` +
     `Purchase: ${hint ?? items[0]}\n` +
-    (items.length ? `Line items:\n${items.map((d) => `  - ${d}`).join('\n')}\n` : '') +
+    (items.length ? `Lines:\n${items.map((d, i) => `  ${i}. ${d}`).join('\n')}\n` : '') +
     `\nExpense accounts (name — description):\n${accountList}\n\n` +
     `Return JSON only:\n` +
-    `{ "rationale": "one short sentence on why", "suggestions": [ { "account": "<exact name from the list>", "weight": <0.0-1.0> } ] }\n` +
-    `- suggestions: 1-3 accounts, most likely first. weight = your probability this is the correct account.\n` +
-    `- Use the EXACT account name from the list. Return suggestions: [] if nothing fits.`;
+    `{ "rationale": "one short sentence on why",\n` +
+    `  "suggestions": [ { "account": "<exact name from the list>", "weight": <0.0-1.0> } ],\n` +
+    `  "lines": [ { "index": <line number>, "account": "<exact name from the list>", "weight": <0.0-1.0>, "why": "<a few words>" } ] }\n` +
+    `- suggestions: 1-3 accounts for the invoice as a whole, most likely first.\n` +
+    `- lines: one entry per line above, in order. Judge each line ON ITS OWN.\n` +
+    `- Lines on one invoice often belong to DIFFERENT accounts. Do not assume they match each other or the invoice as a whole.\n` +
+    `- Match on the account DESCRIPTION, not on words it happens to share with a line. A software licence is not a government licence.\n` +
+    `- Use the EXACT account name from the list. Omit a line, or return suggestions: [], if nothing fits.`;
 
   try {
     const response = await fetch(OPENAI_CHAT_COMPLETIONS_URL, {
@@ -106,7 +130,9 @@ export async function matchExpenseAccounts(args: {
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.openAiApiKey}` },
       body: JSON.stringify({
         model: config.openAiModel,
-        max_tokens: 220,
+        // Enough for a per-line answer on a ten-line invoice; the old 220 was
+        // sized for a single bill-level verdict and would truncate the array.
+        max_tokens: 900,
         temperature: 0,
         response_format: { type: 'json_object' },
         messages: [
@@ -120,6 +146,7 @@ export async function matchExpenseAccounts(args: {
     const raw = JSON.parse(body.choices?.[0]?.message?.content ?? '{}') as {
       rationale?: unknown;
       suggestions?: Array<{ account?: unknown; weight?: unknown }>;
+      lines?: Array<{ index?: unknown; account?: unknown; weight?: unknown; why?: unknown }>;
     };
     const byName = new Map<string, ExpenseAccount>();
     for (const a of args.accounts) byName.set(a.name.toLowerCase(), a);
@@ -131,7 +158,32 @@ export async function matchExpenseAccounts(args: {
       suggestions.push({ accountId: acct.id, accountName: acct.name, weight });
     }
     suggestions.sort((a, b) => b.weight - a.weight);
-    return { rationale: typeof raw.rationale === 'string' ? raw.rationale.slice(0, 200) : null, suggestions: suggestions.slice(0, 3) };
+
+    // Per-line answers, constrained the same way: an account the model did not
+    // pick from the list is not an account, and an index outside the invoice is
+    // not a line.
+    const lines: OcrLineCoding[] = [];
+    for (const l of raw.lines ?? []) {
+      const index = Number(l.index);
+      if (!Number.isInteger(index) || index < 0 || index >= items.length) continue;
+      if (lines.some((x) => x.index === index)) continue;
+      const acct = byName.get(String(l.account ?? '').trim().toLowerCase());
+      if (!acct) continue;
+      lines.push({
+        index,
+        accountId: acct.id,
+        accountName: acct.name,
+        weight: Math.max(0, Math.min(1, Number(l.weight) || 0)),
+        why: typeof l.why === 'string' ? l.why.slice(0, 120) : null,
+      });
+    }
+    lines.sort((a, b) => a.index - b.index);
+
+    return {
+      rationale: typeof raw.rationale === 'string' ? raw.rationale.slice(0, 200) : null,
+      suggestions: suggestions.slice(0, 3),
+      lines,
+    };
   } catch (error) {
     logger.warn('ocr_coding.match_failed', { error: error instanceof Error ? error.message : String(error) });
     return empty;
@@ -156,10 +208,10 @@ export async function suggestOcrCodings(
     items.map(async (item): Promise<OcrCoding | null> => {
       const categoryHint = item.categoryHint?.trim() || null;
       if (!categoryHint && item.lineItems.length === 0) return null;
-      const { rationale, suggestions } = accounts.length
+      const { rationale, suggestions, lines } = accounts.length
         ? await matchExpenseAccounts({ categoryHint, lineItems: item.lineItems, accounts })
-        : { rationale: null, suggestions: [] };
-      return { categoryHint, rationale, suggestions };
+        : { rationale: null, suggestions: [], lines: [] };
+      return { categoryHint, rationale, suggestions, lines };
     }),
   );
 }
