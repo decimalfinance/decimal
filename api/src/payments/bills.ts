@@ -1962,6 +1962,7 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
     return {
       draft: billDraft,
       corrections,
+      recall: { open: null, history: [] },
       status: { macroState: null, subStatus },
       approval: null,
       viewer: { personId: null, name: null, isRequester: false, openTaskId: null, anyTaskId: null },
@@ -2097,10 +2098,17 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
     corrections,
   });
 
+  // A frozen bill has to say so on the bill itself. The approvers looking at
+  // it are the people whose work a grant would throw away, and finding that
+  // out afterwards is how the mechanism loses their trust.
+  const { billRecallState } = await import('./bill-recall.js');
+  const recall = await billRecallState(organizationId, paymentOrderId);
+
   return {
     draft: billDraft,
     corrections,
     signal,
+    recall,
     status: { macroState: approvable.macro_state, subStatus },
     approval: {
       approvableId: approvable.id,

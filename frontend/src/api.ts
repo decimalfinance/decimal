@@ -1563,6 +1563,30 @@ export const billsApi = {
   detail(organizationId: string, paymentOrderId: string) {
     return request<BillDetail>(`/organizations/${organizationId}/bills/${paymentOrderId}/detail`);
   },
+  // Recall: the submitter asks, an admin answers. Raising freezes the bill.
+  requestRecall(organizationId: string, paymentOrderId: string, reason: string) {
+    return request<BillRecall>(`/organizations/${organizationId}/bills/${paymentOrderId}/recall-request`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  },
+  decideRecall(organizationId: string, recallRequestId: string, grant: boolean, note?: string) {
+    return request<{ state: 'granted' | 'denied'; paymentOrderId: string | null }>(
+      `/organizations/${organizationId}/recall-requests/${recallRequestId}/decision`,
+      { method: 'POST', body: JSON.stringify({ grant, ...(note ? { note } : {}) }) },
+    );
+  },
+  withdrawRecall(organizationId: string, recallRequestId: string) {
+    return request<{ paymentOrderId: string | null }>(
+      `/organizations/${organizationId}/recall-requests/${recallRequestId}/withdraw`,
+      { method: 'POST' },
+    );
+  },
+  pendingRecalls(organizationId: string) {
+    return request<Array<BillRecall & { paymentOrderId: string | null; vendorName: string | null; amountMinor: string }>>(
+      `/organizations/${organizationId}/recall-requests`,
+    );
+  },
   updateFacts(organizationId: string, paymentOrderId: string, facts: Record<string, unknown>) {
     return request<{ changed: number }>(`/organizations/${organizationId}/bills/${paymentOrderId}/facts`, {
       method: 'PATCH',
@@ -1678,11 +1702,30 @@ export interface BillDetailStepNode {
   } | null;
 }
 
+/**
+ * A request to pull a bill out of approval. Raising one freezes the bill; an
+ * owner or admin then grants it (approvals invalidated, bill back to draft) or
+ * denies it (bill resumes exactly where it stood).
+ */
+export interface BillRecall {
+  recallRequestId: string;
+  reason: string;
+  state: 'pending' | 'granted' | 'denied' | 'withdrawn';
+  requestedBy: string | null;
+  requestedAt: string;
+  decidedBy: string | null;
+  decidedAt: string | null;
+  decisionNote: string | null;
+  /** The asker decided it themselves — shown as such, never passed off as review. */
+  selfDecided: boolean;
+}
+
 export interface BillDetail {
   draft: BillDraft;
   corrections: Array<{ field: string; from: string; to: string; by: string | null }>;
   // Advisory: routine vs worth-a-look, same classifier as the approvals inbox.
   signal?: InboxSignal;
+  recall: { open: BillRecall | null; history: BillRecall[] };
   status: { macroState: string | null; subStatus: WorkbenchBill['subStatus'] };
   approval: {
     approvableId: string;

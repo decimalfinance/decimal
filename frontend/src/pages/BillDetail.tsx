@@ -47,7 +47,7 @@ const TONE_PILL: Record<string, string> = {
   success: 'pill-success', warning: 'pill-warning', danger: 'pill-danger', info: 'pill-info', neutral: 'pill-neutral',
 };
 
-type ComposerKind = 'reject' | 'info' | 'reply' | 'sendback';
+type ComposerKind = 'reject' | 'info' | 'reply' | 'sendback' | 'recall';
 
 export function BillDetailPage() {
   const { organizationId = '', paymentOrderId = '' } = useParams();
@@ -152,11 +152,26 @@ export function BillDetailPage() {
   // when a release gate refuses (pinned destination, ceiling).
   const canSendBack = approvedOverall && billDraft.state === 'submitted' && Boolean(myAccess.data?.isOwnerOrAdmin);
 
+  // Recall is a request now, not a button. While one is open the bill is frozen:
+  // nobody approves into a bill already known to be wrong.
+  const recallOpen = detail.recall?.open ?? null;
+  const isAdmin = Boolean(myAccess.data?.isOwnerOrAdmin);
+  const canAskForItBack = viewer.isRequester && !isDraft && !approvedOverall && !rejected && !recalled && !recallOpen;
+
   const composerMeta: Record<ComposerKind, { title: string; desc: string; placeholder: string; btn: string; btnClass: string }> = {
     reject: { title: 'Reject this bill', desc: `A reason is required — ${requester?.name ?? 'the submitter'} and the route will see it.`, placeholder: 'Why is this being rejected?', btn: 'Reject bill', btnClass: 'btn-danger' },
     info: { title: 'Request more info', desc: `Send it back to ${requester?.name ?? 'the submitter'} for a detail — the bill stays with you, not reset.`, placeholder: 'What do you need to see before approving?', btn: 'Send request', btnClass: 'btn-primary' },
     reply: { title: 'Reply', desc: 'Your answer goes to the approver who asked, and the route keeps moving.', placeholder: 'Answer the question…', btn: 'Send answer', btnClass: 'btn-primary' },
     sendback: { title: 'Send back to draft', desc: 'Unwinds the approval: the bill returns to draft, and re-confirming starts a fresh approval run under current rules.', placeholder: 'Why is it going back? Goes on the record.', btn: 'Send back', btnClass: 'btn-danger' },
+    recall: {
+      title: 'Ask for this bill back',
+      desc: doneCount > 0
+        ? `The bill stops here while an admin decides. ${doneCount === 1 ? 'One approval has' : `${doneCount} approvals have`} already been given — granting this would void ${doneCount === 1 ? 'it' : 'them'}.`
+        : 'The bill stops here while an admin decides. Nobody has approved it yet, so nothing would be lost.',
+      placeholder: 'What needs changing? The admin and the approvers will see this.',
+      btn: 'Ask for it back',
+      btnClass: 'btn-primary',
+    },
   };
 
   const submitComposer = () => {
@@ -177,6 +192,46 @@ export function BillDetailPage() {
         .catch((err) => toast.error('That didn\'t go through', approvalActErrorMessage(err)))
         .finally(() => setActing(false));
     }
+    if (composer === 'recall') {
+      setActing(true);
+      billsApi.requestRecall(organizationId, paymentOrderId, text)
+        .then(() => {
+          toast.success('Asked — the bill is on hold until an admin answers.');
+          setComposer(null);
+          setComposerText('');
+          refresh();
+        })
+        .catch((err) => toast.error('That didn\'t go through', approvalActErrorMessage(err)))
+        .finally(() => setActing(false));
+    }
+  };
+
+  // Deciding somebody's recall, and taking your own back. Both land on the same
+  // bill, so both just refresh it.
+  const decideRecall = (grant: boolean) => {
+    if (!recallOpen || acting) return;
+    setActing(true);
+    billsApi.decideRecall(organizationId, recallOpen.recallRequestId, grant)
+      .then(() => {
+        toast.success(grant
+          ? 'Recalled — the bill is back in draft and the approvals were voided.'
+          : 'Denied — the bill carries on where it left off.');
+        refresh();
+      })
+      .catch((err) => toast.error('That didn\'t go through', approvalActErrorMessage(err)))
+      .finally(() => setActing(false));
+  };
+
+  const withdrawRecall = () => {
+    if (!recallOpen || acting) return;
+    setActing(true);
+    billsApi.withdrawRecall(organizationId, recallOpen.recallRequestId)
+      .then(() => {
+        toast.success('Withdrawn — the bill carries on where it left off.');
+        refresh();
+      })
+      .catch((err) => toast.error('That didn\'t go through', approvalActErrorMessage(err)))
+      .finally(() => setActing(false));
   };
 
   return (
@@ -248,6 +303,50 @@ export function BillDetailPage() {
             <div className="callout callout-danger" style={{ alignItems: 'center' }}>
               <Ico.x w={16} />
               <span><b>This bill was recalled.</b> It's out of approval and back in the draft queue — the approvers were notified.</span>
+            </div>
+          </div>
+        ) : null}
+
+        {/* A frozen bill says so, to everyone. The approvers reading this are the
+            people whose work a grant would throw away; learning that afterwards
+            is how the mechanism loses them. */}
+        {recallOpen ? (
+          <div style={{ padding: '20px 32px 0' }}>
+            <div className="callout callout-warning" style={{ flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                <Ico.reset w={16} />
+                <span>
+                  <b>{recallOpen.requestedBy ?? 'The submitter'} asked for this bill back.</b>{' '}
+                  Approval is paused while an owner or admin decides.{' '}
+                  {doneCount > 0
+                    ? `The ${doneCount === 1 ? 'approval' : `${doneCount} approvals`} already given ${doneCount === 1 ? 'is' : 'are'} being held — granting would void ${doneCount === 1 ? 'it' : 'them'}, denying gives ${doneCount === 1 ? 'it' : 'them'} straight back.`
+                    : 'Nobody has approved it yet, so nothing is at stake either way.'}
+                  <br />
+                  <span style={{ color: 'var(--text-muted)' }}>“{recallOpen.reason}”</span>
+                </span>
+              </div>
+              {isAdmin || viewer.isRequester ? (
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', paddingLeft: 26 }}>
+                  {isAdmin ? (
+                    <>
+                      <button type="button" className="btn btn-danger btn-sm" disabled={acting}
+                        onClick={() => decideRecall(true)}>
+                        Grant recall
+                      </button>
+                      <button type="button" className="btn btn-secondary btn-sm" disabled={acting}
+                        onClick={() => decideRecall(false)}>
+                        Deny — keep it moving
+                      </button>
+                    </>
+                  ) : null}
+                  {viewer.isRequester ? (
+                    <button type="button" className="btn btn-ghost btn-sm" disabled={acting}
+                      onClick={withdrawRecall}>
+                      Never mind, withdraw
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           </div>
         ) : null}
@@ -482,9 +581,10 @@ export function BillDetailPage() {
               <button type="button" className="btn btn-primary" onClick={() => setComposer('reply')} disabled={acting}>Reply</button>
             ) : null}
             {!approvedOverall ? (
-              <button type="button" className="btn btn-secondary" disabled={acting}
-                onClick={() => void act(viewer.anyTaskId, { kind: 'recall' }, 'Recalled — back in your drafts.')}>
-                <Ico.reset w={14} /> Recall bill
+              <button type="button" className="btn btn-secondary" disabled={acting || !canAskForItBack}
+                title={recallOpen ? 'You have already asked — an admin is deciding.' : undefined}
+                onClick={() => setComposer('recall')}>
+                <Ico.reset w={14} /> Ask for it back
               </button>
             ) : null}
             {canSendBack ? (
