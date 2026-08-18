@@ -1569,3 +1569,35 @@ test('per-line categories are recorded, and so is changing one', async () => {
   assert.ok(['accepted', 'edited'].includes(outcome.outcome));
   assert.ok(Array.isArray(outcome.finalValue), 'the final categories are kept per line, not collapsed to one');
 });
+
+test('recalling a bill puts it back in draft, where it can actually be fixed', async () => {
+  // The point of a recall is to fix something. It was pulling the bill out of
+  // approval and leaving it `submitted`, so the draft screen stayed read-only
+  // and there was nothing you could do with the bill you had just pulled back.
+  //
+  // The bridge always had the branch that returns it to draft. executeCommand
+  // simply never fired the hook for 'cancelled' — the transition list had
+  // approved, auto_approved and rejected, and not this one. Dead code behind a
+  // missing string.
+  const { orgId, owner } = await makeOrg();
+  const other = await register('recall-admin');
+  await prisma.organizationMembership.create({
+    data: { organizationId: orgId, userId: other.userId, role: 'admin', status: 'active' },
+  });
+
+  const bill = await uploadAndConfirm(orgId, owner.token, {
+    vendor: 'Recall Vendor', amount: 640, invoiceNo: 'RC-1', billTo: 'Halcyon Labs, Inc.',
+  });
+  await bill.confirm();
+
+  const before = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
+  assert.equal(before.draft.state, 'submitted', 'confirmed, so it left draft');
+
+  await post(`/organizations/${orgId}/approvals/tasks/${before.viewer.anyTaskId}/command`, {
+    command: { kind: 'recall' }, idempotencyKey: crypto.randomUUID(),
+  }, owner.token);
+
+  const after = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
+  assert.equal(after.draft.state, 'draft', 'recall returns the bill to draft');
+  assert.equal(after.draft.readOnly, false, 'and draft means editable — otherwise the recall achieved nothing');
+});

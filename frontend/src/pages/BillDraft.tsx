@@ -1,4 +1,4 @@
-// Invoice billDraft — verify what was read from the document, then send for
+// The bill draft — verify what was read from the document, then send for
 // approval (uploads/ap-claude-code-handoff.md §3). Document left, one flat
 // field list right, user-resizable split, sticky commit bar.
 //
@@ -54,7 +54,7 @@ export function BillDraftPage() {
     staleTime: 60_000,
   });
 
-  // Prev/next walks the Needs-billDraft queue.
+  // Prev/next walks the draft queue.
   const workbench = useQuery({
     queryKey: ['bills-workbench', organizationId],
     queryFn: () => billsApi.workbench(organizationId),
@@ -343,7 +343,7 @@ function DraftScreen(props: {
   const [activeSource, setActiveSource] = useState<DocSource>(null);
 
   // Chart of accounts for the category picker — same source and cache as the
-  // coding inbox. Falls back to the billDraft packet's options, then to whatever
+  // coding inbox. Falls back to the draft packet's options, then to whatever
   // categories the lines already carry, so the list is stable and never
   // shrinks when a selection changes.
   const accountsQuery = useQuery({
@@ -355,7 +355,7 @@ function DraftScreen(props: {
   });
   const categoryOptions = useMemo<CategoryOption[]>(() => {
     // Prefer the live chart (full, numbered, grouped like the books); fall back
-    // to the billDraft packet's options (builtin chart when QBO isn't connected).
+    // to the draft packet's options (builtin chart when QBO isn't connected).
     const fromBooks: CategoryOption[] = (accountsQuery.data?.items ?? []).map((a) => ({
       value: a.fullyQualifiedName ?? a.name,
       label: a.acctNum ? `${a.acctNum} · ${a.fullyQualifiedName ?? a.name}` : (a.fullyQualifiedName ?? a.name),
@@ -1502,7 +1502,7 @@ export function DocumentDraftPage() {
 
   const data = status.data;
 
-  // Read complete → swap to the real billDraft of the first created bill.
+  // Read complete → swap to the real draft of the first created bill.
   useEffect(() => {
     if (data?.status === 'processed' && data.paymentOrders[0]) {
       navigate(

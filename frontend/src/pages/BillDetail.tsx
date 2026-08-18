@@ -67,7 +67,7 @@ export function BillDetailPage() {
     enabled: Boolean(organizationId && paymentOrderId),
   });
   const detail = detailQuery.data;
-  // Admin tier gates "send back to billDraft" on an approved bill.
+  // Admin tier gates "send back to draft" on an approved bill.
   const myAccess = useQuery({
     queryKey: ['my-access', organizationId],
     queryFn: () => accessApi.get(organizationId),
@@ -156,7 +156,7 @@ export function BillDetailPage() {
     reject: { title: 'Reject this bill', desc: `A reason is required — ${requester?.name ?? 'the submitter'} and the route will see it.`, placeholder: 'Why is this being rejected?', btn: 'Reject bill', btnClass: 'btn-danger' },
     info: { title: 'Request more info', desc: `Send it back to ${requester?.name ?? 'the submitter'} for a detail — the bill stays with you, not reset.`, placeholder: 'What do you need to see before approving?', btn: 'Send request', btnClass: 'btn-primary' },
     reply: { title: 'Reply', desc: 'Your answer goes to the approver who asked, and the route keeps moving.', placeholder: 'Answer the question…', btn: 'Send answer', btnClass: 'btn-primary' },
-    sendback: { title: 'Send back to billDraft', desc: 'Unwinds the approval: the bill returns to billDraft, and re-confirming starts a fresh approval run under current rules.', placeholder: 'Why is it going back? Goes on the record.', btn: 'Send back', btnClass: 'btn-danger' },
+    sendback: { title: 'Send back to draft', desc: 'Unwinds the approval: the bill returns to draft, and re-confirming starts a fresh approval run under current rules.', placeholder: 'Why is it going back? Goes on the record.', btn: 'Send back', btnClass: 'btn-danger' },
   };
 
   const submitComposer = () => {
@@ -169,7 +169,7 @@ export function BillDetailPage() {
       setActing(true);
       billsApi.sendBack(organizationId, paymentOrderId, text)
         .then(() => {
-          toast.success('Back in billDraft — the approval was unwound.');
+          toast.success('Back in draft — the approval was unwound.');
           setComposer(null);
           setComposerText('');
           refresh();
@@ -247,7 +247,7 @@ export function BillDetailPage() {
           <div style={{ padding: '20px 32px 0' }}>
             <div className="callout callout-danger" style={{ alignItems: 'center' }}>
               <Ico.x w={16} />
-              <span><b>This bill was recalled.</b> It's out of approval and back in the billDraft queue — the approvers were notified.</span>
+              <span><b>This bill was recalled.</b> It's out of approval and back in the draft queue — the approvers were notified.</span>
             </div>
           </div>
         ) : null}
@@ -407,12 +407,12 @@ export function BillDetailPage() {
           </>
         ) : recalled ? (
           <>
-            <span className="cb-note" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Bill recalled — back in the billDraft queue</span>
+            <span className="cb-note" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Bill recalled — back in the draft queue</span>
             <span className="commit-spacer" />
             <button type="button" className="btn btn-secondary" disabled={acting}
               onClick={() => void act(viewer.anyTaskId, { kind: 'resubmit' }, 'Back in approval.')}>Undo recall</button>
             <button type="button" className="btn btn-primary" onClick={() => navigate(`/organizations/${organizationId}/bills/${paymentOrderId}/draft`)}>
-              Open in billDraft
+              Open in draft
             </button>
           </>
         ) : viewerHasDecision && viewerBlockedByOwnAsk ? (
@@ -483,13 +483,13 @@ export function BillDetailPage() {
             ) : null}
             {!approvedOverall ? (
               <button type="button" className="btn btn-secondary" disabled={acting}
-                onClick={() => void act(viewer.anyTaskId, { kind: 'recall' }, 'Recalled — back in your billDraft queue.')}>
+                onClick={() => void act(viewer.anyTaskId, { kind: 'recall' }, 'Recalled — back in your drafts.')}>
                 <Ico.reset w={14} /> Recall bill
               </button>
             ) : null}
             {canSendBack ? (
               <button type="button" className="btn btn-secondary" disabled={acting} onClick={() => setComposer('sendback')}>
-                <Ico.reset w={14} /> Send back to billDraft
+                <Ico.reset w={14} /> Send back to draft
               </button>
             ) : null}
           </>
@@ -499,7 +499,7 @@ export function BillDetailPage() {
             <span className="commit-spacer" />
             {canSendBack ? (
               <button type="button" className="btn btn-secondary" disabled={acting} onClick={() => setComposer('sendback')}>
-                <Ico.reset w={14} /> Send back to billDraft
+                <Ico.reset w={14} /> Send back to draft
               </button>
             ) : null}
           </>

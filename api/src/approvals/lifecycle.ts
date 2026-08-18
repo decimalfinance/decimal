@@ -198,8 +198,14 @@ export async function executeCommand(envelope: CommandEnvelope): Promise<Command
     const finalApprovable = (await getApprovable(tx, approvable.id))!;
     return {
       result: { replay: false, taskState: finalTask.state, macroState: finalApprovable.macro_state },
+      // 'cancelled' belongs here. A recall pulls a bill out of approval and is
+      // supposed to put it back in the submitter's draft queue — the bridge has
+      // always had that branch, and it was unreachable, because this list left
+      // the transition out. So a recalled bill kept its `submitted` state, the
+      // draft screen stayed read-only, and recalling achieved nothing you could
+      // act on: you could not fix the thing you pulled it back to fix.
       transition: approvable.macro_state !== finalApprovable.macro_state
-        && ['approved', 'auto_approved', 'rejected'].includes(finalApprovable.macro_state)
+        && ['approved', 'auto_approved', 'rejected', 'cancelled'].includes(finalApprovable.macro_state)
         ? { approvable: finalApprovable, to: finalApprovable.macro_state as ApprovalTransition }
         : null,
     };
