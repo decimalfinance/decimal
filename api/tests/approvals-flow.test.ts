@@ -1618,3 +1618,39 @@ test('a field the form defaulted is not recorded as a human correction', async (
   const taxRow = (detail.corrections ?? []).find((c: { field: string }) => c.field === 'taxAmount');
   assert.equal(taxRow, undefined, 'a defaulted tax of 0 is not somebody correcting the document');
 });
+
+test('a submitter cannot recall a bill that is already approved', async () => {
+  // Recall is withdrawing your own request, not overruling a decision. It had
+  // no guard, so a submitter could recall a fully approved bill — macro state
+  // approved -> cancelled, bill back to draft, and sign-offs real people had
+  // given quietly voided. Unwinding an approved bill is admin-only elsewhere
+  // in this codebase (the send-back route says so); recall walked around it.
+  const { orgId, owner } = await makeOrg();
+  const admin = await register('recall-guard-admin');
+  await prisma.organizationMembership.create({
+    data: { organizationId: orgId, userId: admin.userId, role: 'admin', status: 'active' },
+  });
+  const bill = await uploadAndConfirm(orgId, owner.token, {
+    vendor: 'Guard Vendor', amount: 400, invoiceNo: 'GD-1', billTo: 'Halcyon Labs, Inc.',
+  });
+  await bill.confirm();
+
+  // R1 excludes the owner who submitted it, so the admin holds the task.
+  const asAdmin = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, admin.token);
+  await post(`/organizations/${orgId}/approvals/tasks/${asAdmin.viewer.openTaskId}/command`, {
+    command: { kind: 'approve' }, idempotencyKey: crypto.randomUUID(),
+  }, admin.token);
+
+  const approved = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
+  assert.equal(approved.approval.macroState, 'approved');
+
+  const res = await fetch(`${baseUrl}/organizations/${orgId}/approvals/tasks/${approved.viewer.anyTaskId}/command`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${owner.token}` },
+    body: JSON.stringify({ command: { kind: 'recall' }, idempotencyKey: crypto.randomUUID() }),
+  });
+  assert.notEqual(res.status, 200, 'an approved bill is no longer the submitter\u2019s to withdraw');
+
+  const after = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
+  assert.equal(after.approval.macroState, 'approved', 'and the approval still stands');
+});

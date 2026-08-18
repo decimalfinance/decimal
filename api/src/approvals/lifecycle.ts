@@ -179,6 +179,25 @@ export async function executeCommand(envelope: CommandEnvelope): Promise<Command
       case 'hold': await setMacroState(tx, approvable.id, 'on_hold'); break;
       case 'resume': await setMacroState(tx, approvable.id, 'pending_approval'); break;
       case 'recall': {
+        // Withdrawing your own request, not overruling a decision.
+        //
+        // Recall had no guard, so a submitter could recall a bill that was
+        // already fully approved: the macro state went approved -> cancelled
+        // and the bill dropped back to draft, quietly voiding sign-offs real
+        // people had given. That contradicts a rule this codebase already
+        // holds elsewhere — unwinding an APPROVED bill is admin-only, and the
+        // send-back route says so ("Only an admin can send an approved bill
+        // back to review"). Recall walked around it.
+        //
+        // So: you may take back a request nobody has finished deciding. Once
+        // it is approved it is no longer yours to withdraw, and the admin path
+        // exists for that.
+        if (['approved', 'auto_approved'].includes(approvable.macro_state)) {
+          throw new ApprovalEngineError(
+            'invalid_state',
+            'This bill is already approved — an admin can send it back to draft.',
+          );
+        }
         await closeLiveTasks(tx, task.plan_id, 'obsolete');
         await setMacroState(tx, approvable.id, 'cancelled');
         break;
