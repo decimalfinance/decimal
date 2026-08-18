@@ -708,7 +708,20 @@ export function BillDetailPage() {
               </div>
               <button type="button" className="drawer-x" onClick={() => setDocOpen(false)} aria-label="Close">×</button>
             </div>
-            <DocumentPane organizationId={organizationId} document={billDraft.document} width="100%" />
+            {/* The pane scrolls itself, but only inside a box with a height.
+                Dropped straight into the drawer's column it sized to its own
+                content instead and ran off the bottom of the screen — the
+                document had no canvas to move in, so a tall invoice simply
+                lost its lower half. This is what .rev-split does for the
+                split view, which is why that one has always scrolled. */}
+            <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+              <DocumentPane
+                organizationId={organizationId}
+                document={billDraft.document}
+                width="100%"
+                fitPageOnOpen
+              />
+            </div>
           </div>
         </div>
       ) : null}

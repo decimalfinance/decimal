@@ -1356,6 +1356,17 @@ export function DocumentPane(props: {
   activeSource?: DocSource;
   // Pane width within the split (the wrapper owns it now).
   width: string;
+  /**
+   * Open showing the whole first page rather than filling the width.
+   *
+   * In the split view the document sits beside the fields and the reader is
+   * working down it, so filling the width is right. Opened on its own to be
+   * looked at — "View invoice" — the first thing wanted is the whole page,
+   * and a tall one (A3, or any long invoice) otherwise arrives cropped with
+   * its total below the fold, needing several clicks on minus before it can
+   * be read at all.
+   */
+  fitPageOnOpen?: boolean;
 }) {
   const { organizationId, document: doc, activeSource, width } = props;
   const [pageUrls, setPageUrls] = useState<string[]>([]);
@@ -1363,6 +1374,31 @@ export function DocumentPane(props: {
   const [zoomPct, setZoomPct] = useState(100);
   const knownPages = props.pagesStored ?? doc?.pageCount ?? 0;
   const pageRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const fittedRef = useRef(false);
+
+  // Zoom that makes one page fit the visible box, from the image's own
+  // proportions — the page is `zoomPct` of the scroller's content width, and
+  // the image keeps its aspect ratio inside that.
+  const fitWholePage = (img: HTMLImageElement) => {
+    const box = scrollRef.current;
+    if (!box || !img.naturalWidth || !img.naturalHeight) return;
+    const style = getComputedStyle(box);
+    const padX = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+    const padY = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+    const availW = box.clientWidth - padX;
+    const availH = box.clientHeight - padY;
+    if (availW <= 0 || availH <= 0) return;
+    const ratio = img.naturalHeight / img.naturalWidth;
+    const pct = Math.floor((availH / (availW * ratio)) * 100);
+    // A box that has not been laid out yet yields NaN, which would reach the
+    // DOM as width:"NaN%" and blank the page. Leaving the zoom alone just
+    // means filling the width, which is what it did before any of this.
+    if (!Number.isFinite(pct)) return;
+    // Never zoom past filling the width: a small page should not be blown up
+    // to fill a tall drawer.
+    setZoomPct(Math.max(ZOOM_MIN_PCT, Math.min(100, pct)));
+  };
 
   // Bring the highlighted region into view when focus moves.
   useEffect(() => {
@@ -1398,7 +1434,13 @@ export function DocumentPane(props: {
 
   const zoomBy = (delta: number) => setZoomPct((p) => Math.min(ZOOM_MAX_PCT, Math.max(ZOOM_MIN_PCT, p + delta)));
   const resetView = () => {
-    setZoomPct(100);
+    // "Fit to view" means the whole page where that is what the pane is for,
+    // and fill-the-width in the split, where the reader is working down it.
+    const firstImg = props.fitPageOnOpen
+      ? pageRefs.current[0]?.querySelector('img') ?? null
+      : null;
+    if (firstImg) fitWholePage(firstImg);
+    else setZoomPct(100);
     pageRefs.current[0]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
@@ -1431,7 +1473,17 @@ export function DocumentPane(props: {
           ref={(el) => { pageRefs.current[i] = el; }}
           style={{ width: `${zoomPct}%` }}
         >
-          <img src={url} alt={`${doc.filename} — page ${i + 1}`} />
+          <img
+            src={url}
+            alt={`${doc.filename} — page ${i + 1}`}
+            // Only once, and only off the first page: re-fitting on every load
+            // would yank the zoom back while someone is reading page four.
+            onLoad={(e) => {
+              if (i !== 0 || !props.fitPageOnOpen || fittedRef.current) return;
+              fittedRef.current = true;
+              fitWholePage(e.currentTarget);
+            }}
+          />
           {activeSource && activeSource.page - 1 === i ? (
             <div
               className="doc-hl"
@@ -1474,7 +1526,7 @@ export function DocumentPane(props: {
           </div>
         </div>
       ) : null}
-      <div className="rev-doc">{content}</div>
+      <div className="rev-doc" ref={scrollRef}>{content}</div>
     </div>
   );
 }
