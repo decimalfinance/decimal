@@ -215,22 +215,32 @@ function bucketAndStatus(args: {
 }
 
 /**
- * How this bill arrived. `intakeChannel` is stamped by invoice intake when the
- * door was email; everything else is an ordinary upload. The label names the
- * person because it tells an approver who to ask — "Emailed by Priya" beats
- * "Emailed in".
+ * How this bill arrived, and who brought it. `intakeChannel` is stamped by
+ * invoice intake when the door was email; everything else is an ordinary
+ * upload. Both name the person, because it tells an approver who to ask —
+ * "Forwarded by Priya" beats "Forwarded in", and an upload with no name at all
+ * beats nothing.
  */
 function billSource(
   metadataJson: unknown,
   createdByName: string | null,
 ): { source: 'email' | 'upload'; sourceLabel: string | null } {
   const channel = isRecord(metadataJson) ? metadataJson.intakeChannel : null;
-  if (!isRecord(channel) || channel.kind !== 'email') {
-    return { source: 'upload', sourceLabel: null };
+  const emailed = isRecord(channel) && channel.kind === 'email';
+
+  // An upload used to return no label at all, so a bill that somebody dragged
+  // in showed nothing about where it came from. Both doors name the person:
+  // every bill in the system was put there by a colleague, and which colleague
+  // is the first thing anyone asks when a figure looks wrong.
+  if (!emailed) {
+    return {
+      source: 'upload',
+      sourceLabel: createdByName ? `Uploaded by ${createdByName}` : 'Uploaded',
+    };
   }
   return {
     source: 'email',
-    sourceLabel: createdByName ? `Emailed by ${createdByName}` : 'Emailed in',
+    sourceLabel: createdByName ? `Forwarded by ${createdByName}` : 'Forwarded in',
   };
 }
 

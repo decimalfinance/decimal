@@ -514,9 +514,9 @@ function DraftScreen(props: {
           </button>
           {/* Who put this bill here — a bill clerk's first question when a bill
               they didn't upload appears in their queue. */}
-          {billDraft.source === 'email' && billDraft.sourceLabel ? (
+          {billDraft.sourceLabel ? (
             <span className="cell-source" style={{ marginLeft: 12 }}>
-              <Ico.mail w={15} />
+              {billDraft.source === 'email' ? <Ico.mail w={15} /> : <Ico.upload w={15} />}
               <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{billDraft.sourceLabel}</span>
             </span>
           ) : null}

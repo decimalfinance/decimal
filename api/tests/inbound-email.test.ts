@@ -794,7 +794,9 @@ test('the workbench labels an emailed bill with who sent it', async () => {
 
   assert.equal(workbench.bills.length, 1);
   assert.equal(workbench.bills[0]!.source, 'email');
-  assert.equal(workbench.bills[0]!.sourceLabel, 'Emailed by Priya Sharma');
+  // "Forwarded" rather than "Emailed": uploads now carry a label too, and the
+  // pair reads as one vocabulary — Forwarded by X / Uploaded by X.
+  assert.equal(workbench.bills[0]!.sourceLabel, 'Forwarded by Priya Sharma');
 });
 
 test('two sweeps racing the same attachment fetch it once', async () => {

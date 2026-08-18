@@ -254,8 +254,11 @@ export function BillsPage() {
                                 are scoped to it and render unstyled without it. */}
                             <div className="cell-vendor">
                               <span className="v-name">{bill.vendorName}</span>
-                              {bill.source === 'email' ? (
-                                <span className="v-sub">{bill.sourceLabel ?? 'Emailed in'}</span>
+                              {/* Both doors, not just email. The old fallback
+                                  said "Emailed in" for a bill that had been
+                                  uploaded, which named the wrong door. */}
+                              {bill.sourceLabel ? (
+                                <span className="v-sub">{bill.sourceLabel}</span>
                               ) : null}
                             </div>
                           </td>
