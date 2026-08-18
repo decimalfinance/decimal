@@ -24,21 +24,36 @@ DB ?= $(DEV_DB)
 .SILENT:
 .PHONY: dev stop test reset bench bench-stop help sync-postgres-schema
 
+# Two rules here, both learned the hard way.
+#
+# 1. Nothing is silenced without a fallback that says what happened. The old
+#    recipe sent prisma generate to /dev/null, so when it failed you got no
+#    error from it at all.
+#
+# 2. The failure you DID get was a lie. On any early exit the EXIT trap ran
+#    `wait "$${pids[@]}"` on an array that was still empty, and an empty array
+#    in that position expands to a single empty string — so zsh reported
+#    "pid 0 is not a child of this shell" and make reported a termination.
+#    Both described the trap, not the thing that actually broke. Named pids and
+#    `;` chaining remove the array and the ambiguity together.
 dev: ## start everything (db + api + web) -> localhost:5174
-	set -euo pipefail && \
-	if [[ -f api/.env ]]; then set -a && source api/.env && set +a; fi && \
-	export DATABASE_URL="$(PG)/$(DEV_DB)?schema=public" && \
-	export PORT=3100 && \
-	$(MAKE) sync-postgres-schema DB=$(DEV_DB) && \
-	(cd api && npm run prisma:generate >/dev/null) && \
-	typeset -a pids && \
+	set -euo pipefail; \
+	if [[ -f api/.env ]]; then set -a; source api/.env; set +a; fi; \
+	export DATABASE_URL="$(PG)/$(DEV_DB)?schema=public"; \
+	export PORT=3100; \
+	$(MAKE) sync-postgres-schema DB=$(DEV_DB); \
+	(cd api && npm run prisma:generate >/dev/null) || { \
+	  echo ""; \
+	  echo "prisma generate failed. Its output was hidden; run it directly to see why:"; \
+	  echo "    cd api && npm run prisma:generate"; \
+	  exit 1; \
+	}; \
 	(cd api && exec npm run dev) & \
-	pids+=($$!) && \
+	api_pid=$$!; \
 	(cd frontend && exec npm run dev) & \
-	pids+=($$!) && \
-	trap 'trap - INT TERM EXIT; for pid in "$${pids[@]:-}"; do kill -TERM "$$pid" 2>/dev/null || true; done; sleep 0.5; for pid in "$${pids[@]:-}"; do kill -KILL "$$pid" 2>/dev/null || true; done; wait "$${pids[@]}" 2>/dev/null || true; exit 130' INT TERM && \
-	trap 'for pid in "$${pids[@]:-}"; do kill -TERM "$$pid" 2>/dev/null || true; done; sleep 0.5; for pid in "$${pids[@]:-}"; do kill -KILL "$$pid" 2>/dev/null || true; done; wait "$${pids[@]}" 2>/dev/null || true' EXIT && \
-	wait "$${pids[@]}" || true
+	web_pid=$$!; \
+	trap 'kill -TERM $$api_pid $$web_pid 2>/dev/null || true; sleep 0.5; kill -KILL $$api_pid $$web_pid 2>/dev/null || true' INT TERM EXIT; \
+	wait $$api_pid $$web_pid || true
 
 stop: ## stop everything, including docker
 	set -euo pipefail && ./scripts/stop.sh

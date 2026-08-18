@@ -21,8 +21,8 @@ export type FlowNode =
 // (dollars x 10^6) — match that scale, not cents.
 const USD_MINOR = 1_000_000;
 
-// A stage's flow: the approval flow (kind 'invoice') or the review flow (kind
-// 'review'). Both are the same builder JSON on their own policy set; only the
+// A stage's flow: the approval flow (kind 'invoice') or the release flow
+// (kind 'payment_run'). Both are the same builder JSON on their own policy set; only the
 // seed-name that counts as "not yet authored" differs.
 const SEED_NAME: Record<FlowKind, string> = { invoice: 'default approval', payment_run: 'default release' };
 const PUBLISHED_NAME: Record<FlowKind, string> = { invoice: 'Company approval flow', payment_run: 'Payment release flow' };
@@ -41,11 +41,22 @@ export async function getFlow(organizationId: string, kind: FlowKind = 'invoice'
   const set = await getPolicySet(prisma, organizationId, kind);
   // Roles ride along so the builder's who-picker can show "Klaus · CFO", not
   // just a bare name.
-  const people = await prisma.$queryRaw<{ id: string; name: string; email: string; user_id: string | null; roles: string[] }[]>`
+  // `canApprove` gates who the who-picker may offer. Approving is the Approver
+  // role's job; a Bill Clerk enters and codes bills and must not be placed in a
+  // chain, which is the rule every AP product enforces at exactly this point
+  // (roles-research §1F). Admins stay eligible — they hold every capability,
+  // and an org that has not assigned roles yet still has to be able to route.
+  //
+  // Returned rather than filtered out, so the picker can show a person greyed
+  // with the reason instead of silently omitting a colleague someone is
+  // looking for.
+  const people = await prisma.$queryRaw<{ id: string; name: string; email: string; user_id: string | null; roles: string[]; can_approve: boolean }[]>`
     SELECT p.id, p.name, p.email, p.user_id,
       CASE WHEN om.role = 'owner' THEN ARRAY['Primary admin']
            WHEN om.role = 'admin' THEN ARRAY['Admin']
-           ELSE COALESCE(array_agg(initcap(pr.role) ORDER BY pr.role) FILTER (WHERE pr.role IS NOT NULL), '{}') END AS roles
+           ELSE COALESCE(array_agg(initcap(replace(pr.role, '_', ' ')) ORDER BY pr.role) FILTER (WHERE pr.role IS NOT NULL), '{}') END AS roles,
+      (om.role IN ('owner', 'admin')
+       OR bool_or(pr.role = 'approver')) AS can_approve
     FROM approval.people p
     LEFT JOIN approval.person_roles pr ON pr.person_id = p.id
     LEFT JOIN organization_memberships om ON om.organization_id = p.organization_id AND om.user_id = p.user_id AND om.status = 'active'
@@ -68,7 +79,7 @@ export async function getFlow(organizationId: string, kind: FlowKind = 'invoice'
   // ensureEngineSetup seeds a "default approval" policy so the engine can route
   // bills from day one. That is NOT a flow the user authored — the builder shows
   // it as blank (empty canvas) until they actually build and publish one. (Review
-  // has no seed, so any published review policy is authored.)
+  // has no seed, so any published release policy is authored.)
   const authored = policy != null && policy.name !== SEED_NAME[kind];
   return {
     flow: authored ? body.map(engineNodeToFlow).filter((n): n is FlowNode => n !== null) : [],
@@ -82,7 +93,7 @@ export async function getFlow(organizationId: string, kind: FlowKind = 'invoice'
 }
 
 // Per-org builder draft (unpublished edits). Survives navigation/reload. Keyed by
-// (org, kind) so the review flow and approval flow each keep their own draft.
+// (org, kind) so the release flow and approval flow each keep their own draft.
 type FlowKind = 'invoice' | 'payment_run';
 
 export async function getFlowDraft(organizationId: string, kind: FlowKind = 'invoice'): Promise<FlowNode[] | null> {
@@ -202,7 +213,7 @@ export async function publishFlow(organizationId: string, flow: FlowNode[], kind
 
 // The draft stage: who must fill/confirm a bill's details before it can enter
 // approval. Same builder power as approval (steps · quorum · amount splits), on
-// its own 'review' policy set.
+// its own 'payment_run' policy set.
 
 // The Payment stage as a full flow (steps · quorums · splits) on the
 // payment_run policy — complex releases, same grammar as the other stages.
@@ -239,11 +250,22 @@ export type ReleaseConfig = { approvers: string[]; quorum: 'all' | 'any' | numbe
 export async function getReleaseConfig(organizationId: string) {
   const { ensureEngineSetup } = await import('./wiring.js');
   await ensureEngineSetup(organizationId);
-  const people = await prisma.$queryRaw<{ id: string; name: string; email: string; user_id: string | null; roles: string[] }[]>`
+  // `canApprove` gates who the who-picker may offer. Approving is the Approver
+  // role's job; a Bill Clerk enters and codes bills and must not be placed in a
+  // chain, which is the rule every AP product enforces at exactly this point
+  // (roles-research §1F). Admins stay eligible — they hold every capability,
+  // and an org that has not assigned roles yet still has to be able to route.
+  //
+  // Returned rather than filtered out, so the picker can show a person greyed
+  // with the reason instead of silently omitting a colleague someone is
+  // looking for.
+  const people = await prisma.$queryRaw<{ id: string; name: string; email: string; user_id: string | null; roles: string[]; can_approve: boolean }[]>`
     SELECT p.id, p.name, p.email, p.user_id,
       CASE WHEN om.role = 'owner' THEN ARRAY['Primary admin']
            WHEN om.role = 'admin' THEN ARRAY['Admin']
-           ELSE COALESCE(array_agg(initcap(pr.role) ORDER BY pr.role) FILTER (WHERE pr.role IS NOT NULL), '{}') END AS roles
+           ELSE COALESCE(array_agg(initcap(replace(pr.role, '_', ' ')) ORDER BY pr.role) FILTER (WHERE pr.role IS NOT NULL), '{}') END AS roles,
+      (om.role IN ('owner', 'admin')
+       OR bool_or(pr.role = 'approver')) AS can_approve
     FROM approval.people p
     LEFT JOIN approval.person_roles pr ON pr.person_id = p.id
     LEFT JOIN organization_memberships om ON om.organization_id = p.organization_id AND om.user_id = p.user_id AND om.status = 'active'
@@ -403,7 +425,7 @@ type PipelineChainEntry = { personId: string; name: string; step: string; why: s
 type StageResult = { chain: PipelineChainEntry[]; notes: string[]; stuck: string | null; resolvedIds: string[] };
 
 // One stage's routing. `excluded` maps a personId → why they can't act here
-// (e.g. "reviewed this bill"); the owner stands in if an exclusion empties a step.
+// (e.g. "approved this bill"); the owner stands in if an exclusion empties a step.
 function resolveStage(flow: FlowNode[], opts: {
   amountUsd: number; vendorId?: string | null; category?: string | null; firstBill?: boolean | null;
   excluded: Map<string, string>; ownerId: string | null; nameOf: Map<string, string>;

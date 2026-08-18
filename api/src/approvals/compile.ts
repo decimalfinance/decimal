@@ -134,6 +134,41 @@ export interface CompileResult {
   alerts: string[];
 }
 
+
+/**
+ * Who in this organization may hold an approval task at all.
+ *
+ * Holding the Approver role, or being an admin/primary admin — admins hold
+ * every capability, and an organization that has not assigned roles yet must
+ * still be able to route a bill.
+ */
+async function eligibleIds(tx: Tx, organizationId: string, approvableType: string): Promise<Set<string> | null> {
+  // Which role qualifies depends on what is being decided. A release run is
+  // not an approval — it moves money — so it needs the Payer, not the
+  // Approver. Getting this wrong would drop every Payer from the release
+  // chain, which is the mirror image of the bug being fixed.
+  const requiredRole = approvableType === 'payment_run' ? 'payer' : 'approver';
+
+  // Has anybody been given this job at all?
+  const holders = await tx.$queryRaw<{ id: string }[]>`
+    SELECT p.id FROM approval.people p
+    JOIN approval.person_roles pr ON pr.person_id = p.id AND pr.role = ${requiredRole}
+    WHERE p.organization_id = ${organizationId}::uuid AND p.status = 'active'`;
+  if (holders.length === 0) return null;
+
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    SELECT DISTINCT p.id
+    FROM approval.people p
+    LEFT JOIN approval.person_roles pr
+      ON pr.person_id = p.id AND pr.role = ${requiredRole}
+    LEFT JOIN organization_memberships om
+      ON om.organization_id = p.organization_id AND om.user_id = p.user_id AND om.status = 'active'
+    WHERE p.organization_id = ${organizationId}::uuid
+      AND p.status = 'active'
+      AND (pr.person_id IS NOT NULL OR om.role IN ('owner', 'admin'))`;
+  return new Set(rows.map((r) => r.id));
+}
+
 /** Walk the policy tree, resolve, veto, persist. Does NOT touch macro state — lifecycle owns that. */
 export async function compilePlan(tx: Tx, approvable: ApprovableRow, at = new Date()): Promise<CompileResult> {
   const set = await getPolicySet(tx, approvable.organization_id, approvable.type);
@@ -234,6 +269,39 @@ export async function compilePlan(tx: Tx, approvable: ApprovableRow, at = new Da
       payload: { kind: 'plan_terminal', outcome: terminal, reason: terminalReason, policyId, policyVersion, selectorRule },
     });
     return { planId: null, terminal, terminalReason, steps: [], sodOutcomes: [], alerts };
+  }
+
+  // Role eligibility, before separation of duties.
+  //
+  // These are different questions and conflating them was the bug. Separation
+  // of duties asks "may THIS person approve THIS bill" — it is about conflict,
+  // and it is per-bill. Eligibility asks "is approving this person's job at
+  // all" — it is about capability, and it is the same answer for every bill.
+  //
+  // The flow builder was written before roles existed, so a flow could name
+  // anybody. A Bill Clerk who enters and codes bills would then be routed
+  // approvals, which is precisely the separation the roles exist to create:
+  // Bill.com does not let a non-Approver be placed in a chain at all
+  // (roles-research/SYNTHESIS-decimal-roles.md §1F). We cannot refuse at
+  // publish time for flows already published, so the engine drops them here
+  // and says so, and the builder stops offering them.
+  //
+  // Admins and the primary admin stay eligible: they hold every capability by
+  // definition, and an org that has not assigned roles yet must still route.
+  const eligible = await eligibleIds(tx, approvable.organization_id, approvable.type);
+  // `null` means this organization has nobody holding the role yet, so there is
+  // nothing to hold it to. Enforcing then would empty every chain in an org
+  // that simply has not assigned roles — which is most orgs on day one, and was
+  // this one until recently. The gate switches itself on the moment somebody is
+  // given the job.
+  for (const step of eligible ? resolved : []) {
+    const kept = step.approvers.filter((a) => eligible!.has(a.personId));
+    if (kept.length !== step.approvers.length) {
+      const dropped = step.approvers.filter((a) => !eligible!.has(a.personId)).map((a) => a.personId);
+      const job = approvable.type === 'payment_run' ? 'releasing' : 'approving';
+      alerts.push(`dropped ${dropped.length} person(s) whose role does not include ${job}`);
+    }
+    step.approvers = kept;
   }
 
   // L3 pass — routing proposed, constraints veto (with continue_walk remedies)

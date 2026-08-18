@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS bill_field_changes
   new_value            TEXT,
   -- Who, and null for a machine write so a person is never blamed for one.
   changed_by_user_id   UUID REFERENCES users (user_id),
-  -- 'review' | 'approval' — the same edit means different things at different
+  -- 'draft' | 'approval' — the same edit means different things at different
   -- stages, and an auditor asks when in the process it happened.
   phase                TEXT,
   -- Why, when we know: 'confirm', 'edit', 'answered_question'.

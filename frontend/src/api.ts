@@ -1721,7 +1721,12 @@ export type FlowNode =
   | { id: string; type: 'auto' }
   | { id: string; type: 'notify'; people: string[] };
 
-export interface FlowPerson { id: string; name: string; email: string; user_id: string | null; roles: string[] }
+export interface FlowPerson {
+  id: string; name: string; email: string; user_id: string | null; roles: string[];
+  /** Approving is the Approver's job. False for a Bill Clerk, who would be
+   *  dropped by the engine at compile time if a flow named them anyway. */
+  can_approve: boolean;
+}
 
 export interface FlowSimResult {
   stuck: string | null;

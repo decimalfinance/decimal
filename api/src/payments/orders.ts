@@ -335,7 +335,7 @@ export async function ensurePaymentOrderAuditRequest(
   }
 
   if (current.state === 'draft') {
-    throw new Error('Payment orders that need review must be cleared before routing');
+    throw new Error('A bill still in draft must be submitted before routing');
   }
 
   if (current.state !== 'submitted') {
@@ -427,7 +427,7 @@ export async function markBillSubmitted(args: PaymentActorInput & {
   }
 
   if (current.state !== 'draft') {
-    throw new Error(`Payment order ${current.state} does not need review`);
+    throw new Error(`Payment order ${current.state} is not a draft`);
   }
 
   if (current.counterpartyWallet.trustState === 'blocked') {
@@ -458,9 +458,9 @@ export async function markBillSubmitted(args: PaymentActorInput & {
           trustState: 'trusted',
           metadataJson: {
             ...(isRecordLike(current.counterpartyWallet.metadataJson) ? current.counterpartyWallet.metadataJson : {}),
-            reviewClearedFromPaymentOrderId: current.paymentOrderId,
-            reviewedAt: new Date().toISOString(),
-            reviewedByUserId: args.actorUserId,
+            submittedFromPaymentOrderId: current.paymentOrderId,
+            submittedAt: new Date().toISOString(),
+            submittedByUserId: args.actorUserId,
           },
         },
       });
@@ -484,7 +484,7 @@ export async function markBillSubmitted(args: PaymentActorInput & {
     await createPaymentOrderEvent(tx, {
       paymentOrderId: current.paymentOrderId,
       organizationId: args.organizationId,
-      eventType: 'payment_order_review_cleared',
+      eventType: 'payment_order_submitted',
       ...buildPaymentEventActor(args),
       beforeState: current.state,
       afterState: 'submitted',

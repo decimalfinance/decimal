@@ -285,3 +285,27 @@ test('an approver sees the bills they are involved in, not the whole queue', asy
   const asOwner = await get(`/organizations/${orgId}/bills/workbench`, owner.token);
   assert.equal(asOwner.bills.length, 1);
 });
+
+
+test('a bill clerk is not offered as an approver, and is dropped if a flow names one', async () => {
+  // The bug this pins: the flow builder predates roles, so a published flow
+  // could name anybody. A Bill Clerk enters and codes bills — approving them is
+  // a different job, and every AP product gates chain membership on it
+  // (roles-research SYNTHESIS §1F). The builder now refuses to offer them, and
+  // the engine drops them regardless, because flows published before this
+  // change still exist and still route.
+  const { orgId, owner, member } = await makeOrg();
+  const clerk = await register('flow-clerk');
+  await prisma.organizationMembership.create({
+    data: { organizationId: orgId, userId: clerk.userId, role: 'member', status: 'active' },
+  });
+  await post(`/organizations/${orgId}/roles/bill_clerk/holders`, { userId: clerk.userId }, owner.token);
+  await post(`/organizations/${orgId}/roles/approver/holders`, { userId: member.userId }, owner.token);
+
+  const flow = await get(`/organizations/${orgId}/approvals/flow`, owner.token);
+  const clerkPerson = flow.people.find((p: { user_id: string | null }) => p.user_id === clerk.userId);
+  const approverPerson = flow.people.find((p: { user_id: string | null }) => p.user_id === member.userId);
+
+  assert.equal(clerkPerson.can_approve, false, 'the builder is told not to offer a clerk');
+  assert.equal(approverPerson.can_approve, true, 'and to offer an approver');
+});
