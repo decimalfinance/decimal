@@ -56,7 +56,7 @@ for (const p of NEW_PEOPLE) {
     const token = invite.inviteToken ?? invite.invite?.inviteToken;
     if (token) await call(`/invites/${token}/accept`, {}, s.sessionToken);
   } catch (e) {
-    if (!(e instanceof Error) || !/already a member|exists/i.test(e.message)) throw e;
+    if (!(e instanceof Error) || !/already an active|already a member|exists|409/i.test(e.message)) throw e;
   }
   await call(`/organizations/${orgId}/roles/${p.role}/holders`, { userId: s.user.userId }, owner.sessionToken)
     .catch((e) => console.log(`  note  ${p.email}: ${String(e).slice(0, 90)}`));
@@ -84,6 +84,19 @@ const nadia = id('Nadia Haddad');   // admin, always eligible
 const step = (sid: string, title: string, approvers: string[], quorum: 'all' | 'any' | number, purpose: string) =>
   ({ id: sid, type: 'step' as const, title, approvers, quorum, purpose });
 
+// Every branch has to END somewhere, explicitly.
+//
+// A path with no terminal reads as unfinished: the builder draws "Finish this
+// path" on the open tail and leaves the stage's end pill floating,
+// disconnected from everything. That is not cosmetic — the terminal is the
+// author SAYING this path is complete, and it is what joins the branch to
+// "Approved — forwarded for payment".
+//
+// It compiles to { type: 'marker', kind: 'forward' }, deliberately not an
+// engine terminal: a real terminal would auto-approve the bill and discard the
+// steps above it (flow.ts:193).
+const done = (sid: string) => ({ id: sid, type: 'auto' as const });
+
 // The flow, outermost condition first. Each leaf is reachable by a bill you
 // can construct on purpose, which is what makes it testable rather than
 // decorative.
@@ -97,6 +110,7 @@ const flow = [
         'Three of four sign anything at or above $10,000'),
       step('s-big-fin', 'Controller sign-off', [nadia], 'all',
         'Finance countersigns high-value spend'),
+      done('t-big'),
     ],
     otherwise: [
       {
@@ -106,6 +120,7 @@ const flow = [
           step('s-mid-1', 'Team approval', [marcus], 'all', 'The team lead signs first'),
           step('s-mid-2', 'Second pair of eyes', [tom, ines], 'any',
             'Either of two signs second'),
+          done('t-mid'),
         ],
         otherwise: [
           {
@@ -114,11 +129,13 @@ const flow = [
             then: [
               step('s-new-vendor', 'New vendor check', [ines, sam], 'any',
                 'A vendor we have never paid gets looked at whatever the amount'),
+              done('t-new-vendor'),
             ],
             // Under $1k from a known vendor: one signature, any approver.
             otherwise: [
               step('s-small', 'Routine approval', [marcus, tom, ines, sam], 'any',
                 'Anyone can clear a small bill from a vendor we already pay'),
+              done('t-small'),
             ],
           },
         ],
