@@ -1182,14 +1182,28 @@ function AddPersonButton(props: { label: string; people: FlowPerson[]; exclude: 
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState<{ top: number; left: number; up: boolean } | null>(null);
-  // People holding the stage's role list first — the role is the qualification,
-  // but anyone remains pickable (owners of small teams shouldn't dead-end).
-  // Admins hold every capability, so they always count as qualified.
+  // Approving is a job, not a preference.
+  //
+  // This used to sort role-holders first and let anyone be picked anyway. That
+  // is how a Bill Clerk ended up in a live approval chain: the builder allowed
+  // it, nothing downstream objected, and she was routed bills she is not
+  // supposed to decide. The engine now drops ineligible approvers at compile
+  // time, so offering them here would be offering something that silently does
+  // not happen.
+  //
+  // Shown greyed with the reason rather than hidden — a colleague missing from
+  // a list reads as a bug, whereas "Bill Clerk — approving isn't their job"
+  // reads as the product working.
+  const isAdmin = (p: FlowPerson) => p.roles.includes('Admin') || p.roles.includes('Primary admin');
+  const eligible = (p: FlowPerson) =>
+    props.preferRole !== 'Approver' ? true : (p.can_approve ?? isAdmin(p));
   const hasRole = (p: FlowPerson) => !props.preferRole
-    || p.roles.includes(props.preferRole) || p.roles.includes('Admin') || p.roles.includes('Primary admin');
+    || p.roles.includes(props.preferRole) || isAdmin(p);
   const available = props.people
     .filter((p) => !props.exclude.includes(p.id))
-    .sort((a, b) => Number(hasRole(b)) - Number(hasRole(a)) || a.name.localeCompare(b.name));
+    .sort((a, b) => Number(eligible(b)) - Number(eligible(a))
+      || Number(hasRole(b)) - Number(hasRole(a))
+      || a.name.localeCompare(b.name));
   const width = 232;
   useLayoutEffect(() => {
     if (!open) { setMenu(null); return; }
@@ -1236,14 +1250,18 @@ function AddPersonButton(props: { label: string; people: FlowPerson[]; exclude: 
             {/* Multi-pick: the menu stays open so adding three people is three
                 clicks, not three open-pick cycles. Backdrop click closes. */}
             {available.map((p) => (
-              <button key={p.id} type="button" onClick={() => { props.onPick(p.id); if (available.length <= 1) setOpen(false); }}
-                style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 'var(--r-sm)', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-body)', opacity: hasRole(p) ? 1 : 0.66 }}>
+              <button key={p.id} type="button" disabled={!eligible(p)}
+                title={!eligible(p) ? 'Approving is the Approver role\u2019s job. An admin can grant it on the Members page.' : undefined}
+                onClick={() => { if (!eligible(p)) return; props.onPick(p.id); if (available.length <= 1) setOpen(false); }}
+                style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 'var(--r-sm)', border: 'none', background: 'transparent', cursor: eligible(p) ? 'pointer' : 'not-allowed', textAlign: 'left', fontFamily: 'var(--font-body)', opacity: !eligible(p) ? 0.4 : hasRole(p) ? 1 : 0.66 }}>
                 <span className="p-av" style={{ width: 26, height: 26, fontSize: 9, background: colorOf(p.name), flex: 'none' }}>{initialsOf(p.name)}</span>
                 <span style={{ flex: 1, minWidth: 0 }}>
                   <span style={{ display: 'block', fontSize: 12.5, color: 'var(--text-primary)' }}>{p.name}</span>
                   <span style={{ display: 'block', fontSize: 10.5, color: p.roles.length ? 'var(--text-muted)' : 'var(--text-faint)' }}>
                     {p.roles.length ? p.roles.join(' · ') : 'No role'}
-                    {props.preferRole && !hasRole(p) ? ` — needs the ${props.preferRole} role` : ''}
+                    {!eligible(p)
+                      ? ' — approving isn\u2019t their job'
+                      : props.preferRole && !hasRole(p) ? ` — needs the ${props.preferRole} role` : ''}
                   </span>
                 </span>
               </button>

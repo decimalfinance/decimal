@@ -41,11 +41,22 @@ export async function getFlow(organizationId: string, kind: FlowKind = 'invoice'
   const set = await getPolicySet(prisma, organizationId, kind);
   // Roles ride along so the builder's who-picker can show "Klaus · CFO", not
   // just a bare name.
-  const people = await prisma.$queryRaw<{ id: string; name: string; email: string; user_id: string | null; roles: string[] }[]>`
+  // `canApprove` gates who the who-picker may offer. Approving is the Approver
+  // role's job; a Bill Clerk enters and codes bills and must not be placed in a
+  // chain, which is the rule every AP product enforces at exactly this point
+  // (roles-research §1F). Admins stay eligible — they hold every capability,
+  // and an org that has not assigned roles yet still has to be able to route.
+  //
+  // Returned rather than filtered out, so the picker can show a person greyed
+  // with the reason instead of silently omitting a colleague someone is
+  // looking for.
+  const people = await prisma.$queryRaw<{ id: string; name: string; email: string; user_id: string | null; roles: string[]; can_approve: boolean }[]>`
     SELECT p.id, p.name, p.email, p.user_id,
       CASE WHEN om.role = 'owner' THEN ARRAY['Primary admin']
            WHEN om.role = 'admin' THEN ARRAY['Admin']
-           ELSE COALESCE(array_agg(initcap(pr.role) ORDER BY pr.role) FILTER (WHERE pr.role IS NOT NULL), '{}') END AS roles
+           ELSE COALESCE(array_agg(initcap(replace(pr.role, '_', ' ')) ORDER BY pr.role) FILTER (WHERE pr.role IS NOT NULL), '{}') END AS roles,
+      (om.role IN ('owner', 'admin')
+       OR bool_or(pr.role = 'approver')) AS can_approve
     FROM approval.people p
     LEFT JOIN approval.person_roles pr ON pr.person_id = p.id
     LEFT JOIN organization_memberships om ON om.organization_id = p.organization_id AND om.user_id = p.user_id AND om.status = 'active'
@@ -239,11 +250,22 @@ export type ReleaseConfig = { approvers: string[]; quorum: 'all' | 'any' | numbe
 export async function getReleaseConfig(organizationId: string) {
   const { ensureEngineSetup } = await import('./wiring.js');
   await ensureEngineSetup(organizationId);
-  const people = await prisma.$queryRaw<{ id: string; name: string; email: string; user_id: string | null; roles: string[] }[]>`
+  // `canApprove` gates who the who-picker may offer. Approving is the Approver
+  // role's job; a Bill Clerk enters and codes bills and must not be placed in a
+  // chain, which is the rule every AP product enforces at exactly this point
+  // (roles-research §1F). Admins stay eligible — they hold every capability,
+  // and an org that has not assigned roles yet still has to be able to route.
+  //
+  // Returned rather than filtered out, so the picker can show a person greyed
+  // with the reason instead of silently omitting a colleague someone is
+  // looking for.
+  const people = await prisma.$queryRaw<{ id: string; name: string; email: string; user_id: string | null; roles: string[]; can_approve: boolean }[]>`
     SELECT p.id, p.name, p.email, p.user_id,
       CASE WHEN om.role = 'owner' THEN ARRAY['Primary admin']
            WHEN om.role = 'admin' THEN ARRAY['Admin']
-           ELSE COALESCE(array_agg(initcap(pr.role) ORDER BY pr.role) FILTER (WHERE pr.role IS NOT NULL), '{}') END AS roles
+           ELSE COALESCE(array_agg(initcap(replace(pr.role, '_', ' ')) ORDER BY pr.role) FILTER (WHERE pr.role IS NOT NULL), '{}') END AS roles,
+      (om.role IN ('owner', 'admin')
+       OR bool_or(pr.role = 'approver')) AS can_approve
     FROM approval.people p
     LEFT JOIN approval.person_roles pr ON pr.person_id = p.id
     LEFT JOIN organization_memberships om ON om.organization_id = p.organization_id AND om.user_id = p.user_id AND om.status = 'active'
