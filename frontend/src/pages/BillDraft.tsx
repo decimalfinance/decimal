@@ -129,6 +129,11 @@ function DraftScreen(props: {
   // relying on it alone would flash an editable form at somebody who cannot
   // save it, which is the bug in miniature.
   const readOnly = billDraft.readOnly || !canEditBills;
+  const readOnlyNote = !readOnly
+    ? null
+    : billDraft.readOnlyReason === 'settled'
+      ? 'This bill has left draft — its details are settled.'
+      : 'Read only. Anyone can bring an invoice in; checking the figures and sending it for approval is the Bill Clerk\u2019s job.';
   const queryClient = useQueryClient();
 
   // Flag resolutions. One mechanism for every flag rather than a bespoke path
@@ -531,7 +536,15 @@ function DraftScreen(props: {
 
       {/* Split: read panel LEFT, document RIGHT (matches the approved mock). */}
       <div className="rev-split">
-        <div className="rev-panel" style={{ width: `${100 - panelPct}%` }}>
+        {/* The reason the form is locked lives on hover rather than in a
+            banner. It is a fact about the reader, not news about the bill, and
+            a permanent box explaining what somebody CANNOT do is a poor use of
+            the space a bill needs. */}
+        <div
+          className="rev-panel"
+          style={{ width: `${100 - panelPct}%` }}
+          title={readOnlyNote ?? undefined}
+        >
           <div className="stack stack-20">
             {/* The bill's major facts, as the heading */}
             <div className="rev-head">
@@ -541,21 +554,6 @@ function DraftScreen(props: {
               </div>
               <div className="rh-amount">{usd(documentTotal)}</div>
             </div>
-
-            {/* Why the form is locked, when it is locked because of WHO is
-                reading it rather than where the bill has got to. Greying every
-                field out with no reason given is its own small mystery. */}
-            {billDraft.readOnlyReason === 'not_your_job' ? (
-              <div className="callout callout-info">
-                <Ico.info w={16} />
-                <span>
-                  <b>You can read this bill, not prepare it.</b>{' '}
-                  Anyone can bring an invoice in; checking the figures and sending it for
-                  approval is the Bill Clerk's job. Ask one to pick it up — or if something
-                  here looks wrong, ask a question on it.
-                </span>
-              </div>
-            ) : null}
 
             {/* Sent back by an approver — the bill clerk's homework, above all flags */}
             {billDraft.sentBack ? (
