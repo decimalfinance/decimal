@@ -91,6 +91,38 @@ for (const p of PEOPLE) {
   console.log(`  role  ${p.email.padEnd(34)} ${p.role}`);
 }
 
+// Publish an approval flow built from the roles, not from whoever happened to
+// be handy.
+//
+// The org used to come up with no flow, so the engine fell back to whatever it
+// could resolve — which is how a Bill Clerk ended up being routed approvals.
+// Marcus and Tom hold Approver; they are the chain. Priya prepares bills and
+// is deliberately absent from it, which is the whole point of her having a
+// different job.
+const flowPeople = await call(`/organizations/${org.organizationId}/approvals/flow`, undefined, owner.token);
+const personIdFor = (email: string) =>
+  (flowPeople.people ?? []).find((p: { user_id: string | null }) => p.user_id === sessions.get(email)!.userId)?.id ?? null;
+
+const approvers = ['marcus.ops@dev.decimal.test', 'tom.proc@dev.decimal.test']
+  .map(personIdFor)
+  .filter((id): id is string => Boolean(id));
+
+if (approvers.length > 0) {
+  await call(`/organizations/${org.organizationId}/approvals/flow/publish`, {
+    flow: [{
+      id: 'approve-1',
+      type: 'step',
+      title: 'Approval step',
+      approvers,
+      quorum: 'all',
+      purpose: 'Two approvers sign off on every bill',
+    }],
+  }, owner.token);
+  console.log(`  flow  approval: ${approvers.length} approver(s) — Marcus, Tom`);
+} else {
+  console.log('  WARN  no approver-role holders resolved; flow not published');
+}
+
 // The human tester, invited for real — they accept from their own inbox.
 const humanInvite = await call(`/organizations/${org.organizationId}/invites`, { email: INVITE, role: 'admin' }, owner.token);
 const humanToken = humanInvite.inviteToken ?? humanInvite.invite?.inviteToken;
