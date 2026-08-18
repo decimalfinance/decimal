@@ -1,0 +1,10 @@
+{
+  "name": "decimal-invoice-gen",
+  "private": true,
+  "version": "3.0.0",
+  "description": "Synthetic invoice generator for the Testing Labs pipeline (TESTING-INVOICES.md)",
+  "type": "module",
+  "dependencies": {
+    "puppeteer-core": "^24.23.0"
+  }
+}

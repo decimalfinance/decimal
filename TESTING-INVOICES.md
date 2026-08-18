@@ -115,3 +115,21 @@ These test that low confidence surfaces rather than being guessed at.
 
 Forwarded to `testing-labs@bills.decimal.finance` or uploaded on the Bills
 screen, then prepared by a Bill Clerk (Priya or Omar), confirmed, and routed.
+
+---
+
+## Generated set (2026-08-18)
+
+All 22 invoices exist in `synthetic_data/invoices/` (sections A–E, plus
+`catalog.json` with per-file expectations and a `README.md` with the upload
+order). Regenerate any time with:
+
+```
+cd scripts/invoice-gen && npm install   # once
+node scripts/invoice-gen/generate.mjs
+```
+
+Generator lives in `scripts/invoice-gen/` (branch `worktree-invoice-set-v3`).
+Before testing E2, set a bill ceiling of $100,000 as Zara on the Policies
+page — no ceiling is seeded, so E2 cannot block without it. Testbench brief:
+`synthetic_data/testbench/briefs/009-invoice-set-v3.md`.
