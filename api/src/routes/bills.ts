@@ -358,3 +358,66 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/not-a-bil
   });
   res.json(detail);
 }));
+
+// ---- recall: asked by the submitter, answered by an admin --------------------
+//
+// Recall throws away approvals real people gave, so it stopped being a button.
+// Raising freezes the bill immediately — before a third approver can spend a
+// decision on something already known to be wrong — and an owner or admin
+// answers. Denying and withdrawing both cost nothing, which is what makes
+// raising one safe enough to actually use.
+
+const recallRequestSchema = z.object({ reason: z.string().min(1).max(2000) });
+const recallDecisionSchema = z.object({
+  grant: z.boolean(),
+  note: z.string().max(2000).optional(),
+});
+const recallParamsSchema = z.object({
+  organizationId: z.string().uuid(),
+  recallRequestId: z.string().uuid(),
+});
+
+billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/recall-request', asyncRoute(async (req, res) => {
+  const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
+  const input = recallRequestSchema.parse(req.body);
+  const { requestBillRecall } = await import('../payments/bill-recall.js');
+  res.json(await requestBillRecall({
+    organizationId, paymentOrderId, actorUserId: req.auth!.userId, reason: input.reason,
+  }));
+}));
+
+// The decision itself. Admin standing is checked here as well as in the engine:
+// the screen should not offer what the server will refuse, and the engine
+// should not trust that it didn't.
+billsRouter.post('/organizations/:organizationId/recall-requests/:recallRequestId/decision', asyncRoute(async (req, res) => {
+  const { organizationId, recallRequestId } = recallParamsSchema.parse(req.params);
+  const { membership } = await assertOrganizationAccess(organizationId, req.auth!);
+  if (!isAdminRole(membership?.role)) {
+    throw forbidden('Only an owner or admin can decide a recall.');
+  }
+  const input = recallDecisionSchema.parse(req.body);
+  const { decideBillRecall } = await import('../payments/bill-recall.js');
+  res.json(await decideBillRecall({
+    organizationId, recallRequestId, actorUserId: req.auth!.userId,
+    grant: input.grant, note: input.note,
+  }));
+}));
+
+// Taking your own request back needs nobody's permission.
+billsRouter.post('/organizations/:organizationId/recall-requests/:recallRequestId/withdraw', asyncRoute(async (req, res) => {
+  const { organizationId, recallRequestId } = recallParamsSchema.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  const { withdrawBillRecall } = await import('../payments/bill-recall.js');
+  res.json(await withdrawBillRecall({ organizationId, recallRequestId, actorUserId: req.auth!.userId }));
+}));
+
+// The admin's queue: every bill frozen and waiting on an answer.
+billsRouter.get('/organizations/:organizationId/recall-requests', asyncRoute(async (req, res) => {
+  const { organizationId } = orgParamsSchema.parse(req.params);
+  const { membership } = await assertOrganizationAccess(organizationId, req.auth!);
+  if (!isAdminRole(membership?.role)) throw forbidden('Only an owner or admin sees the recall queue.');
+  const { pendingBillRecalls } = await import('../payments/bill-recall.js');
+  res.json(await pendingBillRecalls(organizationId));
+}));
