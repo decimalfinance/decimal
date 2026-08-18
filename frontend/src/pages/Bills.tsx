@@ -254,12 +254,11 @@ export function BillsPage() {
                                 are scoped to it and render unstyled without it. */}
                             <div className="cell-vendor">
                               <span className="v-name">{bill.vendorName}</span>
-                              {/* Both doors, not just email. The old fallback
-                                  said "Emailed in" for a bill that had been
-                                  uploaded, which named the wrong door. */}
-                              {bill.sourceLabel ? (
-                                <span className="v-sub">{bill.sourceLabel}</span>
-                              ) : null}
+                              {/* Who brought the bill in is deliberately NOT
+                                  here. The queue is for picking what to open
+                                  next — vendor and amount decide that. The
+                                  attribution lives on the bill itself, where
+                                  the question actually gets asked. */}
                             </div>
                           </td>
                           <td className="cell-mono">

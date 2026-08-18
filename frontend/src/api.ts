@@ -1958,7 +1958,7 @@ export const rolesApi = {
 
 // The caller's own resolved access — what nav and pages gate on.
 export type Capability =
-  | 'bills.view' | 'bills.edit' | 'approvals.act'
+  | 'bills.view' | 'bills.create' | 'bills.edit' | 'approvals.act'
   | 'payments.view' | 'payments.sign' | 'treasury.view' | 'treasury.manage'
   | 'vendors.view' | 'vendors.manage' | 'accounting.view' | 'accounting.manage'
   | 'members.view' | 'members.manage' | 'governance.view' | 'governance.edit';
