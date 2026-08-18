@@ -9,7 +9,16 @@
  *   npx tsx scripts/seed-complex-flow.mts
  */
 const API = process.env.API_BASE_URL ?? 'http://localhost:3100';
-const PASSWORD = 'TestingLabs123!';
+// Supplied, never written down here. This repository is public, and a password
+// committed to it is a password published — true even for throwaway local
+// accounts, which is why TESTING-LABS.md (where this value lives) is
+// gitignored. There is deliberately no default: a fixture that silently seeds
+// itself with a known password is the same mistake with extra steps.
+const PASSWORD = process.env.SEED_PASSWORD;
+if (!PASSWORD) {
+  console.error('Set SEED_PASSWORD before seeding — the value is in TESTING-LABS.md (gitignored).');
+  process.exit(1);
+}
 const OWNER = 'zara.owner@dev.decimal.test';
 
 // Added on top of the base seed. Roles chosen so every stage has depth: four

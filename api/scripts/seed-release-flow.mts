@@ -9,7 +9,13 @@
  *   npx tsx scripts/seed-release-flow.mts
  */
 const API = process.env.API_BASE_URL ?? 'http://localhost:3100';
-const PASSWORD = 'TestingLabs123!';
+// See seed-complex-flow.mts: the value lives in the gitignored TESTING-LABS.md,
+// not in a public repository, and there is deliberately no default.
+const PASSWORD = process.env.SEED_PASSWORD;
+if (!PASSWORD) {
+  console.error('Set SEED_PASSWORD before seeding — the value is in TESTING-LABS.md (gitignored).');
+  process.exit(1);
+}
 
 async function call(path: string, body?: unknown, token?: string) {
   const res = await fetch(`${API}${path}`, {

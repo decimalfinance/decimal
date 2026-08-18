@@ -17,7 +17,18 @@ const API = process.env.API_BASE_URL ?? 'http://localhost:3100';
 
 // Reserved dev domain: created pre-verified, so there is no inbox to read a
 // code from. Everything else about these accounts is ordinary.
-const PASSWORD = 'TestingLabs123!';
+//
+// The password is supplied, never written down here. This repository is public,
+// and a password committed to it is a password published — true even for
+// throwaway local accounts, which is why TESTING-LABS.md (where the value
+// lives) is gitignored. There is deliberately no default: a fixture that
+// silently seeds itself with a known password is the same mistake with extra
+// steps.
+const PASSWORD = process.env.SEED_PASSWORD;
+if (!PASSWORD) {
+  console.error('Set SEED_PASSWORD before seeding — the value is in TESTING-LABS.md (gitignored).');
+  process.exit(1);
+}
 const PEOPLE = [
   { email: 'zara.owner@dev.decimal.test', name: 'Zara Okafor', access: 'owner', role: null, part: 'Primary admin — owns policy and the ceiling' },
   { email: 'priya.ap@dev.decimal.test', name: 'Priya Raman', access: 'member', role: 'bill_clerk', part: 'AP clerk — enters and codes bills' },
