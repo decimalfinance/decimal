@@ -1692,7 +1692,11 @@ export interface BillDetailStepNode {
   person: { personId: string; name: string; avatarUrl: string | null } | null;
   purpose: string | null;
   mode: string;
-  state: 'done' | 'current' | 'upcoming' | 'declined' | 'stopped' | 'delegated';
+  /** Approvals this STEP needs. An 'any' step of two people needs one. */
+  required: number;
+  /** People invited to the step — `required` of them have to say yes. */
+  candidates: number;
+  state: 'done' | 'current' | 'upcoming' | 'declined' | 'stopped' | 'delegated' | 'skipped';
   actedAt: string | null;
   declineReason: string | null;
   thread: {

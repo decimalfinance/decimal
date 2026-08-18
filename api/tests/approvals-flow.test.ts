@@ -1740,3 +1740,48 @@ test('recall over HTTP: denying gives the bill straight back, approvals untouche
   });
   assert.equal(order.state, 'submitted', 'a denial costs the bill nothing');
 });
+
+// --- an "any" step is one approval, not two people ---------------------------
+//
+// The bill screen renders the compiled plan as a list of PEOPLE, so it used to
+// answer the wrong question: a first-bill step offering Ines or Sam counted its
+// two rows and said "2 approvers, in order", then "0 of 2 approved". Both are
+// descriptions of a stricter bill than the flow routes. The detail payload now
+// carries what the STEP needs, using the same arithmetic settleStep uses to
+// decide the step is finished, so the two cannot disagree.
+
+test('an any-of-two step reports one approval needed, and the runner-up is not needed once it is given', async () => {
+  const { orgId, owner, a2, a3 } = await makeOrg();
+  const flow = await get(`/organizations/${orgId}/approvals/flow`, owner.token);
+  const byUser = new Map(flow.people.map((p: { user_id: string; id: string }) => [p.user_id, p.id]));
+  // One step, either of two people — the shape of the "vendor's first bill" branch.
+  await publishLadder(orgId, owner.token,
+    [byUser.get(a2.userId) as string, byUser.get(a3.userId) as string],
+    byUser.get(a2.userId) as string);
+
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'Either Or Co', amount: 312.4, invoiceNo: 'EO-1' });
+  await bill.confirm();
+
+  let detail = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
+  assert.equal(detail.approval.steps.length, 2, 'two people are invited');
+  for (const node of detail.approval.steps) {
+    assert.equal(node.mode, 'any');
+    assert.equal(node.required, 1, 'the STEP needs one approval, however many people it lists');
+    assert.equal(node.candidates, 2);
+    assert.equal(node.stepIndex, 0, 'one step, not two');
+  }
+
+  // Either one satisfies it.
+  const inbox = await get(`/organizations/${orgId}/bills/approvals-inbox`, a2.token);
+  const task = inbox.waitingOnYou.find((r: { paymentOrderId: string }) => r.paymentOrderId === bill.billId);
+  assert.ok(task, 'a2 is invited to the step');
+  await post(`/organizations/${orgId}/approvals/tasks/${task.taskId}/command`,
+    { command: { kind: 'approve' }, idempotencyKey: `any-${bill.billId}` }, a2.token);
+
+  detail = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
+  assert.equal(detail.status.macroState, 'approved', 'one approval finished the step');
+  const approved = detail.approval.steps.filter((s: { state: string }) => s.state === 'done');
+  const skipped = detail.approval.steps.filter((s: { state: string }) => s.state === 'skipped');
+  assert.equal(approved.length, 1);
+  assert.equal(skipped.length, 1, 'the other was never going to be asked — not "not yet their turn"');
+});

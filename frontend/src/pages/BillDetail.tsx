@@ -114,6 +114,18 @@ export function BillDetailPage() {
   const approvedOverall = macro === 'approved' || macro === 'auto_approved';
   const steps = approval?.steps ?? [];
   const doneCount = steps.filter((s) => s.state === 'done').length;
+
+  // One plan step can invite several people and need only one of them. The
+  // route is a list of PEOPLE, so counting its rows answers the wrong question:
+  // a first-bill step offering Ines or Sam counted as "2 approvers, in order",
+  // which describes a stricter bill than the flow actually routes.
+  const stepGroups = steps.reduce<BillDetailStepNode[][]>((acc, node) => {
+    const last = acc[acc.length - 1];
+    if (last && last[0]!.stepIndex === node.stepIndex) last.push(node);
+    else acc.push([node]);
+    return acc;
+  }, []);
+  const totalRequired = stepGroups.reduce((sum, g) => sum + (g[0]!.required ?? g.length), 0);
   const currentNode = steps.find((s) => s.state === 'current') ?? null;
   const declinedNode = steps.find((s) => s.state === 'declined') ?? null;
   const infoOpenNode = steps.find((s) => s.thread?.open) ?? null;
@@ -135,12 +147,12 @@ export function BillDetailPage() {
     : recalled
       ? 'Recalled by the submitter'
       : approvedOverall
-        ? `${doneCount} of ${steps.length} approved`
+        ? `${doneCount} of ${totalRequired} approved`
         : infoOpenNode
-          ? `${doneCount} of ${steps.length} approved · ${infoOpenNode.person?.name.split(' ')[0] ?? 'someone'} asked a question`
+          ? `${doneCount} of ${totalRequired} approved · ${infoOpenNode.person?.name.split(' ')[0] ?? 'someone'} asked a question`
           : currentNode
-            ? `${doneCount} of ${steps.length} approved · waiting on ${currentNode.person?.name.split(' ')[0] ?? 'next approver'}`
-            : `${doneCount} of ${steps.length} approved`;
+            ? `${doneCount} of ${totalRequired} approved · waiting on ${currentNode.person?.name.split(' ')[0] ?? 'next approver'}`
+            : `${doneCount} of ${totalRequired} approved`;
 
   // Viewer modes
   const viewerHasDecision = Boolean(viewer.openTaskId) && !rejected && !recalled && !approvedOverall;
@@ -362,7 +374,7 @@ export function BillDetailPage() {
                   <h2>Approval route</h2>
                   <p className="sh-desc">
                     {steps.length > 0
-                      ? `${steps.length} approver${steps.length === 1 ? '' : 's'}, in order — each chosen by a rule, shown below.`
+                      ? `${totalRequired} approval${totalRequired === 1 ? '' : 's'} needed, in order — each chosen by a rule, shown below.`
                       : approval?.macroState === 'auto_approved'
                         ? 'Approved automatically — your flow required no sign-off for a bill like this.'
                         : 'This bill has not entered approval yet.'}
@@ -388,9 +400,33 @@ export function BillDetailPage() {
               ) : null}
 
               <div>
-                {steps.map((node, i) => (
-                  <StepRow key={`${node.stepIndex}-${node.person?.personId ?? i}`} node={node} last={i === steps.length - 1} />
-                ))}
+                {stepGroups.map((group, gi) => {
+                  const needs = group[0]!.required ?? group.length;
+                  // Only say it when it is actually a choice. A one-person step
+                  // and an all-of-three step both speak for themselves.
+                  const choice = group.length > 1 && needs < group.length;
+                  return (
+                    <div key={group[0]!.stepIndex}>
+                      {choice ? (
+                        <div style={{ marginBottom: 10 }}>
+                          <span className="pill pill-min pill-neutral">
+                            <span className="dot" />
+                            {needs === 1
+                              ? `Any one of these ${group.length}`
+                              : `Any ${needs} of these ${group.length}`}
+                          </span>
+                        </div>
+                      ) : null}
+                      {group.map((node, i) => (
+                        <StepRow
+                          key={`${node.stepIndex}-${node.person?.personId ?? i}`}
+                          node={node}
+                          last={gi === stepGroups.length - 1 && i === group.length - 1}
+                        />
+                      ))}
+                    </div>
+                  );
+                })}
               </div>
             </section>
 
@@ -684,8 +720,12 @@ function StepRow({ node, last }: { node: BillDetailStepNode; last: boolean }) {
   const name = node.person?.name ?? 'Unassigned';
   const done = node.state === 'done';
   const current = node.state === 'current';
-  const upcoming = node.state === 'upcoming' || node.state === 'stopped';
+  const upcoming = node.state === 'upcoming' || node.state === 'stopped' || node.state === 'skipped';
   const declined = node.state === 'declined';
+  // On a step that needs fewer approvals than it has people, nobody is "the"
+  // approver — each is an alternative. "Waiting on Ines" alongside "Waiting on
+  // Sam" reads as two people being chased for the same bill.
+  const isChoice = node.candidates > node.required;
 
   const tag = declined
     ? { text: node.actedAt ? `Declined · ${timeLabel(node.actedAt)}` : 'Declined', pill: 'pill-danger' }
@@ -694,12 +734,17 @@ function StepRow({ node, last }: { node: BillDetailStepNode; last: boolean }) {
       : current
         ? node.thread?.open
           ? { text: 'Asked a question', pill: 'pill-warning' }
-          : { text: `Waiting on ${name.split(' ')[0]}`, pill: 'pill-info' }
+          : isChoice
+            ? { text: 'Can approve', pill: 'pill-info' }
+            : { text: `Waiting on ${name.split(' ')[0]}`, pill: 'pill-info' }
         : node.state === 'stopped'
           ? { text: 'Route stopped', pill: 'pill-neutral' }
-          : node.state === 'delegated'
-            ? { text: 'Delegated', pill: 'pill-neutral' }
-            : { text: 'Not yet their turn', pill: 'pill-neutral' };
+          : node.state === 'skipped'
+            // The step was satisfied without them — they will never be asked.
+            ? { text: 'Not needed', pill: 'pill-neutral' }
+            : node.state === 'delegated'
+              ? { text: 'Delegated', pill: 'pill-neutral' }
+              : { text: 'Not yet their turn', pill: 'pill-neutral' };
 
   const bg = upcoming
     ? `color-mix(in srgb, ${personColor(name)} 42%, var(--bg-surface-2))`

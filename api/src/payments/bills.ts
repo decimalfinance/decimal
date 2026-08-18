@@ -2005,7 +2005,16 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
     person: { personId: string; name: string; avatarUrl: string | null } | null;
     purpose: string | null;
     mode: string;
-    state: 'done' | 'current' | 'upcoming' | 'declined' | 'stopped' | 'delegated';
+    /**
+     * How many approvals this STEP needs — not how many people are on it.
+     * An 'any' step lists two candidates and needs one of them; without this
+     * the screen counts rows and reports two approvals required, which is a
+     * different bill from the one the flow actually describes.
+     */
+    required: number;
+    /** People invited to this step, so a screen can say "either of two". */
+    candidates: number;
+    state: 'done' | 'current' | 'upcoming' | 'declined' | 'stopped' | 'delegated' | 'skipped';
     actedAt: string | null;
     declineReason: string | null;
     thread: {
@@ -2021,6 +2030,15 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
   const nodes: StepNode[] = [];
   for (const step of planSteps) {
     const mode = isRecord(step.step) && typeof step.step.mode === 'string' ? step.step.mode : 'all';
+    const quorumM = isRecord(step.step) && typeof step.step.m === 'number' ? step.step.m : null;
+    const candidates = step.approvers.length;
+    // Same arithmetic settleStep uses to decide the step is done, so the screen
+    // and the engine cannot disagree about what this bill needs.
+    const required = mode === 'any' ? 1 : mode === 'quorum' ? (quorumM ?? 1) : candidates;
+    // Once the step is satisfied the engine closes the siblings as obsolete.
+    // They are not "not yet their turn" — they are never going to be asked.
+    const approvedInStep = tasks.filter((t) => t.step_index === step.index && t.state === 'approved').length;
+    const stepSatisfied = approvedInStep >= required;
     for (const approver of step.approvers) {
       const task = tasks.find((t) => t.step_index === step.index && t.person_id === approver.personId);
       const commands = task ? (commandsByTask.get(task.id) ?? []) : [];
@@ -2038,7 +2056,11 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
         case 'info_requested':
         case 'pushed_back': state = 'current'; break;
         case 'delegated': state = 'delegated'; break;
-        case 'obsolete': state = approvable.macro_state === 'rejected' || approvable.macro_state === 'cancelled' ? 'stopped' : 'upcoming'; break;
+        case 'obsolete':
+          state = approvable.macro_state === 'rejected' || approvable.macro_state === 'cancelled'
+            ? 'stopped'
+            : stepSatisfied ? 'skipped' : 'upcoming';
+          break;
         default: state = 'upcoming';
       }
 
@@ -2058,6 +2080,8 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
         person: personView(approver.personId),
         purpose: step.purpose,
         mode,
+        required,
+        candidates,
         state,
         actedAt: approveEvent?.at.toISOString() ?? rejectEvent?.at.toISOString() ?? null,
         declineReason: rejectEvent ? str(rejectEvent.command.reason) : null,
