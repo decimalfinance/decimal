@@ -1076,7 +1076,21 @@ export async function submitBillForApproval(input: SubmitBillInput) {
   const extracted = isRecord(agent.extracted) ? agent.extracted : {};
 
   // Correction memory (spec §4): every field where the confirmed value differs
-  // from what was read. Silent to the operator; gold for calibration.
+  // from what was read.
+  //
+  // "What was read" has to mean what the DRAFT SCREEN SHOWED, not the raw
+  // extraction, or every default the form fills in is logged as a human
+  // correction with that human's name on it. Tax is the case that exposed it:
+  // the screen shows 0 when the document has no tax line, the extraction says
+  // null, and confirming recorded "read as not on document -> 0, Omar
+  // corrected it" for a field Omar never touched.
+  //
+  // That is worse than a cosmetic slip. This trail is the reason an approver
+  // can trust the figures — it claims a person stands behind them — and a
+  // false entry in it is a false attribution to a named colleague.
+  //
+  // Currency already did the right thing (?? 'USD' below, matching the form's
+  // default). Every value here must line up with what the screen renders.
   const corrections: Array<{ field: string; readValue: unknown; correctedValue: unknown }> = [];
   const readValues: Record<string, unknown> = {
     vendorName: str(extracted.vendorName),
@@ -1089,7 +1103,8 @@ export async function submitBillForApproval(input: SubmitBillInput) {
     discount: str(extracted.earlyPayDiscount),
     currency: str(extracted.currency)?.toUpperCase() ?? 'USD',
     total: num(extracted.amount),
-    taxAmount: num(extracted.taxAmount),
+    // The draft screen renders 0 when the document carries no tax line.
+    taxAmount: num(extracted.taxAmount) ?? 0,
   };
   for (const [key, readValue] of Object.entries(readValues)) {
     if (!(key in input.fields)) continue;

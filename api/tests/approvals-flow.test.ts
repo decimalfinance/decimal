@@ -1601,3 +1601,20 @@ test('recalling a bill puts it back in draft, where it can actually be fixed', a
   assert.equal(after.draft.state, 'draft', 'recall returns the bill to draft');
   assert.equal(after.draft.readOnly, false, 'and draft means editable — otherwise the recall achieved nothing');
 });
+
+test('a field the form defaulted is not recorded as a human correction', async () => {
+  // The trail claims a person stands behind these numbers, so a false entry in
+  // it is a false attribution to a named colleague. The draft screen renders 0
+  // when a document has no tax line; the extraction says null. Confirming used
+  // to log "read as not on document -> 0, <name> corrected it" for a field
+  // nobody had touched.
+  const { orgId, owner } = await makeOrg();
+  const bill = await uploadAndConfirm(orgId, owner.token, {
+    vendor: 'No Tax Vendor', amount: 400, invoiceNo: 'NT-1', billTo: 'Halcyon Labs, Inc.',
+  });
+  await bill.confirm();
+
+  const detail = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
+  const taxRow = (detail.corrections ?? []).find((c: { field: string }) => c.field === 'taxAmount');
+  assert.equal(taxRow, undefined, 'a defaulted tax of 0 is not somebody correcting the document');
+});
