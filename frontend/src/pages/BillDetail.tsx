@@ -342,18 +342,25 @@ export function BillDetailPage() {
               <div className="ref-row"><span className="ref-k">Invoice</span><span className="ref-v mono">{invoiceNumber}</span></div>
               {invoiceDate ? <div className="ref-row"><span className="ref-k">Invoice date</span><span className="ref-v">{String(invoiceDate)}</span></div> : null}
               {terms ? <div className="ref-row"><span className="ref-k">Terms</span><span className="ref-v">{String(terms)}</span></div> : null}
-              <div className="ref-row">
-                <span className="ref-k">Pay to</span>
-                <span className="ref-v mono">
-                  {billDraft.paymentBlock.accountLast4
-                    ? `Bank account ••••${billDraft.paymentBlock.accountLast4}`
-                    : billDraft.paymentBlock.sendToLabel}
-                  <br />
-                  {billDraft.paymentBlock.matchesVerified
-                    ? <span style={{ color: 'var(--success)', fontSize: 11.5 }}>✓ Verified method</span>
-                    : <span style={{ color: 'var(--text-muted)', fontSize: 11.5 }}>Verification pending</span>}
-                </span>
-              </div>
+              {/* No "Pay to" row, deliberately.
+                  
+                  It showed a bank account read off the PDF, with a green
+                  "Verified method" tick beside it — and that tick came from
+                  counterpartyWallet.trustState, the trust state of a Solana
+                  address. Two different payment rails: the tick asserted
+                  something about a wallet while sitting next to a bank account
+                  nothing had checked.
+                  
+                  That is the worst possible claim to make on this screen.
+                  Altering bank details on an invoice PDF is how invoice fraud
+                  works, and an approver deciding to authorise money is exactly
+                  who must not be told those details are verified when they are
+                  not. The draft screen dropped its payment section for the
+                  same reason; this one had not caught up.
+                  
+                  Extraction and storage are untouched — the document's payment
+                  details are still read and kept, because the vendor payment
+                  rails work will need them. Only the claim is gone. */}
             </div>
 
             <div className="tbl-card">
