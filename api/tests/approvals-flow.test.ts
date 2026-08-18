@@ -1855,3 +1855,69 @@ test('the approvals inbox calls an alternative an alternative, not the next pers
   assert.match(row.hint ?? '', /can approve instead/, 'says someone else can take it');
   assert.equal(row.chainPosition ?? 'You start the chain', 'You start the chain');
 });
+
+// --- the bill's whole life, not just the approving part ----------------------
+//
+// The screen used to render the compiled approval plan and nothing else, so a
+// paid bill credited whoever approved it and no one else. On the real JOS-1147
+// that meant Ines, who approved — while Zara, who brought the invoice in, and
+// Omar, the clerk who checked the figures and submitted it four hours later,
+// appeared nowhere at all. They had done most of the work on it.
+
+test('the bill history names who brought it in and who submitted it, even when they differ', async () => {
+  const { orgId, owner, a2, a3 } = await makeOrg();
+  const flow = await get(`/organizations/${orgId}/approvals/flow`, owner.token);
+  const byUser = new Map(flow.people.map((p: { user_id: string; id: string }) => [p.user_id, p.id]));
+  await publishLadder(orgId, owner.token, [byUser.get(a2.userId) as string], byUser.get(a2.userId) as string);
+  await post(`/organizations/${orgId}/roles/bill_clerk/holders`, { userId: a3.userId }, owner.token);
+
+  // The owner brings the invoice in; the clerk is the one who checks it and
+  // puts it into approval. Two different people, which is the whole point.
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'Two Hands Co', amount: 1200, invoiceNo: 'TH-1' });
+  await post(`/organizations/${orgId}/bills/${bill.billId}/confirm`, {
+    fields: { invoiceNumber: 'TH-1', invoiceDate: '2026-08-02', dueDate: '2026-08-30', terms: 'Net 30', currency: 'USD', total: 1200, taxAmount: 0 },
+    lines: [{ description: 'Cloud hosting', quantity: 1, unitPrice: 1200, amount: 1200, category: 'Cloud hosting & infrastructure' }],
+    confirmedFieldKeys: [],
+  }, a3.token);
+
+  const detail = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
+  const before = detail.history.before;
+  assert.equal(before.length, 2, 'brought in, then submitted');
+
+  assert.equal(before[0].kind, 'uploaded');
+  assert.ok(before[0].person.name, 'the uploader is named');
+  assert.ok(before[0].at, 'and timed');
+
+  assert.equal(before[1].kind, 'submitted', 'the missing one');
+  assert.notEqual(before[1].person.name, before[0].person.name, 'the clerk is not the uploader');
+  assert.ok(before[1].at);
+  assert.ok(new Date(before[1].at) >= new Date(before[0].at), 'submitted after it arrived');
+});
+
+test('the history carries on past approval to whoever releases the money', async () => {
+  const { orgId, owner, a2, a3 } = await makeOrg();
+  const flow = await get(`/organizations/${orgId}/approvals/flow`, owner.token);
+  const byUser = new Map(flow.people.map((p: { user_id: string; id: string }) => [p.user_id, p.id]));
+  await publishLadder(orgId, owner.token, [byUser.get(a2.userId) as string], byUser.get(a2.userId) as string);
+  await post(`/organizations/${orgId}/roles/bill_clerk/holders`, { userId: a3.userId }, owner.token);
+
+  const bill = await uploadAndConfirm(orgId, a3.token, { vendor: 'Release Co', amount: 1200, invoiceNo: 'RL-1' });
+  await bill.confirm();
+
+  // Nothing after approval yet — the release run has not been spawned.
+  let detail = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
+  assert.equal(detail.history.after.length, 0, 'no payment story before there is an approval');
+
+  const inbox = await get(`/organizations/${orgId}/bills/approvals-inbox`, a2.token);
+  const task = inbox.waitingOnYou.find((r: { paymentOrderId: string }) => r.paymentOrderId === bill.billId);
+  await post(`/organizations/${orgId}/approvals/tasks/${task.taskId}/command`,
+    { command: { kind: 'approve' }, idempotencyKey: `rel-${bill.billId}` }, a2.token);
+
+  detail = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
+  assert.equal(detail.status.macroState, 'approved');
+  assert.ok(detail.history.after.length >= 1, 'the release ceremony shows up');
+  const pending = detail.history.after.find((e: { kind: string }) => e.kind === 'release_pending');
+  assert.ok(pending, 'somebody is holding the money');
+  assert.equal(pending.at, null, 'it has not happened yet');
+  assert.ok(pending.person.name, 'and the screen can name them');
+});

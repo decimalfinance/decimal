@@ -1963,6 +1963,13 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
       draft: billDraft,
       corrections,
       recall: { open: null, history: [] },
+      // A bill still in draft has a beginning even without an approval plan.
+      history: await (await import('./bill-history.js')).billHistory({
+        organizationId,
+        paymentOrderId,
+        approvableId: null,
+        source: billDraft.source === 'email' ? 'email' : 'upload',
+      }),
       status: { macroState: null, subStatus },
       approval: null,
       viewer: { personId: null, name: null, isRequester: false, openTaskId: null, anyTaskId: null },
@@ -2141,11 +2148,22 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
   const { billRecallState } = await import('./bill-recall.js');
   const recall = await billRecallState(organizationId, paymentOrderId);
 
+  // The ends of the story the approval plan cannot tell: who brought the bill
+  // in and who submitted it, and who releases the money once it is approved.
+  const { billHistory } = await import('./bill-history.js');
+  const history = await billHistory({
+    organizationId,
+    paymentOrderId,
+    approvableId: approvable.id,
+    source: billDraft.source === 'email' ? 'email' : 'upload',
+  });
+
   return {
     draft: billDraft,
     corrections,
     signal,
     recall,
+    history,
     status: { macroState: approvable.macro_state, subStatus },
     approval: {
       approvableId: approvable.id,

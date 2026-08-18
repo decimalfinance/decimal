@@ -1724,8 +1724,20 @@ export interface BillRecall {
   selfDecided: boolean;
 }
 
+/**
+ * The parts of a bill's life that sit outside the approval plan: who brought
+ * it in and who submitted it, and who releases the money afterwards.
+ */
+export interface BillHistoryEntry {
+  kind: 'uploaded' | 'forwarded' | 'submitted' | 'release_pending' | 'released' | 'paid';
+  /** Null when it has not happened yet. */
+  at: string | null;
+  person: { name: string; avatarUrl: string | null } | null;
+}
+
 export interface BillDetail {
   draft: BillDraft;
+  history: { before: BillHistoryEntry[]; after: BillHistoryEntry[] };
   corrections: Array<{ field: string; from: string; to: string; by: string | null }>;
   // Advisory: routine vs worth-a-look, same classifier as the approvals inbox.
   signal?: InboxSignal;

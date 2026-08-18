@@ -12,6 +12,7 @@ import {
   billsApi,
   type BillDetail,
   type BillDetailStepNode,
+  type BillHistoryEntry,
 } from '../api';
 import { Ico } from '../dec/icons';
 import { useToast } from '../ui/Toast';
@@ -126,6 +127,9 @@ export function BillDetailPage() {
     return acc;
   }, []);
   const totalRequired = stepGroups.reduce((sum, g) => sum + (g[0]!.required ?? g.length), 0);
+  // The ends of the story the approval plan cannot tell.
+  const historyBefore = detail.history?.before ?? [];
+  const historyAfter = detail.history?.after ?? [];
   const currentNode = steps.find((s) => s.state === 'current') ?? null;
   const declinedNode = steps.find((s) => s.state === 'declined') ?? null;
   const infoOpenNode = steps.find((s) => s.thread?.open) ?? null;
@@ -371,13 +375,18 @@ export function BillDetailPage() {
             <section>
               <div className="sec-head">
                 <div className="sh-titles">
-                  <h2>Approval route</h2>
+                  {/* Not "Approval route" any more. It was named after the
+                      middle of the story and showed only that, so a paid bill
+                      credited whoever approved it and nobody else — not the
+                      person who brought the invoice in, not the clerk who
+                      checked the figures and submitted it hours later. */}
+                  <h2>Track this bill</h2>
                   <p className="sh-desc">
                     {steps.length > 0
-                      ? `${totalRequired} approval${totalRequired === 1 ? '' : 's'} needed, in order — each chosen by a rule, shown below.`
+                      ? `Everything that happened, in order. ${totalRequired} approval${totalRequired === 1 ? '' : 's'} needed, each chosen by a rule.`
                       : approval?.macroState === 'auto_approved'
                         ? 'Approved automatically — your flow required no sign-off for a bill like this.'
-                        : 'This bill has not entered approval yet.'}
+                        : 'Everything that happened, in order.'}
                   </p>
                 </div>
                 <span style={{ fontSize: 12.5, color: 'var(--text-muted)', flex: 'none' }}>
@@ -400,6 +409,10 @@ export function BillDetailPage() {
               ) : null}
 
               <div>
+                {/* Before the engine: brought in, then submitted. */}
+                {historyBefore.map((entry, i) => (
+                  <HistoryRow key={`b-${entry.kind}-${i}`} entry={entry} last={false} />
+                ))}
                 {stepGroups.map((group, gi) => {
                   const needs = group[0]!.required ?? group.length;
                   // Only say it when it is actually a choice. A one-person step
@@ -421,12 +434,21 @@ export function BillDetailPage() {
                         <StepRow
                           key={`${node.stepIndex}-${node.person?.personId ?? i}`}
                           node={node}
-                          last={gi === stepGroups.length - 1 && i === group.length - 1}
+                          last={historyAfter.length === 0
+                            && gi === stepGroups.length - 1 && i === group.length - 1}
                         />
                       ))}
                     </div>
                   );
                 })}
+                {/* After approval: the release ceremony, then the money. */}
+                {historyAfter.map((entry, i) => (
+                  <HistoryRow
+                    key={`a-${entry.kind}-${i}`}
+                    entry={entry}
+                    last={i === historyAfter.length - 1}
+                  />
+                ))}
               </div>
             </section>
 
@@ -725,6 +747,52 @@ export function BillDetailPage() {
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+// A moment in the bill's life that the approval engine never saw: somebody
+// bringing the invoice in, the clerk submitting it, the payer letting the money
+// go. Same rail and avatars as the approval steps, because to whoever is
+// reading it this is one story, not three systems.
+const HISTORY_LABEL: Record<BillHistoryEntry['kind'], string> = {
+  uploaded: 'Uploaded the invoice',
+  forwarded: 'Forwarded the invoice in',
+  submitted: 'Submitted it for approval',
+  release_pending: 'Releases the payment',
+  released: 'Released the payment',
+  paid: 'Paid',
+};
+
+function HistoryRow({ entry, last }: { entry: BillHistoryEntry; last: boolean }) {
+  const name = entry.person?.name ?? 'Someone';
+  const pending = entry.at === null;
+  const bg = pending
+    ? `color-mix(in srgb, ${personColor(name)} 42%, var(--bg-surface-2))`
+    : personColor(name);
+  const tag = pending
+    ? { text: `Waiting on ${name.split(' ')[0]}`, pill: 'pill-info' }
+    : { text: `${HISTORY_LABEL[entry.kind]} · ${timeLabel(entry.at!)}`, pill: 'pill-neutral' };
+
+  return (
+    <div style={{ position: 'relative', paddingBottom: 22 }}>
+      {!last ? <span className="bd-rail is-done" /> : null}
+      <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+        <div style={{ position: 'relative', zIndex: 1, flex: 'none' }}>
+          <span className={`bd-av${pending ? ' is-current' : ''}`} style={{ background: bg }}>{initialsOf(name)}</span>
+        </div>
+        <div style={{ flex: 1, minWidth: 0, opacity: pending ? 0.75 : 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{name}</span>
+            <span className={`pill pill-min ${tag.pill}`}><span className="dot" />{tag.text}</span>
+          </div>
+          {pending ? (
+            <div style={{ fontSize: 12, color: 'var(--text-faint)', marginTop: 3 }}>
+              Approved — waiting for the money to be sent
+            </div>
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 }
