@@ -4,7 +4,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { billsApi, inboundEmailApi, invoiceIntakeApi, type BillBucket, type WorkbenchBill } from '../api';
+import { accessApi, billsApi, inboundEmailApi, invoiceIntakeApi, type BillBucket, type WorkbenchBill } from '../api';
 import { Ico } from '../dec/icons';
 import { PageHead } from '../dec/primitives';
 import { useToast } from '../ui/Toast';
@@ -57,6 +57,15 @@ function urgencyScore(bill: WorkbenchBill): number {
 export function BillsPage() {
   const { organizationId = '' } = useParams();
   const navigate = useNavigate();
+  // A Viewer may read every bill and bring none in — so the two buttons that
+  // create one are hidden rather than offered and refused.
+  const myAccess = useQuery({
+    queryKey: ['my-access', organizationId],
+    queryFn: () => accessApi.get(organizationId),
+    enabled: Boolean(organizationId),
+    staleTime: 60_000,
+  });
+  const canAddBills = myAccess.data ? myAccess.data.capabilities.includes('bills.create') : true;
   const toast = useToast();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<BillBucket>('draft');
@@ -130,14 +139,16 @@ export function BillsPage() {
           title="Bills"
           desc="Everything you've received, from first look to paid."
           actions={
-            <>
-              <button type="button" className="btn btn-secondary" onClick={() => setForwardOpen(true)}>
-                <Ico.mail w={15} /> Forward by email
-              </button>
-              <button type="button" className="btn btn-primary" onClick={() => setUploadOpen(true)}>
-                <Ico.upload w={15} /> Upload a bill
-              </button>
-            </>
+            canAddBills ? (
+              <>
+                <button type="button" className="btn btn-secondary" onClick={() => setForwardOpen(true)}>
+                  <Ico.mail w={15} /> Forward by email
+                </button>
+                <button type="button" className="btn btn-primary" onClick={() => setUploadOpen(true)}>
+                  <Ico.upload w={15} /> Upload a bill
+                </button>
+              </>
+            ) : null
           }
         />
 

@@ -180,6 +180,19 @@ export async function handleInboundEmailEvent(args: HandleInboundArgs): Promise<
     return reject({ ...scoped, senderUserId: null, reason: 'sender_not_member', attachments: event.data.attachments });
   }
 
+  // The two doors have to agree.
+  //
+  // Upload is gated on bills.create, so anyone but a Viewer may bring a bill
+  // in. If email were left at members-only, a Viewer refused at the Upload
+  // button could forward the same invoice and it would land — the same act
+  // allowed or refused depending on which door was used. A Viewer's seat is
+  // read-only, and creating a record is not reading.
+  const { getOrgAccess } = await import('../../approvals/permissions.js');
+  const senderAccess = await getOrgAccess(organization.organizationId, membership.userId);
+  if (!senderAccess?.capabilities.includes('bills.create')) {
+    return reject({ ...scoped, senderUserId: membership.userId, reason: 'sender_cannot_create', attachments: event.data.attachments });
+  }
+
   if (event.data.attachments.length === 0) {
     return reject({ ...scoped, senderUserId: membership.userId, reason: 'no_attachments', attachments: [] });
   }

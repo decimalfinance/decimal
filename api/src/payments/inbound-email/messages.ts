@@ -18,6 +18,7 @@ export type InboundRejectionReason =
   | 'unknown_org'
   | 'org_inactive'
   | 'sender_not_member'
+  | 'sender_cannot_create'
   | 'no_attachments'
   | 'no_supported_attachments'
   | 'malformed_payload';
@@ -27,6 +28,7 @@ export const REJECTION_COPY: Record<InboundRejectionReason, string> = {
   unknown_org: "Sent to an address we don't recognise",
   org_inactive: 'That workspace is no longer active',
   sender_not_member: 'Not on your team',
+  sender_cannot_create: "Their role doesn't include adding bills",
   no_attachments: 'No invoice attached',
   no_supported_attachments: "Attachments weren't a PDF or an image",
   malformed_payload: "We couldn't read that message",

@@ -39,6 +39,10 @@ const RULES: Array<{ pattern: RegExp; view: Need; act: Need }> = [
   // Answering is the other half of asking. If someone can be asked, they can
   // reply — the function itself refuses anyone who was not the person asked.
   { pattern: /^\/bills\/[0-9a-f-]{36}\/questions\/[0-9a-f-]{36}\/answer$/, view: 'bills.view', act: null },
+  // Bringing a bill IN is wider than working on one. Anybody who is not a
+  // Viewer may upload — it creates a draft, which does nothing until a clerk
+  // works it. Must sit above the general bills rule; first match wins.
+  { pattern: /^\/invoices\/upload(-async)?$/, view: 'bills.view', act: 'bills.create' },
   // Bills work surface.
   { pattern: /^\/(bills|invoices|invoice-documents)(\/|$)/, view: 'bills.view', act: 'bills.edit' },
   // The org's inbound invoice address is part of the bills surface: anyone who

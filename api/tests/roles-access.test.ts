@@ -131,7 +131,21 @@ test('payer role opens payment surface without granting bill entry', async () =>
   assert.ok(access.capabilities.includes('treasury.view'));
   assert.ok(!access.capabilities.includes('bills.edit'));
   await get(`/organizations/${orgId}/payment-orders`, member.token);
-  assert.equal(await status('POST', `/organizations/${orgId}/invoices/upload`, member.token, {}), 403, 'payer cannot enter bills');
+  // Bringing a bill in is open to everyone but a Viewer — it creates a draft,
+  // which does nothing until a clerk works it. So the capability gate lets a
+  // payer through and the request fails on its own (empty) body instead.
+  assert.ok(access.capabilities.includes('bills.create'), 'a payer may bring a bill in');
+  assert.notEqual(
+    await status('POST', `/organizations/${orgId}/invoices/upload`, member.token, {}),
+    403,
+    'upload is no longer refused by role',
+  );
+  // Preparing one is still the clerk's: editing a bill's facts stays refused.
+  assert.equal(
+    await status('PATCH', `/organizations/${orgId}/bills/${crypto.randomUUID()}/facts`, member.token, { facts: {} }),
+    403,
+    'payer still cannot prepare a bill',
+  );
   assert.equal(await status('POST', `/organizations/${orgId}/approvals/separation`, member.token, { clerkCanApprove: true, submitterCanApprove: true, approverCanRelease: true }), 403, 'payer cannot edit governance');
 });
 

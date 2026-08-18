@@ -11,7 +11,7 @@
 import { prisma } from '../infra/prisma.js';
 
 export type Capability =
-  | 'bills.view' | 'bills.edit'
+  | 'bills.view' | 'bills.create' | 'bills.edit'
   | 'approvals.act'
   | 'payments.view' | 'payments.sign'
   | 'treasury.view' | 'treasury.manage'
@@ -32,10 +32,25 @@ const ALL_VIEW: Capability[] = [
 // how the pipeline is governed (the pipeline page is view-only for non-owners).
 const BASE: Capability[] = ['members.view', 'governance.view'];
 
+// `bills.create` is deliberately wider than `bills.edit`.
+//
+// Getting an invoice INTO the system is not a privileged act — it creates a
+// draft that does nothing until somebody works it. The person holding the
+// invoice is frequently not the clerk: the ops lead who ordered the thing, the
+// engineer whose tool renewed. Stampli models exactly this with a Requester
+// who submits and an AP Processor who processes. Refusing them would only push
+// the invoice into somebody's inbox and out of the product.
+//
+// PREPARING the bill — changing figures, coding lines, sending it for approval
+// — stays `bills.edit`, and stays the Bill Clerk's. That is where the control
+// belongs and it has not moved.
+//
+// The Viewer is the one exception. It is an auditor's seat: read everything,
+// change nothing, and creating a record is a change.
 export const ROLE_BUNDLES: Record<RoleKey, Capability[]> = {
-  bill_clerk: [...BASE, 'bills.view', 'bills.edit', 'vendors.view', 'accounting.view'],
-  approver: [...BASE, 'bills.view', 'approvals.act', 'vendors.view'],
-  payer: [...BASE, 'bills.view', 'payments.view', 'payments.sign', 'treasury.view', 'vendors.view'],
+  bill_clerk: [...BASE, 'bills.view', 'bills.create', 'bills.edit', 'vendors.view', 'accounting.view'],
+  approver: [...BASE, 'bills.view', 'bills.create', 'approvals.act', 'vendors.view'],
+  payer: [...BASE, 'bills.view', 'bills.create', 'payments.view', 'payments.sign', 'treasury.view', 'vendors.view'],
   viewer: [...ALL_VIEW],
 };
 
@@ -44,7 +59,7 @@ export const ROLE_DEFINITIONS: Array<{ key: RoleKey; name: string; summary: stri
   { key: 'bill_clerk', name: 'Bill Clerk', summary: "Enters and confirms a bill's details and coding. Cannot approve bills or see payments." },
   { key: 'approver', name: 'Approver', summary: 'Signs off on bills assigned to them. Cannot edit bills, send payments, or see bank details.' },
   { key: 'payer', name: 'Payer', summary: 'Sends approved payments and sees balances. Cannot create, edit, or approve bills.' },
-  { key: 'viewer', name: 'Viewer', summary: 'Sees everything, changes nothing. For auditors and stakeholders.' },
+  { key: 'viewer', name: 'Viewer', summary: 'Sees everything, changes nothing — cannot even bring a bill in. For auditors and stakeholders.' },
 ];
 
 /**
@@ -98,7 +113,7 @@ export function billScopeFor(_membershipRole: string, _roles: RoleKey[]): BillSc
 
 export function capabilitiesFor(membershipRole: string, roles: RoleKey[]): Capability[] {
   if (membershipRole === 'owner' || membershipRole === 'admin') {
-    return [...ALL_VIEW, 'bills.edit', 'approvals.act', 'payments.sign', 'treasury.manage', 'vendors.manage', 'accounting.manage', 'members.manage', 'governance.edit'];
+    return [...ALL_VIEW, 'bills.create', 'bills.edit', 'approvals.act', 'payments.sign', 'treasury.manage', 'vendors.manage', 'accounting.manage', 'members.manage', 'governance.edit'];
   }
   const effective = roles.length > 0 ? roles : (['viewer'] as RoleKey[]);
   const caps = new Set<Capability>();
