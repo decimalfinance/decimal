@@ -931,12 +931,10 @@ function DraftScreen(props: {
                     {lines.map((line, i) => (
                       <tr key={i} onFocus={() => setActiveSource(line.source ?? null)}>
                         <td>
-                          <input
-                            className="tbl-input"
+                          <DescriptionInput
                             value={line.description}
                             disabled={readOnly}
-                            placeholder="What is this for?"
-                            onChange={(e) => setLines((prev) => prev.map((l, j) => (j === i ? { ...l, description: e.target.value } : l)))}
+                            onChange={(v) => setLines((prev) => prev.map((l, j) => (j === i ? { ...l, description: v } : l)))}
                           />
                         </td>
                         <td>
@@ -1101,6 +1099,50 @@ function DraftScreen(props: {
 
 // Money cell: the $ is part of the value ("$2,650.00"), right-aligned as one
 // unit; parses loosely while typing, formats on blur.
+/**
+ * A line's description, on as many rows as it needs.
+ *
+ * It was an <input>, and an input is one line by construction: "Social media
+ * management — August" rendered as "Social media management — A" with the rest
+ * reachable only by putting a cursor in the field and scrolling it sideways.
+ * On the screen where somebody is checking what they are about to pay, a
+ * description you cannot read is the one field that must never be cut off.
+ *
+ * A textarea wraps, and grows to fit rather than showing its own scrollbar —
+ * the row gets taller, which is what the reader wanted. Enter is swallowed
+ * because this is a table cell, not prose: a newline inside a description
+ * would travel all the way to the vendor's remittance.
+ */
+function DescriptionInput(props: { value: string; disabled: boolean; onChange: (v: string) => void }) {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+
+  const grow = (el: HTMLTextAreaElement | null) => {
+    if (!el) return;
+    el.style.height = 'auto';
+    // Measured while hidden, scrollHeight is 0 — writing that back would
+    // collapse the field to nothing, which is a worse bug than the one this
+    // fixes. Leave it to the browser until there is a real measurement.
+    if (el.scrollHeight > 0) el.style.height = `${el.scrollHeight}px`;
+  };
+
+  // On mount and whenever the text changes from outside (the draft loading,
+  // an AI re-read), not only on keystrokes.
+  useEffect(() => { grow(ref.current); }, [props.value]);
+
+  return (
+    <textarea
+      ref={ref}
+      className="tbl-input tbl-input-wrap"
+      rows={1}
+      value={props.value}
+      disabled={props.disabled}
+      placeholder="What is this for?"
+      onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
+      onChange={(e) => { grow(e.currentTarget); props.onChange(e.target.value); }}
+    />
+  );
+}
+
 function MoneyInput(props: { value: number | null; disabled: boolean; onChange: (v: number | null) => void }) {
   const { value, disabled, onChange } = props;
   const [text, setText] = useState(value == null ? '' : usd(value));

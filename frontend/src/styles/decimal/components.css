@@ -523,6 +523,11 @@
 .dec .tbl-input { width: 100%; background: transparent; border: none; outline: none; font: inherit; color: inherit; padding: 2px 0; }
 .dec .tbl-input:focus { box-shadow: inset 0 -1.5px 0 var(--accent); }
 .dec .tbl-input.td-num { text-align: right; font-family: var(--font-mono); font-size: 12.5px; }
+/* A textarea standing in for a one-line input, so a long line description
+   wraps onto a second row instead of being cut off mid-word. It grows to fit
+   (JS sets the height), never scrolls itself, and never offers a resize grip
+   inside a table cell. */
+.dec .tbl-input-wrap { resize: none; overflow: hidden; line-height: 1.45; display: block; }
 .dec .line-totals { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; padding: 12px 14px 4px; }
 .dec .line-total-row { display: flex; gap: 18px; font-size: 13px; color: var(--text-muted); align-items: baseline; }
 .dec .line-total-row .lt-val { font-family: var(--font-mono); font-size: 12.5px; color: var(--text-primary); min-width: 110px; text-align: right; }
