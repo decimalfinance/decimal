@@ -187,6 +187,14 @@ export function BillDetailPage() {
           <button type="button" className="btn btn-ghost tb-back" onClick={() => navigate(`/organizations/${organizationId}/bills`)}>
             <Ico.chevLeft w={15} /> Bills
           </button>
+          {/* Same slot as the draft screen. A bill moving from draft into
+              approval should not move its own furniture around. */}
+          {billDraft.sourceLabel ? (
+            <span className="cell-source" style={{ marginLeft: 12 }}>
+              {billDraft.source === 'email' ? <Ico.mail w={15} /> : <Ico.upload w={15} />}
+              <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{billDraft.sourceLabel}</span>
+            </span>
+          ) : null}
         </div>
         <div className="tb-right">
           {viewer.name ? (
@@ -221,16 +229,7 @@ export function BillDetailPage() {
             <div style={{ fontSize: 13.5, color: 'var(--text-muted)', marginTop: 4 }}>
               {billDraft.vendor.name}{billDraft.lines[0]?.description ? ` · ${billDraft.lines[0].description}` : ''}
             </div>
-            {/* Who put this bill here. Every bill in the system was brought in
-                by a colleague, and which colleague is the first thing anybody
-                asks when a figure looks wrong — so it belongs beside the title,
-                not buried in a history panel. */}
-            {billDraft.sourceLabel ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--text-faint)', marginTop: 6 }}>
-                {billDraft.source === 'email' ? <Ico.mail w={13} /> : <Ico.upload w={13} />}
-                <span>{billDraft.sourceLabel}</span>
-              </div>
-            ) : null}
+
           </div>
           <div style={{ textAlign: 'right', flex: 'none' }}>
             <div className="mono" style={{ fontSize: 25, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--text-primary)' }}>
