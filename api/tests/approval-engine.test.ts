@@ -401,3 +401,163 @@ test('payment loop: invoice approval spawns the release run; release approval ha
   const final = await executeCommand({ taskId: open[1].id, actorId: open[1].person_id, command: { kind: 'approve' }, idempotencyKey: 'pl3' });
   assert.equal(final.macroState, 'approved', 'release run approved; execution handoff fired post-commit');
 });
+
+// ---- recall as a request an admin answers -----------------------------------
+//
+// Recall destroys approvals real people gave. These tests hold the shape that
+// makes that safe: the bill freezes the moment it is asked for (so no third
+// approver wastes a decision on it), a denial gives back exactly what was
+// paused, and only a grant costs anything.
+
+/** Give a fixture person a workspace identity with the named standing. */
+async function makeMember(personId: string, email: string, role: 'admin' | 'member'): Promise<void> {
+  const rows = await prisma.$queryRaw<{ user_id: string }[]>`
+    INSERT INTO users (email, display_name, status, updated_at)
+    VALUES (${email}, ${email}, 'active', now())
+    ON CONFLICT (email) DO UPDATE SET display_name = EXCLUDED.display_name
+    RETURNING user_id::text AS user_id`;
+  const userId = rows[0]!.user_id;
+  await prisma.$executeRaw`
+    INSERT INTO organization_memberships (organization_id, user_id, role, status, updated_at)
+    VALUES (${ORG}::uuid, ${userId}::uuid, ${role}, 'active', now())
+    ON CONFLICT (organization_id, user_id) DO UPDATE SET role = EXCLUDED.role`;
+  await prisma.$executeRaw`UPDATE approval.people SET user_id = ${userId}::uuid WHERE id = ${personId}::uuid`;
+}
+
+/** Submit $18.4k and get the buyer's approval on the board — 1 of 2 steps done. */
+async function halfApproved() {
+  const r = await submitApprovable(invoiceInput(18_400));
+  const buyerTask = (await planTasks(prisma, r.planId!)).find((t) => t.person_id === people.buyer)!;
+  await executeCommand({
+    taskId: buyerTask.id, actorId: people.buyer,
+    command: { kind: 'approve' }, idempotencyKey: `rc-${r.approvableId}`,
+  });
+  return r;
+}
+
+test('recall request freezes the bill on the spot, before anyone else can decide', async () => {
+  const { requestRecall } = await import('../src/approvals/recall.js');
+  const r = await halfApproved();
+  const before = await planTasks(prisma, r.planId!);
+  assert.equal(before.find((t) => t.person_id === people.opsHead)?.state, 'open', 'ops was next in line');
+
+  const req = await requestRecall({ approvableId: r.approvableId, actorId: people.dana, reason: 'wrong PO' });
+
+  assert.equal(req.macroState, 'on_hold');
+  assert.equal(req.pausedFrom, 'pending_approval');
+  const after = await planTasks(prisma, r.planId!);
+  assert.equal(after.find((t) => t.person_id === people.buyer)?.state, 'approved', 'the approval already given survives the freeze');
+  assert.ok(req.requestId);
+});
+
+test('a denied recall puts the bill back exactly where it stood, approvals intact', async () => {
+  const { requestRecall, decideRecall } = await import('../src/approvals/recall.js');
+  await makeMember(people.cfo, 'cfo-admin@t.local', 'admin');
+  const r = await halfApproved();
+  const req = await requestRecall({ approvableId: r.approvableId, actorId: people.dana, reason: 'mistaken' });
+
+  const decision = await decideRecall({ requestId: req.requestId, actorId: people.cfo, grant: false, note: 'amount is right' });
+
+  assert.equal(decision.state, 'denied');
+  assert.equal(decision.macroState, 'pending_approval', 'resumed, not recalled');
+  const tasks = await planTasks(prisma, r.planId!);
+  assert.equal(tasks.find((t) => t.person_id === people.buyer)?.state, 'approved', 'nothing was thrown away');
+  assert.equal(tasks.find((t) => t.person_id === people.opsHead)?.state, 'open', 'ops can carry on deciding');
+});
+
+test('a granted recall obsoletes the live chain and cancels the bill', async () => {
+  const { requestRecall, decideRecall } = await import('../src/approvals/recall.js');
+  await makeMember(people.cfo, 'cfo-admin@t.local', 'admin');
+  const r = await halfApproved();
+  const req = await requestRecall({ approvableId: r.approvableId, actorId: people.dana, reason: 'wrong vendor' });
+
+  const decision = await decideRecall({ requestId: req.requestId, actorId: people.cfo, grant: true });
+
+  assert.equal(decision.state, 'granted');
+  assert.equal(decision.macroState, 'cancelled');
+  const tasks = await planTasks(prisma, r.planId!);
+  assert.equal(tasks.find((t) => t.person_id === people.opsHead)?.state, 'obsolete', 'the open task is closed out');
+});
+
+test('a bill parked on a question returns to waiting on that question, not to the queue', async () => {
+  const { requestRecall, decideRecall } = await import('../src/approvals/recall.js');
+  await makeMember(people.cfo, 'cfo-admin@t.local', 'admin');
+  const r = await submitApprovable(invoiceInput(18_400));
+  const buyerTask = (await planTasks(prisma, r.planId!)).find((t) => t.person_id === people.buyer)!;
+  await executeCommand({
+    taskId: buyerTask.id, actorId: people.buyer,
+    command: { kind: 'request_info', question: 'which PO?', from: people.dana }, idempotencyKey: 'ri-1',
+  });
+
+  const req = await requestRecall({ approvableId: r.approvableId, actorId: people.dana, reason: 'let me just fix it' });
+  assert.equal(req.pausedFrom, 'returned_for_info', 'we remember what it was doing');
+
+  const decision = await decideRecall({ requestId: req.requestId, actorId: people.cfo, grant: false });
+  assert.equal(decision.macroState, 'returned_for_info', 'still owed an answer — not silently rejoined the queue');
+});
+
+test('only the submitter may ask, and only an owner or admin may decide', async () => {
+  const { requestRecall, decideRecall } = await import('../src/approvals/recall.js');
+  await makeMember(people.cfo, 'cfo-admin@t.local', 'admin');
+  await makeMember(people.opsHead, 'ops-member@t.local', 'member');
+  const r = await halfApproved();
+
+  await assert.rejects(
+    () => requestRecall({ approvableId: r.approvableId, actorId: people.buyer, reason: 'not mine to pull' }),
+    (e: ApprovalEngineError) => e.code === 'forbidden_role',
+  );
+
+  const req = await requestRecall({ approvableId: r.approvableId, actorId: people.dana, reason: 'mine' });
+  await assert.rejects(
+    () => decideRecall({ requestId: req.requestId, actorId: people.opsHead, grant: true }),
+    (e: ApprovalEngineError) => e.code === 'forbidden_role',
+    'a plain member cannot grant a recall',
+  );
+});
+
+test('one open request per bill, and a decision cannot be taken twice', async () => {
+  const { requestRecall, decideRecall } = await import('../src/approvals/recall.js');
+  await makeMember(people.cfo, 'cfo-admin@t.local', 'admin');
+  const r = await halfApproved();
+  const req = await requestRecall({ approvableId: r.approvableId, actorId: people.dana, reason: 'first' });
+
+  await assert.rejects(
+    () => requestRecall({ approvableId: r.approvableId, actorId: people.dana, reason: 'second' }),
+    'the partial unique index refuses a second open request',
+  );
+
+  await decideRecall({ requestId: req.requestId, actorId: people.cfo, grant: false });
+  await assert.rejects(
+    () => decideRecall({ requestId: req.requestId, actorId: people.cfo, grant: true }),
+    (e: ApprovalEngineError) => e.code === 'invalid_state',
+    'a denial cannot be quietly flipped to a grant',
+  );
+});
+
+test('an approved bill is past recalling — that is the admin send-back route', async () => {
+  const { requestRecall } = await import('../src/approvals/recall.js');
+  const r = await submitApprovable(invoiceInput(3_000));
+  const t = (await planTasks(prisma, r.planId!))[0];
+  const done = await executeCommand({ taskId: t.id, actorId: t.person_id, command: { kind: 'approve' }, idempotencyKey: 'ap-1' });
+  assert.equal(done.macroState, 'approved');
+
+  await assert.rejects(
+    () => requestRecall({ approvableId: r.approvableId, actorId: people.dana, reason: 'too late' }),
+    (e: ApprovalEngineError) => e.code === 'invalid_state',
+  );
+});
+
+test('the asker can take their own request back without troubling an admin', async () => {
+  const { requestRecall, withdrawRecall, openRecallRequest, recallHistory } = await import('../src/approvals/recall.js');
+  const r = await halfApproved();
+  const req = await requestRecall({ approvableId: r.approvableId, actorId: people.dana, reason: 'never mind' });
+  assert.ok(await openRecallRequest(r.approvableId), 'it is open while pending');
+
+  const back = await withdrawRecall({ requestId: req.requestId, actorId: people.dana });
+
+  assert.equal(back.macroState, 'pending_approval');
+  assert.equal(await openRecallRequest(r.approvableId), null, 'no longer open');
+  const history = await recallHistory(r.approvableId);
+  assert.equal(history[0]?.state, 'withdrawn', 'but it stays in the record');
+  assert.equal(history[0]?.reason, 'never mind');
+});

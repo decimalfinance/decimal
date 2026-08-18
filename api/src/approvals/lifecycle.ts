@@ -273,7 +273,7 @@ async function settleStep(tx: Tx, organizationId: string, approvableId: string, 
   await mirrorOooSubstitutes(tx, approvableId);
 }
 
-async function closeLiveTasks(tx: Tx, planId: string, to: string): Promise<void> {
+export async function closeLiveTasks(tx: Tx, planId: string, to: string): Promise<void> {
   const tasks = await planTasks(tx, planId);
   for (const t of tasks.filter((t) => LIVE_STATES.has(t.state))) await setTaskState(tx, t.id, to);
 }
