@@ -18,7 +18,7 @@ const execFileAsync = promisify(execFile);
 
 // Version of the matcher; stamped wherever refinement ran so the review path
 // knows to re-run after matcher improvements.
-export const PROVENANCE_VERSION = 3; // v3: vendor name/email + per-part remit-to anchors
+export const PROVENANCE_VERSION = 4; // v4: negative figures (credit notes) anchor to the page
 
 export type TextWord = { text: string; x0: number; y0: number; x1: number; y1: number }; // 0-1 fractions, top-left origin
 export type TextPage = { words: TextWord[] };
@@ -142,21 +142,38 @@ export function findTextMatches(pages: TextPage[], variants: string[]): Box[] {
 const isMoneyToken = (t: string) => /^[$€£¥]$/.test(t) || /^[($€£¥-]{0,2}[\d,]+(\.\d+)?\)?$/.test(t);
 
 export function findAmountMatches(pages: TextPage[], value: number): Box[] {
-  const out: Box[] = [];
+  // Exact figures first; same figure with the opposite sign as a fallback.
+  //
+  // A credit note prints "-$240.00" and the extraction reports 240, so the
+  // signed comparison was off by 480 and found nothing at all — leaving the
+  // model's guessed box in place, which pointed at blank paper halfway down
+  // the page. The number on the document IS the number in the field; the sign
+  // is a disagreement about whether it is owed or owing, and losing the
+  // highlight is the wrong way to express that.
+  //
+  // Kept as a fallback rather than matching magnitudes outright, so a document
+  // carrying both +240 and -240 still anchors to the one that actually agrees.
+  const exact: Box[] = [];
+  const sameMagnitude: Box[] = [];
   pages.forEach((page, pageIndex) => {
     for (let i = 0; i < page.words.length; i += 1) {
       for (let len = 1; len <= 2 && i + len <= page.words.length; len += 1) {
         const words = page.words.slice(i, i + len);
         if (!words.every((w) => isMoneyToken(w.text))) break;
         const n = numOf(words.map((w) => w.text).join(''));
-        if (n != null && Math.abs(n - value) < 0.005) {
-          out.push(unionBox(pageIndex + 1, words));
+        if (n == null) continue;
+        if (Math.abs(n - value) < 0.005) {
+          exact.push(unionBox(pageIndex + 1, words));
+          break;
+        }
+        if (Math.abs(Math.abs(n) - Math.abs(value)) < 0.005) {
+          sameMagnitude.push(unionBox(pageIndex + 1, words));
           break;
         }
       }
     }
   });
-  return dedupeBoxes(out);
+  return dedupeBoxes(exact.length > 0 ? exact : sameMagnitude);
 }
 
 function unionBox(page: number, words: TextWord[]): Box {

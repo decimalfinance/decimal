@@ -160,3 +160,48 @@ function fakeInvoice(overrides: Record<string, unknown>) {
     ...overrides,
   } as Parameters<typeof refineInvoiceSources>[0];
 }
+
+// --- a credit note prints its figures negative -------------------------------
+//
+// The document says "-$240.00"; the extraction reports 240. The signed
+// comparison was off by 480 and matched nothing, so the model's guessed box
+// survived and the highlight landed on blank paper halfway down the page.
+
+const CREDIT_PAGE: TextPage = {
+  words: [
+    word('Credit', 60, 200, 110, 212),
+    word('-$240.00', 880, 200, 950, 212),   // the line item
+    word('Total', 780, 280, 820, 292),
+    word('credit', 825, 280, 865, 292),
+    word('-$240.00', 870, 280, 950, 292),   // the total
+  ],
+};
+
+test('a negative figure on the page still anchors a positive extracted amount', () => {
+  const hits = findAmountMatches([CREDIT_PAGE], 240);
+  assert.equal(hits.length, 2, 'both printings of -$240.00 are found');
+  // Sorted by position: the line item sits above the total.
+  const ys = hits.map((h) => h.y0).sort((a, b) => a - b);
+  assert.ok(Math.abs(ys[0]! - 0.2) < 0.01, 'the line item row');
+  assert.ok(Math.abs(ys[1]! - 0.28) < 0.01, 'the total row');
+});
+
+test('the sign is still preferred when the document agrees with it', () => {
+  const mixed: TextPage = {
+    words: [
+      word('Charge', 60, 100, 120, 112),
+      word('$240.00', 880, 100, 950, 112),
+      word('Credit', 60, 300, 110, 312),
+      word('-$240.00', 880, 300, 950, 312),
+    ],
+  };
+  // Asking for -240 must not drift onto the positive charge just because the
+  // magnitudes agree — the fallback is only for when nothing matches exactly.
+  const negative = findAmountMatches([mixed], -240);
+  assert.equal(negative.length, 1, 'only the figure that actually reads -240');
+  assert.ok(Math.abs(negative[0]!.y0 - 0.3) < 0.01);
+
+  const positive = findAmountMatches([mixed], 240);
+  assert.equal(positive.length, 1, 'and only the one that reads 240');
+  assert.ok(Math.abs(positive[0]!.y0 - 0.1) < 0.01);
+});
