@@ -2336,3 +2336,61 @@ test('a bill that has left draft cannot be saved over', async () => {
   });
   assert.notEqual(res.status, 200, 'a submitted bill is settled — saving over it would rewrite what approvers saw');
 });
+
+// --- several documents in one go ---------------------------------------------
+//
+// The dialog took one file, so six invoices meant six trips through
+// open-drag-upload-wait-navigate-back. Nothing in intake required that — each
+// upload stores one document and returns, with reading behind it. These guard
+// the assumptions the multi-select rests on: N files make N bills, and the same
+// bytes twice still make one.
+
+test('uploading several documents in a row produces one bill each', async () => {
+  const { orgId, owner } = await makeOrg();
+
+  const ids: string[] = [];
+  for (const name of ['b1.pdf', 'b2.pdf', 'b3.pdf']) {
+    bankInvoice({ vendor: `Stack Co ${name}`, amount: 1000, invoiceNo: `ST-${name}` });
+    const res = await post(`/organizations/${orgId}/invoices/upload-async`, {
+      filename: name,
+      mimeType: 'application/pdf',
+      dataBase64: Buffer.from(`%PDF unique ${name} ${crypto.randomUUID()}`).toString('base64'),
+    }, owner.token);
+    assert.ok(res.invoiceDocumentId, `${name} stored`);
+    assert.equal(res.reused, false, `${name} is its own document`);
+    ids.push(res.invoiceDocumentId);
+    // Drain before the next one: the extraction stub is global and reading runs
+    // behind the upload, so leaving three in flight would have all three read
+    // with whichever stub happened to be set last. A race in the test, not the
+    // product — but a test that passes only sometimes is worse than none.
+    await drainAsyncIntake();
+  }
+
+  assert.equal(new Set(ids).size, 3, 'three distinct documents, not one reused three times');
+
+  const workbench = await get(`/organizations/${orgId}/bills/workbench`, owner.token);
+  assert.equal(workbench.bills.length, 3, 'three bills waiting, one per document');
+});
+
+test('the same bytes twice is one bill, however it was picked', async () => {
+  const { orgId, owner } = await makeOrg();
+  const bytes = Buffer.from(`%PDF identical ${crypto.randomUUID()}`).toString('base64');
+
+  bankInvoice({ vendor: 'Twice Picked Co', amount: 1000, invoiceNo: 'TP-1' });
+  const first = await post(`/organizations/${orgId}/invoices/upload-async`, {
+    filename: 'b4.pdf', mimeType: 'application/pdf', dataBase64: bytes,
+  }, owner.token);
+  assert.equal(first.reused, false);
+
+  // Same document, different filename — the picker's name check would miss it,
+  // which is exactly why the server hashes the bytes.
+  const again = await post(`/organizations/${orgId}/invoices/upload-async`, {
+    filename: 'b4-copy.pdf', mimeType: 'application/pdf', dataBase64: bytes,
+  }, owner.token);
+  assert.equal(again.reused, true, 'recognised as one we already hold');
+  assert.equal(again.invoiceDocumentId, first.invoiceDocumentId, 'and it is the same document');
+
+  await drainAsyncIntake();
+  const workbench = await get(`/organizations/${orgId}/bills/workbench`, owner.token);
+  assert.equal(workbench.bills.length, 1, 'one bill, not two');
+});

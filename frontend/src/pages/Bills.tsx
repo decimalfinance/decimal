@@ -114,6 +114,20 @@ export function BillsPage() {
 
   // The moment the file is stored, the operator is looking at it — the draft
   // screen opens immediately and fills in as the document is read.
+  // Several at once: they are all on this list now, and opening one of six
+  // would be an odd thing to do with the other five. Reading runs behind the
+  // upload, so the rows fill in as the extractions land.
+  const onUploadedMany = (uploaded: number, failed: number) => {
+    setUploadOpen(false);
+    void queryClient.invalidateQueries({ queryKey: ['bills-workbench', organizationId] });
+    setTab('draft');
+    if (failed > 0) {
+      toast.error(`${failed} of ${uploaded + failed} could not be uploaded`, `${uploaded} went through and ${uploaded === 1 ? 'is' : 'are'} being read.`);
+    } else {
+      toast.success(`${uploaded} bills uploaded`, 'Reading them now — the rows fill in as each one is read.');
+    }
+  };
+
   const onUploaded = (invoiceDocumentId: string, reused: boolean) => {
     setUploadOpen(false);
     void queryClient.invalidateQueries({ queryKey: ['bills-workbench', organizationId] });
@@ -327,6 +341,7 @@ export function BillsPage() {
           organizationId={organizationId}
           onClose={() => setUploadOpen(false)}
           onSuccess={onUploaded}
+          onManySuccess={onUploadedMany}
         />
       ) : null}
 
@@ -488,30 +503,91 @@ function ForwardByEmailDialog(props: { organizationId: string; onClose: () => vo
   );
 }
 
-function UploadBillDialog(props: { organizationId: string; onClose: () => void; onSuccess: (invoiceDocumentId: string, reused: boolean) => void }) {
-  const [file, setFile] = useState<File | null>(null);
+/**
+ * Bills arrive in a stack, not one at a time.
+ *
+ * The dialog took a single file, so putting six invoices in meant six trips
+ * through open-drag-upload-wait-navigate-back. Nothing about the intake path
+ * required that: uploadAsync stores one document and returns immediately, with
+ * extraction running behind it, so N files is N calls and the reading overlaps
+ * with the next upload.
+ *
+ * Sequential rather than parallel. Each file is base64 in memory and up to
+ * 10MB, and six at once is six copies plus six extractions competing for the
+ * same model — slower in practice, and a queue that reports "3 of 6" is easier
+ * to trust than six spinners.
+ */
+type UploadState = 'waiting' | 'uploading' | 'done' | 'failed';
+
+function UploadBillDialog(props: {
+  organizationId: string;
+  onClose: () => void;
+  /** One file: open it, as before. */
+  onSuccess: (invoiceDocumentId: string, reused: boolean) => void;
+  /** Several: stay on the list, which is where they now all are. */
+  onManySuccess: (uploaded: number, failed: number) => void;
+}) {
+  const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<Record<string, UploadState>>({});
+
+  const key = (f: File) => `${f.name}:${f.size}`;
+  const add = (incoming: FileList | null) => {
+    if (!incoming) return;
+    const next = [...incoming];
+    setFiles((prev) => {
+      const seen = new Set(prev.map(key));
+      // The same file picked twice is a slip, not a request for two bills.
+      return [...prev, ...next.filter((f) => !seen.has(key(f)))];
+    });
+  };
 
   const start = async () => {
-    if (!file) return;
+    if (files.length === 0) return;
     setRunning(true);
     setError(null);
-    try {
-      const dataBase64 = await fileToBase64(file);
-      const { invoiceDocumentId, reused } = await invoiceIntakeApi.uploadAsync(props.organizationId, {
-        filename: file.name,
-        mimeType: file.type || 'application/pdf',
-        dataBase64,
-      });
-      props.onSuccess(invoiceDocumentId, reused);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed.');
-    } finally {
-      setRunning(false);
+    let uploaded = 0;
+    let failed = 0;
+    let lastId: string | null = null;
+    let lastReused = false;
+
+    for (const file of files) {
+      setStatus((p) => ({ ...p, [key(file)]: 'uploading' }));
+      try {
+        const dataBase64 = await fileToBase64(file);
+        const res = await invoiceIntakeApi.uploadAsync(props.organizationId, {
+          filename: file.name,
+          mimeType: file.type || 'application/pdf',
+          dataBase64,
+        });
+        lastId = res.invoiceDocumentId;
+        lastReused = res.reused;
+        uploaded += 1;
+        setStatus((p) => ({ ...p, [key(file)]: 'done' }));
+      } catch {
+        // One bad file must not strand the other five. It is marked and the
+        // queue carries on; the count at the end says what happened.
+        failed += 1;
+        setStatus((p) => ({ ...p, [key(file)]: 'failed' }));
+      }
     }
+
+    setRunning(false);
+    if (failed > 0 && uploaded === 0) {
+      setError(files.length === 1 ? 'Upload failed.' : 'None of those could be uploaded.');
+      return;
+    }
+    if (uploaded === 1 && failed === 0 && lastId) {
+      props.onSuccess(lastId, lastReused);
+      return;
+    }
+    props.onManySuccess(uploaded, failed);
   };
+
+  const many = files.length > 1;
+  const doneCount = Object.values(status).filter((v) => v === 'done').length;
 
   return (
     <div
@@ -524,8 +600,12 @@ function UploadBillDialog(props: { organizationId: string; onClose: () => void; 
       <div className="dialog" role="dialog" aria-modal="true" style={{ maxWidth: 520 }}>
         <div className="dialog-head">
           <div>
-            <h2>Upload a bill</h2>
-            <p>{running ? 'Reading the document…' : 'PDF or image. We read it; you confirm what we read.'}</p>
+            <h2>{many ? `Upload ${files.length} bills` : 'Upload a bill'}</h2>
+            <p>
+              {running
+                ? many ? `Uploading ${doneCount} of ${files.length}…` : 'Reading the document…'
+                : 'PDFs or images. We read them; you confirm what we read.'}
+            </p>
           </div>
           <button type="button" className="drawer-x" onClick={props.onClose} disabled={running} aria-label="Close">×</button>
         </div>
@@ -538,8 +618,7 @@ function UploadBillDialog(props: { organizationId: string; onClose: () => void; 
             onDrop={(e) => {
               e.preventDefault();
               setIsDragging(false);
-              const dropped = e.dataTransfer?.files?.[0];
-              if (dropped) setFile(dropped);
+              add(e.dataTransfer?.files ?? null);
             }}
             onClick={() => document.getElementById('dec-bill-upload-input')?.click()}
             role="button"
@@ -549,29 +628,62 @@ function UploadBillDialog(props: { organizationId: string; onClose: () => void; 
             <input
               id="dec-bill-upload-input"
               type="file"
+              multiple
               accept=".pdf,application/pdf,image/*"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              onChange={(e) => { add(e.target.files); e.currentTarget.value = ''; }}
               style={{ display: 'none' }}
             />
             <Ico.upload w={34} />
-            {file ? (
+            {files.length > 0 ? (
               <>
-                <span className="dz-main">{file.name}</span>
-                <span className="dz-sub">{(file.size / 1024).toFixed(0)} KB · click to swap</span>
+                <span className="dz-main">{files.length === 1 ? files[0]!.name : `${files.length} documents`}</span>
+                <span className="dz-sub">
+                  {(files.reduce((n, f) => n + f.size, 0) / 1024).toFixed(0)} KB total · click to add more
+                </span>
               </>
             ) : (
               <>
-                <span className="dz-main">Drag a PDF here, or click to browse</span>
-                <span className="dz-sub">Up to 10 MB · PDF or image</span>
+                <span className="dz-main">Drag PDFs here, or click to browse</span>
+                <span className="dz-sub">Up to 10 MB each · PDF or image · several at once</span>
               </>
             )}
           </div>
+
+          {files.length > 0 ? (
+            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {files.map((f) => {
+                const st = status[key(f)] ?? 'waiting';
+                return (
+                  <div key={key(f)} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 }}>
+                      {f.name}
+                    </span>
+                    {st === 'done' ? (
+                      <span className="pill pill-min pill-success"><span className="dot" />uploaded</span>
+                    ) : st === 'failed' ? (
+                      <span className="pill pill-min pill-danger"><span className="dot" />failed</span>
+                    ) : st === 'uploading' ? (
+                      <span className="pill pill-min pill-info"><span className="dot" />uploading</span>
+                    ) : (
+                      <button type="button" className="btn btn-ghost btn-sm" disabled={running}
+                        onClick={() => setFiles((prev) => prev.filter((x) => key(x) !== key(f)))}>
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+
           {error ? <p className="input-error" style={{ marginTop: 10 }}>{error}</p> : null}
         </div>
         <div className="dialog-foot">
           <button type="button" className="btn btn-secondary" onClick={props.onClose} disabled={running}>Cancel</button>
-          <button type="button" className="btn btn-primary" onClick={start} disabled={!file || running}>
-            {running ? 'Uploading…' : 'Upload'}
+          <button type="button" className="btn btn-primary" onClick={start} disabled={files.length === 0 || running}>
+            {running
+              ? many ? `Uploading ${doneCount} of ${files.length}…` : 'Uploading…'
+              : many ? `Upload ${files.length} bills` : 'Upload'}
           </button>
         </div>
       </div>
