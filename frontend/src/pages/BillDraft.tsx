@@ -356,6 +356,7 @@ function DraftScreen(props: {
   const [vendorEmail, setVendorEmail] = useState(billDraft.vendor.email ?? '');
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [notABillOpen, setNotABillOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -437,13 +438,10 @@ function DraftScreen(props: {
   // this" AFTER the click, which is the same dead end the approve path had.
   const canConfirm = canEditBills && !readOnly && blockingFlags.length === 0 && !submitting && !tier1Gap;
 
-  // --- commit ---------------------------------------------------------------
-  const confirm = useCallback(async () => {
-    if (!canConfirm) return;
-    setSubmitting(true);
-    setConfirmError(null);
-    try {
-      const body: ConfirmBillBody = {
+  // What is on the screen right now, in the shape both confirm and save send.
+  // One builder, so a saved draft and a confirmed one can never disagree about
+  // what "exactly as shown" meant.
+  const currentBody = useCallback((): ConfirmBillBody => ({
         fields: {
           vendorName: vendorName.trim() || null,
           vendorEmail: vendorEmail.trim() || null,
@@ -475,8 +473,31 @@ function DraftScreen(props: {
         confirmedFieldKeys: Object.entries(fields)
           .filter(([, f]) => f.state === 'confirmed')
           .map(([key]) => key),
-        noteForApprovers: note.trim() || null,
-      };
+    noteForApprovers: note.trim() || null,
+  }), [fields, lines, documentTotal, taxNumber, note, vendorName, vendorEmail]);
+
+  // --- save: keep it, send nothing ------------------------------------------
+  const saveForLater = useCallback(async () => {
+    if (!canEditBills || readOnly || saving) return;
+    setSaving(true);
+    try {
+      await billsApi.saveDraft(organizationId, billDraft.paymentOrderId, currentBody());
+      toast.success('Saved', 'Your changes are kept — this bill has not been sent for approval.');
+      onBack();
+    } catch (err) {
+      toast.error('Could not save', err instanceof Error ? err.message : 'Try again.');
+    } finally {
+      setSaving(false);
+    }
+  }, [canEditBills, readOnly, saving, organizationId, billDraft.paymentOrderId, currentBody, toast, onBack]);
+
+  // --- commit ---------------------------------------------------------------
+  const confirm = useCallback(async () => {
+    if (!canConfirm) return;
+    setSubmitting(true);
+    setConfirmError(null);
+    try {
+      const body = currentBody();
       await billsApi.confirm(organizationId, billDraft.paymentOrderId, body);
       toast.success('Sent for approval', 'Recorded exactly as shown on this screen.');
       onDone();
@@ -489,7 +510,7 @@ function DraftScreen(props: {
     } finally {
       setSubmitting(false);
     }
-  }, [canConfirm, fields, lines, documentTotal, taxNumber, note, vendorName, vendorEmail, organizationId, billDraft.paymentOrderId, toast, onDone]);
+  }, [canConfirm, currentBody, organizationId, billDraft.paymentOrderId, toast, onDone]);
 
   // ⌘↵ confirms.
   useEffect(() => {
@@ -1119,7 +1140,14 @@ function DraftScreen(props: {
               : tier1Gap ?? 'Recorded with exactly what you see on this screen.'}
           </span>
           <span className="commit-spacer" />
-          <button type="button" className="btn btn-secondary" onClick={onBack}>Save for later</button>
+          {/* This button has said "Save for later" since the screen was built
+              and only ever called onBack — it navigated away and kept nothing,
+              so a clerk part-way through a bill lost every keystroke. It saves
+              now. */}
+          <button type="button" className="btn btn-secondary" disabled={saving || !canEditBills}
+            onClick={() => void saveForLater()}>
+            {saving ? 'Saving…' : 'Save for later'}
+          </button>
           <button type="button" className="btn btn-primary" disabled={!canConfirm} onClick={() => setConfirmOpen(true)}>
             {submitting ? 'Sending…' : 'Confirm & send for approval'}
           </button>

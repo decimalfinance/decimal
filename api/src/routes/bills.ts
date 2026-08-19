@@ -103,6 +103,29 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/confirm',
   res.json(result);
 }));
 
+// Keep what has been typed, without sending the bill anywhere.
+//
+// Confirm was the only way to persist a draft, and confirm submits it for
+// approval — so a clerk part-way through a bill had to finish it or lose the
+// work. Same body as confirm, none of its gates: a half-finished bill is the
+// point, and a flagged one is exactly what somebody is part-way through fixing.
+billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/save', asyncRoute(async (req, res) => {
+  const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
+  const input = confirmSchema.parse(req.body);
+  const { saveBillDraft } = await import('../payments/bills.js');
+  res.json(await saveBillDraft({
+    organizationId,
+    paymentOrderId,
+    actorUserId: req.auth!.userId,
+    fields: input.fields,
+    lines: input.lines,
+    confirmedFieldKeys: input.confirmedFieldKeys,
+    noteForApprovers: input.noteForApprovers ?? null,
+  }));
+}));
+
 // Clear a duplicate flag — an admin asserts the bill is genuinely new. The
 // override is itself the audit record (policy_overridden event), never a
 // silent bypass. Admin-tier only: overriding a policy gate is an escalation.

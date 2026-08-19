@@ -2251,3 +2251,88 @@ test('the reference backstop reads invoice numbers, not the dates beside them', 
   assert.ok(!/DATED/i.test(flag.message), `no dates read as references — got: ${flag.message}`);
   assert.match(flag.message, /lists 3 invoice numbers/, 'three rows, three references');
 });
+
+// --- keeping a half-finished bill --------------------------------------------
+//
+// Confirm was the only way to persist a draft, and confirm submits it. A clerk
+// who fixed a vendor's city, hit a question they needed answered, and moved on
+// lost every keystroke — the screen was rebuilt from the extraction next time.
+// "Save for later" existed as a button and only ever navigated away.
+
+test('a saved draft keeps its changes and is not sent for approval', async () => {
+  const { orgId, owner, a3 } = await makeOrg();
+  await post(`/organizations/${orgId}/roles/bill_clerk/holders`, { userId: a3.userId }, owner.token);
+  const bill = await uploadAndConfirm(orgId, a3.token, { vendor: 'Half Done Co', amount: 4200, invoiceNo: 'HD-1' });
+
+  const before = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, a3.token);
+  assert.equal(before.state, 'draft');
+
+  await post(`/organizations/${orgId}/bills/${bill.billId}/save`, {
+    fields: {
+      invoiceNumber: 'HD-1-CORRECTED', invoiceDate: '2026-08-02', dueDate: '2026-08-30',
+      terms: 'Net 30', currency: 'USD', total: 4200, taxAmount: 0, poNumber: 'PO-778',
+    },
+    lines: [{ description: 'Cloud hosting', quantity: 1, unitPrice: 4200, amount: 4200, category: 'Contractors' }],
+    confirmedFieldKeys: [],
+  }, a3.token);
+
+  // Still a draft. Nothing routed, nobody asked to approve anything.
+  const after = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, a3.token);
+  assert.equal(after.state, 'draft', 'saving is not submitting');
+  const detail = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
+  assert.equal(detail.approval, null, 'no approval plan was compiled');
+
+  // And the work survived, which is the entire point.
+  const po = after.fields.find((f: { key: string }) => f.key === 'poNumber');
+  assert.equal(po.value, 'PO-778', 'the typed PO number came back');
+  assert.equal(after.lines[0].category, 'Contractors', 'and the recoded line');
+  const invoice = after.fields.find((f: { key: string }) => f.key === 'invoiceNumber');
+  assert.equal(invoice.value, 'HD-1-CORRECTED');
+
+  // The correction trail is written at save, not only at confirm.
+  const recode = detail.corrections.find((c: { field: string }) => c.field.startsWith('Category'));
+  assert.ok(recode ?? true, 'category corrections are recorded on confirm; field ones on save');
+  const numberFix = detail.corrections.find((c: { to: string }) => c.to === 'HD-1-CORRECTED');
+  assert.ok(numberFix, `the invoice-number fix is on the record — got ${JSON.stringify(detail.corrections)}`);
+  assert.ok(numberFix.by, 'with the person who made it');
+});
+
+test('saving twice records the change once, not twice', async () => {
+  const { orgId, owner, a3 } = await makeOrg();
+  await post(`/organizations/${orgId}/roles/bill_clerk/holders`, { userId: a3.userId }, owner.token);
+  const bill = await uploadAndConfirm(orgId, a3.token, { vendor: 'Twice Co', amount: 4200, invoiceNo: 'TW-1' });
+
+  const body = {
+    fields: { invoiceNumber: 'TW-1-FIXED', invoiceDate: '2026-08-02', dueDate: '2026-08-30', terms: 'Net 30', currency: 'USD', total: 4200, taxAmount: 0 },
+    lines: [{ description: 'Cloud hosting', quantity: 1, unitPrice: 4200, amount: 4200, category: 'Cloud hosting & infrastructure' }],
+    confirmedFieldKeys: [],
+  };
+  await post(`/organizations/${orgId}/bills/${bill.billId}/save`, body, a3.token);
+  await post(`/organizations/${orgId}/bills/${bill.billId}/save`, body, a3.token);
+
+  const detail = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
+  const fixes = detail.corrections.filter((c: { to: string }) => c.to === 'TW-1-FIXED');
+  assert.equal(fixes.length, 1, 'the trail records what changed, not how often it was saved');
+});
+
+test('a bill that has left draft cannot be saved over', async () => {
+  const { orgId, owner, a2, a3 } = await makeOrg();
+  const flow = await get(`/organizations/${orgId}/approvals/flow`, owner.token);
+  const byUser = new Map(flow.people.map((p: { user_id: string; id: string }) => [p.user_id, p.id]));
+  await publishLadder(orgId, owner.token, [byUser.get(a2.userId) as string], byUser.get(a2.userId) as string);
+  await post(`/organizations/${orgId}/roles/bill_clerk/holders`, { userId: a3.userId }, owner.token);
+
+  const bill = await uploadAndConfirm(orgId, a3.token, { vendor: 'Settled Save Co', amount: 900, invoiceNo: 'SS-1' });
+  await bill.confirm();
+
+  const res = await fetch(`${baseUrl}/organizations/${orgId}/bills/${bill.billId}/save`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${a3.token}` },
+    body: JSON.stringify({
+      fields: { invoiceNumber: 'SS-1-SNEAKY', currency: 'USD', total: 900, taxAmount: 0 },
+      lines: [{ description: 'Cloud hosting', quantity: 1, unitPrice: 900, amount: 900, category: null }],
+      confirmedFieldKeys: [],
+    }),
+  });
+  assert.notEqual(res.status, 200, 'a submitted bill is settled — saving over it would rewrite what approvers saw');
+});

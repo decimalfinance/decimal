@@ -675,12 +675,21 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
 // WA 98109"); the draft screen wants it in four boxes. Anything this can't
 // confidently split stays whole in `street` — showing the address in the wrong
 // box is recoverable, showing "Not on document" is not.
-function splitPostalAddress(address: string | null): {
+export function splitPostalAddress(address: string | null): {
   street: string | null; city: string | null; state: string | null; zip: string | null;
 } {
   const empty = { street: null, city: null, state: null, zip: null };
   if (!address) return empty;
-  const parts = address.split(',').map((p) => p.trim()).filter(Boolean);
+  // Letterheads separate address parts typographically as often as they use a
+  // comma: "500 Howard St · San Francisco, CA 94105". Splitting on commas alone
+  // left the middle dot inside the street, so the street read "500 Howard St ·
+  // San Francisco" and the city read Not on document — a wrong box AND an empty
+  // one, on two of the six B-series invoices.
+  const parts = address
+    .replace(/[·•|]/g, ',')
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean);
   if (parts.length === 0) return empty;
   if (parts.length === 1) return { ...empty, street: parts[0]! };
 
@@ -1221,6 +1230,50 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
 // Confirm & send for approval — the one commit (spec §6)
 // -----------------------------------------------------------------------------
 
+/**
+ * Fields a person changed from what the screen first showed them.
+ *
+ * Shared by confirm and by save, so a correction made while a bill is still
+ * being worked reads the same as one made at the moment of confirming, and
+ * saving twice does not record the same change twice.
+ */
+export function billFieldCorrections(
+  extracted: Record<string, unknown>,
+  fields: Record<string, unknown>,
+  /**
+   * Whoever made the change. Confirm used to leave this off and let the screen
+   * fall back to the confirmer, which was close enough while confirming was the
+   * only way to record anything. A saved draft has no confirmer, so the trail
+   * read "changed by nobody" — and attributing each correction to the person
+   * who actually made it is the more honest answer for both paths anyway.
+   */
+  byUserId?: string | null,
+): Array<{ field: string; readValue: unknown; correctedValue: unknown; byUserId?: string | null }> {
+  const readValues: Record<string, unknown> = {
+    vendorName: str(extracted.vendorName),
+    vendorEmail: str(extracted.vendorEmail),
+    invoiceNumber: str(extracted.invoiceNumber),
+    invoiceDate: str(extracted.invoiceDate),
+    dueDate: str(extracted.dueDate),
+    terms: str(extracted.terms),
+    poNumber: str(extracted.poNumber),
+    discount: str(extracted.earlyPayDiscount),
+    currency: str(extracted.currency)?.toUpperCase() ?? 'USD',
+    total: num(extracted.amount),
+    // The draft screen renders 0 when the document carries no tax line.
+    taxAmount: num(extracted.taxAmount) ?? 0,
+  };
+  const out: Array<{ field: string; readValue: unknown; correctedValue: unknown; byUserId?: string | null }> = [];
+  for (const [key, readValue] of Object.entries(readValues)) {
+    if (!(key in fields)) continue;
+    const corrected = (fields as Record<string, unknown>)[key] ?? null;
+    if (corrected !== (readValue ?? null)) {
+      out.push({ field: key, readValue: readValue ?? null, correctedValue: corrected, ...(byUserId ? { byUserId } : {}) });
+    }
+  }
+  return out;
+}
+
 export type SubmitBillInput = {
   organizationId: string;
   paymentOrderId: string;
@@ -1290,27 +1343,7 @@ export async function submitBillForApproval(input: SubmitBillInput) {
   // Currency already did the right thing (?? 'USD' below, matching the form's
   // default). Every value here must line up with what the screen renders.
   const corrections: Array<{ field: string; readValue: unknown; correctedValue: unknown }> = [];
-  const readValues: Record<string, unknown> = {
-    vendorName: str(extracted.vendorName),
-    vendorEmail: str(extracted.vendorEmail),
-    invoiceNumber: str(extracted.invoiceNumber),
-    invoiceDate: str(extracted.invoiceDate),
-    dueDate: str(extracted.dueDate),
-    terms: str(extracted.terms),
-    poNumber: str(extracted.poNumber),
-    discount: str(extracted.earlyPayDiscount),
-    currency: str(extracted.currency)?.toUpperCase() ?? 'USD',
-    total: num(extracted.amount),
-    // The draft screen renders 0 when the document carries no tax line.
-    taxAmount: num(extracted.taxAmount) ?? 0,
-  };
-  for (const [key, readValue] of Object.entries(readValues)) {
-    if (!(key in input.fields)) continue;
-    const corrected = (input.fields as Record<string, unknown>)[key] ?? null;
-    if (corrected !== (readValue ?? null)) {
-      corrections.push({ field: key, readValue: readValue ?? null, correctedValue: corrected });
-    }
-  }
+  corrections.push(...billFieldCorrections(extracted, input.fields, input.actorUserId));
 
   // A category the operator changed is a correction, and belongs in the trail
   // beside the others.
@@ -2928,4 +2961,101 @@ export async function getApprovalsInbox(organizationId: string, viewerUserId: st
     questionsForYou,
     summary: { flagCount, cleanCount, totalWaitingUsd, questionCount: questionsForYou.length },
   };
+}
+
+// -----------------------------------------------------------------------------
+// Save the draft without sending it anywhere
+// -----------------------------------------------------------------------------
+
+/**
+ * Keep what has been typed so far, and nothing else.
+ *
+ * Confirm was the only way to persist a draft, and confirm submits it for
+ * approval. So a bill clerk who corrected a vendor's city, noticed the invoice
+ * number needed checking with a colleague, and moved to another bill lost every
+ * keystroke — the screen was rebuilt from the extraction on their return. The
+ * expectation was that a bill is finished in one sitting, which is not how AP
+ * is worked: several bills sit half-done while questions come back.
+ *
+ * Deliberately none of confirm's ceremony. No tier-1 completeness gate, because
+ * a half-finished bill is exactly what this is for. No flag check, because a
+ * blocked bill is precisely the one somebody is part-way through fixing. No
+ * routing, no submitted event, no engine. It writes down what is on the screen.
+ */
+export async function saveBillDraft(input: {
+  organizationId: string;
+  paymentOrderId: string;
+  actorUserId: string;
+  fields: SubmitBillInput['fields'];
+  lines: SubmitBillInput['lines'];
+  confirmedFieldKeys?: string[];
+  noteForApprovers?: string | null;
+}): Promise<{ savedAt: string }> {
+  const order = await prisma.paymentOrder.findFirst({
+    where: { organizationId: input.organizationId, paymentOrderId: input.paymentOrderId },
+    select: {
+      paymentOrderId: true, state: true, invoiceNumber: true, dueAt: true,
+      amountRaw: true, metadataJson: true,
+      transferRequests: { select: { transferRequestId: true }, take: 1 },
+    },
+  });
+  if (!order) throw new Error('Bill not found');
+  if (order.state !== 'draft') {
+    throw new Error(`This bill is ${order.state} — its details are settled.`);
+  }
+
+  const metadata = isRecord(order.metadataJson) ? order.metadataJson : {};
+  const agent = isRecord(metadata.agent) ? metadata.agent : {};
+  const extracted = agent && isRecord(agent.extracted) ? agent.extracted : {};
+  const previous = isRecord(metadata.verification) ? metadata.verification : {};
+
+  // The same trail confirm keeps, computed against the same baseline, so a
+  // correction made today still reads as a correction when the bill is
+  // confirmed next week. Recomputed rather than appended — saving twice must
+  // not record the same change twice.
+  const corrections = billFieldCorrections(extracted, input.fields, input.actorUserId);
+
+  const savedAt = new Date().toISOString();
+  const verification = {
+    ...previous,
+    fields: input.fields,
+    lines: input.lines,
+    confirmedFieldKeys: input.confirmedFieldKeys ?? [],
+    corrections,
+    noteForApprovers: str(input.noteForApprovers ?? null),
+    savedByUserId: input.actorUserId,
+    savedAt,
+  };
+
+  const total = input.fields.total;
+  const savedAmountRaw = typeof total === 'number' && Number.isFinite(total) && total > 0
+    ? BigInt(Math.round(total * 1_000_000))
+    : null;
+  const dueAt = input.fields.dueDate ? new Date(input.fields.dueDate) : null;
+
+  await prisma.paymentOrder.update({
+    where: { paymentOrderId: order.paymentOrderId },
+    data: {
+      // The queue reads these columns, so a saved figure has to reach them or
+      // the list keeps showing what the machine first read.
+      amountRaw: savedAmountRaw !== null && order.transferRequests.length === 0 ? savedAmountRaw : undefined,
+      invoiceNumber: str(input.fields.invoiceNumber ?? null) ?? order.invoiceNumber,
+      dueAt: dueAt && !Number.isNaN(dueAt.getTime()) ? dueAt : order.dueAt,
+      metadataJson: { ...metadata, verification } as Prisma.InputJsonValue,
+    },
+  });
+
+  // Field-level history, same as an edit made after submission. A save is a
+  // person changing a figure, and the record should not care which screen they
+  // were on when they did it.
+  await recordFieldChanges({
+    organizationId: input.organizationId,
+    paymentOrderId: order.paymentOrderId,
+    changedByUserId: input.actorUserId,
+    phase: 'draft',
+    reason: 'save',
+    changes: corrections.map((c) => ({ field: c.field, from: c.readValue, to: c.correctedValue })),
+  });
+
+  return { savedAt };
 }

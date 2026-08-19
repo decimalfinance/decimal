@@ -1620,6 +1620,14 @@ export const billsApi = {
       body: JSON.stringify(facts),
     });
   },
+  // Keep the draft as it stands. Same body as confirm, but nothing is sent for
+  // approval — the half-finished bill is the point.
+  saveDraft(organizationId: string, paymentOrderId: string, body: ConfirmBillBody) {
+    return request<{ savedAt: string }>(`/organizations/${organizationId}/bills/${paymentOrderId}/save`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
   confirm(organizationId: string, paymentOrderId: string, body: ConfirmBillBody) {
     return request<{ approvableId: string | null }>(`/organizations/${organizationId}/bills/${paymentOrderId}/confirm`, {
       method: 'POST',
