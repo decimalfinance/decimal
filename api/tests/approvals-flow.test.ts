@@ -2206,3 +2206,48 @@ test('an ordinary invoice carries no not-a-bill block at all', async () => {
   const draft = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, owner.token);
   assert.equal(draft.notABill, null, 'nothing changes for the documents that are bills');
 });
+
+test('the reference backstop reads invoice numbers, not the dates beside them', async () => {
+  const { orgId, owner } = await makeOrg();
+
+  // An extraction from before documentKind existed: rows dressed as line items,
+  // no classification. The regex is all there is, and it is what got this wrong
+  // — "dated 2026" parsed as an invoice reference, so the flag announced four
+  // invoice numbers on a document that lists three.
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [{
+        counterparty: 'Meridian Logistics LLC', amount: 22950, currency: 'USD',
+        reference: null, due_date: null, wallet_address: null, notes: null,
+        source_invoice: {
+          vendorName: 'Meridian Logistics LLC', vendorAddress: null, vendorEmail: 'ap@meridian.example',
+          amount: 22950, currency: 'USD', invoiceNumber: null, invoiceDate: '2026-08-15',
+          dueDate: null, terms: null, poNumber: null, earlyPayDiscount: null,
+          subtotal: 22950, taxAmount: 0, billToName: 'Testing Labs',
+          remitTo: null, paymentDetails: { method: 'ACH', bankName: 'B', accountLast4: '1111', routingNumber: '111000111' },
+          walletAddress: null,
+          lineItems: [
+            { description: 'Invoice MER-8801 dated 2026-06-30', quantity: 1, unitPrice: 12400, total: 12400 },
+            { description: 'Invoice MER-8842 dated 2026-07-15', quantity: 1, unitPrice: 13150, total: 13150 },
+            { description: 'Invoice MER-8890 dated 2026-08-01', quantity: 1, unitPrice: 9800, total: 9800 },
+          ],
+          categoryHint: 'Freight', confidence: { vendor: 1, amount: 1, overall: 1 }, fieldConfidence: null,
+        },
+      }],
+      modelLatencyMs: 1, pageCount: 1,
+    }),
+  });
+
+  const up = await post(`/organizations/${orgId}/invoices/upload`, {
+    filename: 'old-statement.pdf', mimeType: 'application/pdf',
+    dataBase64: Buffer.from(`%PDF ${crypto.randomUUID()}`).toString('base64'), autoAdvance: false,
+  }, owner.token);
+  const billId = up.paymentOrders[0].paymentOrder.paymentOrderId as string;
+
+  const draft = await get(`/organizations/${orgId}/bills/${billId}/draft`, owner.token);
+  const flag = draft.flags.find((f: { kind: string }) => f.kind === 'looks_like_statement');
+  assert.ok(flag, 'still caught without a classification');
+  assert.match(flag.message, /MER-8801/, 'names a real reference');
+  assert.ok(!/DATED/i.test(flag.message), `no dates read as references — got: ${flag.message}`);
+  assert.match(flag.message, /lists 3 invoice numbers/, 'three rows, three references');
+});

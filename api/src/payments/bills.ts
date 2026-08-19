@@ -368,10 +368,17 @@ function documentTypeSignals(extracted: Record<string, unknown> | null, invoiceN
     // not invoice numbers, and would have missed a statement whose rows carry
     // no ISO dates.
     //
-    // A reference is letters-then-digits (MER-8801, INV-2044, VP-3390) or a
-    // long digit run. A date is explicitly not one.
+    // A reference is letters-then-digits (MER-8801, INV-2044, VP-3390). A date
+    // is explicitly not one.
+    //
+    // The separator matters more than it looks. Allowing a SPACE after any
+    // two-to-six letters made "dated 2026" a reference, so the Meridian
+    // statement reported four invoice numbers, one of which was "DATED 2026".
+    // Any-letters therefore requires a dash, a hash, or nothing between the
+    // letters and the digits; only the words that actually announce a
+    // reference — INV, BILL, INVOICE — may be followed by a space.
     const lines = Array.isArray(extracted?.lineItems) ? (extracted!.lineItems as unknown[]) : [];
-    const INVOICE_REF = /\b[A-Z]{2,6}[-\s#]?\d{3,}\b|\b(?:INV|BILL|INVOICE)[-\s#]?\d{2,}\b/gi;
+    const INVOICE_REF = /\b[A-Z]{2,6}[-#]?\d{3,}\b|\b(?:INV|BILL|INVOICE)[-\s#]?\d{2,}\b/gi;
     const ISO_DATE = /^\d{4}-\d{2}(-\d{2})?$/;
     for (const line of lines) {
       if (!isRecord(line)) continue;
