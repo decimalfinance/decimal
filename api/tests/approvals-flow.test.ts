@@ -2096,3 +2096,25 @@ test('a question asked about a draft shows on the Bills page of the person asked
   assert.equal(asClerk.questionsForYou, 0, 'the asker is not waiting on themselves');
   assert.equal(asClerk.bills.find((b: { paymentOrderId: string }) => b.paymentOrderId === bill.billId)?.questionForYou, null);
 });
+
+test('a draft with no approval route still hands the screen the question asked of you', async () => {
+  const { orgId, owner, a2, a3 } = await makeOrg();
+  await post(`/organizations/${orgId}/roles/bill_clerk/holders`, { userId: a3.userId }, owner.token);
+  const bill = await uploadAndConfirm(orgId, a3.token, { vendor: 'No Route Co', amount: 6200, invoiceNo: 'NR-1' });
+
+  await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, {
+    askedOfUserId: a2.userId,
+    question: 'is this us?',
+  }, a3.token);
+
+  const draft = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, a2.token);
+  // The condition that used to hide the whole conversation: the strip it lived
+  // inside only rendered for a bill that had a compiled route, and a draft has
+  // none. The payload was never the problem, so this guards the contract the
+  // screen reads rather than the screen itself.
+  assert.equal(draft.route.length, 0, 'a draft has no route — that is the case that broke');
+  const mine = draft.questions.find((q: { question: string }) => q.question === 'is this us?');
+  assert.ok(mine, 'the question rides along with the draft');
+  assert.equal(mine.youWereAsked, true);
+  assert.equal(mine.stillOpen, true);
+});

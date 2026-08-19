@@ -602,20 +602,36 @@ function DraftScreen(props: {
             {/* Progress and the conversation are one component: both answer
                 "where is this bill", so they belong above the same rule rather
                 than the thread appearing to be page content. */}
-            {billDraft.route.length > 0 ? (
+            {/* The conversation used to live INSIDE this strip, which only
+                rendered once a bill had an approval route. So a question asked
+                while the bill was still a draft — the most useful moment to
+                ask one, since the figures can still be fixed — had nowhere to
+                appear on the very screen it was about. The strip now shows for
+                a route OR a question, and the route half is what is optional. */}
+            {billDraft.route.length > 0 || billDraft.questions.length > 0 ? (
               <div style={{ margin: '-20px -24px 0', padding: '12px 24px', borderBottom: '1px solid var(--border)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                  {billDraft.route.map((n, i) => (
-                    <span key={`${n.name}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span className={`pill pill-min ${n.state === 'done' ? 'pill-success' : n.state === 'waiting' ? 'pill-warning' : n.state === 'declined' ? 'pill-danger' : 'pill-neutral'}`}>
-                        <span className="dot" />{n.name.split(' ')[0]}
+                  {billDraft.route.length > 0 ? (
+                    <>
+                      {billDraft.route.map((n, i) => (
+                        <span key={`${n.name}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span className={`pill pill-min ${n.state === 'done' ? 'pill-success' : n.state === 'waiting' ? 'pill-warning' : n.state === 'declined' ? 'pill-danger' : 'pill-neutral'}`}>
+                            <span className="dot" />{n.name.split(' ')[0]}
+                          </span>
+                          {i < billDraft.route.length - 1 ? <span style={{ color: 'var(--text-faint)' }}>→</span> : null}
+                        </span>
+                      ))}
+                      <span style={{ marginLeft: 4, color: 'var(--text-muted)' }}>
+                        {billDraft.route.filter((n) => n.state === 'done').length} of {billDraft.route.length} approved
                       </span>
-                      {i < billDraft.route.length - 1 ? <span style={{ color: 'var(--text-faint)' }}>→</span> : null}
+                    </>
+                  ) : (
+                    <span style={{ color: 'var(--text-muted)' }}>
+                      {billDraft.questions.some((q) => q.youWereAsked && q.stillOpen)
+                        ? 'Somebody is waiting on you'
+                        : 'Questions on this bill'}
                     </span>
-                  ))}
-                  <span style={{ marginLeft: 4, color: 'var(--text-muted)' }}>
-                    {billDraft.route.filter((n) => n.state === 'done').length} of {billDraft.route.length} approved
-                  </span>
+                  )}
                   <span style={{ flex: 1 }} />
                   {/* Count OUTSIDE the button: a number crammed into a round
                       icon button reads as a badge on nothing and crowds the
