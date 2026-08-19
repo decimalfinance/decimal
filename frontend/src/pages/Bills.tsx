@@ -107,6 +107,15 @@ export function BillsPage() {
     return sorted;
   }, [allBills, tab, search, sort]);
 
+  // Documents still being read, on the tab they will land in.
+  //
+  // Held as one value because the table's empty-state test and its body both
+  // have to agree about whether there is anything to show. They did not: the
+  // rows were written into the tbody while the empty state still asked only
+  // about bills, so six uploads showed "Draft 6" above "Nothing waiting on a
+  // check" — the count came from the server and the table from somewhere else.
+  const pendingRows = tab === 'draft' ? (workbench.data?.pending ?? []) : [];
+
   const openBill = (bill: WorkbenchBill) => {
     if (bill.bucket === 'draft') {
       navigate(`/organizations/${organizationId}/bills/${bill.paymentOrderId}/draft`);
@@ -243,7 +252,7 @@ export function BillsPage() {
             </div>
 
             <div className="tbl-card">
-              {rows.length === 0 ? (
+              {rows.length === 0 && pendingRows.length === 0 ? (
                 <div className="empty">
                   <span className="empty-icon"><Ico.inbox w={22} /></span>
                   <h4>{emptyCopy[tab]}</h4>
@@ -264,7 +273,7 @@ export function BillsPage() {
                   <tbody>
                     {/* Being read. Shown first because they are the newest
                         thing in the pile and the thing somebody just did. */}
-                    {tab === 'draft' ? (workbench.data?.pending ?? []).map((doc) => (
+                    {pendingRows.map((doc) => (
                       <tr
                         key={doc.invoiceDocumentId}
                         onClick={() => navigate(`/organizations/${organizationId}/bills/documents/${doc.invoiceDocumentId}/draft`)}
@@ -291,7 +300,7 @@ export function BillsPage() {
                           </span>
                         </td>
                       </tr>
-                    )) : null}
+                    ))}
                     {rows.map((bill) => {
                       const due = dueInfo(bill);
                       return (
