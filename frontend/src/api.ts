@@ -1401,6 +1401,19 @@ export const invoiceDocumentsApi = {
 
 export type BillBucket = 'draft' | 'in_approval' | 'to_pay' | 'done' | 'needs_attention';
 
+/**
+ * A document we hold but have not finished reading. Not a bill: no vendor, no
+ * amount, no payment order behind it. It becomes one when extraction lands.
+ */
+export interface PendingDocument {
+  invoiceDocumentId: string;
+  filename: string;
+  status: 'processing' | 'failed';
+  error: string | null;
+  createdAt: string;
+  uploadedByName: string | null;
+}
+
 export interface WorkbenchBill {
   paymentOrderId: string;
   bucket: BillBucket;
@@ -1582,7 +1595,14 @@ export const inboundEmailApi = {
 
 export const billsApi = {
   workbench(organizationId: string) {
-    return request<{ counts: Record<BillBucket, number>; draftCounts: { ready: number; missingInfo: number }; bills: WorkbenchBill[]; questionsForYou: number }>(`/organizations/${organizationId}/bills/workbench`);
+    return request<{
+      counts: Record<BillBucket, number>;
+      draftCounts: { ready: number; missingInfo: number };
+      /** Uploaded, stored, not yet read — no bill exists for these yet. */
+      pending: PendingDocument[];
+      bills: WorkbenchBill[];
+      questionsForYou: number;
+    }>(`/organizations/${organizationId}/bills/workbench`);
   },
   draft(organizationId: string, paymentOrderId: string) {
     return request<BillDraft>(`/organizations/${organizationId}/bills/${paymentOrderId}/draft`);

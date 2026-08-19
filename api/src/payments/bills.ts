@@ -540,6 +540,40 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
     draft: 0, in_approval: 0, to_pay: 0, done: 0, needs_attention: 0,
   };
 
+  // Documents we hold but have not finished reading.
+  //
+  // A bill row is a payment order, and a payment order is only created once
+  // extraction produces figures — so between dropping six PDFs in and the model
+  // getting through them, the list said nothing at all. The upload had visibly
+  // worked and the queue was empty, which reads as the file having gone
+  // nowhere. The document exists from the moment it is stored; showing it is
+  // just telling the truth earlier.
+  //
+  // Deliberately NOT a payment order with empty fields. Everything downstream
+  // assumes an order has a vendor and an amount, and inventing a hollow one to
+  // win a row on a list would put a half-formed bill into routing, duplicate
+  // detection and the approval engine. These are documents, and they say so.
+  const pendingDocs = await prisma.invoiceDocument.findMany({
+    where: {
+      organizationId,
+      status: { in: ['processing', 'failed'] },
+      paymentOrders: { none: {} },
+    },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      invoiceDocumentId: true, filename: true, status: true, processingError: true,
+      createdAt: true, uploadedByUser: { select: { displayName: true } },
+    },
+  });
+  const pending = pendingDocs.map((d) => ({
+    invoiceDocumentId: d.invoiceDocumentId,
+    filename: d.filename,
+    status: d.status as 'processing' | 'failed',
+    error: d.processingError,
+    createdAt: d.createdAt,
+    uploadedByName: d.uploadedByUser?.displayName ?? null,
+  }));
+
   const bills = orders.map((order) => {
     const invoice = engine.invoiceByOrder.get(order.paymentOrderId);
     const release = invoice ? engine.releaseBySource.get(invoice.id) : undefined;
@@ -657,9 +691,14 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
     missingInfo: bills.filter((b) => b.readiness === 'missing_info').length,
   };
 
+  // They are on their way to the draft pile, so the tab that says how much work
+  // is waiting should count them.
+  counts.draft += pending.length;
+
   return {
     counts,
     draftCounts,
+    pending,
     bills,
     // So the page can say it at the top as well as on the row — a question is
     // work assigned to a person, not a property of a bill they may not scroll to.

@@ -78,7 +78,10 @@ export function BillsPage() {
     queryKey: ['bills-workbench', organizationId],
     queryFn: () => billsApi.workbench(organizationId),
     enabled: Boolean(organizationId),
-    refetchInterval: 30_000,
+    // A document being read turns into a bill in seconds, not half a minute.
+    // Waiting 30s to notice makes the row look stuck at exactly the moment
+    // somebody is watching it.
+    refetchInterval: (q) => ((q.state.data?.pending.length ?? 0) > 0 ? 2_000 : 30_000),
   });
 
   const counts = workbench.data?.counts;
@@ -259,6 +262,36 @@ export function BillsPage() {
                     </tr>
                   </thead>
                   <tbody>
+                    {/* Being read. Shown first because they are the newest
+                        thing in the pile and the thing somebody just did. */}
+                    {tab === 'draft' ? (workbench.data?.pending ?? []).map((doc) => (
+                      <tr
+                        key={doc.invoiceDocumentId}
+                        onClick={() => navigate(`/organizations/${organizationId}/bills/documents/${doc.invoiceDocumentId}/draft`)}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <td>
+                          <div className="cell-vendor">
+                            <span className="v-name" style={{ color: 'var(--text-muted)' }}>
+                              {doc.status === 'failed' ? 'Could not be read' : 'Reading…'}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="cell-mono" style={{ color: 'var(--text-faint)' }}>—</td>
+                        <td style={{ color: 'var(--text-muted)', maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {doc.filename}
+                        </td>
+                        <td className="td-num" style={{ color: 'var(--text-faint)' }}>—</td>
+                        <td style={{ color: 'var(--text-faint)' }}>—</td>
+                        <td>
+                          <span className={`pill pill-min ${doc.status === 'failed' ? 'pill-danger' : 'pill-info'}`}
+                            title={doc.error ?? undefined}>
+                            <span className="dot" />
+                            {doc.status === 'failed' ? 'Read failed' : 'Reading'}
+                          </span>
+                        </td>
+                      </tr>
+                    )) : null}
                     {rows.map((bill) => {
                       const due = dueInfo(bill);
                       return (

@@ -2394,3 +2394,42 @@ test('the same bytes twice is one bill, however it was picked', async () => {
   const workbench = await get(`/organizations/${orgId}/bills/workbench`, owner.token);
   assert.equal(workbench.bills.length, 1, 'one bill, not two');
 });
+
+// --- the row exists from the moment the file lands ---------------------------
+//
+// A bill row is a payment order, and a payment order is only created once
+// extraction produces figures. So between dropping six PDFs in and the model
+// getting through them, the list said nothing: the upload had visibly worked
+// and the queue was empty, which reads as the file having gone nowhere.
+
+test('an uploaded document shows on the list before it has been read, then becomes a bill', async () => {
+  const { orgId, owner } = await makeOrg();
+
+  const empty = await get(`/organizations/${orgId}/bills/workbench`, owner.token);
+  assert.equal(empty.pending.length, 0);
+  assert.equal(empty.bills.length, 0);
+
+  bankInvoice({ vendor: 'Slow Read Co', amount: 1000, invoiceNo: 'SR-1' });
+  const up = await post(`/organizations/${orgId}/invoices/upload-async`, {
+    filename: 'slow.pdf', mimeType: 'application/pdf',
+    dataBase64: Buffer.from(`%PDF ${crypto.randomUUID()}`).toString('base64'),
+  }, owner.token);
+
+  // Before the reading finishes: no bill, but the document is on the list and
+  // says what it is doing.
+  const during = await get(`/organizations/${orgId}/bills/workbench`, owner.token);
+  assert.equal(during.pending.length, 1, 'the upload is visible immediately');
+  assert.equal(during.pending[0].invoiceDocumentId, up.invoiceDocumentId);
+  assert.equal(during.pending[0].filename, 'slow.pdf');
+  assert.equal(during.pending[0].status, 'processing');
+  assert.ok(during.pending[0].uploadedByName, 'and who put it there');
+  assert.equal(during.counts.draft, 1, 'the drafts tab counts work that is waiting');
+
+  await drainAsyncIntake();
+
+  // Once read, it IS a bill and must not be counted twice.
+  const after = await get(`/organizations/${orgId}/bills/workbench`, owner.token);
+  assert.equal(after.pending.length, 0, 'no longer pending — it became a bill');
+  assert.equal(after.bills.length, 1);
+  assert.equal(after.counts.draft, 1, 'still one thing in drafts, not two');
+});
