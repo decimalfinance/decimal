@@ -1067,6 +1067,27 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       createdAt: order.createdAt,
     }),
   ]);
+  // A document that is not an invoice, and what it means against our records.
+  // The classification is the model's; the reconciliation is a join.
+  const declaredKind = str(extracted.documentKind);
+  const notABillKind = declaredKind && declaredKind !== 'invoice' ? declaredKind : null;
+  const statementRows = Array.isArray(extracted.statementRows)
+    ? (extracted.statementRows as unknown[]).filter(isRecord)
+    : [];
+  const reconciliation = notABillKind === 'statement' && statementRows.length > 0
+    ? await (await import('./document-reconcile.js')).reconcileStatement({
+      organizationId,
+      excludePaymentOrderId: order.paymentOrderId,
+      counterpartyId: order.counterpartyId,
+      rows: statementRows.map((r) => ({
+        reference: str(r.reference),
+        date: str(r.date),
+        amount: num(r.amount),
+        status: str(r.status),
+      })),
+    })
+    : null;
+
   const flagOrg = await prisma.organization.findUniqueOrThrow({
     where: { organizationId },
     select: { organizationName: true, tradingNames: true },
@@ -1127,6 +1148,16 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       ? 'settled' as const
       : (!viewerCanEdit ? 'not_your_job' as const : null),
     ...billSource(order.metadataJson, order.createdByUser?.displayName ?? null),
+    // Present only when the document is not an invoice. The screen switches on
+    // this rather than on whether a flag happens to be blocking: what a
+    // document IS should pick the interface, not what it tripped.
+    notABill: notABillKind
+      ? {
+        kind: notABillKind,
+        appliesToInvoice: str(extracted.appliesToInvoice),
+        statement: reconciliation,
+      }
+      : null,
     // An approver sent this bill back for changes — the bill clerk's homework.
     sentBack: sentBackRaw && order.state === 'draft'
       ? { reason: str(sentBackRaw.reason), byName: str(sentBackRaw.byName), at: str(sentBackRaw.at) }

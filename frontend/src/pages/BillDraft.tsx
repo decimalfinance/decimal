@@ -860,6 +860,14 @@ function DraftScreen(props: {
               </div>
             ))}
 
+            {/* A document that is not an invoice gets its own screen, not the
+                bill form with a warning on top. The flags above still show —
+                they carry the actions — but nothing below states that this is
+                payable. */}
+            {billDraft.notABill ? (
+              <NotABillPane notABill={billDraft.notABill} organizationId={organizationId} />
+            ) : (
+            <>
             {/* Vendor */}
             <section>
               <div className="sec-head">
@@ -1072,6 +1080,8 @@ function DraftScreen(props: {
                 </span>
               </div>
             ) : null}
+            </>
+            )}
           </div>
         </div>
 
@@ -1143,6 +1153,119 @@ function DraftScreen(props: {
 
 // Money cell: the $ is part of the value ("$2,650.00"), right-aligned as one
 // unit; parses loosely while typing, formats on blur.
+// A document that is not an invoice, shown as itself rather than as a bill.
+//
+// Everything arrives here having been read as an invoice, because that is what
+// the extractor is asked for. When it turns out to be something else, dressing
+// it in the bill form — field grid, coded line items, a Confirm button — states
+// that it is payable, which is the one thing it is not. This replaces the form
+// entirely, so that somebody who has seen fifty bills knows from the shape of
+// the screen, before reading a word, that this one is different.
+const NOT_A_BILL: Record<string, { title: string; blurb: string }> = {
+  statement: {
+    title: 'This is a statement of account',
+    blurb: 'It summarises invoices the vendor has already sent. Paying it would pay every one of them again — settle the individual invoices instead.',
+  },
+  credit_note: {
+    title: 'This is a credit note',
+    blurb: 'The vendor owes money back. A credit reduces what you owe — it is applied against a bill, never paid out.',
+  },
+  receipt: {
+    title: 'This is a receipt',
+    blurb: 'It records a payment already made. Nothing is owed on it.',
+  },
+  quote: {
+    title: 'This is a quote',
+    blurb: 'It prices work that has not been invoiced yet. Nothing is owed until an invoice arrives.',
+  },
+  purchase_order: {
+    title: 'This is a purchase order',
+    blurb: 'A purchase order is our own paperwork, not a vendor demand for payment.',
+  },
+  other: {
+    title: 'This does not look like an invoice',
+    blurb: 'Nothing here reads as a bill from a vendor. Check the document before going further.',
+  },
+};
+
+function NotABillPane({ notABill, organizationId }: {
+  notABill: NonNullable<BillDraft['notABill']>;
+  organizationId: string;
+}) {
+  const copy = NOT_A_BILL[notABill.kind] ?? NOT_A_BILL.other!;
+  const st = notABill.statement;
+
+  return (
+    <section>
+      <div className="sec-head">
+        <div className="sh-titles">
+          <h2>{copy.title}</h2>
+          <p className="sh-desc">{copy.blurb}</p>
+        </div>
+      </div>
+
+      {notABill.appliesToInvoice ? (
+        <div className="callout callout-info" style={{ marginBottom: 16 }}>
+          <Ico.doc w={16} />
+          <span>Applies to invoice <b>{notABill.appliesToInvoice}</b>.</span>
+        </div>
+      ) : null}
+
+      {st ? (
+        <>
+          {/* The reason to read a statement rather than bin it: it names an
+              invoice that never reached us, and one we have already settled. */}
+          <p className="sh-desc" style={{ marginBottom: 12 }}>
+            {st.missing > 0
+              ? `${st.missing} of these ${st.rows.length} ${st.missing === 1 ? 'is' : 'are'} not in Decimal — worth chasing the invoice itself.`
+              : 'Every invoice on it is already in Decimal.'}
+            {st.alreadyPaid > 0
+              ? ` The vendor marks ${st.alreadyPaid} of them already paid.`
+              : ''}
+          </p>
+          <div className="tbl-card">
+            <table className="tbl tbl-slim">
+              <thead>
+                <tr>
+                  <th>Invoice</th>
+                  <th>Date</th>
+                  <th className="num">Amount</th>
+                  <th>They say</th>
+                  <th>In Decimal</th>
+                </tr>
+              </thead>
+              <tbody>
+                {st.rows.map((r, i) => (
+                  <tr key={`${r.reference ?? i}`}>
+                    <td className="cell-mono">{r.reference ?? '—'}</td>
+                    <td style={{ color: 'var(--text-muted)' }}>{r.date ?? '—'}</td>
+                    <td className="td-num">{r.amountUsd == null ? '—' : usd(r.amountUsd)}</td>
+                    <td>
+                      <span className={`pill pill-min ${r.statedStatus === 'paid' ? 'pill-success' : r.statedStatus === 'overdue' ? 'pill-danger' : 'pill-neutral'}`}>
+                        <span className="dot" />{r.statedStatus ?? 'unknown'}
+                      </span>
+                    </td>
+                    <td>
+                      {r.held ? (
+                        <a href={`/organizations/${organizationId}/bills/${r.held.paymentOrderId}`}
+                          style={{ color: 'var(--accent)' }}>
+                          {r.held.where}
+                        </a>
+                      ) : (
+                        <span className="pill pill-min pill-warning"><span className="dot" />not in Decimal</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
 /**
  * A line's description, on as many rows as it needs.
  *

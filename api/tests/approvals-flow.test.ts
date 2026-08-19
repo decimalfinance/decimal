@@ -2118,3 +2118,91 @@ test('a draft with no approval route still hands the screen the question asked o
   assert.equal(mine.youWereAsked, true);
   assert.equal(mine.stillOpen, true);
 });
+
+// --- a statement, checked against what we actually hold ----------------------
+//
+// The useful answer about a statement is not "this is a statement". It is which
+// of the invoices it lists we already have, which we have already paid, and
+// which never reached us — that last one being the reason vendors send them.
+
+function statementDocument(rows: Array<{ reference: string; amount: number; status: string }>) {
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [{
+        counterparty: 'Meridian Logistics LLC', amount: 22950, currency: 'USD',
+        reference: 'MST-2026-08', due_date: null, wallet_address: null, notes: null,
+        source_invoice: {
+          documentKind: 'statement',
+          statementRows: rows.map((r) => ({ reference: r.reference, date: '2026-07-15', amount: r.amount, status: r.status })),
+          appliesToInvoice: null,
+          vendorName: 'Meridian Logistics LLC', vendorAddress: null, vendorEmail: 'ap@meridian.example',
+          amount: 22950, currency: 'USD', invoiceNumber: 'MST-2026-08', invoiceDate: '2026-08-15',
+          dueDate: null, terms: null, poNumber: null, earlyPayDiscount: null,
+          subtotal: 22950, taxAmount: 0, billToName: 'Halcyon Labs, Inc.',
+          remitTo: null, paymentDetails: { method: 'ACH', bankName: 'B', accountLast4: '1111', routingNumber: '111000111' },
+          walletAddress: null,
+          lineItems: [],
+          categoryHint: 'Freight', confidence: { vendor: 1, amount: 1, overall: 1 }, fieldConfidence: null,
+        },
+      }],
+      modelLatencyMs: 1, pageCount: 1,
+    }),
+  });
+}
+
+test('a statement says which of its invoices we hold, which are paid, and which never arrived', async () => {
+  const { orgId, owner } = await makeOrg();
+
+  // One of the three referenced invoices really is in the system.
+  const held = await uploadAndConfirm(orgId, owner.token, {
+    vendor: 'Meridian Logistics LLC', amount: 13150, invoiceNo: 'MER-8842',
+  });
+  await held.confirm();
+
+  statementDocument([
+    { reference: 'MER-8801', amount: 12400, status: 'paid' },
+    { reference: 'MER-8842', amount: 13150, status: 'open' },
+    { reference: 'MER-8890', amount: 9800, status: 'open' },
+  ]);
+  const up = await post(`/organizations/${orgId}/invoices/upload`, {
+    filename: 'statement.pdf', mimeType: 'application/pdf',
+    dataBase64: Buffer.from(`%PDF ${crypto.randomUUID()}`).toString('base64'), autoAdvance: false,
+  }, owner.token);
+  const statementId = up.paymentOrders[0].paymentOrder.paymentOrderId as string;
+
+  const draft = await get(`/organizations/${orgId}/bills/${statementId}/draft`, owner.token);
+
+  assert.ok(draft.notABill, 'the screen is told this is not a bill');
+  assert.equal(draft.notABill.kind, 'statement');
+
+  const rows = draft.notABill.statement.rows;
+  assert.equal(rows.length, 3);
+
+  // The row that never reached us — the whole reason to read a statement.
+  const missing = rows.find((r: { reference: string }) => r.reference === 'MER-8890');
+  assert.equal(missing.held, null, 'MER-8890 is not in the system');
+
+  // The row we do hold, with where it has got to in plain words.
+  const ours = rows.find((r: { reference: string }) => r.reference === 'MER-8842');
+  assert.ok(ours.held, 'MER-8842 is one of ours');
+  assert.equal(ours.held.where, 'in approval');
+
+  // The dangerous row: the vendor itself says this one is settled.
+  const paid = rows.find((r: { reference: string }) => r.reference === 'MER-8801');
+  assert.equal(paid.statedStatus, 'paid', 'the status column survived extraction');
+
+  assert.equal(draft.notABill.statement.missing, 2, 'MER-8801 and MER-8890 are not held');
+  assert.equal(draft.notABill.statement.alreadyPaid, 1);
+
+  // And it is still refused: classification informs, it does not permit.
+  const blocking = draft.flags.filter((f: { blocking: boolean }) => f.blocking);
+  assert.ok(blocking.some((f: { kind: string }) => f.kind === 'looks_like_statement'),
+    'a statement is still not payable');
+});
+
+test('an ordinary invoice carries no not-a-bill block at all', async () => {
+  const { orgId, owner } = await makeOrg();
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'Ordinary Co', amount: 500, invoiceNo: 'ORD-1' });
+  const draft = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, owner.token);
+  assert.equal(draft.notABill, null, 'nothing changes for the documents that are bills');
+});

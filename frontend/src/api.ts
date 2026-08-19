@@ -1458,6 +1458,28 @@ export interface BillDraft {
   paymentOrderId: string;
   state: string;
   readOnly: boolean;
+  /**
+   * Present only when the document is NOT an invoice. The screen switches on
+   * this rather than on whether a flag happens to be blocking: what a document
+   * IS should choose the interface, not what it tripped.
+   */
+  notABill: {
+    kind: 'statement' | 'credit_note' | 'receipt' | 'quote' | 'purchase_order' | 'other';
+    /** Credit notes: the invoice the credit applies to, if named. */
+    appliesToInvoice: string | null;
+    /** Statements: their rows, checked against the bills we already hold. */
+    statement: {
+      rows: Array<{
+        reference: string | null;
+        date: string | null;
+        amountUsd: number | null;
+        statedStatus: 'paid' | 'open' | 'overdue' | 'unknown' | null;
+        held: { paymentOrderId: string; invoiceNumber: string | null; state: string; where: string } | null;
+      }>;
+      missing: number;
+      alreadyPaid: number;
+    } | null;
+  } | null;
   /** Why, when it is read-only: the bill has left draft, or preparing it
    *  is not this reader's job. Null when the form is editable. */
   readOnlyReason?: 'settled' | 'not_your_job' | null;
