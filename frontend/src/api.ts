@@ -1428,6 +1428,8 @@ export interface WorkbenchBill {
   };
   // Present when this bill was flagged as a duplicate and an admin cleared it.
   duplicateCleared: { byName: string; reason: string } | null;
+  /** Somebody is waiting on YOU for an answer about this bill. */
+  questionForYou: { billQuestionId: string; question: string; askedByName: string | null } | null;
 }
 
 export type DocSource = { page: number; box: [number, number, number, number] } | null;
@@ -1558,7 +1560,7 @@ export const inboundEmailApi = {
 
 export const billsApi = {
   workbench(organizationId: string) {
-    return request<{ counts: Record<BillBucket, number>; draftCounts: { ready: number; missingInfo: number }; bills: WorkbenchBill[] }>(`/organizations/${organizationId}/bills/workbench`);
+    return request<{ counts: Record<BillBucket, number>; draftCounts: { ready: number; missingInfo: number }; bills: WorkbenchBill[]; questionsForYou: number }>(`/organizations/${organizationId}/bills/workbench`);
   },
   draft(organizationId: string, paymentOrderId: string) {
     return request<BillDraft>(`/organizations/${organizationId}/bills/${paymentOrderId}/draft`);

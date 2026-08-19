@@ -450,6 +450,43 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
     getBillCeilingMinor(prisma, organizationId),
   ]);
 
+  // Questions waiting on this reader, per bill.
+  //
+  // The only surface for these was the Approvals page, which is where
+  // DECISIONS live. So a question asked about a bill still in DRAFT — the most
+  // useful moment to ask one, since the figures can still be fixed — had
+  // nowhere to appear on the screen where drafts are. It was raised, stored,
+  // routed, and invisible to the person it was routed to unless they happened
+  // to open a tab about approvals for a bill that had not reached approval.
+  const openQuestions = orders.length === 0 ? [] : await prisma.billQuestion.findMany({
+    where: {
+      organizationId,
+      askedOfUserId: viewerUserId,
+      answeredAt: null,
+      paymentOrderId: { in: orders.map((o) => o.paymentOrderId) },
+    },
+    orderBy: { createdAt: 'asc' },
+    select: { billQuestionId: true, paymentOrderId: true, question: true, askedByUserId: true },
+  });
+  const askerNames = new Map<string, string>();
+  if (openQuestions.length > 0) {
+    const askers = await prisma.user.findMany({
+      where: { userId: { in: [...new Set(openQuestions.map((q) => q.askedByUserId))] } },
+      select: { userId: true, displayName: true },
+    });
+    for (const u of askers) askerNames.set(u.userId, u.displayName);
+  }
+  // Oldest first, so the one that has been waiting longest is the one shown.
+  const questionByOrder = new Map<string, { billQuestionId: string; question: string; askedByName: string | null }>();
+  for (const q of openQuestions) {
+    if (questionByOrder.has(q.paymentOrderId)) continue;
+    questionByOrder.set(q.paymentOrderId, {
+      billQuestionId: q.billQuestionId,
+      question: q.question,
+      askedByName: askerNames.get(q.askedByUserId) ?? null,
+    });
+  }
+
   // Duplicate detection over rows we already hold. findDuplicateBills would be
   // one query per bill; matchDuplicates is the same rules against the same
   // candidate set, in memory. Grouped by vendor because that is how the query
@@ -574,6 +611,8 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
         const o = readDuplicateOverride(order.metadataJson);
         return o ? { byName: o.byName, reason: o.reason } : null;
       })(),
+      // Somebody is waiting on this reader for an answer about THIS bill.
+      questionForYou: questionByOrder.get(order.paymentOrderId) ?? null,
     };
   });
 
@@ -582,7 +621,14 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
     missingInfo: bills.filter((b) => b.readiness === 'missing_info').length,
   };
 
-  return { counts, draftCounts, bills };
+  return {
+    counts,
+    draftCounts,
+    bills,
+    // So the page can say it at the top as well as on the row — a question is
+    // work assigned to a person, not a property of a bill they may not scroll to.
+    questionsForYou: questionByOrder.size,
+  };
 }
 
 // -----------------------------------------------------------------------------

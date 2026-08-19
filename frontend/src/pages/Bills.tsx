@@ -269,6 +269,15 @@ export function BillsPage() {
                                 <span className="dot" />Duplicate cleared
                               </span>
                             ) : null}
+                            {/* A question routed to this reader. It used to appear
+                                only under Approvals, so one asked while the bill
+                                was still a draft reached nobody. */}
+                            {bill.questionForYou ? (
+                              <span className="pill pill-min pill-info" style={{ marginLeft: 8, verticalAlign: 'middle' }}
+                                title={`${bill.questionForYou.askedByName ?? 'Someone'} asked you: “${bill.questionForYou.question}”`}>
+                                <span className="dot" />Asked of you
+                              </span>
+                            ) : null}
                           </td>
                           <td style={{ color: 'var(--text-muted)', maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {bill.description ?? '—'}

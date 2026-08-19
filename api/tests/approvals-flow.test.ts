@@ -2056,3 +2056,43 @@ test('a bill that has left draft is read-only for its own stage, not for who is 
   assert.equal(after.readOnly, true, 'the clerk still holds bills.edit — the BILL has moved on');
   assert.equal(after.readOnlyReason, 'settled', 'and that is the reason given, not the role');
 });
+
+// --- a question about a DRAFT has to appear where drafts are -----------------
+//
+// Questions surfaced only on the Approvals page, which is where decisions
+// live. So one asked while a bill was still a draft — the most useful moment
+// to ask, since the figures can still be fixed — was routed to a person who
+// had no screen showing it. Raised, stored, delivered, invisible.
+
+test('a question asked about a draft shows on the Bills page of the person asked', async () => {
+  const { orgId, owner, a2, a3 } = await makeOrg();
+  await post(`/organizations/${orgId}/roles/bill_clerk/holders`, { userId: a3.userId }, owner.token);
+
+  const bill = await uploadAndConfirm(orgId, a3.token, { vendor: 'Asked In Draft Co', amount: 6200, invoiceNo: 'AID-1' });
+
+  // Still a draft — deliberately not confirmed.
+  const draft = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, a3.token);
+  assert.equal(draft.state, 'draft');
+
+  // Nothing waiting on a2 yet.
+  const before = await get(`/organizations/${orgId}/bills/workbench`, a2.token);
+  assert.equal(before.questionsForYou, 0);
+  assert.equal(before.bills.find((b: { paymentOrderId: string }) => b.paymentOrderId === bill.billId)?.questionForYou, null);
+
+  await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, {
+    askedOfUserId: a2.userId,
+    question: 'is this us?',
+  }, a3.token);
+
+  const after = await get(`/organizations/${orgId}/bills/workbench`, a2.token);
+  assert.equal(after.questionsForYou, 1, 'the page can say it at the top');
+  const row = after.bills.find((b: { paymentOrderId: string }) => b.paymentOrderId === bill.billId);
+  assert.ok(row?.questionForYou, 'and the row carries it');
+  assert.equal(row.questionForYou.question, 'is this us?');
+  assert.ok(row.questionForYou.askedByName, 'naming who is waiting');
+
+  // Only for the person asked. Everyone else sees an ordinary bill.
+  const asClerk = await get(`/organizations/${orgId}/bills/workbench`, a3.token);
+  assert.equal(asClerk.questionsForYou, 0, 'the asker is not waiting on themselves');
+  assert.equal(asClerk.bills.find((b: { paymentOrderId: string }) => b.paymentOrderId === bill.billId)?.questionForYou, null);
+});
