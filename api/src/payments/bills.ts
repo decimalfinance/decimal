@@ -347,18 +347,47 @@ export function readTradingNames(raw: unknown): string[] {
 // items rather than a new model call — the references are already extracted,
 // they were simply never read as a signal about the document's TYPE.
 function documentTypeSignals(extracted: Record<string, unknown> | null, invoiceNumber: string | null) {
-  const lines = Array.isArray(extracted?.lineItems) ? (extracted!.lineItems as unknown[]) : [];
+  // What the document says it is, asked directly. The regex below stays as a
+  // backstop for extractions made before the question was asked.
+  const kind = str(extracted?.documentKind);
+  const statementRows = Array.isArray(extracted?.statementRows)
+    ? (extracted!.statementRows as unknown[]).filter(isRecord)
+    : [];
+
   const refs: string[] = [];
-  const INVOICE_REF = /\b(?:INV|BILL|INVOICE)[-\s#]?\d{2,}|\b\d{4,}-\d{2,}\b/gi;
-  for (const line of lines) {
-    if (!isRecord(line)) continue;
-    for (const field of [str(line.description), str(line.reference)]) {
-      for (const m of (field ?? '').matchAll(INVOICE_REF)) refs.push(m[0]);
+  for (const row of statementRows) {
+    const ref = str(row.reference);
+    if (ref) refs.push(ref);
+  }
+
+  if (refs.length === 0) {
+    // The old inference, corrected. It used to accept \d{4,}-\d{2,}, which on
+    // the Meridian statement matched the DATES — 2026-06, 2026-07, 2026-08 —
+    // and never MER-8801 at all. The flag fired for the right document by
+    // accident, told the reader it had found three invoice numbers that were
+    // not invoice numbers, and would have missed a statement whose rows carry
+    // no ISO dates.
+    //
+    // A reference is letters-then-digits (MER-8801, INV-2044, VP-3390) or a
+    // long digit run. A date is explicitly not one.
+    const lines = Array.isArray(extracted?.lineItems) ? (extracted!.lineItems as unknown[]) : [];
+    const INVOICE_REF = /\b[A-Z]{2,6}[-\s#]?\d{3,}\b|\b(?:INV|BILL|INVOICE)[-\s#]?\d{2,}\b/gi;
+    const ISO_DATE = /^\d{4}-\d{2}(-\d{2})?$/;
+    for (const line of lines) {
+      if (!isRecord(line)) continue;
+      for (const field of [str(line.description), str(line.reference)]) {
+        for (const m of (field ?? '').matchAll(INVOICE_REF)) {
+          if (!ISO_DATE.test(m[0])) refs.push(m[0]);
+        }
+      }
     }
   }
+
   return {
     invoiceNumber: str(extracted?.invoiceNumber) ?? invoiceNumber,
     lineInvoiceRefs: refs,
+    // A document that names itself is worth believing over an inference.
+    declaredKind: kind && kind !== 'invoice' ? kind : null,
   };
 }
 

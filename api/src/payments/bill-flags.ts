@@ -118,6 +118,12 @@ export type BillFlagFacts = {
     invoiceNumber: string | null;
     /** Distinct invoice references appearing in the line items. */
     lineInvoiceRefs: string[];
+    /**
+     * What the document says it is, when it says something other than
+     * "invoice". Believed over the inference below: a page headed STATEMENT OF
+     * ACCOUNT is a statement whether or not its rows parse.
+     */
+    declaredKind?: string | null;
   };
   amounts: {
     lineItemsTotal: number | null;
@@ -295,7 +301,8 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
   // Both block. Deterministic, cheap, and refusing to pay a document we cannot
   // confidently call an invoice is the right default on a rail with no recall.
   const refs = [...new Set(facts.documentType.lineInvoiceRefs.map((r) => r.toUpperCase()))];
-  if (refs.length > 1) {
+  const declaredStatement = facts.documentType.declaredKind === 'statement';
+  if (declaredStatement || refs.length > 1) {
     flags.push({
       kind: 'looks_like_statement',
       severity: 'danger',
@@ -305,7 +312,13 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
         { action: 'not_ours', label: 'Close it', requires: 'admin', detail: 'A statement is not a payable. Close it and pay the individual invoices.' },
         ASK,
       ],
-      message: `This lists ${refs.length} invoice numbers (${refs.slice(0, 3).join(', ')}${refs.length > 3 ? '…' : ''}), so it looks like a statement of account rather than one invoice. Paying a statement pays every invoice on it again — settle the individual invoices instead.`,
+      // Two ways to get here, and the sentence has to be true for both: the
+      // document named itself, or we inferred it from the references. Saying
+      // "lists 0 invoice numbers" when the heading said STATEMENT OF ACCOUNT
+      // would be worse than saying nothing about the count.
+      message: refs.length > 0
+        ? `This lists ${refs.length} invoice number${refs.length === 1 ? '' : 's'} (${refs.slice(0, 3).join(', ')}${refs.length > 3 ? '…' : ''}), so it looks like a statement of account rather than one invoice. Paying a statement pays every invoice on it again — settle the individual invoices instead.`
+        : 'This document presents itself as a statement of account rather than one invoice. Paying a statement pays every invoice on it again — settle the individual invoices instead.',
     });
   }
 

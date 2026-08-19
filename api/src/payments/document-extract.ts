@@ -39,6 +39,11 @@ Return ONLY a JSON object with this exact shape, nothing else:
 {
   "invoices": [
     {
+      "documentKind": "invoice | statement | credit_note | receipt | quote | purchase_order | other",
+      "statementRows": [
+        { "reference": "string or null", "date": "YYYY-MM-DD or null", "amount": number or null, "status": "paid | open | overdue | unknown" }
+      ] or null,
+      "appliesToInvoice": "string or null",
       "vendorName": "string",
       "vendorAddress": "string or null",
       "vendorEmail": "string or null",
@@ -104,6 +109,14 @@ Return ONLY a JSON object with this exact shape, nothing else:
 }
 
 Rules copied from the AP intake agent:
+- documentKind: what this document IS, judged from its own heading and structure, not from what you were asked to find. One of: invoice, statement, credit_note, receipt, quote, purchase_order, other.
+  * "statement" = a STATEMENT OF ACCOUNT: it summarises several OTHER documents, each with its own reference, and shows a balance. Its rows are references, not charges.
+  * "credit_note" = a credit note / credit memo: the vendor owes US. Usually a negative total, a CN-/CM- series, or the words "credit note".
+  * "receipt" = proof something is already paid. "quote" = a quote, estimate or proforma, nothing owed yet. "purchase_order" = a PO, usually one WE issued.
+  * "invoice" = an ordinary payable invoice. Use this when it is one; do not hedge.
+- statementRows: ONLY when documentKind is "statement". One entry per row of the summary table, in order: its reference (the other document's number, e.g. "MER-8801"), date, amount, and status. status is "paid" when the row says paid/settled/cleared, "open" when it says open/outstanding/due, "overdue" when it says overdue/past due, "unknown" when the document does not say. Read the status column even if it is a tick, a colour, or a word in another column. null when this is not a statement.
+- appliesToInvoice: ONLY when documentKind is "credit_note" — the invoice number the credit applies to, if the document names one ("Applies to invoice VP-3390"). null otherwise.
+- For a statement, still fill amount with the BALANCE DUE it prints, and leave lineItems empty: its rows belong in statementRows, and repeating them as line items states that we are being charged for each, which is what a statement is not.
 - vendorName = the entity we are PAYING: the biller/vendor/from/remit-to side of the invoice. Never the buyer/customer side.
 - amount: positive number. Prefer total due / grand total over subtotal. If undeterminable, use 0.01 and set confidence.amount to 0.
 - currency: use whatever 3-letter ISO code the document explicitly states (USD, EUR, GBP, INR, SGD, JPY, AUD, CAD, CHF, HKD, AED, etc.). If no currency is mentioned anywhere, default to USD.
@@ -155,7 +168,45 @@ const PaymentDetailsSchema = z.object({
   routingNumber: z.string().nullable().default(null),
 });
 
+/**
+ * What the document actually IS.
+ *
+ * Everything here is read as though it were an invoice, because that is what
+ * the extractor is asked for — so a statement of account arrives with its rows
+ * dressed as line items and a total that means something else entirely. The
+ * only defence was a regex over line descriptions looking for invoice-shaped
+ * references, and on the Meridian statement it matched the DATES (2026-06,
+ * 2026-07, 2026-08) rather than MER-8801: right answer, wrong reason, and no
+ * answer at all for a statement whose rows are undated.
+ *
+ * Asking outright is cheaper than inferring, and it is the one question the
+ * model is better placed to answer than we are — it can see the words
+ * "STATEMENT OF ACCOUNT" printed across the top.
+ */
+const DocumentKindSchema = z
+  .enum(['invoice', 'statement', 'credit_note', 'receipt', 'quote', 'purchase_order', 'other'])
+  .nullable()
+  .default(null)
+  .catch(null);
+
+/** One row of a statement of account: a reference to a DIFFERENT document. */
+const StatementRowSchema = z.object({
+  reference: z.string().nullable().default(null).catch(null),
+  date: z.string().nullable().default(null).catch(null),
+  amount: z.number().nullable().default(null).catch(null),
+  /**
+   * The column that matters most and was being dropped. A statement listing an
+   * invoice already settled is how a business pays it twice.
+   */
+  status: z.enum(['paid', 'open', 'overdue', 'unknown']).nullable().default(null).catch(null),
+});
+
 const ExtractedInvoiceSchema = z.object({
+  documentKind: DocumentKindSchema,
+  /** Populated only for a statement — the documents it summarises. */
+  statementRows: z.array(StatementRowSchema).nullable().default(null).catch(null),
+  /** Populated only for a credit note — the invoice the credit applies to. */
+  appliesToInvoice: z.string().nullable().default(null).catch(null),
   vendorName: z.string(),
   vendorAddress: z.string().nullable(),
   vendorEmail: z.string().nullable(),
