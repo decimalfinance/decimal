@@ -192,7 +192,17 @@ function DraftScreen(props: {
   // bound and would push the document off screen. The strip below is fixed
   // height and always visible, because progress is the thing you want at a
   // glance and the thread is the thing you want on demand.
-  const [showThread, setShowThread] = useState(false);
+  //
+  // Open by default when somebody is waiting on THIS reader — a question they
+  // have to answer should not need finding. That used to be done by exempting
+  // those questions from the filter, which made the chevron a control that
+  // moved and changed nothing: the one thing on screen ignored it. Opening by
+  // default gets the same result and leaves the toggle meaning what it says.
+  // Nothing is lost by collapsing, because the header still reads "Somebody is
+  // waiting on you" with the count beside it.
+  const [showThread, setShowThread] = useState(
+    () => billDraft.questions.some((q) => q.youWereAsked && q.stillOpen),
+  );
   const openQuestions = billDraft.questions.filter((q) => q.stillOpen).length;
 
   const [answerFor, setAnswerFor] = useState<string | null>(null);
@@ -654,7 +664,7 @@ function DraftScreen(props: {
                 {/* A conversation, not a stack of alert boxes. Each exchange is
                     one line you can scan — who asked whom, and whether it is
                     settled — with the detail folded away underneath. */}
-                {billDraft.questions.filter((q) => showThread || (q.youWereAsked && q.stillOpen)).map((q) => {
+                {(showThread ? billDraft.questions : []).map((q) => {
                   const settled = q.outcome === 'answered';
                   const fields = q.openFields.length ? q.openFields : q.highlightFields;
                   return (
