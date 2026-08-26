@@ -21,6 +21,7 @@ import {
   type DocSource,
 } from '../api';
 import { Ico } from '../dec/icons';
+import { BillWorkLog } from '../dec/primitives';
 import { useToast } from '../ui/Toast';
 
 function usd(amount: number): string {
@@ -1147,29 +1148,7 @@ function DraftScreen(props: {
                     </p>
                   </div>
                 </div>
-                <div className="surface" style={{ padding: '4px 16px' }}>
-                  {billDraft.workLog.map((entry) => (
-                    <div key={entry.id} className="bd-chg">
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 500 }}>
-                          {entry.text}
-                        </div>
-                        {entry.detail ? (
-                          <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 3 }}>
-                            {entry.detail}
-                          </div>
-                        ) : null}
-                        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>
-                          {entry.byName ?? 'Decimal'}
-                          {' \u00b7 '}
-                          {new Date(entry.at).toLocaleString(undefined, {
-                            month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <BillWorkLog entries={billDraft.workLog} />
               </section>
             ) : null}
           </div>

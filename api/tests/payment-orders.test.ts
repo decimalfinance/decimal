@@ -586,6 +586,21 @@ test('correcting the figures clears the arithmetic flag it was raised on', async
   const settled = await get(`/organizations/${orgId}/bills/${billId}/draft`, setup.sessionToken);
   const totalEdits = settled.workLog.filter((e: { field: string | null }) => e.field === 'total');
   assert.equal(totalEdits.length, 1, 'the same edit saved and then confirmed is one event, not two');
+
+  // And the approver sees the same account of it, written the same way. The
+  // approval view used to render the corrections blob instead: the raw field
+  // key, the raw values, no time, and none of the flags — a worse account of
+  // the bill for the person actually being asked to stand behind it.
+  const detail = await get(`/organizations/${orgId}/bills/${billId}/detail`, setup.sessionToken);
+  const shown = detail.draft.workLog.find((e: { field: string | null }) => e.field === 'total');
+  assert.ok(shown, 'the correction reaches the approval view');
+  assert.match(shown.text, /^Total due changed from/, 'named as the form names it, not as the code does');
+  assert.doesNotMatch(shown.text, /\btotal\b/, 'the field key does not leak to an approver');
+  assert.match(shown.text, /\$4,000\.00/, 'money reads as money');
+  assert.ok(
+    detail.draft.workLog.some((e: { kind: string }) => e.kind === 'flag_raised'),
+    'and the flags travel with it, which the old version never showed at all',
+  );
 });
 
 test('editing a field twice reads as a chain, not two edits from the original', async () => {

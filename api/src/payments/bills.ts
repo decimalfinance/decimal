@@ -3036,7 +3036,19 @@ async function recordFieldChanges(args: {
   changes: Array<{ field: string; key?: string; from: unknown; to: unknown }>;
 }) {
   if (args.changes.length === 0) return;
-  const text = (v: unknown) => (v === null || v === undefined ? null : String(v));
+  // Not every field is a scalar. The remit-to address arrives as an object, and
+  // String() on it yields "[object Object]" — which is worse than recording
+  // nothing, because it looks like a value somebody chose.
+  const text = (v: unknown) => {
+    if (v === null || v === undefined) return null;
+    if (typeof v === 'object') {
+      const parts = Object.values(v as Record<string, unknown>)
+        .filter((x): x is string | number => typeof x === 'string' ? x.trim() !== '' : typeof x === 'number')
+        .map(String);
+      return parts.length > 0 ? parts.join(', ') : null;
+    }
+    return String(v);
+  };
   try {
     // Callers hand us a change measured against what the DOCUMENT said, because
     // that is the comparison the correction blob wants. This table wants

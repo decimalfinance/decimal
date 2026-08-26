@@ -15,6 +15,7 @@ import {
   type BillHistoryEntry,
 } from '../api';
 import { Ico } from '../dec/icons';
+import { BillWorkLog } from '../dec/primitives';
 import { useToast } from '../ui/Toast';
 import { approvalActErrorMessage } from '../lib/app-helpers';
 import { DocumentPane } from './BillDraft';
@@ -108,7 +109,7 @@ export function BillDetailPage() {
     );
   }
 
-  const { draft: billDraft, corrections, approval, viewer, requester, status } = detail;
+  const { draft: billDraft, approval, viewer, requester, status } = detail;
   const macro = approval?.macroState ?? null;
   const rejected = macro === 'rejected';
   const recalled = macro === 'cancelled';
@@ -452,28 +453,24 @@ export function BillDetailPage() {
               </div>
             </section>
 
-            {corrections.length > 0 ? (
+            {/* The same history the clerk saw while preparing it. This used to
+                be its own smaller version built from the corrections blob, and
+                it showed the raw field key, the raw values, no time, and none
+                of the flags — so the person being asked to take responsibility
+                for the bill got a worse account of it than the person who
+                prepared it. */}
+            {billDraft.workLog.length > 0 ? (
               <section>
                 <div className="sec-head">
                   <div className="sh-titles">
-                    <h2>Corrected in draft</h2>
-                    <p className="sh-desc">What a person changed after the document was read — so you approve numbers a human stands behind, not raw machine output.</p>
+                    <h2>What's happened to this bill</h2>
+                    <p className="sh-desc">
+                      Everything raised and everything changed since the document arrived — so you
+                      approve numbers a person stands behind, not raw machine output.
+                    </p>
                   </div>
                 </div>
-                <div className="surface" style={{ padding: '4px 16px' }}>
-                  {corrections.map((c, i) => (
-                    <div key={i} className="bd-chg">
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 500 }}>{c.field}</div>
-                        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                          <span>Read as <span className="bd-strike">{c.from}</span></span>
-                          <Ico.arrowRight w={12} />
-                          <span><span className="bd-now">{c.to}</span>{c.by ? ` · ${c.by} corrected it` : ''}</span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <BillWorkLog entries={billDraft.workLog} />
               </section>
             ) : null}
           </div>

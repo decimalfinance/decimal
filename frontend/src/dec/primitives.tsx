@@ -4,6 +4,7 @@
 
 import type { ReactNode } from 'react';
 import { Ico } from './icons';
+import type { BillWorkLogEntry } from '../api';
 
 // ─── Pill ─────────────────────────────────────────────────────────────────
 // Status pills follow a small semantic palette. The design's STATUS_MAP
@@ -94,6 +95,50 @@ export function PageHead({
         </div>
         {actions ? <div className="ph-actions">{actions}</div> : null}
       </div>
+    </div>
+  );
+}
+
+
+// ─── BillWorkLog ──────────────────────────────────────────────────────────
+// What has been done to a bill, in order.
+//
+// Lives here because two screens show it — the draft you are working and the
+// approval view somebody signs off — and the second one had grown its own
+// version. That one read the corrections blob instead of the change table, so
+// it printed the raw field key ("taxAmount"), the raw values ("0" -> "820"),
+// no time, and none of the flags. An approver got a worse account of the bill
+// than the clerk who prepared it, which is backwards: the approver is the one
+// being asked to take responsibility for it.
+//
+// The sentences come from the server. A history phrased differently on each
+// screen is two histories.
+
+export function BillWorkLog({ entries }: { entries: BillWorkLogEntry[] }) {
+  if (entries.length === 0) return null;
+  return (
+    <div className="surface" style={{ padding: '4px 16px' }}>
+      {entries.map((entry) => (
+        <div key={entry.id} className="bd-chg">
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 500 }}>
+              {entry.text}
+            </div>
+            {entry.detail ? (
+              <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 3 }}>
+                {entry.detail}
+              </div>
+            ) : null}
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>
+              {entry.byName ?? 'Decimal'}
+              {' \u00b7 '}
+              {new Date(entry.at).toLocaleString(undefined, {
+                month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+              })}
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
