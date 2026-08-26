@@ -179,22 +179,18 @@ approvalsRouter.get('/organizations/:organizationId/roles', asyncRoute(async (re
 
 const roleKeyParam = z.object({ roleKey: z.enum(['bill_clerk', 'approver', 'payer', 'viewer']) });
 
+// Put somebody in a seat, replacing whatever they were in. There is no matching
+// DELETE: taking a role away leaves a member with none, which is the read-only
+// limbo the seat exists to prevent. To stop somebody working on bills, move
+// them to Viewer — that is a decision somebody makes and can be seen on the
+// roster, rather than an absence nobody notices.
 approvalsRouter.post('/organizations/:organizationId/roles/:roleKey/holders', asyncRoute(async (req, res) => {
   const { organizationId } = orgParams.parse(req.params);
   const { roleKey } = roleKeyParam.parse(req.params);
   await requireOrgAdmin(organizationId, req.auth!);
   const { userId } = z.object({ userId: z.string().uuid() }).parse(req.body);
-  const { assignRole } = await import('./roles.js');
-  sendCreated(res, await assignRole(organizationId, roleKey, userId));
-}));
-
-approvalsRouter.delete('/organizations/:organizationId/roles/:roleKey/holders/:personId', asyncRoute(async (req, res) => {
-  const { organizationId } = orgParams.parse(req.params);
-  const { roleKey } = roleKeyParam.parse(req.params);
-  const { personId } = z.object({ personId: z.string().uuid() }).parse(req.params);
-  await requireOrgAdmin(organizationId, req.auth!);
-  const { unassignRole } = await import('./roles.js');
-  sendJson(res, await unassignRole(organizationId, roleKey, personId));
+  const { setRole } = await import('./roles.js');
+  sendCreated(res, await setRole(organizationId, roleKey, userId));
 }));
 
 // --- Out of office: pick a fill-in approver for while you're away ---------------

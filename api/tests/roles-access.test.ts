@@ -115,12 +115,37 @@ test('prebuilt roles: fixed set, assignment, my-access, and HTTP enforcement per
   assert.equal(await status('GET', `/organizations/${orgId}/payment-orders`, member.token), 403, 'bill clerk has no payment queue');
   assert.equal(await status('POST', `/organizations/${orgId}/automation-agents`, member.token, {}), 403);
 
-  // Unassign → back to the viewer default.
-  await del(`/organizations/${orgId}/roles/bill_clerk/holders/${me.personId}`, owner.token);
+  // Moved to Viewer → read-only again. Note what this is NOT: there is no
+  // unassign. Taking the role away would leave a member with none, which falls
+  // back to the viewer bundle anyway but as an accident nobody chose and no
+  // screen reports. Stopping somebody working on bills is a move to a seat.
+  await post(`/organizations/${orgId}/roles/viewer/holders`, { userId: member.userId }, owner.token);
   const reverted = await get(`/organizations/${orgId}/my-access`, member.token);
-  assert.deepEqual(reverted.roles, []);
+  assert.deepEqual(reverted.roles, ['viewer'], 'one seat, and it is the one somebody chose');
   await get(`/organizations/${orgId}/payment-orders`, member.token); // viewer sees the queue again
   assert.equal(await status('POST', `/organizations/${orgId}/invoices/upload`, member.token, {}), 403, 'and cannot enter bills anymore');
+});
+
+test('a member holds one seat: choosing another replaces it', async () => {
+  // Roles used to accumulate, and could be taken away until none were left —
+  // and none means the viewer bundle, so a member could end up read-only
+  // because somebody unticked the last box, with nothing anywhere saying that
+  // had happened. One seat has no empty state to fall into.
+  const { orgId, owner, member } = await makeOrg();
+  await post(`/organizations/${orgId}/roles/bill_clerk/holders`, { userId: member.userId }, owner.token);
+  await post(`/organizations/${orgId}/roles/payer/holders`, { userId: member.userId }, owner.token);
+
+  const access = await get(`/organizations/${orgId}/my-access`, member.token);
+  assert.deepEqual(access.roles, ['payer'], 'the second choice replaced the first');
+  assert.ok(access.capabilities.includes('payments.sign'));
+  assert.equal(access.capabilities.includes('bills.edit'), false, 'and the old seat let go of its access');
+
+  // Removal is not offered at all.
+  assert.equal(
+    await status('DELETE', `/organizations/${orgId}/roles/payer/holders/${access.roles.length}`, owner.token),
+    404,
+    'there is no unassign route to call',
+  );
 });
 
 test('payer role opens payment surface without granting bill entry', async () => {

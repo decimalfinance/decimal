@@ -77,13 +77,9 @@ export function MembersPage({ session }: { session: AuthenticatedSession }) {
   };
 
   const assignM = useMutation({
-    mutationFn: (v: { roleKey: RoleKey; userId: string }) => rolesApi.assign(organizationId, v.roleKey, v.userId),
+    mutationFn: (v: { roleKey: RoleKey; userId: string }) => rolesApi.setRole(organizationId, v.roleKey, v.userId),
     onSuccess: invalidate,
-    onError: (e) => toast.error('Could not assign', e instanceof Error ? e.message : 'Try again.'),
-  });
-  const unassignM = useMutation({
-    mutationFn: (v: { roleKey: RoleKey; personId: string }) => rolesApi.unassign(organizationId, v.roleKey, v.personId),
-    onSuccess: invalidate,
+    onError: (e) => toast.error('Could not change role', e instanceof Error ? e.message : 'Try again.'),
   });
   const accessM = useMutation({
     mutationFn: (v: { userId: string; access: 'admin' | 'member' }) => accessApi.setMemberAccess(organizationId, v.userId, v.access),
@@ -106,12 +102,11 @@ export function MembersPage({ session }: { session: AuthenticatedSession }) {
   const filtered = members.filter((m) => !s || m.name.toLowerCase().includes(s) || m.email.toLowerCase().includes(s));
   const pending = invitesQuery.data?.items ?? [];
 
-  const toggleRole = (member: MemberWithRoles, roleKey: RoleKey) => {
-    if (member.roles.includes(roleKey)) {
-      if (member.personId) unassignM.mutate({ roleKey, personId: member.personId });
-    } else {
-      assignM.mutate({ roleKey, userId: member.userId });
-    }
+  // Choosing, not toggling. Picking the seat somebody already holds is a no-op
+  // rather than a way to end up with none.
+  const chooseRole = (member: MemberWithRoles, roleKey: RoleKey) => {
+    if (member.roles.includes(roleKey)) return;
+    assignM.mutate({ roleKey, userId: member.userId });
   };
 
   return (
@@ -257,7 +252,7 @@ export function MembersPage({ session }: { session: AuthenticatedSession }) {
             onTransfer: () => { setTransferFor(members.find((m) => m.userId === manageFor)!); setManageFor(null); },
           } : undefined}
           onClose={() => setManageFor(null)}
-          onToggle={(roleKey) => toggleRole(members.find((m) => m.userId === manageFor)!, roleKey)}
+          onChoose={(roleKey) => chooseRole(members.find((m) => m.userId === manageFor)!, roleKey)}
         />
       ) : null}
 
@@ -286,21 +281,26 @@ export function MembersPage({ session }: { session: AuthenticatedSession }) {
   );
 }
 
-// Tick the roles a member holds. Each row shows the role's plain-English
-// summary so assignment doubles as the explanation of what it grants.
+// The one seat this member holds. Each row shows the role's plain-English
+// summary, so choosing doubles as the explanation of what it grants.
+//
+// One seat, chosen — not a set of ticks. Ticks have a way to reach nothing, and
+// nothing means the viewer bundle by accident: read-only, with no screen saying
+// so. Stopping somebody working on bills is a move to Viewer, which somebody
+// decided and the roster shows.
 function MemberRolesDialog(props: {
   member: MemberWithRoles;
   roles: OrgRole[];
   tier?: { busy: boolean; onSet: (access: 'admin' | 'member') => void; onTransfer: () => void };
-  onClose: () => void; onToggle: (roleKey: RoleKey) => void;
+  onClose: () => void; onChoose: (roleKey: RoleKey) => void;
 }) {
-  const { member, roles, tier, onClose, onToggle } = props;
+  const { member, roles, tier, onClose, onChoose } = props;
   const held = new Set(member.roles);
   return (
     <div className="overlay" style={{ position: 'fixed', inset: 0, zIndex: 60 }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="dialog roles-dialog" role="dialog" aria-modal="true" style={{ maxWidth: 480 }}>
         <div className="dialog-head">
-          <div><h2>{member.access !== 'member' ? `${member.name}'s access` : `${member.name}'s roles`}</h2><p>{member.access !== 'member' ? 'Access tier and the primary-admin seat.' : 'Tick the jobs this person does. Their access follows from the roles they hold.'}</p></div>
+          <div><h2>{member.access !== 'member' ? `${member.name}'s access` : `${member.name}'s roles`}</h2><p>{member.access !== 'member' ? 'Access tier and the primary-admin seat.' : 'The job this person does. Their access follows from it.'}</p></div>
           <button type="button" className="drawer-x" onClick={onClose} aria-label="Close">×</button>
         </div>
         <div className="dialog-body">
@@ -309,9 +309,9 @@ function MemberRolesDialog(props: {
               {member.name.split(' ')[0]} is {member.access === 'owner' ? 'the primary admin' : 'an admin'} and already has full access — roles are for members. Move them to Member below if you want their access to come from roles instead.
             </p>
           ) : (
-          <div className="role-box">
+          <div className="role-box" role="radiogroup" aria-label="Role">
             {roles.map((r) => (
-              <button key={r.key} type="button" className={`role-row${held.has(r.key) ? ' on' : ''}`} onClick={() => onToggle(r.key)} style={{ alignItems: 'flex-start' }}>
+              <button key={r.key} type="button" role="radio" aria-checked={held.has(r.key)} className={`role-row${held.has(r.key) ? ' on' : ''}`} onClick={() => onChoose(r.key)} style={{ alignItems: 'flex-start' }}>
                 <span className="rr-check" style={{ marginTop: 2 }}>{held.has(r.key) ? <Ico.checkSm w={12} /> : null}</span>
                 <span style={{ display: 'flex', flexDirection: 'column', gap: 2, textAlign: 'left', minWidth: 0 }}>
                   <span className="rr-name">{r.name}</span>

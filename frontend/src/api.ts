@@ -2107,11 +2107,11 @@ export const rolesApi = {
   get(organizationId: string) {
     return request<MembersAndRoles>(`/organizations/${organizationId}/roles`);
   },
-  assign(organizationId: string, roleKey: RoleKey, userId: string) {
+  // Puts somebody in a seat, replacing whatever they were in. There is no
+  // unassign: a member with no role is read-only limbo. Moving them to Viewer
+  // is how you stop somebody working on bills.
+  setRole(organizationId: string, roleKey: RoleKey, userId: string) {
     return request<{ ok: boolean; personId: string }>(`/organizations/${organizationId}/roles/${roleKey}/holders`, { method: 'POST', body: JSON.stringify({ userId }) });
-  },
-  unassign(organizationId: string, roleKey: RoleKey, personId: string) {
-    return request<{ ok: boolean }>(`/organizations/${organizationId}/roles/${roleKey}/holders/${personId}`, { method: 'DELETE' });
   },
 };
 
