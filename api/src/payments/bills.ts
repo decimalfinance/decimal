@@ -3029,13 +3029,47 @@ async function recordFieldChanges(args: {
   if (args.changes.length === 0) return;
   const text = (v: unknown) => (v === null || v === undefined ? null : String(v));
   try {
+    // Callers hand us a change measured against what the DOCUMENT said, because
+    // that is the comparison the correction blob wants. This table wants
+    // something different: a chain of what actually happened, each link
+    // starting where the last one ended.
+    //
+    // Told the same way, both a save and the confirm that follows it record
+    // "tax 0 -> 820" — the same edit, twice, from two writers each measuring
+    // from the original. Saving five times wrote it five times. It read as the
+    // tax having been put back to nothing in between, which never happened.
+    //
+    // So: rebase each change onto the last value recorded for that field, and
+    // drop the ones that turn out to say nothing. A repeat is not an event.
+    const history = await prisma.billFieldChange.findMany({
+      where: { organizationId: args.organizationId, paymentOrderId: args.paymentOrderId },
+      orderBy: { changedAt: 'desc' },
+      select: { fieldKey: true, newValue: true },
+    });
+    const lastRecorded = new Map<string, string | null>();
+    for (const row of history) {
+      if (!lastRecorded.has(row.fieldKey)) lastRecorded.set(row.fieldKey, row.newValue);
+    }
+
+    const links = args.changes
+      .map((c) => {
+        const fieldKey = c.key ?? c.field;
+        return {
+          fieldKey,
+          previousValue: lastRecorded.has(fieldKey) ? lastRecorded.get(fieldKey)! : text(c.from),
+          newValue: text(c.to),
+        };
+      })
+      .filter((c) => c.previousValue !== c.newValue);
+    if (links.length === 0) return;
+
     await prisma.billFieldChange.createMany({
-      data: args.changes.map((c) => ({
+      data: links.map((c) => ({
         organizationId: args.organizationId,
         paymentOrderId: args.paymentOrderId,
-        fieldKey: c.key ?? c.field,
-        previousValue: text(c.from),
-        newValue: text(c.to),
+        fieldKey: c.fieldKey,
+        previousValue: c.previousValue,
+        newValue: c.newValue,
         changedByUserId: args.changedByUserId,
         phase: args.phase,
         reason: args.reason,

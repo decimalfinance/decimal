@@ -573,6 +573,99 @@ test('correcting the figures clears the arithmetic flag it was raised on', async
   // And it can now actually leave review, which is the whole point.
   const confirmed = await post(`/organizations/${orgId}/bills/${billId}/confirm`, body, setup.sessionToken);
   assert.equal(confirmed.detail.state, 'submitted');
+
+  // One edit, one line. Save and confirm each used to measure the change from
+  // what the DOCUMENT said, so both wrote "total 4,820 -> 4,000" and the
+  // history read as though the figure had been put back in between.
+  const settled = await get(`/organizations/${orgId}/bills/${billId}/draft`, setup.sessionToken);
+  const totalEdits = settled.workLog.filter((e: { field: string | null }) => e.field === 'total');
+  assert.equal(totalEdits.length, 1, 'the same edit saved and then confirmed is one event, not two');
+});
+
+test('editing a field twice reads as a chain, not two edits from the original', async () => {
+  const setup = await createPaymentOrderSetup();
+  const vendorWallet = Keypair.generate().publicKey.toBase58();
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [
+        {
+          counterparty: 'Harbour Freight Co',
+          amount: 1200,
+          currency: 'USD',
+          reference: 'HF-9001',
+          due_date: '2026-09-10',
+          wallet_address: vendorWallet,
+          notes: 'Freight',
+          source_invoice: {
+            vendorName: 'Harbour Freight Co',
+            vendorAddress: null,
+            vendorEmail: null,
+            amount: 1200,
+            currency: 'USD',
+            invoiceNumber: 'HF-9001',
+            invoiceDate: '2026-08-10',
+            dueDate: '2026-09-10',
+            terms: 'Net 30',
+            poNumber: null,
+            earlyPayDiscount: null,
+            subtotal: 1200,
+            taxAmount: 0,
+            billToName: null,
+            remitTo: { street: '2 Quay St', city: 'Seattle', state: 'WA', zip: '98101' },
+            paymentDetails: { method: 'ACH', bankName: 'Harbor Bank', accountLast4: '4410', routingNumber: null },
+            walletAddress: vendorWallet,
+            lineItems: [{ description: 'Freight', quantity: 1, unitPrice: 1200, total: 1200 }],
+            categoryHint: 'Freight',
+            confidence: { vendor: 0.95, amount: 0.95, overall: 0.95 },
+            fieldConfidence: { invoiceNumber: 0.95, invoiceDate: 0.95, dueDate: 0.95, total: 0.95 },
+          },
+        },
+      ],
+      modelLatencyMs: 5,
+      pageCount: 1,
+    }),
+  });
+
+  const orgId = setup.organization.organizationId;
+  const upload = await post(
+    `/organizations/${orgId}/invoices/upload`,
+    {
+      filename: 'HF-9001.pdf',
+      mimeType: 'application/pdf',
+      dataBase64: Buffer.from('%PDF-1.4 harbour').toString('base64'),
+      sourceTreasuryWalletId: setup.sourceTreasuryWallet.treasuryWalletId,
+      autoAdvance: false,
+    },
+    setup.sessionToken,
+  );
+  const billId = upload.paymentOrders[0].paymentOrder.paymentOrderId;
+
+  const bodyWith = (poNumber: string) => ({
+    fields: {
+      invoiceNumber: 'HF-9001',
+      invoiceDate: '2026-08-10',
+      dueDate: '2026-09-10',
+      terms: 'Net 30',
+      currency: 'USD',
+      poNumber,
+      total: 1200,
+      taxAmount: 0,
+      remitTo: { street: '2 Quay St', city: 'Seattle', state: 'WA', zip: '98101' },
+    },
+    lines: [{ description: 'Freight', quantity: 1, unitPrice: 1200, amount: 1200, category: 'Freight' }],
+    confirmedFieldKeys: [] as string[],
+    noteForApprovers: null as string | null,
+  });
+
+  await post(`/organizations/${orgId}/bills/${billId}/save`, bodyWith('PO-1'), setup.sessionToken);
+  await post(`/organizations/${orgId}/bills/${billId}/save`, bodyWith('PO-2'), setup.sessionToken);
+
+  const draft = await get(`/organizations/${orgId}/bills/${billId}/draft`, setup.sessionToken);
+  const poEdits = draft.workLog.filter((e: { field: string | null }) => e.field === 'poNumber');
+  assert.equal(poEdits.length, 2, 'two real edits, two entries');
+  assert.match(poEdits[0].text, /PO number changed from nothing to PO-1/);
+  // The second link starts where the first ended, rather than from the document.
+  assert.match(poEdits[1].text, /PO number changed from PO-1 to PO-2/);
 });
 
 test('confirm judges the figures being submitted, not the ones last saved', async () => {
