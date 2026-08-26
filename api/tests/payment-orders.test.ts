@@ -990,6 +990,23 @@ test('deciding to pay the itemised total records the decision, not just the numb
   const row = board.bills.find((b: { paymentOrderId: string }) => b.paymentOrderId === billId);
   assert.equal(row.amountUsd, 4000, 'the queue shows the amount that will actually be paid');
 
+  // The account of one action reads in the order it happened: what changed,
+  // what was decided, what that settled. All three are written in the same
+  // instant, so without a fixed order among them the flag came back resolved
+  // above the edit that resolved it.
+  const kinds = after.workLog.map((e: { kind: string }) => e.kind);
+  const changed = kinds.lastIndexOf('field_changed');
+  const decided = kinds.lastIndexOf('policy_overridden');
+  const settled = kinds.lastIndexOf('flag_cleared');
+  assert.ok(changed < decided, 'the edit comes before the decision');
+  assert.ok(decided < settled, 'the decision comes before what it settled');
+
+  // And the decision is named, not slugged. "pay_the_itemised_total" was
+  // appearing as the headline above somebody's sentence about a vendor.
+  const decisionEntry = after.workLog[decided];
+  assert.match(decisionEntry.text, /^Paying the itemised total/);
+  assert.doesNotMatch(decisionEntry.text, /pay_the_itemised_total/);
+
   // Deciding twice is not a thing: there is no discrepancy left to decide.
   await assert.rejects(
     post(

@@ -630,6 +630,8 @@ async function recordFlagChanges(args: {
   before: BillFlag[];
   after: BillFlag[];
   state: string;
+  /** Stamp several writes from one action with one instant. */
+  at?: Date;
 }) {
   // Only the flags that actually stop a bill. An informational one — "first
   // bill from this vendor" — never held anything up, so recording it as raised
@@ -663,6 +665,7 @@ async function recordFlagChanges(args: {
         // history afterwards actually needs.
         message: flag.message,
       },
+      ...(args.at ? { createdAt: args.at } : {}),
     })),
   });
 }
@@ -738,7 +741,12 @@ export async function billWorkLog(organizationId: string, paymentOrderId: string
 
   for (const e of events) {
     const payload = isRecord(e.payloadJson) ? e.payloadJson : {};
-    const short = str(payload.short) ?? str(payload.rule) ?? 'a check';
+    // `rule` is a wire identifier. It reached the screen as the headline of an
+    // entry — "pay_the_itemised_total" sitting above somebody's sentence about
+    // a vendor — which is the same leak the field keys had.
+    const short = str(payload.short)
+      ?? OVERRIDE_LABELS[str(payload.rule) ?? '']
+      ?? 'A check was overridden';
     const reason = str(payload.reason);
     entries.push({
       id: e.paymentOrderEventId,
@@ -755,7 +763,9 @@ export async function billWorkLog(organizationId: string, paymentOrderId: string
     });
   }
 
-  entries.sort((a, b) => a.at.getTime() - b.at.getTime());
+  entries.sort((a, b) =>
+    a.at.getTime() - b.at.getTime()
+    || (ENTRY_ORDER[a.kind] ?? 9) - (ENTRY_ORDER[b.kind] ?? 9));
   return entries.map((e) => ({ ...e, at: e.at.toISOString() }));
 }
 
@@ -777,6 +787,26 @@ const BILL_FIELD_LABELS: Record<string, string> = {
   total: 'Total due',
   taxAmount: 'Tax',
   lineItems: 'Line items',
+};
+
+// What each policy override is called in a sentence. Keyed by the rule the
+// engine records, which is not a phrase anybody should have to read.
+const OVERRIDE_LABELS: Record<string, string> = {
+  pay_the_itemised_total: 'Paying the itemised total',
+  duplicate_bill: 'Duplicate flag cleared',
+};
+
+// Several rows can share a timestamp, because one thing a person did writes a
+// change, a decision and a resolution together. Sorted by time alone the three
+// come back in whatever order the database felt like, and the account reads
+// backwards — the flag resolved above the edit that resolved it. So a fixed
+// order within the same instant: what was changed, what was decided, then what
+// that did to the checks.
+const ENTRY_ORDER: Record<string, number> = {
+  field_changed: 0,
+  policy_overridden: 1,
+  flag_raised: 2,
+  flag_cleared: 3,
 };
 
 // Money reads as money. "Tax changed from 0 to 820" is a worse sentence than
@@ -2526,13 +2556,18 @@ export async function payItemisedTotal(args: {
   const fields = verification && isRecord(verification.fields) ? { ...verification.fields } : {};
   fields.total = itemisedTotal;
 
+  // One instant for everything this action writes. The edit, the decision and
+  // the flag it settles are one thing a person did; giving them three
+  // timestamps milliseconds apart let them come back interleaved with each
+  // other in an order nobody chose.
+  const at = new Date();
   const shortPay = {
     byUserId: args.actorUserId,
     byName: args.actorName,
     reason: args.reason,
     itemisedTotal,
     documentTotal: previousTotal,
-    at: new Date().toISOString(),
+    at: at.toISOString(),
   };
 
   const flagsBefore = await flagsForOrder(args.organizationId, order.paymentOrderId);
@@ -2568,6 +2603,7 @@ export async function payItemisedTotal(args: {
           from: previousTotal,
           to: itemisedTotal,
         },
+        createdAt: at,
       },
     }),
   ]);
@@ -2579,6 +2615,7 @@ export async function payItemisedTotal(args: {
     phase: 'draft',
     reason: 'pay_the_itemised_total',
     changes: [{ field: 'total', from: previousTotal, to: itemisedTotal }],
+    at,
   });
 
   await recordFlagChanges({
@@ -2588,6 +2625,7 @@ export async function payItemisedTotal(args: {
     before: flagsBefore,
     after: await flagsForOrder(args.organizationId, order.paymentOrderId),
     state: order.state,
+    at,
   });
 
   return getBillDraft(args.organizationId, args.paymentOrderId, args.actorUserId);
@@ -3043,6 +3081,8 @@ async function recordFieldChanges(args: {
   /** A sweep must not look like a person. */
   actorType?: 'user' | 'system' | 'agent';
   changes: Array<{ field: string; key?: string; from: unknown; to: unknown }>;
+  /** Stamp several writes from one action with one instant. */
+  at?: Date;
 }) {
   if (args.changes.length === 0) return;
   // Not every field is a scalar. The remit-to address arrives as an object, and
@@ -3105,6 +3145,7 @@ async function recordFieldChanges(args: {
         reason: args.reason,
         correlationId: args.correlationId ?? null,
         actorType: args.actorType ?? (args.changedByUserId ? 'user' : 'system'),
+        ...(args.at ? { changedAt: args.at } : {}),
       })),
     });
   } catch (error) {
