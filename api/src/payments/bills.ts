@@ -436,16 +436,71 @@ async function approvalRouteFor(organizationId: string, paymentOrderId: string) 
   }));
 }
 
-function documentAmounts(extracted: Record<string, unknown> | null) {
-  const lines = Array.isArray(extracted?.lineItems) ? (extracted!.lineItems as unknown[]) : [];
-  const readable = lines.filter(isRecord).map((l) => num(l.total)).filter((n): n is number => n !== null);
+// Sum a set of line rows, refusing to guess. Every row that says anything at
+// all must carry a readable amount; one that doesn't makes the sum unknown
+// rather than smaller, because a total quietly missing a line is worse than no
+// total. Entirely blank rows are ignored — an empty row at the bottom of the
+// table is somewhere to type, not a line worth nothing.
+function sumLineAmounts(rows: unknown[], amountKey: string): number | null {
+  const present = rows.filter(isRecord).filter(
+    (l) => (typeof l.description === 'string' && l.description.trim() !== '') || num(l[amountKey]) !== null,
+  );
+  if (present.length === 0) return null;
+  const amounts = present.map((l) => num(l[amountKey]));
+  if (amounts.some((a) => a === null)) return null;
+  return (amounts as number[]).reduce((a, b) => a + b, 0);
+}
+
+/**
+ * The figures the arithmetic gate should be satisfied with.
+ *
+ * Until somebody edits the bill, that is the document as it was read: the gate
+ * is asking "does this invoice hold together, and did we read it correctly?"
+ *
+ * Once somebody edits it, it is THEIR figures — because theirs are the ones
+ * that will be paid. This used to read the raw extraction always, which made
+ * the flag permanent: correcting the lines, the tax or the total changed
+ * nothing the gate looked at, so "Correct the figures" was an instruction that
+ * could not work and the bill could never leave review. A blocking flag with no
+ * reachable resolution is a dead end, which is exactly what this file's own
+ * rules say must not exist.
+ *
+ * The printed subtotal is dropped once corrections exist. No screen offers a
+ * way to edit it, so keeping it would go on judging a corrected bill against a
+ * number nobody is able to change — the same dead end in a smaller room. What
+ * remains is the question the draft screen has always asked out loud: do the
+ * lines plus the tax come to the total being paid?
+ */
+function documentAmounts(
+  extracted: Record<string, unknown> | null,
+  verification: Record<string, unknown> | null,
+) {
+  const extractedLines = Array.isArray(extracted?.lineItems) ? (extracted!.lineItems as unknown[]) : [];
+  const verifiedFields = verification && isRecord(verification.fields) ? verification.fields : null;
+  const verifiedLines = verification && Array.isArray(verification.lines)
+    ? (verification.lines as unknown[])
+    : null;
+
+  if (!verifiedFields && !verifiedLines) {
+    return {
+      lineItemsTotal: sumLineAmounts(extractedLines, 'total'),
+      subtotal: num(extracted?.subtotal),
+      tax: num(extracted?.taxAmount),
+      total: num(extracted?.amount),
+    };
+  }
+
   return {
-    lineItemsTotal: readable.length > 0 && readable.length === lines.length
-      ? readable.reduce((a, b) => a + b, 0)
-      : null,
-    subtotal: num(extracted?.subtotal),
-    tax: num(extracted?.taxAmount),
-    total: num(extracted?.amount),
+    lineItemsTotal: verifiedLines
+      ? sumLineAmounts(verifiedLines, 'amount')
+      : sumLineAmounts(extractedLines, 'total'),
+    subtotal: null,
+    tax: verifiedFields && 'taxAmount' in verifiedFields
+      ? num(verifiedFields.taxAmount)
+      : num(extracted?.taxAmount),
+    total: verifiedFields && 'total' in verifiedFields
+      ? num(verifiedFields.total)
+      : num(extracted?.amount),
   };
 }
 
@@ -615,7 +670,7 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
         },
       ),
       duplicateOverride: readDuplicateOverride(order.metadataJson),
-      amounts: documentAmounts(extracted),
+      amounts: documentAmounts(extracted, isRecord(metadataRecord.verification) ? metadataRecord.verification : null),
       planAlerts: alertsByOrder.get(order.paymentOrderId) ?? [],
       documentType: documentTypeSignals(extracted, order.invoiceNumber),
     });
@@ -1158,7 +1213,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     ceilingMinor,
     duplicates,
     duplicateOverride: readDuplicateOverride(metadata),
-    amounts: documentAmounts(extracted),
+    amounts: documentAmounts(extracted, verification),
     planAlerts: (await planAlertsByOrder(organizationId, [order.paymentOrderId])).get(order.paymentOrderId) ?? [],
     documentType: documentTypeSignals(extracted, order.invoiceNumber),
   });

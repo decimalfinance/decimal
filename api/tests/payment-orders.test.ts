@@ -426,6 +426,125 @@ test('bills workbench triages uploads; review confirm sends the bill onward', as
   assert.equal(confirmedField.state, 'confirmed');
 });
 
+test('correcting the figures clears the arithmetic flag it was raised on', async () => {
+  // The flag used to be computed from the raw extraction on every read, and a
+  // save never wrote back to the extraction. So a bill whose lines disagreed
+  // with its total could not be fixed by anyone: editing the lines, the tax or
+  // the total changed nothing the gate looked at, and "Correct the figures" —
+  // the only resolution offered — did nothing at all. The bill was stuck for
+  // good. This walks the whole way round: flagged, corrected, cleared.
+  const setup = await createPaymentOrderSetup();
+  const vendorWallet = Keypair.generate().publicKey.toBase58();
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [
+        {
+          counterparty: 'Northwind Supplies',
+          amount: 4820,
+          currency: 'USD',
+          reference: 'NW-3320',
+          due_date: '2026-09-01',
+          wallet_address: vendorWallet,
+          notes: 'Warehouse supplies',
+          source_invoice: {
+            vendorName: 'Northwind Supplies',
+            vendorAddress: null,
+            vendorEmail: null,
+            amount: 4820,
+            currency: 'USD',
+            invoiceNumber: 'NW-3320',
+            invoiceDate: '2026-08-02',
+            dueDate: '2026-09-01',
+            terms: 'Net 30',
+            poNumber: null,
+            earlyPayDiscount: null,
+            // The defect: the document says 4,820 but itemises only 4,000.
+            subtotal: 4820,
+            taxAmount: 0,
+            billToName: null,
+            remitTo: { street: '1 Dock Road', city: 'Tacoma', state: 'WA', zip: '98402' },
+            paymentDetails: { method: 'ACH', bankName: 'Harbor Bank', accountLast4: '1188', routingNumber: null },
+            walletAddress: vendorWallet,
+            lineItems: [
+              { description: 'Warehouse shelving units', quantity: 4, unitPrice: 650, total: 2600 },
+              { description: 'Forklift annual service', quantity: 1, unitPrice: 900, total: 900 },
+              { description: 'Safety equipment restock', quantity: 1, unitPrice: 500, total: 500 },
+            ],
+            categoryHint: 'Job supplies',
+            confidence: { vendor: 0.97, amount: 0.9, overall: 0.93 },
+            fieldConfidence: { invoiceNumber: 0.98, invoiceDate: 0.9, dueDate: 0.9, total: 0.9 },
+          },
+        },
+      ],
+      modelLatencyMs: 5,
+      pageCount: 1,
+    }),
+  });
+
+  const orgId = setup.organization.organizationId;
+  const upload = await post(
+    `/organizations/${orgId}/invoices/upload`,
+    {
+      filename: 'NW-3320.pdf',
+      mimeType: 'application/pdf',
+      dataBase64: Buffer.from('%PDF-1.4 northwind').toString('base64'),
+      sourceTreasuryWalletId: setup.sourceTreasuryWallet.treasuryWalletId,
+      autoAdvance: false,
+    },
+    setup.sessionToken,
+  );
+  const billId = upload.paymentOrders[0].paymentOrder.paymentOrderId;
+
+  const flagged = await get(`/organizations/${orgId}/bills/${billId}/draft`, setup.sessionToken);
+  const raised = flagged.flags.find((f: { kind: string }) => f.kind === 'lines_do_not_sum');
+  assert.ok(raised, 'lines of 4,000 against a total of 4,820 must be flagged');
+  assert.equal(raised.blocking, true);
+  // And the row on the list agrees — both surfaces read one evaluator.
+  const flaggedBoard = await get(`/organizations/${orgId}/bills/workbench`, setup.sessionToken);
+  const flaggedRow = flaggedBoard.bills.find((b: { paymentOrderId: string }) => b.paymentOrderId === billId);
+  assert.equal(flaggedRow.subStatus.text, 'Lines do not add up');
+
+  const body = {
+    fields: {
+      invoiceNumber: 'NW-3320',
+      invoiceDate: '2026-08-02',
+      dueDate: '2026-09-01',
+      terms: 'Net 30',
+      currency: 'USD',
+      // The decision: pay what the invoice itemises, not what it claims.
+      total: 4000,
+      taxAmount: 0,
+      remitTo: { street: '1 Dock Road', city: 'Tacoma', state: 'WA', zip: '98402' },
+    },
+    lines: [
+      { description: 'Warehouse shelving units', quantity: 4, unitPrice: 650, amount: 2600, category: 'Job supplies' },
+      { description: 'Forklift annual service', quantity: 1, unitPrice: 900, amount: 900, category: 'Repairs & maintenance' },
+      { description: 'Safety equipment restock', quantity: 1, unitPrice: 500, amount: 500, category: 'Job supplies' },
+    ],
+    confirmedFieldKeys: [] as string[],
+    noteForApprovers: null as string | null,
+  };
+
+  await post(`/organizations/${orgId}/bills/${billId}/save`, body, setup.sessionToken);
+
+  const fixed = await get(`/organizations/${orgId}/bills/${billId}/draft`, setup.sessionToken);
+  assert.equal(
+    fixed.flags.some((f: { kind: string }) => f.kind === 'lines_do_not_sum'),
+    false,
+    'the corrected figures agree, so the flag it was raised on is gone',
+  );
+  assert.equal(fixed.flags.some((f: { blocking: boolean }) => f.blocking), false);
+
+  const board = await get(`/organizations/${orgId}/bills/workbench`, setup.sessionToken);
+  const row = board.bills.find((b: { paymentOrderId: string }) => b.paymentOrderId === billId);
+  assert.equal(row.amountUsd, 4000, 'the saved figure is what the queue shows');
+  assert.notEqual(row.subStatus.text, 'Lines do not add up');
+
+  // And it can now actually leave review, which is the whole point.
+  const confirmed = await post(`/organizations/${orgId}/bills/${billId}/confirm`, body, setup.sessionToken);
+  assert.equal(confirmed.detail.state, 'submitted');
+});
+
 test('a bill routed to its own submitter deadlocks: the task exists, the rules forbid it', async () => {
   // The engine's own tests drive executeCommand directly. Nothing exercised the
   // path a person actually takes: session auth, the user→person lookup, the
