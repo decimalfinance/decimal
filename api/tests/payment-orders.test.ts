@@ -505,6 +505,12 @@ test('correcting the figures clears the arithmetic flag it was raised on', async
   const openedWith = flagged.workLog.find((e: { kind: string }) => e.kind === 'flag_raised');
   assert.ok(openedWith, 'the opening flag is recorded at intake');
   assert.match(openedWith.text, /Lines do not add up/);
+  // And WHY. The label names the check that fired; on its own it does not say
+  // the lines came to $4,000 against a document reading $4,820, which is the
+  // part somebody reading this back actually needs.
+  assert.ok(openedWith.detail, 'the reason is on the record, not just the label');
+  assert.match(openedWith.detail, /\$4,000\.00/);
+  assert.match(openedWith.detail, /\$4,820\.00/);
   // And the row on the list agrees — both surfaces read one evaluator.
   const flaggedBoard = await get(`/organizations/${orgId}/bills/workbench`, setup.sessionToken);
   const flaggedRow = flaggedBoard.bills.find((b: { paymentOrderId: string }) => b.paymentOrderId === billId);

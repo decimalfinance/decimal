@@ -1467,6 +1467,7 @@ export interface BillWorkLogEntry {
   byName: string | null;
   text: string;
   field: string | null;
+  detail: string | null;
 }
 
 export interface CategoryOption { value: string; label: string; num?: string | null; group: string }

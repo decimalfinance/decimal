@@ -649,6 +649,11 @@ async function recordFlagChanges(args: {
         short: flag.short,
         severity: flag.severity,
         blocking: flag.blocking,
+        // The whole sentence, not just the label. "Lines do not add up" says
+        // which check fired; it does not say that they came to $4,000 against a
+        // document reading $4,820, which is the part somebody reading the
+        // history afterwards actually needs.
+        message: flag.message,
       },
     })),
   });
@@ -702,6 +707,8 @@ export async function billWorkLog(organizationId: string, paymentOrderId: string
     text: string;
     /** Present on a field change, so the screen can point at the field. */
     field: string | null;
+    /** The long form, when there is one worth reading under the headline. */
+    detail: string | null;
   };
 
   const entries: Entry[] = [];
@@ -717,6 +724,7 @@ export async function billWorkLog(organizationId: string, paymentOrderId: string
       byName: c.changedByUserId ? nameOf.get(c.changedByUserId) ?? null : (c.actorType === 'user' ? null : 'Decimal'),
       text: `${label} changed from ${from} to ${to}`,
       field: c.fieldKey,
+      detail: null,
     });
   }
 
@@ -735,6 +743,7 @@ export async function billWorkLog(organizationId: string, paymentOrderId: string
         : e.eventType === 'bill_flag_cleared' ? `Resolved: ${short}`
         : `${short}${reason ? ` \u201c${reason}\u201d` : ''}`,
       field: null,
+      detail: str(payload.message),
     });
   }
 

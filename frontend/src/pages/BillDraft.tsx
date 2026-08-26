@@ -1154,6 +1154,11 @@ function DraftScreen(props: {
                         <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 500 }}>
                           {entry.text}
                         </div>
+                        {entry.detail ? (
+                          <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 3 }}>
+                            {entry.detail}
+                          </div>
+                        ) : null}
                         <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>
                           {entry.byName ?? 'Decimal'}
                           {' \u00b7 '}
