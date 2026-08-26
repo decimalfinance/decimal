@@ -19,6 +19,7 @@ import { extractPdfTextLayer, refineInvoiceSources, PROVENANCE_VERSION } from '.
 import { findDuplicateBills, readDuplicateOverride, describeDuplicate, matchDuplicates } from './duplicate-check.js';
 import { readPayableHold, describePayableHold } from './vendor-payable.js';
 import { evaluateBillFlags, summarizeBillFlags, displayOrgName } from './bill-flags.js';
+import type { BillFlag } from './bill-flags.js';
 import { getBillCeilingMinor } from '../approvals/store.js';
 import { involvedBillIds } from './bill-visibility.js';
 import type { ExtractedInvoice } from './document-extract.js';
@@ -496,6 +497,125 @@ function sumLineAmounts(rows: unknown[], amountKey: string): number | null {
  * remains is the question the draft screen has always asked out loud: do the
  * lines plus the tax come to the total being paid?
  */
+/**
+ * The flags on a bill as things currently stand, gathered from scratch.
+ *
+ * getBillDraft already does this, but it also loads the document, the chart of
+ * accounts, the question thread and the approval route — far too much to run
+ * twice around a save just to find out what changed. This gathers only what the
+ * rules read.
+ *
+ * `verification` can be overridden to ask a counterfactual: what were the flags
+ * BEFORE this save? Passing null answers "as the document arrived", which is
+ * how the first save on a bill gets a truthful baseline without anything having
+ * been written at intake.
+ */
+export async function flagsForOrder(
+  organizationId: string,
+  paymentOrderId: string,
+  opts?: { verification?: Record<string, unknown> | null },
+): Promise<BillFlag[]> {
+  const order = await prisma.paymentOrder.findFirst({
+    where: { organizationId, paymentOrderId },
+    include: { counterparty: true, counterpartyWallet: true },
+  });
+  if (!order) return [];
+
+  const metadata = isRecord(order.metadataJson) ? order.metadataJson : {};
+  const agent = isRecord(metadata.agent) ? metadata.agent : {};
+  const extracted = isRecord(agent.extracted) ? agent.extracted : {};
+  const verification = opts && 'verification' in opts
+    ? opts.verification ?? null
+    : (isRecord(metadata.verification) ? metadata.verification : null);
+  const verifiedFields = verification && isRecord(verification.fields) ? verification.fields : null;
+  const triggeredRules = Array.isArray(agent.triggeredRules)
+    ? (agent.triggeredRules as Array<Record<string, unknown>>)
+    : [];
+
+  const [org, ceilingMinor, duplicates, alerts] = await Promise.all([
+    prisma.organization.findUniqueOrThrow({
+      where: { organizationId },
+      select: { organizationName: true, tradingNames: true },
+    }),
+    getBillCeilingMinor(prisma, organizationId),
+    findDuplicateBills(organizationId, {
+      excludePaymentOrderId: order.paymentOrderId,
+      counterpartyId: order.counterpartyId,
+      counterpartyWalletId: order.counterpartyWalletId,
+      invoiceNumber: (verifiedFields ? str(verifiedFields.invoiceNumber) : null)
+        ?? str(extracted.invoiceNumber) ?? order.invoiceNumber,
+      amountRaw: order.amountRaw,
+      createdAt: order.createdAt,
+    }),
+    planAlertsByOrder(organizationId, [order.paymentOrderId]),
+  ]);
+
+  return evaluateBillFlags({
+    vendorName: order.counterparty?.displayName ?? order.counterpartyWallet.label,
+    organizationName: displayOrgName(org.organizationName),
+    tradingNames: readTradingNames(org.tradingNames),
+    amountRaw: order.amountRaw,
+    billToName: str(extracted.billToName),
+    triggeredRules: triggeredRules.map((r) => str(r.rule)).filter((r): r is string => Boolean(r)),
+    vendorHold: order.counterparty ? readPayableHold(order.counterparty.metadataJson) : null,
+    ceilingMinor,
+    duplicates,
+    duplicateOverride: readDuplicateOverride(metadata),
+    shortPay: readShortPay(metadata),
+    amounts: documentAmounts(extracted, verification),
+    planAlerts: alerts.get(order.paymentOrderId) ?? [],
+    documentType: documentTypeSignals(extracted, order.invoiceNumber),
+  });
+}
+
+/**
+ * Write down what changed about a bill's flags, so the history can say a check
+ * was raised and later cleared rather than silently ceasing to be true.
+ *
+ * Flags are derived — recomputed from the current facts on every read — which
+ * is right, but it means a flag that stops applying leaves no trace at all. A
+ * bill that was blocked and then fixed became indistinguishable from one that
+ * was never flagged, so "was this ever questioned?" had no answer.
+ *
+ * Deliberately called only where a person changed something, never on read.
+ * Recording a flag every time somebody opens a bill would bury the real events
+ * under page loads.
+ */
+async function recordFlagChanges(args: {
+  organizationId: string;
+  paymentOrderId: string;
+  actorUserId: string | null;
+  before: BillFlag[];
+  after: BillFlag[];
+  state: string;
+}) {
+  const was = new Map(args.before.map((f) => [f.kind, f]));
+  const now = new Map(args.after.map((f) => [f.kind, f]));
+
+  const rows: Array<{ eventType: string; flag: BillFlag }> = [];
+  for (const [kind, flag] of now) if (!was.has(kind)) rows.push({ eventType: 'bill_flag_raised', flag });
+  for (const [kind, flag] of was) if (!now.has(kind)) rows.push({ eventType: 'bill_flag_cleared', flag });
+  if (rows.length === 0) return;
+
+  await prisma.paymentOrderEvent.createMany({
+    data: rows.map(({ eventType, flag }) => ({
+      organizationId: args.organizationId,
+      paymentOrderId: args.paymentOrderId,
+      eventType,
+      actorType: 'user' as const,
+      actorId: args.actorUserId,
+      beforeState: args.state,
+      afterState: args.state,
+      payloadJson: {
+        kind: flag.kind,
+        short: flag.short,
+        severity: flag.severity,
+        blocking: flag.blocking,
+      },
+    })),
+  });
+}
+
 /**
  * Everything that has been done to a bill, in order.
  *
@@ -2348,6 +2468,8 @@ export async function payItemisedTotal(args: {
     at: new Date().toISOString(),
   };
 
+  const flagsBefore = await flagsForOrder(args.organizationId, order.paymentOrderId);
+
   await prisma.$transaction([
     prisma.paymentOrder.update({
       where: { paymentOrderId: order.paymentOrderId },
@@ -2390,6 +2512,15 @@ export async function payItemisedTotal(args: {
     phase: 'draft',
     reason: 'pay_the_itemised_total',
     changes: [{ field: 'total', from: previousTotal, to: itemisedTotal }],
+  });
+
+  await recordFlagChanges({
+    organizationId: args.organizationId,
+    paymentOrderId: order.paymentOrderId,
+    actorUserId: args.actorUserId,
+    before: flagsBefore,
+    after: await flagsForOrder(args.organizationId, order.paymentOrderId),
+    state: order.state,
   });
 
   return getBillDraft(args.organizationId, args.paymentOrderId, args.actorUserId);
@@ -3384,6 +3515,12 @@ export async function saveBillDraft(input: {
     : null;
   const dueAt = input.fields.dueDate ? new Date(input.fields.dueDate) : null;
 
+  // Taken on this side of the write on purpose. Asking afterwards what the
+  // flags "would have been" means reconstructing a past state, and every other
+  // thing the write touches — the amount, the invoice number — would already
+  // have moved underneath the reconstruction.
+  const flagsBefore = await flagsForOrder(input.organizationId, order.paymentOrderId);
+
   await prisma.paymentOrder.update({
     where: { paymentOrderId: order.paymentOrderId },
     data: {
@@ -3406,6 +3543,17 @@ export async function saveBillDraft(input: {
     phase: 'draft',
     reason: 'save',
     changes: corrections.map((c) => ({ field: c.field, from: c.readValue, to: c.correctedValue })),
+  });
+
+  // And what the save did to the checks, so the history can say a flag was
+  // raised and later cleared instead of it silently ceasing to be true.
+  await recordFlagChanges({
+    organizationId: input.organizationId,
+    paymentOrderId: order.paymentOrderId,
+    actorUserId: input.actorUserId,
+    before: flagsBefore,
+    after: await flagsForOrder(input.organizationId, order.paymentOrderId),
+    state: order.state,
   });
 
   return { savedAt };

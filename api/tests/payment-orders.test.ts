@@ -550,6 +550,20 @@ test('correcting the figures clears the arithmetic flag it was raised on', async
   assert.ok(logged.byName, 'and says who did it');
   assert.ok(logged.at, 'and when');
 
+  // The flag stopping being true is itself a thing that happened. Flags are
+  // derived, so without this a bill that was blocked and fixed would be
+  // indistinguishable afterwards from one that was never questioned.
+  const cleared = fixed.workLog.find((e: { kind: string }) => e.kind === 'flag_cleared');
+  assert.ok(cleared, 'clearing the flag is recorded');
+  assert.match(cleared.text, /Lines do not add up/);
+  assert.ok(cleared.byName, 'attributed to whoever cleared it');
+  // In order, and after the change that caused it.
+  const order = fixed.workLog.map((e: { kind: string }) => e.kind);
+  assert.ok(
+    order.indexOf('field_changed') < order.indexOf('flag_cleared'),
+    'the change comes before the flag it settled',
+  );
+
   // And it can now actually leave review, which is the whole point.
   const confirmed = await post(`/organizations/${orgId}/bills/${billId}/confirm`, body, setup.sessionToken);
   assert.equal(confirmed.detail.state, 'submitted');
