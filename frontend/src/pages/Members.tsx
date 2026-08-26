@@ -54,11 +54,13 @@ export function MembersPage({ session }: { session: AuthenticatedSession }) {
   });
   // Links are one-time (the token is stored hashed), so "New link" = revoke the
   // old invite and mint a fresh one, then show it.
-  const reinvite = async (inv: { organizationInviteId: string; invitedEmail: string; role: OrganizationInviteRole }) => {
+  const reinvite = async (inv: { organizationInviteId: string; invitedEmail: string; role: OrganizationInviteRole; jobRole?: RoleKey | null }) => {
     setReinviting(inv.organizationInviteId);
     try {
       await api.revokeOrganizationInvite(organizationId, inv.organizationInviteId);
-      const res = await api.createOrganizationInvite(organizationId, { email: inv.invitedEmail, role: inv.role });
+      const res = await api.createOrganizationInvite(organizationId, {
+        email: inv.invitedEmail, role: inv.role, jobRole: inv.jobRole ?? null,
+      });
       setLinkModal({ email: inv.invitedEmail, link: res.inviteLink });
       void invalidateInvites();
     } catch (e) {
@@ -236,6 +238,7 @@ export function MembersPage({ session }: { session: AuthenticatedSession }) {
         <InviteDialog
           organizationId={organizationId}
           canInviteAdmins={isPrimary}
+          roles={roles}
           onClose={() => setInviteOpen(false)}
           onCreated={(email, link) => { setInviteOpen(false); setLinkModal({ email, link }); void invalidateInvites(); }}
           toast={toast}
@@ -370,16 +373,26 @@ function AssignMemberDialog(props: { role: OrgRole; members: MemberWithRoles[]; 
   );
 }
 
-function InviteDialog(props: { organizationId: string; canInviteAdmins: boolean; onClose: () => void; onCreated: (email: string, link: string) => void; toast: ReturnType<typeof useToast> }) {
+function InviteDialog(props: { organizationId: string; canInviteAdmins: boolean; roles: OrgRole[]; onClose: () => void; onCreated: (email: string, link: string) => void; toast: ReturnType<typeof useToast> }) {
   const [email, setEmail] = useState('');
   const [access, setAccess] = useState<OrganizationInviteRole>('member');
+  // No default. A member with no seat falls back to view-only, so a pre-picked
+  // role would decide somebody's access by being ignored — the inviter has to
+  // say what this person is for.
+  const [jobRole, setJobRole] = useState<RoleKey | null>(null);
   const [sending, setSending] = useState(false);
+  const needsRole = access === 'member';
 
   const send = async () => {
     if (!email.trim()) return;
+    if (needsRole && !jobRole) return;
     setSending(true);
     try {
-      const res = await api.createOrganizationInvite(props.organizationId, { email: email.trim(), role: access });
+      const res = await api.createOrganizationInvite(props.organizationId, {
+        email: email.trim(),
+        role: access,
+        jobRole: needsRole ? jobRole : null,
+      });
       props.onCreated(email.trim(), res.inviteLink);
     } catch (err) {
       props.toast.error('Could not invite', err instanceof Error ? err.message : 'Try again.');
@@ -410,14 +423,39 @@ function InviteDialog(props: { organizationId: string; canInviteAdmins: boolean;
               </div>
               <div className="input-help">Admins can change anything. Members get access from their roles. Only the primary admin can invite admins.</div>
             </div>
-            <div className="field">
-              <span className="field-label">Role <span style={{ color: 'var(--text-faint)', fontWeight: 400 }}>· assign after they join</span></span>
-              <div className="input-help">Pick their job (Bill Clerk, Approver, Payer, Viewer) from the roster once they've joined.</div>
-            </div>
+            {needsRole ? (
+              <div className="field">
+                <span className="field-label">What will they do?</span>
+                <div className="check-list">
+                  {props.roles.map((r) => (
+                    <button
+                      key={r.key}
+                      type="button"
+                      className={`check-item${jobRole === r.key ? ' on' : ''}`}
+                      onClick={() => setJobRole(r.key)}
+                    >
+                      <span className="check-box">{jobRole === r.key ? <Ico.checkSm w={12} /> : null}</span>
+                      <span className="col">
+                        <span className="ci-name">{r.name}</span>
+                        <span className="ci-sub">{r.summary}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <div className="input-help">
+                  Chosen now rather than later: somebody who joins without one can only watch, and nothing
+                  on any screen would say why.
+                </div>
+              </div>
+            ) : (
+              <div className="input-help">
+                Admins can do everything already, so they take no role on top.
+              </div>
+            )}
           </div>
           <div className="dialog-foot">
             <button type="button" className="btn btn-secondary" onClick={props.onClose} disabled={sending}>Cancel</button>
-            <button type="submit" className="btn btn-primary" disabled={sending || !email.trim()}>{sending ? 'Creating…' : 'Create invite link'}</button>
+            <button type="submit" className="btn btn-primary" disabled={sending || !email.trim() || (needsRole && !jobRole)}>{sending ? 'Creating…' : 'Create invite link'}</button>
           </div>
         </form>
       </div>

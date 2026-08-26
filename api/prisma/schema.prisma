@@ -289,6 +289,9 @@ model OrganizationInvite {
   organizationId       String        @map("organization_id") @db.Uuid
   invitedEmail         String        @map("invited_email")
   role                 String        @default("member")
+  /// The seat they will hold — bill_clerk / approver / payer / viewer. Null for
+  /// admin invites, which need no role on top.
+  jobRole              String?       @map("job_role")
   inviteTokenHash      String        @unique @map("invite_token_hash")
   status               String        @default("pending")
   invitedByUserId      String        @map("invited_by_user_id") @db.Uuid

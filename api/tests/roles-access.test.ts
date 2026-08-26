@@ -320,3 +320,50 @@ test('a bill clerk is not offered as an approver, and is dropped if a flow names
   assert.equal(clerkPerson.can_approve, false, 'the builder is told not to offer a clerk');
   assert.equal(approverPerson.can_approve, true, 'and to offer an approver');
 });
+
+test('an invite carries the seat, so nobody joins with no role', async () => {
+  // A member with no role falls back to the viewer bundle. So "assign it after
+  // they join" is the same thing as "read-only until somebody remembers", and
+  // nothing on any screen says that is what happened. The person inviting knows
+  // what the new colleague is for; that is the moment to say it.
+  const owner = await register('invite-seat-owner');
+  const org = await post('/organizations', { organizationName: 'Seat Co' }, owner.token);
+  const orgId = org.organizationId as string;
+
+  // A member invite with no seat is refused.
+  await assert.rejects(
+    post(`/organizations/${orgId}/invites`, { email: 'seatless@dev.decimal.test', role: 'member' }, owner.token),
+    /Choose what this person will do/,
+  );
+
+  // An admin takes no seat on top — they already hold everything.
+  await assert.rejects(
+    post(
+      `/organizations/${orgId}/invites`,
+      { email: 'boss@dev.decimal.test', role: 'admin', jobRole: 'approver' },
+      owner.token,
+    ),
+    /no role on top/,
+  );
+
+  // register() mints its own address, so invite the one it actually made.
+  const joiner = await register('invite-seat-clerk');
+  const joinerRow = await prisma.user.findUniqueOrThrow({
+    where: { userId: joiner.userId }, select: { email: true },
+  });
+
+  const invited = await post(
+    `/organizations/${orgId}/invites`,
+    { email: joinerRow.email, role: 'member', jobRole: 'bill_clerk' },
+    owner.token,
+  );
+  assert.equal(invited.jobRole, 'bill_clerk', 'the seat is on the invite, and on the wire');
+
+  await post(`/invites/${invited.inviteToken}/accept`, {}, joiner.token);
+
+  // They arrive holding the seat, not waiting for one.
+  const { getOrgAccess } = await import('../src/approvals/permissions.js');
+  const access = await getOrgAccess(orgId, joiner.userId);
+  assert.deepEqual(access?.roles, ['bill_clerk']);
+  assert.ok(access?.capabilities.includes('bills.edit'), 'and the access that goes with it');
+});

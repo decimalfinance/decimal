@@ -331,7 +331,7 @@ test('organization onboarding automatically provisions personal and agent wallet
 
     const invite = await post(
       `/organizations/${organization.organizationId}/invites`,
-      { email: 'auto-wallet-member@example.com', role: 'member' },
+      { email: 'auto-wallet-member@example.com', role: 'member', jobRole: 'bill_clerk' },
       owner.sessionToken,
     );
     const invitedUser = await post('/auth/register', {
@@ -748,7 +748,7 @@ test('Squads treasury creation prepares a signable transaction and persists the 
   await verifyRegisteredEmail(approver);
   const approverInvite = await post(
     `/organizations/${organization.organizationId}/invites`,
-    { email: 'squads-approver@example.com', role: 'member' },
+    { email: 'squads-approver@example.com', role: 'member', jobRole: 'payer' },
     register.sessionToken,
   );
   await post(`/invites/${approverInvite.inviteToken}/accept`, {}, approver.sessionToken);
@@ -989,7 +989,7 @@ test('Squads treasury creation prepares a signable transaction and persists the 
   await verifyRegisteredEmail(invitedMember);
   const invite = await post(
     `/organizations/${organization.organizationId}/invites`,
-    { email: 'squads-new-member@example.com', role: 'member' },
+    { email: 'squads-new-member@example.com', role: 'member', jobRole: 'payer' },
     register.sessionToken,
   );
   await post(`/invites/${invite.inviteToken}/accept`, {}, invitedMember.sessionToken);

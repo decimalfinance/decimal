@@ -444,7 +444,7 @@ export const api = {
   },
   createOrganizationInvite(
     organizationId: string,
-    input: { email: string; role: OrganizationInviteRole },
+    input: { email: string; role: OrganizationInviteRole; jobRole?: RoleKey | null },
   ) {
     return request<CreateOrganizationInviteResponse>(
       `/organizations/${organizationId}/invites`,

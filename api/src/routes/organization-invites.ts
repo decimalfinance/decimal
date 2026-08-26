@@ -15,6 +15,7 @@ const INVITE_TTL_DAYS = 14;
 // There is exactly ONE primary admin (role 'owner') per org — it can only be
 // transferred, never invited. Admins are minted by the primary admin alone.
 const INVITE_ROLES = ['admin', 'member'] as const;
+const ROLE_KEYS_TUPLE = ['bill_clerk', 'approver', 'payer', 'viewer'] as const;
 
 const organizationParamsSchema = z.object({
   organizationId: z.string().uuid(),
@@ -35,6 +36,11 @@ const listInvitesQuerySchema = z.object({
 const createInviteSchema = z.object({
   email: z.string().trim().email(),
   role: z.enum(INVITE_ROLES).default('member'),
+  // Required for a member, and that is the point: somebody joining with no seat
+  // falls back to the viewer bundle, so "we'll sort their role out later" is
+  // the same thing as "read-only until somebody remembers". Whoever invites
+  // them knows what they are for.
+  jobRole: z.enum(ROLE_KEYS_TUPLE).optional(),
 });
 
 publicOrganizationInvitesRouter.get('/invites/:inviteToken', asyncRoute(async (req, res) => {
@@ -73,6 +79,12 @@ organizationInvitesRouter.post('/organizations/:organizationId/invites', asyncRo
   // Only the primary admin manages the admin tier (QBO's primary-admin rule).
   if (input.role === 'admin' && membership.role !== 'owner') {
     throw forbidden('Only the primary admin can invite admins.');
+  }
+  if (input.role === 'member' && !input.jobRole) {
+    throw badRequest('Choose what this person will do — a member with no role can only watch.');
+  }
+  if (input.role === 'admin' && input.jobRole) {
+    throw badRequest('Admins already have full access, so they take no role on top.');
   }
   const invitedEmail = normalizeEmail(input.email);
 
@@ -113,6 +125,7 @@ organizationInvitesRouter.post('/organizations/:organizationId/invites', asyncRo
         organizationId,
         invitedEmail,
         role: input.role,
+        jobRole: input.jobRole ?? null,
         inviteTokenHash: tokenHash,
         invitedByUserId: req.auth!.userId,
         expiresAt,
@@ -208,6 +221,18 @@ organizationInvitesRouter.post('/invites/:inviteToken/accept', asyncRoute(async 
 
     return { membership, invite: accepted };
   });
+
+  // The seat, given here rather than left for somebody to remember. Outside the
+  // transaction because assignRole reaches into the approval schema through its
+  // own connection; a failure here leaves a member with no role, which is the
+  // state we already handle, not a broken one.
+  if (invite.jobRole && invite.role === 'member') {
+    const { assignRole } = await import('../approvals/roles.js');
+    const { isRoleKey } = await import('../approvals/roles.js');
+    if (isRoleKey(invite.jobRole)) {
+      await assignRole(invite.organizationId, invite.jobRole, req.auth!.userId);
+    }
+  }
   const personalWalletProvisioning = await ensureManagedPersonalWalletForUser(req.auth!.userId, {
     label: 'Decimal signing wallet',
   });
@@ -255,6 +280,7 @@ function serializeInvite(invite: {
   organizationId: string;
   invitedEmail: string;
   role: string;
+  jobRole: string | null;
   status: string;
   expiresAt: Date;
   acceptedAt: Date | null;
@@ -267,6 +293,9 @@ function serializeInvite(invite: {
 }) {
   return {
     organizationInviteId: invite.organizationInviteId,
+    // Carried on the wire so re-minting an invite keeps the seat. Dropping it
+    // here would quietly recreate the roleless member this exists to prevent.
+    jobRole: invite.jobRole,
     organizationId: invite.organizationId,
     invitedEmail: invite.invitedEmail,
     role: invite.role,

@@ -104,6 +104,17 @@ CREATE TABLE IF NOT EXISTS organization_invites
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- The job the invited person will do, chosen by whoever invited them.
+--
+-- `role` above is the access TIER (admin or member); this is the seat — bill
+-- clerk, approver, payer, viewer. Members used to arrive with no seat at all
+-- and fall back to the viewer bundle, which meant a colleague could sit in the
+-- organization read-only because nobody had got round to them, and nothing on
+-- any screen said that had happened. Null for admin invites: admins hold every
+-- capability already, and a role on top of that grants nothing.
+ALTER TABLE organization_invites
+  ADD COLUMN IF NOT EXISTS job_role TEXT;
+
 CREATE TABLE IF NOT EXISTS auth_sessions
 (
   auth_session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
