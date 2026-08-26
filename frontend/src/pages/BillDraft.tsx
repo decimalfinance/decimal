@@ -720,7 +720,10 @@ function DraftScreen(props: {
                     one line you can scan — who asked whom, and whether it is
                     settled — with the detail folded away underneath. */}
                 {(showThread ? billDraft.questions : []).map((q) => {
-                  const settled = q.outcome === 'answered';
+                  // Named for what it is. It used to be `settled`, which
+                  // shadowed the state array of the same name — invisible until
+                  // something inside this block needed the array.
+                  const isAnswered = q.outcome === 'answered';
                   const fields = q.openFields.length ? q.openFields : q.highlightFields;
                   return (
                     <div
@@ -735,9 +738,9 @@ function DraftScreen(props: {
                         <strong>{q.askedByName}</strong>
                         <span style={{ color: 'var(--text-muted)' }}>asked</span>
                         <strong>{q.askedOfName}</strong>
-                        <span className={`pill pill-min ${settled ? 'pill-success' : 'pill-warning'}`}>
+                        <span className={`pill pill-min ${isAnswered ? 'pill-success' : 'pill-warning'}`}>
                           <span className="dot" />
-                          {settled ? `${q.askedOfName.split(' ')[0]} confirmed these details`
+                          {isAnswered ? `${q.askedOfName.split(' ')[0]} confirmed these details`
                             : q.outcome === 'partial' ? 'Partly answered'
                             : q.outcome === 'forwarded' ? 'Passed on'
                             : q.outcome === 'handed_back' ? `${q.askedOfName.split(' ')[0]} could not answer`
@@ -768,9 +771,100 @@ function DraftScreen(props: {
                         </div>
                       ) : null}
 
-                      {q.youWereAsked && answerFor === q.billQuestionId ? null : q.youWereAsked ? (
+                      {/* Answering. This branch rendered null and nothing took
+                          the button's place, so pressing Answer made the button
+                          vanish and that was the whole interaction — which means
+                          no question anywhere in the product could be answered,
+                          and every question ever asked parked its bill for good.
+                          The handler and all of its state were already here. */}
+                      {q.youWereAsked && answerFor === q.billQuestionId ? (
+                        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          <textarea
+                            className="input"
+                            autoFocus
+                            rows={2}
+                            style={{ resize: 'vertical', minHeight: 56, lineHeight: 1.5 }}
+                            placeholder={`Answer ${q.askedByName.split(' ')[0]}…`}
+                            value={answerText}
+                            onChange={(e) => setAnswerText(e.target.value)}
+                          />
+
+                          {/* Which of the fields they named this settles. Only
+                              offered when the answer is partial, because that
+                              is the only case where the difference matters. */}
+                          {fields.length > 0 ? (
+                            <span style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 12.5, color: 'var(--text-muted)' }}>
+                              {fields.map((f) => (
+                                <label key={f} style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={settled.includes(f)}
+                                    onChange={() => setSettled(settled.includes(f)
+                                      ? settled.filter((k) => k !== f)
+                                      : [...settled, f])}
+                                  />
+                                  {fieldLabel(f)}
+                                </label>
+                              ))}
+                            </span>
+                          ) : null}
+
+                          {/* Passing it on needs somebody to pass it to, so the
+                              picker appears with the action rather than after. */}
+                          <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                            <select
+                              className="input"
+                              value={forwardTo}
+                              onChange={(e) => setForwardTo(e.target.value)}
+                              style={{ flex: '0 0 200px', height: 32 }}
+                            >
+                              <option value="">Pass to…</option>
+                              {(askCandidates.data?.candidates ?? [])
+                                .filter((c) => c.userId !== q.askedByUserId)
+                                .map((c) => (
+                                  <option key={c.userId} value={c.userId}>{c.name}</option>
+                                ))}
+                            </select>
+                            <span style={{ flex: 1 }} />
+                            <button type="button" className="btn btn-ghost btn-sm" disabled={answering}
+                              onClick={() => { setAnswerFor(null); setAnswerText(''); setSettled([]); setForwardTo(''); }}>
+                              Cancel
+                            </button>
+                            <button type="button" className="btn btn-secondary btn-sm"
+                              disabled={answering || answerText.trim().length < 1}
+                              title="You could not answer it — it goes back to them, still open."
+                              onClick={() => void sendAnswer(q.billQuestionId, 'handed_back', q.openFields)}>
+                              Can't answer
+                            </button>
+                            {forwardTo ? (
+                              <button type="button" className="btn btn-secondary btn-sm"
+                                disabled={answering || answerText.trim().length < 1}
+                                onClick={() => void sendAnswer(q.billQuestionId, 'forwarded', q.openFields)}>
+                                Pass it on
+                              </button>
+                            ) : null}
+                            {/* Partial only when they named fields and this
+                                settles some but not all of them — otherwise it
+                                is just an answer, and offering both would make
+                                somebody choose between synonyms. */}
+                            {fields.length > 0 && settled.length > 0 && settled.length < fields.length ? (
+                              <button type="button" className="btn btn-primary btn-sm"
+                                disabled={answering || answerText.trim().length < 1}
+                                onClick={() => void sendAnswer(q.billQuestionId, 'partial', q.openFields)}>
+                                {answering ? 'Sending…' : 'Answer what I can'}
+                              </button>
+                            ) : (
+                              <button type="button" className="btn btn-primary btn-sm"
+                                disabled={answering || answerText.trim().length < 1}
+                                onClick={() => void sendAnswer(q.billQuestionId, 'answered', q.openFields)}>
+                                {answering ? 'Sending…' : 'Send answer'}
+                              </button>
+                            )}
+                          </span>
+                        </div>
+                      ) : q.youWereAsked ? (
                         <button type="button" className="btn btn-secondary btn-sm" style={{ marginTop: 8 }}
-                          onClick={() => { setAnswerFor(q.billQuestionId); setAnswerText(''); setSettled([]); }}>
+                          onClick={() => { setAnswerFor(q.billQuestionId); setAnswerText(''); setSettled([]); setForwardTo(''); }}>
                           Answer
                         </button>
                       ) : null}
