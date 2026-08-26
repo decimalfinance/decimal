@@ -783,6 +783,124 @@ test('confirm judges the figures being submitted, not the ones last saved', asyn
   assert.equal(confirmed.detail.state, 'submitted');
 });
 
+test('a discrepancy keeps its name while somebody is fixing it', async () => {
+  // Saving a bill part-way through used to rename the problem. The printed
+  // subtotal was dropped the moment any correction existed, so the lines got
+  // compared against the total with tax taken off — and "total does not
+  // reconcile" turned into "lines do not add up", quoting a figure that appears
+  // nowhere on the document. The history read as one problem being resolved and
+  // a different one appearing in the same second, neither of which happened.
+  const setup = await createPaymentOrderSetup();
+  const vendorWallet = Keypair.generate().publicKey.toBase58();
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [
+        {
+          counterparty: 'Kepler Legal LLP',
+          amount: 4820,
+          currency: 'USD',
+          reference: 'KL-1341',
+          due_date: '2026-09-05',
+          wallet_address: vendorWallet,
+          notes: 'Legal',
+          source_invoice: {
+            vendorName: 'Kepler Legal LLP',
+            vendorAddress: null,
+            vendorEmail: null,
+            amount: 4820,
+            currency: 'USD',
+            invoiceNumber: 'KL-1341',
+            invoiceDate: '2026-08-05',
+            dueDate: '2026-09-05',
+            terms: 'Net 30',
+            poNumber: null,
+            earlyPayDiscount: null,
+            // 4,000 + 320 tax is 4,320, but the document asks for 4,820.
+            subtotal: 4000,
+            taxAmount: 320,
+            billToName: null,
+            remitTo: { street: '9 Chancery Lane', city: 'Boston', state: 'MA', zip: '02110' },
+            paymentDetails: { method: 'ACH', bankName: 'Bay State Bank', accountLast4: '7781', routingNumber: null },
+            walletAddress: vendorWallet,
+            lineItems: [
+              { description: 'Contract review', quantity: 1, unitPrice: 3600, total: 3600 },
+              { description: 'Regulatory filing', quantity: 1, unitPrice: 400, total: 400 },
+            ],
+            categoryHint: 'Legal & professional',
+            confidence: { vendor: 0.96, amount: 0.9, overall: 0.92 },
+            fieldConfidence: { invoiceNumber: 0.95, invoiceDate: 0.9, dueDate: 0.9, total: 0.9 },
+          },
+        },
+      ],
+      modelLatencyMs: 5,
+      pageCount: 1,
+    }),
+  });
+
+  const orgId = setup.organization.organizationId;
+  const upload = await post(
+    `/organizations/${orgId}/invoices/upload`,
+    {
+      filename: 'KL-1341.pdf',
+      mimeType: 'application/pdf',
+      dataBase64: Buffer.from('%PDF-1.4 kepler').toString('base64'),
+      sourceTreasuryWalletId: setup.sourceTreasuryWallet.treasuryWalletId,
+      autoAdvance: false,
+    },
+    setup.sessionToken,
+  );
+  const billId = upload.paymentOrders[0].paymentOrder.paymentOrderId;
+
+  const before = await get(`/organizations/${orgId}/bills/${billId}/draft`, setup.sessionToken);
+  assert.ok(before.flags.find((f: { kind: string }) => f.kind === 'total_does_not_reconcile'));
+
+  // A save that changes nothing about the figures must not rename the problem.
+  await post(
+    `/organizations/${orgId}/bills/${billId}/save`,
+    {
+      fields: {
+        invoiceNumber: 'KL-1341',
+        invoiceDate: '2026-08-05',
+        dueDate: '2026-09-05',
+        terms: 'Net 30',
+        currency: 'USD',
+        total: 4820,
+        taxAmount: 320,
+        remitTo: { street: '9 Chancery Lane', city: 'Boston', state: 'MA', zip: '02110' },
+      },
+      lines: [
+        { description: 'Contract review', quantity: 1, unitPrice: 3600, amount: 3600, category: 'Legal & professional' },
+        { description: 'Regulatory filing', quantity: 1, unitPrice: 400, amount: 400, category: 'Legal & professional' },
+      ],
+      confirmedFieldKeys: [],
+      noteForApprovers: null,
+    },
+    setup.sessionToken,
+  );
+
+  const after = await get(`/organizations/${orgId}/bills/${billId}/draft`, setup.sessionToken);
+  assert.ok(
+    after.flags.find((f: { kind: string }) => f.kind === 'total_does_not_reconcile'),
+    'the same discrepancy, still called the same thing',
+  );
+  assert.equal(
+    after.flags.some((f: { kind: string }) => f.kind === 'lines_do_not_sum'),
+    false,
+    'the lines were never in question — they add up to exactly what the person entered',
+  );
+  // And nothing was recorded as raised or resolved, because nothing was.
+  assert.equal(
+    after.workLog.filter((e: { kind: string }) => e.kind === 'flag_cleared').length,
+    0,
+    'a save that fixed nothing resolves nothing',
+  );
+  assert.equal(
+    after.workLog.filter((e: { kind: string }) => e.kind === 'flag_raised').length,
+    1,
+    'and raises nothing new — just the one it arrived with',
+  );
+});
+
 test('deciding to pay the itemised total records the decision, not just the number', async () => {
   // Retyping the total to $4,000 and retyping it because the invoice does not
   // add up look identical to an approver. This is the difference: the number

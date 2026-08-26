@@ -491,11 +491,19 @@ function sumLineAmounts(rows: unknown[], amountKey: string): number | null {
  * reachable resolution is a dead end, which is exactly what this file's own
  * rules say must not exist.
  *
- * The printed subtotal is dropped once corrections exist. No screen offers a
- * way to edit it, so keeping it would go on judging a corrected bill against a
- * number nobody is able to change — the same dead end in a smaller room. What
- * remains is the question the draft screen has always asked out loud: do the
- * lines plus the tax come to the total being paid?
+ * The printed subtotal is not kept once corrections exist. No screen offers a
+ * way to edit it, so judging a corrected bill against it would be the same dead
+ * end in a smaller room. But it is replaced rather than dropped: a subtotal IS
+ * what the lines come to, and once a person owns the lines, theirs is the
+ * subtotal.
+ *
+ * Dropping it outright looked equivalent and was not. With no subtotal the
+ * lines get compared against the total with tax taken off, so the same single
+ * discrepancy changed its NAME the moment anybody saved — "total does not
+ * reconcile" became "lines do not add up", quoting $4,500, a figure printed
+ * nowhere on the document and arrived at by subtracting tax from a total the
+ * person was in the middle of correcting. The history then read as one problem
+ * being resolved and a different one appearing in the same second.
  */
 /**
  * The flags on a bill as things currently stand, gathered from scratch.
@@ -801,11 +809,12 @@ function documentAmounts(
     };
   }
 
+  const correctedLines = verifiedLines
+    ? sumLineAmounts(verifiedLines, 'amount')
+    : sumLineAmounts(extractedLines, 'total');
   return {
-    lineItemsTotal: verifiedLines
-      ? sumLineAmounts(verifiedLines, 'amount')
-      : sumLineAmounts(extractedLines, 'total'),
-    subtotal: null,
+    lineItemsTotal: correctedLines,
+    subtotal: correctedLines,
     tax: verifiedFields && 'taxAmount' in verifiedFields
       ? num(verifiedFields.taxAmount)
       : num(extracted?.taxAmount),
