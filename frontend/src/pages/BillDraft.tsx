@@ -499,14 +499,26 @@ function DraftScreen(props: {
     setSaving(true);
     try {
       await billsApi.saveDraft(organizationId, billDraft.paymentOrderId, currentBody());
+      // Stay on the bill. Saving is not leaving — being thrown back to the list
+      // every time you keep your work makes the button feel like a way out
+      // rather than a way to hold on to what you typed.
+      //
+      // Which means the flags have to catch up here, since nothing is going to
+      // remount and re-read them. Refetching keeps the form exactly as it is
+      // (the screen is keyed on the bill, not the data) and updates the banner
+      // — so correcting the figures and pressing save shows the flag clearing,
+      // instead of leaving a warning on screen that is no longer true.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['bill-billDraft', organizationId, billDraft.paymentOrderId] }),
+        queryClient.invalidateQueries({ queryKey: ['bills-workbench', organizationId] }),
+      ]);
       toast.success('Saved', 'Your changes are kept — this bill has not been sent for approval.');
-      onBack();
     } catch (err) {
       toast.error('Could not save', err instanceof Error ? err.message : 'Try again.');
     } finally {
       setSaving(false);
     }
-  }, [canEditBills, readOnly, saving, organizationId, billDraft.paymentOrderId, currentBody, toast, onBack]);
+  }, [canEditBills, readOnly, saving, organizationId, billDraft.paymentOrderId, currentBody, toast, queryClient]);
 
   // --- commit ---------------------------------------------------------------
   const confirm = useCallback(async () => {
@@ -1160,9 +1172,9 @@ function DraftScreen(props: {
           {/* This button was called "Save for later", which read as a way to
               defer the bill rather than a way to keep what you had typed — and
               for most of the screen's life it kept nothing at all, since it
-              only called onBack. It saves now, and it says so. It still returns
-              to the list afterwards: the reason it exists is to put a bill down
-              and pick up a different one. */}
+              only called onBack. It saves now, and it says so — and it leaves
+              you on the bill, because saving your work is not the same as
+              finishing with it. */}
           <button type="button" className="btn btn-secondary" disabled={saving || !canEditBills}
             onClick={() => void saveChanges()}>
             {saving ? 'Saving…' : 'Save changes'}
