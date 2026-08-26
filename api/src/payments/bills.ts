@@ -581,6 +581,40 @@ export async function flagsForOrder(
  * Recording a flag every time somebody opens a bill would bury the real events
  * under page loads.
  */
+/**
+ * A bill's opening flags, written down the moment it exists.
+ *
+ * Without this the history is half a sentence. Everything a person does
+ * afterwards can be compared against something, but the flags a document
+ * arrives carrying were never raised by anybody — so a bill that came in
+ * broken and was fixed recorded the fix and not the fault, and the log read
+ * "Resolved: lines do not add up" with nothing ever having said they didn't.
+ *
+ * Best-effort: a bill that has been ingested must not be lost because its
+ * history could not be written.
+ */
+export async function recordOpeningFlags(args: {
+  organizationId: string;
+  paymentOrderId: string;
+  actorUserId: string | null;
+}) {
+  try {
+    await recordFlagChanges({
+      organizationId: args.organizationId,
+      paymentOrderId: args.paymentOrderId,
+      actorUserId: args.actorUserId,
+      before: [],
+      after: await flagsForOrder(args.organizationId, args.paymentOrderId),
+      state: 'draft',
+    });
+  } catch (error) {
+    logger.warn('bill_opening_flags.failed', {
+      paymentOrderId: args.paymentOrderId,
+      ...(error instanceof Error ? { message: error.message } : {}),
+    });
+  }
+}
+
 async function recordFlagChanges(args: {
   organizationId: string;
   paymentOrderId: string;
@@ -589,8 +623,12 @@ async function recordFlagChanges(args: {
   after: BillFlag[];
   state: string;
 }) {
-  const was = new Map(args.before.map((f) => [f.kind, f]));
-  const now = new Map(args.after.map((f) => [f.kind, f]));
+  // Only the flags that actually stop a bill. An informational one — "first
+  // bill from this vendor" — never held anything up, so recording it as raised
+  // and later resolved describes an event that did not happen, and buries the
+  // ones that did under context nobody was ever asked to act on.
+  const was = new Map(args.before.filter((f) => f.blocking).map((f) => [f.kind, f]));
+  const now = new Map(args.after.filter((f) => f.blocking).map((f) => [f.kind, f]));
 
   const rows: Array<{ eventType: string; flag: BillFlag }> = [];
   for (const [kind, flag] of now) if (!was.has(kind)) rows.push({ eventType: 'bill_flag_raised', flag });

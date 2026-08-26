@@ -303,6 +303,18 @@ export async function processInvoiceDocument(args: {
         initialState: 'draft',
       });
 
+      // What this document arrived carrying. Flags are derived, so nothing
+      // records the ones a bill is born with — and a bill that came in broken
+      // and was then fixed would show the fix with no trace of the fault.
+      {
+        const { recordOpeningFlags } = await import('./bills.js');
+        await recordOpeningFlags({
+          organizationId: args.organizationId,
+          paymentOrderId: paymentOrder.paymentOrderId,
+          actorUserId: args.actorUserId ?? null,
+        });
+      }
+
       // The bill enters the approval engine HERE, not at confirm.
       //
       // Until this, a bill sat outside the engine until someone confirmed it,

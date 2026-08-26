@@ -499,6 +499,12 @@ test('correcting the figures clears the arithmetic flag it was raised on', async
   const raised = flagged.flags.find((f: { kind: string }) => f.kind === 'lines_do_not_sum');
   assert.ok(raised, 'lines of 4,000 against a total of 4,820 must be flagged');
   assert.equal(raised.blocking, true);
+  // The flag it arrived carrying is on the record from the start — otherwise
+  // the history would later say a problem was resolved that nothing ever said
+  // existed.
+  const openedWith = flagged.workLog.find((e: { kind: string }) => e.kind === 'flag_raised');
+  assert.ok(openedWith, 'the opening flag is recorded at intake');
+  assert.match(openedWith.text, /Lines do not add up/);
   // And the row on the list agrees — both surfaces read one evaluator.
   const flaggedBoard = await get(`/organizations/${orgId}/bills/workbench`, setup.sessionToken);
   const flaggedRow = flaggedBoard.bills.find((b: { paymentOrderId: string }) => b.paymentOrderId === billId);
