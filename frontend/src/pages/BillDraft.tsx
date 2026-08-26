@@ -1132,6 +1132,41 @@ function DraftScreen(props: {
             ) : null}
             </>
             )}
+
+            {/* Outside the not-a-bill branch on purpose: a document somebody
+                closed as a statement still had things done to it, and "who
+                decided that, and when" is exactly the question asked later. */}
+            {billDraft.workLog.length > 0 ? (
+              <section>
+                <div className="sec-head">
+                  <div className="sh-titles">
+                    <h2>What's happened to this bill</h2>
+                    <p className="sh-desc">
+                      Every change and every check that has cleared, in order. Kept from the moment
+                      the document arrived, not from the moment it is confirmed.
+                    </p>
+                  </div>
+                </div>
+                <div className="surface" style={{ padding: '4px 16px' }}>
+                  {billDraft.workLog.map((entry) => (
+                    <div key={entry.id} className="bd-chg">
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 500 }}>
+                          {entry.text}
+                        </div>
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>
+                          {entry.byName ?? 'Decimal'}
+                          {' \u00b7 '}
+                          {new Date(entry.at).toLocaleString(undefined, {
+                            month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ) : null}
           </div>
         </div>
 

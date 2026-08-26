@@ -1456,6 +1456,19 @@ export interface BillDraftField {
   source?: DocSource;
 }
 
+/**
+ * One thing somebody did to a bill. The server writes the sentence — a history
+ * that phrases itself differently on each screen is two histories.
+ */
+export interface BillWorkLogEntry {
+  id: string;
+  kind: 'field_changed' | 'flag_raised' | 'flag_cleared' | 'policy_overridden';
+  at: string;
+  byName: string | null;
+  text: string;
+  field: string | null;
+}
+
 export interface CategoryOption { value: string; label: string; num?: string | null; group: string }
 
 export interface BillDraftLine {
@@ -1515,6 +1528,7 @@ export interface BillDraft {
   paymentBlock: { method: string | null; bankName: string | null; accountLast4: string | null; sendToLabel: string; sourceTreasuryWalletId: string | null; matchesVerified: boolean };
   organizationName: string;
   route: Array<{ name: string; stepIndex: number; state: 'done' | 'waiting' | 'upcoming' | 'declined' }>;
+  workLog: BillWorkLogEntry[];
   questions: Array<{
     billQuestionId: string; question: string; aboutFlag: string | null;
     askedByUserId: string; askedByName: string;

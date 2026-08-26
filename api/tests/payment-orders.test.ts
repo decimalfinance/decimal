@@ -540,6 +540,16 @@ test('correcting the figures clears the arithmetic flag it was raised on', async
   assert.equal(row.amountUsd, 4000, 'the saved figure is what the queue shows');
   assert.notEqual(row.subStatus.text, 'Lines do not add up');
 
+  // The change is on the bill you are still standing on. This record was always
+  // written; until now the only screen that rendered it was the one you reach
+  // AFTER confirming, so while a bill was being worked its history was invisible.
+  const logged = fixed.workLog.find((e: { field: string | null }) => e.field === 'total');
+  assert.ok(logged, 'changing the total is on the work log');
+  assert.equal(logged.kind, 'field_changed');
+  assert.match(logged.text, /Total due changed from \$4,820\.00 to \$4,000\.00/);
+  assert.ok(logged.byName, 'and says who did it');
+  assert.ok(logged.at, 'and when');
+
   // And it can now actually leave review, which is the whole point.
   const confirmed = await post(`/organizations/${orgId}/bills/${billId}/confirm`, body, setup.sessionToken);
   assert.equal(confirmed.detail.state, 'submitted');

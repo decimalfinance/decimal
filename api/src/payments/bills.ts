@@ -496,6 +496,125 @@ function sumLineAmounts(rows: unknown[], amountKey: string): number | null {
  * remains is the question the draft screen has always asked out loud: do the
  * lines plus the tax come to the total being paid?
  */
+/**
+ * Everything that has been done to a bill, in order.
+ *
+ * The record was always kept — bill_field_changes is append-only and carries
+ * who, what and when — but the only screen that rendered any of it was the
+ * post-confirm detail page. So for the whole time a bill is being WORKED,
+ * which is the only time the question "what has been changed on this?" is
+ * live, the answer was on screen nowhere.
+ *
+ * Reads the table rather than the corrections blob on the bill: the blob is
+ * recomputed on every save and carries no timestamps, so it can tell you the
+ * tax ended up at 820 but not that Priya put it there at 8:49pm.
+ */
+export async function billWorkLog(organizationId: string, paymentOrderId: string) {
+  const [changes, events] = await Promise.all([
+    prisma.billFieldChange.findMany({
+      where: { organizationId, paymentOrderId },
+      orderBy: { changedAt: 'asc' },
+      select: {
+        billFieldChangeId: true, fieldKey: true, previousValue: true, newValue: true,
+        changedByUserId: true, actorType: true, changedAt: true,
+      },
+    }),
+    prisma.paymentOrderEvent.findMany({
+      where: { organizationId, paymentOrderId, eventType: { in: [...BILL_LOG_EVENT_TYPES] } },
+      orderBy: { createdAt: 'asc' },
+      select: { paymentOrderEventId: true, eventType: true, actorId: true, payloadJson: true, createdAt: true },
+    }),
+  ]);
+
+  const userIds = [...new Set([
+    ...changes.map((c) => c.changedByUserId),
+    ...events.map((e) => e.actorId),
+  ].filter((v): v is string => Boolean(v)))];
+  const users = userIds.length > 0
+    ? await prisma.user.findMany({ where: { userId: { in: userIds } }, select: { userId: true, displayName: true } })
+    : [];
+  const nameOf = new Map(users.map((u) => [u.userId, u.displayName]));
+
+  type Entry = {
+    id: string;
+    kind: 'field_changed' | 'flag_raised' | 'flag_cleared' | 'policy_overridden';
+    at: Date;
+    byName: string | null;
+    /** One line, already written out — the screen renders, it does not phrase. */
+    text: string;
+    /** Present on a field change, so the screen can point at the field. */
+    field: string | null;
+  };
+
+  const entries: Entry[] = [];
+
+  for (const c of changes) {
+    const label = BILL_FIELD_LABELS[c.fieldKey] ?? c.fieldKey;
+    const from = c.previousValue === null || c.previousValue === '' ? 'nothing' : formatLoggedValue(c.fieldKey, c.previousValue);
+    const to = c.newValue === null || c.newValue === '' ? 'nothing' : formatLoggedValue(c.fieldKey, c.newValue);
+    entries.push({
+      id: c.billFieldChangeId,
+      kind: 'field_changed',
+      at: c.changedAt,
+      byName: c.changedByUserId ? nameOf.get(c.changedByUserId) ?? null : (c.actorType === 'user' ? null : 'Decimal'),
+      text: `${label} changed from ${from} to ${to}`,
+      field: c.fieldKey,
+    });
+  }
+
+  for (const e of events) {
+    const payload = isRecord(e.payloadJson) ? e.payloadJson : {};
+    const short = str(payload.short) ?? str(payload.rule) ?? 'a check';
+    const reason = str(payload.reason);
+    entries.push({
+      id: e.paymentOrderEventId,
+      kind: e.eventType === 'bill_flag_raised' ? 'flag_raised'
+        : e.eventType === 'bill_flag_cleared' ? 'flag_cleared'
+        : 'policy_overridden',
+      at: e.createdAt,
+      byName: e.actorId ? nameOf.get(e.actorId) ?? null : null,
+      text: e.eventType === 'bill_flag_raised' ? `Flagged: ${short}`
+        : e.eventType === 'bill_flag_cleared' ? `Resolved: ${short}`
+        : `${short}${reason ? ` \u201c${reason}\u201d` : ''}`,
+      field: null,
+    });
+  }
+
+  entries.sort((a, b) => a.at.getTime() - b.at.getTime());
+  return entries.map((e) => ({ ...e, at: e.at.toISOString() }));
+}
+
+/** Event types that belong on a bill's work log. */
+const BILL_LOG_EVENT_TYPES = ['bill_flag_raised', 'bill_flag_cleared', 'policy_overridden'] as const;
+
+// Field keys are wire identifiers; a person reading a history wants the label
+// they saw on the form.
+const BILL_FIELD_LABELS: Record<string, string> = {
+  vendorName: 'Vendor',
+  vendorEmail: 'Email',
+  invoiceNumber: 'Invoice number',
+  invoiceDate: 'Invoice date',
+  dueDate: 'Due date',
+  terms: 'Terms',
+  poNumber: 'PO number',
+  discount: 'Discount',
+  currency: 'Currency',
+  total: 'Total due',
+  taxAmount: 'Tax',
+  lineItems: 'Line items',
+};
+
+// Money reads as money. "Tax changed from 0 to 820" is a worse sentence than
+// "Tax changed from $0.00 to $820.00", and the second is checkable against the
+// document at a glance.
+const MONEY_FIELDS = new Set(['total', 'taxAmount']);
+function formatLoggedValue(fieldKey: string, value: string): string {
+  if (!MONEY_FIELDS.has(fieldKey)) return value;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return value;
+  return n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+}
+
 function documentAmounts(
   extracted: Record<string, unknown> | null,
   verification: Record<string, unknown> | null,
@@ -1255,6 +1374,10 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     // worse than none: the asker believes they raised something and the person
     // asked never learns they were asked.
     route: await approvalRouteFor(organizationId, order.paymentOrderId),
+    // What has been done to this bill so far. Kept since the beginning, shown
+    // only after confirm until now — so the phase in which somebody is
+    // actually changing things was the one phase with no record on screen.
+    workLog: await billWorkLog(organizationId, order.paymentOrderId),
     questions: (await listBillQuestions(organizationId, order.paymentOrderId)).map((q) => ({
       ...q,
       // Whose move it is, decided here rather than by the client comparing ids.
