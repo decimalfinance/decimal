@@ -156,7 +156,7 @@ test('a slug collision does not poison the transaction that is creating the orga
       data: { email: 'owner@acme.test', displayName: 'Owner', status: 'active' },
     });
     await tx.organizationMembership.create({
-      data: { organizationId: org.organizationId, userId: user.userId, role: 'owner' },
+      data: { organizationId: org.organizationId, userId: user.userId, role: 'primary_admin' },
     });
     return minted;
   });
@@ -400,7 +400,7 @@ async function seedOrgWithMember(orgName: string, memberEmail: string) {
     data: { email: memberEmail, displayName: 'Priya Sharma', status: 'active', emailVerifiedAt: new Date() },
   });
   await prisma.organizationMembership.create({
-    data: { organizationId: org.organizationId, userId: user.userId, role: 'owner' },
+    data: { organizationId: org.organizationId, userId: user.userId, role: 'primary_admin' },
   });
   return { org, slug, user };
 }

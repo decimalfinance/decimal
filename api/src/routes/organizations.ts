@@ -123,7 +123,7 @@ organizationsRouter.post('/organizations', async (req, res, next) => {
         data: {
           organizationId: createdOrganization.organizationId,
           userId: req.auth!.userId,
-          role: 'owner',
+          role: 'primary_admin',
         },
       });
 
@@ -151,7 +151,7 @@ organizationsRouter.post('/organizations', async (req, res, next) => {
     res.status(201).json({
       organizationId: organization.organizationId,
       organizationName: organization.organizationName,
-      role: 'owner',
+      role: 'primary_admin',
       status: organization.status,
       provisioning: {
         personalWallet: personalWalletProvisioning,
@@ -164,7 +164,7 @@ organizationsRouter.post('/organizations', async (req, res, next) => {
 });
 
 // --- Access tiers (QBO's primary-admin model) --------------------------------
-// Exactly one primary admin (role 'owner') per org. Admins can do everything in
+// Exactly one primary admin (role 'primary_admin') per org. Admins can do everything in
 // the product, but ONLY the primary admin can promote/demote admins or hand the
 // primary-admin seat to someone else. The seat transfers; it is never vacant.
 
@@ -176,7 +176,7 @@ organizationsRouter.patch('/organizations/:organizationId/members/:userId/access
     const { userId } = z.object({ userId: z.string().uuid() }).parse(req.params);
     const { access } = memberAccessSchema.parse(req.body);
     const { membership } = await assertOrganizationAccess(organizationId, req.auth!);
-    if (membership.role !== 'owner') {
+    if (membership.role !== 'primary_admin') {
       throw forbidden('Only the primary admin can promote or demote admins.');
     }
     if (userId === req.auth!.userId) {
@@ -188,7 +188,7 @@ organizationsRouter.patch('/organizations/:organizationId/members/:userId/access
     if (!target || target.status !== 'active') {
       throw forbidden('That person is not an active member.');
     }
-    if (target.role === 'owner') {
+    if (target.role === 'primary_admin') {
       throw forbidden('The primary admin cannot be demoted — transfer the seat instead.');
     }
     await prisma.$transaction(async (tx) => {
@@ -216,7 +216,7 @@ organizationsRouter.post('/organizations/:organizationId/primary-admin/transfer'
     const { organizationId } = orgParamsSchema.parse(req.params);
     const { userId } = z.object({ userId: z.string().uuid() }).parse(req.body);
     const { membership } = await assertOrganizationAccess(organizationId, req.auth!);
-    if (membership.role !== 'owner') {
+    if (membership.role !== 'primary_admin') {
       throw forbidden('Only the primary admin can transfer the primary-admin seat.');
     }
     if (userId === req.auth!.userId) {
@@ -234,7 +234,7 @@ organizationsRouter.post('/organizations/:organizationId/primary-admin/transfer'
     await prisma.$transaction([
       prisma.organizationMembership.update({
         where: { organizationId_userId: { organizationId, userId } },
-        data: { role: 'owner' },
+        data: { role: 'primary_admin' },
       }),
       prisma.organizationMembership.update({
         where: { organizationId_userId: { organizationId, userId: req.auth!.userId } },

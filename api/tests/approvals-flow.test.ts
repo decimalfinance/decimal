@@ -57,7 +57,7 @@ after(async () => {
 
 // ---- 3-member org: owner (requester) + two approvers ------------------------
 async function makeOrg() {
-  const owner = await register('owner');
+  const owner = await register('primary_admin');
   const org = await post('/organizations', { organizationName: 'Halcyon Labs, Inc.' }, owner.token);
   const a2 = await register('approver-a');
   const a3 = await register('approver-b');
@@ -1061,7 +1061,7 @@ test('a member who is not an admin cannot decide that another company is us', as
       organizationId: orgId, name: 'Halcyon Labs',
       actorUserId: member.userId, actorName: 'Member',
     }),
-    /owner or admin/,
+    /primary admin or admin/,
     'a regular member must not be able to widen what the org answers to',
   );
 });
@@ -1800,7 +1800,7 @@ test('recall over HTTP: raising freezes the bill, a member cannot decide, granti
     headers: { 'content-type': 'application/json', authorization: `Bearer ${a2.token}` },
     body: JSON.stringify({ grant: true }),
   });
-  assert.equal(refused.status, 403, 'only an owner or admin decides');
+  assert.equal(refused.status, 403, 'only a primary admin or admin decides');
 
   // The owner grants it, and the bill lands back in the submitter's drafts —
   // editable, which is the entire point of asking for it.

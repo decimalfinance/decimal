@@ -50,7 +50,7 @@ export function ProtectionsPage() {
     enabled: Boolean(organizationId),
     staleTime: 60_000,
   });
-  const isPrimaryAdmin = myAccess.data?.membershipRole === 'owner';
+  const isPrimaryAdmin = myAccess.data?.membershipRole === 'primary_admin';
   // Always-on gates + the bill ceiling (the rest of the Policies page).
   const policiesQuery = useQuery({
     queryKey: ['policies-overview', organizationId] as const,

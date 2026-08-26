@@ -165,7 +165,7 @@ async function eligibleIds(tx: Tx, organizationId: string, approvableType: strin
       ON om.organization_id = p.organization_id AND om.user_id = p.user_id AND om.status = 'active'
     WHERE p.organization_id = ${organizationId}::uuid
       AND p.status = 'active'
-      AND (pr.person_id IS NOT NULL OR om.role IN ('owner', 'admin'))`;
+      AND (pr.person_id IS NOT NULL OR om.role IN ('primary_admin', 'admin'))`;
   return new Set(rows.map((r) => r.id));
 }
 
@@ -351,7 +351,7 @@ export async function compilePlan(tx: Tx, approvable: ApprovableRow, at = new Da
       const adminMembers = await tx.$queryRaw<{ user_id: string }[]>`
         SELECT om.user_id::text AS user_id FROM organization_memberships om
         WHERE om.organization_id = ${approvable.organization_id}::uuid
-          AND om.role IN ('owner', 'admin') AND om.status = 'active'`;
+          AND om.role IN ('primary_admin', 'admin') AND om.status = 'active'`;
       const { ensurePersonForUser } = await import('./wiring.js');
       for (const m of adminMembers) await ensurePersonForUser(tx, approvable.organization_id, m.user_id);
 
@@ -360,7 +360,7 @@ export async function compilePlan(tx: Tx, approvable: ApprovableRow, at = new Da
         JOIN organization_memberships om
           ON om.user_id = p.user_id AND om.organization_id = p.organization_id
         WHERE p.organization_id = ${approvable.organization_id}::uuid
-          AND om.role IN ('owner', 'admin') AND om.status = 'active' AND p.status = 'active'
+          AND om.role IN ('primary_admin', 'admin') AND om.status = 'active' AND p.status = 'active'
           AND p.id != ${requesterId}::uuid
           AND (${entererId}::uuid IS NULL OR p.id != ${entererId}::uuid)`;
       assignees = adminRows.map((r) => r.id);
@@ -372,7 +372,7 @@ export async function compilePlan(tx: Tx, approvable: ApprovableRow, at = new Da
         JOIN organization_memberships om
           ON om.user_id = p.user_id AND om.organization_id = p.organization_id
         WHERE p.organization_id = ${approvable.organization_id}::uuid
-          AND om.role = 'owner' AND om.status = 'active' AND p.status = 'active'
+          AND om.role = 'primary_admin' AND om.status = 'active' AND p.status = 'active'
         LIMIT 1`;
       assignees = ownerRows[0] ? [ownerRows[0].id] : [];
       how = 'the owner as approver of last resort';

@@ -30,7 +30,7 @@ if (!PASSWORD) {
   process.exit(1);
 }
 const PEOPLE = [
-  { email: 'zara.owner@dev.decimal.test', name: 'Zara Okafor', access: 'owner', role: null, part: 'Primary admin — owns policy and the ceiling' },
+  { email: 'zara.owner@dev.decimal.test', name: 'Zara Okafor', access: 'primary_admin', role: null, part: 'Primary admin — owns policy and the ceiling' },
   { email: 'priya.ap@dev.decimal.test', name: 'Priya Raman', access: 'member', role: 'bill_clerk', part: 'AP clerk — enters and codes bills' },
   { email: 'marcus.ops@dev.decimal.test', name: 'Marcus Bell', access: 'member', role: 'approver', part: 'Ops lead — approves spend for his team' },
   { email: 'nadia.fin@dev.decimal.test', name: 'Nadia Haddad', access: 'admin', role: null, part: 'Finance manager — second pair of eyes' },

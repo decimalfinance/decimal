@@ -2154,7 +2154,7 @@ export async function addOrganizationTradingName(args: {
   // isAdminRole covers the owner too — one vocabulary, rather than this file
   // inventing its own idea of who counts as an admin.
   if (!isAdminRole(membership?.role)) {
-    throw new Error('Only an owner or admin can record a name your organization trades under.');
+    throw new Error('Only a primary admin or admin can record a name your organization trades under.');
   }
 
   const org = await prisma.organization.findUniqueOrThrow({
@@ -2412,7 +2412,7 @@ export async function listAskCandidates(
         canSettle: needs === null
           ? null
           : needs === 'admin'
-            ? Boolean(a?.isOwnerOrAdmin)
+            ? Boolean(a?.isPrimaryOrAdmin)
             : Boolean(a?.capabilities.includes('bills.edit')),
       };
     })

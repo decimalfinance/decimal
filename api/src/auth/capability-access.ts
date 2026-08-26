@@ -1,7 +1,7 @@
 // Role-based access enforcement (roles-research/SYNTHESIS-decimal-roles.md).
 // One middleware, one ordered table: org-scoped requests are matched to the
 // capability their area requires (first match wins; GET/HEAD need the view
-// capability, everything else the act capability). Owner/admin bypass. A member
+// capability, everything else the act capability). Primary admin/admin bypass. A member
 // with no roles holds the viewer bundle — sees everything, changes nothing.
 // This is feature-surface enforcement, same mechanism as QBO: a role without
 // payments.view simply has no payment surface.
@@ -88,7 +88,7 @@ export function capabilityAccessMiddleware() {
       // Not a member at all → let the route's own assertOrganizationAccess 404/403
       // with its established message.
       if (!access) return next();
-      if (access.isOwnerOrAdmin || options.some((c) => access.capabilities.includes(c))) return next();
+      if (access.isPrimaryOrAdmin || options.some((c) => access.capabilities.includes(c))) return next();
       throw forbidden("Your role doesn't include this. Ask an admin on the Members page if you need it.", { needed: options });
     } catch (error) {
       next(error);

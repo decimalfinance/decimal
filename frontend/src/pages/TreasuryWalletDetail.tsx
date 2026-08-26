@@ -44,7 +44,7 @@ export function TreasuryWalletDetailPage({ session }: { session: AuthenticatedSe
     [session.organizations, organizationId],
   );
   const isAdmin =
-    currentMembership?.role === 'owner' || currentMembership?.role === 'admin';
+    currentMembership?.role === 'primary_admin' || currentMembership?.role === 'admin';
 
   const treasuryListQuery = useQuery({
     queryKey: ['treasury-wallets', organizationId] as const,

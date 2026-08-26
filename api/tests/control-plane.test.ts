@@ -497,7 +497,7 @@ test('dev seed builds a whole org — users, memberships, roles, sessions — in
     assert.equal(seed.users.length, 4);
     const owner = seed.users.find((u: { email: string }) => u.email === 'zaid@dev.decimal.test');
     const rio = seed.users.find((u: { email: string }) => u.email === 'rio@dev.decimal.test');
-    assert.equal(owner.access, 'owner');
+    assert.equal(owner.access, 'primary_admin');
     assert.deepEqual(rio.roles, ['bill_clerk', 'approver']);
 
     // Every persona got a working session.

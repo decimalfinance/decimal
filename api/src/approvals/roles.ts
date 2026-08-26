@@ -28,7 +28,7 @@ export async function getMembersAndRoles(organizationId: string) {
       JOIN users u ON u.user_id = om.user_id
       LEFT JOIN approval.people p ON p.organization_id = om.organization_id AND p.user_id = om.user_id
       WHERE om.organization_id = ${organizationId}::uuid AND om.status = 'active'
-      ORDER BY (om.role = 'owner') DESC, u.display_name`,
+      ORDER BY (om.role = 'primary_admin') DESC, u.display_name`,
     prisma.$queryRaw<{ person_id: string; role: string; name: string; user_id: string | null }[]>`
       SELECT pr.person_id, pr.role, p.name, p.user_id
       FROM approval.person_roles pr
@@ -36,7 +36,7 @@ export async function getMembersAndRoles(organizationId: string) {
       LEFT JOIN organization_memberships om
         ON om.organization_id = pr.organization_id AND om.user_id = p.user_id AND om.status = 'active'
       WHERE pr.organization_id = ${organizationId}::uuid
-        AND (om.role IS NULL OR om.role NOT IN ('owner', 'admin'))
+        AND (om.role IS NULL OR om.role NOT IN ('primary_admin', 'admin'))
       ORDER BY p.name`,
   ]);
 
@@ -105,7 +105,7 @@ async function assertRoleTakeable(organizationId: string, userId: string) {
   const tier = await prisma.$queryRaw<{ role: string }[]>`
     SELECT role FROM organization_memberships
     WHERE organization_id = ${organizationId}::uuid AND user_id = ${userId}::uuid AND status = 'active'`;
-  if (tier[0] && (tier[0].role === 'owner' || tier[0].role === 'admin')) {
+  if (tier[0] && (tier[0].role === 'primary_admin' || tier[0].role === 'admin')) {
     throw new Error('Admins already have full access — roles are for members.');
   }
 }
@@ -116,7 +116,7 @@ export async function assignRole(organizationId: string, roleKey: RoleKey, userI
   const tier = await prisma.$queryRaw<{ role: string }[]>`
     SELECT role FROM organization_memberships
     WHERE organization_id = ${organizationId}::uuid AND user_id = ${userId}::uuid AND status = 'active'`;
-  if (tier[0] && (tier[0].role === 'owner' || tier[0].role === 'admin')) {
+  if (tier[0] && (tier[0].role === 'primary_admin' || tier[0].role === 'admin')) {
     throw new Error('Admins already have full access — roles are for members.');
   }
   const { ensurePersonForUser } = await import('./wiring.js');

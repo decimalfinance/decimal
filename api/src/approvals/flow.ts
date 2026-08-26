@@ -52,10 +52,10 @@ export async function getFlow(organizationId: string, kind: FlowKind = 'invoice'
   // looking for.
   const people = await prisma.$queryRaw<{ id: string; name: string; email: string; user_id: string | null; roles: string[]; can_approve: boolean }[]>`
     SELECT p.id, p.name, p.email, p.user_id,
-      CASE WHEN om.role = 'owner' THEN ARRAY['Primary admin']
+      CASE WHEN om.role = 'primary_admin' THEN ARRAY['Primary admin']
            WHEN om.role = 'admin' THEN ARRAY['Admin']
            ELSE COALESCE(array_agg(initcap(replace(pr.role, '_', ' ')) ORDER BY pr.role) FILTER (WHERE pr.role IS NOT NULL), '{}') END AS roles,
-      (om.role IN ('owner', 'admin')
+      (om.role IN ('primary_admin', 'admin')
        OR bool_or(pr.role = 'approver')) AS can_approve
     FROM approval.people p
     LEFT JOIN approval.person_roles pr ON pr.person_id = p.id
@@ -237,7 +237,7 @@ async function ownerPersonId(organizationId: string): Promise<string | null> {
   const rows = await prisma.$queryRaw<{ id: string }[]>`
     SELECT p.id FROM approval.people p
     JOIN organization_memberships om ON om.user_id = p.user_id AND om.organization_id = p.organization_id
-    WHERE p.organization_id = ${organizationId}::uuid AND om.role = 'owner' AND om.status = 'active' AND p.status = 'active'
+    WHERE p.organization_id = ${organizationId}::uuid AND om.role = 'primary_admin' AND om.status = 'active' AND p.status = 'active'
     LIMIT 1`;
   return rows[0]?.id ?? null;
 }
@@ -261,10 +261,10 @@ export async function getReleaseConfig(organizationId: string) {
   // looking for.
   const people = await prisma.$queryRaw<{ id: string; name: string; email: string; user_id: string | null; roles: string[]; can_approve: boolean }[]>`
     SELECT p.id, p.name, p.email, p.user_id,
-      CASE WHEN om.role = 'owner' THEN ARRAY['Primary admin']
+      CASE WHEN om.role = 'primary_admin' THEN ARRAY['Primary admin']
            WHEN om.role = 'admin' THEN ARRAY['Admin']
            ELSE COALESCE(array_agg(initcap(replace(pr.role, '_', ' ')) ORDER BY pr.role) FILTER (WHERE pr.role IS NOT NULL), '{}') END AS roles,
-      (om.role IN ('owner', 'admin')
+      (om.role IN ('primary_admin', 'admin')
        OR bool_or(pr.role = 'approver')) AS can_approve
     FROM approval.people p
     LEFT JOIN approval.person_roles pr ON pr.person_id = p.id
@@ -342,7 +342,7 @@ export async function simulateFlow(organizationId: string, flow: FlowNode[], sam
   const ownerRows = await prisma.$queryRaw<{ id: string }[]>`
     SELECT p.id FROM approval.people p
     JOIN organization_memberships om ON om.user_id = p.user_id AND om.organization_id = p.organization_id
-    WHERE p.organization_id = ${organizationId}::uuid AND om.role = 'owner' AND om.status = 'active' AND p.status = 'active'
+    WHERE p.organization_id = ${organizationId}::uuid AND om.role = 'primary_admin' AND om.status = 'active' AND p.status = 'active'
     LIMIT 1`;
   const ownerId = ownerRows[0]?.id ?? null;
 
@@ -581,7 +581,7 @@ export async function assistFlow(organizationId: string, message: string, curren
   // Org data the tools serve — fetched once, handed to the model only when it asks.
   const people = await prisma.$queryRaw<{ id: string; name: string; email: string; roles: string[] }[]>`
     SELECT p.id, p.name, p.email,
-      CASE WHEN om.role = 'owner' THEN ARRAY['Primary admin']
+      CASE WHEN om.role = 'primary_admin' THEN ARRAY['Primary admin']
            WHEN om.role = 'admin' THEN ARRAY['Admin']
            ELSE COALESCE(array_agg(initcap(pr.role) ORDER BY pr.role) FILTER (WHERE pr.role IS NOT NULL), '{}') END AS roles
     FROM approval.people p

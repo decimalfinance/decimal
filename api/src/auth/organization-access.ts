@@ -1,7 +1,7 @@
 import type { AuthContext } from './sessions.js';
 import { prisma } from '../infra/prisma.js';
 
-const ADMIN_ROLES = new Set(['owner', 'admin']);
+const ADMIN_ROLES = new Set(['primary_admin', 'admin']);
 
 type AccessActor = string | AuthContext;
 
@@ -51,9 +51,9 @@ export async function assertOrganizationAdmin(organizationId: string, actor: Acc
   return result;
 }
 
-/** Owner is distinct from admin for governance acts (protection relaxation, vault keys). */
-export function isOwnerRole(role: string | null | undefined) {
-  return role === 'owner';
+/** The primary admin is distinct from an admin for governance acts (protection relaxation, vault keys). */
+export function isPrimaryAdminRole(role: string | null | undefined) {
+  return role === 'primary_admin';
 }
 
 export function isAdminRole(role: string | null | undefined) {

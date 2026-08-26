@@ -52,7 +52,7 @@ const SELECT_ROW = `
   r.decided_at, r.decision_note, r.created_at`;
 
 /**
- * Is this person an owner or admin of the org?
+ * Is this person a primary admin or admin of the org?
  *
  * Resolved the same way the compiler's last-resort approver search does it —
  * engine person joined to the workspace membership — because the engine holds
@@ -65,7 +65,7 @@ async function isOrgAdmin(tx: Tx, organizationId: string, personId: string): Pro
       ON om.user_id = p.user_id AND om.organization_id = p.organization_id
     WHERE p.id = ${personId}::uuid
       AND p.organization_id = ${organizationId}::uuid
-      AND om.role IN ('owner', 'admin') AND om.status = 'active' AND p.status = 'active'`;
+      AND om.role IN ('primary_admin', 'admin') AND om.status = 'active' AND p.status = 'active'`;
   return rows.length > 0;
 }
 
@@ -151,7 +151,7 @@ export interface DecideRecallInput {
 /**
  * An admin answers. Granting is the only path that destroys anything.
  *
- * Self-decision is allowed when the asker is themselves an owner or admin —
+ * Self-decision is allowed when the asker is themselves a primary admin or admin —
  * they could already unwind the bill by other means, so refusing here would
  * only cost them a step without protecting anyone, and a one-admin org would
  * deadlock outright. The row records who asked and who decided, so a
@@ -175,7 +175,7 @@ export async function decideRecall(input: DecideRecallInput): Promise<{
       throw new ApprovalEngineError('invalid_state', `This request was already ${request.state}.`);
     }
     if (!(await isOrgAdmin(tx, request.organization_id, input.actorId))) {
-      throw new ApprovalEngineError('forbidden_role', 'Only an owner or admin can decide a recall.');
+      throw new ApprovalEngineError('forbidden_role', 'Only a primary admin or admin can decide a recall.');
     }
 
     const approvable = (await getApprovable(tx, request.approvable_id))!;

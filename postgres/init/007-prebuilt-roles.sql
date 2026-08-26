@@ -32,4 +32,4 @@ DELETE FROM approval.person_roles pr
 USING approval.people p, organization_memberships om
 WHERE p.id = pr.person_id
   AND om.organization_id = pr.organization_id AND om.user_id = p.user_id
-  AND om.status = 'active' AND om.role IN ('owner','admin');
+  AND om.status = 'active' AND om.role IN ('primary_admin','admin');

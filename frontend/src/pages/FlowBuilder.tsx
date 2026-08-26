@@ -152,7 +152,7 @@ function useFlowStage(organizationId: string, kind: string, isOwner: boolean, cl
 export function FlowBuilderPage({ session }: { session: AuthenticatedSession }) {
   const { organizationId = '' } = useParams();
   const toast = useToast();
-  const isOwner = session.organizations.find((o) => o.organizationId === organizationId)?.role === 'owner';
+  const isOwner = session.organizations.find((o) => o.organizationId === organizationId)?.role === 'primary_admin';
 
   const [lastEdited, setLastEdited] = useState<'approve' | 'pay'>('approve');
   const approve = useFlowStage(organizationId, 'invoice', isOwner, flowApi, () => setLastEdited('approve'));

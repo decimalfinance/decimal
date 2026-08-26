@@ -100,7 +100,7 @@ export function createApp() {
   app.use(publicInboundEmailRouter);
   app.use(requireAuth());
   // Role-based access: org-scoped requests must carry the capability their
-  // area requires (auth/capability-access.ts). Owner/admin bypass.
+  // area requires (auth/capability-access.ts). Primary admin/admin bypass.
   app.use(capabilityAccessMiddleware());
   // SSE stream is authed but long-lived; mount it before idempotency so that
   // middleware (built for mutations) never wraps the open response.

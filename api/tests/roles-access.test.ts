@@ -45,7 +45,7 @@ after(async () => {
 });
 
 async function makeOrg() {
-  const owner = await register('owner');
+  const owner = await register('primary_admin');
   const org = await post('/organizations', { organizationName: 'Halcyon Labs, Inc.' }, owner.token);
   const member = await register('teammate');
   await prisma.organizationMembership.create({
@@ -186,7 +186,7 @@ test('primary-admin tier: only the seat holder manages admins, and the seat tran
   assert.equal(await status('PATCH', `/organizations/${orgId}/members/${third.userId}/access`, member.token, { access: 'admin' }), 403, 'admins cannot promote admins');
   assert.equal(await status('POST', `/organizations/${orgId}/invites`, member.token, { email: 'x@example.com', role: 'admin' }), 403, 'admins cannot invite admins');
   // Owner invites cannot be created at all — the seat only transfers.
-  assert.equal(await status('POST', `/organizations/${orgId}/invites`, owner.token, { email: 'y@example.com', role: 'owner' }), 400);
+  assert.equal(await status('POST', `/organizations/${orgId}/invites`, owner.token, { email: 'y@example.com', role: 'primary_admin' }), 400);
   // The primary admin cannot be demoted.
   assert.equal(await status('PATCH', `/organizations/${orgId}/members/${owner.userId}/access`, member.token, { access: 'member' }), 403);
 
@@ -205,10 +205,10 @@ test('primary-admin tier: only the seat holder manages admins, and the seat tran
   await fetchOk('POST', `/organizations/${orgId}/primary-admin/transfer`, owner.token, { userId: member.userId });
   const rows = await prisma.organizationMembership.findMany({ where: { organizationId: orgId }, select: { userId: true, role: true } });
   const roleOf = new Map(rows.map((r) => [r.userId, r.role]));
-  assert.equal(roleOf.get(member.userId), 'owner');
+  assert.equal(roleOf.get(member.userId), 'primary_admin');
   assert.equal(roleOf.get(owner.userId), 'admin');
   // Never vacant, never doubled.
-  assert.equal(rows.filter((r) => r.role === 'owner').length, 1);
+  assert.equal(rows.filter((r) => r.role === 'primary_admin').length, 1);
 });
 
 async function fetchOk(method: string, path: string, token: string, body: unknown) {

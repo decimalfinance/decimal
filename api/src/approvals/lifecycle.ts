@@ -382,7 +382,7 @@ export async function sweepTimers(now = new Date()): Promise<{ escalated: number
         const owner = await tx.$queryRaw<{ id: string }[]>`
           SELECT pe.id FROM approval.people pe
           JOIN organization_memberships om ON om.user_id = pe.user_id AND om.organization_id = pe.organization_id
-          WHERE pe.organization_id = ${t.organization_id}::uuid AND om.role = 'owner'
+          WHERE pe.organization_id = ${t.organization_id}::uuid AND om.role = 'primary_admin'
             AND om.status = 'active' AND pe.status = 'active'
           LIMIT 1`;
         const ownerId = owner[0]?.id ?? null;

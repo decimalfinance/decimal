@@ -20,16 +20,16 @@ const initialsOf = (name: string, email = '') => {
 // Role keys are snake_case ('bill_clerk'), so a bare capitalise would render
 // "Bill_clerk". Only a fallback — the real names come from the API.
 const titleCase = (s: string) => s.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-// Access tiers, in product words: 'owner' is the primary admin (one per org).
-const accessLabel = (a: string) => (a === 'owner' ? 'Primary admin' : titleCase(a));
+// Access tiers, in product words: 'primary_admin' is the primary admin (one per org).
+const accessLabel = (a: string) => (a === 'primary_admin' ? 'Primary admin' : titleCase(a));
 
 export function MembersPage({ session }: { session: AuthenticatedSession }) {
   const { organizationId = '' } = useParams();
   const queryClient = useQueryClient();
   const toast = useToast();
   const myRole = session.organizations.find((o) => o.organizationId === organizationId)?.role;
-  const canManage = myRole === 'owner' || myRole === 'admin';
-  const isPrimary = myRole === 'owner';
+  const canManage = myRole === 'primary_admin' || myRole === 'admin';
+  const isPrimary = myRole === 'primary_admin';
   const myUserId = session.user.userId;
 
   const q = useQuery({ queryKey: ['members-roles', organizationId], queryFn: () => rolesApi.get(organizationId), enabled: Boolean(organizationId) });
@@ -306,7 +306,7 @@ function MemberRolesDialog(props: {
         <div className="dialog-body">
           {member.access !== 'member' ? (
             <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.55, margin: 0 }}>
-              {member.name.split(' ')[0]} is {member.access === 'owner' ? 'the primary admin' : 'an admin'} and already has full access — roles are for members. Move them to Member below if you want their access to come from roles instead.
+              {member.name.split(' ')[0]} is {member.access === 'primary_admin' ? 'the primary admin' : 'an admin'} and already has full access — roles are for members. Move them to Member below if you want their access to come from roles instead.
             </p>
           ) : (
           <div className="role-box" role="radiogroup" aria-label="Role">

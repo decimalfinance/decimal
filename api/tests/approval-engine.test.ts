@@ -285,7 +285,7 @@ test('wiring: default org setup migrates members onto a 2-of-N policy; invoice f
   await prisma.$executeRaw`INSERT INTO organizations (organization_id, organization_name) VALUES (${org2}::uuid, 'wiring-org') ON CONFLICT DO NOTHING`;
   await prisma.$executeRaw`INSERT INTO users (user_id, email, display_name) VALUES (${u1}::uuid, 'w1@t.local', 'W One') ON CONFLICT DO NOTHING`;
   await prisma.$executeRaw`INSERT INTO users (user_id, email, display_name) VALUES (${u2}::uuid, 'w2@t.local', 'W Two') ON CONFLICT DO NOTHING`;
-  await prisma.$executeRaw`INSERT INTO organization_memberships (organization_id, user_id, role) VALUES (${org2}::uuid, ${u1}::uuid, 'owner') ON CONFLICT DO NOTHING`;
+  await prisma.$executeRaw`INSERT INTO organization_memberships (organization_id, user_id, role) VALUES (${org2}::uuid, ${u1}::uuid, 'primary_admin') ON CONFLICT DO NOTHING`;
   await prisma.$executeRaw`INSERT INTO organization_memberships (organization_id, user_id, role) VALUES (${org2}::uuid, ${u2}::uuid, 'member') ON CONFLICT DO NOTHING`;
 
   const { ensureEngineSetup, submitInvoiceForApproval } = await import('../src/approvals/wiring.js');
@@ -496,7 +496,7 @@ test('a bill parked on a question returns to waiting on that question, not to th
   assert.equal(decision.macroState, 'returned_for_info', 'still owed an answer — not silently rejoined the queue');
 });
 
-test('only the submitter may ask, and only an owner or admin may decide', async () => {
+test('only the submitter may ask, and only a primary admin or admin may decide', async () => {
   const { requestRecall, decideRecall } = await import('../src/approvals/recall.js');
   await makeMember(people.cfo, 'cfo-admin@t.local', 'admin');
   await makeMember(people.opsHead, 'ops-member@t.local', 'member');

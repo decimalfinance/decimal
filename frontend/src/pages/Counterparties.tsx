@@ -126,8 +126,8 @@ export function CounterpartiesPage({ session: _session }: { session: Authenticat
     enabled: Boolean(organizationId),
     staleTime: 60_000,
   });
-  const isPrimaryAdmin = myAccess.data?.membershipRole === 'owner';
-  const isAdminTier = Boolean(myAccess.data?.isOwnerOrAdmin);
+  const isPrimaryAdmin = myAccess.data?.membershipRole === 'primary_admin';
+  const isAdminTier = Boolean(myAccess.data?.isPrimaryOrAdmin);
   const vendorById = useMemo(
     () => new Map((counterpartiesQuery.data?.items ?? []).map((c) => [c.counterpartyId, c])),
     [counterpartiesQuery.data],

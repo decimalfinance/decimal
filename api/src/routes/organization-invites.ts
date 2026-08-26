@@ -12,7 +12,7 @@ export const publicOrganizationInvitesRouter = Router();
 export const organizationInvitesRouter = Router();
 
 const INVITE_TTL_DAYS = 14;
-// There is exactly ONE primary admin (role 'owner') per org — it can only be
+// There is exactly ONE primary admin (role 'primary_admin') per org — it can only be
 // transferred, never invited. Admins are minted by the primary admin alone.
 const INVITE_ROLES = ['admin', 'member'] as const;
 const ROLE_KEYS_TUPLE = ['bill_clerk', 'approver', 'payer', 'viewer'] as const;
@@ -77,7 +77,7 @@ organizationInvitesRouter.post('/organizations/:organizationId/invites', asyncRo
   assertVerifiedEmail(req.auth!.userEmailVerifiedAt);
   const input = createInviteSchema.parse(req.body);
   // Only the primary admin manages the admin tier (QBO's primary-admin rule).
-  if (input.role === 'admin' && membership.role !== 'owner') {
+  if (input.role === 'admin' && membership.role !== 'primary_admin') {
     throw forbidden('Only the primary admin can invite admins.');
   }
   if (input.role === 'member' && !input.jobRole) {

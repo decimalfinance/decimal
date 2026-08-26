@@ -93,7 +93,7 @@ export function BillDraftPage() {
       key={paymentOrderId}
       organizationId={organizationId}
       billDraft={billDraft.data}
-      canOverrideDuplicate={Boolean(myAccess.data?.isOwnerOrAdmin)}
+      canOverrideDuplicate={Boolean(myAccess.data?.isPrimaryOrAdmin)}
       canEditBills={myAccess.data ? myAccess.data.capabilities.includes('bills.edit') : true}
       onBack={() => navigate(`/organizations/${organizationId}/bills`)}
       onDone={() => {
@@ -263,7 +263,7 @@ function DraftScreen(props: {
     action === 'this_is_us'
       ? {
           title: `Is "${claimed}" a name ${billDraft.organizationName ?? 'your organization'} trades under?`,
-          help: 'Confirm the name below. It is recorded against your organization, so bills addressed to it are never flagged again — and only an owner or admin can do this.',
+          help: 'Confirm the name below. It is recorded against your organization, so bills addressed to it are never flagged again — and only a primary admin or admin can do this.',
           label: 'Name to record',
           cta: 'Yes, record it',
         }
@@ -926,7 +926,7 @@ function DraftScreen(props: {
                       // of why the button is dead was unreachable by hovering
                       // the dead button.
                       const why = blocked
-                        ? 'Only an owner or admin can do this — ask one to look, or ask a question on this bill.'
+                        ? 'Only a primary admin or admin can do this — ask one to look, or ask a question on this bill.'
                         : r.detail;
                       return (
                         <span key={r.action} title={why} style={{ display: 'inline-flex', flex: 'none' }}>

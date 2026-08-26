@@ -168,7 +168,7 @@ export function InboxPage({ session }: { session: AuthenticatedSession }) {
   const orgName = membership?.organizationName ?? 'your workspace';
   // Setup is admin work — members on a fresh org get a quiet empty state, not
   // a checklist of buttons whose actions the API will refuse them.
-  const canAdminister = membership?.role === 'owner' || membership?.role === 'admin';
+  const canAdminister = membership?.role === 'primary_admin' || membership?.role === 'admin';
 
   return (
     <div className="page">

@@ -1804,7 +1804,7 @@ export interface BillDetailStepNode {
 
 /**
  * A request to pull a bill out of approval. Raising one freezes the bill; an
- * owner or admin then grants it (approvals invalidated, bill back to draft) or
+ * primary admin or admin then grants it (approvals invalidated, bill back to draft) or
  * denies it (bill resumes exactly where it stood).
  */
 export interface BillRecall {
@@ -2121,7 +2121,7 @@ export type Capability =
   | 'payments.view' | 'payments.sign' | 'treasury.view' | 'treasury.manage'
   | 'vendors.view' | 'vendors.manage' | 'accounting.view' | 'accounting.manage'
   | 'members.view' | 'members.manage' | 'governance.view' | 'governance.edit';
-export interface MyAccess { membershipRole: string; roles: RoleKey[]; capabilities: Capability[]; isOwnerOrAdmin: boolean }
+export interface MyAccess { membershipRole: string; roles: RoleKey[]; capabilities: Capability[]; isPrimaryOrAdmin: boolean }
 export const accessApi = {
   get(organizationId: string) {
     return request<MyAccess>(`/organizations/${organizationId}/my-access`);

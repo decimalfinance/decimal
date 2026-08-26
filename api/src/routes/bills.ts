@@ -134,7 +134,7 @@ const duplicateOverrideSchema = z.object({ reason: z.string().trim().min(3).max(
 billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/duplicate-override', asyncRoute(async (req, res) => {
   const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
   const { membership } = await assertOrganizationAccess(organizationId, req.auth!);
-  if (!membership || (membership.role !== 'owner' && membership.role !== 'admin')) {
+  if (!membership || (membership.role !== 'primary_admin' && membership.role !== 'admin')) {
     throw forbidden('Only an admin can clear a duplicate flag — ask one to review this bill.');
   }
   await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
@@ -203,7 +203,7 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/this-is-u
     res.json({ ...result, draft: await getBillDraft(organizationId, paymentOrderId, req.auth!.userId) });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not record that name.';
-    if (/owner or admin/.test(message)) throw forbidden(message);
+    if (/primary admin or admin/.test(message)) throw forbidden(message);
     throw error;
   }
 }));
@@ -342,7 +342,7 @@ const sendBackSchema = z.object({ reason: z.string().trim().min(3).max(300) });
 billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/send-back', asyncRoute(async (req, res) => {
   const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
   const { membership } = await assertOrganizationAccess(organizationId, req.auth!);
-  if (!membership || (membership.role !== 'owner' && membership.role !== 'admin')) {
+  if (!membership || (membership.role !== 'primary_admin' && membership.role !== 'admin')) {
     throw forbidden('Only an admin can send an approved bill back to draft.');
   }
   await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
@@ -398,7 +398,7 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/not-a-bil
   const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
   const { membership } = await assertOrganizationAccess(organizationId, req.auth!);
   if (!isAdminRole(membership?.role)) {
-    throw forbidden('Only an owner or admin can close a bill — ask one to look, or ask a question on it instead.');
+    throw forbidden('Only a primary admin or admin can close a bill — ask one to look, or ask a question on it instead.');
   }
   await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
   const input = notABillSchema.parse(req.body);
@@ -416,7 +416,7 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/not-a-bil
 //
 // Recall throws away approvals real people gave, so it stopped being a button.
 // Raising freezes the bill immediately — before a third approver can spend a
-// decision on something already known to be wrong — and an owner or admin
+// decision on something already known to be wrong — and a primary admin or admin
 // answers. Denying and withdrawing both cost nothing, which is what makes
 // raising one safe enough to actually use.
 
@@ -448,7 +448,7 @@ billsRouter.post('/organizations/:organizationId/recall-requests/:recallRequestI
   const { organizationId, recallRequestId } = recallParamsSchema.parse(req.params);
   const { membership } = await assertOrganizationAccess(organizationId, req.auth!);
   if (!isAdminRole(membership?.role)) {
-    throw forbidden('Only an owner or admin can decide a recall.');
+    throw forbidden('Only a primary admin or admin can decide a recall.');
   }
   const input = recallDecisionSchema.parse(req.body);
   const { decideBillRecall } = await import('../payments/bill-recall.js');
@@ -470,7 +470,7 @@ billsRouter.post('/organizations/:organizationId/recall-requests/:recallRequestI
 billsRouter.get('/organizations/:organizationId/recall-requests', asyncRoute(async (req, res) => {
   const { organizationId } = orgParamsSchema.parse(req.params);
   const { membership } = await assertOrganizationAccess(organizationId, req.auth!);
-  if (!isAdminRole(membership?.role)) throw forbidden('Only an owner or admin sees the recall queue.');
+  if (!isAdminRole(membership?.role)) throw forbidden('Only a primary admin or admin sees the recall queue.');
   const { pendingBillRecalls } = await import('../payments/bill-recall.js');
   res.json(await pendingBillRecalls(organizationId));
 }));

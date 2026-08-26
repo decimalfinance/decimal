@@ -385,13 +385,13 @@ authRouter.post('/auth/dev/seed', async (req, res, next) => {
     const organization = await prisma.$transaction(async (tx) => {
       const org = await tx.organization.create({ data: { organizationName } });
       await tx.organizationMembership.create({
-        data: { organizationId: org.organizationId, userId: ownerUser.userId, role: 'owner' },
+        data: { organizationId: org.organizationId, userId: ownerUser.userId, role: 'primary_admin' },
       });
       const { mintIntakeSlug } = await import('../payments/inbound-email/slug.js');
       await mintIntakeSlug(tx, org.organizationId, organizationName);
       return org;
     });
-    const personas = [{ user: ownerUser, access: 'owner', roles: [] as string[] }];
+    const personas = [{ user: ownerUser, access: 'primary_admin', roles: [] as string[] }];
     for (const [index, member] of input.members.entries()) {
       const user = await upsertDevUser(member.email, member.displayName);
       await prisma.organizationMembership.create({

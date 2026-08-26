@@ -20,7 +20,7 @@ export function AccountingPage({ session }: { session: AuthenticatedSession }) {
     () => session.organizations.find((o) => o.organizationId === orgId),
     [session.organizations, orgId],
   );
-  const isAdmin = membership?.role === 'owner' || membership?.role === 'admin';
+  const isAdmin = membership?.role === 'primary_admin' || membership?.role === 'admin';
 
   const statusQuery = useQuery({
     queryKey: ['accounting-status', orgId] as const,

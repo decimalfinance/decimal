@@ -71,11 +71,11 @@ export const ROLE_BUNDLES: Record<RoleKey, Capability[]> = {
  * pays it — can be asked. Owners and admins always.
  */
 export function canBeAskedAboutBills(access: {
-  isOwnerOrAdmin: boolean;
+  isPrimaryOrAdmin: boolean;
   roles: RoleKey[];
 } | null): boolean {
   if (!access) return false;
-  if (access.isOwnerOrAdmin) return true;
+  if (access.isPrimaryOrAdmin) return true;
   // Held roles, not effective capabilities. A member with no role yet falls
   // back to the viewer BUNDLE, which is a default rather than a decision —
   // nobody sat down and made the new colleague read-only, they just have not
@@ -107,10 +107,10 @@ export const ROLE_DEFINITIONS: Array<{ key: RoleKey; name: string; summary: stri
 export type BillScope = 'all' | 'involved';
 
 export interface OrgAccess {
-  membershipRole: string;          // owner | admin | member
+  membershipRole: string;          // primary_admin | admin | member
   roles: RoleKey[];                // prebuilt roles held (empty = viewer default)
   capabilities: Capability[];
-  isOwnerOrAdmin: boolean;
+  isPrimaryOrAdmin: boolean;
   billScope: BillScope;
 }
 
@@ -143,7 +143,7 @@ export function billScopeFor(_membershipRole: string, _roles: RoleKey[]): BillSc
 }
 
 export function capabilitiesFor(membershipRole: string, roles: RoleKey[]): Capability[] {
-  if (membershipRole === 'owner' || membershipRole === 'admin') {
+  if (membershipRole === 'primary_admin' || membershipRole === 'admin') {
     return [...ALL_VIEW, 'bills.create', 'bills.edit', 'approvals.act', 'payments.sign', 'treasury.manage', 'vendors.manage', 'accounting.manage', 'members.manage', 'governance.edit'];
   }
   const effective = roles.length > 0 ? roles : (['viewer'] as RoleKey[]);
@@ -167,7 +167,7 @@ export async function getOrgAccess(organizationId: string, userId: string): Prom
     membershipRole,
     roles,
     capabilities: capabilitiesFor(membershipRole, roles),
-    isOwnerOrAdmin: membershipRole === 'owner' || membershipRole === 'admin',
+    isPrimaryOrAdmin: membershipRole === 'primary_admin' || membershipRole === 'admin',
     billScope: billScopeFor(membershipRole, roles),
   };
 }

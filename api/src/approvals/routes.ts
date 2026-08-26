@@ -231,7 +231,7 @@ approvalsRouter.get('/organizations/:organizationId/my-access', asyncRoute(async
   await assertOrganizationAccess(organizationId, req.auth!);
   const { getOrgAccess } = await import('./permissions.js');
   const access = await getOrgAccess(organizationId, req.auth!.userId);
-  sendJson(res, access ?? { membershipRole: 'member', roles: [], capabilities: [], isOwnerOrAdmin: false });
+  sendJson(res, access ?? { membershipRole: 'member', roles: [], capabilities: [], isPrimaryOrAdmin: false });
 }));
 
 // --- Approval flow builder ------------------------------------------------------
@@ -350,9 +350,9 @@ approvalsRouter.get('/organizations/:organizationId/approvals/release', asyncRou
 approvalsRouter.post('/organizations/:organizationId/approvals/release/publish', asyncRoute(async (req, res) => {
   const { organizationId } = orgParams.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
-  const { isOwnerRole, getOrganizationMembership } = await import('../auth/organization-access.js');
+  const { isPrimaryAdminRole, getOrganizationMembership } = await import('../auth/organization-access.js');
   const m = await getOrganizationMembership(req.auth!.userId, organizationId);
-  if (!isOwnerRole(m?.role)) throw forbidden('Only the primary admin can set who sends payments.');
+  if (!isPrimaryAdminRole(m?.role)) throw forbidden('Only the primary admin can set who sends payments.');
   const body = z.object({
     approvers: z.array(z.string().uuid()).min(1),
     quorum: z.union([z.literal('all'), z.literal('any'), z.number().int().min(1).max(20)]),
@@ -364,9 +364,9 @@ approvalsRouter.post('/organizations/:organizationId/approvals/release/publish',
 approvalsRouter.post('/organizations/:organizationId/approvals/flow/publish', asyncRoute(async (req, res) => {
   const { organizationId } = orgParams.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
-  const { isOwnerRole, getOrganizationMembership } = await import('../auth/organization-access.js');
+  const { isPrimaryAdminRole, getOrganizationMembership } = await import('../auth/organization-access.js');
   const membership = await getOrganizationMembership(req.auth!.userId, organizationId);
-  if (!isOwnerRole(membership?.role)) throw forbidden('Only the primary admin can publish the approval flow.');
+  if (!isPrimaryAdminRole(membership?.role)) throw forbidden('Only the primary admin can publish the approval flow.');
   const body = z.object({ flow: flowSchema.min(1) }).parse(req.body);
   const { publishFlow } = await import('./flow.js');
   sendJson(res, await publishFlow(organizationId, body.flow as never));
@@ -387,9 +387,9 @@ approvalsRouter.get('/organizations/:organizationId/approvals/payment-flow', asy
 approvalsRouter.post('/organizations/:organizationId/approvals/payment-flow/publish', asyncRoute(async (req, res) => {
   const { organizationId } = orgParams.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
-  const { isOwnerRole, getOrganizationMembership } = await import('../auth/organization-access.js');
+  const { isPrimaryAdminRole, getOrganizationMembership } = await import('../auth/organization-access.js');
   const m = await getOrganizationMembership(req.auth!.userId, organizationId);
-  if (!isOwnerRole(m?.role)) throw forbidden('Only the primary admin can publish the payment stage.');
+  if (!isPrimaryAdminRole(m?.role)) throw forbidden('Only the primary admin can publish the payment stage.');
   const body = z.object({ flow: flowSchema.min(1) }).parse(req.body);
   const { publishPaymentFlow } = await import('./flow.js');
   sendJson(res, await publishPaymentFlow(organizationId, body.flow as never));
@@ -425,9 +425,9 @@ approvalsRouter.get('/organizations/:organizationId/approvals/separation', async
 approvalsRouter.post('/organizations/:organizationId/approvals/separation', asyncRoute(async (req, res) => {
   const { organizationId } = orgParams.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
-  const { isOwnerRole, getOrganizationMembership } = await import('../auth/organization-access.js');
+  const { isPrimaryAdminRole, getOrganizationMembership } = await import('../auth/organization-access.js');
   const m = await getOrganizationMembership(req.auth!.userId, organizationId);
-  if (!isOwnerRole(m?.role)) throw forbidden('Only the primary admin can change separation of duties.');
+  if (!isPrimaryAdminRole(m?.role)) throw forbidden('Only the primary admin can change separation of duties.');
   const body = z.object({
     clerkCanApprove: z.boolean(),
     submitterCanApprove: z.boolean(),
@@ -597,8 +597,8 @@ const ceilingSchema = z.object({ amountUsd: z.number().positive().max(1_000_000_
 approvalsRouter.put('/organizations/:organizationId/policies/ceiling', asyncRoute(async (req, res) => {
   const { organizationId } = orgParams.parse(req.params);
   const access = await assertOrganizationAccess(organizationId, req.auth!);
-  const { isOwnerRole } = await import('../auth/organization-access.js');
-  if (!isOwnerRole(access.membership.role)) throw forbidden('Only the primary admin can change the bill ceiling.');
+  const { isPrimaryAdminRole } = await import('../auth/organization-access.js');
+  if (!isPrimaryAdminRole(access.membership.role)) throw forbidden('Only the primary admin can change the bill ceiling.');
   const input = ceilingSchema.parse(req.body);
   const { setBillCeilingMinor } = await import('./store.js');
   const minor = input.amountUsd === null ? null : BigInt(Math.round(input.amountUsd * 1_000_000));
@@ -610,8 +610,8 @@ approvalsRouter.post('/organizations/:organizationId/protections/:code/relax', a
   const { organizationId } = orgParams.parse(req.params);
   const { code } = z.object({ code: z.enum(['R1', 'R2', 'R5']) }).parse(req.params); // R7 not even routable
   const access = await assertOrganizationAccess(organizationId, req.auth!);
-  const { isOwnerRole } = await import('../auth/organization-access.js');
-  if (!isOwnerRole(access.membership.role)) throw forbidden('Only the primary admin can relax a protection');
+  const { isPrimaryAdminRole } = await import('../auth/organization-access.js');
+  if (!isPrimaryAdminRole(access.membership.role)) throw forbidden('Only the primary admin can relax a protection');
 
   const input = relaxSchema.parse(req.body);
   // Fresh re-authentication — a real identity ceremony, not a checkbox.
@@ -640,8 +640,8 @@ approvalsRouter.post('/organizations/:organizationId/protections/:code/retighten
   const { organizationId } = orgParams.parse(req.params);
   const { code } = z.object({ code: z.enum(['R1', 'R2', 'R5']) }).parse(req.params);
   const access = await assertOrganizationAccess(organizationId, req.auth!);
-  const { isOwnerRole } = await import('../auth/organization-access.js');
-  if (!isOwnerRole(access.membership.role)) throw forbidden('Only the primary admin can change protections');
+  const { isPrimaryAdminRole } = await import('../auth/organization-access.js');
+  if (!isPrimaryAdminRole(access.membership.role)) throw forbidden('Only the primary admin can change protections');
   const { revokeRelaxation } = await import('./protections.js');
   const { ensurePersonForUser } = await import('./wiring.js');
   const personId = await prisma.$transaction((tx) => ensurePersonForUser(tx, organizationId, req.auth!.userId));

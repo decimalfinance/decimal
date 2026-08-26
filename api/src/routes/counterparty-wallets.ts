@@ -184,7 +184,7 @@ counterpartyWalletsRouter.patch('/organizations/:organizationId/counterparties/:
   if (!current) throw new Error('Vendor not found');
   const existing = readPayableHold(current.metadataJson);
   const touchesBlocked = input.status === 'blocked' || existing?.status === 'blocked';
-  if (touchesBlocked && membership.role !== 'owner') {
+  if (touchesBlocked && membership.role !== 'primary_admin') {
     throw new Error('Blocking a vendor (or unblocking one) is the primary admin’s call.');
   }
   if (input.status !== 'payable' && !input.reason?.trim()) {

@@ -167,12 +167,12 @@ export function BillDetailPage() {
   const operatorMode = viewer.isRequester && !viewerHasDecision;
   // Approved but unpaid: an admin may unwind the approval — the recovery path
   // when a release gate refuses (pinned destination, ceiling).
-  const canSendBack = approvedOverall && billDraft.state === 'submitted' && Boolean(myAccess.data?.isOwnerOrAdmin);
+  const canSendBack = approvedOverall && billDraft.state === 'submitted' && Boolean(myAccess.data?.isPrimaryOrAdmin);
 
   // Recall is a request now, not a button. While one is open the bill is frozen:
   // nobody approves into a bill already known to be wrong.
   const recallOpen = detail.recall?.open ?? null;
-  const isAdmin = Boolean(myAccess.data?.isOwnerOrAdmin);
+  const isAdmin = Boolean(myAccess.data?.isPrimaryOrAdmin);
   const canAskForItBack = viewer.isRequester && !isDraft && !approvedOverall && !rejected && !recalled && !recallOpen;
 
   const composerMeta: Record<ComposerKind, { title: string; desc: string; placeholder: string; btn: string; btnClass: string }> = {
@@ -334,7 +334,7 @@ export function BillDetailPage() {
                 <Ico.reset w={16} />
                 <span>
                   <b>{recallOpen.requestedBy ?? 'The submitter'} asked for this bill back.</b>{' '}
-                  Approval is paused while an owner or admin decides.{' '}
+                  Approval is paused while a primary admin or admin decides.{' '}
                   {doneCount > 0
                     ? `The ${doneCount === 1 ? 'approval' : `${doneCount} approvals`} already given ${doneCount === 1 ? 'is' : 'are'} being held — granting would void ${doneCount === 1 ? 'it' : 'them'}, denying gives ${doneCount === 1 ? 'it' : 'them'} straight back.`
                     : 'Nobody has approved it yet, so nothing is at stake either way.'}
