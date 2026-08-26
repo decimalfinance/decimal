@@ -2331,7 +2331,29 @@ export async function answerBillQuestion(args: {
   });
 }
 
-export async function listAskCandidates(organizationId: string, viewerUserId: string) {
+/**
+ * Who this person could ask, and which of them could actually settle the thing
+ * being asked about.
+ *
+ * The list used to be every colleague in one undifferentiated dropdown — nine
+ * names including the viewer, with nothing to say that eight of them could not
+ * act on a bill addressed to another company.
+ *
+ * Not filtered down to the people who can settle it, though, which is the
+ * tempting fix. Asking serves two different needs: "please do the thing I
+ * cannot", which wants an admin, and "do we actually trade as Halcyon Labs?",
+ * which wants whoever KNOWS — often the clerk who onboarded the vendor rather
+ * than any admin. Filtering would leave the second question with nowhere to go
+ * and force it through someone who may not have the answer. So: rank, mark, and
+ * let the asker see what they are choosing.
+ */
+export async function listAskCandidates(
+  organizationId: string,
+  viewerUserId: string,
+  /** The flag being asked about, when the question came off one. */
+  aboutFlag?: string | null,
+  paymentOrderId?: string | null,
+) {
   const members = await prisma.organizationMembership.findMany({
     where: { organizationId, status: 'active', userId: { not: viewerUserId } },
     select: { userId: true, role: true, user: { select: { displayName: true, email: true } } },
@@ -2349,18 +2371,57 @@ export async function listAskCandidates(organizationId: string, viewerUserId: st
   const askedBy = new Map(history.map((h) => [h.askedOfUserId, h._count._all]));
   const answeredBy = new Map(answered.map((h) => [h.askedOfUserId, h._count._all]));
 
+  // What settling this particular flag takes. Read off the flag's own
+  // resolutions rather than hard-coded here, so a flag that changes who may
+  // resolve it changes this list too, instead of quietly disagreeing with it.
+  let needs: 'admin' | 'edit' | null = null;
+  if (aboutFlag && paymentOrderId) {
+    const flag = (await flagsForOrder(organizationId, paymentOrderId))
+      .find((f) => f.kind === aboutFlag);
+    const settling = (flag?.resolutions ?? []).filter((r) => r.action !== 'ask_someone');
+    if (settling.length > 0) {
+      needs = settling.some((r) => r.requires === 'anyone') ? 'edit' : 'admin';
+    }
+  }
+
+  const { getOrgAccess } = await import('../approvals/permissions.js');
+  const access = needs
+    ? new Map(await Promise.all(members.map(async (m) =>
+        [m.userId, await getOrgAccess(organizationId, m.userId)] as const)))
+    : new Map();
+
   return members
-    .map((m) => ({
-      userId: m.userId,
-      name: m.user.displayName,
-      email: m.user.email,
-      role: m.role,
-      asked: askedBy.get(m.userId) ?? 0,
-      answered: answeredBy.get(m.userId) ?? 0,
-    }))
-    // Most-answered first: the person who actually replies is the useful
-    // default, not the one who happens to sort first by name.
-    .sort((a, b) => b.answered - a.answered || b.asked - a.asked || a.name.localeCompare(b.name));
+    .map((m) => {
+      const a = access.get(m.userId);
+      return {
+        userId: m.userId,
+        name: m.user.displayName,
+        email: m.user.email,
+        role: m.role,
+        asked: askedBy.get(m.userId) ?? 0,
+        answered: answeredBy.get(m.userId) ?? 0,
+        /** The job they do here, for a list where nine names look alike. */
+        jobRole: a?.roles[0] ?? null,
+        /**
+         * Whether this person could settle the flag the question is about.
+         * null when the question is not about a flag — then nobody is being
+         * ranked on standing they were never asked for.
+         */
+        canSettle: needs === null
+          ? null
+          : needs === 'admin'
+            ? Boolean(a?.isOwnerOrAdmin)
+            : Boolean(a?.capabilities.includes('bills.edit')),
+      };
+    })
+    // People who can settle it first, then most-answered: the person who
+    // actually replies is the useful default, not the one who sorts first by
+    // name.
+    .sort((a, b) =>
+      Number(b.canSettle ?? false) - Number(a.canSettle ?? false)
+      || b.answered - a.answered
+      || b.asked - a.asked
+      || a.name.localeCompare(b.name));
 }
 
 /**

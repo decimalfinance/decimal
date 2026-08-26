@@ -245,9 +245,13 @@ function DraftScreen(props: {
       setAnswering(false);
     }
   };
+  // Keyed on the flag too: who can settle a bill addressed to another company
+  // is not who can settle its arithmetic, and a cached list from the last flag
+  // would quietly mark the wrong people.
+  const askAboutFlag = activeResolution?.action === 'ask_someone' ? activeResolution.flag : null;
   const askCandidates = useQuery({
-    queryKey: ['ask-candidates', organizationId, billDraft.paymentOrderId],
-    queryFn: () => billsApi.askCandidates(organizationId, billDraft.paymentOrderId),
+    queryKey: ['ask-candidates', organizationId, billDraft.paymentOrderId, askAboutFlag],
+    queryFn: () => billsApi.askCandidates(organizationId, billDraft.paymentOrderId, askAboutFlag),
     enabled: activeResolution?.action === 'ask_someone' || answerFor !== null,
   });
 
@@ -817,13 +821,37 @@ function DraftScreen(props: {
                           <span style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
                             {asking ? (
                               <select className="input" value={askOf} onChange={(e) => setAskOf(e.target.value)}
-                                style={{ flex: '0 0 200px', height: 32 }}>
+                                style={{ flex: '0 0 240px', height: 32 }}>
                                 <option value="">Choose a colleague…</option>
-                                {people.map((c) => (
-                                  <option key={c.userId} value={c.userId}>
-                                    {c.name}{c.answered > 0 ? ` — answered ${c.answered}` : ''}
-                                  </option>
-                                ))}
+                                {/* Split, not filtered. The people who can settle
+                                    this go first; everyone else stays reachable,
+                                    because "do we trade as Halcyon Labs?" is a
+                                    question for whoever KNOWS, who is often not
+                                    an admin. */}
+                                {people.some((c) => c.canSettle) ? (
+                                  <>
+                                    <optgroup label="Can settle this">
+                                      {people.filter((c) => c.canSettle).map((c) => (
+                                        <option key={c.userId} value={c.userId}>
+                                          {c.name}{c.answered > 0 ? ` — answered ${c.answered}` : ''}
+                                        </option>
+                                      ))}
+                                    </optgroup>
+                                    <optgroup label="Can help, but can't settle it">
+                                      {people.filter((c) => !c.canSettle).map((c) => (
+                                        <option key={c.userId} value={c.userId}>
+                                          {c.name}{c.jobRole ? ` — ${c.jobRole.replace(/_/g, ' ')}` : ''}
+                                        </option>
+                                      ))}
+                                    </optgroup>
+                                  </>
+                                ) : (
+                                  people.map((c) => (
+                                    <option key={c.userId} value={c.userId}>
+                                      {c.name}{c.answered > 0 ? ` — answered ${c.answered}` : ''}
+                                    </option>
+                                  ))
+                                )}
                               </select>
                             ) : null}
                             <input
@@ -892,18 +920,27 @@ function DraftScreen(props: {
                       // reviewer staring at a blocked bill wondering what the
                       // route forward even is.
                       const blocked = r.requires === 'admin' && !canOverrideDuplicate;
+                      // The title has to sit on a WRAPPER. Browsers suppress
+                      // pointer events on a disabled control, so a tooltip on
+                      // the button itself never appears — the one explanation
+                      // of why the button is dead was unreachable by hovering
+                      // the dead button.
+                      const why = blocked
+                        ? 'Only an owner or admin can do this — ask one to look, or ask a question on this bill.'
+                        : r.detail;
                       return (
-                        <button
-                          key={r.action}
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          style={{ flex: 'none' }}
-                          disabled={blocked}
-                          title={blocked ? 'Only an owner or admin can do this — ask one to look, or ask a question on this bill.' : r.detail}
-                          onClick={() => startResolution(flag.kind, r.action)}
-                        >
-                          {r.label}
-                        </button>
+                        <span key={r.action} title={why} style={{ display: 'inline-flex', flex: 'none' }}>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            style={{ flex: 'none' }}
+                            disabled={blocked}
+                            aria-label={blocked ? `${r.label} — ${why}` : undefined}
+                            onClick={() => startResolution(flag.kind, r.action)}
+                          >
+                            {r.label}
+                          </button>
+                        </span>
                       );
                     })}
                   </span>

@@ -1626,6 +1626,63 @@ test('a field the form defaulted is not recorded as a human correction', async (
   assert.equal(taxRow, undefined, 'a defaulted tax of 0 is not somebody correcting the document');
 });
 
+test('the ask list says who could actually settle the flag being asked about', async () => {
+  // Nine colleagues in one flat dropdown, including a viewer, with nothing to
+  // say that only two of them could act on a bill addressed to another company.
+  //
+  // Marked rather than filtered on purpose: "please do the thing I cannot" wants
+  // an admin, but "do we actually trade under that name?" wants whoever KNOWS,
+  // who is often the clerk who onboarded the vendor. Filtering would leave the
+  // second question with nowhere to go.
+  const { orgId, owner } = await makeOrg();
+  const clerk = await register('ask-list-clerk');
+  const admin = await register('ask-list-admin');
+  await prisma.organizationMembership.createMany({
+    data: [
+      { organizationId: orgId, userId: clerk.userId, role: 'member', status: 'active' },
+      { organizationId: orgId, userId: admin.userId, role: 'admin', status: 'active' },
+    ],
+  });
+
+  const bill = await uploadAndConfirm(orgId, owner.token, {
+    // The test org IS "Halcyon Labs, Inc." — bill it to somebody genuinely else.
+    vendor: 'Ironclad Security', amount: 6200, invoiceNo: 'IRN-890', billTo: 'Northwind Trading Co.',
+  });
+
+  const draft = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, owner.token);
+  const flag = draft.flags.find((f: { kind: string }) => f.kind === 'addressed_elsewhere');
+  assert.ok(flag, 'the bill is addressed elsewhere');
+
+  const listed = await get(
+    `/organizations/${orgId}/bills/${bill.billId}/ask-candidates?flag=addressed_elsewhere`,
+    owner.token,
+  );
+  const byId = new Map<string, { canSettle: boolean | null; name: string }>(
+    listed.candidates.map((c: { userId: string; canSettle: boolean | null; name: string }) => [c.userId, c]),
+  );
+
+  assert.equal(byId.get(admin.userId)?.canSettle, true, 'an admin can settle this one');
+  assert.equal(byId.get(clerk.userId)?.canSettle, false, 'a plain member cannot');
+  // But still reachable — the point is marking, not removing.
+  assert.ok(byId.has(clerk.userId), 'and is still someone you may ask');
+
+  // Whoever can settle it sorts first, so the useful choice is the visible one.
+  assert.equal(listed.candidates[0].canSettle, true);
+
+  // Standing is read off the flag's own resolutions rather than hard-coded per
+  // flag, so naming one this bill does not carry ranks nobody — better than
+  // confidently marking people against a check that is not being asked about.
+  const absent = await get(
+    `/organizations/${orgId}/bills/${bill.billId}/ask-candidates?flag=lines_do_not_sum`,
+    owner.token,
+  );
+  assert.equal(absent.candidates[0].canSettle, null, 'a flag the bill does not have ranks nobody');
+
+  // With no flag named, nobody is ranked on standing they were never asked for.
+  const plain = await get(`/organizations/${orgId}/bills/${bill.billId}/ask-candidates`, owner.token);
+  assert.equal(plain.candidates[0].canSettle, null);
+});
+
 test('a submitter cannot recall a bill that is already approved', async () => {
   // Recall is withdrawing your own request, not overruling a decision. It had
   // no guard, so a submitter could recall a fully approved bill — macro state

@@ -1470,6 +1470,22 @@ export interface BillWorkLogEntry {
   detail: string | null;
 }
 
+/**
+ * Somebody who could be asked about a bill. `canSettle` says whether they could
+ * actually resolve the flag the question is about — null when it is not about a
+ * flag, since then nobody is being judged on standing nobody asked for.
+ */
+export interface AskCandidate {
+  userId: string;
+  name: string;
+  email: string;
+  role: string;
+  asked: number;
+  answered: number;
+  jobRole: string | null;
+  canSettle: boolean | null;
+}
+
 export interface CategoryOption { value: string; label: string; num?: string | null; group: string }
 
 export interface BillDraftLine {
@@ -1680,9 +1696,10 @@ export const billsApi = {
       { method: 'POST', body: JSON.stringify(body) },
     );
   },
-  askCandidates(organizationId: string, paymentOrderId: string) {
-    return request<{ candidates: Array<{ userId: string; name: string; email: string; role: string; asked: number; answered: number }> }>(
-      `/organizations/${organizationId}/bills/${paymentOrderId}/ask-candidates`,
+  askCandidates(organizationId: string, paymentOrderId: string, aboutFlag?: string | null) {
+    return request<{ candidates: AskCandidate[] }>(
+      `/organizations/${organizationId}/bills/${paymentOrderId}/ask-candidates`
+      + (aboutFlag ? `?flag=${encodeURIComponent(aboutFlag)}` : ''),
     );
   },
   suggestAskFields(organizationId: string, paymentOrderId: string, question: string) {

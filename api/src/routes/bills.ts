@@ -214,7 +214,10 @@ billsRouter.get('/organizations/:organizationId/bills/:paymentOrderId/ask-candid
   const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
   await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
-  res.json({ candidates: await listAskCandidates(organizationId, req.auth!.userId) });
+  const aboutFlag = typeof req.query.flag === 'string' ? req.query.flag : null;
+  res.json({
+    candidates: await listAskCandidates(organizationId, req.auth!.userId, aboutFlag, paymentOrderId),
+  });
 }));
 
 // Ask a colleague about a bill. No role gate on purpose: asking is never the
