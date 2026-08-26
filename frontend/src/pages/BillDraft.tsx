@@ -494,7 +494,7 @@ function DraftScreen(props: {
   }), [fields, lines, documentTotal, taxNumber, note, vendorName, vendorEmail]);
 
   // --- save: keep it, send nothing ------------------------------------------
-  const saveForLater = useCallback(async () => {
+  const saveChanges = useCallback(async () => {
     if (!canEditBills || readOnly || saving) return;
     setSaving(true);
     try {
@@ -1157,13 +1157,15 @@ function DraftScreen(props: {
               : tier1Gap ?? 'Recorded with exactly what you see on this screen.'}
           </span>
           <span className="commit-spacer" />
-          {/* This button has said "Save for later" since the screen was built
-              and only ever called onBack — it navigated away and kept nothing,
-              so a clerk part-way through a bill lost every keystroke. It saves
-              now. */}
+          {/* This button was called "Save for later", which read as a way to
+              defer the bill rather than a way to keep what you had typed — and
+              for most of the screen's life it kept nothing at all, since it
+              only called onBack. It saves now, and it says so. It still returns
+              to the list afterwards: the reason it exists is to put a bill down
+              and pick up a different one. */}
           <button type="button" className="btn btn-secondary" disabled={saving || !canEditBills}
-            onClick={() => void saveForLater()}>
-            {saving ? 'Saving…' : 'Save for later'}
+            onClick={() => void saveChanges()}>
+            {saving ? 'Saving…' : 'Save changes'}
           </button>
           <button type="button" className="btn btn-primary" disabled={!canConfirm} onClick={() => setConfirmOpen(true)}>
             {submitting ? 'Sending…' : 'Confirm & send for approval'}
