@@ -1535,7 +1535,7 @@ export interface BillDraft {
     short: string;
     /** What can be done about it — rendered on the flag, never in a footer. */
     resolutions: Array<{
-      action: 'this_is_us' | 'not_ours' | 'ask_someone' | 'clear_duplicate' | 'fix_fields' | 'raise_ceiling' | 'release_vendor';
+      action: 'this_is_us' | 'not_ours' | 'ask_someone' | 'clear_duplicate' | 'fix_fields' | 'raise_ceiling' | 'release_vendor' | 'pay_the_lines';
       label: string;
       requires: 'anyone' | 'admin';
       detail: string;
@@ -1692,6 +1692,15 @@ export const billsApi = {
     return request<unknown>(`/organizations/${organizationId}/bills/${paymentOrderId}/not-a-bill`, {
       method: 'POST',
       body: JSON.stringify(body),
+    });
+  },
+  // Pay what the bill itemises rather than the figure printed on it. Anyone who
+  // can edit a bill may decide it; the reason travels to the approvers, which
+  // is what separates a decision from a mistyped total.
+  payItemised(organizationId: string, paymentOrderId: string, reason: string) {
+    return request<BillDraft>(`/organizations/${organizationId}/bills/${paymentOrderId}/pay-itemised`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
     });
   },
   // Admin-only: clear the duplicate-bill flag with a logged reason.

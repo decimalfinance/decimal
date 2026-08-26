@@ -436,6 +436,31 @@ async function approvalRouteFor(organizationId: string, paymentOrderId: string) 
   }));
 }
 
+/**
+ * A recorded decision to pay what a bill itemises rather than the figure
+ * printed on it. Stored beside the duplicate override and read the same way —
+ * a judgement somebody made, kept with the bill so it travels to the approvers
+ * instead of arriving as an unexplained number.
+ */
+function readShortPay(metadata: unknown): {
+  byName: string;
+  reason: string;
+  itemisedTotal: number;
+  documentTotal: number | null;
+} | null {
+  if (!isRecord(metadata)) return null;
+  const raw = metadata.shortPay;
+  if (!isRecord(raw)) return null;
+  const itemised = num(raw.itemisedTotal);
+  if (typeof raw.reason !== 'string' || itemised === null) return null;
+  return {
+    byName: typeof raw.byName === 'string' ? raw.byName : 'somebody',
+    reason: raw.reason,
+    itemisedTotal: itemised,
+    documentTotal: num(raw.documentTotal),
+  };
+}
+
 // Sum a set of line rows, refusing to guess. Every row that says anything at
 // all must carry a readable amount; one that doesn't makes the sum unknown
 // rather than smaller, because a total quietly missing a line is worse than no
@@ -670,6 +695,7 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
         },
       ),
       duplicateOverride: readDuplicateOverride(order.metadataJson),
+      shortPay: readShortPay(order.metadataJson),
       amounts: documentAmounts(extracted, isRecord(metadataRecord.verification) ? metadataRecord.verification : null),
       planAlerts: alertsByOrder.get(order.paymentOrderId) ?? [],
       documentType: documentTypeSignals(extracted, order.invoiceNumber),
@@ -1213,6 +1239,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     ceilingMinor,
     duplicates,
     duplicateOverride: readDuplicateOverride(metadata),
+    shortPay: readShortPay(metadata),
     amounts: documentAmounts(extracted, verification),
     planAlerts: (await planAlertsByOrder(organizationId, [order.paymentOrderId])).get(order.paymentOrderId) ?? [],
     documentType: documentTypeSignals(extracted, order.invoiceNumber),
@@ -2136,6 +2163,113 @@ export async function overrideDuplicateFlag(args: {
     }),
   ]);
   return getBillDraft(args.organizationId, args.paymentOrderId);
+}
+
+/**
+ * Record the decision to pay what the bill itemises rather than what it prints.
+ *
+ * The other half of an invoice that disagrees with itself. "Correct the
+ * figures" covers the case where the reading was wrong; this covers the case
+ * where the document is. Short-paying to the itemised total and telling the
+ * vendor is ordinary accounts-payable practice, and until now the only way to
+ * express it was to retype the total — which reaches an approver looking
+ * exactly like a fat finger.
+ *
+ * The reason is the product here. Changing the number is the easy part.
+ */
+export async function payItemisedTotal(args: {
+  organizationId: string;
+  paymentOrderId: string;
+  actorUserId: string;
+  actorName: string;
+  reason: string;
+}) {
+  const order = await prisma.paymentOrder.findFirst({
+    where: { organizationId: args.organizationId, paymentOrderId: args.paymentOrderId },
+    select: {
+      paymentOrderId: true, state: true, metadataJson: true,
+      transferRequests: { select: { transferRequestId: true }, take: 1 },
+    },
+  });
+  if (!order) throw new Error('Bill not found');
+  if (order.state !== 'draft') {
+    throw new Error(`This bill is ${order.state} — its figures are settled.`);
+  }
+
+  const metadata = isRecord(order.metadataJson) ? order.metadataJson : {};
+  const extracted = extractedOf(order.metadataJson);
+  const verification = isRecord(metadata.verification) ? metadata.verification : null;
+  const amounts = documentAmounts(extracted, verification);
+
+  if (amounts.lineItemsTotal === null) {
+    throw new Error('The line items on this bill cannot be added up, so there is no itemised total to pay. Fill in the missing amounts first.');
+  }
+  const itemisedTotal = amounts.lineItemsTotal + (amounts.tax ?? 0);
+  if (itemisedTotal <= 0) {
+    throw new Error('The itemised total comes to nothing, which is not a bill to pay.');
+  }
+  if (amounts.total !== null && Math.abs(itemisedTotal - amounts.total) < 0.005) {
+    throw new Error('The figures on this bill already agree — there is nothing to decide.');
+  }
+
+  const previousTotal = amounts.total;
+  const fields = verification && isRecord(verification.fields) ? { ...verification.fields } : {};
+  fields.total = itemisedTotal;
+
+  const shortPay = {
+    byUserId: args.actorUserId,
+    byName: args.actorName,
+    reason: args.reason,
+    itemisedTotal,
+    documentTotal: previousTotal,
+    at: new Date().toISOString(),
+  };
+
+  await prisma.$transaction([
+    prisma.paymentOrder.update({
+      where: { paymentOrderId: order.paymentOrderId },
+      data: {
+        // Nothing has been sent yet, but a bill already carrying a transfer
+        // must not have its amount moved underneath it.
+        amountRaw: order.transferRequests.length === 0
+          ? BigInt(Math.round(itemisedTotal * 1_000_000))
+          : undefined,
+        metadataJson: {
+          ...metadata,
+          verification: { ...(verification ?? {}), fields },
+          shortPay,
+        } as Prisma.InputJsonValue,
+      },
+    }),
+    prisma.paymentOrderEvent.create({
+      data: {
+        organizationId: args.organizationId,
+        paymentOrderId: order.paymentOrderId,
+        eventType: 'policy_overridden',
+        actorType: 'user',
+        actorId: args.actorUserId,
+        beforeState: order.state,
+        afterState: order.state,
+        payloadJson: {
+          rule: 'pay_the_itemised_total',
+          reason: args.reason,
+          from: previousTotal,
+          to: itemisedTotal,
+        },
+      },
+    }),
+  ]);
+
+  await recordFieldChanges({
+    organizationId: args.organizationId,
+    paymentOrderId: order.paymentOrderId,
+    changedByUserId: args.actorUserId,
+    phase: 'draft',
+    reason: 'pay_the_itemised_total',
+    changes: [{ field: 'total', from: previousTotal, to: itemisedTotal }],
+  });
+
+  return getBillDraft(args.organizationId, args.paymentOrderId, args.actorUserId);
 }
 
 // Send an already-APPROVED (but unpaid) bill back to draft — the recovery

@@ -545,6 +545,105 @@ test('correcting the figures clears the arithmetic flag it was raised on', async
   assert.equal(confirmed.detail.state, 'submitted');
 });
 
+test('deciding to pay the itemised total records the decision, not just the number', async () => {
+  // Retyping the total to $4,000 and retyping it because the invoice does not
+  // add up look identical to an approver. This is the difference: the number
+  // moves AND the reason travels with it.
+  const setup = await createPaymentOrderSetup();
+  const vendorWallet = Keypair.generate().publicKey.toBase58();
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [
+        {
+          counterparty: 'Northwind Supplies',
+          amount: 4820,
+          currency: 'USD',
+          reference: 'NW-3321',
+          due_date: '2026-09-01',
+          wallet_address: vendorWallet,
+          notes: 'Warehouse supplies',
+          source_invoice: {
+            vendorName: 'Northwind Supplies',
+            vendorAddress: null,
+            vendorEmail: null,
+            amount: 4820,
+            currency: 'USD',
+            invoiceNumber: 'NW-3321',
+            invoiceDate: '2026-08-02',
+            dueDate: '2026-09-01',
+            terms: 'Net 30',
+            poNumber: null,
+            earlyPayDiscount: null,
+            subtotal: 4820,
+            taxAmount: 0,
+            billToName: null,
+            remitTo: { street: '1 Dock Road', city: 'Tacoma', state: 'WA', zip: '98402' },
+            paymentDetails: { method: 'ACH', bankName: 'Harbor Bank', accountLast4: '1188', routingNumber: null },
+            walletAddress: vendorWallet,
+            lineItems: [
+              { description: 'Warehouse shelving units', quantity: 4, unitPrice: 650, total: 2600 },
+              { description: 'Forklift annual service', quantity: 1, unitPrice: 900, total: 900 },
+              { description: 'Safety equipment restock', quantity: 1, unitPrice: 500, total: 500 },
+            ],
+            categoryHint: 'Job supplies',
+            confidence: { vendor: 0.97, amount: 0.9, overall: 0.93 },
+            fieldConfidence: { invoiceNumber: 0.98, invoiceDate: 0.9, dueDate: 0.9, total: 0.9 },
+          },
+        },
+      ],
+      modelLatencyMs: 5,
+      pageCount: 1,
+    }),
+  });
+
+  const orgId = setup.organization.organizationId;
+  const upload = await post(
+    `/organizations/${orgId}/invoices/upload`,
+    {
+      filename: 'NW-3321.pdf',
+      mimeType: 'application/pdf',
+      dataBase64: Buffer.from('%PDF-1.4 northwind two').toString('base64'),
+      sourceTreasuryWalletId: setup.sourceTreasuryWallet.treasuryWalletId,
+      autoAdvance: false,
+    },
+    setup.sessionToken,
+  );
+  const billId = upload.paymentOrders[0].paymentOrder.paymentOrderId;
+
+  const before = await get(`/organizations/${orgId}/bills/${billId}/draft`, setup.sessionToken);
+  const blocked = before.flags.find((f: { blocking: boolean }) => f.blocking);
+  assert.ok(blocked, 'the bill is blocked to begin with');
+  assert.ok(
+    blocked.resolutions.some((r: { action: string }) => r.action === 'pay_the_lines'),
+    'and the way out is offered on the flag itself',
+  );
+
+  const after = await post(
+    `/organizations/${orgId}/bills/${billId}/pay-itemised`,
+    { reason: 'Invoice does not add up; asked the vendor for a corrected copy.' },
+    setup.sessionToken,
+  );
+
+  assert.equal(after.flags.some((f: { blocking: boolean }) => f.blocking), false, 'nothing blocks it now');
+  const decision = after.flags.find((f: { kind: string }) => f.kind === 'short_paid');
+  assert.ok(decision, 'the decision is on the bill');
+  assert.match(decision.message, /corrected copy/);
+  assert.match(decision.message, /\$4,820\.00/, 'and says what the document printed');
+
+  const board = await get(`/organizations/${orgId}/bills/workbench`, setup.sessionToken);
+  const row = board.bills.find((b: { paymentOrderId: string }) => b.paymentOrderId === billId);
+  assert.equal(row.amountUsd, 4000, 'the queue shows the amount that will actually be paid');
+
+  // Deciding twice is not a thing: there is no discrepancy left to decide.
+  await assert.rejects(
+    post(
+      `/organizations/${orgId}/bills/${billId}/pay-itemised`,
+      { reason: 'Trying it a second time.' },
+      setup.sessionToken,
+    ),
+  );
+});
+
 test('a bill routed to its own submitter deadlocks: the task exists, the rules forbid it', async () => {
   // The engine's own tests drive executeCommand directly. Nothing exercised the
   // path a person actually takes: session auth, the user→person lookup, the

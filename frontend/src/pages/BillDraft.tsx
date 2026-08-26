@@ -139,7 +139,7 @@ function DraftScreen(props: {
   // Flag resolutions. One mechanism for every flag rather than a bespoke path
   // per kind — the backend says which are available and who may take them, so
   // this only has to run the one the person chose.
-  type ResolutionAction = 'this_is_us' | 'not_ours' | 'ask_someone' | 'clear_duplicate' | 'fix_fields' | 'raise_ceiling' | 'release_vendor';
+  type ResolutionAction = 'this_is_us' | 'not_ours' | 'ask_someone' | 'clear_duplicate' | 'fix_fields' | 'raise_ceiling' | 'release_vendor' | 'pay_the_lines';
   const [activeResolution, setActiveResolution] = useState<{ flag: string; action: ResolutionAction } | null>(null);
   const [resolutionValue, setResolutionValue] = useState('');
   const [resolving, setResolving] = useState(false);
@@ -269,6 +269,16 @@ function DraftScreen(props: {
           label: 'Why is it not yours?',
           cta: 'Close the bill',
         }
+      : action === 'pay_the_lines'
+      ? {
+          // Both numbers, spelled out. The decision is which of two figures
+          // leaves the building, and it should not have to be reconstructed
+          // from the sentence above.
+          title: `Pay ${usd(computedTotal)} instead of the ${usd(documentTotal)} printed?`,
+          help: 'For an invoice that does not add up: you pay what it itemises and take it up with the vendor. Your reason goes to the approvers with the bill, so the smaller figure reads as a decision rather than a slip.',
+          label: 'Why pay the itemised total?',
+          cta: `Pay ${usd(computedTotal)}`,
+        }
       : {
           title: 'Clear the duplicate flag?',
           help: 'You are asserting this is a genuinely new bill, not one already paid. Your reason becomes the audit record for that decision.',
@@ -323,6 +333,13 @@ function DraftScreen(props: {
           suggestionId,
         });
         toast.success('Asked. The bill waits on their answer rather than moving on.', 'Question sent');
+      } else if (action === 'pay_the_lines') {
+        // Save first. The server adds up the lines it has stored, so deciding
+        // to pay them while the screen holds unsaved edits would record a
+        // number nobody is looking at.
+        await billsApi.saveDraft(organizationId, billDraft.paymentOrderId, currentBody());
+        await billsApi.payItemised(organizationId, billDraft.paymentOrderId, resolutionValue.trim());
+        toast.success('Recorded — the approvers will see the amount and why it changed.', 'Paying the itemised total');
       } else if (action === 'not_ours') {
         await billsApi.notABill(organizationId, billDraft.paymentOrderId, { reason: 'not_ours', note: resolutionValue.trim() });
         toast.success('Closed as addressed to another company.', 'Not ours');

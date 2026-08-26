@@ -150,6 +150,33 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/duplicate
   res.json(billDraft);
 }));
 
+// Pay what the bill itemises rather than what it prints, with a reason.
+//
+// Not admin-gated, unlike clearing a duplicate: this does not bypass a control,
+// it records a judgement about a defective document, and the bill still has its
+// entire approval chain ahead of it with the reason attached. bills.edit is
+// enforced by the capability middleware, same as saving a draft.
+const itemisedPaySchema = z.object({ reason: z.string().trim().min(3).max(300) });
+
+billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/pay-itemised', asyncRoute(async (req, res) => {
+  const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
+  const input = itemisedPaySchema.parse(req.body);
+  const user = await prisma.user.findUniqueOrThrow({
+    where: { userId: req.auth!.userId },
+    select: { displayName: true },
+  });
+  const { payItemisedTotal } = await import('../payments/bills.js');
+  res.json(await payItemisedTotal({
+    organizationId,
+    paymentOrderId,
+    actorUserId: req.auth!.userId,
+    actorName: user.displayName,
+    reason: input.reason,
+  }));
+}));
+
 // "This is us" — record a name the organization also trades under, resolving
 // the addressed_elsewhere flag for it permanently rather than dismissing it
 // once. Authority lives in addOrganizationTradingName; the route reports its

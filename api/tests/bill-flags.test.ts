@@ -59,6 +59,7 @@ const baseFacts = {
   ceilingMinor: null,
   duplicates: [],
   duplicateOverride: null,
+  shortPay: null,
   amounts: { lineItemsTotal: null, subtotal: null, tax: null, total: null },
   planAlerts: [] as string[],
   documentType: { invoiceNumber: null as string | null, lineInvoiceRefs: [] as string[] },
@@ -174,6 +175,49 @@ test('the screen and the server ask the arithmetic question the same way', () =>
   });
   assert.equal(screenSaysOk, true);
   assert.equal(flags.some((f) => f.kind === 'lines_do_not_sum'), false);
+});
+
+test('an arithmetic flag offers paying the itemised total, and anyone may decide it', () => {
+  // The dead end this closes: "Correct the figures" assumes the reading was
+  // wrong. When the document is the thing that is wrong, the ordinary answer is
+  // to pay what it itemises — and that had no way to be said.
+  for (const amounts of [
+    { lineItemsTotal: 4_000, subtotal: null, tax: null, total: 4_820 },
+    { lineItemsTotal: null, subtotal: 4_000, tax: 320, total: 4_820 },
+  ]) {
+    const flags = evaluateBillFlags({ ...baseFacts, amounts });
+    const flag = flags.find((f) => f.blocking);
+    assert.ok(flag, 'the bill is blocked');
+    const pay = flag.resolutions.find((r) => r.action === 'pay_the_lines');
+    assert.ok(pay, `${flag.kind} must offer paying the itemised total`);
+    // Not admin-gated: the approval chain is the control, not this button.
+    assert.equal(pay.requires, 'anyone');
+  }
+});
+
+test('the recorded decision to short-pay replaces the flag that prompted it', () => {
+  // Once the total matches the lines the discrepancy is gone, so the flag would
+  // simply vanish — and an approver would see a bill for $4,000 against a
+  // document printed at $4,820 with nothing saying why. The judgement has to
+  // outlive the problem.
+  const flags = evaluateBillFlags({
+    ...baseFacts,
+    amounts: { lineItemsTotal: 4_000, subtotal: null, tax: 0, total: 4_000 },
+    shortPay: {
+      byName: 'Priya Raman',
+      reason: 'Invoice does not add up; vendor asked for a corrected copy.',
+      itemisedTotal: 4_000,
+      documentTotal: 4_820,
+    },
+  });
+  const flag = flags.find((f) => f.kind === 'short_paid');
+  assert.ok(flag, 'the decision is shown');
+  assert.equal(flag.blocking, false);
+  assert.equal(flag.severity, 'info');
+  assert.match(flag.message, /Priya Raman/);
+  assert.match(flag.message, /\$4,820\.00/);
+  assert.match(flag.message, /corrected copy/);
+  assert.equal(summarizeBillFlags(flags).blocking, false);
 });
 
 test('sub-cent rounding is not treated as disagreement', () => {

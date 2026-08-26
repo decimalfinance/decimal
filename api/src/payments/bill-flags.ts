@@ -35,6 +35,7 @@ export const BILL_FLAG_KINDS = [
   'approval_weakened',
   'lines_do_not_sum',
   'total_does_not_reconcile',
+  'short_paid',
   'new_vendor',
 ] as const;
 
@@ -43,7 +44,7 @@ export type BillFlagKind = (typeof BILL_FLAG_KINDS)[number];
 /** What a person can do about a flag, offered on the flag itself. */
 export type FlagResolution = {
   /** Stable identifier the UI posts back. */
-  action: 'this_is_us' | 'not_ours' | 'ask_someone' | 'clear_duplicate' | 'fix_fields' | 'raise_ceiling' | 'release_vendor';
+  action: 'this_is_us' | 'not_ours' | 'ask_someone' | 'clear_duplicate' | 'fix_fields' | 'raise_ceiling' | 'release_vendor' | 'pay_the_lines';
   label: string;
   /** Who may take it. The UI greys what the viewer cannot do and says why. */
   requires: 'anyone' | 'admin';
@@ -76,6 +77,24 @@ const ASK: FlagResolution = {
   detail: 'Put a question to a colleague. The bill waits for their answer instead of moving.',
 };
 
+// The other honest answer to an invoice that disagrees with itself.
+//
+// "Correct the figures" assumes the reading was wrong. Often it wasn't: the
+// document genuinely does not add up, and the ordinary AP move is to pay what
+// it itemises and tell the vendor. That decision had no way to be expressed —
+// the only route to it was quietly retyping the total, which reaches an
+// approver looking exactly like a typo. Requiring a reason is the whole point:
+// it turns a changed number into a decision somebody made and signed.
+//
+// Not admin-gated. The bill still has its whole approval chain ahead of it, and
+// the reason travels with it; the chain is the control, not this button.
+const PAY_THE_LINES: FlagResolution = {
+  action: 'pay_the_lines',
+  label: 'Pay the itemised total',
+  requires: 'anyone',
+  detail: 'Pay what the lines add up to instead of the printed total, with a reason the approvers will see.',
+};
+
 /**
  * Everything the flag rules need. Assembled by the caller so the rules
  * themselves never touch the database.
@@ -98,6 +117,16 @@ export type BillFlagFacts = {
   ceilingMinor: bigint | null;
   duplicates: DuplicateMatch[];
   duplicateOverride: DuplicateOverride | null;
+  /**
+   * A recorded decision to pay what the bill itemises rather than the figure
+   * printed on it. Present only once somebody has made it.
+   */
+  shortPay: {
+    byName: string;
+    reason: string;
+    itemisedTotal: number;
+    documentTotal: number | null;
+  } | null;
   /**
    * The figures as read from the document, in dollars. Any may be absent —
    * plenty of real invoices carry no subtotal or tax line, and a missing
@@ -392,7 +421,7 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
       severity: 'danger',
       blocking: true,
       short: 'Lines do not add up',
-      resolutions: [{ action: 'fix_fields', label: 'Correct the figures', requires: 'anyone', detail: 'Fix the lines or the total so they agree with the document.' }, ASK],
+      resolutions: [{ action: 'fix_fields', label: 'Correct the figures', requires: 'anyone', detail: 'Fix the lines or the total so they agree with the document.' }, PAY_THE_LINES, ASK],
       message: `The line items add up to ${money(lineItemsTotal)}, but the document says ${money(against)}. Something was read wrong, or the document disagrees with itself — check it against the original before paying.`,
     });
   }
@@ -403,8 +432,26 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
       severity: 'danger',
       blocking: true,
       short: 'Total does not reconcile',
-      resolutions: [{ action: 'fix_fields', label: 'Correct the figures', requires: 'anyone', detail: 'Fix the subtotal, tax or total so they agree with the document.' }, ASK],
+      resolutions: [{ action: 'fix_fields', label: 'Correct the figures', requires: 'anyone', detail: 'Fix the subtotal, tax or total so they agree with the document.' }, PAY_THE_LINES, ASK],
       message: `${money(subtotal)} plus ${money(tax ?? 0)} tax comes to ${money(subtotal + (tax ?? 0))}, not the ${money(total)} this bill asks for. Check the figures against the document before paying.`,
+    });
+  }
+
+  // The decision, once made, is louder than the discrepancy was. An approver
+  // looking at a bill for $4,000 against a document printed at $4,820 needs to
+  // see that somebody chose that and why — otherwise the safest reading is
+  // that a figure got fat-fingered. Same shape as a cleared duplicate: the
+  // record of the judgement replaces the flag that prompted it.
+  if (facts.shortPay) {
+    flags.push({
+      kind: 'short_paid',
+      severity: 'info',
+      blocking: false,
+      short: 'Paying the itemised total',
+      resolutions: [],
+      message: facts.shortPay.documentTotal !== null
+        ? `Paying the ${money(facts.shortPay.itemisedTotal)} this bill itemises rather than the ${money(facts.shortPay.documentTotal)} printed on it — decided by ${facts.shortPay.byName}: “${facts.shortPay.reason}”.`
+        : `Paying the ${money(facts.shortPay.itemisedTotal)} this bill itemises — decided by ${facts.shortPay.byName}: “${facts.shortPay.reason}”.`,
     });
   }
 
