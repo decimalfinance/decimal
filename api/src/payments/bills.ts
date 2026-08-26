@@ -1680,8 +1680,19 @@ export async function submitBillForApproval(input: SubmitBillInput) {
   // Org ceiling, same re-check (and against the CONFIRMED total, below).
   const confirmCeiling = await getBillCeilingMinor(prisma, input.organizationId);
 
-  const billDraft = await getBillDraft(input.organizationId, input.paymentOrderId);
-  const blocking = (billDraft?.flags ?? []).filter((f) => f.blocking);
+  // Judge what is being submitted, not what was last written down.
+  //
+  // This read the STORED bill, so correcting the figures on screen and pressing
+  // Confirm without saving first was refused — by a flag computed from numbers
+  // that were no longer on the screen, quoting those numbers back. The only way
+  // through was to save and then confirm, which nothing told anyone.
+  //
+  // The submitted body IS the bill at this moment: it is what the rest of this
+  // function is about to commit. Gating on anything else means gating on a
+  // different bill from the one being approved.
+  const blocking = (await flagsForOrder(input.organizationId, input.paymentOrderId, {
+    verification: { fields: input.fields, lines: input.lines },
+  })).filter((f) => f.blocking);
   if (blocking.length > 0) {
     throw new Error(`Resolve the flagged issue first: ${blocking[0]!.message}`);
   }

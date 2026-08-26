@@ -569,6 +569,100 @@ test('correcting the figures clears the arithmetic flag it was raised on', async
   assert.equal(confirmed.detail.state, 'submitted');
 });
 
+test('confirm judges the figures being submitted, not the ones last saved', async () => {
+  // Correct the figures on screen and press Confirm without saving first. The
+  // gate read the STORED bill to decide whether anything was blocking, so the
+  // stale flag refused a submission that was already correct — and the message
+  // quoted numbers that were no longer on the screen the person was looking at.
+  const setup = await createPaymentOrderSetup();
+  const vendorWallet = Keypair.generate().publicKey.toBase58();
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [
+        {
+          counterparty: 'Northwind Supplies',
+          amount: 4820,
+          currency: 'USD',
+          reference: 'NW-3322',
+          due_date: '2026-09-01',
+          wallet_address: vendorWallet,
+          notes: 'Warehouse supplies',
+          source_invoice: {
+            vendorName: 'Northwind Supplies',
+            vendorAddress: null,
+            vendorEmail: null,
+            amount: 4820,
+            currency: 'USD',
+            invoiceNumber: 'NW-3322',
+            invoiceDate: '2026-08-02',
+            dueDate: '2026-09-01',
+            terms: 'Net 30',
+            poNumber: null,
+            earlyPayDiscount: null,
+            subtotal: 4820,
+            taxAmount: 0,
+            billToName: null,
+            remitTo: { street: '1 Dock Road', city: 'Tacoma', state: 'WA', zip: '98402' },
+            paymentDetails: { method: 'ACH', bankName: 'Harbor Bank', accountLast4: '1188', routingNumber: null },
+            walletAddress: vendorWallet,
+            lineItems: [
+              { description: 'Warehouse shelving units', quantity: 4, unitPrice: 650, total: 2600 },
+              { description: 'Forklift annual service', quantity: 1, unitPrice: 900, total: 900 },
+              { description: 'Safety equipment restock', quantity: 1, unitPrice: 500, total: 500 },
+            ],
+            categoryHint: 'Job supplies',
+            confidence: { vendor: 0.97, amount: 0.9, overall: 0.93 },
+            fieldConfidence: { invoiceNumber: 0.98, invoiceDate: 0.9, dueDate: 0.9, total: 0.9 },
+          },
+        },
+      ],
+      modelLatencyMs: 5,
+      pageCount: 1,
+    }),
+  });
+
+  const orgId = setup.organization.organizationId;
+  const upload = await post(
+    `/organizations/${orgId}/invoices/upload`,
+    {
+      filename: 'NW-3322.pdf',
+      mimeType: 'application/pdf',
+      dataBase64: Buffer.from('%PDF-1.4 northwind three').toString('base64'),
+      sourceTreasuryWalletId: setup.sourceTreasuryWallet.treasuryWalletId,
+      autoAdvance: false,
+    },
+    setup.sessionToken,
+  );
+  const billId = upload.paymentOrders[0].paymentOrder.paymentOrderId;
+
+  // Straight to confirm. No save in between — the figures exist only in the
+  // request body, which is exactly how the screen sends them.
+  const confirmed = await post(
+    `/organizations/${orgId}/bills/${billId}/confirm`,
+    {
+      fields: {
+        invoiceNumber: 'NW-3322',
+        invoiceDate: '2026-08-02',
+        dueDate: '2026-09-01',
+        terms: 'Net 30',
+        currency: 'USD',
+        total: 4820,
+        taxAmount: 820,
+        remitTo: { street: '1 Dock Road', city: 'Tacoma', state: 'WA', zip: '98402' },
+      },
+      lines: [
+        { description: 'Warehouse shelving units', quantity: 4, unitPrice: 650, amount: 2600, category: 'Job supplies' },
+        { description: 'Forklift annual service', quantity: 1, unitPrice: 900, amount: 900, category: 'Repairs & maintenance' },
+        { description: 'Safety equipment restock', quantity: 1, unitPrice: 500, amount: 500, category: 'Job supplies' },
+      ],
+      confirmedFieldKeys: [],
+      noteForApprovers: null,
+    },
+    setup.sessionToken,
+  );
+  assert.equal(confirmed.detail.state, 'submitted');
+});
+
 test('deciding to pay the itemised total records the decision, not just the number', async () => {
   // Retyping the total to $4,000 and retyping it because the invoice does not
   // add up look identical to an approver. This is the difference: the number
