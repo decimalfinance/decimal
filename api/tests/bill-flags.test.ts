@@ -149,6 +149,33 @@ test('a bill whose figures reconcile raises nothing', () => {
   assert.deepEqual(flags, []);
 });
 
+test('tax on a bill with no printed subtotal is not a mismatch', () => {
+  // The commonest invoice in the world: three lines, a tax line, a total, and
+  // no subtotal row. Comparing the lines against a tax-inclusive total made
+  // every one of them read "lines do not add up" and blocked it — a false
+  // alarm on ordinary paperwork, which is how a gate gets ignored.
+  const flags = evaluateBillFlags({
+    ...baseFacts,
+    amounts: { lineItemsTotal: 4_000, subtotal: null, tax: 320, total: 4_320 },
+  });
+  assert.deepEqual(flags, []);
+});
+
+test('the screen and the server ask the arithmetic question the same way', () => {
+  // The draft screen has always checked `lines + tax` against the total. When
+  // the server compared lines against the total with tax still in it, a person
+  // could watch the on-screen warning clear and still be refused at Confirm
+  // with no visible reason. Same numbers, same verdict, from both sides.
+  const lines = 4_000, tax = 820, total = 4_820;
+  const screenSaysOk = Math.abs(lines + tax - total) < 0.005;
+  const flags = evaluateBillFlags({
+    ...baseFacts,
+    amounts: { lineItemsTotal: lines, subtotal: null, tax, total },
+  });
+  assert.equal(screenSaysOk, true);
+  assert.equal(flags.some((f) => f.kind === 'lines_do_not_sum'), false);
+});
+
 test('sub-cent rounding is not treated as disagreement', () => {
   // Invoices print to two decimals; a third-decimal remainder is arithmetic,
   // not a discrepancy, and flagging it would train people to ignore the flag.

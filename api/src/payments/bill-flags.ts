@@ -378,7 +378,13 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
   // A total we cannot reconcile against the document's own parts is a total we
   // should not pay on a rail with no recourse, so these block.
   const { lineItemsTotal, subtotal, tax, total } = facts.amounts;
-  const against = subtotal ?? total;
+  // What the lines are meant to add up to. The printed subtotal when there is
+  // one; otherwise the total with tax taken back off — because tax is not a
+  // line item, and comparing lines against a tax-inclusive total marks every
+  // ordinary taxed invoice that omits a subtotal line as broken. The screen
+  // has always checked `lines + tax` against the total; this is the same
+  // question asked from the other side, so the two can no longer disagree.
+  const against = subtotal ?? (total !== null ? total - (tax ?? 0) : null);
   if (lineItemsTotal !== null && against !== null
       && Math.abs(lineItemsTotal - against) > MONEY_EPSILON) {
     flags.push({
