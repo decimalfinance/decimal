@@ -1683,6 +1683,48 @@ test('the ask list says who could actually settle the flag being asked about', a
   assert.equal(plain.candidates[0].canSettle, null);
 });
 
+test('a viewer cannot be asked, because asking parks the bill', async () => {
+  // A viewer is an auditor's seat: read everything, change nothing. Asking is
+  // not a message — it moves the bill to request_info and it stops there until
+  // an answer comes. Listing a viewer therefore handed somebody with no job on
+  // the bill the ability to hold a payable still, and they could answer, since
+  // the answer route asks only for bills.view.
+  const { orgId, owner } = await makeOrg();
+  const watcher = await register('audit-watcher');
+  await prisma.organizationMembership.create({
+    data: { organizationId: orgId, userId: watcher.userId, role: 'member', status: 'active' },
+  });
+  const person = await prisma.$queryRaw<{ id: string }[]>`
+    INSERT INTO approval.people (organization_id, user_id, name, email)
+    VALUES (${orgId}::uuid, ${watcher.userId}::uuid, 'Audit Watcher', 'audit@dev.decimal.test')
+    RETURNING id`;
+  await prisma.$executeRaw`
+    INSERT INTO approval.person_roles (organization_id, person_id, role)
+    VALUES (${orgId}::uuid, ${person[0]!.id}::uuid, 'viewer')`;
+
+  const bill = await uploadAndConfirm(orgId, owner.token, {
+    vendor: 'Ironclad Security', amount: 6200, invoiceNo: 'IRN-891', billTo: 'Northwind Trading Co.',
+  });
+
+  const listed = await get(`/organizations/${orgId}/bills/${bill.billId}/ask-candidates`, owner.token);
+  assert.equal(
+    listed.candidates.some((c: { userId: string }) => c.userId === watcher.userId),
+    false,
+    'a viewer is not offered',
+  );
+
+  // And the server refuses it directly — a parked bill is too big a thing to
+  // hand out on the client's word about who it listed.
+  await assert.rejects(
+    post(
+      `/organizations/${orgId}/bills/${bill.billId}/ask`,
+      { askedOfUserId: watcher.userId, question: 'Is this one ours?' },
+      owner.token,
+    ),
+    /only view bills/,
+  );
+});
+
 test('a submitter cannot recall a bill that is already approved', async () => {
   // Recall is withdrawing your own request, not overruling a decision. It had
   // no guard, so a submitter could recall a fully approved bill — macro state

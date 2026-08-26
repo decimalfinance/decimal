@@ -54,6 +54,37 @@ export const ROLE_BUNDLES: Record<RoleKey, Capability[]> = {
   viewer: [...ALL_VIEW],
 };
 
+/**
+ * Whether somebody can be put a question about a bill.
+ *
+ * Asking is not a message — it PARKS the bill. The engine moves it to
+ * request_info and it stops there until the person answers. So the question is
+ * not "could they be useful", it is "should this person be able to hold a
+ * payable still", and for a seat defined as changing nothing the answer is no.
+ *
+ * Which is this file's own rule two comments up: the Viewer is an auditor's
+ * seat, read everything, change nothing — and creating a record is a change.
+ * Answering creates one. If an auditor happens to know something, they can say
+ * so; that does not justify making the pipeline wait on them.
+ *
+ * Anyone who does a job on a bill — brings one in, prepares it, approves it,
+ * pays it — can be asked. Owners and admins always.
+ */
+export function canBeAskedAboutBills(access: {
+  isOwnerOrAdmin: boolean;
+  roles: RoleKey[];
+} | null): boolean {
+  if (!access) return false;
+  if (access.isOwnerOrAdmin) return true;
+  // Held roles, not effective capabilities. A member with no role yet falls
+  // back to the viewer BUNDLE, which is a default rather than a decision —
+  // nobody sat down and made the new colleague read-only, they just have not
+  // been given a job yet, and they may well be the person who knows. Only the
+  // seat somebody was actually put in counts.
+  if (access.roles.length === 0) return true;
+  return access.roles.some((r) => r !== 'viewer');
+}
+
 // Shown on the Members page and used as the role's explanation everywhere.
 export const ROLE_DEFINITIONS: Array<{ key: RoleKey; name: string; summary: string }> = [
   { key: 'bill_clerk', name: 'Bill Clerk', summary: "Enters and confirms a bill's details and coding. Cannot approve bills or see payments." },

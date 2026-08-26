@@ -2384,13 +2384,15 @@ export async function listAskCandidates(
     }
   }
 
-  const { getOrgAccess } = await import('../approvals/permissions.js');
-  const access = needs
-    ? new Map(await Promise.all(members.map(async (m) =>
-        [m.userId, await getOrgAccess(organizationId, m.userId)] as const)))
-    : new Map();
+  // Standing is needed for everybody now, not only when a flag is named: a
+  // viewer must not appear on this list at all, and that is true of every
+  // question, flag or no flag.
+  const { getOrgAccess, canBeAskedAboutBills } = await import('../approvals/permissions.js');
+  const access = new Map(await Promise.all(members.map(async (m) =>
+    [m.userId, await getOrgAccess(organizationId, m.userId)] as const)));
 
   return members
+    .filter((m) => canBeAskedAboutBills(access.get(m.userId) ?? null))
     .map((m) => {
       const a = access.get(m.userId);
       return {
@@ -2453,6 +2455,14 @@ export async function askAboutBill(args: {
 }) {
   const question = args.question.trim();
   if (question.length < 3) throw new Error('Say what you want to know.');
+
+  // The screen no longer offers them, and the server must not accept them
+  // either — a parked bill is too big a thing to hand out on the client's word.
+  const { getOrgAccess, canBeAskedAboutBills } = await import('../approvals/permissions.js');
+  const askedOf = await getOrgAccess(args.organizationId, args.askedOfUserId);
+  if (!canBeAskedAboutBills(askedOf)) {
+    throw new Error('That person can only view bills, and asking one parks it until they answer. Ask somebody who works on it.');
+  }
 
   const target = await prisma.organizationMembership.findFirst({
     where: { organizationId: args.organizationId, userId: args.askedOfUserId, status: 'active' },
