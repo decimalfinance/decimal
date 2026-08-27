@@ -19,6 +19,7 @@ import { extractPdfTextLayer, refineInvoiceSources, PROVENANCE_VERSION } from '.
 import { findDuplicateBills, readDuplicateOverride, describeDuplicate, matchDuplicates } from './duplicate-check.js';
 import { readPayableHold, describePayableHold } from './vendor-payable.js';
 import { evaluateBillFlags, summarizeBillFlags, displayOrgName } from './bill-flags.js';
+import { HIGHLIGHTABLE_FIELDS } from './question-fields.js';
 import type { BillFlag } from './bill-flags.js';
 import { getBillCeilingMinor } from '../approvals/store.js';
 import { involvedBillIds } from './bill-visibility.js';
@@ -1646,6 +1647,11 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     document: order.invoiceDocument,
     fields,
     remitFields,
+    // Every field a question may be pointed at. The closed vocabulary lives in
+    // question-fields.ts, where it is enforced — sending it means the picker
+    // offers exactly what the server will accept, instead of a second list that
+    // agrees with it today and drifts tomorrow.
+    highlightableFields: [...HIGHLIGHTABLE_FIELDS],
     lines,
     categoryOptions,
     codingSuggestionSource,

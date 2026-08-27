@@ -164,6 +164,10 @@ function DraftScreen(props: {
   // Ties what the asker sends back to what we proposed, so an edit is
   // measurable rather than invisible.
   const [suggestionId, setSuggestionId] = useState<string | null>(null);
+  // What the model proposed, kept separately from what is ticked. Unticking a
+  // suggestion must not remove it from the list, or a mis-click is permanent.
+  const [suggestedFields, setSuggestedFields] = useState<string[]>([]);
+  const [addingField, setAddingField] = useState(false);
   // Whether settling the flag would answer the whole question. Judged once,
   // here, at the moment the question is written — never per edit afterwards.
   const [questionScope, setQuestionScope] = useState<'covered_by_flag' | 'asks_more'>('asks_more');
@@ -174,10 +178,12 @@ function DraftScreen(props: {
     try {
       const res = await billsApi.suggestAskFields(organizationId, billDraft.paymentOrderId, question.trim(), aboutFlag);
       setAskFields(res.fields);
+      setSuggestedFields(res.fields);
       setSuggestionId(res.suggestionId);
       setQuestionScope(res.scope);
     } catch {
       setAskFields([]); // no suggestion is fine; the question still sends
+      setSuggestedFields([]);
       setQuestionScope('asks_more'); // and nothing may close it but a person
     } finally {
       setSuggesting(false);
@@ -322,6 +328,8 @@ function DraftScreen(props: {
       setResolutionValue('');
       setAskOf('');
       setAskFields(null);
+      setSuggestedFields([]);
+      setAddingField(false);
       setSuggestionId(null);
       setQuestionScope('asks_more');
       return;
@@ -1003,31 +1011,85 @@ function DraftScreen(props: {
                             </button>
                           </span>
                         )}
-                        {asking && askFields !== null ? (
+                        {asking && askFields !== null ? (() => {
+                          // Unticking used to DELETE the row, so a mis-click was
+                          // unrecoverable — the field left the list and there
+                          // was no way back to it. And the model's guess was the
+                          // whole universe: nothing could be added that it had
+                          // not thought of.
+                          //
+                          // Suggested fields stay on screen whether ticked or
+                          // not, and everything else in the vocabulary is one
+                          // click away. `suggestedFields` is frozen at the
+                          // moment of suggestion so the list does not reshuffle
+                          // under the cursor as boxes are ticked.
+                          const picked = new Set(askFields);
+                          const shown = [...new Set([...suggestedFields, ...askFields])];
+                          const rest = billDraft.highlightableFields.filter((k) => !shown.includes(k));
+                          const toggle = (key: string) => setAskFields(
+                            picked.has(key) ? askFields.filter((k) => k !== key) : [...askFields, key],
+                          );
+                          return (
                           <span style={{ display: 'block', marginTop: 10 }}>
                             <strong style={{ display: 'block' }}>
-                              {askFields.length > 0
+                              {shown.length > 0
                                 ? 'These are the fields they will be asked to fill — right?'
                                 : 'This does not look like it is about a specific field.'}
                             </strong>
                             <span style={{ display: 'block', marginTop: 2, opacity: 0.85 }}>
-                              {askFields.length > 0
-                                ? 'They will be highlighted on their screen. Untick anything that does not belong.'
-                                : 'It will be sent as a plain question, with nothing highlighted.'}
+                              {shown.length > 0
+                                ? 'Ticked ones are highlighted on their screen. Untick what does not belong, and add anything missing.'
+                                : 'It will be sent as a plain question unless you point at something.'}
                             </span>
-                            {askFields.length > 0 ? (
+                            {shown.length > 0 ? (
                               <span style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
-                                {askFields.map((key) => (
+                                {shown.map((key) => (
                                   <label key={key} style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
-                                    <input type="checkbox" checked
-                                      onChange={() => setAskFields(askFields.filter((k) => k !== key))} />
+                                    <input
+                                      type="checkbox"
+                                      checked={picked.has(key)}
+                                      onChange={() => toggle(key)}
+                                    />
                                     {fieldLabel(key)}
                                   </label>
                                 ))}
                               </span>
                             ) : null}
+
+                            {/* Anything the model did not think of. A question
+                                is often about a field precisely BECAUSE the
+                                reading of it looks wrong, which is the case a
+                                suggestion is least likely to cover. */}
+                            {rest.length > 0 ? (
+                              <span style={{ display: 'block', marginTop: 8 }}>
+                                {addingField ? (
+                                  <span style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                                    {rest.map((key) => (
+                                      <button
+                                        key={key}
+                                        type="button"
+                                        className="btn btn-ghost btn-sm"
+                                        onClick={() => { setAskFields([...askFields, key]); }}
+                                      >
+                                        + {fieldLabel(key)}
+                                      </button>
+                                    ))}
+                                    <button type="button" className="btn btn-ghost btn-sm"
+                                      onClick={() => setAddingField(false)}>
+                                      Done
+                                    </button>
+                                  </span>
+                                ) : (
+                                  <button type="button" className="btn btn-ghost btn-sm"
+                                    onClick={() => setAddingField(true)}>
+                                    <Ico.plus w={12} /> Add a field
+                                  </button>
+                                )}
+                              </span>
+                            ) : null}
                           </span>
-                        ) : null}
+                          );
+                        })() : null}
                         <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} disabled={resolving}
                           onClick={() => { setActiveResolution(null); setResolutionValue(''); setAskOf(''); setAskFields(null); }}>
                           Cancel

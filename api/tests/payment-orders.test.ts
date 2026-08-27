@@ -496,6 +496,15 @@ test('correcting the figures clears the arithmetic flag it was raised on', async
   const billId = upload.paymentOrders[0].paymentOrder.paymentOrderId;
 
   const flagged = await get(`/organizations/${orgId}/bills/${billId}/draft`, setup.sessionToken);
+
+  // The ask screen lets somebody add a field the model did not suggest, so it
+  // needs the whole vocabulary — and must not build its own, which would agree
+  // today and drift the first time a field is added on one side only. Anything
+  // it offered but the server did not enforce would be dropped on the way in,
+  // which looks exactly like the tick not working.
+  const { HIGHLIGHTABLE_FIELDS } = await import('../src/payments/question-fields.js');
+  assert.deepEqual(flagged.highlightableFields, [...HIGHLIGHTABLE_FIELDS]);
+
   const raised = flagged.flags.find((f: { kind: string }) => f.kind === 'lines_do_not_sum');
   assert.ok(raised, 'lines of 4,000 against a total of 4,820 must be flagged');
   assert.equal(raised.blocking, true);

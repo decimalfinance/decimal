@@ -1546,6 +1546,8 @@ export interface BillDraft {
   organizationName: string;
   route: Array<{ name: string; stepIndex: number; state: 'done' | 'waiting' | 'upcoming' | 'declined' }>;
   workLog: BillWorkLogEntry[];
+  /** Every field a question may point at — the server's closed vocabulary. */
+  highlightableFields: string[];
   questions: Array<{
     billQuestionId: string; question: string; aboutFlag: string | null;
     askedByUserId: string; askedByName: string;
