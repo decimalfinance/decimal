@@ -2167,18 +2167,45 @@ export async function addOrganizationTradingName(args: {
   }
 
   // Who claimed this, and off which bill. An identity claim should say who made it.
+  const at = new Date();
   const entry = {
     name,
     addedByUserId: args.actorUserId,
     addedByName: args.actorName,
-    addedAt: new Date().toISOString(),
+    addedAt: at.toISOString(),
     fromPaymentOrderId: args.fromPaymentOrderId ?? null,
   };
+
+  // This clears a flag, and until now it recorded nothing. The bill went from
+  // blocked to fine with no event between the two, so its history read as
+  // though it had never been questioned.
+  //
+  // Only the bill the claim was made from. A trading name silently un-flags
+  // every OTHER bill addressed to that name too, which is the point of it being
+  // permanent — but those bills had nothing done TO them, and writing a
+  // clearance onto a bill nobody touched would be inventing an event.
+  const flagsBefore = args.fromPaymentOrderId
+    ? await flagsForOrder(args.organizationId, args.fromPaymentOrderId)
+    : null;
+
   const updated = await prisma.organization.update({
     where: { organizationId: args.organizationId },
     data: { tradingNames: [...existing, entry] as never },
     select: { tradingNames: true },
   });
+
+  if (flagsBefore && args.fromPaymentOrderId) {
+    await recordFlagChanges({
+      organizationId: args.organizationId,
+      paymentOrderId: args.fromPaymentOrderId,
+      actorUserId: args.actorUserId,
+      before: flagsBefore,
+      after: await flagsForOrder(args.organizationId, args.fromPaymentOrderId),
+      state: 'draft',
+      at,
+    });
+  }
+
   return { added: true, tradingNames: readTradingNames(updated.tradingNames) };
 }
 
@@ -2544,12 +2571,16 @@ export async function overrideDuplicateFlag(args: {
   });
   if (!order) throw new Error('Bill not found');
 
+  const at = new Date();
   const override = {
     byUserId: args.actorUserId,
     byName: args.actorName,
     reason: args.reason,
-    at: new Date().toISOString(),
+    at: at.toISOString(),
   };
+  // Same omission as the trading name: clearing a duplicate wrote the override
+  // and the policy event, but nothing saying the flag stopped being raised.
+  const flagsBefore = await flagsForOrder(args.organizationId, order.paymentOrderId);
   await prisma.$transaction([
     prisma.paymentOrder.update({
       where: { paymentOrderId: order.paymentOrderId },
@@ -2570,9 +2601,21 @@ export async function overrideDuplicateFlag(args: {
         beforeState: order.state,
         afterState: order.state,
         payloadJson: { rule: 'duplicate_bill', reason: args.reason },
+        createdAt: at,
       },
     }),
   ]);
+
+  await recordFlagChanges({
+    organizationId: args.organizationId,
+    paymentOrderId: order.paymentOrderId,
+    actorUserId: args.actorUserId,
+    before: flagsBefore,
+    after: await flagsForOrder(args.organizationId, order.paymentOrderId),
+    state: order.state,
+    at,
+  });
+
   return getBillDraft(args.organizationId, args.paymentOrderId);
 }
 
@@ -3290,6 +3333,7 @@ export async function updateBillFacts(input: BillFactsInput) {
     ? new Date(dueDateInput)
     : undefined;
 
+  const at = new Date();
   await recordFieldChanges({
     organizationId: input.organizationId,
     paymentOrderId: order.paymentOrderId,
@@ -3297,7 +3341,13 @@ export async function updateBillFacts(input: BillFactsInput) {
     phase: order.state === 'submitted' ? 'approval' : 'draft',
     reason: 'edit',
     changes,
+    at,
   });
+
+  // Editing the facts moves the arithmetic, so it can settle or raise a flag —
+  // and this was the third write point recording the change but not what the
+  // change did to the checks.
+  const flagsBefore = await flagsForOrder(input.organizationId, order.paymentOrderId);
 
   await prisma.$transaction([
     prisma.paymentOrder.update({
@@ -3323,9 +3373,20 @@ export async function updateBillFacts(input: BillFactsInput) {
         beforeState: order.state,
         afterState: order.state,
         payloadJson: { changes } as Prisma.InputJsonValue,
+        createdAt: at,
       },
     }),
   ]);
+
+  await recordFlagChanges({
+    organizationId: input.organizationId,
+    paymentOrderId: order.paymentOrderId,
+    actorUserId: input.actorUserId,
+    before: flagsBefore,
+    after: await flagsForOrder(input.organizationId, order.paymentOrderId),
+    state: order.state,
+    at,
+  });
 
   return { changed: changes.length };
 }

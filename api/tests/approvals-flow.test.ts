@@ -1683,6 +1683,43 @@ test('the ask list says who could actually settle the flag being asked about', a
   assert.equal(plain.candidates[0].canSettle, null);
 });
 
+test('clearing a flag by deed is recorded, not just done', async () => {
+  // Recording a trading name, and clearing a duplicate, both make a flag stop
+  // being raised — and both wrote nothing saying so. The bill went from blocked
+  // to fine with no event in between, so afterwards its history read as though
+  // it had never been questioned at all. The flag diff existed; it was only
+  // wired to saving and to paying the itemised total.
+  const { orgId, owner } = await makeOrg();
+  const bill = await uploadAndConfirm(orgId, owner.token, {
+    vendor: 'Ironclad Security', amount: 6200, invoiceNo: 'IRN-892', billTo: 'Northwind Trading Co.',
+  });
+
+  const before = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, owner.token);
+  assert.ok(before.flags.find((f: { kind: string }) => f.kind === 'addressed_elsewhere'));
+  assert.equal(
+    before.workLog.filter((e: { kind: string }) => e.kind === 'flag_cleared').length,
+    0,
+    'nothing resolved yet',
+  );
+
+  await post(
+    `/organizations/${orgId}/bills/${bill.billId}/this-is-us`,
+    { name: 'Northwind Trading Co.' },
+    owner.token,
+  );
+
+  const after = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, owner.token);
+  assert.equal(
+    after.flags.some((f: { kind: string }) => f.kind === 'addressed_elsewhere'),
+    false,
+    'the flag is gone',
+  );
+  const cleared = after.workLog.find((e: { kind: string }) => e.kind === 'flag_cleared');
+  assert.ok(cleared, 'and the bill says so');
+  assert.match(cleared.text, /Addressed to Northwind Trading Co\./);
+  assert.ok(cleared.byName, 'naming whoever did it');
+});
+
 test('a viewer cannot be asked, because asking parks the bill', async () => {
   // A viewer is an auditor's seat: read everything, change nothing. Asking is
   // not a message — it moves the bill to request_info and it stops there until
