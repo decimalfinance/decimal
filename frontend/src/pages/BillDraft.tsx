@@ -757,7 +757,10 @@ function DraftScreen(props: {
                   // shadowed the state array of the same name — invisible until
                   // something inside this block needed the array.
                   const isAnswered = q.outcome === 'answered';
-                  const fields = q.openFields.length ? q.openFields : q.highlightFields;
+                  // Named `namedFields`, not `fields`: the outer `fields` is the field-state
+                  // map, and shadowing it meant nothing in this block could
+                  // ask whether a field had been confirmed.
+                  const namedFields = q.openFields.length ? q.openFields : q.highlightFields;
                   return (
                     <div
                       key={q.billQuestionId}
@@ -780,10 +783,10 @@ function DraftScreen(props: {
                             : `Waiting on ${q.askedOfName.split(' ')[0]}`}
                         </span>
                         <span style={{ flex: 1 }} />
-                        {fields.length > 0 ? (
+                        {namedFields.length > 0 ? (
                           <button type="button" className="btn btn-ghost btn-sm"
                             onClick={() => setOpenThreadDetail(openThreadDetail === q.billQuestionId ? null : q.billQuestionId)}>
-                            {fields.length} field{fields.length === 1 ? '' : 's'}
+                            {namedFields.length} field{namedFields.length === 1 ? '' : 's'}
                             <Ico.chevDown w={12} style={{ marginLeft: 4, transform: openThreadDetail === q.billQuestionId ? 'rotate(180deg)' : undefined }} />
                           </button>
                         ) : null}
@@ -795,6 +798,25 @@ function DraftScreen(props: {
                           <strong>{q.askedOfName.split(' ')[0]}:</strong> “{q.answer}”
                         </div>
                       ) : null}
+
+                      {/* Ticking the fields IS the answer to "please check
+                          these" — but a tick lives on this screen until the
+                          bill is saved, so somebody can check all six, see
+                          every one go green, and find the question still
+                          waiting. Say what is left to do rather than leaving
+                          them to guess that a save is what sends it. */}
+                      {(() => {
+                        if (!q.stillOpen || q.openFields.length === 0) return null;
+                        const checked = q.openFields.filter((f) => fields[f]?.state === 'confirmed');
+                        if (checked.length === 0) return null;
+                        return (
+                          <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--text-muted)' }}>
+                            {checked.length === q.openFields.length
+                              ? `You have checked all ${q.openFields.length} fields. Save the bill and that goes back as your answer.`
+                              : `You have checked ${checked.length} of ${q.openFields.length}. Saving sends what you have done so far.`}
+                          </div>
+                        );
+                      })()}
 
                       {/* The flag it was raised from is settled, but the
                           question asked for more than the flag — so it stays
@@ -809,9 +831,9 @@ function DraftScreen(props: {
                         </div>
                       ) : null}
 
-                      {openThreadDetail === q.billQuestionId && fields.length > 0 ? (
+                      {openThreadDetail === q.billQuestionId && namedFields.length > 0 ? (
                         <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                          {fields.map((f) => (
+                          {namedFields.map((f) => (
                             <span key={f} className="pill pill-min pill-neutral">{fieldLabel(f)}</span>
                           ))}
                         </div>
@@ -838,9 +860,9 @@ function DraftScreen(props: {
                           {/* Which of the fields they named this settles. Only
                               offered when the answer is partial, because that
                               is the only case where the difference matters. */}
-                          {fields.length > 0 ? (
+                          {namedFields.length > 0 ? (
                             <span style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 12.5, color: 'var(--text-muted)' }}>
-                              {fields.map((f) => (
+                              {namedFields.map((f) => (
                                 <label key={f} style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
                                   <input
                                     type="checkbox"
@@ -893,7 +915,7 @@ function DraftScreen(props: {
                                 settles some but not all of them — otherwise it
                                 is just an answer, and offering both would make
                                 somebody choose between synonyms. */}
-                            {fields.length > 0 && settled.length > 0 && settled.length < fields.length ? (
+                            {namedFields.length > 0 && settled.length > 0 && settled.length < namedFields.length ? (
                               <button type="button" className="btn btn-primary btn-sm"
                                 disabled={answering || answerText.trim().length < 1}
                                 onClick={() => void sendAnswer(q.billQuestionId, 'partial', q.openFields)}>

@@ -672,6 +672,37 @@ async function recordFlagChanges(args: {
 }
 
 /**
+ * Field keys as a QUESTION names them, from the keys a correction records.
+ *
+ * Two vocabularies met here and did not match: corrections are keyed on the
+ * extraction's field names, and questions on what the screen can highlight.
+ * They agree on most of it — invoiceNumber, dueDate, total — and disagree on
+ * exactly the two that a question about "the vendor details" is most likely to
+ * name. Left unmapped, checking the vendor's name settles nothing.
+ */
+const CORRECTION_TO_HIGHLIGHT: Record<string, string> = {
+  vendorName: 'vendor.name',
+  vendorEmail: 'vendor.email',
+};
+
+/**
+ * What a person just settled about this bill, in the terms a question uses.
+ *
+ * Confirming a field counts. "Please check the vendor details" is answered by
+ * checking them — the tick IS the reply, and asking for a typed sentence on top
+ * of it is asking somebody to say what they have already done.
+ */
+export function settledFieldKeys(
+  corrections: Array<{ field: string }>,
+  confirmedFieldKeys: string[] | undefined,
+): string[] {
+  return [...new Set([
+    ...corrections.map((c) => CORRECTION_TO_HIGHLIGHT[c.field] ?? c.field),
+    ...(confirmedFieldKeys ?? []),
+  ])];
+}
+
+/**
  * Everything that has been done to a bill, in order.
  *
  * The record was always kept — bill_field_changes is append-only and carries
@@ -3898,14 +3929,38 @@ export async function saveBillDraft(input: {
 
   // And what the save did to the checks, so the history can say a flag was
   // raised and later cleared instead of it silently ceasing to be true.
+  const flagsAfter = await flagsForOrder(input.organizationId, order.paymentOrderId);
   await recordFlagChanges({
     organizationId: input.organizationId,
     paymentOrderId: order.paymentOrderId,
     actorUserId: input.actorUserId,
     before: flagsBefore,
-    after: await flagsForOrder(input.organizationId, order.paymentOrderId),
+    after: flagsAfter,
     state: order.state,
   });
+
+  // …and to the questions. A save is where checking a field becomes a fact —
+  // until it lands here the ticks are only on somebody's screen — so this is
+  // the moment "please check the vendor details" has been answered by doing it.
+  const settledKeys = settledFieldKeys(corrections, input.confirmedFieldKeys);
+  if (settledKeys.length > 0) {
+    const actor = await prisma.user.findUnique({
+      where: { userId: input.actorUserId },
+      select: { displayName: true },
+    });
+    const { settleQuestionsFromDeed } = await import('./question-settle.js');
+    await settleQuestionsFromDeed({
+      organizationId: input.organizationId,
+      paymentOrderId: order.paymentOrderId,
+      actorUserId: input.actorUserId,
+      actorName: actor?.displayName ?? 'Somebody',
+      what: 'checked the fields you asked about',
+      flagsBefore,
+      flagsAfter,
+      changedFields: settledKeys,
+      at: new Date(savedAt),
+    });
+  }
 
   return { savedAt };
 }

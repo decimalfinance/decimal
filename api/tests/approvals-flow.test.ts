@@ -1850,6 +1850,63 @@ test('a question about no flag and no fields is never settled by a deed', async 
   assert.equal(q.stillOpen, true, 'untouched — a person answers this one');
 });
 
+test('checking the fields somebody asked about answers them', async () => {
+  // "Please check the vendor details" is answered by checking them. The tick IS
+  // the reply, and asking for a typed sentence on top is asking somebody to
+  // write down what they have already done.
+  //
+  // Two things made this dead: nothing passed changedFields to the settler, so
+  // the field branch never ran; and the two vocabularies disagreed on exactly
+  // the keys a vendor question names — corrections say `vendorName`, questions
+  // say `vendor.name`.
+  const { orgId, owner } = await makeOrg();
+  const clerk = await register('check-clerk');
+  await prisma.organizationMembership.create({
+    data: { organizationId: orgId, userId: clerk.userId, role: 'member', status: 'active' },
+  });
+
+  const bill = await uploadAndConfirm(orgId, owner.token, {
+    vendor: 'Ironclad Security', amount: 6200, invoiceNo: 'IRN-896', billTo: 'Northwind Trading Co.',
+  });
+
+  const asked = await post(
+    `/organizations/${orgId}/bills/${bill.billId}/ask`,
+    {
+      askedOfUserId: owner.userId,
+      question: 'please check the vendor details',
+      highlightFields: ['vendor.name', 'vendor.email'],
+      questionScope: 'asks_more',
+    },
+    clerk.token,
+  );
+
+  const body = {
+    fields: { invoiceNumber: 'IRN-896', currency: 'USD', total: 6200, taxAmount: 0 },
+    lines: [{ description: 'Security retainer', quantity: 1, unitPrice: 6200, amount: 6200, category: 'Cloud hosting & infrastructure' }],
+    confirmedFieldKeys: ['vendor.name'],
+    noteForApprovers: null,
+  };
+
+  // One of the two checked: partly done, so it stays open and says which half.
+  await post(`/organizations/${orgId}/bills/${bill.billId}/save`, body, owner.token);
+  const half = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, clerk.token);
+  const midway = half.questions.find((x: { billQuestionId: string }) => x.billQuestionId === asked.billQuestionId);
+  assert.equal(midway.stillOpen, true, 'half-checked is not answered');
+  assert.deepEqual(midway.openFields, ['vendor.email'], 'and it now asks only for what is left');
+
+  // The other one: nothing outstanding, so the question is done.
+  await post(
+    `/organizations/${orgId}/bills/${bill.billId}/save`,
+    { ...body, confirmedFieldKeys: ['vendor.name', 'vendor.email'] },
+    owner.token,
+  );
+  const done = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, clerk.token);
+  const settled = done.questions.find((x: { billQuestionId: string }) => x.billQuestionId === asked.billQuestionId);
+  assert.equal(settled.outcome, 'answered');
+  assert.equal(settled.stillOpen, false, 'it stops parking the bill');
+  assert.match(settled.answer, /checked the fields/);
+});
+
 test('a viewer cannot be asked, because asking parks the bill', async () => {
   // A viewer is an auditor's seat: read everything, change nothing. Asking is
   // not a message — it moves the bill to request_info and it stops there until
