@@ -992,7 +992,21 @@ function DraftScreen(props: {
                               value={resolutionValue}
                               placeholder={asking ? 'What do you want to know?' : ask!.label}
                               onChange={(e) => setResolutionValue(e.target.value)}
-                              onKeyDown={(e) => { if (e.key === 'Enter' && ready) void runResolution(); }}
+                              onKeyDown={(e) => {
+                                if (e.key !== 'Enter' || !ready) return;
+                                // Enter used to call runResolution directly and
+                                // skip straight past the confirm step — so the
+                                // question went out with fields nobody had been
+                                // shown, chosen server-side, which is precisely
+                                // the "a suggestion nobody sees is an assertion"
+                                // this two-step exists to prevent. It has to
+                                // advance the same way the button does.
+                                if (asking && askFields === null) {
+                                  void suggestFields(resolutionValue, activeResolution.flag);
+                                  return;
+                                }
+                                void runResolution();
+                              }}
                               style={{ flex: 1, minWidth: 0, height: 32 }}
                             />
                             <button type="button" className="btn btn-primary btn-sm" style={{ flex: 'none' }}
@@ -1155,26 +1169,34 @@ function DraftScreen(props: {
                 </div>
               </div>
               <div className="rev-grid" style={{ gridTemplateColumns: '1fr 1fr', marginBottom: 16 }}>
+                {/* Hand-rolled rather than DraftField because these two are
+                    bound to their own state, not to billDraft.fields — which is
+                    why they were the only fields in the vocabulary that could
+                    not say they had been asked about. A question naming "the
+                    vendor details" pointed at six fields and visibly marked
+                    four, missing the two it was most about. */}
                 <div className="rev-field">
                   <span className="field-label">Vendor name</span>
                   <input
-                    className="input"
+                    className={`input${askedFields.has('vendor.name') ? ' is-look' : ''}`}
                     value={vendorName}
                     disabled={readOnly}
                     onFocus={() => setActiveSource(billDraft.vendor.nameSource ?? null)}
                     onChange={(e) => setVendorName(e.target.value)}
                   />
+                  <AskedMark asked={askedFields.get('vendor.name')} />
                 </div>
                 <div className="rev-field">
                   <span className="field-label">Email</span>
                   <input
-                    className="input"
+                    className={`input${askedFields.has('vendor.email') ? ' is-look' : ''}`}
                     value={vendorEmail}
                     disabled={readOnly}
                     placeholder="Not on document"
                     onFocus={() => setActiveSource(billDraft.vendor.emailSource ?? null)}
                     onChange={(e) => setVendorEmail(e.target.value)}
                   />
+                  <AskedMark asked={askedFields.get('vendor.email')} />
                 </div>
               </div>
               <div className="rev-grid" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr' }}>
@@ -1783,6 +1805,21 @@ function AccountPicker(props: {
         </div>
       ) : null}
     </>
+  );
+}
+
+// "Somebody asked about this", in the one place it is written.
+//
+// DraftField renders its own copy inline; this exists for the two vendor inputs
+// that are not DraftFields. Deliberately no Confirm button: those fields have no
+// confirmed state to move to, and offering a button that settles nothing would
+// be worse than offering none.
+function AskedMark({ asked }: { asked?: { by: string; question: string } }) {
+  if (!asked) return null;
+  return (
+    <span className="ftag is-look" title={asked.question}>
+      Asked by {asked.by.split(' ')[0]}
+    </span>
   );
 }
 
