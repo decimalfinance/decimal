@@ -711,7 +711,7 @@ export async function billWorkLog(organizationId: string, paymentOrderId: string
 
   type Entry = {
     id: string;
-    kind: 'field_changed' | 'flag_raised' | 'flag_cleared' | 'policy_overridden';
+    kind: 'field_changed' | 'flag_raised' | 'flag_cleared' | 'policy_overridden' | 'question_settled';
     at: Date;
     byName: string | null;
     /** One line, already written out — the screen renders, it does not phrase. */
@@ -752,11 +752,14 @@ export async function billWorkLog(organizationId: string, paymentOrderId: string
       id: e.paymentOrderEventId,
       kind: e.eventType === 'bill_flag_raised' ? 'flag_raised'
         : e.eventType === 'bill_flag_cleared' ? 'flag_cleared'
+        : e.eventType === 'bill_question_settled' ? 'question_settled'
         : 'policy_overridden',
       at: e.createdAt,
       byName: e.actorId ? nameOf.get(e.actorId) ?? null : null,
       text: e.eventType === 'bill_flag_raised' ? `Flagged: ${short}`
         : e.eventType === 'bill_flag_cleared' ? `Resolved: ${short}`
+        : e.eventType === 'bill_question_settled'
+          ? `Question settled: ${str(payload.answer) ?? 'by what was done'}`
         : `${short}${reason ? ` \u201c${reason}\u201d` : ''}`,
       field: null,
       detail: str(payload.message),
@@ -770,7 +773,9 @@ export async function billWorkLog(organizationId: string, paymentOrderId: string
 }
 
 /** Event types that belong on a bill's work log. */
-const BILL_LOG_EVENT_TYPES = ['bill_flag_raised', 'bill_flag_cleared', 'policy_overridden'] as const;
+const BILL_LOG_EVENT_TYPES = [
+  'bill_flag_raised', 'bill_flag_cleared', 'policy_overridden', 'bill_question_settled',
+] as const;
 
 // Field keys are wire identifiers; a person reading a history wants the label
 // they saw on the form.
@@ -807,6 +812,7 @@ const ENTRY_ORDER: Record<string, number> = {
   policy_overridden: 1,
   flag_raised: 2,
   flag_cleared: 3,
+  question_settled: 4,
 };
 
 // Money reads as money. "Tax changed from 0 to 820" is a worse sentence than
@@ -2195,13 +2201,25 @@ export async function addOrganizationTradingName(args: {
   });
 
   if (flagsBefore && args.fromPaymentOrderId) {
+    const flagsAfter = await flagsForOrder(args.organizationId, args.fromPaymentOrderId);
     await recordFlagChanges({
       organizationId: args.organizationId,
       paymentOrderId: args.fromPaymentOrderId,
       actorUserId: args.actorUserId,
       before: flagsBefore,
-      after: await flagsForOrder(args.organizationId, args.fromPaymentOrderId),
+      after: flagsAfter,
       state: 'draft',
+      at,
+    });
+    const { settleQuestionsFromDeed } = await import('./question-settle.js');
+    await settleQuestionsFromDeed({
+      organizationId: args.organizationId,
+      paymentOrderId: args.fromPaymentOrderId,
+      actorUserId: args.actorUserId,
+      actorName: args.actorName,
+      what: `recorded “${name}” as a name your organization trades under`,
+      flagsBefore,
+      flagsAfter,
       at,
     });
   }
@@ -2479,6 +2497,8 @@ export async function askAboutBill(args: {
    * (API callers, older clients) falls back to the suggestion.
    */
   highlightFields?: string[] | null;
+  /** As judged when the question was written; re-judged here when absent. */
+  questionScope?: 'covered_by_flag' | 'asks_more' | null;
 }) {
   const question = args.question.trim();
   if (question.length < 3) throw new Error('Say what you want to know.');
@@ -2540,9 +2560,17 @@ export async function askAboutBill(args: {
   // does not exist.
   const { fieldsForQuestion, HIGHLIGHTABLE_FIELDS } = await import('./question-fields.js');
   const allowed = new Set<string>(HIGHLIGHTABLE_FIELDS);
+  // The asker's confirmed fields win, but the SCOPE judgement is never theirs
+  // to skip — it is about what their sentence asked, and it decides whether a
+  // deed may close it later. Reuse what the ask screen already computed when it
+  // sent one; otherwise judge it here.
+  const suggested = args.highlightFields && args.questionScope
+    ? null
+    : await fieldsForQuestion(question, args.aboutFlag ?? null);
   const highlightFields = args.highlightFields
     ? args.highlightFields.filter((f) => allowed.has(f))
-    : await fieldsForQuestion(question);
+    : (suggested?.fields ?? []);
+  const questionScope = args.questionScope ?? suggested?.scope ?? 'asks_more';
 
   return prisma.billQuestion.create({
     data: {
@@ -2553,6 +2581,7 @@ export async function askAboutBill(args: {
       askedOfUserId: args.askedOfUserId,
       question,
       aboutFlag: args.aboutFlag ?? null,
+      questionScope,
       highlightFields,
     },
   });
@@ -2606,13 +2635,25 @@ export async function overrideDuplicateFlag(args: {
     }),
   ]);
 
+  const flagsAfter = await flagsForOrder(args.organizationId, order.paymentOrderId);
   await recordFlagChanges({
     organizationId: args.organizationId,
     paymentOrderId: order.paymentOrderId,
     actorUserId: args.actorUserId,
     before: flagsBefore,
-    after: await flagsForOrder(args.organizationId, order.paymentOrderId),
+    after: flagsAfter,
     state: order.state,
+    at,
+  });
+  const { settleQuestionsFromDeed } = await import('./question-settle.js');
+  await settleQuestionsFromDeed({
+    organizationId: args.organizationId,
+    paymentOrderId: order.paymentOrderId,
+    actorUserId: args.actorUserId,
+    actorName: args.actorName,
+    what: `cleared the duplicate flag — “${args.reason}”`,
+    flagsBefore,
+    flagsAfter,
     at,
   });
 

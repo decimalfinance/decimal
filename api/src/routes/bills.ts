@@ -230,6 +230,9 @@ const askSchema = z.object({
   highlightFields: z.array(z.string()).max(20).nullable().optional(),
   // Ties what was sent back to what we proposed.
   suggestionId: z.string().uuid().nullable().optional(),
+  // As judged when the question was written. Absent (API callers, older
+  // clients) is re-judged server-side rather than assumed.
+  questionScope: z.enum(['covered_by_flag', 'asks_more']).nullable().optional(),
 });
 
 // What fields does this question look like it is about? A SUGGESTION, shown to
@@ -242,7 +245,8 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/ask/sugge
   const input = z.object({ question: z.string().trim().min(3).max(500) }).parse(req.body);
   const { fieldsForQuestion } = await import('../payments/question-fields.js');
   const { logSuggestion } = await import('../payments/suggestion-log.js');
-  const fields = await fieldsForQuestion(input.question);
+  const aboutFlag = typeof req.body?.aboutFlag === 'string' ? req.body.aboutFlag : null;
+  const { fields, scope } = await fieldsForQuestion(input.question, aboutFlag);
   // Logged BEFORE knowing what the asker does with it. If we only recorded
   // accepted suggestions we would have no negatives, and no way to tell a
   // suggestion nobody edited from one nobody was shown.
@@ -253,9 +257,9 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/ask/sugge
     subjectId: paymentOrderId,
     suggested: fields,
     producer: 'question-fields/v1',
-    inputs: { question: input.question },
+    inputs: { question: input.question, aboutFlag },
   });
-  res.json({ fields, suggestionId });
+  res.json({ fields, scope, suggestionId });
 }));
 
 billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/ask', asyncRoute(async (req, res) => {
@@ -271,6 +275,7 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/ask', asy
     question: input.question,
     aboutFlag: input.aboutFlag ?? null,
     highlightFields: input.highlightFields ?? null,
+    questionScope: input.questionScope ?? null,
   });
 
   // What the asker did with the suggestion. 'edited' is the informative one —

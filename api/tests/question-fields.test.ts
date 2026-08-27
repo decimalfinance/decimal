@@ -26,7 +26,12 @@ test('with no model configured it returns nothing rather than failing', async ()
     const { config } = await import('../src/config.js');
     const savedKey = config.openAiApiKey;
     (config as { openAiApiKey: string | null }).openAiApiKey = null;
-    assert.deepEqual(await fieldsForQuestion('Can you confirm the vendor details?'), []);
+    assert.deepEqual(
+      await fieldsForQuestion('Can you confirm the vendor details?'),
+      // No model, so no highlight AND no claim that a flag covers it. Both
+      // absences are safe; a wrong scope would close somebody's concern.
+      { fields: [], scope: 'asks_more' },
+    );
     (config as { openAiApiKey: string | null }).openAiApiKey = savedKey;
   } finally {
     if (previous !== undefined) process.env.OPENAI_API_KEY = previous;

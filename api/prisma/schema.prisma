@@ -924,6 +924,9 @@ model BillQuestion {
   askedOfUserId  String    @map("asked_of_user_id") @db.Uuid
   question       String
   aboutFlag      String?   @map("about_flag")
+  /// 'covered_by_flag' | 'asks_more' — whether settling aboutFlag answers the
+  /// whole question. Null (asked before this existed) reads as 'asks_more'.
+  questionScope  String?   @map("question_scope")
   /// Review-screen field keys this question concerns, for highlighting.
   highlightFields Json     @default("[]") @map("highlight_fields")
   answer         String?

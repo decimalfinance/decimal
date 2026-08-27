@@ -1720,6 +1720,136 @@ test('clearing a flag by deed is recorded, not just done', async () => {
   assert.ok(cleared.byName, 'naming whoever did it');
 });
 
+test('a deed settles the question that asked for it', async () => {
+  // "Please resolve this flag" is answered by resolving the flag. It used to sit
+  // open anyway — parking the bill and demanding a typed sentence for something
+  // already done. Note who settles it: a THIRD person, not the one asked. The
+  // question existed to get the thing fixed, and it is fixed.
+  const { orgId, owner } = await makeOrg();
+  const clerk = await register('deed-clerk');
+  const other = await register('deed-admin');
+  await prisma.organizationMembership.createMany({
+    data: [
+      { organizationId: orgId, userId: clerk.userId, role: 'member', status: 'active' },
+      { organizationId: orgId, userId: other.userId, role: 'admin', status: 'active' },
+    ],
+  });
+
+  const bill = await uploadAndConfirm(orgId, owner.token, {
+    vendor: 'Ironclad Security', amount: 6200, invoiceNo: 'IRN-893', billTo: 'Northwind Trading Co.',
+  });
+
+  const asked = await post(
+    `/organizations/${orgId}/bills/${bill.billId}/ask`,
+    {
+      askedOfUserId: owner.userId,
+      question: 'please resolve this flag',
+      aboutFlag: 'addressed_elsewhere',
+      // Scope is normally judged by the model when the question is written; the
+      // suite has none, so state it — the point under test is what a DEED does
+      // with it, not how it was arrived at.
+      questionScope: 'covered_by_flag',
+    },
+    clerk.token,
+  );
+  assert.ok(asked.billQuestionId);
+
+  // The third person does the deed.
+  await post(
+    `/organizations/${orgId}/bills/${bill.billId}/this-is-us`,
+    { name: 'Northwind Trading Co.' },
+    other.token,
+  );
+
+  const after = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, clerk.token);
+  const q = after.questions.find((x: { billQuestionId: string }) => x.billQuestionId === asked.billQuestionId);
+  assert.ok(q, 'the question is still on the bill');
+  assert.equal(q.outcome, 'answered', 'and it is settled');
+  assert.equal(q.stillOpen, false, 'so it stops parking the bill');
+  assert.match(q.answer, /recorded/, 'the answer says what was done');
+  assert.match(q.answer, /Northwind Trading Co\./);
+
+  // And the bill's own history says so, after the clearance that caused it.
+  const kinds = after.workLog.map((e: { kind: string }) => e.kind);
+  assert.ok(kinds.includes('flag_cleared'));
+  assert.ok(kinds.includes('question_settled'));
+  assert.ok(
+    kinds.lastIndexOf('flag_cleared') < kinds.lastIndexOf('question_settled'),
+    'the settlement reads after the thing that settled it',
+  );
+});
+
+test('a question that asked more than the flag is left for a person', async () => {
+  // Clearing the flag answers half of "is this ours, and should we keep paying
+  // them?". Closing it there would drop the other half with no trace, so the
+  // question stays open and somebody writes the rest.
+  const { orgId, owner } = await makeOrg();
+  const clerk = await register('more-clerk');
+  await prisma.organizationMembership.create({
+    data: { organizationId: orgId, userId: clerk.userId, role: 'member', status: 'active' },
+  });
+
+  const bill = await uploadAndConfirm(orgId, owner.token, {
+    vendor: 'Ironclad Security', amount: 6200, invoiceNo: 'IRN-894', billTo: 'Northwind Trading Co.',
+  });
+
+  const asked = await post(
+    `/organizations/${orgId}/bills/${bill.billId}/ask`,
+    {
+      askedOfUserId: owner.userId,
+      question: 'is this ours, and should we keep paying them?',
+      aboutFlag: 'addressed_elsewhere',
+      questionScope: 'asks_more',
+    },
+    clerk.token,
+  );
+
+  await post(
+    `/organizations/${orgId}/bills/${bill.billId}/this-is-us`,
+    { name: 'Northwind Trading Co.' },
+    owner.token,
+  );
+
+  const after = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, clerk.token);
+  const q = after.questions.find((x: { billQuestionId: string }) => x.billQuestionId === asked.billQuestionId);
+  assert.equal(q.outcome, null, 'not settled by the deed');
+  assert.equal(q.stillOpen, true, 'somebody still owes an answer');
+  // The flag half genuinely is done, and the bill says so.
+  assert.equal(after.flags.some((f: { kind: string }) => f.kind === 'addressed_elsewhere'), false);
+  assert.ok(after.workLog.some((e: { kind: string }) => e.kind === 'flag_cleared'));
+});
+
+test('a question about no flag and no fields is never settled by a deed', async () => {
+  // Nothing structural to observe, so nothing may close it but a person. This
+  // is the boundary: the mechanism settles what a question DECLARED, and stays
+  // out of everything else.
+  const { orgId, owner } = await makeOrg();
+  const clerk = await register('open-clerk');
+  await prisma.organizationMembership.create({
+    data: { organizationId: orgId, userId: clerk.userId, role: 'member', status: 'active' },
+  });
+
+  const bill = await uploadAndConfirm(orgId, owner.token, {
+    vendor: 'Ironclad Security', amount: 6200, invoiceNo: 'IRN-895', billTo: 'Northwind Trading Co.',
+  });
+
+  const asked = await post(
+    `/organizations/${orgId}/bills/${bill.billId}/ask`,
+    { askedOfUserId: owner.userId, question: 'should we keep using this vendor at all?' },
+    clerk.token,
+  );
+
+  await post(
+    `/organizations/${orgId}/bills/${bill.billId}/this-is-us`,
+    { name: 'Northwind Trading Co.' },
+    owner.token,
+  );
+
+  const after = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, clerk.token);
+  const q = after.questions.find((x: { billQuestionId: string }) => x.billQuestionId === asked.billQuestionId);
+  assert.equal(q.stillOpen, true, 'untouched — a person answers this one');
+});
+
 test('a viewer cannot be asked, because asking parks the bill', async () => {
   // A viewer is an auditor's seat: read everything, change nothing. Asking is
   // not a message — it moves the bill to request_info and it stops there until

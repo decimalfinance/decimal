@@ -1702,13 +1702,15 @@ export const billsApi = {
       + (aboutFlag ? `?flag=${encodeURIComponent(aboutFlag)}` : ''),
     );
   },
-  suggestAskFields(organizationId: string, paymentOrderId: string, question: string) {
-    return request<{ fields: string[]; suggestionId: string | null }>(
+  // The flag goes IN so the scope can come out: judging whether a question asks
+  // for more than its check covers is impossible without knowing the check.
+  suggestAskFields(organizationId: string, paymentOrderId: string, question: string, aboutFlag?: string | null) {
+    return request<{ fields: string[]; scope: 'covered_by_flag' | 'asks_more'; suggestionId: string | null }>(
       `/organizations/${organizationId}/bills/${paymentOrderId}/ask/suggest-fields`,
-      { method: 'POST', body: JSON.stringify({ question }) },
+      { method: 'POST', body: JSON.stringify({ question, aboutFlag: aboutFlag ?? null }) },
     );
   },
-  ask(organizationId: string, paymentOrderId: string, body: { askedOfUserId: string; question: string; aboutFlag?: string | null; highlightFields?: string[] | null; suggestionId?: string | null }) {
+  ask(organizationId: string, paymentOrderId: string, body: { askedOfUserId: string; question: string; aboutFlag?: string | null; highlightFields?: string[] | null; suggestionId?: string | null; questionScope?: 'covered_by_flag' | 'asks_more' | null }) {
     return request<{ billQuestionId: string }>(
       `/organizations/${organizationId}/bills/${paymentOrderId}/ask`,
       { method: 'POST', body: JSON.stringify(body) },

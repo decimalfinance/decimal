@@ -17,6 +17,7 @@ import {
   type BillDraftField,
   type BillDraftLine,
   type CategoryOption,
+  type BillWorkLogEntry,
   type ConfirmBillBody,
   type DocSource,
 } from '../api';
@@ -114,6 +115,15 @@ export function BillDraftPage() {
   );
 }
 
+// Who settled a check, in the words the work log already used. The thread and
+// the log are one account of the bill, so the thread quotes it rather than
+// composing a second sentence about the same event.
+function flagSettledBy(log: BillWorkLogEntry[], _flagKind: string): string | null {
+  const entry = [...log].reverse().find((e) => e.kind === 'flag_cleared');
+  if (!entry) return null;
+  return `${entry.byName ?? 'Somebody'} settled that check.`;
+}
+
 function DraftScreen(props: {
   organizationId: string;
   billDraft: BillDraft;
@@ -154,16 +164,21 @@ function DraftScreen(props: {
   // Ties what the asker sends back to what we proposed, so an edit is
   // measurable rather than invisible.
   const [suggestionId, setSuggestionId] = useState<string | null>(null);
+  // Whether settling the flag would answer the whole question. Judged once,
+  // here, at the moment the question is written — never per edit afterwards.
+  const [questionScope, setQuestionScope] = useState<'covered_by_flag' | 'asks_more'>('asks_more');
 
-  const suggestFields = async (question: string) => {
+  const suggestFields = async (question: string, aboutFlag: string | null) => {
     if (question.trim().length < 3) return;
     setSuggesting(true);
     try {
-      const res = await billsApi.suggestAskFields(organizationId, billDraft.paymentOrderId, question.trim());
+      const res = await billsApi.suggestAskFields(organizationId, billDraft.paymentOrderId, question.trim(), aboutFlag);
       setAskFields(res.fields);
       setSuggestionId(res.suggestionId);
+      setQuestionScope(res.scope);
     } catch {
       setAskFields([]); // no suggestion is fine; the question still sends
+      setQuestionScope('asks_more'); // and nothing may close it but a person
     } finally {
       setSuggesting(false);
     }
@@ -308,6 +323,7 @@ function DraftScreen(props: {
       setAskOf('');
       setAskFields(null);
       setSuggestionId(null);
+      setQuestionScope('asks_more');
       return;
     }
     // Prefill the name being claimed; it is almost always the right answer and
@@ -336,6 +352,7 @@ function DraftScreen(props: {
           aboutFlag: activeResolution.flag,
           highlightFields: askFields,
           suggestionId,
+          questionScope,
         });
         toast.success('Asked. The bill waits on their answer rather than moving on.', 'Question sent');
       } else if (action === 'pay_the_lines') {
@@ -763,6 +780,19 @@ function DraftScreen(props: {
                         </div>
                       ) : null}
 
+                      {/* The flag it was raised from is settled, but the
+                          question asked for more than the flag — so it stays
+                          open, and the person asked is told what has already
+                          been done rather than facing a blank box. */}
+                      {q.stillOpen && q.aboutFlag
+                        && !billDraft.flags.some((f) => f.kind === q.aboutFlag) ? (
+                        <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--text-muted)' }}>
+                          {flagSettledBy(billDraft.workLog, q.aboutFlag)
+                            ?? 'That check has been settled.'}
+                          {' '}Your question asked more than that — write the rest to close it.
+                        </div>
+                      ) : null}
+
                       {openThreadDetail === q.billQuestionId && fields.length > 0 ? (
                         <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                           {fields.map((f) => (
@@ -963,7 +993,7 @@ function DraftScreen(props: {
                                 // Two steps on purpose: suggest, then confirm.
                                 // The asker sees exactly what the other person
                                 // will be pointed at before it is sent.
-                                if (asking && askFields === null) { void suggestFields(resolutionValue); return; }
+                                if (asking && askFields === null) { void suggestFields(resolutionValue, activeResolution.flag); return; }
                                 void runResolution();
                               }}>
                               {resolving ? 'Saving…'
