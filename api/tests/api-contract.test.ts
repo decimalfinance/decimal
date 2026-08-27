@@ -47,3 +47,32 @@ test('typed Decimal client interpolates path, query, body, and auth headers', as
   assert.equal(calls[0].url, 'http://127.0.0.1:3100/organizations/organization-1/payment-orders/order-1/proof?format=json');
   assert.equal((calls[0].init.headers as Record<string, string>).authorization, 'Bearer test-token');
 });
+
+test('an internal failure is told apart from a refusal meant for a person', async () => {
+  // A Prisma validation error's message is the whole query — the arguments, the
+  // row being written, and absolute paths into the source tree — and the error
+  // handler returned it to the browser verbatim, under a 400 saying the CALLER
+  // had erred. It appeared on screen when a generated client had gone stale
+  // against the schema.
+  //
+  // This is the predicate that branch turns on. It is tested directly rather
+  // than through a request: the handler is registered inside createApp, so a
+  // route added afterwards sits behind requireAuth and never reaches it.
+  const { isInternalFailure } = await import('../src/app.js');
+
+  const prismaish = Object.assign(
+    new Error('Invalid `prisma.billQuestion.create()` invocation in /Users/x/api/src/payments/bills.ts:2575'),
+    { name: 'PrismaClientValidationError' },
+  );
+  assert.equal(isInternalFailure(prismaish), true, 'a stale client is not the caller\'s mistake');
+  assert.equal(
+    isInternalFailure(Object.assign(new Error('db down'), { name: 'PrismaClientKnownRequestError' })),
+    true,
+  );
+  assert.equal(isInternalFailure(new TypeError('x is not a function')), true);
+
+  // The deliberate channel must survive untouched: this codebase refuses people
+  // by throwing a sentence written for them, and they still have to receive it.
+  assert.equal(isInternalFailure(new Error('Only a primary admin or admin can do this.')), false);
+  assert.equal(isInternalFailure(new Error('This bill is submitted — its details are settled.')), false);
+});

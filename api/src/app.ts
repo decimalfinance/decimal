@@ -154,7 +154,17 @@ export function createApp() {
       return;
     }
 
-    if (error instanceof Error) {
+    // A plain `throw new Error('Only a primary admin can…')` is this codebase's
+    // way of telling somebody why they were refused, so its message is meant
+    // for them and goes back as a 400.
+    //
+    // An INTERNAL failure is not. A Prisma validation error's message is the
+    // whole query — the arguments, the row being written, and absolute paths
+    // into the source tree — and it was going back to the browser verbatim,
+    // under a 400 that said the caller had done something wrong. So did every
+    // TypeError. The detail belongs in the log, where it already goes, with a
+    // request id to find it by.
+    if (error instanceof Error && !isInternalFailure(error)) {
       logRequestError(error, req, 400, normalizeErrorCode(error.name));
       res.status(400).json({
         error: error.name,
@@ -175,6 +185,21 @@ export function createApp() {
   });
 
   return app;
+}
+
+// Errors that mean the program is wrong, not the caller. None of these were
+// written to be read by a person, and all of them carry internals in the text.
+const INTERNAL_ERROR_NAMES = new Set([
+  'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'EvalError', 'URIError',
+]);
+
+export function isInternalFailure(error: Error): boolean {
+  // Prisma names its errors on the class rather than by convention, and the
+  // one that started this — PrismaClientValidationError, from a generated
+  // client that had gone stale against the schema — put the query and the
+  // written row on screen.
+  if (error.name.startsWith('PrismaClient')) return true;
+  return INTERNAL_ERROR_NAMES.has(error.name);
 }
 
 function isAllowedOrigin(origin: string) {
