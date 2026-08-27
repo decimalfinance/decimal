@@ -393,6 +393,14 @@ function DraftScreen(props: {
     for (const f of [...billDraft.fields, ...billDraft.remitFields]) {
       map[f.key] = { value: f.value == null ? '' : String(f.value), state: f.state };
     }
+    // The vendor name and email keep their VALUE in their own state, because
+    // they are bound to their own inputs — but their confirmed-ness belongs
+    // here with everything else, so confirming one is recorded and survives a
+    // reload like any other field. Without this they were the only fields that
+    // could be asked about and never checked off, which is why the screen grew
+    // a second, weaker marker for them.
+    map['vendor.name'] = { value: billDraft.vendor.name, state: billDraft.vendor.nameState };
+    map['vendor.email'] = { value: billDraft.vendor.email ?? '', state: billDraft.vendor.emailState };
     return map;
   });
   const [lines, setLines] = useState<BillDraftLine[]>(() =>
@@ -1175,29 +1183,27 @@ function DraftScreen(props: {
                     not say they had been asked about. A question naming "the
                     vendor details" pointed at six fields and visibly marked
                     four, missing the two it was most about. */}
-                <div className="rev-field">
-                  <span className="field-label">Vendor name</span>
-                  <input
-                    className={`input${askedFields.has('vendor.name') ? ' is-look' : ''}`}
-                    value={vendorName}
-                    disabled={readOnly}
-                    onFocus={() => setActiveSource(billDraft.vendor.nameSource ?? null)}
-                    onChange={(e) => setVendorName(e.target.value)}
-                  />
-                  <AskedMark asked={askedFields.get('vendor.name')} />
-                </div>
-                <div className="rev-field">
-                  <span className="field-label">Email</span>
-                  <input
-                    className={`input${askedFields.has('vendor.email') ? ' is-look' : ''}`}
-                    value={vendorEmail}
-                    disabled={readOnly}
-                    placeholder="Not on document"
-                    onFocus={() => setActiveSource(billDraft.vendor.emailSource ?? null)}
-                    onChange={(e) => setVendorEmail(e.target.value)}
-                  />
-                  <AskedMark asked={askedFields.get('vendor.email')} />
-                </div>
+                <VendorField
+                  label="Vendor name"
+                  value={vendorName}
+                  state={fields['vendor.name']?.state ?? 'read'}
+                  readOnly={readOnly}
+                  asked={askedFields.get('vendor.name')}
+                  onChange={setVendorName}
+                  onConfirm={() => confirmField('vendor.name')}
+                  onFocusField={() => setActiveSource(billDraft.vendor.nameSource ?? null)}
+                />
+                <VendorField
+                  label="Email"
+                  value={vendorEmail}
+                  state={fields['vendor.email']?.state ?? 'read'}
+                  readOnly={readOnly}
+                  asked={askedFields.get('vendor.email')}
+                  onChange={setVendorEmail}
+                  onConfirm={() => confirmField('vendor.email')}
+                  onFocusField={() => setActiveSource(billDraft.vendor.emailSource ?? null)}
+                  placeholder="Not on document"
+                />
               </div>
               <div className="rev-grid" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr' }}>
                 {billDraft.remitFields.map((f) => (
@@ -1808,18 +1814,62 @@ function AccountPicker(props: {
   );
 }
 
-// "Somebody asked about this", in the one place it is written.
+// The vendor name and email, which hold their value in their own state rather
+// than in billDraft.fields — so they cannot be DraftFields, but must not look
+// like a different kind of thing either. Same markers, same words, same Confirm.
 //
-// DraftField renders its own copy inline; this exists for the two vendor inputs
-// that are not DraftFields. Deliberately no Confirm button: those fields have no
-// confirmed state to move to, and offering a button that settles nothing would
-// be worse than offering none.
-function AskedMark({ asked }: { asked?: { by: string; question: string } }) {
-  if (!asked) return null;
+// The first version of this had no Confirm and its own wording, on the grounds
+// that these fields had nowhere to confirm TO. That was true and it was the
+// wrong conclusion: the fix is to give them somewhere, not to give the person
+// looking at them a second vocabulary to learn.
+function VendorField(props: {
+  label: string;
+  value: string;
+  state: BillDraftField['state'];
+  readOnly: boolean;
+  asked?: { by: string; question: string };
+  onChange: (value: string) => void;
+  onConfirm: () => void;
+  onFocusField: () => void;
+  placeholder?: string;
+}) {
+  const { label, value, state, readOnly, asked, onChange, onConfirm, onFocusField, placeholder } = props;
+  const needsLook = state === 'needs_look';
   return (
-    <span className="ftag is-look" title={asked.question}>
-      Asked by {asked.by.split(' ')[0]}
-    </span>
+    <div className="rev-field">
+      <span className="field-label">{label}</span>
+      <input
+        className={`input${needsLook || asked ? ' is-look' : ''}`}
+        value={value}
+        disabled={readOnly}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={onFocusField}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && (needsLook || asked)) {
+            e.preventDefault();
+            onConfirm();
+          }
+        }}
+      />
+      {state === 'confirmed' ? (
+        <span className="ftag is-confirmed"><Ico.checkSm w={11} /> Confirmed by you</span>
+      ) : asked ? (
+        <span className="ftag is-look" title={asked.question}>
+          Asked ·{' '}
+          {!readOnly ? (
+            <button type="button" className="ftag-btn" onClick={onConfirm}>Confirm</button>
+          ) : null}
+        </span>
+      ) : needsLook ? (
+        <span className="ftag is-look" title="Worth a second look before this is paid">
+          Check ·{' '}
+          {!readOnly ? (
+            <button type="button" className="ftag-btn" onClick={onConfirm}>Confirm</button>
+          ) : null}
+        </span>
+      ) : null}
+    </div>
   );
 }
 

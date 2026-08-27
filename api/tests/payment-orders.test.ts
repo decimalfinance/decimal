@@ -390,7 +390,10 @@ test('bills workbench triages uploads; review confirm sends the bill onward', as
         { description: 'Cloud hosting — compute (July 2026)', quantity: 1, unitPrice: 2650, amount: 2650, category: 'Cloud hosting & infrastructure' },
         { description: 'Object storage — 34 TB', quantity: 1, unitPrice: 2170, amount: 2170, category: 'Cloud hosting & infrastructure' },
       ],
-      confirmedFieldKeys: ['invoiceDate'],
+      // vendor.name rides along: these two hold their value outside the fields
+      // list, and used to have no confirmed state at all — so they were the
+      // only fields somebody could be asked about and never tick off.
+      confirmedFieldKeys: ['invoiceDate', 'vendor.name'],
       noteForApprovers: 'Recurring cloud bill, verified against the document.',
     },
     setup.sessionToken,
@@ -424,6 +427,8 @@ test('bills workbench triages uploads; review confirm sends the bill onward', as
   assert.equal(reviewAfter.verification.noteForApprovers, 'Recurring cloud bill, verified against the document.');
   const confirmedField = reviewAfter.fields.find((f: { key: string }) => f.key === 'invoiceDate');
   assert.equal(confirmedField.state, 'confirmed');
+  assert.equal(reviewAfter.vendor.nameState, 'confirmed', 'and it survives a reload for the vendor too');
+  assert.ok(reviewAfter.vendor.emailState, 'both vendor fields carry a state at all');
 });
 
 test('correcting the figures clears the arithmetic flag it was raised on', async () => {

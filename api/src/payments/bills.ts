@@ -1641,6 +1641,24 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       email: (verifiedFields ? str(verifiedFields.vendorEmail) : null) ?? str(extracted.vendorEmail),
       nameSource: sourceOf('vendorName'),
       emailSource: sourceOf('vendorEmail'),
+      // These two were the only fields in the highlightable vocabulary with no
+      // state of their own. They render outside the fields list, so they could
+      // be asked about and never say so, and could not be confirmed at all —
+      // which left the screen showing two different markers for one idea. Same
+      // helper, same confirmedKeys, so they are ordinary fields now.
+      nameState: fieldState({
+        key: 'vendor.name',
+        value: (verifiedFields ? str(verifiedFields.vendorName) : null)
+          ?? (order.counterparty?.displayName ?? order.counterpartyWallet.label),
+        fieldConfidence,
+        confirmedKeys,
+      }).state,
+      emailState: fieldState({
+        key: 'vendor.email',
+        value: (verifiedFields ? str(verifiedFields.vendorEmail) : null) ?? str(extracted.vendorEmail),
+        fieldConfidence,
+        confirmedKeys,
+      }).state,
       isNew: order.counterpartyWallet.trustState === 'unreviewed',
       trustState: order.counterpartyWallet.trustState,
     },
