@@ -16,6 +16,7 @@ import {
 } from '../api';
 import { Ico } from '../dec/icons';
 import { BillWorkLog } from '../dec/primitives';
+import { BillConversation } from '../dec/BillConversation';
 import { useToast } from '../ui/Toast';
 import { approvalActErrorMessage } from '../lib/app-helpers';
 import { DocumentPane } from './BillDraft';
@@ -451,6 +452,43 @@ export function BillDetailPage() {
                   />
                 ))}
               </div>
+            </section>
+
+            {/* The conversation, on the screen where somebody is deciding
+                whether to approve this.
+
+                It lived only on the draft screen, so the discussion that led to
+                a bill being sent for approval was invisible to the person being
+                asked to approve it — and an approver could not say a word back.
+                Same component as the draft, so the two cannot drift.
+
+                Not split by phase. A thread can be raised in draft and replied
+                to after submission, so cutting the conversation at the boundary
+                would tear threads in half to answer a question the reader can
+                answer by looking; there is a line across the stream instead. */}
+            <section>
+              <div className="sec-head">
+                <div className="sh-titles">
+                  <h2>Conversation</h2>
+                  <p className="sh-desc">
+                    Everything asked and said about this bill, before and since it was sent for approval.
+                  </p>
+                </div>
+              </div>
+              <BillConversation
+                organizationId={organizationId}
+                paymentOrderId={billDraft.paymentOrderId}
+                questions={billDraft.questions}
+                comments={billDraft.comments}
+                fieldLabel={(key) => (
+                  [...billDraft.fields, ...billDraft.remitFields].find((f) => f.key === key)?.label
+                  ?? (key === 'vendor.name' ? 'Vendor name'
+                    : key === 'vendor.email' ? 'Email'
+                    : key === 'lineItems' ? 'Line items' : key)
+                )}
+                submittedAt={billDraft.verification?.confirmedAt ?? null}
+                onChanged={() => { void queryClient.invalidateQueries({ queryKey: ['bill-detail', organizationId, paymentOrderId] }); }}
+              />
             </section>
 
             {/* The same history the clerk saw while preparing it. This used to

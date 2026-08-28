@@ -1053,3 +1053,12 @@
 .dec .bt-more { background: none; border: none; padding: 0; cursor: pointer; text-align: left;
   font-family: var(--font-body); font-size: 12.5px; font-weight: 600; color: var(--accent); }
 .dec .bt-more:hover { text-decoration: underline; }
+
+/* The moment the bill left the clerk and became somebody's to approve. A line
+   ACROSS the conversation rather than a split down it: threads start in draft
+   and get replied to after submission, and cutting the stream there would tear
+   them in half to answer a question the reader can answer by looking. */
+.dec .bt-divider { display: flex; align-items: center; gap: 10px; margin: 4px 0 2px;
+  font-size: 11.5px; color: var(--text-faint); }
+.dec .bt-divider::before, .dec .bt-divider::after {
+  content: ''; height: 1px; background: var(--border); flex: 1; }
