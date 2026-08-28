@@ -515,6 +515,10 @@
 .dec .ftag svg { width: 11px; height: 11px; }
 .dec .ftag.is-read { color: var(--text-muted); font-style: italic; }
 .dec .ftag.is-confirmed { color: var(--success); }
+/* An offer, not a status. The other notes under a field report something that
+   is already true; this one invites an action, so it takes the accent every
+   other clickable thing on the page uses, and italics to sit apart from them. */
+.dec .ftag.is-generate { color: var(--accent); font-style: italic; }
 .dec .ftag.is-look { color: var(--warning); }
 .dec .ftag .ftag-btn { border: none; background: none; padding: 0; font: inherit; color: inherit; font-weight: 600; cursor: pointer; }
 .dec .ftag .ftag-btn:hover { text-decoration: underline; }

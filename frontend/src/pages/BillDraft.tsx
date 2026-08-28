@@ -2109,8 +2109,8 @@ function DraftField(props: {
         // Sits in the same one-note slot as the others, never stacked with them
         // — an empty field has nothing to confirm and nobody waiting on it, so
         // the slot is free.
-        <span className="ftag" title="Some invoices carry no number. Check the document first; if there really isn't one, build the reference this bill will be known by.">
-          <button type="button" className="ftag-btn" onClick={onGenerate}>Generate a reference</button>
+        <span className="ftag is-generate" title="Some invoices carry no number. Check the document first; if there really isn't one, build the reference this bill will be known by.">
+          <button type="button" className="ftag-btn" onClick={onGenerate}>Generate</button>
         </span>
       ) : null}
     </div>
