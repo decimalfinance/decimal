@@ -9,6 +9,7 @@ import {
   refineInvoiceSources,
   parseTesseractTsv,
   mergeWordPages,
+  estimateSkewDeg,
   stripUnmeasuredSources,
   type TextPage,
 } from '../src/payments/doc-provenance.js';
@@ -356,6 +357,63 @@ test('a row number printed just before the description is still included', () =>
   };
   const match = findTextMatches([page], ['Dashboard build-out (3)'])[0]!;
   assert.ok(expandToRow(page, match, null).x0 < 0.31, 'the row number is part of the row');
+});
+
+test('page tilt is measured from whole lines, in pixels', () => {
+  // A line 800px long that falls 25px across its span is tilted about 1.8°,
+  // which is what C1 actually measures.
+  const line = (y: number, drop: number) => [
+    { x: 100, y }, { x: 400, y: y + drop / 2 }, { x: 900, y: y + drop },
+  ];
+  assert.ok(Math.abs(estimateSkewDeg([line(200, 25)]) - 1.79) < 0.1);
+
+  // Median, not mean: one misread line with a stray word at the far edge would
+  // drag an average a long way, and a page has one tilt.
+  assert.ok(Math.abs(estimateSkewDeg([line(200, 25), line(300, 25), line(400, 400)]) - 1.79) < 0.1);
+
+  // A short line cannot pin down an angle — a couple of pixels of noise at each
+  // end is degrees of slope — so it is not allowed to vote.
+  assert.equal(estimateSkewDeg([[{ x: 10, y: 10 }, { x: 30, y: 14 }, { x: 50, y: 18 }]]), 0);
+  assert.equal(estimateSkewDeg([]), 0);
+});
+
+test('on a tilted page the box turns with the text instead of growing to fit it', () => {
+  // A photograph of paper is rarely square to the camera. Upright, a rectangle
+  // round sloping text has to be tall enough to contain the whole slope: on C1,
+  // 28px of fall against 13px of text, so the box comes out three times taller
+  // than the words and reads as a band floating around the line.
+  const words = [];
+  // "Ocean freight inbound APAC", falling steadily left to right.
+  for (const [i, text] of ['Ocean', 'freight', 'inbound', 'APAC'].entries()) {
+    const y = 300 + i * 8;                     // the tilt
+    words.push(word(text, 100 + i * 200, y, 280 + i * 200, y + 14));
+  }
+  const tilted: TextPage = { words, aspect: 0.733, skewDeg: 1.79 };
+  const upright: TextPage = { words, aspect: 0.733, skewDeg: 0 };
+
+  const of = (page: TextPage) => {
+    const invoice = fakeInvoice({ vendorName: 'Ocean freight inbound APAC' });
+    refineInvoiceSources(invoice, [page]);
+    return invoice.fieldSources!.vendorName!;
+  };
+
+  const a = of(tilted);
+  const b = of(upright);
+  assert.ok(a.angle === 1.79, 'the box carries the tilt for the viewer to apply');
+  assert.equal(b.angle, undefined, 'and says nothing when the page is square');
+  assert.ok(a.box[3] < b.box[3], `tilted box is the shorter one: ${a.box[3]} vs ${b.box[3]}`);
+
+  // Turned about its own centre, so the centre must not move.
+  assert.ok(Math.abs((a.box[1] + a.box[3] / 2) - (b.box[1] + b.box[3] / 2)) < 1e-9);
+});
+
+test('a tilt too small to matter is left alone', () => {
+  // C2 measures -0.25°. Correcting that would move every box for no visible
+  // gain, on an estimate that is itself only good to a fraction of a degree.
+  const words = [word('Kepler', 100, 300, 200, 314), word('Legal', 210, 300, 300, 314)];
+  const invoice = fakeInvoice({ vendorName: 'Kepler Legal' });
+  refineInvoiceSources(invoice, [{ words, aspect: 0.718, skewDeg: -0.25 }]);
+  assert.equal(invoice.fieldSources!.vendorName!.angle, undefined);
 });
 
 function fakeInvoice(overrides: Record<string, unknown>) {

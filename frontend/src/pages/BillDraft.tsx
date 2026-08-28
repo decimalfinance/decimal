@@ -2246,6 +2246,16 @@ export function DocumentPane(props: {
                 top: `${activeSource.box[1] * 100}%`,
                 width: `${Math.max(activeSource.box[2] * 100, 1.5)}%`,
                 height: `${Math.max(activeSource.box[3] * 100, 1)}%`,
+                // A photograph of paper is rarely square to the camera. C1 sits
+                // 1.94° off, which over a line item is 28px of fall against 13px
+                // of text — so an upright box has to be three times taller than
+                // the words to contain them, and reads as a band floating
+                // around the line rather than a highlight on it. Turning it
+                // about its own centre puts it back on the text. Absent on a
+                // digital PDF, where the rotation is 0 and this is a no-op.
+                ...(activeSource.angle
+                  ? { transform: `rotate(${activeSource.angle}deg)` }
+                  : null),
               }}
             />
           ) : null}

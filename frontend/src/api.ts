@@ -1445,7 +1445,12 @@ export interface WorkbenchBill {
   questionForYou: { billQuestionId: string; question: string; askedByName: string | null } | null;
 }
 
-export type DocSource = { page: number; box: [number, number, number, number] } | null;
+export type DocSource = {
+  page: number;
+  box: [number, number, number, number];
+  /** Degrees the page's text is tilted, when it is; the highlight turns with it. */
+  angle?: number;
+} | null;
 
 export interface BillDraftField {
   key: string;

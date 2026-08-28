@@ -1395,13 +1395,22 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     : null;
   const fieldSources = isRecord(extracted.fieldSources) ? extracted.fieldSources : null;
   // Sanitize a model-reported source box; null when absent or malformed.
-  const sourceOf = (key: string): { page: number; box: [number, number, number, number] } | null => {
+  const sourceOf = (key: string): { page: number; box: [number, number, number, number]; angle?: number } | null => {
     const raw = fieldSources?.[key];
     if (!isRecord(raw)) return null;
     const page = num(raw.page);
     const box = Array.isArray(raw.box) ? raw.box.map((v) => num(v)) : null;
     if (!page || page < 1 || !box || box.length !== 4 || box.some((v) => v == null || v < 0 || v > 1)) return null;
-    return { page: Math.round(page), box: box as [number, number, number, number] };
+    // How far the page is tilted, when it is. A photograph of paper rarely sits
+    // square, and an upright rectangle over sloping text has to be tall enough
+    // to contain the slope — which reads as a band floating around the words
+    // rather than a highlight on them.
+    const angle = num(raw.angle);
+    return {
+      page: Math.round(page),
+      box: box as [number, number, number, number],
+      ...(angle != null && Math.abs(angle) <= 20 ? { angle } : {}),
+    };
   };
   const confirmedKeys = new Set<string>(
     verification && Array.isArray(verification.confirmedFieldKeys)

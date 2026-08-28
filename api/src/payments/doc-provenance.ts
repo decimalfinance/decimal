@@ -32,13 +32,26 @@ const execFileAsync = promisify(execFile);
 
 // Version of the matcher; stamped wherever refinement ran so the review path
 // knows to re-run after matcher improvements.
-export const PROVENANCE_VERSION = 6; // v6: letterhead address per part; multi-pass OCR
+export const PROVENANCE_VERSION = 7; // v7: rows bounded by their column; tilted pages
 
 export type TextWord = { text: string; x0: number; y0: number; x1: number; y1: number }; // 0-1 fractions, top-left origin
-export type TextPage = { words: TextWord[] };
+export type TextPage = {
+  words: TextWord[];
+  /** Page width / height in pixels. Needed to reason about angles, which live
+   *  in pixel space while every coordinate here is a fraction of a side. */
+  aspect?: number;
+  /** How far the printed text tilts, in degrees, clockwise-positive. Zero for
+   *  a digital PDF; a photograph is rarely quite straight. */
+  skewDeg?: number;
+};
 
 type Box = { page: number; x0: number; y0: number; x1: number; y1: number }; // page is 1-based
-type SourceBox = { page: number; box: [number, number, number, number] };
+type SourceBox = {
+  page: number;
+  box: [number, number, number, number];
+  /** Degrees to rotate the box about its own centre, when the page is tilted. */
+  angle?: number;
+};
 
 // ---------------------------------------------------------------------------
 // Text-layer extraction (PDF only)
@@ -135,7 +148,9 @@ export function parseBboxXml(xml: string): TextPage[] {
         y1: Number(wordMatch[4]) / height,
       });
     }
-    pages.push({ words });
+    // A digital PDF's text layer is not tilted — it has no camera. Geometry is
+    // reported anyway so every TextPage answers the same questions.
+    pages.push({ words, aspect: width / height, skewDeg: 0 });
   }
   return pages;
 }
@@ -274,7 +289,14 @@ async function upscaleForOcr(imgPath: string, dir: string, index: number): Promi
  * place, and pickMatch picks one.
  */
 export function mergeWordPages(pages: TextPage[]): TextPage {
-  return { words: pages.flatMap((page) => page.words) };
+  const skews = pages.map((p) => p.skewDeg ?? 0).filter((d) => d !== 0).sort((a, b) => a - b);
+  return {
+    words: pages.flatMap((page) => page.words),
+    aspect: pages.find((p) => p.aspect)?.aspect,
+    // Each pass measures the same page, so they should agree; the median is
+    // there so one bad pass cannot tilt every box.
+    skewDeg: skews.length ? skews[Math.floor(skews.length / 2)] : 0,
+  };
 }
 
 /**
@@ -290,9 +312,14 @@ export function parseTesseractTsv(tsv: string): TextPage {
   const iWidth = col('width'), iHeight = col('height'), iConf = col('conf'), iText = col('text');
   if (iLevel < 0 || iLeft < 0 || iText < 0) return { words: [] };
 
+  // Tesseract's OWN line segmentation, which is the only grouping that follows
+  // tilted text. Kept for the skew estimate below and nothing else.
+  const iBlock = col('block_num'), iPar = col('par_num'), iLine = col('line_num');
+
   let pageWidth = 0;
   let pageHeight = 0;
-  const rows: Array<{ left: number; top: number; width: number; height: number; conf: number; text: string }> = [];
+  type Row = { left: number; top: number; width: number; height: number; conf: number; text: string; line: string };
+  const rows: Row[] = [];
   for (const line of lines.slice(1)) {
     const cells = line.split('\t');
     if (cells.length <= iText) continue;
@@ -303,23 +330,73 @@ export function parseTesseractTsv(tsv: string): TextPage {
     if (level !== 5) continue; // 5 = word
     const text = cells[iText] ?? '';
     if (!text.trim()) continue;
-    rows.push({ left, top, width, height, conf: Number(cells[iConf]), text });
+    rows.push({
+      left, top, width, height, conf: Number(cells[iConf]), text,
+      line: `${cells[iBlock]}/${cells[iPar]}/${cells[iLine]}`,
+    });
   }
   if (!pageWidth || !pageHeight) return { words: [] };
 
   // Low-confidence tokens are usually paper texture read as punctuation. They
   // cannot help a match and can only drag a box somewhere wrong.
   const MIN_CONF = 30;
-  const words: TextWord[] = rows
-    .filter((r) => !Number.isFinite(r.conf) || r.conf >= MIN_CONF)
-    .map((r) => ({
-      text: r.text,
-      x0: r.left / pageWidth,
-      y0: r.top / pageHeight,
-      x1: (r.left + r.width) / pageWidth,
-      y1: (r.top + r.height) / pageHeight,
-    }));
-  return { words };
+  const kept = rows.filter((r) => !Number.isFinite(r.conf) || r.conf >= MIN_CONF);
+  const words: TextWord[] = kept.map((r) => ({
+    text: r.text,
+    x0: r.left / pageWidth,
+    y0: r.top / pageHeight,
+    x1: (r.left + r.width) / pageWidth,
+    y1: (r.top + r.height) / pageHeight,
+  }));
+
+  // Skew, from the word centres of each tesseract line, in PIXELS — an angle is
+  // a fact about pixels, and these coordinates are about to become fractions of
+  // two different page dimensions.
+  const byLine = new Map<string, Array<{ x: number; y: number }>>();
+  for (const r of kept) {
+    const at = byLine.get(r.line) ?? [];
+    at.push({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+    byLine.set(r.line, at);
+  }
+  return {
+    words,
+    aspect: pageWidth / pageHeight,
+    skewDeg: estimateSkewDeg([...byLine.values()], pageWidth * 0.08),
+  };
+}
+
+// Below this the tilt is not worth correcting, and a small misestimate would
+// move boxes for no reason.
+const MIN_SKEW_DEG = 0.5;
+
+/**
+ * How far the printed text tilts, from the lines tesseract itself found.
+ *
+ * The grouping has to be tesseract's own (block/paragraph/line), not ours by
+ * vertical proximity. On tilted text a line drifts further vertically than a
+ * word is tall, so proximity grouping chops it into level fragments and every
+ * slope it measures comes out near zero — which is exactly what a first attempt
+ * at this reported for C1: 0.15°, for a page that is tilted 1.94°.
+ *
+ * Median rather than mean: one misread line with a stray word at the far edge
+ * would drag an average a long way, and a page has one tilt.
+ */
+export function estimateSkewDeg(lines: Array<Array<{ x: number; y: number }>>, minSpanPx = 100): number {
+  const angles: number[] = [];
+  for (const words of lines) {
+    if (words.length < 3) continue;
+    const sorted = [...words].sort((a, b) => a.x - b.x);
+    const first = sorted[0]!;
+    const last = sorted[sorted.length - 1]!;
+    const dx = last.x - first.x;
+    // A short line cannot pin down an angle: a couple of pixels of noise at
+    // each end is degrees of slope.
+    if (dx < minSpanPx) continue;
+    angles.push(Math.atan2(last.y - first.y, dx) * 180 / Math.PI);
+  }
+  if (angles.length === 0) return 0;
+  angles.sort((a, b) => a - b);
+  return angles[Math.floor(angles.length / 2)]!;
 }
 
 export type WordSource = 'text-layer' | 'ocr' | 'none';
@@ -631,12 +708,52 @@ export function expandToRow(page: TextPage, match: Box, amount?: number | null):
 
 const PAD = 0.006;
 
-function toSource(b: Box): SourceBox {
-  const x0 = Math.max(0, b.x0 - PAD);
-  const y0 = Math.max(0, b.y0 - PAD);
-  const x1 = Math.min(1, b.x1 + PAD);
-  const y1 = Math.min(1, b.y1 + PAD);
-  return { page: b.page, box: [x0, y0, x1 - x0, y1 - y0] };
+/**
+ * The box the viewer draws — tightened and tilted to sit on tilted text.
+ *
+ * Every box here is an axis-aligned rectangle around a run of words, which is
+ * right for a PDF and wrong for a photograph. C1 is tilted 1.94°: across a line
+ * item spanning some 790px, the text falls 28px from its start to its end while
+ * standing only about 13px tall, so the rectangle enclosing it comes out three
+ * times taller than the words and reads as a band floating around them.
+ *
+ * The height it should have is recoverable from the tilt, without needing the
+ * individual words back:
+ *
+ *     enclosing height  =  text height  +  width x tan(tilt)
+ *
+ * Subtract the drift and what remains is the height of the text itself. Keep
+ * the centre, hand the viewer the angle, and let it rotate the box about that
+ * centre onto the words.
+ *
+ * The multiplication by `aspect` is the part that is easy to get wrong: an
+ * angle is a fact about pixels, while x and y here are fractions of two
+ * different page dimensions. A drift of `width x tan(t)` pixels is
+ * `width x aspect x tan(t)` in fractions of the height.
+ */
+function toSource(b: Box, page?: TextPage): SourceBox {
+  let { y0, y1 } = b;
+  const skew = page?.skewDeg ?? 0;
+  const tilted = Math.abs(skew) >= MIN_SKEW_DEG;
+  if (tilted) {
+    const drift = (b.x1 - b.x0) * (page?.aspect ?? 1) * Math.tan(Math.abs(skew) * Math.PI / 180);
+    const height = y1 - y0;
+    // Never collapse it to nothing: the tilt is a median over the page and an
+    // individual line can sit straighter than the page as a whole.
+    const tight = Math.max(height - drift, height * 0.3);
+    const cy = (y0 + y1) / 2;
+    y0 = cy - tight / 2;
+    y1 = cy + tight / 2;
+  }
+  const px0 = Math.max(0, b.x0 - PAD);
+  const py0 = Math.max(0, y0 - PAD);
+  const px1 = Math.min(1, b.x1 + PAD);
+  const py1 = Math.min(1, y1 + PAD);
+  return {
+    page: b.page,
+    box: [px0, py0, px1 - px0, py1 - py0],
+    ...(tilted ? { angle: skew } : {}),
+  };
 }
 
 export function dateVariants(iso: string): string[] {
@@ -684,7 +801,7 @@ export function refineInvoiceSources(invoice: ExtractedInvoice, pages: TextPage[
   const setIfFound = (key: string, matches: Box[], prefer: 'first' | 'bottom' = 'first') => {
     const chosen = pickMatch(matches, hint(key), prefer);
     if (chosen) {
-      sources[key] = toSource(chosen);
+      sources[key] = toSource(chosen, pages[chosen.page - 1]);
       measured.add(key);
       refined += 1;
     }
@@ -726,7 +843,7 @@ export function refineInvoiceSources(invoice: ExtractedInvoice, pages: TextPage[
       if (!value) continue;
       const chosen = pickMatch(findTextMatches(pages, [value]), whole ?? hint(`vendorAddress.${part}`), 'first');
       if (chosen) {
-        sources[`vendorAddress.${part}`] = toSource(chosen);
+        sources[`vendorAddress.${part}`] = toSource(chosen, pages[chosen.page - 1]);
         measured.add(`vendorAddress.${part}`);
         refined += 1;
       }
@@ -754,7 +871,7 @@ export function refineInvoiceSources(invoice: ExtractedInvoice, pages: TextPage[
       const matches = findTextMatches(pages, [value]);
       const chosen = pickMatch(matches, sources.remitTo ?? hint(key), 'first');
       if (chosen) {
-        sources[key] = toSource(chosen);
+        sources[key] = toSource(chosen, pages[chosen.page - 1]);
         measured.add(key);
         refined += 1;
       }
@@ -795,7 +912,7 @@ export function refineInvoiceSources(invoice: ExtractedInvoice, pages: TextPage[
     }
     const chosen = pickMatch(rows.map((r) => r.row), item.source, 'first');
     if (chosen) {
-      item.source = toSource(chosen);
+      item.source = toSource(chosen, pages[chosen.page - 1]);
       refined += 1;
     }
   }
