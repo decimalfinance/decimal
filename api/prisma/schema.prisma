@@ -915,6 +915,22 @@ model TransferRequestNote {
 /// A question asked of a colleague about a bill. The record of WHO gets asked
 /// what, and whether they answer, is the point — it is what eventually lets the
 /// product suggest a recipient rather than presenting an empty dropdown.
+/// Saying something about a bill without putting it on hold. A question names a
+/// person and parks the bill; a comment does neither.
+model BillComment {
+  billCommentId       String   @id @default(dbgenerated("gen_random_uuid()")) @map("bill_comment_id") @db.Uuid
+  organizationId      String   @map("organization_id") @db.Uuid
+  paymentOrderId      String   @map("payment_order_id") @db.Uuid
+  authorUserId        String   @map("author_user_id") @db.Uuid
+  body                String
+  /// The question this replies to, when it is one.
+  inReplyToQuestionId String?  @map("in_reply_to_question_id") @db.Uuid
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([paymentOrderId, createdAt])
+  @@map("bill_comments")
+}
+
 model BillQuestion {
   billQuestionId String    @id @default(uuid()) @map("bill_question_id") @db.Uuid
   organizationId String    @map("organization_id") @db.Uuid

@@ -1548,6 +1548,14 @@ export interface BillDraft {
   workLog: BillWorkLogEntry[];
   /** Every field a question may point at — the server's closed vocabulary. */
   highlightableFields: string[];
+  comments: Array<{
+    billCommentId: string;
+    body: string;
+    authorUserId: string;
+    authorName: string;
+    inReplyToQuestionId: string | null;
+    at: string;
+  }>;
   questions: Array<{
     billQuestionId: string; question: string; aboutFlag: string | null;
     askedByUserId: string; askedByName: string;
@@ -1706,6 +1714,14 @@ export const billsApi = {
   },
   // The flag goes IN so the scope can come out: judging whether a question asks
   // for more than its check covers is impossible without knowing the check.
+  // Anyone who can see the bill may say something about it. Unlike asking, this
+  // parks nothing — which is the whole difference between the two.
+  comment(organizationId: string, paymentOrderId: string, body: { body: string; inReplyToQuestionId?: string | null }) {
+    return request<{ billCommentId: string }>(
+      `/organizations/${organizationId}/bills/${paymentOrderId}/comments`,
+      { method: 'POST', body: JSON.stringify(body) },
+    );
+  },
   suggestAskFields(organizationId: string, paymentOrderId: string, question: string, aboutFlag?: string | null) {
     return request<{ fields: string[]; scope: 'covered_by_flag' | 'asks_more'; suggestionId: string | null }>(
       `/organizations/${organizationId}/bills/${paymentOrderId}/ask/suggest-fields`,

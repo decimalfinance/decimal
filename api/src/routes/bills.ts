@@ -220,6 +220,30 @@ billsRouter.get('/organizations/:organizationId/bills/:paymentOrderId/ask-candid
   });
 }));
 
+// Comment on a bill. No role gate and no hold: anyone who can see the bill can
+// say something about it, and saying something stops nothing. Asking is the only
+// act that parks a payable, and it stays that way.
+const commentSchema = z.object({
+  body: z.string().trim().min(1).max(2000),
+  inReplyToQuestionId: z.string().uuid().nullable().optional(),
+});
+
+billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/comments', asyncRoute(async (req, res) => {
+  const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
+  const input = commentSchema.parse(req.body);
+  const { commentOnBill } = await import('../payments/bills.js');
+  const created = await commentOnBill({
+    organizationId,
+    paymentOrderId,
+    authorUserId: req.auth!.userId,
+    body: input.body,
+    inReplyToQuestionId: input.inReplyToQuestionId ?? null,
+  });
+  res.status(201).json({ billCommentId: created.billCommentId });
+}));
+
 // Ask a colleague about a bill. No role gate on purpose: asking is never the
 // dangerous act, and it must never be the thing an approver cannot do.
 const askSchema = z.object({

@@ -168,3 +168,19 @@ blocks, dialog-foot) and copy its skeleton line by line.**
   rows (`.pi-name` + small mono `.pi-num` beneath — the Ramp account-picker pattern).
   Canonical implementation: AccountPicker in InvoiceReview.tsx. Native `<select>` stays fine
   for short static lists (sort orders, roles).
+
+## Additions 2026-08-28 (bill thread as a chat)
+
+- **Conversation on a record**: `.bthread` > `.bt-msg` > `.bt-av` (28px initials circle,
+  hue derived from the name so a face keeps its colour) + `.bt-col` > `.bt-who` (name,
+  relationship, `.pill pill-min` state, `.bt-when`) + `.bt-bubble`. Variants: bare bubble
+  for a comment, `.bt-bubble.is-question` (bordered) for a message that carries an
+  obligation, `+ .is-waiting` (amber) while it is owed. Quoted context in `.bt-quote`,
+  supporting lines in `.bt-note`, row of buttons in `.bt-actions`, input row in
+  `.bt-composer`.
+- **The rule it encodes**: two message kinds that differ in POWER must differ in SHAPE.
+  A question parks the bill and names a person; a comment does neither. Rendering them
+  alike would have made "waiting on Zara" read as chatter, which is the one thing that
+  must stay legible.
+- **Timestamps in a conversation**: time of day for today, `27 Aug` before that. A full
+  date on every line is noise when they all happened this afternoon.

@@ -1622,6 +1622,10 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     // only after confirm until now — so the phase in which somebody is
     // actually changing things was the one phase with no record on screen.
     workLog: await billWorkLog(organizationId, order.paymentOrderId),
+    // The other half of the conversation. Rendered as one thread with the
+    // questions, which is what makes the bill's own screen the place the work
+    // is discussed rather than the place it is recorded after the fact.
+    comments: await listBillComments(organizationId, order.paymentOrderId),
     questions: (await listBillQuestions(organizationId, order.paymentOrderId)).map((q) => ({
       ...q,
       // Whose move it is, decided here rather than by the client comparing ids.
@@ -2298,6 +2302,75 @@ export async function addOrganizationTradingName(args: {
  * asker believes they have raised something and the person asked never learns
  * they were asked. This is what puts the thread on the bill for both of them.
  */
+/**
+ * Leave a comment on a bill.
+ *
+ * Open to anybody who can see the bill, and deliberately powerless: it parks
+ * nothing and settles nothing. That is the difference from a question, and the
+ * difference is the point — "waiting on Zara" only means something while the
+ * only way to create that state is to ask.
+ *
+ * A comment may reply to a question, which is how somebody who was not asked
+ * can help answer it without being able to close what was put to somebody else.
+ */
+export async function commentOnBill(args: {
+  organizationId: string;
+  paymentOrderId: string;
+  authorUserId: string;
+  body: string;
+  inReplyToQuestionId?: string | null;
+}) {
+  const body = args.body.trim();
+  if (body.length < 1) throw new Error('Write something first.');
+
+  if (args.inReplyToQuestionId) {
+    const question = await prisma.billQuestion.findFirst({
+      where: {
+        billQuestionId: args.inReplyToQuestionId,
+        organizationId: args.organizationId,
+        paymentOrderId: args.paymentOrderId,
+      },
+      select: { billQuestionId: true },
+    });
+    // A reply pointing at a question on a different bill would read as part of
+    // this conversation while belonging to another one.
+    if (!question) throw new Error('That question is not on this bill.');
+  }
+
+  return prisma.billComment.create({
+    data: {
+      organizationId: args.organizationId,
+      paymentOrderId: args.paymentOrderId,
+      authorUserId: args.authorUserId,
+      body,
+      inReplyToQuestionId: args.inReplyToQuestionId ?? null,
+    },
+  });
+}
+
+/** Comments on a bill, oldest first — the thread reads downward like a chat. */
+export async function listBillComments(organizationId: string, paymentOrderId: string) {
+  const rows = await prisma.billComment.findMany({
+    where: { organizationId, paymentOrderId },
+    orderBy: { createdAt: 'asc' },
+    take: 200,
+  });
+  if (rows.length === 0) return [];
+  const users = await prisma.user.findMany({
+    where: { userId: { in: [...new Set(rows.map((r) => r.authorUserId))] } },
+    select: { userId: true, displayName: true },
+  });
+  const nameOf = new Map(users.map((u) => [u.userId, u.displayName]));
+  return rows.map((r) => ({
+    billCommentId: r.billCommentId,
+    body: r.body,
+    authorUserId: r.authorUserId,
+    authorName: nameOf.get(r.authorUserId) ?? 'Someone',
+    inReplyToQuestionId: r.inReplyToQuestionId,
+    at: r.createdAt.toISOString(),
+  }));
+}
+
 export async function listBillQuestions(organizationId: string, paymentOrderId: string) {
   const rows = await prisma.billQuestion.findMany({
     where: { organizationId, paymentOrderId },

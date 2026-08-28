@@ -1907,6 +1907,81 @@ test('checking the fields somebody asked about answers them', async () => {
   assert.match(settled.answer, /checked the fields/);
 });
 
+test('anyone can comment on a question they were not asked, and it settles nothing', async () => {
+  // The split this rests on: helping is open, releasing the bill is not. Omar
+  // knows the vendor and can say so on Zara's question; only Zara can answer it,
+  // because answering is what un-parks a payable.
+  const { orgId, owner } = await makeOrg();
+  const clerk = await register('chat-clerk');
+  const bystander = await register('chat-bystander');
+  await prisma.organizationMembership.createMany({
+    data: [
+      { organizationId: orgId, userId: clerk.userId, role: 'member', status: 'active' },
+      { organizationId: orgId, userId: bystander.userId, role: 'member', status: 'active' },
+    ],
+  });
+
+  const bill = await uploadAndConfirm(orgId, owner.token, {
+    vendor: 'Ironclad Security', amount: 6200, invoiceNo: 'IRN-897', billTo: 'Northwind Trading Co.',
+  });
+
+  const asked = await post(
+    `/organizations/${orgId}/bills/${bill.billId}/ask`,
+    { askedOfUserId: owner.userId, question: 'is this ours?', aboutFlag: 'addressed_elsewhere' },
+    clerk.token,
+  );
+
+  // Somebody who was not asked replies. It lands, and it changes nothing.
+  await post(
+    `/organizations/${orgId}/bills/${bill.billId}/comments`,
+    { body: 'They invoice us as Halcyon — I set that vendor up.', inReplyToQuestionId: asked.billQuestionId },
+    bystander.token,
+  );
+
+  const after = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, clerk.token);
+  assert.equal(after.comments.length, 1);
+  assert.equal(after.comments[0].inReplyToQuestionId, asked.billQuestionId, 'attached to the question');
+  assert.ok(after.comments[0].authorName, 'and says who said it');
+
+  const q = after.questions.find((x: { billQuestionId: string }) => x.billQuestionId === asked.billQuestionId);
+  assert.equal(q.stillOpen, true, 'the hold is untouched — a comment is not an answer');
+
+  // And the bystander still cannot answer it.
+  await assert.rejects(
+    post(
+      `/organizations/${orgId}/bills/${bill.billId}/questions/${asked.billQuestionId}/answer`,
+      { answer: 'yes it is ours', outcome: 'answered' },
+      bystander.token,
+    ),
+    /person who was asked/,
+  );
+});
+
+test('a comment cannot be attached to a question on another bill', async () => {
+  // A reply pointing at a question on a different bill would read as part of
+  // this conversation while belonging to another one.
+  const { orgId, owner } = await makeOrg();
+  const one = await uploadAndConfirm(orgId, owner.token, {
+    vendor: 'Ironclad Security', amount: 100, invoiceNo: 'IRN-898', billTo: 'Halcyon Labs, Inc.',
+  });
+  const two = await uploadAndConfirm(orgId, owner.token, {
+    vendor: 'Ironclad Security', amount: 200, invoiceNo: 'IRN-899', billTo: 'Halcyon Labs, Inc.',
+  });
+  const asked = await post(
+    `/organizations/${orgId}/bills/${one.billId}/ask`,
+    { askedOfUserId: owner.userId, question: 'about this one' },
+    owner.token,
+  );
+  await assert.rejects(
+    post(
+      `/organizations/${orgId}/bills/${two.billId}/comments`,
+      { body: 'wrong bill', inReplyToQuestionId: asked.billQuestionId },
+      owner.token,
+    ),
+    /not on this bill/,
+  );
+});
+
 test('a viewer cannot be asked, because asking parks the bill', async () => {
   // A viewer is an auditor's seat: read everything, change nothing. Asking is
   // not a message — it moves the bill to request_info and it stops there until

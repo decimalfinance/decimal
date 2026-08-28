@@ -17,6 +17,7 @@ import {
   type BillDraftField,
   type BillDraftLine,
   type CategoryOption,
+  type AskCandidate,
   type BillWorkLogEntry,
   type ConfirmBillBody,
   type DocSource,
@@ -113,6 +114,120 @@ export function BillDraftPage() {
       toast={toast}
     />
   );
+}
+
+// Answering a question, which is the one act in this thread that releases the
+// bill. Lifted out of the stream because it is the biggest thing in it and was
+// burying the conversation it sits inside.
+function AnswerComposer(props: {
+  question: BillDraft['questions'][number];
+  namedFields: string[];
+  fieldLabel: (key: string) => string;
+  answerText: string;
+  setAnswerText: (v: string) => void;
+  settled: string[];
+  setSettled: (v: string[]) => void;
+  forwardTo: string;
+  setForwardTo: (v: string) => void;
+  candidates: AskCandidate[];
+  answering: boolean;
+  onSend: (billQuestionId: string, outcome: 'answered' | 'partial' | 'handed_back' | 'forwarded', openFields: string[]) => void;
+  onCancel: () => void;
+}) {
+  const {
+    question: q, namedFields, fieldLabel, answerText, setAnswerText, settled, setSettled,
+    forwardTo, setForwardTo, candidates, answering, onSend, onCancel,
+  } = props;
+  const empty = answerText.trim().length < 1;
+  return (
+    <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <textarea
+        className="input"
+        autoFocus
+        rows={2}
+        style={{ resize: 'vertical', minHeight: 56, lineHeight: 1.5 }}
+        placeholder={`Answer ${q.askedByName.split(' ')[0]}…`}
+        value={answerText}
+        onChange={(e) => setAnswerText(e.target.value)}
+      />
+
+      {namedFields.length > 0 ? (
+        <span style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 12.5, color: 'var(--text-muted)' }}>
+          {namedFields.map((f) => (
+            <label key={f} style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+              <input
+                type="checkbox"
+                checked={settled.includes(f)}
+                onChange={() => setSettled(settled.includes(f) ? settled.filter((k) => k !== f) : [...settled, f])}
+              />
+              {fieldLabel(f)}
+            </label>
+          ))}
+        </span>
+      ) : null}
+
+      <span className="bt-actions">
+        <select className="input" value={forwardTo} onChange={(e) => setForwardTo(e.target.value)}
+          style={{ flex: '0 0 190px', height: 32 }}>
+          <option value="">Pass to…</option>
+          {candidates.filter((c) => c.userId !== q.askedByUserId).map((c) => (
+            <option key={c.userId} value={c.userId}>{c.name}</option>
+          ))}
+        </select>
+        <span style={{ flex: 1 }} />
+        <button type="button" className="btn btn-ghost btn-sm" disabled={answering} onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="button" className="btn btn-secondary btn-sm" disabled={answering || empty}
+          title="You could not answer it — it goes back to them, still open."
+          onClick={() => onSend(q.billQuestionId, 'handed_back', q.openFields)}>
+          Can't answer
+        </button>
+        {forwardTo ? (
+          <button type="button" className="btn btn-secondary btn-sm" disabled={answering || empty}
+            onClick={() => onSend(q.billQuestionId, 'forwarded', q.openFields)}>
+            Pass it on
+          </button>
+        ) : null}
+        {/* Partial only when they named fields and this settles some but not
+            all of them — otherwise it is just an answer, and offering both would
+            make somebody choose between synonyms. */}
+        {namedFields.length > 0 && settled.length > 0 && settled.length < namedFields.length ? (
+          <button type="button" className="btn btn-primary btn-sm" disabled={answering || empty}
+            onClick={() => onSend(q.billQuestionId, 'partial', q.openFields)}>
+            {answering ? 'Sending…' : 'Answer what I can'}
+          </button>
+        ) : (
+          <button type="button" className="btn btn-primary btn-sm" disabled={answering || empty}
+            onClick={() => onSend(q.billQuestionId, 'answered', q.openFields)}>
+            {answering ? 'Sending…' : 'Send answer'}
+          </button>
+        )}
+      </span>
+    </div>
+  );
+}
+
+// A stable colour per person, so the same face keeps the same circle down the
+// thread. Hue only — saturation and lightness are fixed so nothing can come out
+// unreadable against white text.
+function avatarTone(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i += 1) hash = (hash * 31 + name.charCodeAt(i)) % 360;
+  return `hsl(${hash}, 42%, 45%)`;
+}
+
+// "2:14pm" for today, "27 Aug" before that. A conversation wants the time of
+// day; a date on every line is noise when they all happened this afternoon.
+function shortWhen(iso: string): string {
+  const at = new Date(iso);
+  const today = new Date();
+  const sameDay = at.getFullYear() === today.getFullYear()
+    && at.getMonth() === today.getMonth()
+    && at.getDate() === today.getDate();
+  return sameDay
+    ? at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+    : at.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 }
 
 // Who settled a check, in the words the work log already used. The thread and
@@ -226,6 +341,53 @@ function DraftScreen(props: {
     () => billDraft.questions.some((q) => q.youWereAsked && q.stillOpen),
   );
   const openQuestions = billDraft.questions.filter((q) => q.stillOpen).length;
+
+  // Comments: anyone may leave one, and leaving one holds nothing up.
+  const [commentText, setCommentText] = useState('');
+  const [replyTo, setReplyTo] = useState<string | null>(null);
+  const [commenting, setCommenting] = useState(false);
+
+  const sendComment = async () => {
+    if (commentText.trim().length < 1 || commenting) return;
+    setCommenting(true);
+    try {
+      await billsApi.comment(organizationId, billDraft.paymentOrderId, {
+        body: commentText.trim(),
+        inReplyToQuestionId: replyTo,
+      });
+      await queryClient.invalidateQueries({ queryKey: ['bill-billDraft', organizationId, billDraft.paymentOrderId] });
+      setCommentText('');
+      setReplyTo(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Try again.', 'Could not send that');
+    } finally {
+      setCommenting(false);
+    }
+  };
+
+  // One stream, oldest first. Questions arrive newest-first from the API
+  // because every other surface wants them that way; a conversation reads
+  // downward, so it is ordered here rather than changing what everything else
+  // gets.
+  const thread = useMemo(() => {
+    type Entry =
+      | { kind: 'question'; id: string; at: string; question: BillDraft['questions'][number] }
+      | { kind: 'comment'; id: string; at: string; body: string; authorName: string; inReplyToQuestionId: string | null };
+    const entries: Entry[] = [
+      ...billDraft.questions.map((q) => ({
+        kind: 'question' as const, id: q.billQuestionId, at: q.askedAt, question: q,
+      })),
+      ...billDraft.comments.map((c) => ({
+        kind: 'comment' as const,
+        id: c.billCommentId,
+        at: c.at,
+        body: c.body,
+        authorName: c.authorName,
+        inReplyToQuestionId: c.inReplyToQuestionId,
+      })),
+    ];
+    return entries.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+  }, [billDraft.questions, billDraft.comments]);
 
   const [answerFor, setAnswerFor] = useState<string | null>(null);
   const [answerText, setAnswerText] = useState('');
@@ -749,196 +911,190 @@ function DraftScreen(props: {
                   </button>
                 </div>
 
-                {/* A conversation, not a stack of alert boxes. Each exchange is
-                    one line you can scan — who asked whom, and whether it is
-                    settled — with the detail folded away underneath. */}
-                {(showThread ? billDraft.questions : []).map((q) => {
-                  // Named for what it is. It used to be `settled`, which
-                  // shadowed the state array of the same name — invisible until
-                  // something inside this block needed the array.
-                  const isAnswered = q.outcome === 'answered';
-                  // Named `namedFields`, not `fields`: the outer `fields` is the field-state
-                  // map, and shadowing it meant nothing in this block could
-                  // ask whether a field had been confirmed.
-                  const namedFields = q.openFields.length ? q.openFields : q.highlightFields;
-                  return (
-                    <div
-                      key={q.billQuestionId}
-                      style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}
-                      // Hovering an exchange lights the fields it is about, so
-                      // "which bits does this concern" needs no reading.
-                      onMouseEnter={() => setHoveredQuestion(q.billQuestionId)}
-                      onMouseLeave={() => setHoveredQuestion(null)}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                        <strong>{q.askedByName}</strong>
-                        <span style={{ color: 'var(--text-muted)' }}>asked</span>
-                        <strong>{q.askedOfName}</strong>
-                        <span className={`pill pill-min ${isAnswered ? 'pill-success' : 'pill-warning'}`}>
-                          <span className="dot" />
-                          {isAnswered ? `${q.askedOfName.split(' ')[0]} confirmed these details`
-                            : q.outcome === 'partial' ? 'Partly answered'
-                            : q.outcome === 'forwarded' ? 'Passed on'
-                            : q.outcome === 'handed_back' ? `${q.askedOfName.split(' ')[0]} could not answer`
-                            : `Waiting on ${q.askedOfName.split(' ')[0]}`}
-                        </span>
-                        <span style={{ flex: 1 }} />
-                        {namedFields.length > 0 ? (
-                          <button type="button" className="btn btn-ghost btn-sm"
-                            onClick={() => setOpenThreadDetail(openThreadDetail === q.billQuestionId ? null : q.billQuestionId)}>
-                            {namedFields.length} field{namedFields.length === 1 ? '' : 's'}
-                            <Ico.chevDown w={12} style={{ marginLeft: 4, transform: openThreadDetail === q.billQuestionId ? 'rotate(180deg)' : undefined }} />
-                          </button>
-                        ) : null}
-                      </div>
+                {/* One conversation, in order, the way people already expect
+                    a conversation to look. Two kinds of message share it: a
+                    QUESTION, which names somebody and parks the bill until they
+                    answer, and a COMMENT, which parks nothing.
 
-                      <div style={{ marginTop: 4 }}>“{q.question}”</div>
-                      {q.answer ? (
-                        <div style={{ marginTop: 2, color: 'var(--text-muted)' }}>
-                          <strong>{q.askedOfName.split(' ')[0]}:</strong> “{q.answer}”
-                        </div>
-                      ) : null}
+                    They are different shapes on purpose. The whole value of a
+                    question is that "waiting on Zara" is TRUE — a hold with a
+                    name on it — and if it looked like chatter that would stop
+                    being visible. So a question is bordered and amber while it
+                    is owed; a comment is a quiet bubble.
 
-                      {/* Ticking the fields IS the answer to "please check
-                          these" — but a tick lives on this screen until the
-                          bill is saved, so somebody can check all six, see
-                          every one go green, and find the question still
-                          waiting. Say what is left to do rather than leaving
-                          them to guess that a save is what sends it. */}
-                      {(() => {
-                        if (!q.stillOpen || q.openFields.length === 0) return null;
-                        const checked = q.openFields.filter((f) => fields[f]?.state === 'confirmed');
-                        if (checked.length === 0) return null;
+                    Anyone may reply to a question; only the person asked may
+                    answer it. That is the same split, drawn once more: helping
+                    is open, releasing the bill is not. */}
+                {showThread ? (
+                  <div className="bthread">
+                    {thread.map((entry) => {
+                      if (entry.kind === 'comment') {
+                        const repliedTo = entry.inReplyToQuestionId
+                          ? billDraft.questions.find((q) => q.billQuestionId === entry.inReplyToQuestionId)
+                          : null;
                         return (
-                          <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--text-muted)' }}>
-                            {checked.length === q.openFields.length
-                              ? `You have checked all ${q.openFields.length} fields. Save the bill and that goes back as your answer.`
-                              : `You have checked ${checked.length} of ${q.openFields.length}. Saving sends what you have done so far.`}
+                          <div key={entry.id} className="bt-msg">
+                            <span className="bt-av" style={{ background: avatarTone(entry.authorName) }}>
+                              {initialsOf(entry.authorName)}
+                            </span>
+                            <div className="bt-col">
+                              <div className="bt-who">
+                                <strong>{entry.authorName}</strong>
+                                <span className="bt-when">{shortWhen(entry.at)}</span>
+                              </div>
+                              <div className="bt-bubble">
+                                {repliedTo ? (
+                                  <div className="bt-quote" title={repliedTo.question}>
+                                    Replying to {repliedTo.askedByName.split(' ')[0]}: “{repliedTo.question}”
+                                  </div>
+                                ) : null}
+                                {entry.body}
+                              </div>
+                            </div>
                           </div>
                         );
-                      })()}
+                      }
 
-                      {/* The flag it was raised from is settled, but the
-                          question asked for more than the flag — so it stays
-                          open, and the person asked is told what has already
-                          been done rather than facing a blank box. */}
-                      {q.stillOpen && q.aboutFlag
-                        && !billDraft.flags.some((f) => f.kind === q.aboutFlag) ? (
-                        <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--text-muted)' }}>
-                          {flagSettledBy(billDraft.workLog, q.aboutFlag)
-                            ?? 'That check has been settled.'}
-                          {' '}Your question asked more than that — write the rest to close it.
-                        </div>
-                      ) : null}
-
-                      {openThreadDetail === q.billQuestionId && namedFields.length > 0 ? (
-                        <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                          {namedFields.map((f) => (
-                            <span key={f} className="pill pill-min pill-neutral">{fieldLabel(f)}</span>
-                          ))}
-                        </div>
-                      ) : null}
-
-                      {/* Answering. This branch rendered null and nothing took
-                          the button's place, so pressing Answer made the button
-                          vanish and that was the whole interaction — which means
-                          no question anywhere in the product could be answered,
-                          and every question ever asked parked its bill for good.
-                          The handler and all of its state were already here. */}
-                      {q.youWereAsked && answerFor === q.billQuestionId ? (
-                        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                          <textarea
-                            className="input"
-                            autoFocus
-                            rows={2}
-                            style={{ resize: 'vertical', minHeight: 56, lineHeight: 1.5 }}
-                            placeholder={`Answer ${q.askedByName.split(' ')[0]}…`}
-                            value={answerText}
-                            onChange={(e) => setAnswerText(e.target.value)}
-                          />
-
-                          {/* Which of the fields they named this settles. Only
-                              offered when the answer is partial, because that
-                              is the only case where the difference matters. */}
-                          {namedFields.length > 0 ? (
-                            <span style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 12.5, color: 'var(--text-muted)' }}>
-                              {namedFields.map((f) => (
-                                <label key={f} style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
-                                  <input
-                                    type="checkbox"
-                                    checked={settled.includes(f)}
-                                    onChange={() => setSettled(settled.includes(f)
-                                      ? settled.filter((k) => k !== f)
-                                      : [...settled, f])}
-                                  />
-                                  {fieldLabel(f)}
-                                </label>
-                              ))}
-                            </span>
-                          ) : null}
-
-                          {/* Passing it on needs somebody to pass it to, so the
-                              picker appears with the action rather than after. */}
-                          <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                            <select
-                              className="input"
-                              value={forwardTo}
-                              onChange={(e) => setForwardTo(e.target.value)}
-                              style={{ flex: '0 0 200px', height: 32 }}
-                            >
-                              <option value="">Pass to…</option>
-                              {(askCandidates.data?.candidates ?? [])
-                                .filter((c) => c.userId !== q.askedByUserId)
-                                .map((c) => (
-                                  <option key={c.userId} value={c.userId}>{c.name}</option>
-                                ))}
-                            </select>
-                            <span style={{ flex: 1 }} />
-                            <button type="button" className="btn btn-ghost btn-sm" disabled={answering}
-                              onClick={() => { setAnswerFor(null); setAnswerText(''); setSettled([]); setForwardTo(''); }}>
-                              Cancel
-                            </button>
-                            <button type="button" className="btn btn-secondary btn-sm"
-                              disabled={answering || answerText.trim().length < 1}
-                              title="You could not answer it — it goes back to them, still open."
-                              onClick={() => void sendAnswer(q.billQuestionId, 'handed_back', q.openFields)}>
-                              Can't answer
-                            </button>
-                            {forwardTo ? (
-                              <button type="button" className="btn btn-secondary btn-sm"
-                                disabled={answering || answerText.trim().length < 1}
-                                onClick={() => void sendAnswer(q.billQuestionId, 'forwarded', q.openFields)}>
-                                Pass it on
-                              </button>
-                            ) : null}
-                            {/* Partial only when they named fields and this
-                                settles some but not all of them — otherwise it
-                                is just an answer, and offering both would make
-                                somebody choose between synonyms. */}
-                            {namedFields.length > 0 && settled.length > 0 && settled.length < namedFields.length ? (
-                              <button type="button" className="btn btn-primary btn-sm"
-                                disabled={answering || answerText.trim().length < 1}
-                                onClick={() => void sendAnswer(q.billQuestionId, 'partial', q.openFields)}>
-                                {answering ? 'Sending…' : 'Answer what I can'}
-                              </button>
-                            ) : (
-                              <button type="button" className="btn btn-primary btn-sm"
-                                disabled={answering || answerText.trim().length < 1}
-                                onClick={() => void sendAnswer(q.billQuestionId, 'answered', q.openFields)}>
-                                {answering ? 'Sending…' : 'Send answer'}
-                              </button>
-                            )}
+                      const q = entry.question;
+                      const isAnswered = q.outcome === 'answered';
+                      const namedFields = q.openFields.length ? q.openFields : q.highlightFields;
+                      return (
+                        <div
+                          key={entry.id}
+                          className="bt-msg"
+                          onMouseEnter={() => setHoveredQuestion(q.billQuestionId)}
+                          onMouseLeave={() => setHoveredQuestion(null)}
+                        >
+                          <span className="bt-av" style={{ background: avatarTone(q.askedByName) }}>
+                            {initialsOf(q.askedByName)}
                           </span>
+                          <div className="bt-col">
+                            <div className="bt-who">
+                              <strong>{q.askedByName}</strong>
+                              <span>asked</span>
+                              <strong>{q.askedOfName}</strong>
+                              <span className={`pill pill-min ${isAnswered ? 'pill-success' : 'pill-warning'}`}>
+                                <span className="dot" />
+                                {isAnswered ? `${q.askedOfName.split(' ')[0]} confirmed these details`
+                                  : q.outcome === 'partial' ? 'Partly answered'
+                                  : q.outcome === 'forwarded' ? 'Passed on'
+                                  : q.outcome === 'handed_back' ? `${q.askedOfName.split(' ')[0]} could not answer`
+                                  : `Waiting on ${q.askedOfName.split(' ')[0]}`}
+                              </span>
+                              <span className="bt-when">{shortWhen(q.askedAt)}</span>
+                            </div>
+
+                            <div className={`bt-bubble is-question${q.stillOpen ? ' is-waiting' : ''}`}>
+                              {q.question}
+                              {namedFields.length > 0 ? (
+                                <div className="bt-fields">
+                                  {namedFields.map((f) => (
+                                    <span key={f} className="pill pill-min pill-neutral">{fieldLabel(f)}</span>
+                                  ))}
+                                </div>
+                              ) : null}
+                            </div>
+
+                            {q.answer ? (
+                              <div className="bt-note">
+                                <strong>{q.askedOfName.split(' ')[0]}:</strong> “{q.answer}”
+                              </div>
+                            ) : null}
+
+                            {/* Ticking the fields IS the answer to "please check
+                                these" — but a tick lives on this screen until
+                                the bill is saved, so somebody can check all six,
+                                watch every one go green, and find the question
+                                still waiting. */}
+                            {(() => {
+                              if (!q.stillOpen || q.openFields.length === 0) return null;
+                              const checked = q.openFields.filter((f) => fields[f]?.state === 'confirmed');
+                              if (checked.length === 0) return null;
+                              return (
+                                <div className="bt-note">
+                                  {checked.length === q.openFields.length
+                                    ? `You have checked all ${q.openFields.length} fields. Save the bill and that goes back as your answer.`
+                                    : `You have checked ${checked.length} of ${q.openFields.length}. Saving sends what you have done so far.`}
+                                </div>
+                              );
+                            })()}
+
+                            {/* The flag it came from is settled, but the question
+                                asked more than the flag — so it stays open, and
+                                the person asked is told what has already been
+                                done rather than facing a blank box. */}
+                            {q.stillOpen && q.aboutFlag
+                              && !billDraft.flags.some((f) => f.kind === q.aboutFlag) ? (
+                              <div className="bt-note">
+                                {flagSettledBy(billDraft.workLog, q.aboutFlag) ?? 'That check has been settled.'}
+                                {' '}Your question asked more than that — write the rest to close it.
+                              </div>
+                            ) : null}
+
+                            {q.youWereAsked && answerFor === q.billQuestionId ? (
+                              <AnswerComposer
+                                question={q}
+                                namedFields={namedFields}
+                                fieldLabel={fieldLabel}
+                                answerText={answerText}
+                                setAnswerText={setAnswerText}
+                                settled={settled}
+                                setSettled={setSettled}
+                                forwardTo={forwardTo}
+                                setForwardTo={setForwardTo}
+                                candidates={askCandidates.data?.candidates ?? []}
+                                answering={answering}
+                                onSend={sendAnswer}
+                                onCancel={() => { setAnswerFor(null); setAnswerText(''); setSettled([]); setForwardTo(''); }}
+                              />
+                            ) : (
+                              <div className="bt-actions">
+                                {q.youWereAsked ? (
+                                  <button type="button" className="btn btn-secondary btn-sm"
+                                    onClick={() => { setAnswerFor(q.billQuestionId); setAnswerText(''); setSettled([]); setForwardTo(''); }}>
+                                    Answer
+                                  </button>
+                                ) : null}
+                                {/* Open to everybody, including the asker. Helping
+                                    is not the same as releasing the bill. */}
+                                {q.stillOpen && !readOnly ? (
+                                  <button type="button" className="btn btn-ghost btn-sm"
+                                    onClick={() => { setReplyTo(q.billQuestionId); setCommentText(''); }}>
+                                    Reply
+                                  </button>
+                                ) : null}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      ) : q.youWereAsked ? (
-                        <button type="button" className="btn btn-secondary btn-sm" style={{ marginTop: 8 }}
-                          onClick={() => { setAnswerFor(q.billQuestionId); setAnswerText(''); setSettled([]); setForwardTo(''); }}>
-                          Answer
+                      );
+                    })}
+
+                    {!readOnly ? (
+                      <div className="bt-composer">
+                        <input
+                          className="input"
+                          value={commentText}
+                          placeholder={replyTo ? 'Reply…' : 'Say something about this bill…'}
+                          onChange={(e) => setCommentText(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') void sendComment(); }}
+                          style={{ height: 32 }}
+                        />
+                        {replyTo ? (
+                          <button type="button" className="btn btn-ghost btn-sm"
+                            onClick={() => { setReplyTo(null); setCommentText(''); }}>
+                            Cancel reply
+                          </button>
+                        ) : null}
+                        <button type="button" className="btn btn-secondary btn-sm"
+                          disabled={commenting || commentText.trim().length < 1}
+                          onClick={() => void sendComment()}>
+                          {commenting ? 'Sending…' : 'Send'}
                         </button>
-                      ) : null}
-                    </div>
-                  );
-                })}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             ) : null}
 
