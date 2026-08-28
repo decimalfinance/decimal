@@ -711,6 +711,12 @@ function DraftScreen(props: {
     ? 'Add the total due before sending.'
     : realLines.length === 0
       ? 'Add at least one line item before sending.'
+      // A bill has to be identifiable before anybody approves it: it is what the
+      // vendor is told the payment settles, and the first thing duplicate
+      // detection looks at. Where the document prints no number, the reference
+      // is the bill clerk's to choose — the box is right here.
+      : !(fields.invoiceNumber?.value ?? '').trim()
+        ? 'Add an invoice number before sending — if the document has none, enter the reference you want this bill known by.'
       : (() => {
           const noAmount = realLines.findIndex((l) => l.amount == null);
           if (noAmount >= 0) return `Add an amount to line ${noAmount + 1} before sending.`;

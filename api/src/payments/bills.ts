@@ -2142,6 +2142,29 @@ export async function submitBillForApproval(input: SubmitBillInput) {
     throw new Error('Total must be a positive amount.');
   }
 
+  // A bill needs a reference before anybody approves it.
+  //
+  // This was left out of the tier-1 gate on the grounds that it could be filled
+  // later, which confused "the document does not carry one" with "we do not
+  // need one". A bill has to be identifiable: it is what a vendor is told the
+  // payment settles, what the ledger carries, and the key duplicate detection
+  // looks at first — without it that check falls back to amount-and-date, which
+  // will happily pass two real invoices from a vendor who bills the same
+  // retainer monthly.
+  //
+  // Blocking is safe here precisely because the field is editable and sitting
+  // on the screen. Where a document genuinely prints no number — which happens,
+  // and is what D5 is — the bill clerk enters the reference the organisation
+  // will use. That is the same thing an AP team does with a numberless invoice
+  // today, and it is a decision a person should make rather than one we should
+  // silently skip.
+  const confirmedInvoiceNumber = (input.fields.invoiceNumber ?? '').trim();
+  if (!confirmedInvoiceNumber) {
+    throw new Error(
+      'Add an invoice number before sending for approval. If the document does not show one, enter the reference you want this bill known by.',
+    );
+  }
+
   // Tier-1 gate: approval routes on amounts — a plan compiled without them is
   // a wrong plan, silently. Categories are DIFFERENT (GL synthesis: coding
   // uncertainty never blocks a bill): an uncoded line parks in the catch-all

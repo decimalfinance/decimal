@@ -653,6 +653,87 @@ test('refined highlight boxes survive the rest of the request that computed them
   assert.equal(coding.categoryHint, 'Freight', 'the GL-coding block still owns its own key');
 });
 
+test('a bill with no reference cannot be sent for approval', async () => {
+  // D5 prints no invoice number, and it reached approval on a stray keystroke
+  // with nothing to call it. A bill has to be identifiable before anybody
+  // approves it: the number is what the vendor is told the payment settles,
+  // what the ledger carries, and the first thing duplicate detection looks at.
+  // Without it that check falls back to amount-and-date, which will happily
+  // pass two real invoices from a vendor billing the same retainer monthly.
+  //
+  // It is a gate rather than a warning because the remedy is right there — the
+  // field is on the screen and editable. Where a document genuinely has no
+  // number the bill clerk enters the reference the organisation will use, which
+  // is what an AP team does with a numberless invoice anyway.
+  const setup = await createPaymentOrderSetup();
+  const vendorWallet = Keypair.generate().publicKey.toBase58();
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [{
+        counterparty: 'Vantage Print Co',
+        amount: 1500, currency: 'USD', reference: null,
+        due_date: '2026-09-14', wallet_address: vendorWallet, notes: null,
+        source_invoice: {
+          vendorName: 'Vantage Print Co', vendorAddress: null, vendorEmail: null,
+          amount: 1500, currency: 'USD',
+          invoiceNumber: null,                     // the document prints none
+          invoiceDate: '2026-08-15', dueDate: '2026-09-14', terms: 'Net 30',
+          poNumber: null, earlyPayDiscount: null, subtotal: 1500, taxAmount: 0,
+          billToName: null, remitTo: { street: null, city: null, state: null, zip: null },
+          paymentDetails: null, walletAddress: vendorWallet,
+          lineItems: [{ description: 'Brochure printing', quantity: 1, unitPrice: 1500, total: 1500 }],
+          categoryHint: 'Printing', confidence: { vendor: 1, amount: 1, overall: 1 },
+        },
+      }],
+      modelLatencyMs: 3, pageCount: 1,
+    }),
+  });
+
+  const orgId = setup.organization.organizationId;
+  const upload = await post(
+    `/organizations/${orgId}/invoices/upload`,
+    {
+      filename: 'D5-no-invoice-number.pdf',
+      mimeType: 'application/pdf',
+      dataBase64: Buffer.from('%PDF-1.4 unnumbered').toString('base64'),
+      sourceTreasuryWalletId: setup.sourceTreasuryWallet.treasuryWalletId,
+      autoAdvance: false,
+    },
+    setup.sessionToken,
+  );
+  const billId = upload.paymentOrders[0].paymentOrder.paymentOrderId;
+
+  const body = {
+    fields: {
+      vendorName: 'Vantage Print Co',
+      invoiceNumber: null,
+      invoiceDate: '2026-08-15',
+      dueDate: '2026-09-14',
+      terms: 'Net 30',
+      currency: 'USD',
+      total: 1500,
+      taxAmount: 0,
+      remitTo: { street: null, city: null, state: null, zip: null },
+    },
+    lines: [{ description: 'Brochure printing', quantity: 1, unitPrice: 1500, amount: 1500, category: 'Printing' }],
+    confirmedFieldKeys: [] as string[],
+    noteForApprovers: null as string | null,
+  };
+  await assert.rejects(
+    post(`/organizations/${orgId}/bills/${billId}/confirm`, body, setup.sessionToken),
+    /invoice number/i,
+    'a bill nobody can name does not go to an approver',
+  );
+
+  // And the way out is the obvious one: name it.
+  const sent = await post(
+    `/organizations/${orgId}/bills/${billId}/confirm`,
+    { ...body, fields: { ...body.fields, invoiceNumber: 'VANTAGE-2026-08-15' } },
+    setup.sessionToken,
+  );
+  assert.equal(sent.detail.state, 'submitted');
+});
+
 test('a field the model could not read is marked for a look, in its own words', async () => {
   // The whole "check this field" mechanism keyed off a self-reported 0-1
   // confidence, and never fired: every C-series document came back at 0.98,
