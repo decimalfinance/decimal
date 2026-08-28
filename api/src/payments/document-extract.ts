@@ -152,10 +152,7 @@ Rules copied from the AP intake agent:
       -> remitTo: { street: "400 Congress Ave", city: "Austin", state: "TX", zip: "78701" }.
   A bank name is never a street. If the line under "Remit to" has no street number and no city, remitTo is all null.
 - paymentDetails: how the document says to pay — method ("ACH", "Wire", "Check", "Crypto"), bank name, ONLY the last 4 digits of any account number, and the routing number if printed. Never invent any of these.
-- fieldSources / line item source: WHERE each value appears on its page, so the UI can highlight it. page is 1-based. box is [x, y, w, h] as fractions of the page's width/height (0.0-1.0), where x,y is the TOP-LEFT corner of a tight rectangle around the printed value. Include an entry only for fields you actually located; omit or use null when unsure. For a line item, box the whole row.
 - walletAddress: only emit a Solana wallet address if it is printed on the invoice itself, in a "Remit to", "Pay to wallet", "Solana address", or similar field. Never guess.
-- Solana wallet addresses are base58 public keys. Valid wallet characters exclude 0, O, I, and lowercase l.
-- OCR commonly confuses 1/l/I and 0/O. If any wallet character is uncertain, return walletAddress: null and lower confidence.overall instead of guessing or "repairing" the address.
 - One invoice = one invoice object regardless of how many line items it has.
 - Multiple separate invoices in one upload = one invoice object per invoice.
 
@@ -166,6 +163,39 @@ Vendor-side example:
 
 Correct vendorName: "Acme Corp".
 Wrong vendorName: "Decimal Labs Inc.".`;
+
+/**
+ * Rules that only make sense against a picture.
+ *
+ * The prompt above is almost entirely about what the FIELDS MEAN — vendor
+ * versus buyer, when a document is a statement, that a bank name is never a
+ * street. None of that changes with the medium, so it is shared.
+ *
+ * These do change. Telling a model to watch for OCR confusing 1 for l is sound
+ * advice about a photograph and nonsense about exact characters, and asking for
+ * pixel coordinates it cannot possibly know invites it to invent some.
+ */
+const VISION_ONLY_RULES = `
+- fieldSources / line item source: WHERE each value appears on its page, so the UI can highlight it. page is 1-based. box is [x, y, w, h] as fractions of the page's width/height (0.0-1.0), where x,y is the TOP-LEFT corner of a tight rectangle around the printed value. Include an entry only for fields you actually located; omit or use null when unsure. For a line item, box the whole row.
+- Solana wallet addresses are base58 public keys. Valid wallet characters exclude 0, O, I, and lowercase l.
+- OCR commonly confuses 1/l/I and 0/O. If any wallet character is uncertain, return walletAddress: null and lower confidence.overall instead of guessing or "repairing" the address.
+- fieldStatus "unreadable" means the value is on the page and you could not make it out: blur, glare, a stamp across it, handwriting.`;
+
+/**
+ * Rules for reading the document's own text.
+ *
+ * The characters are exact, which changes two things. "Unreadable" stops
+ * meaning blurred and starts meaning absent — a model told it is looking at a
+ * photograph will describe glare that is not there. And position is unknowable
+ * from text alone, so it must not be guessed: the boxes come from the word
+ * coordinates pdftotext already gave us, which are the real ones.
+ */
+const TEXT_ONLY_RULES = `
+- You are reading the document's OWN TEXT, extracted from the PDF with its column spacing preserved. These are its actual characters, not a transcription of a picture. Nothing here is blurred, and nothing is obscured.
+- Because of that: if a value is not in this text, it is NOT ON THE DOCUMENT. The answer is null with status "absent", never a guess at what was probably there.
+- fieldStatus "unreadable" should be rare here and never means blurry. Use "ambiguous" when the text supports two readings, "conflicting" when it says two different things, "partial" when a value is visibly cut off.
+- fieldSources: return an empty array. You cannot know where a value sits on the page from text alone, and the real coordinates are already held elsewhere. Do not invent boxes.
+- Column alignment carries meaning: on a line-item row the description, quantity, unit price and amount are separated by runs of spaces.`;
 
 /**
  * The schema the API enforces, as opposed to the one we hope for.
@@ -807,22 +837,18 @@ async function extractFromText(args: {
     {
       type: 'text',
       text:
-        `${USER_PROMPT_PREFIX}\n\n` +
-        // Said explicitly, because it changes what "unreadable" means. Against a
-        // photograph it means blurred or obscured; against extracted text it
-        // means the characters are not there. A model told it is looking at a
-        // picture will describe glare it cannot see.
-        `Below is the text of the document, extracted from the PDF itself with its column ` +
-        `spacing preserved. These are the document's own characters, not a transcription — ` +
-        `if a value is not in this text, it is not on the document, and the right answer is ` +
-        `null with status "absent" rather than a guess.\n\n` +
-        `Column alignment carries meaning: on a line-item row the description, quantity, ` +
-        `unit price and amount are separated by runs of spaces.\n\n` +
-        `=== DOCUMENT TEXT (${args.filename}) ===\n${args.layoutText}`,
+        // What this input IS lives in TEXT_ONLY_RULES on the system message
+        // now, with the rest of the reading instructions, rather than being
+        // half here and half there.
+        `${USER_PROMPT_PREFIX}\n\n=== DOCUMENT TEXT (${args.filename}) ===\n${args.layoutText}`,
     },
   ];
 
-  const attempt = await runExtractionLlm({ userContent, model: config.openAiTextModel });
+  const attempt = await runExtractionLlm({
+    userContent,
+    model: config.openAiTextModel,
+    mediumRules: TEXT_ONLY_RULES,
+  });
 
   // No wallet retry on this path. That retry exists for a vision failure — 1/l/I
   // and 0/O confused by OCR — and the characters here are exact. A base58
@@ -862,6 +888,12 @@ async function runExtractionLlm(args: {
   retryCorrection?: string;
   /** The text path may run on a different (cheaper, non-vision) model. */
   model?: string | null;
+  /**
+   * The rules that depend on what the model is looking at. Defaults to the
+   * vision set, so the wallet retry — which re-enters this function — keeps the
+   * instructions it was written for.
+   */
+  mediumRules?: string;
 }): Promise<{
   invoices: z.infer<typeof ExtractedInvoiceSchema>[];
   latencyMs: number;
@@ -870,7 +902,7 @@ async function runExtractionLlm(args: {
   usage: { promptTokens: number; completionTokens: number };
 }> {
   const messages: Array<{ role: string; content: ExtractionUserContent | string }> = [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: `${SYSTEM_PROMPT}\n${args.mediumRules ?? VISION_ONLY_RULES}` },
     { role: 'user', content: args.userContent },
   ];
   if (args.retryCorrection) {
