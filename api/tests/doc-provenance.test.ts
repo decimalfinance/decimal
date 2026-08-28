@@ -491,7 +491,10 @@ test('a tilted box is as tall as the text in it, not as tall as the slope', () =
 
   assert.ok(box.angle === 1.79, 'and still carries the tilt');
   // Snug: a highlight round one line of text, not a band containing its fall.
-  assert.ok(box.box[3] < H * 2.2, `box ${box.box[3]} should be under ${H * 2.2}`);
+  // Loose on purpose — this guards the SHAPE, not a chosen size. The drift
+  // below is what a band would have to be, and the exact multiple is a look
+  // that can be tuned without breaking a test that was never about it.
+  assert.ok(box.box[3] < H * 2.6, `box ${box.box[3]} should be under ${H * 2.6}`);
   assert.ok(box.box[3] > H, `but not thinner than the glyphs: ${box.box[3]}`);
 
   // The drift across this row is far larger than the text is tall, which is the

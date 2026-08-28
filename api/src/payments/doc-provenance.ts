@@ -32,7 +32,7 @@ const execFileAsync = promisify(execFile);
 
 // Version of the matcher; stamped wherever refinement ran so the review path
 // knows to re-run after matcher improvements.
-export const PROVENANCE_VERSION = 9; // v9: tilted box height measured from the words
+export const PROVENANCE_VERSION = 10; // v10: tilted boxes a fifth taller
 
 export type TextWord = { text: string; x0: number; y0: number; x1: number; y1: number }; // 0-1 fractions, top-left origin
 export type TextPage = {
@@ -737,6 +737,18 @@ export function expandToRow(page: TextPage, match: Box, amount?: number | null):
 
 const PAD = 0.006;
 
+// A tilted box is built from the measured height of its own text, so these are
+// in multiples of that: the box is 2 x 0.72 tall with 0.30 of margin each side,
+// about twice the height of the line it sits on.
+//
+// The first version of this came out at 1.7x and read as cropped — a line of
+// text has ascenders and descenders that a median word height does not account
+// for, and a rotated box that only just contains them looks like it is cutting
+// into them. Both numbers moved together so the box grew by a fifth in total
+// rather than growing its middle and keeping its margins.
+const TILTED_HALF_HEIGHT = 0.72;
+const TILTED_PAD = 0.30;
+
 /**
  * The box the viewer draws — tightened and tilted to sit on tilted text.
  *
@@ -786,12 +798,12 @@ function toSource(b: Box, page?: TextPage): SourceBox {
       // for the whole run.
       const line = heights[Math.floor(heights.length / 2)]!;
       const cy = (y0 + y1) / 2;
-      y0 = cy - line * 0.6;
-      y1 = cy + line * 0.6;
+      y0 = cy - line * TILTED_HALF_HEIGHT;
+      y1 = cy + line * TILTED_HALF_HEIGHT;
       // And a thinner margin, or the padding alone would be most of the box: a
       // constant that looks snug round a whole upright cell is half again the
       // height of a single tilted line of text.
-      padY = Math.min(PAD, line * 0.25);
+      padY = Math.min(PAD, line * TILTED_PAD);
     }
   }
   const px0 = Math.max(0, b.x0 - PAD);
