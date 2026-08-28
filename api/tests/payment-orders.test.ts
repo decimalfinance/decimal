@@ -6,6 +6,7 @@ import { AddressInfo } from 'node:net';
 import { Keypair } from '@solana/web3.js';
 import { createApp } from '../src/app.js';
 import { prisma } from '../src/infra/prisma.js';
+import { PROVENANCE_VERSION } from '../src/payments/doc-provenance.js';
 import { requireTestDatabase } from './helpers/require-test-database.js';
 import { setInvoiceIntakeRuntimeForTests } from '../src/payments/invoice-intake.js';
 
@@ -568,6 +569,88 @@ test('a provider outage is not a fact about the invoice', async () => {
   assert.equal(board.bills.length, 0, 'no junk draft');
   assert.equal(board.pending.length, 1, 'it stayed a failed row');
   assert.equal(board.pending[0].status, 'failed');
+});
+
+test('refined highlight boxes survive the rest of the request that computed them', async () => {
+  // metadataJson is one json column and getBillDraft writes it TWICE in a
+  // single request: once to cache the recomputed provenance boxes, and again
+  // further down to refresh the GL-coding suggestion. The second write was a
+  // read-modify-write from a `metadata` captured before the first, so it put
+  // the pre-refinement value straight back.
+  //
+  // Nothing looked broken from either end. The screen showed current boxes,
+  // because they are returned in memory; only the stored copy was reverted. So
+  // the work was redone on every open forever, and the version stamp lied —
+  // it read as "the improvement has not run" when the truth was "it runs every
+  // time and is thrown away".
+  const setup = await createPaymentOrderSetup();
+  const vendorWallet = Keypair.generate().publicKey.toBase58();
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [{
+        counterparty: 'Harbor Freight Ltd',
+        amount: 1200,
+        currency: 'USD',
+        reference: 'HF-7001',
+        due_date: '2026-09-10',
+        wallet_address: vendorWallet,
+        notes: null,
+        source_invoice: {
+          vendorName: 'Harbor Freight Ltd', vendorAddress: null, vendorEmail: null,
+          amount: 1200, currency: 'USD', invoiceNumber: 'HF-7001',
+          invoiceDate: '2026-08-11', dueDate: '2026-09-10', terms: 'Net 30',
+          poNumber: null, earlyPayDiscount: null, subtotal: 1200, taxAmount: 0,
+          billToName: null, remitTo: { street: null, city: null, state: null, zip: null },
+          paymentDetails: null, walletAddress: vendorWallet,
+          lineItems: [{ description: 'Container handling', quantity: 1, unitPrice: 1200, total: 1200 }],
+          categoryHint: 'Freight', confidence: { vendor: 1, amount: 1, overall: 1 },
+        },
+      }],
+      modelLatencyMs: 3,
+      pageCount: 1,
+    }),
+  });
+  const orgId = setup.organization.organizationId;
+  const upload = await post(
+    `/organizations/${orgId}/invoices/upload`,
+    {
+      filename: 'provenance.pdf',
+      mimeType: 'application/pdf',
+      dataBase64: Buffer.from('%PDF-1.4 nothing readable').toString('base64'),
+      sourceTreasuryWalletId: setup.sourceTreasuryWallet.treasuryWalletId,
+      autoAdvance: false,
+    },
+    setup.sessionToken,
+  );
+  const billId = upload.paymentOrders[0].paymentOrder.paymentOrderId;
+
+  // Force the second writer to run: it fires whenever the stored coding has no
+  // `lines` key, which is exactly the shape that made this reproducible.
+  const before = await prisma.paymentOrder.findUniqueOrThrow({ where: { paymentOrderId: billId } });
+  const md = before.metadataJson as Record<string, unknown>;
+  await prisma.paymentOrder.update({
+    where: { paymentOrderId: billId },
+    data: {
+      metadataJson: {
+        ...md,
+        agent: { ...(md.agent as Record<string, unknown>), provenanceVersion: 1 },
+        ocrCoding: { categoryHint: 'Freight', rationale: null, suggestions: [] },
+      } as never,
+    },
+  });
+
+  await get(`/organizations/${orgId}/bills/${billId}/draft`, setup.sessionToken);
+
+  const after = await prisma.paymentOrder.findUniqueOrThrow({ where: { paymentOrderId: billId } });
+  const agent = (after.metadataJson as Record<string, unknown>).agent as Record<string, unknown>;
+  assert.equal(agent.provenanceVersion, PROVENANCE_VERSION,
+    'the recomputed boxes are still there after the request that computed them');
+
+  // And the other writer's data is still there — this is not a fix that works
+  // by dropping the second write. (Whether the refresh itself lands is a
+  // separate matter: it needs a model, which the test suite does not have.)
+  const coding = (after.metadataJson as Record<string, unknown>).ocrCoding as Record<string, unknown>;
+  assert.equal(coding.categoryHint, 'Freight', 'the GL-coding block still owns its own key');
 });
 
 test('a field the model could not read is marked for a look, in its own words', async () => {

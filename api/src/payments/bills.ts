@@ -39,20 +39,20 @@ async function ensureProvenance(order: {
   paymentOrderId: string;
   invoiceDocumentId: string | null;
   metadataJson: unknown;
-}): Promise<Record<string, unknown> | null> {
+}): Promise<{ extracted: Record<string, unknown> | null; metadata: Record<string, unknown> }> {
   const metadata = isRecord(order.metadataJson) ? order.metadataJson : {};
   const agent = isRecord(metadata.agent) ? metadata.agent : null;
   const extracted = agent && isRecord(agent.extracted) ? agent.extracted : null;
-  if (!agent || !extracted) return extracted;
-  if (agent.provenanceVersion === PROVENANCE_VERSION) return extracted;
-  if (!order.invoiceDocumentId) return extracted;
+  if (!agent || !extracted) return { extracted, metadata };
+  if (agent.provenanceVersion === PROVENANCE_VERSION) return { extracted, metadata };
+  if (!order.invoiceDocumentId) return { extracted, metadata };
 
   try {
     const doc = await prisma.invoiceDocument.findUnique({
       where: { invoiceDocumentId: order.invoiceDocumentId },
       select: { data: true, filename: true, mimeType: true },
     });
-    if (!doc) return extracted;
+    if (!doc) return { extracted, metadata };
 
     const fileBytes = Buffer.from(doc.data);
     const pages = await extractPdfTextLayer({
@@ -91,22 +91,24 @@ async function ensureProvenance(order: {
     refreshed.ungrounded = ungroundedFields(refreshed, pages);
     // Stamp even when there's no text layer (scan/image) so we don't re-run
     // pdftotext on every open.
+    // Handed back, not just written. Everything after this in getBillDraft
+    // works from `metadata`, and one of those things writes the whole column
+    // again — with whatever it was handed. See the note at the call site.
+    const updated = {
+      ...metadata,
+      agent: { ...agent, extracted: refreshed, provenanceVersion: PROVENANCE_VERSION },
+    };
     await prisma.paymentOrder.update({
       where: { paymentOrderId: order.paymentOrderId },
-      data: {
-        metadataJson: {
-          ...metadata,
-          agent: { ...agent, extracted: refreshed, provenanceVersion: PROVENANCE_VERSION },
-        } as Prisma.InputJsonValue,
-      },
+      data: { metadataJson: updated as Prisma.InputJsonValue },
     });
-    return refreshed;
+    return { extracted: refreshed, metadata: updated };
   } catch (error) {
     logger.warn('bill_draft.provenance_backfill_failed', {
       paymentOrderId: order.paymentOrderId,
       ...(error instanceof Error ? { message: error.message } : {}),
     });
-    return extracted;
+    return { extracted, metadata };
   }
 }
 
@@ -1407,11 +1409,26 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     viewerCanEdit = Boolean(access?.capabilities.includes('bills.edit'));
   }
 
-  const metadata = isRecord(order.metadataJson) ? order.metadataJson : {};
-  const agent = isRecord(metadata.agent) ? metadata.agent : {};
   // Compute (and cache) exact document boxes on demand, so highlighting works
   // for every bill regardless of when it was read.
-  const extracted = (await ensureProvenance(order)) ?? (isRecord(agent.extracted) ? agent.extracted : {});
+  //
+  // The metadata it hands back MUST be the one used from here on. metadataJson
+  // is a single json column, and further down this function the GL-coding
+  // refresh writes the whole of it again — read-modify-write, from whatever
+  // `metadata` holds. Reading it before this call and writing it after meant
+  // that second write put the pre-refinement metadata straight back: the boxes
+  // were recomputed correctly, returned to the screen, saved, and then undone
+  // a few milliseconds later by an unrelated write in the same request.
+  //
+  // Nothing looked broken from either end. The screen showed current boxes
+  // because they are returned in memory; the stored version never moved, so the
+  // work was redone on every single open, forever. It also made the version
+  // stamp lie — I read v8 as "the fix has not run" when the truth was "the fix
+  // runs every time and is thrown away".
+  const provenance = await ensureProvenance(order);
+  const metadata = provenance.metadata;
+  const agent = isRecord(metadata.agent) ? metadata.agent : {};
+  const extracted = provenance.extracted ?? (isRecord(agent.extracted) ? agent.extracted : {});
   const verification = isRecord(metadata.verification) ? metadata.verification : null;
   const triggeredRules = Array.isArray(agent.triggeredRules) ? (agent.triggeredRules as Array<Record<string, unknown>>) : [];
   const fieldConfidence = isRecord(extracted.fieldConfidence) ? extracted.fieldConfidence : null;
