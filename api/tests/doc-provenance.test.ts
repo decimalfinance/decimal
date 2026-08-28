@@ -7,6 +7,8 @@ import {
   dateVariants,
   expandToRow,
   refineInvoiceSources,
+  parseTesseractTsv,
+  stripUnmeasuredSources,
   type TextPage,
 } from '../src/payments/doc-provenance.js';
 
@@ -124,13 +126,100 @@ test('expandToRow unions only words on the same text line', () => {
   assert.ok(row.y0 >= 0.39 && row.y1 <= 0.43, 'does not swallow neighboring rows');
 });
 
-test('a value with no text-layer match keeps the model box', () => {
+test('a value that is not on the page gets no box at all', () => {
+  // This test used to assert the opposite — that an unmatched field KEEPS the
+  // model's box — and that assertion was the bug, written down and guarded.
+  //
+  // The premise was that the model's box is a rough guess worth falling back
+  // to. It is not a guess, it is an invention: C1 and C2, two unrelated
+  // invoices, both came back with vendorName at exactly [0.05, 0.05, 0.4, 0.07]
+  // and their header fields on a flat 0.03 ladder. Falling back to it means the
+  // UI points confidently at blank paper and says the number came from there.
+  //
+  // Half-measured was the worst state: on C1 eight fields were relocated
+  // correctly and three kept fabricated rectangles, indistinguishable in the
+  // viewer from the eight real ones. So a box is shown only if it was measured.
   const invoice = fakeInvoice({
     poNumber: 'PO-DOES-NOT-EXIST',
     fieldSources: { poNumber: { page: 1, box: [0.5, 0.5, 0.1, 0.02] } },
   });
   refineInvoiceSources(invoice, [PAGE]);
-  assert.deepEqual(invoice.fieldSources?.poNumber, { page: 1, box: [0.5, 0.5, 0.1, 0.02] });
+  assert.equal(invoice.fieldSources?.poNumber, undefined);
+
+  // The fields that WERE found are untouched by the rule.
+  assert.ok(invoice.fieldSources?.invoiceNumber, 'a value on the page still gets its measured box');
+});
+
+test('a line item nobody could find on the page loses its box too', () => {
+  const invoice = fakeInvoice({
+    lineItems: [{
+      description: 'Something that is not printed anywhere',
+      quantity: 1, unitPrice: 10, total: 10,
+      source: { page: 1, box: [0.05, 0.43, 0.7, 0.04] },
+    }],
+  });
+  refineInvoiceSources(invoice, [PAGE]);
+  assert.equal((invoice.lineItems[0] as { source?: unknown }).source, null);
+});
+
+test('the model box still does its one real job: picking between two matches', () => {
+  // Dropping unmatched boxes does not mean ignoring them. Where a value appears
+  // twice on the page, the model's rough location is exactly enough to choose
+  // the right occurrence — the one job a guess can do honestly.
+  const twice: TextPage = {
+    words: [
+      word('Net', 60, 100, 90, 112), word('30', 95, 100, 115, 112),
+      word('Net', 60, 800, 90, 812), word('30', 95, 800, 115, 812),
+    ],
+  };
+  const invoice = fakeInvoice({
+    terms: 'Net 30',
+    fieldSources: { terms: { page: 1, box: [0.06, 0.79, 0.06, 0.02] } },
+  });
+  refineInvoiceSources(invoice, [twice]);
+  const box = invoice.fieldSources!.terms!.box;
+  assert.ok(box[1] > 0.5, `the hint picked the lower occurrence, got y=${box[1]}`);
+});
+
+test('tesseract word boxes are normalised against the page-level row', () => {
+  // Photographs and scans have no text layer, so nothing could ever be measured
+  // on them and the invented boxes were rendered as fact. OCR is what gives
+  // those documents real coordinates. Its characters stay a guess — used for
+  // position only, never for grounding — but its geometry is a measurement.
+  const tsv = [
+    'level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext',
+    '1\t1\t0\t0\t0\t0\t0\t0\t1000\t2000\t-1\t',
+    '5\t1\t1\t1\t1\t1\t100\t200\t300\t50\t96\tCoastal',
+    // Paper texture read as punctuation: too unsure to help a match, and able
+    // to drag a box somewhere wrong.
+    '5\t1\t1\t1\t1\t2\t500\t600\t10\t10\t4\t.',
+    '5\t1\t1\t1\t2\t1\t100\t400\t200\t50\t88\tFreight',
+  ].join('\n');
+
+  const page = parseTesseractTsv(tsv);
+  assert.deepEqual(page.words.map((w) => w.text), ['Coastal', 'Freight']);
+  assert.deepEqual(page.words[0], { text: 'Coastal', x0: 0.1, y0: 0.1, x1: 0.4, y1: 0.125 });
+});
+
+test('a document with no page row yields no words rather than nonsense', () => {
+  // Without the page-level row there is nothing to normalise against, and
+  // dividing by zero would produce Infinity coordinates that render as a box
+  // covering the whole document.
+  const tsv = 'level\tleft\ttop\twidth\theight\tconf\ttext\n5\t10\t10\t20\t20\t90\tHello';
+  assert.deepEqual(parseTesseractTsv(tsv).words, []);
+});
+
+test('when nothing on a document can be measured, every box is thrown away', () => {
+  const invoice = fakeInvoice({
+    fieldSources: { total: { page: 1, box: [0.85, 0.53, 0.1, 0.04] } },
+    lineItems: [{
+      description: 'Ocean freight', quantity: 1, unitPrice: 10, total: 10,
+      source: { page: 1, box: [0.05, 0.33, 0.7, 0.04] },
+    }],
+  });
+  stripUnmeasuredSources(invoice as unknown as Record<string, unknown>);
+  assert.equal(invoice.fieldSources, undefined);
+  assert.equal((invoice.lineItems[0] as { source?: unknown }).source, undefined);
 });
 
 function fakeInvoice(overrides: Record<string, unknown>) {

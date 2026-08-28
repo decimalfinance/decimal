@@ -1,11 +1,25 @@
-// Exact field→document provenance from the PDF text layer.
+// Exact field→document provenance from the words actually printed on the page.
 //
-// The vision model's bounding boxes are approximate at best. For digital PDFs,
-// poppler's `pdftotext -bbox` gives EXACT per-word coordinates, so after
-// extraction we re-locate every extracted value in the text layer and replace
-// the model's guess with the real box. The model's box survives only as a
-// fallback (scanned PDFs and image uploads have no text layer) and as the
-// disambiguation hint when a value appears more than once on the document.
+// The vision model's bounding boxes are not approximate. They are INVENTED, and
+// the invention is tidy enough to look like data — C1 and C2, two unrelated
+// invoices, both came back with vendorName at exactly [0.05, 0.05, 0.4, 0.07]
+// and their header fields on a perfect 0.03 ladder. Asked where a value sits, a
+// vision model writes down a plausible layout rather than a measurement.
+//
+// So a box is only ever shown if it was MEASURED, from one of two sources of
+// real word coordinates:
+//
+//   digital PDF   → poppler `pdftotext -bbox`   (exact characters, exact boxes)
+//   image / scan  → tesseract TSV               (OCR words, measured boxes)
+//
+// Both produce the same TextPage[], so one matcher serves both. Where neither
+// can run, the model's guesses are STRIPPED rather than displayed: pointing
+// confidently at the wrong part of the page is worse than not pointing, because
+// the highlight is a claim about where the number came from.
+//
+// The model's box survives only as the disambiguation hint when a value appears
+// more than once on the document — a rough location is enough to pick between
+// two real matches, which is the one job it can do.
 import { execFile } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -18,7 +32,7 @@ const execFileAsync = promisify(execFile);
 
 // Version of the matcher; stamped wherever refinement ran so the review path
 // knows to re-run after matcher improvements.
-export const PROVENANCE_VERSION = 4; // v4: negative figures (credit notes) anchor to the page
+export const PROVENANCE_VERSION = 5; // v5: OCR word boxes for images; invented boxes stripped
 
 export type TextWord = { text: string; x0: number; y0: number; x1: number; y1: number }; // 0-1 fractions, top-left origin
 export type TextPage = { words: TextWord[] };
@@ -133,6 +147,156 @@ function unescapeXml(s: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&#39;|&apos;/g, "'")
     .replace(/&amp;/g, '&');
+}
+
+// ---------------------------------------------------------------------------
+// Word coordinates from an image (OCR)
+// ---------------------------------------------------------------------------
+
+/**
+ * Real word boxes for a page image, via tesseract's TSV output.
+ *
+ * This is the half of provenance that never existed. Photographs and scans have
+ * no text layer, so nothing could be measured and the model's invented boxes
+ * were rendered as though they were facts — which is what put the highlight on
+ * blank paper three lines below the line item somebody clicked.
+ *
+ * OCR is used for POSITION ONLY, never to decide what the document says. Its
+ * characters are a guess; its coordinates are a measurement. Grounding stays on
+ * the PDF text layer, where the characters are exact, so a misread digit can
+ * never claim a figure is missing from the page.
+ *
+ * Returns null when tesseract is not installed, so the app runs without it —
+ * boxes are then stripped rather than faked.
+ */
+export async function extractImageTextLayer(
+  pageImages: Array<{ bytes: Buffer }>,
+): Promise<TextPage[] | null> {
+  if (pageImages.length === 0) return null;
+  const dir = await mkdtemp(join(tmpdir(), 'doc-ocr-'));
+  try {
+    const pages: TextPage[] = [];
+    for (const [index, page] of pageImages.entries()) {
+      const inPath = join(dir, `page-${index}.png`);
+      await writeFile(inPath, page.bytes);
+      const { stdout } = await execFileAsync(
+        'tesseract',
+        [inPath, 'stdout', '--psm', '3', 'tsv'],
+        { maxBuffer: 64 * 1024 * 1024 },
+      );
+      pages.push(parseTesseractTsv(stdout));
+    }
+    return pages.some((p) => p.words.length > 0) ? pages : null;
+  } catch (error) {
+    // ENOENT means tesseract is not installed. Everything still works; images
+    // just get no highlights, which is the honest outcome.
+    const code = (error as { code?: string }).code;
+    logger.warn('doc_provenance.ocr_failed', {
+      ...(code === 'ENOENT'
+        ? { message: 'tesseract not installed — image documents get no source highlights. brew install tesseract' }
+        : {}),
+      ...(error instanceof Error ? { message: error.message } : {}),
+    });
+    return null;
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * tesseract TSV: level, page_num, block_num, par_num, line_num, word_num,
+ * left, top, width, height, conf, text — coordinates in PIXELS, so the
+ * page-level row (level 1) carries the image dimensions we normalise against.
+ */
+export function parseTesseractTsv(tsv: string): TextPage {
+  const lines = tsv.split(/\r?\n/);
+  const header = lines[0]?.split('\t') ?? [];
+  const col = (name: string) => header.indexOf(name);
+  const iLevel = col('level'), iLeft = col('left'), iTop = col('top');
+  const iWidth = col('width'), iHeight = col('height'), iConf = col('conf'), iText = col('text');
+  if (iLevel < 0 || iLeft < 0 || iText < 0) return { words: [] };
+
+  let pageWidth = 0;
+  let pageHeight = 0;
+  const rows: Array<{ left: number; top: number; width: number; height: number; conf: number; text: string }> = [];
+  for (const line of lines.slice(1)) {
+    const cells = line.split('\t');
+    if (cells.length <= iText) continue;
+    const level = Number(cells[iLevel]);
+    const left = Number(cells[iLeft]), top = Number(cells[iTop]);
+    const width = Number(cells[iWidth]), height = Number(cells[iHeight]);
+    if (level === 1) { pageWidth = width; pageHeight = height; continue; }
+    if (level !== 5) continue; // 5 = word
+    const text = cells[iText] ?? '';
+    if (!text.trim()) continue;
+    rows.push({ left, top, width, height, conf: Number(cells[iConf]), text });
+  }
+  if (!pageWidth || !pageHeight) return { words: [] };
+
+  // Low-confidence tokens are usually paper texture read as punctuation. They
+  // cannot help a match and can only drag a box somewhere wrong.
+  const MIN_CONF = 30;
+  const words: TextWord[] = rows
+    .filter((r) => !Number.isFinite(r.conf) || r.conf >= MIN_CONF)
+    .map((r) => ({
+      text: r.text,
+      x0: r.left / pageWidth,
+      y0: r.top / pageHeight,
+      x1: (r.left + r.width) / pageWidth,
+      y1: (r.top + r.height) / pageHeight,
+    }));
+  return { words };
+}
+
+export type WordSource = 'text-layer' | 'ocr' | 'none';
+
+/**
+ * The words on this document, however they can be got.
+ *
+ * `source` matters to the caller: only `text-layer` may be used for grounding
+ * (see ungroundedFields), because only exact characters can prove a value is
+ * absent. `ocr` is good for position and nothing else.
+ */
+export async function locateDocumentWords(args: {
+  fileBytes: Buffer;
+  filename: string;
+  mimeType: string;
+  /** Rendered page images, for when there is no text layer to read. */
+  renderPages?: () => Promise<Array<{ bytes: Buffer }>>;
+}): Promise<{ pages: TextPage[] | null; source: WordSource }> {
+  const textLayer = await extractPdfTextLayer(args);
+  if (textLayer) return { pages: textLayer, source: 'text-layer' };
+  if (!args.renderPages) return { pages: null, source: 'none' };
+  try {
+    const ocr = await extractImageTextLayer(await args.renderPages());
+    return ocr ? { pages: ocr, source: 'ocr' } : { pages: null, source: 'none' };
+  } catch (error) {
+    logger.warn('doc_provenance.render_for_ocr_failed', {
+      filename: args.filename,
+      ...(error instanceof Error ? { message: error.message } : {}),
+    });
+    return { pages: null, source: 'none' };
+  }
+}
+
+/**
+ * Throw away every box we could not measure.
+ *
+ * Called when no word coordinates could be got at all. The alternative is
+ * leaving the model's invented ladder in place, which is what shipped: a
+ * highlight is a claim that the value was read from THIS spot, and an
+ * authoritative-looking box over blank paper is a lie the UI tells in our voice.
+ * A field with no box simply does not highlight, which the viewer already
+ * handles.
+ */
+export function stripUnmeasuredSources(invoice: Record<string, unknown>): void {
+  delete invoice.fieldSources;
+  const lines = invoice.lineItems;
+  if (Array.isArray(lines)) {
+    for (const line of lines) {
+      if (line && typeof line === 'object') delete (line as Record<string, unknown>).source;
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -330,10 +494,22 @@ export function refineInvoiceSources(invoice: ExtractedInvoice, pages: TextPage[
   const sources: Record<string, SourceBox | null> = { ...(invoice.fieldSources ?? {}) };
   const hint = (key: string) => sources[key] ?? null;
 
+  // Which boxes were MEASURED on this page, as opposed to guessed by the model.
+  // Everything else is dropped at the end.
+  //
+  // Overwriting only what matched left the rest of the model's invented ladder
+  // in place, which is how a document could be refined and still point at blank
+  // paper: on C1 eight fields were relocated and dueDate, currency and
+  // invoiceNumber quietly kept their fabricated rectangles, indistinguishable
+  // in the UI from the eight real ones. Half-measured is the worst state to be
+  // in — it looks like the fix worked.
+  const measured = new Set<string>();
+
   const setIfFound = (key: string, matches: Box[], prefer: 'first' | 'bottom' = 'first') => {
     const chosen = pickMatch(matches, hint(key), prefer);
     if (chosen) {
       sources[key] = toSource(chosen);
+      measured.add(key);
       refined += 1;
     }
   };
@@ -375,12 +551,18 @@ export function refineInvoiceSources(invoice: ExtractedInvoice, pages: TextPage[
       const chosen = pickMatch(matches, sources.remitTo ?? hint(key), 'first');
       if (chosen) {
         sources[key] = toSource(chosen);
+        measured.add(key);
         refined += 1;
       }
     }
   }
 
-  invoice.fieldSources = sources;
+  // Only what was found on the page survives. The model's boxes did their one
+  // useful job above — as a hint for picking between two real matches — and are
+  // not evidence of anything on their own.
+  invoice.fieldSources = Object.fromEntries(
+    Object.entries(sources).filter(([key]) => measured.has(key)),
+  );
 
   // Line items: locate the description, then take the whole table row —
   // preferring, among duplicate descriptions, the row that carries the
@@ -388,7 +570,12 @@ export function refineInvoiceSources(invoice: ExtractedInvoice, pages: TextPage[
   for (const item of invoice.lineItems) {
     if (!item.description) continue;
     const matches = findTextMatches(pages, [item.description]);
-    if (matches.length === 0) continue;
+    if (matches.length === 0) {
+      // Same rule as the header fields: a row we could not find on the page
+      // gets no highlight rather than the model's guess at where it might be.
+      item.source = null;
+      continue;
+    }
     let rows = matches.map((m) => ({ m, row: expandToRow(pages[m.page - 1]!, m) }));
     if (item.total != null && rows.length > 1) {
       const withAmount = rows.filter(({ row, m }) => {
