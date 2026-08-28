@@ -32,7 +32,7 @@ const execFileAsync = promisify(execFile);
 
 // Version of the matcher; stamped wherever refinement ran so the review path
 // knows to re-run after matcher improvements.
-export const PROVENANCE_VERSION = 11; // v11: tilted box centred on its words
+export const PROVENANCE_VERSION = 12; // v12: address parts need corroboration
 
 export type TextWord = { text: string; x0: number; y0: number; x1: number; y1: number }; // 0-1 fractions, top-left origin
 export type TextPage = {
@@ -859,6 +859,68 @@ export function dateVariants(iso: string): string[] {
 // Refinement
 // ---------------------------------------------------------------------------
 
+/**
+ * Address parts, each accepted only if something corroborates it.
+ *
+ * A postal address is mostly short strings, and short strings turn up all over
+ * an invoice. C1's letterhead is a photograph of small grey type that OCR could
+ * not read at all — not the street, not the city, not the zip, not the email.
+ * "CA" it did find, in the customer's address further down the page, and with a
+ * single match and nothing to compare it against that became the vendor's
+ * state highlight. A two-character coincidence pointing at the wrong company's
+ * address.
+ *
+ * So a part needs an ANCHOR: the whole address if it matched, otherwise the
+ * longest part that did. Everything else has to sit near that anchor, because
+ * the lines of one address are printed together. With no anchor at all, only
+ * parts long enough to stand alone are kept — a lone "CA" is a coincidence, a
+ * lone "9 Cannery Row" is not.
+ */
+function anchoredAddressParts(
+  pages: TextPage[],
+  parts: Record<string, string | null>,
+  whole: SourceBox | null,
+): Record<string, Box> {
+  // Long enough that finding it twice on one page would be a surprise.
+  const STANDS_ALONE = 5;
+  // An address occupies a few lines; anything further off is a different one.
+  const NEAR = 0.05;
+
+  const found: Array<[part: string, value: string, matches: Box[]]> = [];
+  for (const [part, value] of Object.entries(parts)) {
+    if (!value) continue;
+    const matches = findTextMatches(pages, [value]);
+    if (matches.length > 0) found.push([part, value, matches]);
+  }
+  if (found.length === 0) return {};
+
+  // The anchor: the whole address if we have it, else the longest part that
+  // matched exactly once — an unambiguous long string is a reliable landmark.
+  let anchor: Box | null = null;
+  if (whole) {
+    anchor = { page: whole.page, x0: whole.box[0], y0: whole.box[1], x1: whole.box[0] + whole.box[2], y1: whole.box[1] + whole.box[3] };
+  } else {
+    const longestFirst = [...found].sort((a, b) => b[1].length - a[1].length);
+    const landmark = longestFirst.find(([, value, matches]) => value.length >= STANDS_ALONE && matches.length === 1);
+    if (landmark) anchor = landmark[2][0]!;
+  }
+
+  const out: Record<string, Box> = {};
+  for (const [part, value, matches] of found) {
+    if (!anchor) {
+      // Nothing to corroborate against. Keep only what could not plausibly be
+      // a coincidence, and only when the page agrees it appears once.
+      if (value.length >= STANDS_ALONE && matches.length === 1) out[part] = matches[0]!;
+      continue;
+    }
+    const near = matches
+      .filter((m) => m.page === anchor!.page && Math.abs((m.y0 + m.y1) / 2 - (anchor!.y0 + anchor!.y1) / 2) < NEAR)
+      .sort((a, b) => Math.abs(a.y0 - anchor!.y0) - Math.abs(b.y0 - anchor!.y0));
+    if (near.length > 0) out[part] = near[0]!;
+  }
+  return out;
+}
+
 export function refineInvoiceSources(invoice: ExtractedInvoice, pages: TextPage[]): { refined: number } {
   let refined = 0;
   const sources: Record<string, SourceBox | null> = { ...(invoice.fieldSources ?? {}) };
@@ -914,16 +976,11 @@ export function refineInvoiceSources(invoice: ExtractedInvoice, pages: TextPage[
   // appear anywhere.
   if (invoice.vendorAddress) {
     setIfFound('vendorAddress', findTextMatches(pages, [invoice.vendorAddress]));
-    const whole = sources.vendorAddress ?? null;
     const parts = splitPostalAddress(invoice.vendorAddress);
-    for (const [part, value] of Object.entries(parts)) {
-      if (!value) continue;
-      const chosen = pickMatch(findTextMatches(pages, [value]), whole ?? hint(`vendorAddress.${part}`), 'first');
-      if (chosen) {
-        sources[`vendorAddress.${part}`] = toSource(chosen, pages[chosen.page - 1]);
-        measured.add(`vendorAddress.${part}`);
-        refined += 1;
-      }
+    for (const [part, box] of Object.entries(anchoredAddressParts(pages, parts, sources.vendorAddress ?? null))) {
+      sources[`vendorAddress.${part}`] = toSource(box, pages[box.page - 1]);
+      measured.add(`vendorAddress.${part}`);
+      refined += 1;
     }
   }
 

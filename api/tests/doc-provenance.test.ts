@@ -540,6 +540,51 @@ test('a tilted box is as tall as the text in it, not as tall as the slope', () =
   assert.ok(drift > H, `drift ${drift} exceeds text height ${H}`);
 });
 
+test('a lone state code with nothing to corroborate it gets no box', () => {
+  // C1's letterhead is a photograph of small grey type, and OCR read none of
+  // it: not the street, not the city, not the zip, not the email. It did find
+  // "CA" — in the CUSTOMER's address further down the page — and with a single
+  // match and nothing to compare it against, that became the vendor's state
+  // highlight. A two-character coincidence pointing at the wrong company.
+  const page: TextPage = {
+    words: [
+      // The bill-to block, which is all this page could be read for.
+      word('660', 60, 300, 100, 314), word('Mission', 105, 300, 180, 314),
+      word('San', 60, 320, 95, 334), word('Francisco,', 100, 320, 190, 334),
+      word('CA', 195, 320, 220, 334), word('94105', 225, 320, 285, 334),
+    ],
+  };
+  const invoice = fakeInvoice({ vendorAddress: '9 Cannery Row · Monterey, CA 93940' });
+  refineInvoiceSources(invoice, [page]);
+  const src = invoice.fieldSources ?? {};
+  assert.equal(src['vendorAddress.state'], undefined, 'the vendor state is not the customer state');
+  assert.equal(src['vendorAddress.street'], undefined);
+  assert.equal(src['vendorAddress.city'], undefined);
+  assert.equal(src['vendorAddress.zip'], undefined);
+});
+
+test('a state code IS kept when the rest of its address is beside it', () => {
+  // The rule is corroboration, not a ban on short values. Where the address is
+  // legible, the long parts anchor the short ones and all four get a box.
+  const page: TextPage = {
+    words: [
+      word('9', 60, 300, 75, 314), word('Cannery', 80, 300, 150, 314), word('Row', 155, 300, 190, 314),
+      word('Monterey,', 60, 320, 140, 334), word('CA', 145, 320, 170, 334), word('93940', 175, 320, 230, 334),
+      // The same two letters elsewhere on the page, far away.
+      word('CA', 700, 800, 725, 814),
+    ],
+  };
+  const invoice = fakeInvoice({ vendorAddress: '9 Cannery Row · Monterey, CA 93940' });
+  refineInvoiceSources(invoice, [page]);
+  const src = invoice.fieldSources!;
+  assert.ok(src['vendorAddress.street'], 'street');
+  assert.ok(src['vendorAddress.city'], 'city');
+  assert.ok(src['vendorAddress.zip'], 'zip');
+  const state = src['vendorAddress.state'];
+  assert.ok(state, 'state');
+  assert.ok(state!.box[1] < 0.5, `the CA in the address, not the stray one: y=${state!.box[1]}`);
+});
+
 function fakeInvoice(overrides: Record<string, unknown>) {
   return {
     vendorName: 'Acme Logistics LLC',
