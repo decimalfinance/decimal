@@ -147,9 +147,18 @@ export async function matchExpenseAccounts(args: {
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.openAiApiKey}` },
       body: JSON.stringify({
         model: config.openAiModel,
-        // Enough for a per-line answer on a ten-line invoice; the old 220 was
-        // sized for a single bill-level verdict and would truncate the array.
-        max_tokens: 900,
+        // Sized to the invoice, because the answer grows with it.
+        //
+        // This was a flat 900, chosen for a ten-line invoice — the same ten the
+        // input was capped at. The two numbers were a matched pair and nothing
+        // said so, so lifting the input cap alone truncated the reply mid-array
+        // and the JSON failed to parse. That is worse than the bug it replaced:
+        // ten lines coded became NONE coded.
+        //
+        // A per-line entry — index, account name, weight, a few words of why —
+        // runs about 45 tokens, plus room for the rationale and the bill-level
+        // suggestions.
+        max_tokens: Math.min(4000, 300 + items.length * 45),
         temperature: 0,
         response_format: { type: 'json_object' },
         messages: [
