@@ -551,7 +551,7 @@
    marks where a focused field was read from. */
 .dec .doc-page { position: relative; width: 100%; flex: none; }
 .dec .doc-page img { display: block; width: 100%; }
-.dec .doc-hl { position: absolute; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-radius: 0; pointer-events: none; transition: all 0.18s ease; }
+.dec .doc-hl { position: absolute; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-radius: 4px; pointer-events: none; transition: all 0.18s ease; }
 
 /* Topbar back button reads at regular size, not chip size. */
 .dec .topbar .tb-back { font-size: 14px; }
