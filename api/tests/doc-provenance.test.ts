@@ -8,6 +8,7 @@ import {
   expandToRow,
   refineInvoiceSources,
   parseTesseractTsv,
+  mergeWordPages,
   stripUnmeasuredSources,
   type TextPage,
 } from '../src/payments/doc-provenance.js';
@@ -263,6 +264,32 @@ test('a two-letter state code is disambiguated by the address block', () => {
   refineInvoiceSources(invoice, [page]);
   const state = invoice.fieldSources!['vendorAddress.state']!;
   assert.ok(state.box[1] > 0.2, `picked the state in the address, not the stray, got y=${state.box[1]}`);
+});
+
+test('merging OCR passes keeps each pass a contiguous run', () => {
+  // The matcher slides a window over CONSECUTIVE words, so a multi-word value
+  // only matches while the words that spell it sit next to each other in the
+  // list. Several OCR passes are run over the same page because they fail
+  // differently — and an obvious-looking dedup, dropping a word the previous
+  // pass already found, punches a hole in the later pass's run and breaks every
+  // multi-word match across it. That cost three fields when tried, two of them
+  // gains the extra pass had just made.
+  //
+  // So passes are concatenated whole. Duplicates are harmless: they produce
+  // duplicate candidates in the same place and pickMatch picks one.
+  const passA: TextPage = { words: [word('Coastal', 60, 40, 130, 55)] };
+  const passB: TextPage = {
+    words: [
+      word('Coastal', 61, 41, 131, 56),   // the same word, found again
+      word('Freight', 135, 40, 200, 55),  // and the one pass A missed
+    ],
+  };
+  const merged = mergeWordPages([passA, passB]);
+  assert.equal(merged.words.length, 3, 'nothing is dropped');
+
+  // The proof that matters: "Coastal Freight" is findable, which it would not
+  // be if the duplicate had been removed and pass B left with one word.
+  assert.equal(findTextMatches([merged], ['Coastal Freight']).length, 1);
 });
 
 function fakeInvoice(overrides: Record<string, unknown>) {

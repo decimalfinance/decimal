@@ -177,14 +177,40 @@ export async function extractImageTextLayer(
   try {
     const pages: TextPage[] = [];
     for (const [index, page] of pageImages.entries()) {
-      const inPath = join(dir, `page-${index}.png`);
-      await writeFile(inPath, page.bytes);
-      const { stdout } = await execFileAsync(
-        'tesseract',
-        [inPath, 'stdout', '--psm', '3', 'tsv'],
-        { maxBuffer: 64 * 1024 * 1024 },
+      const raw = join(dir, `page-${index}.png`);
+      await writeFile(raw, page.bytes);
+      const enlarged = await upscaleForOcr(raw, dir, index);
+
+      // Several passes over the same page, because they fail differently and
+      // the union of what they find is strictly better than any one of them.
+      //
+      //   psm 3   reads the page as a laid-out document; its tokenization is
+      //           what the matcher needs
+      //   psm 11  treats it as scattered text and picks up words psm 3 walks
+      //           past
+      //   1x/2x   enlarging resolves characters on a soft scan, but changes
+      //           how words are split — C1's vendor name matched at the stored
+      //           size and stopped matching when enlarged, while its invoice
+      //           number and due date did the opposite
+      //
+      // Reading order survives because each pass's words are appended as a
+      // block: the matcher slides its window over consecutive words, and every
+      // pass's own run stays contiguous.
+      //
+      // Measured on the C series, not assumed. Four passes cost about two
+      // seconds on a document that is read once.
+      const scales = enlarged === raw ? [raw] : [raw, enlarged];
+      const passes = await Promise.all(
+        scales.flatMap((path) => ['3', '11'].map(async (psm) => {
+          const { stdout } = await execFileAsync(
+            'tesseract',
+            [path, 'stdout', '--psm', psm, 'tsv'],
+            { maxBuffer: 64 * 1024 * 1024 },
+          );
+          return parseTesseractTsv(stdout);
+        })),
       );
-      pages.push(parseTesseractTsv(stdout));
+      pages.push(mergeWordPages(passes));
     }
     return pages.some((p) => p.words.length > 0) ? pages : null;
   } catch (error) {
@@ -201,6 +227,54 @@ export async function extractImageTextLayer(
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+}
+
+/**
+ * Small scans read far better enlarged.
+ *
+ * The single biggest thing between a photograph and a working highlight. C2 is
+ * a soft 150dpi scan: at its stored size tesseract located 4 fields and neither
+ * line item; at twice the size, 12 fields and both lines. Nothing else tried
+ * came close — more page-segmentation modes, different confidence floors —
+ * because the characters were simply too few pixels to resolve.
+ *
+ * Only ever enlarges. `sips -Z` resizes to fit, so running it unconditionally
+ * would SHRINK a high-resolution scan and undo the very thing this is for.
+ *
+ * Returns the original path on any failure, so a machine without sips still
+ * does OCR, just on the smaller image.
+ */
+async function upscaleForOcr(imgPath: string, dir: string, index: number): Promise<string> {
+  const ENOUGH = 3000;
+  try {
+    const { stdout } = await execFileAsync('sips', ['-g', 'pixelWidth', '-g', 'pixelHeight', imgPath]);
+    const width = Number(/pixelWidth:\s*(\d+)/.exec(stdout)?.[1]);
+    const height = Number(/pixelHeight:\s*(\d+)/.exec(stdout)?.[1]);
+    const longest = Math.max(width || 0, height || 0);
+    if (!longest || longest >= ENOUGH) return imgPath;
+    const outPath = join(dir, `page-${index}-big.png`);
+    await execFileAsync('sips', ['-Z', String(Math.min(longest * 2, 4000)), imgPath, '--out', outPath]);
+    return outPath;
+  } catch {
+    return imgPath;
+  }
+}
+
+/**
+ * One word list from several OCR passes over the same image.
+ *
+ * Concatenated, NOT deduplicated, and that is the whole subtlety. The matcher
+ * slides a window over consecutive words, so each pass's output has to stay a
+ * contiguous run. Dropping a word from the second pass because the first pass
+ * already found it punches a hole in the second pass's run and breaks every
+ * multi-word match across it — which cost three fields when tried, including
+ * two the extra pass had just gained.
+ *
+ * Duplicates are harmless: they produce duplicate candidate matches in the same
+ * place, and pickMatch picks one.
+ */
+export function mergeWordPages(pages: TextPage[]): TextPage {
+  return { words: pages.flatMap((page) => page.words) };
 }
 
 /**
