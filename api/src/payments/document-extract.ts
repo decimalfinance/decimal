@@ -166,6 +166,229 @@ Vendor-side example:
 Correct vendorName: "Acme Corp".
 Wrong vendorName: "Decimal Labs Inc.".`;
 
+/**
+ * The schema the API enforces, as opposed to the one we hope for.
+ *
+ * We were sending response_format: { type: 'json_object' }, which guarantees
+ * VALID JSON and nothing about its shape. Strict json_schema is enforced at the
+ * sampling layer — the decoder cannot emit a token that violates it — so a
+ * missing field or a string where a number belongs stops being possible rather
+ * than being caught downstream.
+ *
+ * That matters here beyond tidiness. Almost every field in the Zod schema below
+ * carries .catch(null), which quietly turns a malformed value into an absent
+ * one. Absent and unparseable then look identical to every screen downstream,
+ * which is the shape of half the bugs found in this area.
+ *
+ * Three rules the API imposes, all of them recursive:
+ *   - additionalProperties: false on every object
+ *   - every property listed in required — there are no optional keys
+ *   - "optional" is expressed as a null union: { type: ['string', 'null'] }
+ *
+ * Which is why fieldStatus and fieldSources are ARRAYS here and records in
+ * storage: an open-ended map of field names cannot be expressed under those
+ * rules. They are folded back into records on the way in, so nothing
+ * downstream has to know.
+ */
+const nullableString = { type: ['string', 'null'] } as const;
+const nullableNumber = { type: ['number', 'null'] } as const;
+
+const SOURCE_BOX_JSON_SCHEMA = {
+  type: ['object', 'null'],
+  properties: {
+    page: { type: 'integer', minimum: 1 },
+    box: { type: 'array', items: { type: 'number' }, minItems: 4, maxItems: 4 },
+  },
+  required: ['page', 'box'],
+  additionalProperties: false,
+} as const;
+
+const EXTRACTION_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    invoices: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          documentKind: {
+            type: 'string',
+            enum: ['invoice', 'statement', 'credit_note', 'receipt', 'quote', 'purchase_order', 'other'],
+          },
+          statementRows: {
+            type: ['array', 'null'],
+            items: {
+              type: 'object',
+              properties: {
+                reference: nullableString,
+                date: nullableString,
+                amount: nullableNumber,
+                status: { type: ['string', 'null'], enum: ['paid', 'open', 'overdue', 'unknown', null] },
+              },
+              required: ['reference', 'date', 'amount', 'status'],
+              additionalProperties: false,
+            },
+          },
+          appliesToInvoice: nullableString,
+          vendorName: { type: 'string' },
+          vendorAddress: nullableString,
+          vendorEmail: nullableString,
+          amount: { type: 'number' },
+          currency: { type: 'string' },
+          invoiceNumber: nullableString,
+          invoiceDate: nullableString,
+          dueDate: nullableString,
+          terms: nullableString,
+          poNumber: nullableString,
+          earlyPayDiscount: nullableString,
+          subtotal: nullableNumber,
+          taxAmount: nullableNumber,
+          billToName: nullableString,
+          remitTo: {
+            type: ['object', 'null'],
+            properties: {
+              street: nullableString,
+              city: nullableString,
+              state: nullableString,
+              zip: nullableString,
+            },
+            required: ['street', 'city', 'state', 'zip'],
+            additionalProperties: false,
+          },
+          paymentDetails: {
+            type: ['object', 'null'],
+            properties: {
+              method: nullableString,
+              bankName: nullableString,
+              accountLast4: nullableString,
+              routingNumber: nullableString,
+            },
+            required: ['method', 'bankName', 'accountLast4', 'routingNumber'],
+            additionalProperties: false,
+          },
+          walletAddress: nullableString,
+          lineItems: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                description: { type: 'string' },
+                quantity: nullableNumber,
+                unitPrice: nullableNumber,
+                total: nullableNumber,
+                categoryHint: nullableString,
+                source: SOURCE_BOX_JSON_SCHEMA,
+              },
+              required: ['description', 'quantity', 'unitPrice', 'total', 'categoryHint', 'source'],
+              additionalProperties: false,
+            },
+          },
+          categoryHint: nullableString,
+          confidence: {
+            type: 'object',
+            properties: {
+              vendor: { type: 'number' },
+              amount: { type: 'number' },
+              overall: { type: 'number' },
+            },
+            required: ['vendor', 'amount', 'overall'],
+            additionalProperties: false,
+          },
+          fieldStatus: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                field: { type: 'string' },
+                status: {
+                  type: 'string',
+                  enum: ['confident', 'partial', 'ambiguous', 'conflicting', 'unreadable', 'absent'],
+                },
+              },
+              required: ['field', 'status'],
+              additionalProperties: false,
+            },
+          },
+          issues: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                field: { type: 'string' },
+                note: { type: 'string' },
+              },
+              required: ['field', 'note'],
+              additionalProperties: false,
+            },
+          },
+          fieldSources: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                field: { type: 'string' },
+                page: { type: 'integer', minimum: 1 },
+                box: { type: 'array', items: { type: 'number' }, minItems: 4, maxItems: 4 },
+              },
+              required: ['field', 'page', 'box'],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: [
+          'documentKind', 'statementRows', 'appliesToInvoice', 'vendorName', 'vendorAddress',
+          'vendorEmail', 'amount', 'currency', 'invoiceNumber', 'invoiceDate', 'dueDate',
+          'terms', 'poNumber', 'earlyPayDiscount', 'subtotal', 'taxAmount', 'billToName',
+          'remitTo', 'paymentDetails', 'walletAddress', 'lineItems', 'categoryHint',
+          'confidence', 'fieldStatus', 'issues', 'fieldSources',
+        ],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['invoices'],
+  additionalProperties: false,
+} as const;
+
+/**
+ * Fold the wire's arrays back into the records everything downstream reads.
+ *
+ * The list-of-pairs shape exists only because strict mode cannot express an
+ * open-ended map. Converting here means one place knows that, instead of every
+ * consumer of an extraction.
+ */
+function foldKeyedArrays(invoice: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...invoice };
+
+  const status = invoice.fieldStatus;
+  if (Array.isArray(status)) {
+    const map: Record<string, string> = {};
+    for (const entry of status) {
+      if (entry && typeof entry === 'object') {
+        const e = entry as { field?: unknown; status?: unknown };
+        if (typeof e.field === 'string' && typeof e.status === 'string') map[e.field] = e.status;
+      }
+    }
+    out.fieldStatus = map;
+  }
+
+  const sources = invoice.fieldSources;
+  if (Array.isArray(sources)) {
+    const map: Record<string, { page: number; box: number[] }> = {};
+    for (const entry of sources) {
+      if (entry && typeof entry === 'object') {
+        const e = entry as { field?: unknown; page?: unknown; box?: unknown };
+        if (typeof e.field === 'string' && typeof e.page === 'number' && Array.isArray(e.box)) {
+          map[e.field] = { page: e.page, box: e.box as number[] };
+        }
+      }
+    }
+    out.fieldSources = map;
+  }
+
+  return out;
+}
+
 // Where a value was read from: 1-based page + [x, y, w, h] as 0-1 fractions.
 const SourceBoxSchema = z.object({
   page: z.number().int().min(1),
@@ -500,7 +723,12 @@ async function runExtractionLlm(args: {
       // without bloating cost.
       max_tokens: 4096,
       temperature: 0,
-      response_format: { type: 'json_object' },
+      // Enforced at the sampling layer rather than hoped for and validated
+      // afterwards: the decoder cannot emit a token that breaks this schema.
+      response_format: {
+        type: 'json_schema',
+        json_schema: { name: 'extracted_invoices', strict: true, schema: EXTRACTION_JSON_SCHEMA },
+      },
       messages,
     }),
   });
@@ -539,6 +767,14 @@ async function runExtractionLlm(args: {
     raw = JSON.parse(jsonText);
   } catch {
     throw new Error(`Model response was not valid JSON. Got: ${content.slice(0, 500)}`);
+  }
+  // The wire sends fieldStatus and fieldSources as arrays because strict mode
+  // cannot express an open-ended map; everything downstream reads records.
+  // Folded here so exactly one place knows that.
+  if (raw && typeof raw === 'object' && Array.isArray((raw as { invoices?: unknown }).invoices)) {
+    (raw as { invoices: unknown[] }).invoices =
+      (raw as { invoices: unknown[] }).invoices.map((inv) =>
+        inv && typeof inv === 'object' ? foldKeyedArrays(inv as Record<string, unknown>) : inv);
   }
   const parsedInvoices = ExtractedInvoicesSchema.safeParse(raw);
   if (!parsedInvoices.success) {
