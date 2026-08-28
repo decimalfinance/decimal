@@ -1175,8 +1175,20 @@ export function splitPostalAddress(address: string | null): {
   // left the middle dot inside the street, so the street read "500 Howard St ·
   // San Francisco" and the city read Not on document — a wrong box AND an empty
   // one, on two of the six B-series invoices.
+  //
+  // A NEWLINE is the third separator, and the one a letterhead actually uses:
+  //
+  //     340 Congress St
+  //     Austin, TX 78701
+  //
+  // It only started arriving once extraction began reading the PDF's own text,
+  // because pdftotext preserves the document's line breaks and the vision model
+  // had been quietly converting them to "·". So this had been correct against
+  // every input it was ever shown, and wrong about the format the document is
+  // actually written in — the street came out "340 Congress St\nAustin", which
+  // the browser then collapsed into "340 Congress StAustin".
   const parts = address
-    .replace(/[·•|]/g, ',')
+    .replace(/[·•|\r\n]+/g, ',')
     .split(',')
     .map((p) => p.trim())
     .filter(Boolean);

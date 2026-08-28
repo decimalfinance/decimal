@@ -32,3 +32,31 @@ test('an address it cannot split stays whole in street rather than vanishing', (
   });
   assert.deepEqual(splitPostalAddress(null), { street: null, city: null, state: null, zip: null });
 });
+
+test('a letterhead written across two lines splits like any other', () => {
+  // The separator a letterhead actually uses, and the one this never saw:
+  //
+  //     340 Congress St
+  //     Austin, TX 78701
+  //
+  // It only began arriving when extraction started reading the PDF's own text.
+  // pdftotext preserves the document's line breaks; the vision model had been
+  // quietly turning them into "·". So this function was correct against every
+  // input it had ever been given and wrong about the format the document is
+  // written in — the street came out "340 Congress St\nAustin", which a browser
+  // then collapses into "340 Congress StAustin".
+  assert.deepEqual(splitPostalAddress('340 Congress St\nAustin, TX 78701'), {
+    street: '340 Congress St', city: 'Austin', state: 'TX', zip: '78701',
+  });
+
+  // Windows line endings, and a blank line between, which a PDF text layer
+  // produces as readily as a single break.
+  assert.deepEqual(splitPostalAddress('9 Cannery Row\r\n\r\nMonterey, CA 93940'), {
+    street: '9 Cannery Row', city: 'Monterey', state: 'CA', zip: '93940',
+  });
+
+  // Mixed, because a document is free to use both.
+  assert.deepEqual(splitPostalAddress('77 Industrial Pkwy · Suite 200\nColumbus, OH 43004'), {
+    street: '77 Industrial Pkwy, Suite 200', city: 'Columbus', state: 'OH', zip: '43004',
+  });
+});
