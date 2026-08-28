@@ -835,17 +835,28 @@ function DraftScreen(props: {
     }
   }, [canConfirm, currentBody, organizationId, billDraft.paymentOrderId, toast, onDone]);
 
-  // ⌘↵ confirms.
+  // ⌘↵ ASKS. It used to send.
+  //
+  // The button opens a confirmation because sending a bill for approval is a
+  // change of state that puts it in front of other people, and correcting it
+  // afterwards restarts their approvals. The shortcut called confirm() straight
+  // through and skipped that — so a stray ⌘↵ while typing in a field sent a
+  // half-finished bill onward, which is exactly how D5 reached approval.
+  //
+  // A shortcut is an accelerator for the button, not for the decision. It now
+  // opens the same dialog, and is ignored entirely when the button itself is
+  // unavailable — a key that does something the button refuses is a second way
+  // in with different rules.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         e.preventDefault();
-        void confirm();
+        if (canConfirm) setConfirmOpen(true);
       }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [confirm]);
+  }, [canConfirm]);
 
   // --- resizable split ------------------------------------------------------
   const shellRef = useRef<HTMLDivElement>(null);
