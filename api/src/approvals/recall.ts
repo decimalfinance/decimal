@@ -58,7 +58,7 @@ const SELECT_ROW = `
  * engine person joined to the workspace membership — because the engine holds
  * people and the control plane holds standing, and only the join knows both.
  */
-async function isOrgAdmin(tx: Tx, organizationId: string, personId: string): Promise<boolean> {
+export async function isOrgAdmin(tx: Tx, organizationId: string, personId: string): Promise<boolean> {
   const rows = await tx.$queryRaw<{ ok: boolean }[]>`
     SELECT true AS ok FROM approval.people p
     JOIN organization_memberships om
@@ -67,6 +67,14 @@ async function isOrgAdmin(tx: Tx, organizationId: string, personId: string): Pro
       AND p.organization_id = ${organizationId}::uuid
       AND om.role IN ('primary_admin', 'admin') AND om.status = 'active' AND p.status = 'active'`;
   return rows.length > 0;
+}
+
+/**
+ * Can this person decide a recall themselves? Same question isOrgAdmin answers,
+ * for callers who are not already inside a transaction.
+ */
+export async function canDecideRecall(organizationId: string, personId: string): Promise<boolean> {
+  return prisma.$transaction((tx) => isOrgAdmin(tx, organizationId, personId));
 }
 
 // --- raising -----------------------------------------------------------------
@@ -156,6 +164,12 @@ export interface DecideRecallInput {
  * only cost them a step without protecting anyone, and a one-admin org would
  * deadlock outright. The row records who asked and who decided, so a
  * self-granted recall is visible as one rather than disguised as review.
+ *
+ * That reasoning runs one step further than it used to: if making an admin
+ * decide their own request protects nobody, neither does making them take the
+ * step. requestBillRecall grants it for them on the spot. This function is
+ * still the only thing that grants — the shortcut calls it rather than
+ * repeating it — so the recorded outcome is identical either way.
  */
 export async function decideRecall(input: DecideRecallInput): Promise<{
   state: 'granted' | 'denied';

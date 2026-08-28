@@ -8,7 +8,7 @@
 import { prisma } from '../infra/prisma.js';
 import { forbidden, notFound } from '../infra/api-errors.js';
 import {
-  requestRecall, decideRecall, withdrawRecall,
+  requestRecall, decideRecall, withdrawRecall, canDecideRecall,
   openRecallRequest, recallHistory, pendingRecallRequests,
   type RecallRequestRow,
 } from '../approvals/recall.js';
@@ -66,12 +66,31 @@ export async function requestBillRecall(input: {
   paymentOrderId: string;
   actorUserId: string;
   reason: string;
-}): Promise<BillRecallView> {
+}): Promise<BillRecallView & { granted: boolean }> {
   const approvableId = await approvableForOrder(input.organizationId, input.paymentOrderId);
   const actorId = await personFor(input.organizationId, input.actorUserId);
-  await requestRecall({ approvableId, actorId, reason: input.reason });
+  const { requestId } = await requestRecall({ approvableId, actorId, reason: input.reason });
+
+  // An admin asking themselves is not a review.
+  //
+  // Recall is a request because it throws away approvals real people gave, and
+  // somebody should own that. But only an admin can grant one — so when the
+  // asker IS an admin, the ceremony asks them to rubber-stamp their own
+  // decision. Zara raised a request and immediately granted it, which is not a
+  // safeguard, it is a form to fill in. Worse, the record then shows two
+  // decisions where one was made.
+  //
+  // The reason is still captured, the freeze still happens, the grant still
+  // runs through decideRecall — nothing is skipped except the interval in which
+  // the same person waits for themselves.
+  if (await canDecideRecall(input.organizationId, actorId)) {
+    await decideRecall({ requestId, actorId, grant: true, note: 'Recalled directly — the asker is an admin.' });
+    const [decided] = await recallHistory(approvableId);
+    return { ...toView(decided!), granted: true };
+  }
+
   const open = await openRecallRequest(approvableId);
-  return toView(open!);
+  return { ...toView(open!), granted: false };
 }
 
 export async function decideBillRecall(input: {

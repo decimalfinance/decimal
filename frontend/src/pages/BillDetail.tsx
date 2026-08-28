@@ -213,8 +213,13 @@ export function BillDetailPage() {
     if (composer === 'recall') {
       setActing(true);
       billsApi.requestRecall(organizationId, paymentOrderId, text)
-        .then(() => {
-          toast.success('Asked — the bill is on hold until an admin answers.');
+        .then((r) => {
+          // An admin's recall happens on the spot, so saying it is "on hold
+          // until an admin answers" would describe a wait that already ended —
+          // and leave them looking for a request to grant that is gone.
+          toast.success(r.granted
+            ? 'Recalled — the bill is back in the draft queue and the approvers were notified.'
+            : 'Asked — the bill is on hold until an admin answers.');
           setComposer(null);
           setComposerText('');
           refresh();

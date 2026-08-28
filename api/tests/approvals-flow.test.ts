@@ -2180,6 +2180,49 @@ test('a submitter cannot recall a bill that is already approved', async () => {
 // order stayed `submitted`, so the bill came back read-only and you could not
 // fix the thing you asked for it back to fix.
 
+test('an admin recalling their own bill does not have to grant their own request', async () => {
+  // Zara raised a recall request and then immediately granted it. That is not a
+  // safeguard, it is a form: only an admin can grant one, so an admin asking is
+  // asking themselves. It also left a record showing two decisions where one
+  // was made.
+  //
+  // The ceremony still exists for everybody else, and for good reason — a
+  // recall throws away approvals real people gave. What goes is the interval in
+  // which the same person waits for themselves.
+  const { orgId, owner, a2, a3 } = await makeOrg();
+  const flow = await get(`/organizations/${orgId}/approvals/flow`, owner.token);
+  const byUser = new Map(flow.people.map((p: { user_id: string; id: string }) => [p.user_id, p.id]));
+  // The owner is not in the ladder, so the bill they submit really does wait on
+  // somebody else — otherwise this would prove nothing about recall.
+  await publishLadder(orgId, owner.token, [byUser.get(a2.userId) as string], byUser.get(a3.userId) as string);
+
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'Recall Direct Co', amount: 900, invoiceNo: 'RD-1' });
+  await bill.confirm();
+  let detail = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
+  assert.equal(detail.status.macroState, 'pending_approval');
+
+  const raised = await post(`/organizations/${orgId}/bills/${bill.billId}/recall-request`,
+    { reason: 'wrong figures' }, owner.token);
+  assert.equal(raised.state, 'granted', 'it happened, rather than waiting for the asker');
+  assert.equal(raised.granted, true, 'and the screen is told, so it does not promise a wait that is over');
+
+  // Nothing is left for anybody to answer.
+  detail = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
+  assert.equal(detail.recall.open, null, 'no request hanging around to be granted');
+
+  // The bill actually came back, which is the whole point of asking.
+  const order = await prisma.paymentOrder.findFirstOrThrow({
+    where: { organizationId: orgId, paymentOrderId: bill.billId },
+    select: { state: true },
+  });
+  assert.equal(order.state, 'draft');
+
+  // And the reason survives: a shortcut that loses the record would be a worse
+  // trade than the step it removes.
+  const history = detail.recall.history ?? [];
+  assert.ok(history.some((h: { reason: string }) => h.reason === 'wrong figures'), 'the reason is on the record');
+});
+
 test('recall over HTTP: raising freezes the bill, a member cannot decide, granting returns it to draft', async () => {
   const { orgId, owner, a2, a3 } = await makeOrg();
   const flow = await get(`/organizations/${orgId}/approvals/flow`, owner.token);

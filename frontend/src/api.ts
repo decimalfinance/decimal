@@ -1659,7 +1659,9 @@ export const billsApi = {
   },
   // Recall: the submitter asks, an admin answers. Raising freezes the bill.
   requestRecall(organizationId: string, paymentOrderId: string, reason: string) {
-    return request<BillRecall>(`/organizations/${organizationId}/bills/${paymentOrderId}/recall-request`, {
+    // `granted` is true when the asker was an admin and the recall therefore
+    // happened immediately, rather than waiting for somebody to answer.
+    return request<BillRecall & { granted: boolean }>(`/organizations/${organizationId}/bills/${paymentOrderId}/recall-request`, {
       method: 'POST',
       body: JSON.stringify({ reason }),
     });
