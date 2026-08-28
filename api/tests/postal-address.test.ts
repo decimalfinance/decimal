@@ -78,7 +78,7 @@ test('a reference reads like an invoice number, not a sentence', () => {
     deriveInvoiceReference({
       vendorName: 'Vantage Print Co', amount: 1500, invoiceDate: '2026-08-15',
     }),
-    'VPC-20260815-1500',
+    'VPC-260815-1500',
   );
 });
 
@@ -94,11 +94,11 @@ test('cents appear only when there are cents', () => {
   // Trailing zeros are noise on the overwhelming majority of bills.
   assert.equal(
     deriveInvoiceReference({ vendorName: 'Acme Cloud', amount: 1500.5, invoiceDate: '2026-08-15' }),
-    'AC-20260815-1500.50',
+    'AC-260815-1500.50',
   );
   assert.equal(
     deriveInvoiceReference({ vendorName: 'Acme Cloud', amount: 1500, invoiceDate: '2026-08-15' }),
-    'AC-20260815-1500',
+    'AC-260815-1500',
   );
 });
 
@@ -118,7 +118,7 @@ test('two bills from one vendor on different days do not collide', () => {
 test('a missing invoice date falls back to the due date', () => {
   assert.equal(
     deriveInvoiceReference({ vendorName: 'Acme', amount: 200, invoiceDate: null, dueDate: '2026-12-01' }),
-    'A-20261201-200',
+    'A-261201-200',
   );
 });
 

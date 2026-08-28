@@ -1236,7 +1236,7 @@ function toDocSource(raw: unknown): DocSource | null {
  * some utility statements — and AP teams do not reject those. They construct a
  * reference from a written convention and note that they did.
  *
- *     Vantage Print Co, $1,500.00, 2026-08-15  ->  VPC-20260815-1500
+ *     Vantage Print Co, $1,500.00, 2026-08-15  ->  VPC-260815-1500
  *
  * It has to LOOK like an invoice number, because that is what it will be read
  * as everywhere it appears: on the bill list, in the ledger, quoted back to a
@@ -1245,10 +1245,13 @@ function toDocSource(raw: unknown): DocSource | null {
  *
  * Initials, date, amount. Each part earns its place:
  *
- *   VPC        so a human scanning a list can tell whose it is
- *   20260815   the invoice's own date, checkable against the page at a glance
- *   1500       the amount, because two invoices from one vendor on one day is
- *              uncommon but real, and without it they would collide
+ *   VPC      so a human scanning a list can tell whose it is
+ *   260815   the invoice's own date, YYMMDD, checkable against the page at a
+ *            glance. Two digits for the year because an AP reference is read
+ *            and matched over a handful of years, not archived for a century,
+ *            and the published conventions this follows all do the same
+ *   1500     the amount, because two invoices from one vendor on one day is
+ *            uncommon but real, and without it they would collide
  *
  * Cents only when there are cents: -1500 rather than -1500.00, since the
  * trailing zeros are noise on the overwhelming majority of bills.
@@ -1277,7 +1280,7 @@ export function deriveInvoiceReference(extracted: Record<string, unknown>): stri
   // The invoice's own date, falling back to the due date — a bill with neither
   // still gets a reference, just a less specific one.
   const iso = str(extracted.invoiceDate) ?? str(extracted.dueDate);
-  const day = iso ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso) : null;
+  const day = iso ? /^\d{2}(\d{2})-(\d{2})-(\d{2})$/.exec(iso) : null;
   if (day) parts.push(`${day[1]}${day[2]}${day[3]}`);
 
   const amount = num(extracted.amount);
