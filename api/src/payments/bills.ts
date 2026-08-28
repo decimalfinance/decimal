@@ -1236,10 +1236,22 @@ function toDocSource(raw: unknown): DocSource | null {
  * some utility statements — and AP teams do not reject those. They construct a
  * reference from a written convention and note that they did.
  *
- * The convention here follows the common one: vendor, the amount to the cent,
- * and the month and year of the invoice date.
+ *     Vantage Print Co, $1,500.00, 2026-08-15  ->  VPC-20260815-1500
  *
- *     Vantage Print Co, $1,500.00, 2026-08-15  ->  VantagePrintCo1500.00Aug26
+ * It has to LOOK like an invoice number, because that is what it will be read
+ * as everywhere it appears: on the bill list, in the ledger, quoted back to a
+ * vendor. The first version of this spelled the vendor out in full and came out
+ * VantagePrintCo1500.00Aug26 — accurate, deterministic, and a sentence.
+ *
+ * Initials, date, amount. Each part earns its place:
+ *
+ *   VPC        so a human scanning a list can tell whose it is
+ *   20260815   the invoice's own date, checkable against the page at a glance
+ *   1500       the amount, because two invoices from one vendor on one day is
+ *              uncommon but real, and without it they would collide
+ *
+ * Cents only when there are cents: -1500 rather than -1500.00, since the
+ * trailing zeros are noise on the overwhelming majority of bills.
  *
  * The property that matters is not that a reference EXISTS but that the same
  * invoice always derives the same one. Duplicate detection keys on vendor plus
@@ -1250,35 +1262,33 @@ function toDocSource(raw: unknown): DocSource | null {
  * So it is derived from the DOCUMENT — what was read off the page — rather than
  * from whatever is currently typed into the form. Editing the vendor name on
  * screen should not change what this invoice is called.
- *
- * Spaces and punctuation come out of the vendor name because a reference is
- * matched, not read aloud, and stray characters are how two spellings of the
- * same thing stop matching.
  */
 export function deriveInvoiceReference(extracted: Record<string, unknown>): string | null {
-  const vendor = (str(extracted.vendorName) ?? '').replace(/[^A-Za-z0-9]/g, '').slice(0, 24);
-  if (!vendor) return null;
+  const initials = (str(extracted.vendorName) ?? '')
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean)
+    .map((word) => word[0]!.toUpperCase())
+    .join('')
+    .slice(0, 4);
+  if (!initials) return null;
 
-  const amount = num(extracted.amount);
-  const money = amount != null && Number.isFinite(amount) ? amount.toFixed(2) : '';
+  const parts = [initials];
 
   // The invoice's own date, falling back to the due date — a bill with neither
   // still gets a reference, just a less specific one.
   const iso = str(extracted.invoiceDate) ?? str(extracted.dueDate);
-  const stamp = monthStamp(iso);
+  const day = iso ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso) : null;
+  if (day) parts.push(`${day[1]}${day[2]}${day[3]}`);
 
-  const reference = `${vendor}${money}${stamp}`;
-  // Vendor alone is not a reference: every bill from them would collide.
-  return money || stamp ? reference : null;
-}
+  const amount = num(extracted.amount);
+  if (amount != null && Number.isFinite(amount)) {
+    parts.push(Number.isInteger(amount) ? String(amount) : amount.toFixed(2));
+  }
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-function monthStamp(iso: string | null): string {
-  const m = iso ? /^(\d{4})-(\d{2})-\d{2}$/.exec(iso) : null;
-  if (!m) return '';
-  const month = MONTHS[Number(m[2]) - 1];
-  return month ? `${month}${m[1]!.slice(2)}` : '';
+  // Initials alone are not a reference: every bill from that vendor would
+  // collide, which is worse than having none — duplicate detection would fire
+  // on unrelated invoices.
+  return parts.length > 1 ? parts.join('-') : null;
 }
 
 export type ReviewFieldState = 'read' | 'needs_look' | 'not_on_document' | 'confirmed';

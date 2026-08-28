@@ -69,12 +69,16 @@ test('a letterhead written across two lines splits like any other', () => {
 // one — duplicate detection keys on vendor plus number, so "VANTAGE-AUG" from
 // one clerk and "Vantage 8/15" from another means the same bill is paid twice.
 
-test('a reference is built from the vendor, the amount and the invoice month', () => {
+test('a reference reads like an invoice number, not a sentence', () => {
+  // It will be read as one everywhere it appears: the bill list, the ledger,
+  // quoted back to a vendor. Initials so a human can tell whose it is, the
+  // invoice date so it can be checked against the page, the amount so two
+  // bills from one vendor on one day do not collide.
   assert.equal(
     deriveInvoiceReference({
       vendorName: 'Vantage Print Co', amount: 1500, invoiceDate: '2026-08-15',
     }),
-    'VantagePrintCo1500.00Aug26',
+    'VPC-20260815-1500',
   );
 });
 
@@ -86,27 +90,41 @@ test('the same invoice always derives the same reference', () => {
   assert.equal(a, b);
 });
 
-test('cents are part of it, because two bills a month apart can share a dollar figure', () => {
+test('cents appear only when there are cents', () => {
+  // Trailing zeros are noise on the overwhelming majority of bills.
   assert.equal(
-    deriveInvoiceReference({ vendorName: 'Acme', amount: 1500.5, invoiceDate: '2026-08-15' }),
-    'Acme1500.50Aug26',
+    deriveInvoiceReference({ vendorName: 'Acme Cloud', amount: 1500.5, invoiceDate: '2026-08-15' }),
+    'AC-20260815-1500.50',
   );
+  assert.equal(
+    deriveInvoiceReference({ vendorName: 'Acme Cloud', amount: 1500, invoiceDate: '2026-08-15' }),
+    'AC-20260815-1500',
+  );
+});
+
+test('two bills from one vendor on different days do not collide', () => {
   assert.notEqual(
     deriveInvoiceReference({ vendorName: 'Acme', amount: 1500, invoiceDate: '2026-08-15' }),
     deriveInvoiceReference({ vendorName: 'Acme', amount: 1500, invoiceDate: '2026-09-15' }),
+  );
+  // Nor two on the SAME day for different amounts, which is the case the amount
+  // is carried for.
+  assert.notEqual(
+    deriveInvoiceReference({ vendorName: 'Acme', amount: 1500, invoiceDate: '2026-08-15' }),
+    deriveInvoiceReference({ vendorName: 'Acme', amount: 900, invoiceDate: '2026-08-15' }),
   );
 });
 
 test('a missing invoice date falls back to the due date', () => {
   assert.equal(
     deriveInvoiceReference({ vendorName: 'Acme', amount: 200, invoiceDate: null, dueDate: '2026-12-01' }),
-    'Acme200.00Dec26',
+    'A-20261201-200',
   );
 });
 
-test('a vendor name alone is not a reference', () => {
-  // Every bill from them would collide, which is worse than having none: it
-  // would make duplicate detection fire on unrelated invoices.
+test('initials alone are not a reference', () => {
+  // Every bill from that vendor would collide, which is worse than having none:
+  // duplicate detection would fire on unrelated invoices.
   assert.equal(deriveInvoiceReference({ vendorName: 'Acme' }), null);
   assert.equal(deriveInvoiceReference({ vendorName: null, amount: 100 }), null);
   assert.equal(deriveInvoiceReference({ vendorName: '///', amount: 100, invoiceDate: '2026-08-15' }), null);
