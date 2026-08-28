@@ -32,7 +32,7 @@ const execFileAsync = promisify(execFile);
 
 // Version of the matcher; stamped wherever refinement ran so the review path
 // knows to re-run after matcher improvements.
-export const PROVENANCE_VERSION = 10; // v10: tilted boxes a fifth taller
+export const PROVENANCE_VERSION = 11; // v11: tilted box centred on its words
 
 export type TextWord = { text: string; x0: number; y0: number; x1: number; y1: number }; // 0-1 fractions, top-left origin
 export type TextPage = {
@@ -738,16 +738,15 @@ export function expandToRow(page: TextPage, match: Box, amount?: number | null):
 const PAD = 0.006;
 
 // A tilted box is built from the measured height of its own text, so these are
-// in multiples of that: the box is 2 x 0.72 tall with 0.30 of margin each side,
-// about twice the height of the line it sits on.
+// in multiples of that: the box is 2 x 0.6 tall with 0.25 of margin each side.
 //
-// The first version of this came out at 1.7x and read as cropped — a line of
-// text has ascenders and descenders that a median word height does not account
-// for, and a rotated box that only just contains them looks like it is cutting
-// into them. Both numbers moved together so the box grew by a fifth in total
-// rather than growing its middle and keeping its margins.
-const TILTED_HALF_HEIGHT = 0.72;
-const TILTED_PAD = 0.30;
+// These were briefly a fifth larger. The box looked cropped, and growing it was
+// the wrong answer — the outline was 2px, so most of what read as "cutting into
+// the text" was the border itself, and a bigger box only left slack below the
+// words for the border to sit in. A hairline outline fixed the look; the extra
+// height is back off.
+const TILTED_HALF_HEIGHT = 0.6;
+const TILTED_PAD = 0.25;
 
 /**
  * The box the viewer draws — tightened and tilted to sit on tilted text.
@@ -785,19 +784,36 @@ function toSource(b: Box, page?: TextPage): SourceBox {
     // slightly long, hit its own floor, and produced a bar THINNER than the
     // glyphs, which the padding then had to make up. Measuring beats deriving
     // when the measurement is sitting right there.
-    const heights = page.words
-      .filter((w) => {
-        const cx = (w.x0 + w.x1) / 2;
-        const cy = (w.y0 + w.y1) / 2;
-        return cx >= b.x0 && cx <= b.x1 && cy >= b.y0 && cy <= b.y1;
-      })
-      .map((w) => w.y1 - w.y0)
-      .sort((a, b2) => a - b2);
+    const inside = page.words.filter((w) => {
+      const cx = (w.x0 + w.x1) / 2;
+      const cy = (w.y0 + w.y1) / 2;
+      return cx >= b.x0 && cx <= b.x1 && cy >= b.y0 && cy <= b.y1;
+    });
+    const heights = inside.map((w) => w.y1 - w.y0).sort((a, b2) => a - b2);
     if (heights.length > 0) {
       // Median, so one tall glyph or one misread speck does not set the height
       // for the whole run.
       const line = heights[Math.floor(heights.length / 2)]!;
-      const cy = (y0 + y1) / 2;
+      // And the CENTRE comes from the words too, not from the middle of the
+      // rectangle that encloses them.
+      //
+      // C1's first row sat visibly high, and one token was the whole reason:
+      // tesseract read its em dash as "~" and gave that a box 0.0187 tall
+      // against 0.005 for every real word beside it. The enclosing rectangle
+      // takes its top edge from whatever reaches highest, so a single misread
+      // glyph pulled the centre up by a third of a line — enough to lift a
+      // 16px-tall highlight clear of the text it belongs to.
+      //
+      // Each word says where the line sits at the box's midpoint, by walking
+      // its own centre back along the slope. The median of those answers is
+      // immune to the one word that is wrong.
+      const midX = (b.x0 + b.x1) / 2;
+      const tan = Math.tan(skew * Math.PI / 180);
+      const aspect = page.aspect ?? 1;
+      const centres = inside
+        .map((w) => (w.y0 + w.y1) / 2 - ((w.x0 + w.x1) / 2 - midX) * aspect * tan)
+        .sort((a, b2) => a - b2);
+      const cy = centres[Math.floor(centres.length / 2)]!;
       y0 = cy - line * TILTED_HALF_HEIGHT;
       y1 = cy + line * TILTED_HALF_HEIGHT;
       // And a thinner margin, or the padding alone would be most of the box: a

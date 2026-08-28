@@ -382,14 +382,17 @@ test('on a tilted page the box turns with the text instead of growing to fit it'
   // round sloping text has to be tall enough to contain the whole slope: on C1,
   // 28px of fall against 13px of text, so the box comes out three times taller
   // than the words and reads as a band floating around the line.
+  const ASPECT = 0.733, SKEW = 1.79;
+  const slope = ASPECT * Math.tan(SKEW * Math.PI / 180);   // fall per unit of x
   const words = [];
-  // "Ocean freight inbound APAC", falling steadily left to right.
+  // "Ocean freight inbound APAC", falling at exactly the page's declared tilt.
   for (const [i, text] of ['Ocean', 'freight', 'inbound', 'APAC'].entries()) {
-    const y = 300 + i * 8;                     // the tilt
-    words.push(word(text, 100 + i * 200, y, 280 + i * 200, y + 14));
+    const x0 = 0.10 + i * 0.20;
+    const y = 0.30 + (x0 - 0.10) * slope;
+    words.push({ text, x0, y0: y, x1: x0 + 0.18, y1: y + 0.014 });
   }
-  const tilted: TextPage = { words, aspect: 0.733, skewDeg: 1.79 };
-  const upright: TextPage = { words, aspect: 0.733, skewDeg: 0 };
+  const tilted: TextPage = { words, aspect: ASPECT, skewDeg: SKEW };
+  const upright: TextPage = { words, aspect: ASPECT, skewDeg: 0 };
 
   const of = (page: TextPage) => {
     const invoice = fakeInvoice({ vendorName: 'Ocean freight inbound APAC' });
@@ -403,8 +406,42 @@ test('on a tilted page the box turns with the text instead of growing to fit it'
   assert.equal(b.angle, undefined, 'and says nothing when the page is square');
   assert.ok(a.box[3] < b.box[3], `tilted box is the shorter one: ${a.box[3]} vs ${b.box[3]}`);
 
-  // Turned about its own centre, so the centre must not move.
-  assert.ok(Math.abs((a.box[1] + a.box[3] / 2) - (b.box[1] + b.box[3] / 2)) < 1e-9);
+  // The centre sits ON THE LINE at the box's midpoint — not at the middle of
+  // the rectangle enclosing it.
+  //
+  // This used to assert the opposite: that the tilted centre matched the
+  // upright one, i.e. the middle of the enclosing rectangle. That is the
+  // behaviour that put C1's first row visibly high, because the rectangle takes
+  // its top edge from whatever reaches highest and one token there was a
+  // misread em dash with a box three times the height of a real word.
+  const midX = a.box[0] + a.box[2] / 2;
+  const first = words[0]!;
+  const lineAtMid = (first.y0 + first.y1) / 2 + (midX - (first.x0 + first.x1) / 2) * slope;
+  const centre = a.box[1] + a.box[3] / 2;
+  assert.ok(Math.abs(centre - lineAtMid) < 0.001,
+    `centre ${centre} should sit on the line at ${lineAtMid}`);
+
+  // The case that actually broke it: one word with a wildly oversized box.
+  //
+  // Tesseract read C1's em dash as "~" and gave it a box 0.0187 tall against
+  // 0.005 for every real word beside it. Taking the centre from the enclosing
+  // rectangle let that single glyph lift the highlight a third of a line clear
+  // of the text. Taking it from the median of what the words themselves say
+  // costs that one word its vote.
+  const withMisread: TextPage = {
+    ...tilted,
+    words: [
+      ...words.slice(0, 2),
+      { text: '~', x0: 0.47, y0: 0.29, x1: 0.485, y1: 0.3187 },   // three lines tall
+      ...words.slice(2),
+    ],
+  };
+  const invoice = fakeInvoice({ vendorName: 'Ocean freight inbound APAC' });
+  refineInvoiceSources(invoice, [withMisread]);
+  const withOutlier = invoice.fieldSources!.vendorName!;
+  const outlierCentre = withOutlier.box[1] + withOutlier.box[3] / 2;
+  assert.ok(Math.abs(outlierCentre - lineAtMid) < 0.001,
+    `one misread glyph must not move the centre: ${outlierCentre} vs ${lineAtMid}`);
 });
 
 test('a tilt too small to matter is left alone', () => {
