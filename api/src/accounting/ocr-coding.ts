@@ -90,6 +90,10 @@ export async function listExpenseAccounts(organizationId: string): Promise<Expen
  * account is correct, 0-1). Constrained to the provided account names so it can't invent
  * an account. Returns no suggestions when nothing fits or the model is unavailable.
  */
+// How many invoice lines are put in front of the model at once. Descriptions
+// are short, so this is a context-window guard rather than a cost one.
+const MAX_CODED_LINES = 100;
+
 export async function matchExpenseAccounts(args: {
   categoryHint: string | null;
   lineItems: { description: string }[];
@@ -98,7 +102,20 @@ export async function matchExpenseAccounts(args: {
   const empty = { rationale: null, suggestions: [] as OcrSuggestion[], lines: [] as OcrLineCoding[] };
   if (!config.openAiApiKey || args.accounts.length === 0) return empty;
   const hint = args.categoryHint?.trim() || null;
-  const items = args.lineItems.map((l) => l.description).filter(Boolean).slice(0, 10);
+  const all = args.lineItems.map((l) => l.description).filter(Boolean);
+  // Ten was far too few and said nothing about it. D1 is a 22-line cloud bill,
+  // and per-line coding is the entire reason that invoice exists — twelve of
+  // its lines were never sent to the model at all, and the screen showed the
+  // result as though every line had been considered.
+  //
+  // A cap still belongs here: a thousand-line invoice would blow the context
+  // window. It is now high enough that a real invoice reaches it rarely, and it
+  // says so out loud when it bites, because a coverage limit that nobody can
+  // see reads as "all of this was coded" when it was not.
+  const items = all.slice(0, MAX_CODED_LINES);
+  if (all.length > items.length) {
+    logger.warn('ocr_coding.lines_truncated', { total: all.length, coded: items.length });
+  }
   if (!hint && items.length === 0) return empty;
 
   const accountList = args.accounts
