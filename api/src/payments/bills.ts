@@ -17,7 +17,7 @@ import { markBillSubmitted, cancelPaymentOrder, getPaymentOrderDetail } from './
 import { listChartOfAccounts } from '../accounting/ocr-coding.js';
 import {
   extractPdfTextLayer, extractImageTextLayer, refineInvoiceSources, stripUnmeasuredSources,
-  ungroundedFields, PROVENANCE_VERSION,
+  ungroundedFields, splitPostalAddress, PROVENANCE_VERSION,
 } from './doc-provenance.js';
 import { DOUBTFUL_FIELD_STATUSES, renderDocumentToImages } from './document-extract.js';
 import { findDuplicateBills, readDuplicateOverride, describeDuplicate, matchDuplicates } from './duplicate-check.js';
@@ -1189,59 +1189,10 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
 // Review packet
 // -----------------------------------------------------------------------------
 
-// Invoices print the vendor address as one line ("450 Westlake Ave N, Seattle,
-// WA 98109"); the draft screen wants it in four boxes. Anything this can't
-// confidently split stays whole in `street` — showing the address in the wrong
-// box is recoverable, showing "Not on document" is not.
-export function splitPostalAddress(address: string | null): {
-  street: string | null; city: string | null; state: string | null; zip: string | null;
-} {
-  const empty = { street: null, city: null, state: null, zip: null };
-  if (!address) return empty;
-  // Letterheads separate address parts typographically as often as they use a
-  // comma: "500 Howard St · San Francisco, CA 94105". Splitting on commas alone
-  // left the middle dot inside the street, so the street read "500 Howard St ·
-  // San Francisco" and the city read Not on document — a wrong box AND an empty
-  // one, on two of the six B-series invoices.
-  //
-  // A NEWLINE is the third separator, and the one a letterhead actually uses:
-  //
-  //     340 Congress St
-  //     Austin, TX 78701
-  //
-  // It only started arriving once extraction began reading the PDF's own text,
-  // because pdftotext preserves the document's line breaks and the vision model
-  // had been quietly converting them to "·". So this had been correct against
-  // every input it was ever shown, and wrong about the format the document is
-  // actually written in — the street came out "340 Congress St\nAustin", which
-  // the browser then collapsed into "340 Congress StAustin".
-  const parts = address
-    .replace(/[·•|\r\n]+/g, ',')
-    .split(',')
-    .map((p) => p.trim())
-    .filter(Boolean);
-  if (parts.length === 0) return empty;
-  if (parts.length === 1) return { ...empty, street: parts[0]! };
-
-  let state: string | null = null;
-  let zip: string | null = null;
-  const tail = parts[parts.length - 1]!;
-  const stateZip = /^([A-Za-z][A-Za-z. ]*?)\s+(\d{5}(?:-\d{4})?)$/.exec(tail);
-  if (stateZip) {
-    state = stateZip[1]!.trim();
-    zip = stateZip[2]!;
-    parts.pop();
-  } else if (/^\d{5}(?:-\d{4})?$/.test(tail)) {
-    zip = tail;
-    parts.pop();
-  } else if (/^[A-Za-z][A-Za-z. ]*$/.test(tail) && tail.length <= 20 && parts.length > 2) {
-    state = tail;
-    parts.pop();
-  }
-
-  const city = parts.length > 1 ? parts.pop()! : null;
-  return { street: parts.join(', ') || null, city, state, zip };
-}
+// Lives with the matcher now, because the refiner needs the same split to put a
+// box round each part of a letterhead address. Re-exported so there is one
+// implementation and one name for it.
+export { splitPostalAddress } from './doc-provenance.js';
 
 export type ReviewFieldState = 'read' | 'needs_look' | 'not_on_document' | 'confirmed';
 
@@ -1510,8 +1461,16 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       // "We could not read this" and "this section does not exist" are
       // different statements, and only one of them is the reader's problem.
       ...fieldState({ key: pickAddressConfidenceKey(usedVendorAddress), value, fieldConfidence, fieldStatus, issues, ungrounded, confirmedKeys }),
+      // Each box points at its own words, falling back to the whole address
+      // block when only that could be located.
+      //
+      // This asked for `vendorAddress` alone, and nothing ever wrote that key —
+      // so the common case, an address on the letterhead rather than in a
+      // Remit To panel, silently had no highlight on any document. The refiner
+      // produces the per-part keys now; this is the other half of the same fix,
+      // and one without the other still shows nothing.
       source: usedVendorAddress
-        ? sourceOf('vendorAddress')
+        ? sourceOf(`vendorAddress.${part}`) ?? sourceOf('vendorAddress')
         : sourceOf(remitPartSourceKey[part]) ?? sourceOf('remitTo'),
     };
   });

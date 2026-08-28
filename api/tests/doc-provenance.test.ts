@@ -222,6 +222,49 @@ test('when nothing on a document can be measured, every box is thrown away', () 
   assert.equal((invoice.lineItems[0] as { source?: unknown }).source, undefined);
 });
 
+test('the letterhead address gets a box round each part', () => {
+  // Most invoices print the address on the letterhead rather than in a Remit To
+  // panel, and that address was never refined at all — while the draft screen
+  // asked for it under a key (`vendorAddress`) nothing ever wrote. So street,
+  // city, state and zip showed no highlight on EVERY document, digital PDFs
+  // included, where the exact characters were sitting in the text layer.
+  // Sixteen of the thirty missing boxes across the C series were these four.
+  const page: TextPage = {
+    words: [
+      word('9', 60, 300, 75, 315), word('Cannery', 80, 300, 150, 315), word('Row', 155, 300, 190, 315),
+      word('Monterey,', 60, 320, 140, 335), word('CA', 145, 320, 170, 335), word('93940', 175, 320, 230, 335),
+    ],
+  };
+  const invoice = fakeInvoice({ vendorAddress: '9 Cannery Row · Monterey, CA 93940' });
+  refineInvoiceSources(invoice, [page]);
+  const src = invoice.fieldSources!;
+
+  // Each input points at its own words, not all four at one block.
+  assert.ok(src['vendorAddress.street'], 'street');
+  assert.ok(src['vendorAddress.city'], 'city');
+  assert.ok(src['vendorAddress.state'], 'state');
+  assert.ok(src['vendorAddress.zip'], 'zip');
+  assert.ok(src['vendorAddress.city']!.box[1] > src['vendorAddress.street']!.box[1],
+    'the city sits on the line below the street');
+});
+
+test('a two-letter state code is disambiguated by the address block', () => {
+  // "CA" is two characters and can appear anywhere on an invoice. The
+  // whole-address match is the hint that picks the right one — the same job the
+  // model's box does when it is the only hint available.
+  const page: TextPage = {
+    words: [
+      word('CA', 700, 100, 725, 115),          // a stray, far from the address
+      word('9', 60, 300, 75, 315), word('Cannery', 80, 300, 150, 315), word('Row', 155, 300, 190, 315),
+      word('Monterey,', 60, 320, 140, 335), word('CA', 145, 320, 170, 335), word('93940', 175, 320, 230, 335),
+    ],
+  };
+  const invoice = fakeInvoice({ vendorAddress: '9 Cannery Row · Monterey, CA 93940' });
+  refineInvoiceSources(invoice, [page]);
+  const state = invoice.fieldSources!['vendorAddress.state']!;
+  assert.ok(state.box[1] > 0.2, `picked the state in the address, not the stray, got y=${state.box[1]}`);
+});
+
 function fakeInvoice(overrides: Record<string, unknown>) {
   return {
     vendorName: 'Acme Logistics LLC',
