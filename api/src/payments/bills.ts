@@ -15,7 +15,7 @@ import { logger } from '../infra/logger.js';
 import { USDC_DECIMALS } from '../solana.js';
 import { markBillSubmitted, cancelPaymentOrder, getPaymentOrderDetail } from './orders.js';
 import { listChartOfAccounts } from '../accounting/ocr-coding.js';
-import { extractPdfTextLayer, refineInvoiceSources, PROVENANCE_VERSION } from './doc-provenance.js';
+import { extractPdfTextLayer, refineInvoiceSources, ungroundedFields, PROVENANCE_VERSION } from './doc-provenance.js';
 import { DOUBTFUL_FIELD_STATUSES } from './document-extract.js';
 import { findDuplicateBills, readDuplicateOverride, describeDuplicate, matchDuplicates } from './duplicate-check.js';
 import { readPayableHold, describePayableHold } from './vendor-payable.js';
@@ -62,6 +62,12 @@ async function ensureProvenance(order: {
       // refiner reads; missing fields are simply skipped.
       refineInvoiceSources(refreshed as unknown as ExtractedInvoice, pages);
     }
+    // And, from the same text layer, the one confidence signal that is not the
+    // model's opinion of itself: is the figure we are about to pay actually
+    // printed on the page? Null when there is no text layer — "we could not
+    // check" is not "we checked and it was fine", and the difference matters
+    // most on the photographs where checking is impossible.
+    refreshed.ungrounded = ungroundedFields(refreshed, pages);
     // Stamp even when there's no text layer (scan/image) so we don't re-run
     // pdftotext on every open.
     await prisma.paymentOrder.update({
@@ -1207,6 +1213,8 @@ function fieldState(args: {
   fieldStatus?: Record<string, unknown> | null;
   /** The model's own words about the ones it struggled with. */
   issues?: Array<{ field: string; note: string }> | null;
+  /** Fields whose value could not be found in the document's text layer. */
+  ungrounded?: string[] | null;
   confirmedKeys: Set<string>;
 }): { state: ReviewFieldState; reason: string | null } {
   if (args.confirmedKeys.has(args.key)) return { state: 'confirmed', reason: null };
@@ -1219,6 +1227,17 @@ function fieldState(args: {
   // calibrated probability, which they cannot: everything came back 0.98,
   // whether from a clean PDF or a photograph of creased paper, so the "check
   // this" marker never once appeared.
+  // Not found in the document's own text. This outranks anything the model
+  // says about itself: it is an observation, and the failure it catches — a
+  // figure that reads cleanly and is not on the page — is the one that gets
+  // paid without anybody looking.
+  if (args.ungrounded?.includes(args.key)) {
+    return {
+      state: 'needs_look',
+      reason: 'This value does not appear anywhere in the document text — check it against the page',
+    };
+  }
+
   const status = str(args.fieldStatus?.[args.key]);
   if (status) {
     if (!DOUBTFUL_FIELD_STATUSES.has(status)) return { state: 'read', reason: null };
@@ -1312,6 +1331,9 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   const fieldStatus = isRecord(extracted.fieldStatus) ? extracted.fieldStatus : null;
   // The model's own words about what it struggled with. Better under a field
   // than any sentence we could write, because it names the actual obstacle.
+  const ungrounded = Array.isArray(extracted.ungrounded)
+    ? (extracted.ungrounded as unknown[]).filter((k): k is string => typeof k === 'string')
+    : null;
   const issues = Array.isArray(extracted.issues)
     ? (extracted.issues as unknown[]).filter(isRecord)
         .map((i) => ({ field: str(i.field) ?? '', note: str(i.note) ?? '' }))
@@ -1355,7 +1377,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   };
   const fields = headerFieldDefs.map((f) => ({
     ...f,
-    ...fieldState({ key: f.key, value: f.value, fieldConfidence, fieldStatus, issues, confirmedKeys }),
+    ...fieldState({ key: f.key, value: f.value, fieldConfidence, fieldStatus, issues, ungrounded, confirmedKeys }),
     source: sourceOf(sourceKeyByField[f.key] ?? f.key),
   }));
 
@@ -1384,7 +1406,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       // absence, and every bill came up amber for a value it had read cleanly.
       // "We could not read this" and "this section does not exist" are
       // different statements, and only one of them is the reader's problem.
-      ...fieldState({ key: pickAddressConfidenceKey(usedVendorAddress), value, fieldConfidence, fieldStatus, issues, confirmedKeys }),
+      ...fieldState({ key: pickAddressConfidenceKey(usedVendorAddress), value, fieldConfidence, fieldStatus, issues, ungrounded, confirmedKeys }),
       source: usedVendorAddress
         ? sourceOf('vendorAddress')
         : sourceOf(remitPartSourceKey[part]) ?? sourceOf('remitTo'),
@@ -1726,6 +1748,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
         fieldConfidence,
         fieldStatus,
         issues,
+        ungrounded,
         confirmedKeys,
       }).state,
       emailState: fieldState({
@@ -1734,6 +1757,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
         fieldConfidence,
         fieldStatus,
         issues,
+        ungrounded,
         confirmedKeys,
       }).state,
       isNew: order.counterpartyWallet.trustState === 'unreviewed',

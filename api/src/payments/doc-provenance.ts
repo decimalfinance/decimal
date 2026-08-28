@@ -367,3 +367,69 @@ export function refineInvoiceSources(invoice: ExtractedInvoice, pages: TextPage[
 
   return { refined };
 }
+
+
+// ---------------------------------------------------------------------------
+// Grounding: did the value we are about to pay actually appear on the page?
+// ---------------------------------------------------------------------------
+
+/**
+ * Check extracted values against the document's own text layer.
+ *
+ * This is the one confidence signal that is not the model's opinion of itself.
+ * The model saying "0.98" and the page containing "5,420.00" are different
+ * kinds of claim, and only the second can be checked. It costs nothing: the
+ * text layer is already pulled for highlighting, so this is a string search
+ * over words we have in hand.
+ *
+ * Deliberately narrow. Only the values that decide identity and money, and
+ * only where a comparison is honest:
+ *
+ *   - amounts, compared digit-by-digit, because "$5,420.00" and 5420 are the
+ *     same number written two ways
+ *   - the invoice number, compared alphanumerically for the same reason
+ *
+ * Dates, terms and addresses are skipped on purpose. A document printing
+ * "August 5, 2026" against an extracted "2026-08-05" is correct, and flagging
+ * it would produce a warning on almost every invoice — which is how a warning
+ * stops being read. A grounding check that cries wolf is worse than none.
+ *
+ * Returns the fields whose values could NOT be found. An empty array from a
+ * document with no text layer means "we could not check", never "verified" —
+ * callers get null for that case instead.
+ */
+export function ungroundedFields(
+  invoice: Record<string, unknown>,
+  pages: TextPage[] | null,
+): string[] | null {
+  if (!pages || pages.length === 0) return null;
+
+  const words = pages.flatMap((page) => page.words.map((w) => w.text));
+  const haystack = words.join(' ');
+  // Digits only: "$5,420.00" and "5420" and "5 420,00" all reduce the same way.
+  const digits = haystack.replace(/[^0-9]/g, '');
+  // Letters and digits only, lowercased: "ZA-8102" matches "za8102".
+  const alnum = haystack.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  const missing: string[] = [];
+
+  const amountFound = (value: unknown): boolean => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return true;
+    // Both the exact printed form and the whole-currency form, since a document
+    // may print "5,420" where the extraction says 5420.00.
+    const withCents = Math.abs(value).toFixed(2).replace(/[^0-9]/g, '');
+    const whole = String(Math.round(Math.abs(value)));
+    return digits.includes(withCents) || digits.includes(whole);
+  };
+
+  if (!amountFound(invoice.amount)) missing.push('total');
+  if (invoice.subtotal != null && !amountFound(invoice.subtotal)) missing.push('subtotal');
+
+  const invoiceNumber = invoice.invoiceNumber;
+  if (typeof invoiceNumber === 'string' && invoiceNumber.trim()) {
+    const needle = invoiceNumber.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (needle && !alnum.includes(needle)) missing.push('invoiceNumber');
+  }
+
+  return missing;
+}

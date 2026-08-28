@@ -205,3 +205,63 @@ test('the sign is still preferred when the document agrees with it', () => {
   assert.equal(positive.length, 1, 'and only the one that reads 240');
   assert.ok(Math.abs(positive[0]!.y0 - 0.1) < 0.01);
 });
+
+// --- grounding -------------------------------------------------------------
+//
+// The one confidence signal that is not the model's opinion of itself. "0.98"
+// and "5,420.00 is printed on page 1" are different kinds of claim, and only
+// the second can be checked.
+
+test('a figure that is not on the page is reported', async () => {
+  const { ungroundedFields } = await import('../src/payments/doc-provenance.js');
+  const page = {
+    words: '#ZA-8102 Subtotal $5,420.00 Total due $5,420.00'.split(' ').map((text) => ({
+      text, x0: 0, y0: 0, x1: 0.1, y1: 0.02,
+    })),
+  };
+
+  // What was actually read: both values present, in different formatting.
+  assert.deepEqual(
+    ungroundedFields({ amount: 5420, invoiceNumber: 'ZA-8102' }, [page]),
+    [],
+    'punctuation and currency symbols are not a difference',
+  );
+
+  // A total nobody printed. This is the failure that matters: it reads cleanly,
+  // the model is sure, and it would be paid without anyone looking.
+  assert.deepEqual(
+    ungroundedFields({ amount: 8420, invoiceNumber: 'ZA-8102' }, [page]),
+    ['total'],
+  );
+  assert.deepEqual(
+    ungroundedFields({ amount: 5420, invoiceNumber: 'ZA-9999' }, [page]),
+    ['invoiceNumber'],
+  );
+});
+
+test('no text layer means we could not check, not that it passed', async () => {
+  // A photograph has no text to search. Returning [] would say "verified" about
+  // the documents least able to be verified — exactly backwards.
+  const { ungroundedFields } = await import('../src/payments/doc-provenance.js');
+  assert.equal(ungroundedFields({ amount: 5420 }, null), null);
+  assert.equal(ungroundedFields({ amount: 5420 }, []), null);
+});
+
+test('grounding stays away from anything it would cry wolf about', async () => {
+  // A document printing "August 5, 2026" against an extracted "2026-08-05" is
+  // correct. Checking dates, terms or addresses would put a warning on nearly
+  // every invoice, and a warning on everything is a warning on nothing.
+  const { ungroundedFields } = await import('../src/payments/doc-provenance.js');
+  const page = {
+    words: 'Invoice ZA-8102 Date August 5, 2026 Terms Net 15 Total $5,420.00'.split(' ').map((text) => ({
+      text, x0: 0, y0: 0, x1: 0.1, y1: 0.02,
+    })),
+  };
+  assert.deepEqual(
+    ungroundedFields(
+      { amount: 5420, invoiceNumber: 'ZA-8102', invoiceDate: '2026-08-05', terms: 'Net 15' },
+      [page],
+    ),
+    [],
+  );
+});
