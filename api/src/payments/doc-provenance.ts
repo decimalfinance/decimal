@@ -32,7 +32,7 @@ const execFileAsync = promisify(execFile);
 
 // Version of the matcher; stamped wherever refinement ran so the review path
 // knows to re-run after matcher improvements.
-export const PROVENANCE_VERSION = 8; // v8: rows follow the slope of tilted text
+export const PROVENANCE_VERSION = 9; // v9: tilted box height measured from the words
 
 export type TextWord = { text: string; x0: number; y0: number; x1: number; y1: number }; // 0-1 fractions, top-left origin
 export type TextPage = {
@@ -762,22 +762,42 @@ const PAD = 0.006;
  */
 function toSource(b: Box, page?: TextPage): SourceBox {
   let { y0, y1 } = b;
+  let padY = PAD;
   const skew = page?.skewDeg ?? 0;
-  const tilted = Math.abs(skew) >= MIN_SKEW_DEG;
+  const tilted = page != null && Math.abs(skew) >= MIN_SKEW_DEG;
   if (tilted) {
-    const drift = (b.x1 - b.x0) * (page?.aspect ?? 1) * Math.tan(Math.abs(skew) * Math.PI / 180);
-    const height = y1 - y0;
-    // Never collapse it to nothing: the tilt is a median over the page and an
-    // individual line can sit straighter than the page as a whole.
-    const tight = Math.max(height - drift, height * 0.3);
-    const cy = (y0 + y1) / 2;
-    y0 = cy - tight / 2;
-    y1 = cy + tight / 2;
+    // How tall the text in this box actually is, measured from the words in it.
+    //
+    // The first attempt inferred it — enclosing height minus width x tan(tilt)
+    // — which is right on paper and fragile in practice: the subtraction ran
+    // slightly long, hit its own floor, and produced a bar THINNER than the
+    // glyphs, which the padding then had to make up. Measuring beats deriving
+    // when the measurement is sitting right there.
+    const heights = page.words
+      .filter((w) => {
+        const cx = (w.x0 + w.x1) / 2;
+        const cy = (w.y0 + w.y1) / 2;
+        return cx >= b.x0 && cx <= b.x1 && cy >= b.y0 && cy <= b.y1;
+      })
+      .map((w) => w.y1 - w.y0)
+      .sort((a, b2) => a - b2);
+    if (heights.length > 0) {
+      // Median, so one tall glyph or one misread speck does not set the height
+      // for the whole run.
+      const line = heights[Math.floor(heights.length / 2)]!;
+      const cy = (y0 + y1) / 2;
+      y0 = cy - line * 0.6;
+      y1 = cy + line * 0.6;
+      // And a thinner margin, or the padding alone would be most of the box: a
+      // constant that looks snug round a whole upright cell is half again the
+      // height of a single tilted line of text.
+      padY = Math.min(PAD, line * 0.25);
+    }
   }
   const px0 = Math.max(0, b.x0 - PAD);
-  const py0 = Math.max(0, y0 - PAD);
+  const py0 = Math.max(0, y0 - padY);
   const px1 = Math.min(1, b.x1 + PAD);
-  const py1 = Math.min(1, y1 + PAD);
+  const py1 = Math.min(1, y1 + padY);
   return {
     page: b.page,
     box: [px0, py0, px1 - px0, py1 - py0],

@@ -462,6 +462,44 @@ test('on a tilted page a row follows its own text, not a flat band', () => {
     `starts below the previous row's amount at ${rowTwoMoneyY}, got ${box.box[1]}`);
 });
 
+test('a tilted box is as tall as the text in it, not as tall as the slope', () => {
+  // The height was first DERIVED — enclosing height minus width x tan(tilt) —
+  // which is right on paper and fragile in practice. The subtraction ran long,
+  // hit its own floor, and produced a bar thinner than the glyphs that the
+  // padding then had to make up: C1's rows came out about 2.9x the height of
+  // their text, which is a band, not a highlight.
+  //
+  // Measuring beats deriving when the measurement is sitting right there. The
+  // words in the box know how tall they are.
+  const aspect = 0.733, tan = Math.tan(1.79 * Math.PI / 180);
+  const H = 0.009;                                  // the text height
+  const at = (x: number) => 0.30 + (x - 0.15) * aspect * tan;
+  const w = (text: string, x: number, width: number) => {
+    const y = at(x);
+    return { text, x0: x, y0: y - H / 2, x1: x + width, y1: y + H / 2 };
+  };
+  const page: TextPage = {
+    aspect, skewDeg: 1.79,
+    words: [w('Drayage', 0.15, 0.06), w('Oakland', 0.22, 0.06), w('$450.00', 0.80, 0.06)],
+  };
+
+  const invoice = fakeInvoice({
+    lineItems: [{ description: 'Drayage Oakland', quantity: 1, unitPrice: 450, total: 450 }],
+  });
+  refineInvoiceSources(invoice, [page]);
+  const box = (invoice.lineItems[0] as { source?: { box: number[]; angle?: number } }).source!;
+
+  assert.ok(box.angle === 1.79, 'and still carries the tilt');
+  // Snug: a highlight round one line of text, not a band containing its fall.
+  assert.ok(box.box[3] < H * 2.2, `box ${box.box[3]} should be under ${H * 2.2}`);
+  assert.ok(box.box[3] > H, `but not thinner than the glyphs: ${box.box[3]}`);
+
+  // The drift across this row is far larger than the text is tall, which is the
+  // whole reason an upright box could not work.
+  const drift = (box.box[2]) * aspect * tan;
+  assert.ok(drift > H, `drift ${drift} exceeds text height ${H}`);
+});
+
 function fakeInvoice(overrides: Record<string, unknown>) {
   return {
     vendorName: 'Acme Logistics LLC',

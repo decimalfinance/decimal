@@ -1194,6 +1194,39 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
 // implementation and one name for it.
 export { splitPostalAddress } from './doc-provenance.js';
 
+export type DocSource = { page: number; box: [number, number, number, number]; angle?: number };
+
+/**
+ * A stored provenance box, checked and handed to the screen.
+ *
+ * There were two of these — one for header fields, one for line items —
+ * identical but for where they read the raw record from. Adding the tilt to
+ * header fields therefore did nothing for line items, which silently dropped it
+ * on the way out: the backend stored angle 1.79 on every box of a tilted page,
+ * the API sent it for the total and not for the rows, and the row highlight
+ * stayed resolutely horizontal across sloping text. The bug was invisible from
+ * either end on its own.
+ *
+ * One function, two call sites, and a field added here reaches both.
+ */
+function toDocSource(raw: unknown): DocSource | null {
+  if (!isRecord(raw)) return null;
+  const page = num(raw.page);
+  const box = Array.isArray(raw.box) ? raw.box.map((v) => num(v)) : null;
+  if (!page || page < 1 || !box || box.length !== 4 || box.some((v) => v == null || v < 0 || v > 1)) return null;
+  // How far the page is tilted, when it is. A photograph of paper rarely sits
+  // square, and an upright rectangle over sloping text has to be tall enough to
+  // contain the slope — which reads as a band floating around the words rather
+  // than a highlight on them. Bounded because a wild value would spin the
+  // highlight off the page.
+  const angle = num(raw.angle);
+  return {
+    page: Math.round(page),
+    box: box as [number, number, number, number],
+    ...(angle != null && Math.abs(angle) <= 20 ? { angle } : {}),
+  };
+}
+
 export type ReviewFieldState = 'read' | 'needs_look' | 'not_on_document' | 'confirmed';
 
 function fieldState(args: {
@@ -1395,23 +1428,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     : null;
   const fieldSources = isRecord(extracted.fieldSources) ? extracted.fieldSources : null;
   // Sanitize a model-reported source box; null when absent or malformed.
-  const sourceOf = (key: string): { page: number; box: [number, number, number, number]; angle?: number } | null => {
-    const raw = fieldSources?.[key];
-    if (!isRecord(raw)) return null;
-    const page = num(raw.page);
-    const box = Array.isArray(raw.box) ? raw.box.map((v) => num(v)) : null;
-    if (!page || page < 1 || !box || box.length !== 4 || box.some((v) => v == null || v < 0 || v > 1)) return null;
-    // How far the page is tilted, when it is. A photograph of paper rarely sits
-    // square, and an upright rectangle over sloping text has to be tall enough
-    // to contain the slope — which reads as a band floating around the words
-    // rather than a highlight on them.
-    const angle = num(raw.angle);
-    return {
-      page: Math.round(page),
-      box: box as [number, number, number, number],
-      ...(angle != null && Math.abs(angle) <= 20 ? { angle } : {}),
-    };
-  };
+  const sourceOf = (key: string) => toDocSource(fieldSources?.[key]);
   const confirmedKeys = new Set<string>(
     verification && Array.isArray(verification.confirmedFieldKeys)
       ? (verification.confirmedFieldKeys as string[])
@@ -1597,13 +1614,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   if (!codingSuggestionSource && codingSuggestion) {
     codingSuggestionSource = { kind: 'ocr', detail: 'read from the invoice' };
   }
-  const lineSource = (line: Record<string, unknown>) => {
-    if (!isRecord(line.source)) return null;
-    const page = num(line.source.page);
-    const box = Array.isArray(line.source.box) ? line.source.box.map((v) => num(v)) : null;
-    if (!page || page < 1 || !box || box.length !== 4 || box.some((v) => v == null || v < 0 || v > 1)) return null;
-    return { page: Math.round(page), box: box as [number, number, number, number] };
-  };
+  const lineSource = (line: Record<string, unknown>) => toDocSource(line.source);
   // Each line carries its own category when the document supports one.
   //
   // Every line used to inherit ONE bill-level suggestion, so an invoice with
