@@ -11,7 +11,7 @@ import {
   setInvoiceDocumentStatus,
 } from './documents.js';
 import { extractPaymentRowsFromDocument, renderDocumentToImages, type ExtractedRow } from './document-extract.js';
-import { extractPdfLayoutText } from './doc-provenance.js';
+import { extractPdfLayoutText, ungroundedFields } from './doc-provenance.js';
 import { extractPdfTextLayer, refineInvoiceSources, PROVENANCE_VERSION } from './doc-provenance.js';
 import { suggestOcrCodings } from '../accounting/ocr-coding.js';
 import { INVOICE_IMPORT_REVIEW_NOTE } from '../counterparty-wallets.js';
@@ -211,6 +211,23 @@ export async function processInvoiceDocument(args: {
         filename: args.filename,
         refined,
       });
+    }
+
+    // And the grounding check, HERE, where a bill is born.
+    //
+    // It was only ever run by the provenance backfill in getBillDraft, which
+    // skips any bill already stamped with the current version — and intake
+    // stamps that at creation. So the one check that can catch a figure the
+    // model produced from nowhere ran on old documents and never on a new
+    // upload, which is exactly backwards.
+    //
+    // Null for anything with no text layer: "we could not check" is not
+    // "we checked and it was fine", and the photographs are where an
+    // invented figure is most likely and least detectable.
+    for (const row of extraction.rows) {
+      if (!row.source_invoice) continue;
+      (row.source_invoice as unknown as Record<string, unknown>).ungrounded =
+        ungroundedFields(row.source_invoice as unknown as Record<string, unknown>, textPages);
     }
   } catch (error) {
     logger.warn('invoice_intake.provenance_refine_failed', {

@@ -431,6 +431,75 @@ test('bills workbench triages uploads; review confirm sends the bill onward', as
   assert.ok(reviewAfter.vendor.emailState, 'both vendor fields carry a state at all');
 });
 
+test('grounding runs when the bill is created, not only on old documents', async () => {
+  // The check lived only in the provenance backfill, which skips any bill
+  // already stamped with the current version — and intake stamps that at
+  // creation. So the one check that catches a figure the model produced from
+  // nowhere ran on old documents and never on a new upload. Nothing asserted it
+  // on a fresh upload, which is why it went unnoticed until a real one was
+  // inspected in the database.
+  //
+  // What this asserts is that the check RAN. Its verdict is covered by the unit
+  // tests in doc-provenance.test.ts, which can hand it real page text; here the
+  // upload has no readable text layer, so the honest verdict is null — "could
+  // not check". The bug left the key absent entirely, and absent is what this
+  // catches.
+  const setup = await createPaymentOrderSetup();
+  const vendorWallet = Keypair.generate().publicKey.toBase58();
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [{
+        counterparty: 'Grounding Co',
+        amount: 1200,
+        currency: 'USD',
+        reference: 'GC-1',
+        due_date: '2026-09-01',
+        wallet_address: vendorWallet,
+        notes: null,
+        source_invoice: {
+          vendorName: 'Grounding Co', vendorAddress: null, vendorEmail: null,
+          amount: 1200, currency: 'USD', invoiceNumber: 'GC-1',
+          invoiceDate: '2026-08-01', dueDate: '2026-09-01', terms: 'Net 30',
+          poNumber: null, earlyPayDiscount: null, subtotal: 1200, taxAmount: 0,
+          billToName: null, remitTo: null, paymentDetails: null,
+          walletAddress: vendorWallet,
+          lineItems: [{ description: 'Consulting', quantity: 1, unitPrice: 1200, total: 1200 }],
+          categoryHint: 'Consulting',
+          confidence: { vendor: 1, amount: 1, overall: 1 },
+          fieldConfidence: null, fieldStatus: null, issues: null, fieldSources: null,
+        },
+      }],
+      modelLatencyMs: 5,
+      pageCount: 1,
+    }),
+  });
+
+  const orgId = setup.organization.organizationId;
+  const upload = await post(
+    `/organizations/${orgId}/invoices/upload`,
+    {
+      filename: 'grounding.pdf',
+      mimeType: 'application/pdf',
+      dataBase64: Buffer.from(`%PDF-1.4 ${crypto.randomUUID()}`).toString('base64'),
+      sourceTreasuryWalletId: setup.sourceTreasuryWallet.treasuryWalletId,
+      autoAdvance: false,
+    },
+    setup.sessionToken,
+  );
+  const billId = upload.paymentOrders[0].paymentOrder.paymentOrderId;
+
+  const order = await prisma.paymentOrder.findUniqueOrThrow({
+    where: { paymentOrderId: billId },
+    select: { metadataJson: true },
+  });
+  const extracted = (order.metadataJson as {
+    agent?: { extracted?: Record<string, unknown> };
+  }).agent?.extracted;
+  assert.ok(extracted, 'the bill carries its extraction');
+  assert.ok('ungrounded' in extracted, 'the grounding check ran at intake');
+  assert.equal(extracted.ungrounded, null, 'no text layer means "could not check", not "verified"');
+});
+
 test('a document nothing could read still becomes a bill somebody can key in', async () => {
   // It used to throw, leaving a failed row on the list: visible, outside the
   // queue, impossible to type into. But a scan nobody can read is still an
