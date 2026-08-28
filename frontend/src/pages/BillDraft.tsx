@@ -723,7 +723,31 @@ function DraftScreen(props: {
   // carry the decision — but confirming it is not theirs to do, and the server
   // refuses. Offering the button anyway produced "Your role doesn't include
   // this" AFTER the click, which is the same dead end the approve path had.
-  const canConfirm = canEditBills && !readOnly && blockingFlags.length === 0 && !submitting && !tier1Gap;
+  // A field marked "check this" is a question, and sending answers it by
+  // ignoring it. NW-3388's total sat under a PAID stamp, extraction said so,
+  // the field went amber — and Confirm & send took the figure anyway. What
+  // reaches the approver then looks exactly like a bill somebody verified, and
+  // the approver has no way to tell that nobody did.
+  //
+  // Confirming settles it, and so does correcting it: typing in the box flips
+  // the field to confirmed (setFieldValue). This asks for engagement, not
+  // obedience.
+  //
+  // The address parts are left out to stay in step with the server, which
+  // cannot gate them: the screen confirms them under `remitTo.street` while the
+  // server judges the address under one shared `vendorAddress` key, so a
+  // confirmation never arrives under the key it is waiting for. Blocking here
+  // and not there would mean the screen refusing a send the API would accept.
+  const uncheckedFields = Object.entries(fields)
+    .filter(([key, f]) => f.state === 'needs_look' && !key.startsWith('remitTo.'))
+    .map(([key]) => key);
+  const uncheckedGap = uncheckedFields.length === 0
+    ? null
+    : uncheckedFields.length === 1
+      ? `${fieldLabel(uncheckedFields[0]!)} still needs checking against the document \u2014 confirm it or correct it first.`
+      : `${uncheckedFields.length} fields still need checking against the document \u2014 confirm or correct each one first.`;
+  const canConfirm = canEditBills && !readOnly && blockingFlags.length === 0 && !submitting
+    && !tier1Gap && !uncheckedGap;
 
   // What is on the screen right now, in the shape both confirm and save send.
   // One builder, so a saved draft and a confirmed one can never disagree about
@@ -1550,7 +1574,7 @@ function DraftScreen(props: {
               ? 'Preparing a bill is the Bill Clerk\u2019s job — you can read it, but not send it for approval.'
               : blockingFlags.length > 0
               ? `${blockingFlags[0]!.short} — use the buttons on that flag to settle it.`
-              : tier1Gap ?? 'Recorded with exactly what you see on this screen.'}
+              : tier1Gap ?? uncheckedGap ?? 'Recorded with exactly what you see on this screen.'}
           </span>
           <span className="commit-spacer" />
           {/* This button was called "Save for later", which read as a way to
