@@ -53,10 +53,19 @@ Runtime dependencies:
 ## Local Development
 
 ```bash
+brew install poppler tesseract   # document reading, see below
 cd api && npm install
 cd ../frontend && npm install
 make dev
 ```
+
+Two command-line tools do the reading a model should not be asked to do.
+**poppler** pulls a PDF's own text and the exact coordinates of every word;
+**tesseract** does the same for photographs and scans, which have no text layer.
+Both feed the highlight boxes on the bill screen, which are only ever drawn
+where a real word was found — a vision model asked where a value sits invents a
+plausible layout rather than measuring one. Without poppler only the first page
+of a PDF is read; without tesseract, photographs get no highlights.
 
 That's the whole command surface:
 
