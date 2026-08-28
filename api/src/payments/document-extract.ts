@@ -87,11 +87,15 @@ Return ONLY a JSON object with this exact shape, nothing else:
         "amount": number,
         "overall": number
       },
-      "fieldConfidence": {
-        "invoiceNumber": number, "invoiceDate": number, "dueDate": number,
-        "terms": number, "poNumber": number, "currency": number, "total": number,
-        "remitTo": number, "lineItems": number
+      "fieldStatus": {
+        "invoiceNumber": "confident", "invoiceDate": "confident", "dueDate": "confident",
+        "terms": "confident", "poNumber": "absent", "currency": "confident",
+        "total": "confident", "remitTo": "absent", "lineItems": "confident",
+        "vendorName": "confident", "billToName": "confident", "paymentDetails": "confident"
       },
+      "issues": [
+        { "field": "total", "note": "a PAID stamp covers part of the figure" }
+      ],
       "fieldSources": {
         "invoiceNumber": { "page": 1, "box": [x, y, w, h] },
         "invoiceDate": { "page": 1, "box": [x, y, w, h] },
@@ -125,13 +129,27 @@ Rules copied from the AP intake agent:
 - lineItems[].categoryHint: a short 2-5 word spend category for THAT LINE, judged on its own. Lines on one invoice often belong in different categories — freight and a documentation fee are not the same expense, and a software invoice may carry a one-off setup charge. Do not copy the invoice-level hint down onto every line.
 - categoryHint: a short 2-5 word plain-English summary of what this invoice is FOR — the spend category (e.g. "Inbound freight", "Monthly phone service", "Office supplies", "Cloud hosting", "Legal services"). Derive it from the line items and invoice context. Use null only if truly indeterminable.
 - confidence: three keys (vendor, amount, overall), each 0.0 to 1.0.
-- fieldConfidence: 0.0-1.0 per field, for every field you attempted to read. 1.0 = printed clearly and unambiguously; below 0.85 means a human should double-check it. A field that is genuinely absent from the document gets confidence 1.0 with value null (absence read with certainty is not uncertainty).
+- fieldStatus: for every field you attempted, say which SITUATION you were in. Not a number — one of:
+  * "confident"   — printed clearly, you read it, no doubt.
+  * "partial"     — you read some of it but not all (a total whose last digit is cut off, an address missing its city).
+  * "ambiguous"   — the document could support more than one reading and you picked one.
+  * "conflicting" — the document says two different things (a total that disagrees with its own lines, two due dates).
+  * "unreadable"  — it is there but you could not read it: blur, glare, a stamp across it, handwriting.
+  * "absent"      — it is genuinely not on the document. This is CERTAINTY, not doubt.
+  Say "confident" only when you are. A wrong value read confidently is the single most expensive thing you can produce here: it will be paid without anybody looking at it. "unreadable" costs somebody thirty seconds.
+- issues: one entry per field that is anything other than "confident" or "absent", saying in a few plain words WHY — "glare across the total", "handwritten, could be 3150 or 3750", "two dates printed, used the later". Empty array when everything was clean. This is what a person reads before deciding whether to trust you.
 - terms: the payment terms exactly as printed ("Net 30", "Due on receipt", "2/10 Net 30"). null if absent.
 - poNumber: the purchase-order number if the document references one. null if absent.
 - earlyPayDiscount: any early-payment discount offer, verbatim ("2% 10 days"). null if absent.
 - subtotal / taxAmount: numbers as printed. null if the document doesn't break them out.
 - billToName: the entity the invoice is ADDRESSED TO (the buyer/customer side). Used to catch invoices addressed to someone else.
-- remitTo: the PHYSICAL remit-to / payment mailing address broken into parts. All null if the document has none.
+- remitTo: a POSTAL ADDRESS ONLY — street, city, state, zip — where a cheque would be mailed. All null if the document has none.
+  "Remit to" on an invoice means one of two different things, and only one of them belongs here:
+    "Remit to: Zephyr Analytics · Lone Star Bank · Routing 111000025 · Account ****4417"
+      -> remitTo: all null. There is no street address here. Those are PAYMENT INSTRUCTIONS: put the bank, routing and account in paymentDetails.
+    "Remit to: Zephyr Analytics, 400 Congress Ave, Austin, TX 78701"
+      -> remitTo: { street: "400 Congress Ave", city: "Austin", state: "TX", zip: "78701" }.
+  A bank name is never a street. If the line under "Remit to" has no street number and no city, remitTo is all null.
 - paymentDetails: how the document says to pay — method ("ACH", "Wire", "Check", "Crypto"), bank name, ONLY the last 4 digits of any account number, and the routing number if printed. Never invent any of these.
 - fieldSources / line item source: WHERE each value appears on its page, so the UI can highlight it. page is 1-based. box is [x, y, w, h] as fractions of the page's width/height (0.0-1.0), where x,y is the TOP-LEFT corner of a tight rectangle around the printed value. Include an entry only for fields you actually located; omit or use null when unsure. For a line item, box the whole row.
 - walletAddress: only emit a Solana wallet address if it is printed on the invoice itself, in a "Remit to", "Pay to wallet", "Solana address", or similar field. Never guess.
@@ -189,6 +207,23 @@ const DocumentKindSchema = z
   .default(null)
   .catch(null);
 
+/**
+ * What reading a field was actually like.
+ *
+ * "absent" is certainty, not doubt: a document with no PO number was read
+ * correctly. Only the middle four mean somebody should look.
+ */
+const FieldStatusSchema = z
+  .enum(['confident', 'partial', 'ambiguous', 'conflicting', 'unreadable', 'absent'])
+  .catch('confident');
+
+export type FieldStatus = z.infer<typeof FieldStatusSchema>;
+
+/** The statuses that mean a person should check the value before it is paid. */
+export const DOUBTFUL_FIELD_STATUSES: ReadonlySet<string> = new Set([
+  'partial', 'ambiguous', 'conflicting', 'unreadable',
+]);
+
 /** One row of a statement of account: a reference to a DIFFERENT document. */
 const StatementRowSchema = z.object({
   reference: z.string().nullable().default(null).catch(null),
@@ -241,9 +276,37 @@ const ExtractedInvoiceSchema = z.object({
     amount: z.number(),
     overall: z.number(),
   }),
-  // Per-field read confidence (0-1). Optional: older extractions and terse model
-  // replies simply lack entries; a missing field means "no signal", not "certain".
+  // Per-field read confidence (0-1). Kept for extractions made before
+  // fieldStatus existed — reading them still has to work — but no longer asked
+  // for. A number between 0 and 1 is a calibration problem, and small models
+  // are measurably bad at it: everything came back 0.98, from a clean PDF and
+  // from a phone photograph of creased paper alike, so the one mechanism meant
+  // to make a human look at a doubtful figure never fired once.
   fieldConfidence: z.record(z.string(), z.number()).nullable().default(null),
+
+  /**
+   * Which SITUATION the model was in for each field.
+   *
+   * Classification instead of quantification. Asking "how sure are you, 0 to 1"
+   * asks for calibrated probability, which these models cannot produce. Asking
+   * "was this clear, partly readable, ambiguous, contradictory, or covered by a
+   * stamp" asks them to classify, which they are good at.
+   */
+  fieldStatus: z.record(z.string(), FieldStatusSchema).nullable().default(null).catch(null),
+
+  /**
+   * Why, in the model's own words, for anything it could not read cleanly.
+   *
+   * The status says a figure is doubtful; this says a stamp is across it. One
+   * is a routing decision, the other is what the person who has to look at it
+   * actually needs.
+   */
+  issues: z.array(
+    z.object({
+      field: z.string(),
+      note: z.string(),
+    }).catch({ field: 'unknown', note: '' }),
+  ).nullable().default(null).catch(null),
   // Per-field provenance for document highlighting. Fully optional — fields
   // without a source simply don't highlight. `catch` shields us from sloppy
   // model output (a malformed box must never sink the whole extraction).

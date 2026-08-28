@@ -16,6 +16,7 @@ import { USDC_DECIMALS } from '../solana.js';
 import { markBillSubmitted, cancelPaymentOrder, getPaymentOrderDetail } from './orders.js';
 import { listChartOfAccounts } from '../accounting/ocr-coding.js';
 import { extractPdfTextLayer, refineInvoiceSources, PROVENANCE_VERSION } from './doc-provenance.js';
+import { DOUBTFUL_FIELD_STATUSES } from './document-extract.js';
 import { findDuplicateBills, readDuplicateOverride, describeDuplicate, matchDuplicates } from './duplicate-check.js';
 import { readPayableHold, describePayableHold } from './vendor-payable.js';
 import { evaluateBillFlags, summarizeBillFlags, displayOrgName } from './bill-flags.js';
@@ -1202,21 +1203,50 @@ function fieldState(args: {
   key: string;
   value: unknown;
   fieldConfidence: Record<string, unknown> | null;
+  /** What reading it was actually like, when the extraction says. */
+  fieldStatus?: Record<string, unknown> | null;
+  /** The model's own words about the ones it struggled with. */
+  issues?: Array<{ field: string; note: string }> | null;
   confirmedKeys: Set<string>;
 }): { state: ReviewFieldState; reason: string | null } {
   if (args.confirmedKeys.has(args.key)) return { state: 'confirmed', reason: null };
   const empty = args.value == null || args.value === '';
   if (empty) return { state: 'not_on_document', reason: null };
+
+  // The status wins where there is one. It says which SITUATION the reader was
+  // in — clear, partly legible, ambiguous, contradictory, obscured — which is a
+  // classification, and one these models can make. The number it replaces was a
+  // calibrated probability, which they cannot: everything came back 0.98,
+  // whether from a clean PDF or a photograph of creased paper, so the "check
+  // this" marker never once appeared.
+  const status = str(args.fieldStatus?.[args.key]);
+  if (status) {
+    if (!DOUBTFUL_FIELD_STATUSES.has(status)) return { state: 'read', reason: null };
+    // Written to be read on HOVER, not printed under every field. Prefer the
+    // model's own sentence — "a PAID stamp covers part of the figure" is
+    // something a person can act on; "we were not confident" is not.
+    const note = args.issues?.find((i) => i.field === args.key)?.note;
+    return {
+      state: 'needs_look',
+      reason: note ?? DOUBTFUL_STATUS_REASON[status] ?? 'Worth checking against the page before this is paid',
+    };
+  }
+
+  // Extractions made before fieldStatus existed still have to render.
   const confidence = num(args.fieldConfidence?.[args.key]);
   if (confidence != null && confidence < FIELD_CONFIDENCE_THRESHOLD) {
-    // Written to be read on HOVER, not printed under every field. The tag says
-    // "Check"; this explains why, and says whose uncertainty it is — the reader
-    // was not there when we read the document, so "hard to read here" told them
-    // nothing they could act on.
     return { state: 'needs_look', reason: 'We were not confident reading this off the document — check it against the page' };
   }
   return { state: 'read', reason: null };
 }
+
+// What each doubtful status means, for when the model did not say why.
+const DOUBTFUL_STATUS_REASON: Record<string, string> = {
+  partial: 'Only part of this was legible on the document',
+  ambiguous: 'The document could be read more than one way here',
+  conflicting: 'The document says two different things about this',
+  unreadable: 'This is on the document but could not be read',
+};
 
 // The order a bookkeeper expects: spend accounts first, then assets,
 // liabilities, and the rest. Within a group, account number order.
@@ -1279,6 +1309,14 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   const verification = isRecord(metadata.verification) ? metadata.verification : null;
   const triggeredRules = Array.isArray(agent.triggeredRules) ? (agent.triggeredRules as Array<Record<string, unknown>>) : [];
   const fieldConfidence = isRecord(extracted.fieldConfidence) ? extracted.fieldConfidence : null;
+  const fieldStatus = isRecord(extracted.fieldStatus) ? extracted.fieldStatus : null;
+  // The model's own words about what it struggled with. Better under a field
+  // than any sentence we could write, because it names the actual obstacle.
+  const issues = Array.isArray(extracted.issues)
+    ? (extracted.issues as unknown[]).filter(isRecord)
+        .map((i) => ({ field: str(i.field) ?? '', note: str(i.note) ?? '' }))
+        .filter((i) => i.field && i.note)
+    : null;
   const fieldSources = isRecord(extracted.fieldSources) ? extracted.fieldSources : null;
   // Sanitize a model-reported source box; null when absent or malformed.
   const sourceOf = (key: string): { page: number; box: [number, number, number, number] } | null => {
@@ -1317,7 +1355,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   };
   const fields = headerFieldDefs.map((f) => ({
     ...f,
-    ...fieldState({ key: f.key, value: f.value, fieldConfidence, confirmedKeys }),
+    ...fieldState({ key: f.key, value: f.value, fieldConfidence, fieldStatus, issues, confirmedKeys }),
     source: sourceOf(sourceKeyByField[f.key] ?? f.key),
   }));
 
@@ -1346,7 +1384,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       // absence, and every bill came up amber for a value it had read cleanly.
       // "We could not read this" and "this section does not exist" are
       // different statements, and only one of them is the reader's problem.
-      ...fieldState({ key: pickAddressConfidenceKey(usedVendorAddress), value, fieldConfidence, confirmedKeys }),
+      ...fieldState({ key: pickAddressConfidenceKey(usedVendorAddress), value, fieldConfidence, fieldStatus, issues, confirmedKeys }),
       source: usedVendorAddress
         ? sourceOf('vendorAddress')
         : sourceOf(remitPartSourceKey[part]) ?? sourceOf('remitTo'),
@@ -1686,12 +1724,16 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
         value: (verifiedFields ? str(verifiedFields.vendorName) : null)
           ?? (order.counterparty?.displayName ?? order.counterpartyWallet.label),
         fieldConfidence,
+        fieldStatus,
+        issues,
         confirmedKeys,
       }).state,
       emailState: fieldState({
         key: 'vendor.email',
         value: (verifiedFields ? str(verifiedFields.vendorEmail) : null) ?? str(extracted.vendorEmail),
         fieldConfidence,
+        fieldStatus,
+        issues,
         confirmedKeys,
       }).state,
       isNew: order.counterpartyWallet.trustState === 'unreviewed',

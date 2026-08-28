@@ -431,6 +431,87 @@ test('bills workbench triages uploads; review confirm sends the bill onward', as
   assert.ok(reviewAfter.vendor.emailState, 'both vendor fields carry a state at all');
 });
 
+test('a field the model could not read is marked for a look, in its own words', async () => {
+  // The whole "check this field" mechanism keyed off a self-reported 0-1
+  // confidence, and never fired: every C-series document came back at 0.98,
+  // a phone photograph of creased paper scoring the same as a clean PDF.
+  // Asking a small model for calibrated probability asks for the one thing it
+  // cannot give. Asking WHICH SITUATION it was in is a classification, which it
+  // can — and the sentence it writes about the obstacle beats anything we could
+  // write, because it names the actual obstacle.
+  const setup = await createPaymentOrderSetup();
+  const vendorWallet = Keypair.generate().publicKey.toBase58();
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [
+        {
+          counterparty: 'Northwind Supplies',
+          amount: 3150,
+          currency: 'USD',
+          reference: 'NW-3388',
+          due_date: '2026-08-06',
+          wallet_address: vendorWallet,
+          notes: 'Stamped',
+          source_invoice: {
+            vendorName: 'Northwind Supplies',
+            vendorAddress: null,
+            vendorEmail: null,
+            amount: 3150,
+            currency: 'USD',
+            invoiceNumber: 'NW-3388',
+            invoiceDate: '2026-07-22',
+            dueDate: '2026-08-06',
+            terms: 'Net 15',
+            poNumber: null,
+            earlyPayDiscount: null,
+            subtotal: 3150,
+            taxAmount: 0,
+            billToName: null,
+            remitTo: { street: null, city: null, state: null, zip: null },
+            paymentDetails: { method: 'ACH', bankName: 'Buckeye Bank', accountLast4: '2201', routingNumber: null },
+            walletAddress: vendorWallet,
+            lineItems: [
+              { description: 'Safety equipment', quantity: 1, unitPrice: 3150, total: 3150 },
+            ],
+            categoryHint: 'Job supplies',
+            confidence: { vendor: 1, amount: 1, overall: 0.98 },
+            // The old signal says everything is fine. The new one does not.
+            fieldConfidence: { total: 1, dueDate: 1, invoiceNumber: 1 },
+            fieldStatus: { total: 'unreadable', dueDate: 'confident', invoiceNumber: 'confident' },
+            issues: [{ field: 'total', note: 'a red PAID stamp covers part of the figure' }],
+          },
+        },
+      ],
+      modelLatencyMs: 5,
+      pageCount: 1,
+    }),
+  });
+
+  const orgId = setup.organization.organizationId;
+  const upload = await post(
+    `/organizations/${orgId}/invoices/upload`,
+    {
+      filename: 'NW-3388.png',
+      mimeType: 'image/png',
+      dataBase64: Buffer.from('%PDF-1.4 stamped').toString('base64'),
+      sourceTreasuryWalletId: setup.sourceTreasuryWallet.treasuryWalletId,
+      autoAdvance: false,
+    },
+    setup.sessionToken,
+  );
+  const billId = upload.paymentOrders[0].paymentOrder.paymentOrderId;
+
+  const draft = await get(`/organizations/${orgId}/bills/${billId}/draft`, setup.sessionToken);
+  const total = draft.fields.find((f: { key: string }) => f.key === 'total');
+  assert.equal(total.state, 'needs_look', 'a figure under a stamp wants a human');
+  assert.match(total.reason, /PAID stamp/, "and says why, in the model's own words");
+
+  // A field it read cleanly is not dressed up as doubtful — a marker on
+  // everything is a marker on nothing.
+  const invoiceNumber = draft.fields.find((f: { key: string }) => f.key === 'invoiceNumber');
+  assert.equal(invoiceNumber.state, 'read');
+});
+
 test('correcting the figures clears the arithmetic flag it was raised on', async () => {
   // The flag used to be computed from the raw extraction on every read, and a
   // save never wrote back to the extraction. So a bill whose lines disagreed
