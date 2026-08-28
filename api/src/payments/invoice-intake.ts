@@ -165,14 +165,37 @@ export async function processInvoiceDocument(args: {
   }
 
   const invoiceDocumentId = args.invoiceDocumentId;
-  const extraction = await runtime.extractRowsFromDocument({
-    fileBytes: args.fileBytes,
-    filename: args.filename,
-    mimeType: args.mimeType,
-    prerenderedPages,
-    textPages,
-    layoutText,
-  });
+  let extraction: Awaited<ReturnType<typeof runtime.extractRowsFromDocument>>;
+  try {
+    extraction = await runtime.extractRowsFromDocument({
+      fileBytes: args.fileBytes,
+      filename: args.filename,
+      mimeType: args.mimeType,
+      prerenderedPages,
+      textPages,
+      layoutText,
+    });
+  } catch (error) {
+    // A document we could not read still becomes a bill.
+    //
+    // It used to throw, leaving a failed row on the list: visible, outside the
+    // queue, and impossible to key in by hand. But a scan nobody can read is
+    // still an invoice somebody owes money on, and the useful thing is a draft
+    // with the fields marked unreadable — a person types what the machine
+    // could not, and nothing is invented in the meantime.
+    //
+    // Only when the DOCUMENT defeated us. A provider being down is not a fact
+    // about the invoice, and turning an outage into a queue full of empty
+    // drafts somebody has to clean up would be worse than the outage.
+    if (!isDocumentDefeatedUs(error)) throw error;
+    const message = error instanceof Error ? error.message : 'Could not read this document.';
+    logger.warn('invoice_intake.unreadable_document', {
+      organizationId: args.organizationId,
+      filename: args.filename,
+      message,
+    });
+    extraction = { rows: [unreadableRow(args.filename, message)], modelLatencyMs: 0, pageCount: prerenderedPages?.length ?? 1 };
+  }
 
   // Exact provenance: re-locate every extracted value in the PDF's text layer
   // and replace the model's approximate boxes with real word coordinates.
@@ -505,6 +528,84 @@ export async function beginAsyncInvoiceIntake(args: {
   })());
 
   return { invoiceDocumentId: stored.invoiceDocumentId, reused: false };
+}
+
+/**
+ * Was that failure about the document, or about us?
+ *
+ * A schema violation, an empty completion, a reply that would not parse — the
+ * document defeated the extractor, and a draft with the fields marked
+ * unreadable is the honest outcome. A network error or a 5xx is not a fact
+ * about the invoice: it will read fine when the provider is back, and turning
+ * an outage into a queue of empty drafts somebody has to clear is worse than
+ * the outage.
+ */
+function isDocumentDefeatedUs(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/OpenAI \d{3}:/.test(message)) return false;          // provider returned an error status
+  if (/fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND/i.test(message)) return false;
+  if (/is not configured/i.test(message)) return false;      // no API key: our problem
+  return true;
+}
+
+/**
+ * A bill for a document nothing could read.
+ *
+ * Everything null, every field marked unreadable, and the real error carried in
+ * issues so the person looking at it knows what went wrong rather than facing a
+ * blank form. The amount is 0.01 because the row schema requires a positive
+ * number and the extraction prompt already uses that value for "undeterminable"
+ * — one convention, not two.
+ */
+function unreadableRow(filename: string, message: string): ExtractedRow {
+  const unreadable = [
+    'vendorName', 'invoiceNumber', 'invoiceDate', 'dueDate', 'total', 'lineItems',
+  ];
+  return {
+    counterparty: 'Unreadable document',
+    amount: 0.01,
+    currency: 'USD',
+    reference: null,
+    due_date: null,
+    wallet_address: null,
+    notes: `Could not be read: ${filename}`,
+    source_invoice: {
+      documentKind: 'invoice',
+      statementRows: null,
+      appliesToInvoice: null,
+      vendorName: 'Unreadable document',
+      vendorAddress: null,
+      vendorEmail: null,
+      amount: 0.01,
+      currency: 'USD',
+      invoiceNumber: null,
+      invoiceDate: null,
+      dueDate: null,
+      terms: null,
+      poNumber: null,
+      earlyPayDiscount: null,
+      subtotal: null,
+      taxAmount: null,
+      billToName: null,
+      remitTo: null,
+      paymentDetails: null,
+      walletAddress: null,
+      lineItems: [],
+      categoryHint: null,
+      confidence: { vendor: 0, amount: 0, overall: 0 },
+      fieldConfidence: null,
+      fieldStatus: Object.fromEntries(unreadable.map((f) => [f, 'unreadable' as const])),
+      // The same sentence against every field, deliberately: when the whole
+      // document defeated us the reason IS the same for each one, and a field
+      // that says "could not be read" without saying why sends the reader
+      // hunting for an explanation that exists one level up.
+      issues: [
+        { field: 'document', note: message },
+        ...unreadable.map((field) => ({ field, note: message })),
+      ],
+      fieldSources: null,
+    },
+  };
 }
 
 /** Re-exported so tests keep one obvious place to drain from. */

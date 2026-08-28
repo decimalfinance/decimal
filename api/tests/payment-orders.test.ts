@@ -431,6 +431,76 @@ test('bills workbench triages uploads; review confirm sends the bill onward', as
   assert.ok(reviewAfter.vendor.emailState, 'both vendor fields carry a state at all');
 });
 
+test('a document nothing could read still becomes a bill somebody can key in', async () => {
+  // It used to throw, leaving a failed row on the list: visible, outside the
+  // queue, impossible to type into. But a scan nobody can read is still an
+  // invoice somebody owes money on, and the useful outcome is a draft with the
+  // fields marked unreadable — not a dead end.
+  const setup = await createPaymentOrderSetup();
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => {
+      throw new Error('Extracted invoices failed schema validation: vendorName required');
+    },
+  });
+
+  const orgId = setup.organization.organizationId;
+  const up = await post(
+    `/organizations/${orgId}/invoices/upload-async`,
+    {
+      filename: 'illegible-scan.pdf',
+      mimeType: 'application/pdf',
+      dataBase64: Buffer.from(`%PDF ${crypto.randomUUID()}`).toString('base64'),
+    },
+    setup.sessionToken,
+  );
+  await drainAsyncIntake();
+
+  const board = await get(`/organizations/${orgId}/bills/workbench`, setup.sessionToken);
+  assert.equal(board.pending.length, 0, 'it did not stay a failed row');
+  assert.equal(board.bills.length, 1, 'it is a bill');
+
+  const billId = board.bills[0].paymentOrderId;
+  const draft = await get(`/organizations/${orgId}/bills/${billId}/draft`, setup.sessionToken);
+
+  // Every field it could not read says so, with the real reason attached.
+  const total = draft.fields.find((f: { key: string }) => f.key === 'total');
+  assert.equal(total.state, 'needs_look');
+  assert.match(total.reason, /schema validation/, 'the actual failure, not a shrug');
+
+  // And nothing was invented on the way.
+  assert.equal(draft.fields.find((f: { key: string }) => f.key === 'invoiceNumber').value ?? null, null);
+  void up;
+});
+
+test('a provider outage is not a fact about the invoice', async () => {
+  // A network failure will read fine when the provider is back. Turning an
+  // outage into a queue of empty drafts somebody has to clear is worse than the
+  // outage, so this one stays a failed row and can be retried.
+  const setup = await createPaymentOrderSetup();
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => {
+      throw new Error('OpenAI 503: upstream unavailable');
+    },
+  });
+
+  const orgId = setup.organization.organizationId;
+  await post(
+    `/organizations/${orgId}/invoices/upload-async`,
+    {
+      filename: 'fine-invoice.pdf',
+      mimeType: 'application/pdf',
+      dataBase64: Buffer.from(`%PDF ${crypto.randomUUID()}`).toString('base64'),
+    },
+    setup.sessionToken,
+  );
+  await drainAsyncIntake();
+
+  const board = await get(`/organizations/${orgId}/bills/workbench`, setup.sessionToken);
+  assert.equal(board.bills.length, 0, 'no junk draft');
+  assert.equal(board.pending.length, 1, 'it stayed a failed row');
+  assert.equal(board.pending[0].status, 'failed');
+});
+
 test('a field the model could not read is marked for a look, in its own words', async () => {
   // The whole "check this field" mechanism keyed off a self-reported 0-1
   // confidence, and never fired: every C-series document came back at 0.98,
