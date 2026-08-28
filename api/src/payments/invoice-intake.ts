@@ -11,6 +11,7 @@ import {
   setInvoiceDocumentStatus,
 } from './documents.js';
 import { extractPaymentRowsFromDocument, renderDocumentToImages, type ExtractedRow } from './document-extract.js';
+import { extractPdfLayoutText } from './doc-provenance.js';
 import { extractPdfTextLayer, refineInvoiceSources, PROVENANCE_VERSION } from './doc-provenance.js';
 import { suggestOcrCodings } from '../accounting/ocr-coding.js';
 import { INVOICE_IMPORT_REVIEW_NOTE } from '../counterparty-wallets.js';
@@ -139,23 +140,44 @@ export async function processInvoiceDocument(args: {
     });
   }
 
+  // The document's own text, pulled BEFORE extraction rather than after.
+  //
+  // It was always pulled here — a few lines further down, to fix up provenance
+  // boxes once the model had guessed at them. Which meant we held the exact
+  // characters, ignored them, rasterised the page, and paid a vision model to
+  // read them back. Moving it above the call lets extraction read the text when
+  // there is text, and keeps one pdftotext run doing both jobs.
+  let textPages: Awaited<ReturnType<typeof extractPdfTextLayer>> = null;
+  let layoutText: string | null = null;
+  try {
+    [textPages, layoutText] = await Promise.all([
+      extractPdfTextLayer({ fileBytes: args.fileBytes, filename: args.filename, mimeType: args.mimeType }),
+      extractPdfLayoutText({ fileBytes: args.fileBytes, filename: args.filename, mimeType: args.mimeType }),
+    ]);
+  } catch (error) {
+    // Best-effort: no text layer simply means the vision path, which is what
+    // every image takes anyway.
+    logger.warn('invoice_intake.text_layer_failed', {
+      organizationId: args.organizationId,
+      filename: args.filename,
+      ...(error instanceof Error ? { message: error.message } : {}),
+    });
+  }
+
   const invoiceDocumentId = args.invoiceDocumentId;
   const extraction = await runtime.extractRowsFromDocument({
     fileBytes: args.fileBytes,
     filename: args.filename,
     mimeType: args.mimeType,
     prerenderedPages,
+    textPages,
+    layoutText,
   });
 
   // Exact provenance: re-locate every extracted value in the PDF's text layer
   // and replace the model's approximate boxes with real word coordinates.
   // Best-effort — scans and images have no text layer and keep the model's box.
   try {
-    const textPages = await extractPdfTextLayer({
-      fileBytes: args.fileBytes,
-      filename: args.filename,
-      mimeType: args.mimeType,
-    });
     if (textPages) {
       let refined = 0;
       for (const row of extraction.rows) {

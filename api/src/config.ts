@@ -84,6 +84,12 @@ type DecimalConfig = {
    */
   openAiApiKey: string;
   openAiModel: string;
+  /**
+   * Model for the TEXT extraction path. A PDF with its own characters needs no
+   * vision, and non-vision models are markedly cheaper — so the swap is a
+   * config change rather than a code change. Empty falls back to openAiModel.
+   */
+  openAiTextModel: string;
   squadsProgramId: string;
   squadsDefaultVaultIndex: number;
   squadsDefaultTimelockSeconds: number;
@@ -175,6 +181,7 @@ function buildConfig(): DecimalConfig {
     resendFromName: (process.env.RESEND_FROM_NAME ?? 'Decimal').trim(),
     openAiApiKey: (process.env.OPENAI_API_KEY ?? '').trim(),
     openAiModel: (process.env.OPENAI_MODEL ?? fileConfig.openAiModel ?? 'gpt-4o-mini').trim(),
+    openAiTextModel: (process.env.OPENAI_TEXT_MODEL ?? '').trim(),
     squadsProgramId:
       (process.env.SQUADS_V4_PROGRAM_ID ?? fileConfig.squadsProgramId ?? 'SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf').trim(),
     squadsDefaultVaultIndex: Number(process.env.SQUADS_DEFAULT_VAULT_INDEX ?? fileConfig.squadsDefaultVaultIndex ?? 0),

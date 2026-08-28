@@ -57,6 +57,50 @@ export async function extractPdfTextLayer(args: {
   }
 }
 
+/**
+ * The document's own text, with its columns still standing.
+ *
+ * Sibling of extractPdfTextLayer, which returns word boxes — the right shape
+ * for re-locating a value on a page and the wrong shape for reading. This is
+ * the shape you put in front of a model.
+ *
+ * `-layout` rather than plain text, because an invoice is a table and plain
+ * text destroys it: the description, the quantity and the amount collapse onto
+ * one line with no way to tell which number belongs to which row. Column
+ * spacing carries that meaning, and pdftotext preserves it as whitespace:
+ *
+ *     Dashboard build-out (3)        3     $540.00      $1,620.00
+ *
+ * A markdown/table converter (Docling, MinerU) is the answer if this proves
+ * insufficient on harder layouts. Not yet: the grounding and arithmetic checks
+ * downstream will say so, and a dependency added before it is earned is how a
+ * pipeline gets slow.
+ */
+export async function extractPdfLayoutText(args: {
+  fileBytes: Buffer;
+  filename: string;
+  mimeType: string;
+}): Promise<string | null> {
+  const isPdf = args.mimeType === 'application/pdf' || args.filename.toLowerCase().endsWith('.pdf');
+  if (!isPdf) return null;
+
+  const dir = await mkdtemp(join(tmpdir(), 'doc-text-'));
+  try {
+    const inPath = join(dir, 'input.pdf');
+    await writeFile(inPath, args.fileBytes);
+    const { stdout } = await execFileAsync('pdftotext', ['-layout', inPath, '-'], { maxBuffer: 64 * 1024 * 1024 });
+    return stdout.trim() ? stdout : null;
+  } catch (error) {
+    logger.warn('doc_provenance.layout_text_failed', {
+      filename: args.filename,
+      ...(error instanceof Error ? { message: error.message } : {}),
+    });
+    return null;
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
 export function parseBboxXml(xml: string): TextPage[] {
   const pages: TextPage[] = [];
   const pageRe = /<page width="([\d.]+)" height="([\d.]+)">([\s\S]*?)<\/page>/g;

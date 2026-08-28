@@ -21,6 +21,7 @@ import { promisify } from 'node:util';
 import { z } from 'zod';
 import { PublicKey } from '@solana/web3.js';
 import { config } from '../config.js';
+import { ungroundedFields, type TextPage } from './doc-provenance.js';
 import { logger } from '../infra/logger.js';
 
 const execFileAsync = promisify(execFile);
@@ -562,6 +563,29 @@ export type ExtractedRow = z.infer<typeof ExtractedRowSchema>;
 const SUPPORTED_IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif']);
 const MAX_DOCUMENT_PAGES = 10;
 
+/**
+ * Whether a PDF's text layer is worth reading instead of the picture.
+ *
+ * "none" is not a PDF, or a scan with no words at all — the existing behaviour.
+ *
+ * "thin" is the case worth having a name for: some scanners embed their own OCR,
+ * and it is often a handful of garbage words. Trusting that over a legible image
+ * is worse than having no text layer at all, because it looks like success.
+ *
+ * Judged across the whole document rather than per page. A document with one
+ * weak page goes to vision entire — half-and-half extraction is more branching
+ * than the saving is worth, and a page that failed to embed text is a signal
+ * about how the document was made.
+ */
+const MIN_WORDS_PER_PAGE = 40;
+
+export function textLayerQuality(pages: TextPage[] | null): 'good' | 'thin' | 'none' {
+  if (!pages || pages.length === 0) return 'none';
+  const words = pages.reduce((sum, page) => sum + page.words.length, 0);
+  if (words === 0) return 'none';
+  return words / pages.length >= MIN_WORDS_PER_PAGE ? 'good' : 'thin';
+}
+
 export function isDocumentExtractionConfigured() {
   return Boolean(config.openAiApiKey);
 }
@@ -587,10 +611,59 @@ export async function extractPaymentRowsFromDocument(args: {
   // Already-rendered page images (skips the render step — the async intake
   // renders once, stores the pages, then extracts from the same images).
   prerenderedPages?: RenderedPage[];
+  /**
+   * The document's own text, when it has one worth reading.
+   *
+   * Passed in rather than pulled here because the intake already extracts it —
+   * for provenance, a few lines further down. Pulling it twice to decide
+   * something the caller has already computed would be the same waste this
+   * whole change is about.
+   */
+  layoutText?: string | null;
+  textPages?: TextPage[] | null;
   onProgress?: (event: DocumentExtractProgressEvent) => void;
 }): Promise<{ rows: ExtractedRow[]; modelLatencyMs: number; pageCount: number }> {
   if (!isDocumentExtractionConfigured()) {
     throw new Error('OPENAI_API_KEY is not configured on the server.');
+  }
+
+  // Read the text when there is text.
+  //
+  // A PDF carries its own characters, and we already hold them. Rasterising the
+  // page and asking a vision model to read them back is lossy, slow, and the
+  // expensive path — image tokens dwarf text tokens, and a text PDF does not
+  // need a vision model at all.
+  //
+  // Page images are still rendered and stored: the draft screen displays them
+  // and provenance draws boxes on them. What changes is that they stop being
+  // SENT to the model when the text is good.
+  const quality = textLayerQuality(args.textPages ?? null);
+  if (quality === 'good' && args.layoutText) {
+    const fromText = await extractFromText({
+      layoutText: args.layoutText,
+      filename: args.filename,
+      onProgress: args.onProgress,
+    });
+
+    // Did it work? Not "is the model confident" — is the figure we would pay
+    // actually in the text we handed it. That check costs nothing and it is the
+    // only one that can catch a value the model produced from nowhere.
+    //
+    // A missing TOTAL or INVOICE NUMBER is worth a second look at the picture:
+    // between them they decide how much leaves and which bill it settles. One
+    // retry, capped, and only for those two — escalating on anything ungrounded
+    // would send documents to vision over a reformatted date.
+    const critical = criticalUngrounded(fromText.rows, args.textPages ?? null);
+    if (critical.length === 0) return fromText;
+
+    logger.warn('document_extract.escalated_to_vision', {
+      filename: args.filename,
+      ungrounded: critical,
+      reason: 'a value that decides the payment was not found in the document text',
+    });
+    // Falls through to the vision path below, whose result wins. It is a second
+    // call, on a small minority of documents, in exchange for not paying a
+    // figure nobody printed.
   }
 
   const pages = args.prerenderedPages
@@ -630,6 +703,8 @@ export async function extractPaymentRowsFromDocument(args: {
   const firstAttempt = await runExtractionLlm({ userContent });
   let invoices = firstAttempt.invoices;
   let totalLatencyMs = firstAttempt.latencyMs;
+  let totalPromptTokens = firstAttempt.usage.promptTokens;
+  let totalCompletionTokens = firstAttempt.usage.completionTokens;
   let retryAttempted = false;
 
   // The vision model occasionally returns wallet addresses that contain
@@ -650,6 +725,8 @@ export async function extractPaymentRowsFromDocument(args: {
       retryCorrection: correction,
     });
     totalLatencyMs += secondAttempt.latencyMs;
+    totalPromptTokens += secondAttempt.usage.promptTokens;
+    totalCompletionTokens += secondAttempt.usage.completionTokens;
 
     // If the second pass still returned invalid wallets, scrub them to
     // null so downstream code routes to "no wallet, human review needed"
@@ -671,9 +748,12 @@ export async function extractPaymentRowsFromDocument(args: {
   }
 
   logger.info('document_extract.completed', {
+    path: 'vision',
     pageCount: pages.length,
     rowCount: parsedRows.data.rows.length,
     latencyMs: totalLatencyMs,
+    promptTokens: totalPromptTokens,
+    completionTokens: totalCompletionTokens,
     retryAttempted,
     model: firstAttempt.model ?? config.openAiModel,
     rows: parsedRows.data.rows.map((row) => ({
@@ -688,6 +768,90 @@ export async function extractPaymentRowsFromDocument(args: {
   return { rows: parsedRows.data.rows, modelLatencyMs: totalLatencyMs, pageCount: pages.length };
 }
 
+/**
+ * The ungrounded fields that are worth a second opinion.
+ *
+ * Kept to the two that decide the payment. A date that reformatted, or an
+ * address the text layer spells differently, is a field somebody should glance
+ * at — not a reason to pay for the whole document twice.
+ */
+function criticalUngrounded(rows: ExtractedRow[], textPages: TextPage[] | null): string[] {
+  if (!textPages) return [];
+  const found = new Set<string>();
+  for (const row of rows) {
+    if (!row.source_invoice) continue;
+    const missing = ungroundedFields(row.source_invoice as unknown as Record<string, unknown>, textPages);
+    for (const field of missing ?? []) {
+      if (field === 'total' || field === 'invoiceNumber') found.add(field);
+    }
+  }
+  return [...found];
+}
+
+/**
+ * Extraction from the document's own text.
+ *
+ * Same system prompt, same strict schema, same shape out — the only difference
+ * is what the model is looking at. Everything downstream is unable to tell
+ * which path a bill came from, which is the point: the draft screen, the flags
+ * and the work log stay one implementation.
+ */
+async function extractFromText(args: {
+  layoutText: string;
+  filename: string;
+  onProgress?: (event: DocumentExtractProgressEvent) => void;
+}): Promise<{ rows: ExtractedRow[]; modelLatencyMs: number; pageCount: number }> {
+  args.onProgress?.({ stage: 'extracting', pageCount: 1 });
+
+  const userContent: ExtractionUserContent = [
+    {
+      type: 'text',
+      text:
+        `${USER_PROMPT_PREFIX}\n\n` +
+        // Said explicitly, because it changes what "unreadable" means. Against a
+        // photograph it means blurred or obscured; against extracted text it
+        // means the characters are not there. A model told it is looking at a
+        // picture will describe glare it cannot see.
+        `Below is the text of the document, extracted from the PDF itself with its column ` +
+        `spacing preserved. These are the document's own characters, not a transcription — ` +
+        `if a value is not in this text, it is not on the document, and the right answer is ` +
+        `null with status "absent" rather than a guess.\n\n` +
+        `Column alignment carries meaning: on a line-item row the description, quantity, ` +
+        `unit price and amount are separated by runs of spaces.\n\n` +
+        `=== DOCUMENT TEXT (${args.filename}) ===\n${args.layoutText}`,
+    },
+  ];
+
+  const attempt = await runExtractionLlm({ userContent, model: config.openAiTextModel });
+
+  // No wallet retry on this path. That retry exists for a vision failure — 1/l/I
+  // and 0/O confused by OCR — and the characters here are exact. A base58
+  // address that is wrong in this text is wrong on the document.
+  const rowsRaw = attempt.invoices.map(invoiceToPaymentRow);
+  const parsedRows = ExtractedRowsSchema.safeParse({ rows: rowsRaw });
+  if (!parsedRows.success) {
+    throw new Error(`Extracted payment rows failed schema validation: ${parsedRows.error.message}`);
+  }
+
+  logger.info('document_extract.completed', {
+    path: 'text',
+    pageCount: 1,
+    rowCount: parsedRows.data.rows.length,
+    latencyMs: attempt.latencyMs,
+    promptTokens: attempt.usage.promptTokens,
+    completionTokens: attempt.usage.completionTokens,
+    model: attempt.model ?? config.openAiTextModel ?? config.openAiModel,
+    rows: parsedRows.data.rows.map((row) => ({
+      counterparty: row.counterparty,
+      amount: row.amount,
+      currency: row.currency,
+      reference: row.reference,
+    })),
+  });
+
+  return { rows: parsedRows.data.rows, modelLatencyMs: attempt.latencyMs, pageCount: 1 };
+}
+
 type ExtractionUserContent = Array<
   | { type: 'text'; text: string }
   | { type: 'image_url'; image_url: { url: string } }
@@ -696,10 +860,14 @@ type ExtractionUserContent = Array<
 async function runExtractionLlm(args: {
   userContent: ExtractionUserContent;
   retryCorrection?: string;
+  /** The text path may run on a different (cheaper, non-vision) model. */
+  model?: string | null;
 }): Promise<{
   invoices: z.infer<typeof ExtractedInvoiceSchema>[];
   latencyMs: number;
   model: string | undefined;
+  /** What the call actually cost, so the cheap path can be shown to be cheap. */
+  usage: { promptTokens: number; completionTokens: number };
 }> {
   const messages: Array<{ role: string; content: ExtractionUserContent | string }> = [
     { role: 'system', content: SYSTEM_PROMPT },
@@ -717,7 +885,7 @@ async function runExtractionLlm(args: {
       Authorization: `Bearer ${config.openAiApiKey}`,
     },
     body: JSON.stringify({
-      model: config.openAiModel,
+      model: args.model || config.openAiModel,
       // Multi-page extraction needs more headroom than the provider
       // default (often 512). 4096 covers ~10 invoice rows comfortably
       // without bloating cost.
@@ -781,7 +949,15 @@ async function runExtractionLlm(args: {
     throw new Error(`Extracted invoices failed schema validation: ${parsedInvoices.error.message}`);
   }
 
-  return { invoices: parsedInvoices.data.invoices, latencyMs, model: body.model };
+  return {
+    invoices: parsedInvoices.data.invoices,
+    latencyMs,
+    model: body.model,
+    usage: {
+      promptTokens: body.usage?.prompt_tokens ?? 0,
+      completionTokens: body.usage?.completion_tokens ?? 0,
+    },
+  };
 }
 
 type InvalidWalletReport = { vendorName: string; walletAddress: string };
