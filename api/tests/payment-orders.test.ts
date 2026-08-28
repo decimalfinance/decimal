@@ -649,6 +649,44 @@ test('a field the model could not read is marked for a look, in its own words', 
   // everything is a marker on nothing.
   const invoiceNumber = draft.fields.find((f: { key: string }) => f.key === 'invoiceNumber');
   assert.equal(invoiceNumber.state, 'read');
+
+  // And the marker has to MEAN something. Asking for a look and then sending
+  // anyway is worse than never asking: the bill arrives in front of an approver
+  // indistinguishable from one a person actually verified, carrying a figure
+  // the model said it could not fully read.
+  const body = {
+    fields: {
+      vendorName: 'Northwind Supplies',
+      invoiceNumber: 'NW-3388',
+      invoiceDate: '2026-07-22',
+      dueDate: '2026-08-06',
+      terms: 'Net 15',
+      currency: 'USD',
+      total: 3150,
+      taxAmount: 0,
+      remitTo: { street: null, city: null, state: null, zip: null },
+    },
+    lines: [
+      { description: 'Safety equipment', quantity: 1, unitPrice: 3150, amount: 3150, category: 'Job supplies' },
+    ],
+    confirmedFieldKeys: [] as string[],
+    noteForApprovers: null as string | null,
+  };
+  await assert.rejects(
+    post(`/organizations/${orgId}/bills/${billId}/confirm`, body, setup.sessionToken),
+    /Total due still needs checking/,
+    'the total under the stamp cannot be sent unlooked-at',
+  );
+
+  // Nothing else is held hostage. A clean field carries no marker, so gating on
+  // one would refuse the send and leave somebody hunting for an amber box that
+  // was never painted.
+  const cleared = await post(
+    `/organizations/${orgId}/bills/${billId}/confirm`,
+    { ...body, confirmedFieldKeys: ['total'] },
+    setup.sessionToken,
+  );
+  assert.equal(cleared.detail.state, 'submitted', 'once a person has checked it, it goes');
 });
 
 test('correcting the figures clears the arithmetic flag it was raised on', async () => {

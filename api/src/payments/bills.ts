@@ -831,6 +831,13 @@ const BILL_FIELD_LABELS: Record<string, string> = {
   total: 'Total due',
   taxAmount: 'Tax',
   lineItems: 'Line items',
+  // The keys fieldState marks by, which are not the keys a change is written
+  // under. Both spellings reach BILL_FIELD_LABELS, so both need a name a
+  // person can find on the screen.
+  'vendor.name': 'Vendor',
+  'vendor.email': 'Email',
+  vendorAddress: 'Vendor address',
+  remitTo: 'Remit to address',
 };
 
 // What each policy override is called in a sentence. Keyed by the rule the
@@ -1269,6 +1276,69 @@ function fieldState(args: {
     return { state: 'needs_look', reason: 'We were not confident reading this off the document — check it against the page' };
   }
   return { state: 'read', reason: null };
+}
+
+/**
+ * Fields the screen is asking somebody to check, that nobody has confirmed.
+ *
+ * Only fields the draft screen actually marks. Gating on one that carries no
+ * visible marker would refuse the send and leave the person hunting for an
+ * amber box that was never painted — a refusal has to be actionable, which
+ * means it can only name what they can see.
+ *
+ * Correcting a value does not settle it, and that is deliberate: the screen
+ * keeps the marker up after an edit, so the gate agreeing with the screen is
+ * the whole point. Confirm is the one signal that means a person looked.
+ */
+function uncheckedFields(args: {
+  extracted: Record<string, unknown>;
+  input: SubmitBillInput;
+}): string[] {
+  const { extracted, input } = args;
+  const fieldConfidence = isRecord(extracted.fieldConfidence) ? extracted.fieldConfidence : null;
+  const fieldStatus = isRecord(extracted.fieldStatus) ? extracted.fieldStatus : null;
+  const issues = Array.isArray(extracted.issues)
+    ? (extracted.issues as Array<{ field: string; note: string }>)
+    : null;
+  const ungrounded = Array.isArray(extracted.ungrounded)
+    ? (extracted.ungrounded as unknown[]).filter((v): v is string => typeof v === 'string')
+    : null;
+  const confirmedKeys = new Set(input.confirmedFieldKeys ?? []);
+  const f = input.fields;
+
+  // The submitted body IS the value — no fallback chain, unlike the draft
+  // screen, which has to fill a form before anybody has touched it.
+  const candidates: Array<{ key: string; value: unknown }> = [
+    { key: 'invoiceNumber', value: f.invoiceNumber },
+    { key: 'invoiceDate', value: f.invoiceDate },
+    { key: 'dueDate', value: f.dueDate },
+    { key: 'terms', value: f.terms },
+    { key: 'poNumber', value: f.poNumber },
+    { key: 'discount', value: f.discount },
+    { key: 'currency', value: f.currency },
+    { key: 'total', value: f.total },
+    { key: 'vendor.name', value: f.vendorName },
+    { key: 'vendor.email', value: f.vendorEmail },
+  ];
+  const unchecked = candidates
+    .filter(({ key, value }) => fieldState({
+      key, value, fieldConfidence, fieldStatus, issues, ungrounded, confirmedKeys,
+    }).state === 'needs_look')
+    .map(({ key }) => key);
+
+  // The address is deliberately NOT gated, and the reason is a dead end rather
+  // than a judgement about addresses. Its four inputs share one state, judged
+  // under `vendorAddress`/`remitTo` — but the screen confirms them under
+  // `remitTo.street`, `remitTo.city` and so on, so the confirmation never comes
+  // back under the key the server would be waiting for. Gating on it would
+  // refuse every send with no button anywhere that could clear it, which is the
+  // same trap as the arithmetic flag no edit could settle.
+  //
+  // The key mismatch is worth fixing on its own (it also means confirming an
+  // address does not survive a reload). Gating first would just make an
+  // existing cosmetic bug impassable.
+
+  return unchecked;
 }
 
 // What each doubtful status means, for when the model did not say why.
@@ -1929,6 +1999,32 @@ export async function submitBillForApproval(input: SubmitBillInput) {
   const metadata = isRecord(order.metadataJson) ? order.metadataJson : {};
   const agent = isRecord(metadata.agent) ? metadata.agent : {};
   const extracted = isRecord(agent.extracted) ? agent.extracted : {};
+
+  // A field we asked somebody to check has to be checked.
+  //
+  // NW-3388 printed its total under a PAID stamp. Extraction said so — total
+  // `partial`, "a PAID stamp covers part of the figure" — the screen marked it
+  // amber and offered Confirm, and Confirm & send went through anyway, taking
+  // the figure the model had told us it could not fully read.
+  //
+  // That is worse than never raising it. The marker's whole premise is that the
+  // machine might be wrong here, so sending regardless means the bill reaches
+  // an approver looking identical to one a person actually verified, and the
+  // approver has no way to tell the difference. Asking and then not waiting for
+  // the answer manufactures assurance that nobody gave.
+  //
+  // Judged by fieldState — the same function that decides what the screen
+  // paints amber — against the SUBMITTED body, for the same reason the flag
+  // gate above uses it: the body is the bill being committed.
+  const unchecked = uncheckedFields({ extracted, input });
+  if (unchecked.length > 0) {
+    const names = unchecked.map((k) => BILL_FIELD_LABELS[k] ?? k);
+    throw new Error(
+      names.length === 1
+        ? `${names[0]} still needs checking against the document. Confirm it before sending this for approval.`
+        : `These still need checking against the document: ${names.join(', ')}. Confirm each before sending this for approval.`,
+    );
+  }
 
   // Correction memory (spec §4): every field where the confirmed value differs
   // from what was read.
