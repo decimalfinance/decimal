@@ -32,7 +32,7 @@ const execFileAsync = promisify(execFile);
 
 // Version of the matcher; stamped wherever refinement ran so the review path
 // knows to re-run after matcher improvements.
-export const PROVENANCE_VERSION = 7; // v7: rows bounded by their column; tilted pages
+export const PROVENANCE_VERSION = 8; // v8: rows follow the slope of tilted text
 
 export type TextWord = { text: string; x0: number; y0: number; x1: number; y1: number }; // 0-1 fractions, top-left origin
 export type TextPage = {
@@ -641,6 +641,40 @@ function pickMatch(matches: Box[], hint: SourceBox | null | undefined, prefer: '
 
 // All words sharing the matched words' text line — the full table row.
 /**
+ * Is this word on the same printed row as the match?
+ *
+ * "At the same height" is the obvious test and it is wrong on a tilted page,
+ * which is most photographs. C1 slopes 1.79° down to the right, so a row's
+ * amount sits LOWER than its own description by about as much as one row is
+ * tall — and a flat band around "Drayage — Port of Oakland" cannot reach the
+ * $450.00 that belongs to it, while the $950.00 belonging to the row ABOVE
+ * falls squarely inside. The highlight then spans one row's description and the
+ * previous row's money, which is a worse mistake than not highlighting at all:
+ * it points at a real figure and says it belongs to this line.
+ *
+ * Measured on C1: "Drayage" sits at y 0.2317 and its own amount at 0.2463 —
+ * 0.0146 apart, against a tolerance of about 0.007. Following the slope
+ * predicts 0.2471 for it, which is 0.0008 out, comfortably inside.
+ *
+ * So the band follows the text rather than the page edge. On a digital PDF the
+ * slope is zero and this is exactly the old flat band.
+ */
+function sameRowAs(page: TextPage, match: Box): (w: TextWord) => boolean {
+  const tan = Math.tan((page.skewDeg ?? 0) * Math.PI / 180);
+  const aspect = page.aspect ?? 1;
+  const cx = (match.x0 + match.x1) / 2;
+  const cy = (match.y0 + match.y1) / 2;
+  const h = match.y1 - match.y0;
+  return (w: TextWord) => {
+    const wcx = (w.x0 + w.x1) / 2;
+    const wcy = (w.y0 + w.y1) / 2;
+    // Where this row's text has fallen to by the time it reaches this word.
+    const expected = cy + (wcx - cx) * aspect * tan;
+    return Math.abs(wcy - expected) < Math.max(h, w.y1 - w.y0) * 0.7;
+  };
+}
+
+/**
  * A table row: the description, its figures, and nothing from the next column.
  *
  * "Every word at this height" was the whole rule, and on a two-column invoice it
@@ -663,12 +697,7 @@ function pickMatch(matches: Box[], hint: SourceBox | null | undefined, prefer: '
  * values we already hold, and the row is what lies between them.
  */
 export function expandToRow(page: TextPage, match: Box, amount?: number | null): Box {
-  const cy = (match.y0 + match.y1) / 2;
-  const h = match.y1 - match.y0;
-  const rowWords = page.words.filter((w) => {
-    const wc = (w.y0 + w.y1) / 2;
-    return Math.abs(wc - cy) < Math.max(h, w.y1 - w.y0) * 0.7;
-  });
+  const rowWords = page.words.filter(sameRowAs(page, match));
   if (rowWords.length === 0) return match;
 
   // Right edge: the line's own amount, when it is printed on this line. Past it
@@ -899,13 +928,16 @@ export function refineInvoiceSources(invoice: ExtractedInvoice, pages: TextPage[
     }
     let rows = matches.map((m) => ({ m, row: expandToRow(pages[m.page - 1]!, m, item.total) }));
     if (item.total != null && rows.length > 1) {
-      const withAmount = rows.filter(({ row, m }) => {
+      const withAmount = rows.filter(({ m }) => {
         const page = pages[m.page - 1]!;
-        const cy = (row.y0 + row.y1) / 2;
+        // Against the DESCRIPTION's row, following the page's slope — the same
+        // band expandToRow uses. Measured off the expanded row instead, this
+        // was asking whether the amount lies inside a box that was built to
+        // contain that amount, which is a question with a foregone answer.
+        const onThisRow = sameRowAs(page, m);
         return page.words.some((w) => {
-          const wc = (w.y0 + w.y1) / 2;
           const n = numOf(w.text);
-          return n != null && Math.abs(n - (item.total ?? 0)) < 0.005 && Math.abs(wc - cy) < (row.y1 - row.y0);
+          return n != null && Math.abs(n - (item.total ?? 0)) < 0.005 && onThisRow(w);
         });
       });
       if (withAmount.length > 0) rows = withAmount;

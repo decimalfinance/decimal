@@ -416,6 +416,52 @@ test('a tilt too small to matter is left alone', () => {
   assert.equal(invoice.fieldSources!.vendorName!.angle, undefined);
 });
 
+test('on a tilted page a row follows its own text, not a flat band', () => {
+  // The failure this prevents is worse than a missing highlight: it points at a
+  // real figure and says it belongs to this line.
+  //
+  // C1 slopes 1.79° down to the right, and one row is about as tall as the
+  // amount column falls behind its own description. So a flat band around
+  // "Drayage — Port of Oakland" cannot reach the $450.00 that belongs to it,
+  // while the $950.00 belonging to the row ABOVE lands squarely inside — and
+  // the highlight spans one row's description and the previous row's money.
+  //
+  // Measured on the real document: "Drayage" sits at y 0.2317, its own amount
+  // at 0.2463 — 0.0146 apart against a tolerance near 0.007.
+  const aspect = 0.733;
+  const tan = Math.tan(1.79 * Math.PI / 180);
+  // A row's y at a given x, once the slope has had its way.
+  const at = (x: number, rowY: number) => rowY + (x - 0.155) * aspect * tan;
+
+  const w = (text: string, x: number, rowY: number) => {
+    const y = at(x, rowY);
+    return { text, x0: x, y0: y - 0.004, x1: x + 0.05, y1: y + 0.004 };
+  };
+
+  const ROW2 = 0.2135, ROW3 = 0.2317;   // one row apart, as printed
+  const page: TextPage = {
+    aspect, skewDeg: 1.79,
+    words: [
+      w('Customs', 0.155, ROW2), w('brokerage', 0.21, ROW2), w('$950.00', 0.828, ROW2),
+      w('Drayage', 0.155, ROW3), w('Oakland', 0.21, ROW3), w('$450.00', 0.828, ROW3),
+    ],
+  };
+
+  const invoice = fakeInvoice({
+    lineItems: [{ description: 'Drayage Oakland', quantity: 1, unitPrice: 450, total: 450 }],
+  });
+  refineInvoiceSources(invoice, [page]);
+  const box = (invoice.lineItems[0] as { source?: { box: number[] } }).source!;
+  const right = box.box[0] + box.box[2];
+  assert.ok(right > 0.86, `the row reaches its own amount at x 0.828, got ${right}`);
+
+  // And the proof it followed the slope rather than widening: the row that
+  // matters is row 3, so the box must sit below row 2's money, not around it.
+  const rowTwoMoneyY = at(0.828, ROW2);
+  assert.ok(box.box[1] > rowTwoMoneyY - 0.004,
+    `starts below the previous row's amount at ${rowTwoMoneyY}, got ${box.box[1]}`);
+});
+
 function fakeInvoice(overrides: Record<string, unknown>) {
   return {
     vendorName: 'Acme Logistics LLC',
