@@ -265,3 +265,21 @@ test('grounding stays away from anything it would cry wolf about', async () => {
     [],
   );
 });
+
+test('a multi-page document reports all of its pages, not one', async () => {
+  // The text path has no images to count and answered "1". True of most
+  // invoices, and wrong about precisely the documents it handles best: a
+  // three-page PDF reported one page, and the viewer — which trusts that
+  // number — left pages two and three rendered, stored and unreachable.
+  const { documentPageCount } = await import('../src/payments/document-extract.js');
+
+  const three = { length: 3 };
+  assert.equal(documentPageCount(three, null), 3, 'the renders are what the viewer shows');
+  assert.equal(documentPageCount(null, three), 3, 'pdftotext emits an entry per page');
+  assert.equal(documentPageCount(three, { length: 1 }), 3, 'renders win — they are the display');
+
+  // Neither available is the only case where any answer is a guess, and one is
+  // the least wrong.
+  assert.equal(documentPageCount(null, null), 1);
+  assert.equal(documentPageCount({ length: 0 }, null), 1, 'zero renders is not zero pages');
+});

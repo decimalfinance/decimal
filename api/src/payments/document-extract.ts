@@ -609,6 +609,27 @@ const MAX_DOCUMENT_PAGES = 10;
  */
 const MIN_WORDS_PER_PAGE = 40;
 
+/**
+ * How many pages the document has.
+ *
+ * The text path has no images to count, and answered "1" — true of most
+ * invoices and wrong about precisely the documents it handles best. A
+ * three-page PDF reported one page, and the viewer, which trusts that number,
+ * left pages two and three rendered, stored and unreachable.
+ *
+ * Both sources count real pages: the renders are exactly what the viewer will
+ * show, and pdftotext emits an entry per page whether or not it holds words.
+ * Renders first because they are what is being displayed. Falling back to 1 is
+ * for the case where we have neither, where any answer is a guess and one is
+ * the least wrong.
+ */
+export function documentPageCount(
+  prerenderedPages?: { length: number } | null,
+  textPages?: { length: number } | null,
+): number {
+  return prerenderedPages?.length || textPages?.length || 1;
+}
+
 export function textLayerQuality(pages: TextPage[] | null): 'good' | 'thin' | 'none' {
   if (!pages || pages.length === 0) return 'none';
   const words = pages.reduce((sum, page) => sum + page.words.length, 0);
@@ -672,6 +693,7 @@ export async function extractPaymentRowsFromDocument(args: {
     const fromText = await extractFromText({
       layoutText: args.layoutText,
       filename: args.filename,
+      pageCount: documentPageCount(args.prerenderedPages, args.textPages),
       onProgress: args.onProgress,
     });
 
@@ -829,9 +851,20 @@ function criticalUngrounded(rows: ExtractedRow[], textPages: TextPage[] | null):
 async function extractFromText(args: {
   layoutText: string;
   filename: string;
+  /**
+   * How many pages the document has.
+   *
+   * Not derivable from the text — that is the whole point of this path — so it
+   * comes from the caller, which has both the rendered pages and the word
+   * boxes. It was hardcoded to 1, which is true of most invoices and wrong
+   * about exactly the ones this path handles best: a three-page PDF reported
+   * one page, and the viewer, which trusts that number, left pages two and
+   * three sitting in the database unrendered.
+   */
+  pageCount: number;
   onProgress?: (event: DocumentExtractProgressEvent) => void;
 }): Promise<{ rows: ExtractedRow[]; modelLatencyMs: number; pageCount: number }> {
-  args.onProgress?.({ stage: 'extracting', pageCount: 1 });
+  args.onProgress?.({ stage: 'extracting', pageCount: args.pageCount });
 
   const userContent: ExtractionUserContent = [
     {
@@ -861,7 +894,7 @@ async function extractFromText(args: {
 
   logger.info('document_extract.completed', {
     path: 'text',
-    pageCount: 1,
+    pageCount: args.pageCount,
     rowCount: parsedRows.data.rows.length,
     latencyMs: attempt.latencyMs,
     promptTokens: attempt.usage.promptTokens,
@@ -875,7 +908,7 @@ async function extractFromText(args: {
     })),
   });
 
-  return { rows: parsedRows.data.rows, modelLatencyMs: attempt.latencyMs, pageCount: 1 };
+  return { rows: parsedRows.data.rows, modelLatencyMs: attempt.latencyMs, pageCount: args.pageCount };
 }
 
 type ExtractionUserContent = Array<
