@@ -38,6 +38,26 @@ function initialsOf(name: string): string {
 
 type FieldStateMap = Record<string, { value: string; state: BillDraftField['state'] }>;
 
+type BillComment = BillDraft['comments'][number];
+
+/**
+ * One subject on a bill, and everything said about it.
+ *
+ * The head is either a QUESTION — which names somebody and parks the bill until
+ * they answer — or a remark raised on its own. Replies are flat underneath:
+ * two levels, Slack's shape rather than Reddit's, because what makes this
+ * readable is knowing which subject a remark belongs to, and nesting deeper
+ * answers that no better in a pane this narrow.
+ */
+type BillThread = {
+  id: string;
+  at: string;
+  head:
+    | { kind: 'question'; question: BillDraft['questions'][number] }
+    | { kind: 'comment'; comment: BillComment };
+  replies: BillComment[];
+};
+
 export function BillDraftPage() {
   const { organizationId = '', paymentOrderId = '' } = useParams();
   const navigate = useNavigate();
@@ -344,7 +364,9 @@ function DraftScreen(props: {
 
   // Comments: anyone may leave one, and leaving one holds nothing up.
   const [commentText, setCommentText] = useState('');
-  const [replyTo, setReplyTo] = useState<string | null>(null);
+  // The THREAD being replied to, not an id: a root is either a question or a
+  // comment, and which one decides where the reply attaches.
+  const [replyTo, setReplyTo] = useState<BillThread | null>(null);
   const [commenting, setCommenting] = useState(false);
 
   const sendComment = async () => {
@@ -353,7 +375,8 @@ function DraftScreen(props: {
     try {
       await billsApi.comment(organizationId, billDraft.paymentOrderId, {
         body: commentText.trim(),
-        inReplyToQuestionId: replyTo,
+        inReplyToQuestionId: replyTo?.head.kind === 'question' ? replyTo.head.question.billQuestionId : null,
+        inReplyToCommentId: replyTo?.head.kind === 'comment' ? replyTo.head.comment.billCommentId : null,
       });
       await queryClient.invalidateQueries({ queryKey: ['bill-billDraft', organizationId, billDraft.paymentOrderId] });
       setCommentText('');
@@ -369,25 +392,54 @@ function DraftScreen(props: {
   // because every other surface wants them that way; a conversation reads
   // downward, so it is ordered here rather than changing what everything else
   // gets.
-  const thread = useMemo(() => {
-    type Entry =
-      | { kind: 'question'; id: string; at: string; question: BillDraft['questions'][number] }
-      | { kind: 'comment'; id: string; at: string; body: string; authorName: string; inReplyToQuestionId: string | null };
-    const entries: Entry[] = [
-      ...billDraft.questions.map((q) => ({
-        kind: 'question' as const, id: q.billQuestionId, at: q.askedAt, question: q,
-      })),
-      ...billDraft.comments.map((c) => ({
-        kind: 'comment' as const,
-        id: c.billCommentId,
-        at: c.at,
-        body: c.body,
-        authorName: c.authorName,
-        inReplyToQuestionId: c.inReplyToQuestionId,
-      })),
-    ];
-    return entries.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+  // Threads, not one stream. A bill collects questions about different things,
+  // and flattening them means reading the third one costs scrolling through the
+  // first two. Each question — and each remark raised on its own — is a root,
+  // and everything said about it hangs underneath and folds away when done.
+  const threads = useMemo(() => {
+    const byId = new Map<string, BillThread>();
+    const order: string[] = [];
+
+    const root = (id: string, at: string, head: BillThread['head']) => {
+      if (!byId.has(id)) {
+        byId.set(id, { id, at, head, replies: [] });
+        order.push(id);
+      }
+      return byId.get(id)!;
+    };
+
+    for (const q of billDraft.questions) {
+      root(q.billQuestionId, q.askedAt, { kind: 'question', question: q });
+    }
+    // Roots first, so a reply always finds the thread it belongs to. Comments
+    // arrive oldest-first, so a reply cannot precede its own root.
+    for (const c of billDraft.comments) {
+      const parentId = c.inReplyToQuestionId ?? c.inReplyToCommentId;
+      if (!parentId) {
+        root(c.billCommentId, c.at, { kind: 'comment', comment: c });
+        continue;
+      }
+      const parent = byId.get(parentId);
+      // A reply whose root we cannot see — the question was deleted, or it
+      // arrived out of order — stands on its own rather than vanishing.
+      if (!parent) {
+        root(c.billCommentId, c.at, { kind: 'comment', comment: c });
+        continue;
+      }
+      parent.replies.push(c);
+    }
+
+    return order
+      .map((id) => byId.get(id)!)
+      .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
   }, [billDraft.questions, billDraft.comments]);
+
+  // Collapsed by choice, not by rule: an answered question is done, so it folds
+  // itself away and leaves the bill's live conversation on screen. Anything
+  // still owed stays open, because that is the part somebody has to act on.
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const isOpen = (t: BillThread) => expanded[t.id]
+    ?? (t.head.kind === 'question' ? t.head.question.stillOpen : true);
 
   const [answerFor, setAnswerFor] = useState<string | null>(null);
   const [answerText, setAnswerText] = useState('');
@@ -927,144 +979,164 @@ function DraftScreen(props: {
                     is open, releasing the bill is not. */}
                 {showThread ? (
                   <div className="bthread">
-                    {thread.map((entry) => {
-                      if (entry.kind === 'comment') {
-                        const repliedTo = entry.inReplyToQuestionId
-                          ? billDraft.questions.find((q) => q.billQuestionId === entry.inReplyToQuestionId)
-                          : null;
-                        return (
-                          <div key={entry.id} className="bt-msg">
-                            <span className="bt-av" style={{ background: avatarTone(entry.authorName) }}>
-                              {initialsOf(entry.authorName)}
+                    {threads.map((t) => {
+                      const open = isOpen(t);
+                      const q = t.head.kind === 'question' ? t.head.question : null;
+                      const isAnswered = q?.outcome === 'answered';
+                      const namedFields = q ? (q.openFields.length ? q.openFields : q.highlightFields) : [];
+                      const author = q ? q.askedByName : t.head.kind === 'comment' ? t.head.comment.authorName : '';
+                      return (
+                        <div
+                          key={t.id}
+                          className="bt-thread"
+                          onMouseEnter={() => q && setHoveredQuestion(q.billQuestionId)}
+                          onMouseLeave={() => setHoveredQuestion(null)}
+                        >
+                          <div className="bt-msg">
+                            <span className="bt-av" style={{ background: avatarTone(author) }}>
+                              {initialsOf(author)}
                             </span>
                             <div className="bt-col">
                               <div className="bt-who">
-                                <strong>{entry.authorName}</strong>
-                                <span className="bt-when">{shortWhen(entry.at)}</span>
+                                <strong>{author}</strong>
+                                {q ? (
+                                  <>
+                                    <span>asked</span>
+                                    <strong>{q.askedOfName}</strong>
+                                    <span className={`pill pill-min ${isAnswered ? 'pill-success' : 'pill-warning'}`}>
+                                      <span className="dot" />
+                                      {isAnswered ? `${q.askedOfName.split(' ')[0]} confirmed these details`
+                                        : q.outcome === 'partial' ? 'Partly answered'
+                                        : q.outcome === 'forwarded' ? 'Passed on'
+                                        : q.outcome === 'handed_back' ? `${q.askedOfName.split(' ')[0]} could not answer`
+                                        : `Waiting on ${q.askedOfName.split(' ')[0]}`}
+                                    </span>
+                                  </>
+                                ) : null}
+                                <span className="bt-when">{shortWhen(t.at)}</span>
+                                <span style={{ flex: 1 }} />
+                                {/* The fold. A bill with six settled questions
+                                    on it should read as six lines, not six
+                                    forms — the detail is there when somebody
+                                    goes looking and out of the way when not. */}
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost btn-icon btn-sm"
+                                  aria-expanded={open}
+                                  aria-label={open ? 'Collapse this thread' : 'Expand this thread'}
+                                  onClick={() => setExpanded({ ...expanded, [t.id]: !open })}
+                                >
+                                  <Ico.chevDown w={13} style={{ transform: open ? 'rotate(180deg)' : undefined, transition: 'transform 120ms' }} />
+                                </button>
                               </div>
-                              <div className="bt-bubble">
-                                {repliedTo ? (
-                                  <div className="bt-quote" title={repliedTo.question}>
-                                    Replying to {repliedTo.askedByName.split(' ')[0]}: “{repliedTo.question}”
+
+                              <div className={q ? `bt-bubble is-question${q.stillOpen ? ' is-waiting' : ''}` : 'bt-bubble'}>
+                                {q ? q.question : t.head.kind === 'comment' ? t.head.comment.body : null}
+                                {open && namedFields.length > 0 ? (
+                                  <div className="bt-fields">
+                                    {namedFields.map((f) => (
+                                      <span key={f} className="pill pill-min pill-neutral">{fieldLabel(f)}</span>
+                                    ))}
                                   </div>
                                 ) : null}
-                                {entry.body}
                               </div>
-                            </div>
-                          </div>
-                        );
-                      }
 
-                      const q = entry.question;
-                      const isAnswered = q.outcome === 'answered';
-                      const namedFields = q.openFields.length ? q.openFields : q.highlightFields;
-                      return (
-                        <div
-                          key={entry.id}
-                          className="bt-msg"
-                          onMouseEnter={() => setHoveredQuestion(q.billQuestionId)}
-                          onMouseLeave={() => setHoveredQuestion(null)}
-                        >
-                          <span className="bt-av" style={{ background: avatarTone(q.askedByName) }}>
-                            {initialsOf(q.askedByName)}
-                          </span>
-                          <div className="bt-col">
-                            <div className="bt-who">
-                              <strong>{q.askedByName}</strong>
-                              <span>asked</span>
-                              <strong>{q.askedOfName}</strong>
-                              <span className={`pill pill-min ${isAnswered ? 'pill-success' : 'pill-warning'}`}>
-                                <span className="dot" />
-                                {isAnswered ? `${q.askedOfName.split(' ')[0]} confirmed these details`
-                                  : q.outcome === 'partial' ? 'Partly answered'
-                                  : q.outcome === 'forwarded' ? 'Passed on'
-                                  : q.outcome === 'handed_back' ? `${q.askedOfName.split(' ')[0]} could not answer`
-                                  : `Waiting on ${q.askedOfName.split(' ')[0]}`}
-                              </span>
-                              <span className="bt-when">{shortWhen(q.askedAt)}</span>
-                            </div>
+                              {/* Collapsed, a thread still has to say what is
+                                  under it, or folding it away hides that anyone
+                                  replied at all. */}
+                              {!open && t.replies.length > 0 ? (
+                                <button type="button" className="bt-more"
+                                  onClick={() => setExpanded({ ...expanded, [t.id]: true })}>
+                                  {t.replies.length} {t.replies.length === 1 ? 'reply' : 'replies'}
+                                </button>
+                              ) : null}
 
-                            <div className={`bt-bubble is-question${q.stillOpen ? ' is-waiting' : ''}`}>
-                              {q.question}
-                              {namedFields.length > 0 ? (
-                                <div className="bt-fields">
-                                  {namedFields.map((f) => (
-                                    <span key={f} className="pill pill-min pill-neutral">{fieldLabel(f)}</span>
-                                  ))}
-                                </div>
+                              {open ? (
+                                <>
+                                  {q?.answer ? (
+                                    <div className="bt-note">
+                                      <strong>{q.askedOfName.split(' ')[0]}:</strong> “{q.answer}”
+                                    </div>
+                                  ) : null}
+
+                                  {/* Ticking the fields IS the answer to "please
+                                      check these" — but a tick lives on this
+                                      screen until the bill is saved. */}
+                                  {(() => {
+                                    if (!q?.stillOpen || q.openFields.length === 0) return null;
+                                    const checked = q.openFields.filter((f) => fields[f]?.state === 'confirmed');
+                                    if (checked.length === 0) return null;
+                                    return (
+                                      <div className="bt-note">
+                                        {checked.length === q.openFields.length
+                                          ? `You have checked all ${q.openFields.length} fields. Save the bill and that goes back as your answer.`
+                                          : `You have checked ${checked.length} of ${q.openFields.length}. Saving sends what you have done so far.`}
+                                      </div>
+                                    );
+                                  })()}
+
+                                  {q?.stillOpen && q.aboutFlag
+                                    && !billDraft.flags.some((f) => f.kind === q.aboutFlag) ? (
+                                    <div className="bt-note">
+                                      {flagSettledBy(billDraft.workLog, q.aboutFlag) ?? 'That check has been settled.'}
+                                      {' '}Your question asked more than that — write the rest to close it.
+                                    </div>
+                                  ) : null}
+
+                                  {t.replies.length > 0 ? (
+                                    <div className="bt-replies">
+                                      {t.replies.map((r) => (
+                                        <div key={r.billCommentId} className="bt-msg">
+                                          <span className="bt-av is-sm" style={{ background: avatarTone(r.authorName) }}>
+                                            {initialsOf(r.authorName)}
+                                          </span>
+                                          <div className="bt-col">
+                                            <div className="bt-who">
+                                              <strong>{r.authorName}</strong>
+                                              <span className="bt-when">{shortWhen(r.at)}</span>
+                                            </div>
+                                            <div className="bt-bubble">{r.body}</div>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : null}
+
+                                  {q && q.youWereAsked && answerFor === q.billQuestionId ? (
+                                    <AnswerComposer
+                                      question={q}
+                                      namedFields={namedFields}
+                                      fieldLabel={fieldLabel}
+                                      answerText={answerText}
+                                      setAnswerText={setAnswerText}
+                                      settled={settled}
+                                      setSettled={setSettled}
+                                      forwardTo={forwardTo}
+                                      setForwardTo={setForwardTo}
+                                      candidates={askCandidates.data?.candidates ?? []}
+                                      answering={answering}
+                                      onSend={sendAnswer}
+                                      onCancel={() => { setAnswerFor(null); setAnswerText(''); setSettled([]); setForwardTo(''); }}
+                                    />
+                                  ) : !readOnly ? (
+                                    <div className="bt-actions">
+                                      {q?.youWereAsked ? (
+                                        <button type="button" className="btn btn-secondary btn-sm"
+                                          onClick={() => { setAnswerFor(q.billQuestionId); setAnswerText(''); setSettled([]); setForwardTo(''); }}>
+                                          Answer
+                                        </button>
+                                      ) : null}
+                                      {/* Open to everybody, the asker included.
+                                          Helping is not releasing the bill. */}
+                                      <button type="button" className="btn btn-ghost btn-sm"
+                                        onClick={() => { setReplyTo(t); setCommentText(''); }}>
+                                        Reply
+                                      </button>
+                                    </div>
+                                  ) : null}
+                                </>
                               ) : null}
                             </div>
-
-                            {q.answer ? (
-                              <div className="bt-note">
-                                <strong>{q.askedOfName.split(' ')[0]}:</strong> “{q.answer}”
-                              </div>
-                            ) : null}
-
-                            {/* Ticking the fields IS the answer to "please check
-                                these" — but a tick lives on this screen until
-                                the bill is saved, so somebody can check all six,
-                                watch every one go green, and find the question
-                                still waiting. */}
-                            {(() => {
-                              if (!q.stillOpen || q.openFields.length === 0) return null;
-                              const checked = q.openFields.filter((f) => fields[f]?.state === 'confirmed');
-                              if (checked.length === 0) return null;
-                              return (
-                                <div className="bt-note">
-                                  {checked.length === q.openFields.length
-                                    ? `You have checked all ${q.openFields.length} fields. Save the bill and that goes back as your answer.`
-                                    : `You have checked ${checked.length} of ${q.openFields.length}. Saving sends what you have done so far.`}
-                                </div>
-                              );
-                            })()}
-
-                            {/* The flag it came from is settled, but the question
-                                asked more than the flag — so it stays open, and
-                                the person asked is told what has already been
-                                done rather than facing a blank box. */}
-                            {q.stillOpen && q.aboutFlag
-                              && !billDraft.flags.some((f) => f.kind === q.aboutFlag) ? (
-                              <div className="bt-note">
-                                {flagSettledBy(billDraft.workLog, q.aboutFlag) ?? 'That check has been settled.'}
-                                {' '}Your question asked more than that — write the rest to close it.
-                              </div>
-                            ) : null}
-
-                            {q.youWereAsked && answerFor === q.billQuestionId ? (
-                              <AnswerComposer
-                                question={q}
-                                namedFields={namedFields}
-                                fieldLabel={fieldLabel}
-                                answerText={answerText}
-                                setAnswerText={setAnswerText}
-                                settled={settled}
-                                setSettled={setSettled}
-                                forwardTo={forwardTo}
-                                setForwardTo={setForwardTo}
-                                candidates={askCandidates.data?.candidates ?? []}
-                                answering={answering}
-                                onSend={sendAnswer}
-                                onCancel={() => { setAnswerFor(null); setAnswerText(''); setSettled([]); setForwardTo(''); }}
-                              />
-                            ) : (
-                              <div className="bt-actions">
-                                {q.youWereAsked ? (
-                                  <button type="button" className="btn btn-secondary btn-sm"
-                                    onClick={() => { setAnswerFor(q.billQuestionId); setAnswerText(''); setSettled([]); setForwardTo(''); }}>
-                                    Answer
-                                  </button>
-                                ) : null}
-                                {/* Open to everybody, including the asker. Helping
-                                    is not the same as releasing the bill. */}
-                                {q.stillOpen && !readOnly ? (
-                                  <button type="button" className="btn btn-ghost btn-sm"
-                                    onClick={() => { setReplyTo(q.billQuestionId); setCommentText(''); }}>
-                                    Reply
-                                  </button>
-                                ) : null}
-                              </div>
-                            )}
                           </div>
                         </div>
                       );
@@ -1075,7 +1147,9 @@ function DraftScreen(props: {
                         <input
                           className="input"
                           value={commentText}
-                          placeholder={replyTo ? 'Reply…' : 'Say something about this bill…'}
+                          placeholder={replyTo
+                            ? `Reply to ${replyTo.head.kind === 'question' ? replyTo.head.question.askedByName : replyTo.head.comment.authorName}…`
+                            : 'Say something about this bill…'}
                           onChange={(e) => setCommentText(e.target.value)}
                           onKeyDown={(e) => { if (e.key === 'Enter') void sendComment(); }}
                           style={{ height: 32 }}

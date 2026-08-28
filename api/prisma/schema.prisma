@@ -925,6 +925,9 @@ model BillComment {
   body                String
   /// The question this replies to, when it is one.
   inReplyToQuestionId String?  @map("in_reply_to_question_id") @db.Uuid
+  /// The comment this replies to. At most one parent of either kind, and a
+  /// reply to a reply is flattened onto the same root — two levels, not depth.
+  inReplyToCommentId  String?  @map("in_reply_to_comment_id") @db.Uuid
   createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@index([paymentOrderId, createdAt])

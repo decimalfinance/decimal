@@ -2319,9 +2319,13 @@ export async function commentOnBill(args: {
   authorUserId: string;
   body: string;
   inReplyToQuestionId?: string | null;
+  inReplyToCommentId?: string | null;
 }) {
   const body = args.body.trim();
   if (body.length < 1) throw new Error('Write something first.');
+  if (args.inReplyToQuestionId && args.inReplyToCommentId) {
+    throw new Error('A reply belongs to one conversation, not two.');
+  }
 
   if (args.inReplyToQuestionId) {
     const question = await prisma.billQuestion.findFirst({
@@ -2337,13 +2341,37 @@ export async function commentOnBill(args: {
     if (!question) throw new Error('That question is not on this bill.');
   }
 
+  // Two levels, not depth. Replying to a reply joins the thread it is already
+  // in, rather than starting a third rung — what makes this readable is knowing
+  // which SUBJECT a remark is about, and nesting deeper answers that no better
+  // while making it much harder to read in a narrow pane.
+  let questionParent = args.inReplyToQuestionId ?? null;
+  let commentParent: string | null = null;
+  if (args.inReplyToCommentId) {
+    const parent = await prisma.billComment.findFirst({
+      where: {
+        billCommentId: args.inReplyToCommentId,
+        organizationId: args.organizationId,
+        paymentOrderId: args.paymentOrderId,
+      },
+      select: { billCommentId: true, inReplyToQuestionId: true, inReplyToCommentId: true },
+    });
+    if (!parent) throw new Error('That comment is not on this bill.');
+    if (parent.inReplyToQuestionId) {
+      questionParent = parent.inReplyToQuestionId;
+    } else {
+      commentParent = parent.inReplyToCommentId ?? parent.billCommentId;
+    }
+  }
+
   return prisma.billComment.create({
     data: {
       organizationId: args.organizationId,
       paymentOrderId: args.paymentOrderId,
       authorUserId: args.authorUserId,
       body,
-      inReplyToQuestionId: args.inReplyToQuestionId ?? null,
+      inReplyToQuestionId: questionParent,
+      inReplyToCommentId: commentParent,
     },
   });
 }
@@ -2367,6 +2395,7 @@ export async function listBillComments(organizationId: string, paymentOrderId: s
     authorUserId: r.authorUserId,
     authorName: nameOf.get(r.authorUserId) ?? 'Someone',
     inReplyToQuestionId: r.inReplyToQuestionId,
+    inReplyToCommentId: r.inReplyToCommentId,
     at: r.createdAt.toISOString(),
   }));
 }

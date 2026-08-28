@@ -1957,6 +1957,73 @@ test('anyone can comment on a question they were not asked, and it settles nothi
   );
 });
 
+test('a reply to a reply joins the same thread rather than starting a third rung', async () => {
+  // Two levels, not depth. What makes a bill's conversation readable is knowing
+  // which SUBJECT a remark is about; a reply-to-a-reply-to-a-reply answers that
+  // no better and costs width the review pane does not have. So depth is
+  // flattened on the way in, where it can be relied on, rather than in the
+  // renderer where every future surface would have to remember to do it.
+  const { orgId, owner } = await makeOrg();
+  const other = await register('thread-other');
+  await prisma.organizationMembership.create({
+    data: { organizationId: orgId, userId: other.userId, role: 'member', status: 'active' },
+  });
+  const bill = await uploadAndConfirm(orgId, owner.token, {
+    vendor: 'Ironclad Security', amount: 500, invoiceNo: 'IRN-900', billTo: 'Halcyon Labs, Inc.',
+  });
+
+  const asked = await post(
+    `/organizations/${orgId}/bills/${bill.billId}/ask`,
+    { askedOfUserId: owner.userId, question: 'can somebody check this?' },
+    other.token,
+  );
+
+  const first = await post(
+    `/organizations/${orgId}/bills/${bill.billId}/comments`,
+    { body: 'I set this vendor up.', inReplyToQuestionId: asked.billQuestionId },
+    other.token,
+  );
+  // A reply to that reply: belongs to the question's thread, not to a new one.
+  await post(
+    `/organizations/${orgId}/bills/${bill.billId}/comments`,
+    { body: 'Thanks — that settles it for me.', inReplyToCommentId: first.billCommentId },
+    owner.token,
+  );
+
+  const draft = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, owner.token);
+  assert.equal(draft.comments.length, 2);
+  for (const c of draft.comments) {
+    assert.equal(c.inReplyToQuestionId, asked.billQuestionId, 'both hang off the question');
+    assert.equal(c.inReplyToCommentId, null, 'and neither is nested under the other');
+  }
+
+  // A remark of its own is its own root, and replies to it hang off IT.
+  const standalone = await post(
+    `/organizations/${orgId}/bills/${bill.billId}/comments`,
+    { body: 'Unrelated: the PO looks off.' },
+    other.token,
+  );
+  await post(
+    `/organizations/${orgId}/bills/${bill.billId}/comments`,
+    { body: 'Agreed, I will check.', inReplyToCommentId: standalone.billCommentId },
+    owner.token,
+  );
+  const after = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, owner.token);
+  const reply = after.comments.find((c: { body: string }) => c.body === 'Agreed, I will check.');
+  assert.equal(reply.inReplyToCommentId, standalone.billCommentId);
+  assert.equal(reply.inReplyToQuestionId, null);
+
+  // And one sentence never belongs to two conversations.
+  await assert.rejects(
+    post(
+      `/organizations/${orgId}/bills/${bill.billId}/comments`,
+      { body: 'both', inReplyToQuestionId: asked.billQuestionId, inReplyToCommentId: standalone.billCommentId },
+      owner.token,
+    ),
+    /one conversation/,
+  );
+});
+
 test('a comment cannot be attached to a question on another bill', async () => {
   // A reply pointing at a question on a different bill would read as part of
   // this conversation while belonging to another one.

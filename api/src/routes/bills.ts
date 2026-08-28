@@ -226,6 +226,7 @@ billsRouter.get('/organizations/:organizationId/bills/:paymentOrderId/ask-candid
 const commentSchema = z.object({
   body: z.string().trim().min(1).max(2000),
   inReplyToQuestionId: z.string().uuid().nullable().optional(),
+  inReplyToCommentId: z.string().uuid().nullable().optional(),
 });
 
 billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/comments', asyncRoute(async (req, res) => {
@@ -240,6 +241,7 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/comments'
     authorUserId: req.auth!.userId,
     body: input.body,
     inReplyToQuestionId: input.inReplyToQuestionId ?? null,
+    inReplyToCommentId: input.inReplyToCommentId ?? null,
   });
   res.status(201).json({ billCommentId: created.billCommentId });
 }));

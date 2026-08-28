@@ -1554,6 +1554,7 @@ export interface BillDraft {
     authorUserId: string;
     authorName: string;
     inReplyToQuestionId: string | null;
+    inReplyToCommentId: string | null;
     at: string;
   }>;
   questions: Array<{
@@ -1716,7 +1717,7 @@ export const billsApi = {
   // for more than its check covers is impossible without knowing the check.
   // Anyone who can see the bill may say something about it. Unlike asking, this
   // parks nothing — which is the whole difference between the two.
-  comment(organizationId: string, paymentOrderId: string, body: { body: string; inReplyToQuestionId?: string | null }) {
+  comment(organizationId: string, paymentOrderId: string, body: { body: string; inReplyToQuestionId?: string | null; inReplyToCommentId?: string | null }) {
     return request<{ billCommentId: string }>(
       `/organizations/${organizationId}/bills/${paymentOrderId}/comments`,
       { method: 'POST', body: JSON.stringify(body) },

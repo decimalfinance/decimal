@@ -182,5 +182,13 @@ blocks, dialog-foot) and copy its skeleton line by line.**
   A question parks the bill and names a person; a comment does neither. Rendering them
   alike would have made "waiting on Zara" read as chatter, which is the one thing that
   must stay legible.
+- **Threads, not a stream**: `.bt-thread` is one subject and folds; `.bt-replies` holds
+  its replies, indented once by a left rule, with `.bt-av.is-sm` for the smaller avatar.
+  Collapsed, a thread must still report what is under it — `.bt-more` ("3 replies") —
+  or folding hides that anyone answered at all. Two levels only: a reply to a reply
+  joins the same root, flattened server-side so every surface inherits it.
+- **What folds by default**: whatever is finished. An answered question collapses itself
+  and leaves the live conversation on screen; anything still owed stays open, because
+  that is the part somebody has to act on.
 - **Timestamps in a conversation**: time of day for today, `27 Aug` before that. A full
   date on every line is noise when they all happened this afternoon.
