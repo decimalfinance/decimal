@@ -1741,7 +1741,7 @@ export const billsApi = {
       { method: 'POST', body: JSON.stringify(body) },
     );
   },
-  notABill(organizationId: string, paymentOrderId: string, body: { reason: 'duplicate' | 'statement' | 'not_ours' | 'unreadable' | 'other'; note?: string | null }) {
+  notABill(organizationId: string, paymentOrderId: string, body: { reason: 'duplicate' | 'statement' | 'credit_note' | 'not_ours' | 'unreadable' | 'other'; note?: string | null }) {
     return request<unknown>(`/organizations/${organizationId}/bills/${paymentOrderId}/not-a-bill`, {
       method: 'POST',
       body: JSON.stringify(body),

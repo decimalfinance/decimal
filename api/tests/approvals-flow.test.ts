@@ -2024,6 +2024,49 @@ test('a reply to a reply joins the same thread rather than starting a third rung
   );
 });
 
+test('closing a document records what it actually was', async () => {
+  // Every close went in as 'not_ours', whatever the flag said — so a statement
+  // of account, which is OUR bill listed six times over, was filed as somebody
+  // else's. A year later "why was this never paid" gets a wrong answer, and the
+  // only true part was whatever the person happened to type in the note.
+  //
+  // A credit note gets its own value for the same reason: it means the vendor
+  // owes US, and that is worth counting rather than filing under "other".
+  const { orgId, owner } = await makeOrg();
+
+  const statement = await uploadAndConfirm(orgId, owner.token, {
+    vendor: 'Meridian Logistics', amount: 22950, invoiceNo: 'MST-2026-09', billTo: 'Halcyon Labs, Inc.',
+  });
+  await post(
+    `/organizations/${orgId}/bills/${statement.billId}/not-a-bill`,
+    { reason: 'statement', note: 'Lists six invoices we already have.' },
+    owner.token,
+  );
+
+  const credit = await uploadAndConfirm(orgId, owner.token, {
+    vendor: 'Vantage Print Co', amount: 240, invoiceNo: 'CN-0443', billTo: 'Halcyon Labs, Inc.',
+  });
+  await post(
+    `/organizations/${orgId}/bills/${credit.billId}/not-a-bill`,
+    { reason: 'credit_note', note: 'They owe us; applying against the balance.' },
+    owner.token,
+  );
+
+  const rows = await prisma.paymentOrder.findMany({
+    where: { paymentOrderId: { in: [statement.billId, credit.billId] } },
+    select: { paymentOrderId: true, state: true, metadataJson: true },
+  });
+  const reasonOf = (id: string) => {
+    const row = rows.find((r) => r.paymentOrderId === id)!;
+    const meta = row.metadataJson as { notABill?: { reason?: string } } | null;
+    return { state: row.state, reason: meta?.notABill?.reason };
+  };
+
+  assert.equal(reasonOf(statement.billId).state, 'cancelled');
+  assert.equal(reasonOf(statement.billId).reason, 'statement', 'filed as what it is');
+  assert.equal(reasonOf(credit.billId).reason, 'credit_note', 'and a credit note is not "other"');
+});
+
 test('a comment cannot be attached to a question on another bill', async () => {
   // A reply pointing at a question on a different bill would read as part of
   // this conversation while belonging to another one.

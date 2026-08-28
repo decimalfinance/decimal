@@ -417,7 +417,10 @@ billsRouter.patch('/organizations/:organizationId/bills/:paymentOrderId/facts', 
 }));
 
 const notABillSchema = z.object({
-  reason: z.enum(['duplicate', 'statement', 'not_ours', 'unreadable', 'other']),
+  // A credit note is not "something else". It means the vendor owes US, and a
+  // year later "why was this never paid" wants that answer rather than a
+  // shrug — the same argument as having 'statement' at all.
+  reason: z.enum(['duplicate', 'statement', 'credit_note', 'not_ours', 'unreadable', 'other']),
   note: z.string().trim().max(500).nullable().optional(),
 });
 

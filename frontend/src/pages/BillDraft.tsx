@@ -39,6 +39,9 @@ function initialsOf(name: string): string {
 
 type FieldStateMap = Record<string, { value: string; state: BillDraftField['state'] }>;
 
+/** Why a document is not a payable. Counted later, so it has to be true. */
+type NotABillReason = 'duplicate' | 'statement' | 'credit_note' | 'not_ours' | 'unreadable' | 'other';
+
 type BillComment = BillDraft['comments'][number];
 
 /**
@@ -538,6 +541,21 @@ function DraftScreen(props: {
       toast.info('This is changed where it was set, not on the bill — Policies for a ceiling, the vendor for a hold.', 'Needs an admin');
       return;
     }
+    // Closing a bill ends it. It went straight through from an inline box —
+    // and Enter in that box fired it — so a $22,950 document could be cancelled
+    // by a keystroke, with a reason nobody chose. It goes through the same
+    // dialog the commit bar uses now, carrying the reason the FLAG implies
+    // rather than 'not_ours' for everything.
+    if (action === 'not_ours') {
+      setCloseReason(
+        flagKind === 'looks_like_statement' ? 'statement'
+          : flagKind === 'looks_like_credit_note' ? 'credit_note'
+          : flagKind === 'possible_duplicate' ? 'duplicate'
+          : 'not_ours',
+      );
+      setNotABillOpen(true);
+      return;
+    }
     if (action === 'ask_someone') {
       setActiveResolution({ flag: flagKind, action });
       setResolutionValue('');
@@ -585,11 +603,6 @@ function DraftScreen(props: {
         await billsApi.saveDraft(organizationId, billDraft.paymentOrderId, currentBody());
         await billsApi.payItemised(organizationId, billDraft.paymentOrderId, resolutionValue.trim());
         toast.success('Recorded — the approvers will see the amount and why it changed.', 'Paying the itemised total');
-      } else if (action === 'not_ours') {
-        await billsApi.notABill(organizationId, billDraft.paymentOrderId, { reason: 'not_ours', note: resolutionValue.trim() });
-        toast.success('Closed as addressed to another company.', 'Not ours');
-        onDone();
-        return;
       }
       await queryClient.invalidateQueries({ queryKey: ['bill-billDraft', organizationId, billDraft.paymentOrderId] });
       setActiveResolution(null);
@@ -629,6 +642,10 @@ function DraftScreen(props: {
   const [saving, setSaving] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [notABillOpen, setNotABillOpen] = useState(false);
+  // What the flag says this document is, carried into the dialog so the
+  // recorded reason matches the check that stopped it. A statement closed as
+  // "not ours" reads as somebody else's bill when it is ours, listed six times.
+  const [closeReason, setCloseReason] = useState<NotABillReason>('duplicate');
   const [confirmOpen, setConfirmOpen] = useState(false);
   // Field ↔ document linking: focusing a field highlights where it was read.
   const [activeSource, setActiveSource] = useState<DocSource>(null);
@@ -1551,6 +1568,7 @@ function DraftScreen(props: {
         <NotABillDialog
           organizationId={organizationId}
           paymentOrderId={billDraft.paymentOrderId}
+          initialReason={closeReason}
           onClose={() => setNotABillOpen(false)}
           onDone={() => { setNotABillOpen(false); onDone(); }}
           toast={toast}
@@ -2337,17 +2355,20 @@ export function DocumentDraftPage() {
 function NotABillDialog(props: {
   organizationId: string;
   paymentOrderId: string;
+  /** What the flag that led here says it is, so the record matches the check. */
+  initialReason?: NotABillReason;
   onClose: () => void;
   onDone: () => void;
   toast: ReturnType<typeof useToast>;
 }) {
-  const [reason, setReason] = useState<'duplicate' | 'statement' | 'not_ours' | 'unreadable' | 'other'>('duplicate');
+  const [reason, setReason] = useState<NotABillReason>(props.initialReason ?? 'duplicate');
   const [detail, setDetail] = useState('');
   const [running, setRunning] = useState(false);
 
-  const reasons: Array<{ key: typeof reason; label: string }> = [
+  const reasons: Array<{ key: NotABillReason; label: string }> = [
     { key: 'duplicate', label: "It's a duplicate of a bill we already have" },
-    { key: 'statement', label: "It's a statement or receipt, not an invoice" },
+    { key: 'statement', label: "It's a statement of account, not an invoice" },
+    { key: 'credit_note', label: "It's a credit note — they owe us, we don't owe them" },
     { key: 'not_ours', label: "It isn't ours to pay" },
     { key: 'unreadable', label: "It can't be read" },
     { key: 'other', label: 'Something else' },

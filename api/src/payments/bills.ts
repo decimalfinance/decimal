@@ -2153,7 +2153,7 @@ export async function markNotABill(args: {
   organizationId: string;
   paymentOrderId: string;
   actorUserId: string;
-  reason: 'duplicate' | 'statement' | 'not_ours' | 'unreadable' | 'other';
+  reason: 'duplicate' | 'statement' | 'credit_note' | 'not_ours' | 'unreadable' | 'other';
   note?: string | null;
 }) {
   const order = await prisma.paymentOrder.findFirst({
