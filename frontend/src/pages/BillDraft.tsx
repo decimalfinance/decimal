@@ -882,7 +882,19 @@ function DraftScreen(props: {
                 <h1>{fields.invoiceNumber?.value || vendorName}</h1>
                 <div className="rh-sub">{vendorName}</div>
               </div>
-              <div className="rh-amount">{usd(documentTotal)}</div>
+              {/* A credit note's figure is negative on the page and positive in
+                  our data, because the extraction prompt asks for a positive
+                  amount — reasonable for the invoices that are 99% of what
+                  arrives, and wrong for this one. The document says -$240.00 and
+                  the screen said $240.00, which is the sign that carries the
+                  entire meaning: who owes whom.
+
+                  Shown, not stored. The magnitude is what everything downstream
+                  is built on, and a negative payable would be a much larger
+                  change than a document nobody is going to pay is worth. */}
+              <div className="rh-amount">
+                {usd(billDraft.notABill?.kind === 'credit_note' ? -Math.abs(documentTotal) : documentTotal)}
+              </div>
             </div>
 
             {/* Sent back by an approver — the bill clerk's homework, above all flags */}
@@ -1258,7 +1270,12 @@ function DraftScreen(props: {
                 they carry the actions — but nothing below states that this is
                 payable. */}
             {billDraft.notABill ? (
-              <NotABillPane notABill={billDraft.notABill} organizationId={organizationId} />
+              <NotABillPane
+                notABill={billDraft.notABill}
+                organizationId={organizationId}
+                creditAmount={documentTotal}
+                onFocusTotal={() => setActiveSource(billDraft.totalsSources?.total ?? null)}
+              />
             ) : (
             <>
             {/* Vendor */}
@@ -1615,9 +1632,13 @@ const NOT_A_BILL: Record<string, { title: string; blurb: string }> = {
   },
 };
 
-function NotABillPane({ notABill, organizationId }: {
+function NotABillPane({ notABill, organizationId, creditAmount, onFocusTotal }: {
   notABill: NonNullable<BillDraft['notABill']>;
   organizationId: string;
+  /** The credit's magnitude, rendered negative — the sign is its meaning. */
+  creditAmount?: number | null;
+  /** Focus the document where the total was read, same as any other figure. */
+  onFocusTotal?: () => void;
 }) {
   const copy = NOT_A_BILL[notABill.kind] ?? NOT_A_BILL.other!;
   const st = notABill.statement;

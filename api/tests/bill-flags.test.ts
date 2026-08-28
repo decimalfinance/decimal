@@ -458,3 +458,44 @@ test('a value read from the letterhead is judged on the letterhead read', () => 
   assert.equal(pickAddressConfidenceKey(false), 'remitTo',
     'a real Remit-To panel is still judged as remitTo');
 });
+
+test('a document that is not an invoice is not held to an invoice\'s arithmetic', () => {
+  // A credit note's figures are negative on the page; the extraction prompt
+  // asks for a positive amount, which is right for the invoices that are almost
+  // everything that arrives. So its line of -$240 got compared against a
+  // sign-stripped $240 and reported as a document that disagrees with itself.
+  // It does not. We stripped the sign.
+  //
+  // The deeper reason holds without that bug. These checks exist to stop a
+  // wrong figure being PAID, and they offer "correct the figures" and "pay the
+  // itemised total" to get there. On something nobody can pay, both answer a
+  // question nobody asked — and the second, on a credit note, invites paying
+  // minus four hundred and eighty dollars.
+  const flags = evaluateBillFlags({
+    ...baseFacts,
+    amounts: { lineItemsTotal: -240, subtotal: null, tax: 0, total: 240 },
+    documentType: { invoiceNumber: 'CN-0442', lineInvoiceRefs: [], declaredKind: 'credit_note' },
+  });
+  assert.equal(flags.some((f) => f.kind === 'lines_do_not_sum'), false);
+  assert.equal(flags.some((f) => f.kind === 'total_does_not_reconcile'), false);
+  // What it IS gets said, loudly, and still blocks.
+  const credit = flags.find((f) => f.kind === 'looks_like_credit_note');
+  assert.ok(credit);
+  assert.equal(credit.blocking, true);
+  // And nothing offers to pay it.
+  for (const f of flags) {
+    assert.equal(f.resolutions.some((r) => r.action === 'pay_the_lines'), false);
+  }
+});
+
+test('an invoice is still held to its arithmetic', () => {
+  // The suppression is scoped to what the document says it is, not to anything
+  // that happens to have odd figures — an invoice that does not add up is the
+  // whole reason these checks exist.
+  const flags = evaluateBillFlags({
+    ...baseFacts,
+    amounts: { lineItemsTotal: 4_000, subtotal: null, tax: 0, total: 4_820 },
+    documentType: { invoiceNumber: 'NW-3320', lineInvoiceRefs: [], declaredKind: 'invoice' },
+  });
+  assert.equal(flags.some((f) => f.kind === 'lines_do_not_sum'), true);
+});

@@ -406,7 +406,23 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
   // failure mode nothing else does: extraction that is confidently wrong.
   // A total we cannot reconcile against the document's own parts is a total we
   // should not pay on a rail with no recourse, so these block.
-  const { lineItemsTotal, subtotal, tax, total } = facts.amounts;
+  //
+  // Only for documents that are invoices, though. A credit note's figures are
+  // negative and the extraction prompt asks for a positive amount, so its line
+  // of -$240 was being compared against a sign-stripped $240 and reported as a
+  // document that disagrees with itself. It does not: we stripped the sign.
+  //
+  // The deeper reason to skip it holds even without that bug. These flags exist
+  // to stop a wrong figure being PAID, and they offer "correct the figures" and
+  // "pay the itemised total" to get there. On a document that is not payable at
+  // all, both are answers to a question nobody asked — and the second one, on a
+  // credit note, invites somebody to pay negative four hundred and eighty
+  // dollars.
+  const isPayableDocument = !facts.documentType.declaredKind
+    || facts.documentType.declaredKind === 'invoice';
+  const { lineItemsTotal, subtotal, tax, total } = isPayableDocument
+    ? facts.amounts
+    : { lineItemsTotal: null, subtotal: null, tax: null, total: null };
   // What the lines are meant to add up to. The printed subtotal when there is
   // one; otherwise the total with tax taken back off — because tax is not a
   // line item, and comparing lines against a tax-inclusive total marks every
