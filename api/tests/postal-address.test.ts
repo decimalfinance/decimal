@@ -1,7 +1,7 @@
 // --- vendor addresses off a letterhead ---------------------------------------
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { splitPostalAddress } from '../src/payments/bills.js';
+import { splitPostalAddress, deriveInvoiceReference } from '../src/payments/bills.js';
 
 test('a middle dot separates address parts just like a comma', () => {
   // Both of these are real B-series letterheads. Splitting on commas alone put
@@ -59,4 +59,55 @@ test('a letterhead written across two lines splits like any other', () => {
   assert.deepEqual(splitPostalAddress('77 Industrial Pkwy · Suite 200\nColumbus, OH 43004'), {
     street: '77 Industrial Pkwy, Suite 200', city: 'Columbus', state: 'OH', zip: '43004',
   });
+});
+
+// --- a reference for an invoice that prints none -----------------------------
+//
+// AP teams do not reject a numberless invoice; they construct a reference from
+// a written convention and note that they did. The property that matters is not
+// that a reference EXISTS but that the same invoice always derives the same
+// one — duplicate detection keys on vendor plus number, so "VANTAGE-AUG" from
+// one clerk and "Vantage 8/15" from another means the same bill is paid twice.
+
+test('a reference is built from the vendor, the amount and the invoice month', () => {
+  assert.equal(
+    deriveInvoiceReference({
+      vendorName: 'Vantage Print Co', amount: 1500, invoiceDate: '2026-08-15',
+    }),
+    'VantagePrintCo1500.00Aug26',
+  );
+});
+
+test('the same invoice always derives the same reference', () => {
+  // The whole point. Spacing and punctuation in the vendor name are exactly how
+  // two spellings of one company stop matching each other.
+  const a = deriveInvoiceReference({ vendorName: 'Vantage Print Co.', amount: 1500, invoiceDate: '2026-08-15' });
+  const b = deriveInvoiceReference({ vendorName: 'Vantage  Print   Co', amount: 1500.0, invoiceDate: '2026-08-15' });
+  assert.equal(a, b);
+});
+
+test('cents are part of it, because two bills a month apart can share a dollar figure', () => {
+  assert.equal(
+    deriveInvoiceReference({ vendorName: 'Acme', amount: 1500.5, invoiceDate: '2026-08-15' }),
+    'Acme1500.50Aug26',
+  );
+  assert.notEqual(
+    deriveInvoiceReference({ vendorName: 'Acme', amount: 1500, invoiceDate: '2026-08-15' }),
+    deriveInvoiceReference({ vendorName: 'Acme', amount: 1500, invoiceDate: '2026-09-15' }),
+  );
+});
+
+test('a missing invoice date falls back to the due date', () => {
+  assert.equal(
+    deriveInvoiceReference({ vendorName: 'Acme', amount: 200, invoiceDate: null, dueDate: '2026-12-01' }),
+    'Acme200.00Dec26',
+  );
+});
+
+test('a vendor name alone is not a reference', () => {
+  // Every bill from them would collide, which is worse than having none: it
+  // would make duplicate detection fire on unrelated invoices.
+  assert.equal(deriveInvoiceReference({ vendorName: 'Acme' }), null);
+  assert.equal(deriveInvoiceReference({ vendorName: null, amount: 100 }), null);
+  assert.equal(deriveInvoiceReference({ vendorName: '///', amount: 100, invoiceDate: '2026-08-15' }), null);
 });

@@ -1229,6 +1229,58 @@ function toDocSource(raw: unknown): DocSource | null {
   };
 }
 
+/**
+ * A reference for an invoice that prints none.
+ *
+ * Some invoices genuinely carry no number — small vendors, handwritten bills,
+ * some utility statements — and AP teams do not reject those. They construct a
+ * reference from a written convention and note that they did.
+ *
+ * The convention here follows the common one: vendor, the amount to the cent,
+ * and the month and year of the invoice date.
+ *
+ *     Vantage Print Co, $1,500.00, 2026-08-15  ->  VantagePrintCo1500.00Aug26
+ *
+ * The property that matters is not that a reference EXISTS but that the same
+ * invoice always derives the same one. Duplicate detection keys on vendor plus
+ * number, so if one clerk types "VANTAGE-AUG" and another types "Vantage 8/15"
+ * for the same bill, the check quietly passes and the bill is paid twice. A
+ * person inventing a reference cannot give that guarantee; a rule can.
+ *
+ * So it is derived from the DOCUMENT — what was read off the page — rather than
+ * from whatever is currently typed into the form. Editing the vendor name on
+ * screen should not change what this invoice is called.
+ *
+ * Spaces and punctuation come out of the vendor name because a reference is
+ * matched, not read aloud, and stray characters are how two spellings of the
+ * same thing stop matching.
+ */
+export function deriveInvoiceReference(extracted: Record<string, unknown>): string | null {
+  const vendor = (str(extracted.vendorName) ?? '').replace(/[^A-Za-z0-9]/g, '').slice(0, 24);
+  if (!vendor) return null;
+
+  const amount = num(extracted.amount);
+  const money = amount != null && Number.isFinite(amount) ? amount.toFixed(2) : '';
+
+  // The invoice's own date, falling back to the due date — a bill with neither
+  // still gets a reference, just a less specific one.
+  const iso = str(extracted.invoiceDate) ?? str(extracted.dueDate);
+  const stamp = monthStamp(iso);
+
+  const reference = `${vendor}${money}${stamp}`;
+  // Vendor alone is not a reference: every bill from them would collide.
+  return money || stamp ? reference : null;
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function monthStamp(iso: string | null): string {
+  const m = iso ? /^(\d{4})-(\d{2})-\d{2}$/.exec(iso) : null;
+  if (!m) return '';
+  const month = MONTHS[Number(m[2]) - 1];
+  return month ? `${month}${m[1]!.slice(2)}` : '';
+}
+
 export type ReviewFieldState = 'read' | 'needs_look' | 'not_on_document' | 'confirmed';
 
 function fieldState(args: {
@@ -1865,6 +1917,19 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     document: order.invoiceDocument,
     fields,
     remitFields,
+    // Offered, never filled in.
+    //
+    // Pre-filling would invite the clerk past the one thing worth doing here:
+    // looking at the document. Extraction misses a printed number often enough
+    // — small type, a bad scan — and a box that already has something in it
+    // gets scrolled past. Then the invoice has two references, its own and
+    // ours, which is the exact failure the reference exists to prevent.
+    //
+    // So the screen offers it under the field and a person chooses. Null once
+    // the bill has a number, because there is then nothing to offer.
+    suggestedReference: str(extracted.invoiceNumber) ?? order.invoiceNumber
+      ? null
+      : deriveInvoiceReference(extracted),
     // Every field a question may be pointed at. The closed vocabulary lives in
     // question-fields.ts, where it is enforced — sending it means the picker
     // offers exactly what the server will accept, instead of a second list that

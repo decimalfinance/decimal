@@ -1540,6 +1540,8 @@ export interface BillDraft {
   document: { invoiceDocumentId: string; filename: string; mimeType: string; byteSize: number; pageCount: number | null } | null;
   fields: BillDraftField[];
   remitFields: BillDraftField[];
+  /** A reference to offer when the document prints no invoice number. */
+  suggestedReference?: string | null;
   lines: BillDraftLine[];
   categoryOptions: CategoryOption[];
   // Why the pre-filled category was suggested (vendor rule vs the document).

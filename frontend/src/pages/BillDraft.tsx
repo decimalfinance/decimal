@@ -1401,6 +1401,17 @@ function DraftScreen(props: {
                     onChange={(v) => setFieldValue(f.key, v)}
                     onConfirm={() => confirmField(f.key)}
                     onFocusField={() => setActiveSource(f.source ?? null)}
+                    // Only the invoice number, and only when the document had
+                    // none: a bill cannot be sent without one, and inventing a
+                    // reference is a real answer rather than a way round the
+                    // gate. The server built it from what was read off the
+                    // page, so the same invoice always derives the same string.
+                    onGenerate={f.key === 'invoiceNumber' && billDraft.suggestedReference
+                      ? () => {
+                          setFieldValue('invoiceNumber', billDraft.suggestedReference!);
+                          toast.success('Reference generated', 'Built from the vendor, amount and invoice date. Edit it if your team uses another format.');
+                        }
+                      : undefined}
                   />
                 ))}
               </div>
@@ -2044,8 +2055,10 @@ function DraftField(props: {
   askedBy?: string | null;
   /** The question itself, shown on hover rather than printed under every field. */
   askedQuestion?: string | null;
+  /** Offered under an empty field that can have a value constructed for it. */
+  onGenerate?: () => void;
 }) {
-  const { def, current, readOnly, onChange, onConfirm, onFocusField, askedBy, askedQuestion } = props;
+  const { def, current, readOnly, onChange, onConfirm, onFocusField, askedBy, askedQuestion, onGenerate } = props;
   const needsLook = current.state === 'needs_look';
   // Reuse the amber "needs attention" state rather than inventing a second
   // visual language for the same idea: this field wants a human's eye.
@@ -2091,6 +2104,13 @@ function DraftField(props: {
           {!readOnly ? (
             <button type="button" className="ftag-btn" onClick={onConfirm}>Confirm</button>
           ) : null}
+        </span>
+      ) : onGenerate && !current.value.trim() && !readOnly ? (
+        // Sits in the same one-note slot as the others, never stacked with them
+        // — an empty field has nothing to confirm and nobody waiting on it, so
+        // the slot is free.
+        <span className="ftag" title="Some invoices carry no number. Check the document first; if there really isn't one, build the reference this bill will be known by.">
+          <button type="button" className="ftag-btn" onClick={onGenerate}>Generate a reference</button>
         </span>
       ) : null}
     </div>
