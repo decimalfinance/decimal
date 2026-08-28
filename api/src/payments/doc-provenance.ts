@@ -32,7 +32,7 @@ const execFileAsync = promisify(execFile);
 
 // Version of the matcher; stamped wherever refinement ran so the review path
 // knows to re-run after matcher improvements.
-export const PROVENANCE_VERSION = 5; // v5: OCR word boxes for images; invented boxes stripped
+export const PROVENANCE_VERSION = 6; // v6: letterhead address per part; multi-pass OCR
 
 export type TextWord = { text: string; x0: number; y0: number; x1: number; y1: number }; // 0-1 fractions, top-left origin
 export type TextPage = { words: TextWord[] };
