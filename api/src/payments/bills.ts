@@ -15,8 +15,11 @@ import { logger } from '../infra/logger.js';
 import { USDC_DECIMALS } from '../solana.js';
 import { markBillSubmitted, cancelPaymentOrder, getPaymentOrderDetail } from './orders.js';
 import { listChartOfAccounts } from '../accounting/ocr-coding.js';
-import { extractPdfTextLayer, refineInvoiceSources, ungroundedFields, PROVENANCE_VERSION } from './doc-provenance.js';
-import { DOUBTFUL_FIELD_STATUSES } from './document-extract.js';
+import {
+  extractPdfTextLayer, extractImageTextLayer, refineInvoiceSources, stripUnmeasuredSources,
+  ungroundedFields, PROVENANCE_VERSION,
+} from './doc-provenance.js';
+import { DOUBTFUL_FIELD_STATUSES, renderDocumentToImages } from './document-extract.js';
 import { findDuplicateBills, readDuplicateOverride, describeDuplicate, matchDuplicates } from './duplicate-check.js';
 import { readPayableHold, describePayableHold } from './vendor-payable.js';
 import { evaluateBillFlags, summarizeBillFlags, displayOrgName } from './bill-flags.js';
@@ -51,16 +54,34 @@ async function ensureProvenance(order: {
     });
     if (!doc) return extracted;
 
+    const fileBytes = Buffer.from(doc.data);
     const pages = await extractPdfTextLayer({
-      fileBytes: Buffer.from(doc.data),
+      fileBytes,
       filename: doc.filename,
       mimeType: doc.mimeType,
     });
+    // A photograph or scan has no text layer, and the model's boxes for one are
+    // invented rather than measured — so OCR the rendered pages for real
+    // coordinates. Held separately from `pages` because only exact characters
+    // may be used for grounding below.
+    let boxPages = pages;
+    if (!boxPages) {
+      const rendered = await renderDocumentToImages({
+        fileBytes,
+        filename: doc.filename,
+        mimeType: doc.mimeType,
+      }).catch(() => null);
+      if (rendered?.length) boxPages = await extractImageTextLayer(rendered);
+    }
     const refreshed = structuredClone(extracted);
-    if (pages) {
+    if (boxPages) {
       // The stored extraction is plain JSON with the same field names the
       // refiner reads; missing fields are simply skipped.
-      refineInvoiceSources(refreshed as unknown as ExtractedInvoice, pages);
+      refineInvoiceSources(refreshed as unknown as ExtractedInvoice, boxPages);
+    } else {
+      // Nothing on this document could be measured. Drop the guesses rather
+      // than keep pointing somewhere confident and wrong.
+      stripUnmeasuredSources(refreshed);
     }
     // And, from the same text layer, the one confidence signal that is not the
     // model's opinion of itself: is the figure we are about to pay actually

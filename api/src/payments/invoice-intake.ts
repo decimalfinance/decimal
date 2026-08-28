@@ -12,7 +12,10 @@ import {
 } from './documents.js';
 import { extractPaymentRowsFromDocument, renderDocumentToImages, type ExtractedRow } from './document-extract.js';
 import { extractPdfLayoutText, ungroundedFields } from './doc-provenance.js';
-import { extractPdfTextLayer, refineInvoiceSources, PROVENANCE_VERSION } from './doc-provenance.js';
+import {
+  extractPdfTextLayer, extractImageTextLayer, refineInvoiceSources, stripUnmeasuredSources,
+  PROVENANCE_VERSION,
+} from './doc-provenance.js';
 import { suggestOcrCodings } from '../accounting/ocr-coding.js';
 import { INVOICE_IMPORT_REVIEW_NOTE } from '../counterparty-wallets.js';
 
@@ -164,6 +167,28 @@ export async function processInvoiceDocument(args: {
     });
   }
 
+  // Where the highlight boxes come from, which is NOT the same question as
+  // where the text comes from.
+  //
+  // A photograph has no text layer, so nothing could be measured and the
+  // model's boxes were kept — and the model does not measure boxes, it invents
+  // them. C1 and C2, two unrelated invoices, both came back with vendorName at
+  // exactly [0.05, 0.05, 0.4, 0.07] and their header fields on a flat 0.03
+  // ladder. Clicking a line item lit up blank paper well below it, with the
+  // same confident pink as a box read off a real PDF.
+  //
+  // OCR gives those documents measured coordinates. It reads the page images
+  // already rendered for the viewer, so the words are located in exactly the
+  // picture the highlight is drawn over.
+  //
+  // Deliberately kept apart from `textPages`: OCR characters are a guess and
+  // must never reach the extraction prompt or the grounding check. Position is
+  // a measurement; text is not evidence.
+  let boxPages = textPages;
+  if (!boxPages && prerenderedPages?.length) {
+    boxPages = await extractImageTextLayer(prerenderedPages);
+  }
+
   const invoiceDocumentId = args.invoiceDocumentId;
   let extraction: Awaited<ReturnType<typeof runtime.extractRowsFromDocument>>;
   try {
@@ -197,21 +222,26 @@ export async function processInvoiceDocument(args: {
     extraction = { rows: [unreadableRow(args.filename, message)], modelLatencyMs: 0, pageCount: prerenderedPages?.length ?? 1 };
   }
 
-  // Exact provenance: re-locate every extracted value in the PDF's text layer
-  // and replace the model's approximate boxes with real word coordinates.
-  // Best-effort — scans and images have no text layer and keep the model's box.
+  // Exact provenance: re-locate every extracted value among the words actually
+  // printed on the page and replace the model's box with the real coordinates.
+  //
+  // Where nothing could be measured the model's boxes are thrown away rather
+  // than drawn. A highlight is a claim that the value was read from THIS spot;
+  // an authoritative pink rectangle over empty paper is a lie told in our
+  // voice, and worse than no highlight at all.
   try {
-    if (textPages) {
-      let refined = 0;
-      for (const row of extraction.rows) {
-        if (row.source_invoice) refined += refineInvoiceSources(row.source_invoice, textPages).refined;
-      }
-      logger.info('invoice_intake.provenance_refined', {
-        organizationId: args.organizationId,
-        filename: args.filename,
-        refined,
-      });
+    let refined = 0;
+    for (const row of extraction.rows) {
+      if (!row.source_invoice) continue;
+      if (boxPages) refined += refineInvoiceSources(row.source_invoice, boxPages).refined;
+      else stripUnmeasuredSources(row.source_invoice as unknown as Record<string, unknown>);
     }
+    logger.info('invoice_intake.provenance_refined', {
+      organizationId: args.organizationId,
+      filename: args.filename,
+      boxSource: boxPages ? (textPages ? 'text-layer' : 'ocr') : 'none',
+      refined,
+    });
 
     // And the grounding check, HERE, where a bill is born.
     //
