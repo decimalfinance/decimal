@@ -292,6 +292,72 @@ test('merging OCR passes keeps each pass a contiguous run', () => {
   assert.equal(findTextMatches([merged], ['Coastal Freight']).length, 1);
 });
 
+test('a line item row stops at the column gutter, not at a whitespace gap', () => {
+  // C4 puts its line items in a right-hand column and its BILL TO block on the
+  // left. "Dashboard build-out (3)" sits level with "BILL TO", and the row rule
+  // was "every word at this height" — so the highlight stretched from the
+  // middle of the address block to the right margin.
+  //
+  // A gap threshold cannot fix this, which is worth a test because it is the
+  // obvious fix. On the real document:
+  //
+  //     BILL TO  ->  Dashboard    gap 0.215    the gutter, to exclude
+  //     (3)      ->  3            gap 0.222    description to QTY, to keep
+  //
+  // The gutter is SMALLER than the gap inside the table. So the row is bounded
+  // by things we know instead: the description on the left, the line's own
+  // amount on the right.
+  const page: TextPage = {
+    words: [
+      word('BILL', 71, 300, 92, 312),
+      word('TO', 96, 300, 111, 312),
+      word('Dashboard', 326, 300, 392, 312),
+      word('build-out', 395, 300, 449, 312),
+      word('(3)', 452, 300, 467, 312),
+      word('3', 689, 300, 696, 312),
+      word('$540.00', 771, 300, 819, 312),
+      word('$1,620.00', 870, 300, 929, 312),
+    ],
+  };
+  const match = findTextMatches([page], ['Dashboard build-out (3)'])[0]!;
+  const row = expandToRow(page, match, 1620);
+
+  assert.ok(row.x0 >= 0.32, `starts at the description, not the left column, got ${row.x0}`);
+  assert.ok(row.x1 >= 0.92, `still reaches the amount, got ${row.x1}`);
+});
+
+test('without an amount the row still refuses to cross into the left column', () => {
+  // The right bound needs the line's amount; the left bound never does. A line
+  // item reads left to right — description first, then its figures — so
+  // anything left of the description belongs to another column.
+  const page: TextPage = {
+    words: [
+      word('BILL', 71, 300, 92, 312),
+      word('TO', 96, 300, 111, 312),
+      word('Dashboard', 326, 300, 392, 312),
+      word('build-out', 395, 300, 449, 312),
+      word('(3)', 452, 300, 467, 312),
+    ],
+  };
+  const match = findTextMatches([page], ['Dashboard build-out (3)'])[0]!;
+  assert.ok(expandToRow(page, match, null).x0 >= 0.32);
+});
+
+test('a row number printed just before the description is still included', () => {
+  // Never reaching left would be too blunt: a short hop picks up a bullet or a
+  // line number set close to the text, which IS part of the row.
+  const page: TextPage = {
+    words: [
+      word('2.', 300, 300, 318, 312),          // close: 0.008 away
+      word('Dashboard', 326, 300, 392, 312),
+      word('build-out', 395, 300, 449, 312),
+      word('(3)', 452, 300, 467, 312),
+    ],
+  };
+  const match = findTextMatches([page], ['Dashboard build-out (3)'])[0]!;
+  assert.ok(expandToRow(page, match, null).x0 < 0.31, 'the row number is part of the row');
+});
+
 function fakeInvoice(overrides: Record<string, unknown>) {
   return {
     vendorName: 'Acme Logistics LLC',

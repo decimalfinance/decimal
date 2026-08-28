@@ -563,7 +563,29 @@ function pickMatch(matches: Box[], hint: SourceBox | null | undefined, prefer: '
 }
 
 // All words sharing the matched words' text line — the full table row.
-export function expandToRow(page: TextPage, match: Box): Box {
+/**
+ * A table row: the description, its figures, and nothing from the next column.
+ *
+ * "Every word at this height" was the whole rule, and on a two-column invoice it
+ * reaches straight across the gutter. C4 puts its line items in a right-hand
+ * column and its BILL TO block on the left, and "Dashboard build-out (3)" sits
+ * level with "BILL TO" — so the highlight stretched from the middle of the
+ * address block to the right margin.
+ *
+ * A gap threshold cannot fix it, which is worth stating because it is the
+ * obvious fix. Measured on that row:
+ *
+ *     BILL TO  ->  Dashboard    gap 0.215     the gutter, to exclude
+ *     (3)      ->  3            gap 0.222     description to QTY, to keep
+ *
+ * The gutter is SMALLER than the gap inside the table. Any threshold that drops
+ * one drops the other.
+ *
+ * So the row is bounded by things we know rather than by whitespace: the
+ * description on the left, and the line's own amount on the right. Both ends are
+ * values we already hold, and the row is what lies between them.
+ */
+export function expandToRow(page: TextPage, match: Box, amount?: number | null): Box {
   const cy = (match.y0 + match.y1) / 2;
   const h = match.y1 - match.y0;
   const rowWords = page.words.filter((w) => {
@@ -571,7 +593,33 @@ export function expandToRow(page: TextPage, match: Box): Box {
     return Math.abs(wc - cy) < Math.max(h, w.y1 - w.y0) * 0.7;
   });
   if (rowWords.length === 0) return match;
-  const u = unionBox(match.page, rowWords);
+
+  // Right edge: the line's own amount, when it is printed on this line. Past it
+  // is a different column, and on a one-column invoice there is nothing there
+  // anyway — so this costs nothing where it is not needed.
+  let right = Infinity;
+  if (amount != null) {
+    for (const w of rowWords) {
+      const n = numOf(w.text);
+      if (n != null && Math.abs(Math.abs(n) - Math.abs(amount)) < 0.005) right = Math.max(right === Infinity ? 0 : right, w.x1);
+    }
+  }
+
+  // Left edge: the description. A line item reads left to right — description
+  // first, then its figures — so anything left of the description is another
+  // column, not part of this row. Short hops are still allowed, for a row
+  // number or a bullet printed just before the text.
+  const LEFT_REACH = 0.03;
+  let left = match.x0;
+  for (const w of [...rowWords].sort((a, b) => b.x0 - a.x0)) {
+    if (w.x1 > left) continue;
+    if (w.x1 < left - LEFT_REACH) break;
+    left = w.x0;
+  }
+
+  const kept = rowWords.filter((w) => w.x1 <= right + 1e-6 && w.x0 >= left - 1e-6);
+  if (kept.length === 0) return match;
+  const u = unionBox(match.page, kept);
   return {
     page: match.page,
     x0: Math.min(u.x0, match.x0),
@@ -732,7 +780,7 @@ export function refineInvoiceSources(invoice: ExtractedInvoice, pages: TextPage[
       item.source = null;
       continue;
     }
-    let rows = matches.map((m) => ({ m, row: expandToRow(pages[m.page - 1]!, m) }));
+    let rows = matches.map((m) => ({ m, row: expandToRow(pages[m.page - 1]!, m, item.total) }));
     if (item.total != null && rows.length > 1) {
       const withAmount = rows.filter(({ row, m }) => {
         const page = pages[m.page - 1]!;
