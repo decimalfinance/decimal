@@ -23,6 +23,7 @@ import { PublicKey } from '@solana/web3.js';
 import { config } from '../config.js';
 import { ungroundedFields, type TextPage } from './doc-provenance.js';
 import { logger } from '../infra/logger.js';
+import { badRequest } from '../infra/api-errors.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -236,7 +237,37 @@ const SOURCE_BOX_JSON_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-const EXTRACTION_JSON_SCHEMA = {
+/**
+ * Every property of every object must also be listed as required.
+ *
+ * Strict `json_schema` mode demands it, and the two lists were maintained by
+ * hand: adding `country` to `properties` and not to `required` took the whole
+ * upload down with an OpenAI 400. The API is right to refuse — the mistake is
+ * simply invisible when reading either list on its own, and it is only ever
+ * found by sending a real request.
+ *
+ * Walked here so it is found by `make test` instead. Returns the paths that
+ * disagree, so the failure names the field rather than the file.
+ */
+export function strictSchemaViolations(node: unknown, path = 'root'): string[] {
+  if (!node || typeof node !== 'object') return [];
+  const out: string[] = [];
+  const n = node as Record<string, unknown>;
+  const properties = n.properties as Record<string, unknown> | undefined;
+  if (properties && typeof properties === 'object') {
+    const required = new Set(Array.isArray(n.required) ? (n.required as string[]) : []);
+    for (const key of Object.keys(properties)) {
+      if (!required.has(key)) out.push(`${path}.${key} is a property but not required`);
+    }
+    for (const [key, child] of Object.entries(properties)) {
+      out.push(...strictSchemaViolations(child, `${path}.${key}`));
+    }
+  }
+  if (n.items) out.push(...strictSchemaViolations(n.items, `${path}[]`));
+  return out;
+}
+
+export const EXTRACTION_JSON_SCHEMA = {
   type: 'object',
   properties: {
     invoices: {
@@ -286,7 +317,7 @@ const EXTRACTION_JSON_SCHEMA = {
               zip: nullableString,
               country: nullableString,
             },
-            required: ['street', 'city', 'state', 'zip'],
+            required: ['street', 'city', 'state', 'zip', 'country'],
             additionalProperties: false,
           },
           paymentDetails: {
@@ -1200,7 +1231,7 @@ async function renderToImages(fileBytes: Buffer, ext: string): Promise<RenderedP
     return [{ bytes: fileBytes, mime: imageMimeFromExt(ext) }];
   }
   if (ext !== 'pdf') {
-    throw new Error(`Unsupported file type: .${ext}. Supported: PDF, PNG, JPG, JPEG, WEBP, GIF.`);
+    throw badRequest(`Unsupported file type: .${ext}. Supported: PDF, PNG, JPG, JPEG, WEBP, GIF.`);
   }
 
   if (process.platform !== 'darwin') {

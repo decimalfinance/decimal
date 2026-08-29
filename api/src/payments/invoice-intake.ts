@@ -1,5 +1,6 @@
 import type { Counterparty, CounterpartyWallet, Prisma } from '@prisma/client';
 import { logger } from '../infra/logger.js';
+import { ApiError, badRequest } from '../infra/api-errors.js';
 import { prisma } from '../infra/prisma.js';
 import { trackBackgroundWork } from '../infra/background.js';
 import { deriveUsdcAtaForWallet, SOLANA_CHAIN, USDC_ASSET, USDC_DECIMALS } from '../solana.js';
@@ -112,6 +113,28 @@ export async function uploadInvoiceToPaymentOrders(args: {
 // Everything after document storage: render pages → extract → create orders.
 // The async intake path calls this in the background while the operator is
 // already looking at the stored document on the draft screen.
+/**
+ * What a person is told when a document fails to become a bill.
+ *
+ * The rule is opt-in, and it has to be: an error is shown ONLY if somebody
+ * deliberately wrote it for a reader. Everything else is a fault, and a fault
+ * described in its own words is how an OpenAI 400 — schema names, a param path,
+ * an error code — ended up on the screen under a heading about the document.
+ * Twice, from two different catch sites, because each one decided for itself.
+ *
+ * ApiError already carries that meaning everywhere else in the codebase: it is
+ * constructed with a message meant for whoever is reading. Anything else is
+ * internal by default, which is the safe direction — a new throw added
+ * anywhere is silent on the screen until somebody chooses otherwise.
+ *
+ * The detail is not lost, it is logged. It just stops being an answer to
+ * "what is wrong with my invoice".
+ */
+export function describeIntakeFailure(error: unknown): string {
+  if (error instanceof ApiError) return error.message;
+  return 'We could not read this document. That is a fault on our side rather than a problem with the file — it is stored, so try the upload again.';
+}
+
 export async function processInvoiceDocument(args: {
   organizationId: string;
   actorUserId: string;
@@ -272,7 +295,7 @@ export async function processInvoiceDocument(args: {
   }
 
   if (extraction.rows.length === 0) {
-    throw new Error('No payable invoice rows were extracted from this document.');
+    throw badRequest('No payable invoice rows were extracted from this document.');
   }
 
   // OCR-driven coding: map each invoice's "what it's for" to an expense account in the
@@ -486,9 +509,15 @@ export async function processInvoiceDocument(args: {
       // code, in place of anything a bill clerk could act on. The detail belongs
       // in the log, where somebody can chase it; the screen gets the truth
       // plainly, including whose fault it was.
+      // The same rule as everywhere else. This site had its own version of the
+      // judgement, written when only this path was known to leak — which is
+      // precisely how the next path leaked instead.
+      //
+      // RangeError still speaks for itself: an amount that will not fit is a
+      // fact about the document, and the sentence describing it is useful.
       const message = error instanceof RangeError && error.message
         ? error.message
-        : 'We could not save this bill. That is a fault on our side rather than a problem with the document — the file is stored, so try the upload again.';
+        : describeIntakeFailure(error);
       logger.error('invoice_intake.order_creation_failed', {
         organizationId: args.organizationId,
         filename: args.filename,
@@ -512,7 +541,7 @@ export async function processInvoiceDocument(args: {
       skippedCount: skipped.length,
       skippedRows: skipped.slice(0, 10),
     });
-    throw new Error(`Invoice upload did not create any payment orders.${detail ? ` ${detail}` : ''}`);
+    throw badRequest(`Invoice upload did not create any payment orders.${detail ? ` ${detail}` : ''}`);
   }
 
   logger.info('invoice_intake.completed', {
@@ -581,13 +610,14 @@ export async function beginAsyncInvoiceIntake(args: {
       await processInvoiceDocument({ ...args, invoiceDocumentId: stored.invoiceDocumentId });
       await setInvoiceDocumentStatus(stored.invoiceDocumentId, 'processed');
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Processing failed.';
       logger.error('invoice_intake.async_failed', {
         organizationId: args.organizationId,
         invoiceDocumentId: stored.invoiceDocumentId,
-        message,
+        ...(error instanceof Error ? { message: error.message, stack: error.stack } : { error: String(error) }),
       });
-      await setInvoiceDocumentStatus(stored.invoiceDocumentId, 'failed', message).catch(() => {});
+      await setInvoiceDocumentStatus(
+        stored.invoiceDocumentId, 'failed', describeIntakeFailure(error),
+      ).catch(() => {});
     }
   })());
 

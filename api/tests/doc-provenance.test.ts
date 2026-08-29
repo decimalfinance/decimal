@@ -13,7 +13,12 @@ import {
   stripUnmeasuredSources,
   type TextPage,
 } from '../src/payments/doc-provenance.js';
-import { stripUnstorableCharacters, repairAgainstDocument } from '../src/payments/document-extract.js';
+import {
+  stripUnstorableCharacters, repairAgainstDocument,
+  strictSchemaViolations, EXTRACTION_JSON_SCHEMA,
+} from '../src/payments/document-extract.js';
+import { describeIntakeFailure } from '../src/payments/invoice-intake.js';
+import { badRequest } from '../src/infra/api-errors.js';
 
 // A miniature invoice text layer (fractions of a 1000x1000 page for readability).
 function word(text: string, x0: number, y0: number, x1: number, y1: number) {
@@ -848,4 +853,57 @@ test('punctuation is what gets mangled, so it is not what we match on', () => {
     repairAgainstDocument('Design retainer / August', D4_TEXT),
     'Design retainer — August',
   );
+});
+
+// --- the schema strict mode will actually accept -----------------------------
+
+test('every property in the extraction schema is also required', () => {
+  // Strict json_schema demands it, and the two lists were maintained by hand.
+  // Adding `country` to properties and not to required took the whole upload
+  // down with an OpenAI 400 — a mistake invisible when reading either list on
+  // its own, and otherwise only ever found by sending a real request.
+  assert.deepEqual(strictSchemaViolations(EXTRACTION_JSON_SCHEMA), []);
+});
+
+test('the invariant catches exactly the mistake that was made', () => {
+  // Proof the check has teeth: the same shape, with country left out of
+  // required, is reported rather than passed.
+  const broken = {
+    type: 'object',
+    properties: {
+      remitTo: {
+        type: ['object', 'null'],
+        properties: { street: {}, city: {}, country: {} },
+        required: ['street', 'city'],
+      },
+    },
+    required: ['remitTo'],
+  };
+  const found = strictSchemaViolations(broken);
+  assert.equal(found.length, 1);
+  assert.match(found[0]!, /country/);
+});
+
+// --- what a person is told when a document fails -----------------------------
+
+test('a provider or database fault is never quoted at the reader', () => {
+  // Both leaks looked like this: an error describing our internals, printed
+  // under a heading about the document. The first was a Prisma stack trace, the
+  // second an OpenAI 400 naming the schema, the param path and an error code.
+  const openAi = new Error('OpenAI 400: {"error":{"message":"Invalid schema for response_format \'extracted_invoices\': ... Missing \'country\'."}}');
+  const shown = describeIntakeFailure(openAi);
+  assert.doesNotMatch(shown, /OpenAI|response_format|schema|400/i);
+  assert.match(shown, /fault on our side/);
+
+  // Opt-in, and that is the point: anything not deliberately written for a
+  // reader is internal by default, so a throw added later is silent on the
+  // screen until somebody chooses otherwise.
+  assert.match(describeIntakeFailure(new Error('ConnectorError(PostgresError { code: "22P05" })')), /fault on our side/);
+});
+
+test('a message written for a reader is passed through unchanged', () => {
+  // The rule must not swallow the useful ones — an unsupported file type is
+  // something the person can act on.
+  const written = badRequest('Unsupported file type: .docx. Supported: PDF, PNG, JPG, JPEG, WEBP, GIF.');
+  assert.equal(describeIntakeFailure(written), written.message);
 });
