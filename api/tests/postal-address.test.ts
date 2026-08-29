@@ -61,6 +61,39 @@ test('a letterhead written across two lines splits like any other', () => {
   });
 });
 
+test('a UK address puts London in the city and the postcode in the postcode', () => {
+  // D4, exactly as it arrived: two lines flattened into one, a postcode that is
+  // not five digits, and a country on the end. All of it landed in the street,
+  // with "United Kingdom" filed as the city.
+  assert.deepEqual(splitPostalAddress('14 Clerkenwell Road  London EC1M 5PA, United Kingdom'), {
+    street: '14 Clerkenwell Road', city: 'London', state: null, zip: 'EC1M 5PA',
+  });
+});
+
+test('a country on the end is dropped rather than filed as the city', () => {
+  // There is nowhere to put a country in a four-box US address. Putting it in
+  // the city is worse than losing it: it looks deliberate.
+  assert.deepEqual(splitPostalAddress('9 Cannery Row, Monterey, CA 93940, USA'), {
+    street: '9 Cannery Row', city: 'Monterey', state: 'CA', zip: '93940',
+  });
+});
+
+test('other postcode shapes reach the postcode box too', () => {
+  // Canada writes them differently again, and the rest of the world is not an
+  // edge case — it is most invoices sent to a company that buys abroad.
+  assert.deepEqual(splitPostalAddress('120 Bloor St W, Toronto M5S 1M8, Canada'), {
+    street: '120 Bloor St W', city: 'Toronto', state: null, zip: 'M5S 1M8',
+  });
+});
+
+test('a run of spaces separates, because a flattened line break looks like one', () => {
+  // The model returns two lines as one string with the break collapsed. Read as
+  // ordinary spacing, the city stays inside the street.
+  assert.deepEqual(splitPostalAddress('340 Congress St   Austin, TX 78701'), {
+    street: '340 Congress St', city: 'Austin', state: 'TX', zip: '78701',
+  });
+});
+
 // --- a reference for an invoice that prints none -----------------------------
 //
 // AP teams do not reject a numberless invoice; they construct a reference from

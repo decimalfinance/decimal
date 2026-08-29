@@ -32,7 +32,7 @@ const execFileAsync = promisify(execFile);
 
 // Version of the matcher; stamped wherever refinement ran so the review path
 // knows to re-run after matcher improvements.
-export const PROVENANCE_VERSION = 13; // v13: margins scale with the text
+export const PROVENANCE_VERSION = 14; // v14: addresses outside the US parse
 
 export type TextWord = { text: string; x0: number; y0: number; x1: number; y1: number }; // 0-1 fractions, top-left origin
 export type TextPage = {
@@ -477,10 +477,21 @@ export function splitPostalAddress(address: string | null): {
   // actually written in — the street came out "340 Congress St\nAustin", which
   // the browser then collapsed into "340 Congress StAustin".
   const parts = address
-    .replace(/[·•|\r\n]+/g, ',')
+    // A RUN OF SPACES is a separator too. It is what a line break looks like
+    // after the model has flattened it: D4's letterhead prints the street and
+    // the city on two lines and arrived as "14 Clerkenwell Road  London EC1M
+    // 5PA", which then sat entirely inside the street.
+    .replace(/[·•|\r\n]+|\s{2,}/g, ',')
     .split(',')
     .map((p) => p.trim())
     .filter(Boolean);
+  if (parts.length === 0) return empty;
+
+  // A country is not a city. D4 ends "…, United Kingdom" and that went straight
+  // into the city box, which is both wrong and the sort of wrong that looks
+  // deliberate. There is nowhere to put a country in a four-box US address, so
+  // it is dropped rather than filed somewhere it does not belong.
+  if (parts.length > 1 && COUNTRY_NAMES.has(parts[parts.length - 1]!.toLowerCase())) parts.pop();
   if (parts.length === 0) return empty;
   if (parts.length === 1) return { ...empty, street: parts[0]! };
 
@@ -488,6 +499,11 @@ export function splitPostalAddress(address: string | null): {
   let zip: string | null = null;
   const tail = parts[parts.length - 1]!;
   const stateZip = /^([A-Za-z][A-Za-z. ]*?)\s+(\d{5}(?:-\d{4})?)$/.exec(tail);
+  // A postcode that is not five digits still belongs in the postcode box.
+  // "London EC1M 5PA" is a city and a postcode, not a street — and this is the
+  // shape most of the world writes, so failing to see it puts the whole line in
+  // the wrong field on every non-US invoice.
+  const cityPostcode = /^(.+?)[,\s]+([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}|[A-Z]\d[A-Z]\s*\d[A-Z]\d)$/i.exec(tail);
   if (stateZip) {
     state = stateZip[1]!.trim();
     zip = stateZip[2]!;
@@ -495,6 +511,11 @@ export function splitPostalAddress(address: string | null): {
   } else if (/^\d{5}(?:-\d{4})?$/.test(tail)) {
     zip = tail;
     parts.pop();
+  } else if (cityPostcode) {
+    // The city rides along with it — putting it back keeps the one rule below
+    // that decides what a city is.
+    zip = cityPostcode[2]!.trim();
+    parts[parts.length - 1] = cityPostcode[1]!.trim();
   } else if (/^[A-Za-z][A-Za-z. ]*$/.test(tail) && tail.length <= 20 && parts.length > 2) {
     state = tail;
     parts.pop();
@@ -503,6 +524,21 @@ export function splitPostalAddress(address: string | null): {
   const city = parts.length > 1 ? parts.pop()! : null;
   return { street: parts.join(', ') || null, city, state, zip };
 }
+
+/**
+ * Countries as they are printed at the end of a letterhead address.
+ *
+ * Only needed to keep one OUT of the city box. Deliberately short: the point is
+ * the handful that appear on invoices sent to a US company, not a gazetteer.
+ */
+const COUNTRY_NAMES = new Set([
+  'united kingdom', 'uk', 'great britain', 'england', 'scotland', 'wales',
+  'united states', 'usa', 'us', 'u.s.a.', 'u.s.',
+  'canada', 'ireland', 'germany', 'deutschland', 'france', 'spain', 'italy',
+  'netherlands', 'the netherlands', 'belgium', 'switzerland', 'austria',
+  'sweden', 'norway', 'denmark', 'finland', 'poland', 'portugal',
+  'australia', 'new zealand', 'singapore', 'india', 'japan', 'mexico', 'brazil',
+]);
 
 // ---------------------------------------------------------------------------
 // Matching
