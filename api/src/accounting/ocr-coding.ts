@@ -139,6 +139,18 @@ export async function matchExpenseAccounts(args: {
     `- lines: one entry per line above, in order. Judge each line ON ITS OWN.\n` +
     `- Lines on one invoice often belong to DIFFERENT accounts. Do not assume they match each other or the invoice as a whole.\n` +
     `- Match on the account DESCRIPTION, not on words it happens to share with a line. A software licence is not a government licence.\n` +
+    // Everything on this document is money going OUT to a vendor. That is a
+    // structural fact about the input, not a hint — and it rules out a whole
+    // account on its own. D6 billed "Night cleaning crew" and "Reception relief
+    // staff", and both were coded to Payroll expenses: the model matched the
+    // people-shaped words and ignored that a third party had invoiced for them.
+    // Vendor spend landing in payroll distorts payroll reporting and follows
+    // through into filings.
+    `- This is an invoice FROM a supplier. Nothing on it is your own payroll, however much a line sounds like staff. Work done for you by another company is outsourced work, whatever the people doing it are called.\n` +
+    // The same word-matching failure, lower stakes: a photocopier lease went to
+    // an account described as office or facility rent, because the line said
+    // "lease". Naming the distinction is more use than another general warning.
+    `- Premises and equipment are different accounts. Renting a room or a building is not the same as renting a machine or a device, whichever word the line uses — lease, hire, rental.\n` +
     `- Use the EXACT account name from the list. Omit a line, or return suggestions: [], if nothing fits.`;
 
   try {
