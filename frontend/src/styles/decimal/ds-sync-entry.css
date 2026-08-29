@@ -1273,7 +1273,7 @@
 .dec .sec-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
 .dec .sec-head .sh-titles { display: flex; flex-direction: column; gap: 4px; }
 .dec .sec-head h2 { font-family: var(--font-display); font-size: 19px; font-weight: 600; letter-spacing: -0.02em; margin: 0; color: var(--text-primary); }
-.dec .sec-head .sh-desc { font-size: 13px; color: var(--text-muted); margin: 0; max-width: 52ch; }
+.dec .sec-head .sh-desc { font-size: 13px; color: var(--text-muted); margin: 0; }
 
 /* ---- Members table (treasury) ---- */
 .dec .member-cell { display: flex; align-items: center; gap: 11px; }
