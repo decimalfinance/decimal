@@ -32,7 +32,7 @@ const execFileAsync = promisify(execFile);
 
 // Version of the matcher; stamped wherever refinement ran so the review path
 // knows to re-run after matcher improvements.
-export const PROVENANCE_VERSION = 14; // v14: addresses outside the US parse
+export const PROVENANCE_VERSION = 15; // v15: the address carries a country
 
 export type TextWord = { text: string; x0: number; y0: number; x1: number; y1: number }; // 0-1 fractions, top-left origin
 export type TextPage = {
@@ -456,8 +456,11 @@ export function stripUnmeasuredSources(invoice: Record<string, unknown>): void {
 // box is recoverable, showing "Not on document" is not.
 export function splitPostalAddress(address: string | null): {
   street: string | null; city: string | null; state: string | null; zip: string | null;
+  /** Kept, not dropped: for a vendor abroad this is often the line that matters
+   *  most, and most of the world has no state to fill the box beside it. */
+  country: string | null;
 } {
-  const empty = { street: null, city: null, state: null, zip: null };
+  const empty = { street: null, city: null, state: null, zip: null, country: null };
   if (!address) return empty;
   // Letterheads separate address parts typographically as often as they use a
   // comma: "500 Howard St · San Francisco, CA 94105". Splitting on commas alone
@@ -489,11 +492,15 @@ export function splitPostalAddress(address: string | null): {
 
   // A country is not a city. D4 ends "…, United Kingdom" and that went straight
   // into the city box, which is both wrong and the sort of wrong that looks
-  // deliberate. There is nowhere to put a country in a four-box US address, so
-  // it is dropped rather than filed somewhere it does not belong.
-  if (parts.length > 1 && COUNTRY_NAMES.has(parts[parts.length - 1]!.toLowerCase())) parts.pop();
-  if (parts.length === 0) return empty;
-  if (parts.length === 1) return { ...empty, street: parts[0]! };
+  // deliberate. It has a box of its own now, so it is kept rather than dropped:
+  // for a vendor abroad the country is often the most load-bearing line of the
+  // address, and most of the world has no state to put in the box beside it.
+  let country: string | null = null;
+  if (parts.length > 1 && COUNTRY_NAMES.has(parts[parts.length - 1]!.toLowerCase())) {
+    country = parts.pop()!;
+  }
+  if (parts.length === 0) return { ...empty, country };
+  if (parts.length === 1) return { ...empty, street: parts[0]!, country };
 
   let state: string | null = null;
   let zip: string | null = null;
@@ -522,7 +529,7 @@ export function splitPostalAddress(address: string | null): {
   }
 
   const city = parts.length > 1 ? parts.pop()! : null;
-  return { street: parts.join(', ') || null, city, state, zip };
+  return { street: parts.join(', ') || null, city, state, zip, country };
 }
 
 /**
@@ -1039,6 +1046,7 @@ export function refineInvoiceSources(invoice: ExtractedInvoice, pages: TextPage[
       ['remitCity', remit.city],
       ['remitState', remit.state],
       ['remitZip', remit.zip],
+      ['remitCountry', remit.country ?? null],
     ];
     for (const [key, value] of parts) {
       if (!value) continue;

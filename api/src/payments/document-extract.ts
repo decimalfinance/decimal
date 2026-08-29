@@ -63,7 +63,8 @@ Return ONLY a JSON object with this exact shape, nothing else:
         "street": "string or null",
         "city": "string or null",
         "state": "string or null",
-        "zip": "string or null"
+        "zip": "string or null",
+        "country": "string or null"
       },
       "paymentDetails": {
         "method": "string or null",
@@ -144,7 +145,8 @@ Rules copied from the AP intake agent:
 - earlyPayDiscount: any early-payment discount offer, verbatim ("2% 10 days"). null if absent.
 - subtotal / taxAmount: numbers as printed. null if the document doesn't break them out.
 - billToName: the entity the invoice is ADDRESSED TO (the buyer/customer side). Used to catch invoices addressed to someone else.
-- remitTo: a POSTAL ADDRESS ONLY — street, city, state, zip — where a cheque would be mailed. All null if the document has none.
+- remitTo: a POSTAL ADDRESS ONLY — street, city, state, zip, country — where a cheque would be mailed. All null if the document has none.
+  Country only when the document prints one. Most of the world has no state: leave state null rather than repeating the county, province or region there.
   "Remit to" on an invoice means one of two different things, and only one of them belongs here:
     "Remit to: Zephyr Analytics · Lone Star Bank · Routing 111000025 · Account ****4417"
       -> remitTo: all null. There is no street address here. Those are PAYMENT INSTRUCTIONS: put the bank, routing and account in paymentDetails.
@@ -282,6 +284,7 @@ const EXTRACTION_JSON_SCHEMA = {
               city: nullableString,
               state: nullableString,
               zip: nullableString,
+              country: nullableString,
             },
             required: ['street', 'city', 'state', 'zip'],
             additionalProperties: false,
@@ -498,6 +501,7 @@ const RemitToSchema = z.object({
   city: z.string().nullable().default(null),
   state: z.string().nullable().default(null),
   zip: z.string().nullable().default(null),
+  country: z.string().nullable().default(null),
 });
 
 const PaymentDetailsSchema = z.object({

@@ -1572,13 +1572,13 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   // which extraction puts in the flat `vendorAddress` string — so the fields
   // rendered "Not on document" about an address plainly on the page. Fall back
   // to the letterhead address rather than tell the bill clerk it isn't there.
-  const remitTo = (['street', 'city', 'state', 'zip'] as const).some((p) => str(remitToRaw[p]))
+  const remitTo = (['street', 'city', 'state', 'zip', 'country'] as const).some((p) => str(remitToRaw[p]))
     ? remitToRaw
     : splitPostalAddress(str(extracted.vendorAddress));
   const usedVendorAddress = remitTo !== remitToRaw;
   const remitToVerified = verifiedFields && isRecord(verifiedFields.remitTo) ? verifiedFields.remitTo : null;
-  const remitPartSourceKey = { street: 'remitStreet', city: 'remitCity', state: 'remitState', zip: 'remitZip' } as const;
-  const remitFields = (['street', 'city', 'state', 'zip'] as const).map((part) => {
+  const remitPartSourceKey = { street: 'remitStreet', city: 'remitCity', state: 'remitState', zip: 'remitZip', country: 'remitCountry' } as const;
+  const remitFields = (['street', 'city', 'state', 'zip', 'country'] as const).map((part) => {
     const value = remitToVerified ? remitToVerified[part] : str(remitTo[part]);
     return {
       key: `remitTo.${part}`,
@@ -2214,7 +2214,7 @@ export type SubmitBillInput = {
     currency?: string | null;
     total?: number;
     taxAmount?: number | null;
-    remitTo?: { street?: string | null; city?: string | null; state?: string | null; zip?: string | null };
+    remitTo?: { street?: string | null; city?: string | null; state?: string | null; zip?: string | null; country?: string | null };
   };
   lines: Array<{ description: string; quantity: number | null; unitPrice: number | null; amount: number | null; category?: string | null }>;
   confirmedFieldKeys: string[];

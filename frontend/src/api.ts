@@ -1613,7 +1613,7 @@ export interface ConfirmBillBody {
     currency?: string | null;
     total?: number;
     taxAmount?: number | null;
-    remitTo?: { street?: string | null; city?: string | null; state?: string | null; zip?: string | null };
+    remitTo?: { street?: string | null; city?: string | null; state?: string | null; zip?: string | null; country?: string | null };
   };
   lines: Array<{ description: string; quantity: number | null; unitPrice: number | null; amount: number | null; category?: string | null }>;
   confirmedFieldKeys: string[];

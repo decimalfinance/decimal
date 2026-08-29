@@ -833,6 +833,7 @@ function DraftScreen(props: {
             city: fields['remitTo.city']?.value || null,
             state: fields['remitTo.state']?.value || null,
             zip: fields['remitTo.zip']?.value || null,
+            country: fields['remitTo.country']?.value || null,
           },
         },
         lines: lines
@@ -1444,7 +1445,9 @@ function DraftScreen(props: {
                   placeholder="Not on document"
                 />
               </div>
-              <div className="rev-grid" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr' }}>
+              {/* Five now: most of the world has no state, and for a vendor
+                  abroad the country is often the line that matters most. */}
+              <div className="rev-grid" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr' }}>
                 {billDraft.remitFields.map((f) => (
                   <DraftField
                     key={f.key}
