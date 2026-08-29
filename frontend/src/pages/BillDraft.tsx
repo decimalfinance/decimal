@@ -2245,6 +2245,14 @@ function DraftField(props: {
             <button type="button" className="ftag-btn" onClick={onConfirm}>Confirm</button>
           ) : null}
         </span>
+      ) : def.inferred && current.value.trim() && !unsaved ? (
+        // The one field we fill without the document saying so, and therefore
+        // the one that has to say where it came from. Below Confirmed, Asked
+        // and Check — those are about the value — and below Unsaved, because an
+        // edit supersedes what we worked out.
+        <span className="ftag" title="Not printed on this invoice — worked out from the state and postcode. Change it if that is wrong.">
+          Inferred
+        </span>
       ) : unsaved ? (
         // Same one-note slot as the rest. It outranks Generate — a field you
         // have just typed into is not a field waiting to be filled — and sits

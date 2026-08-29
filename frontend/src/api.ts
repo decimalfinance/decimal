@@ -1453,6 +1453,8 @@ export type DocSource = {
 } | null;
 
 export interface BillDraftField {
+  /** Worked out from the address rather than read off the document. */
+  inferred?: boolean;
   key: string;
   label: string;
   value: string | number | null;

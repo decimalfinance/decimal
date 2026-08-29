@@ -7,30 +7,30 @@ test('a middle dot separates address parts just like a comma', () => {
   // Both of these are real B-series letterheads. Splitting on commas alone put
   // the city inside the street and left the city box reading "Not on document".
   assert.deepEqual(splitPostalAddress('500 Howard St · San Francisco, CA 94105'), {
-    street: '500 Howard St', city: 'San Francisco', state: 'CA', zip: '94105', country: null,
+    street: '500 Howard St', city: 'San Francisco', state: 'CA', zip: '94105', country: 'United States', countryInferred: true,
   });
   assert.deepEqual(splitPostalAddress('1 Beacon St · Boston, MA 02108'), {
-    street: '1 Beacon St', city: 'Boston', state: 'MA', zip: '02108', country: null,
+    street: '1 Beacon St', city: 'Boston', state: 'MA', zip: '02108', country: 'United States', countryInferred: true,
   });
 });
 
 test('bullets and pipes separate too, and plain commas are unchanged', () => {
   assert.deepEqual(splitPostalAddress('12 Rutland St • Boston, MA 02118'), {
-    street: '12 Rutland St', city: 'Boston', state: 'MA', zip: '02118', country: null,
+    street: '12 Rutland St', city: 'Boston', state: 'MA', zip: '02118', country: 'United States', countryInferred: true,
   });
   assert.deepEqual(splitPostalAddress('88 Harbor Rd | Oakland, CA 94607'), {
-    street: '88 Harbor Rd', city: 'Oakland', state: 'CA', zip: '94607', country: null,
+    street: '88 Harbor Rd', city: 'Oakland', state: 'CA', zip: '94607', country: 'United States', countryInferred: true,
   });
   assert.deepEqual(splitPostalAddress('660 Mission St, Floor 4, San Francisco, CA 94105'), {
-    street: '660 Mission St, Floor 4', city: 'San Francisco', state: 'CA', zip: '94105', country: null,
+    street: '660 Mission St, Floor 4', city: 'San Francisco', state: 'CA', zip: '94105', country: 'United States', countryInferred: true,
   });
 });
 
 test('an address it cannot split stays whole in street rather than vanishing', () => {
   assert.deepEqual(splitPostalAddress('Somewhere Unhelpful'), {
-    street: 'Somewhere Unhelpful', city: null, state: null, zip: null, country: null,
+    street: 'Somewhere Unhelpful', city: null, state: null, zip: null, country: null, countryInferred: false,
   });
-  assert.deepEqual(splitPostalAddress(null), { street: null, city: null, state: null, zip: null, country: null });
+  assert.deepEqual(splitPostalAddress(null), { street: null, city: null, state: null, zip: null, country: null, countryInferred: false });
 });
 
 test('a letterhead written across two lines splits like any other', () => {
@@ -46,18 +46,18 @@ test('a letterhead written across two lines splits like any other', () => {
   // written in — the street came out "340 Congress St\nAustin", which a browser
   // then collapses into "340 Congress StAustin".
   assert.deepEqual(splitPostalAddress('340 Congress St\nAustin, TX 78701'), {
-    street: '340 Congress St', city: 'Austin', state: 'TX', zip: '78701', country: null,
+    street: '340 Congress St', city: 'Austin', state: 'TX', zip: '78701', country: 'United States', countryInferred: true,
   });
 
   // Windows line endings, and a blank line between, which a PDF text layer
   // produces as readily as a single break.
   assert.deepEqual(splitPostalAddress('9 Cannery Row\r\n\r\nMonterey, CA 93940'), {
-    street: '9 Cannery Row', city: 'Monterey', state: 'CA', zip: '93940', country: null,
+    street: '9 Cannery Row', city: 'Monterey', state: 'CA', zip: '93940', country: 'United States', countryInferred: true,
   });
 
   // Mixed, because a document is free to use both.
   assert.deepEqual(splitPostalAddress('77 Industrial Pkwy · Suite 200\nColumbus, OH 43004'), {
-    street: '77 Industrial Pkwy, Suite 200', city: 'Columbus', state: 'OH', zip: '43004', country: null,
+    street: '77 Industrial Pkwy, Suite 200', city: 'Columbus', state: 'OH', zip: '43004', country: 'United States', countryInferred: true,
   });
 });
 
@@ -70,7 +70,7 @@ test('a UK address puts London in the city and the postcode in the postcode', ()
     // State stays null and that is the honest answer: the UK has none, and
     // repeating the county or the country there to fill the box would be worse
     // than an empty field.
-    country: 'United Kingdom',
+    country: 'United Kingdom', countryInferred: false,
   });
 });
 
@@ -78,7 +78,7 @@ test('a country on the end goes in the country box, not the city', () => {
   // It was briefly dropped, for want of anywhere to put it. A vendor abroad is
   // the case this product exists for, so it has a box of its own.
   assert.deepEqual(splitPostalAddress('9 Cannery Row, Monterey, CA 93940, USA'), {
-    street: '9 Cannery Row', city: 'Monterey', state: 'CA', zip: '93940', country: 'USA',
+    street: '9 Cannery Row', city: 'Monterey', state: 'CA', zip: '93940', country: 'USA', countryInferred: false,
   });
 });
 
@@ -86,7 +86,7 @@ test('other postcode shapes reach the postcode box too', () => {
   // Canada writes them differently again, and the rest of the world is not an
   // edge case — it is most invoices sent to a company that buys abroad.
   assert.deepEqual(splitPostalAddress('120 Bloor St W, Toronto M5S 1M8, Canada'), {
-    street: '120 Bloor St W', city: 'Toronto', state: null, zip: 'M5S 1M8', country: 'Canada',
+    street: '120 Bloor St W', city: 'Toronto', state: null, zip: 'M5S 1M8', country: 'Canada', countryInferred: false,
   });
 });
 
@@ -94,8 +94,48 @@ test('a run of spaces separates, because a flattened line break looks like one',
   // The model returns two lines as one string with the break collapsed. Read as
   // ordinary spacing, the city stays inside the street.
   assert.deepEqual(splitPostalAddress('340 Congress St   Austin, TX 78701'), {
-    street: '340 Congress St', city: 'Austin', state: 'TX', zip: '78701', country: null,
+    street: '340 Congress St', city: 'Austin', state: 'TX', zip: '78701', country: 'United States', countryInferred: true,
   });
+});
+
+test('a US invoice that prints no country still gets one', () => {
+  // Most US invoices simply do not print it, and leaving the box empty on
+  // "New York, NY 10010" is pedantry rather than rigour: the postal format
+  // says it plainly.
+  const r = splitPostalAddress('210 5th Ave · New York, NY 10010');
+  assert.equal(r.country, 'United States');
+  // And it says it was worked out. Everything else on the bill screen shows
+  // only what the document says; this is the one field allowed to break that,
+  // so it is the one field that has to admit it.
+  assert.equal(r.countryInferred, true);
+});
+
+test('a country actually printed is read, not inferred', () => {
+  const r = splitPostalAddress('9 Cannery Row, Monterey, CA 93940, USA');
+  assert.equal(r.country, 'USA');
+  assert.equal(r.countryInferred, false, 'read off the page, so nothing was worked out');
+});
+
+test('other decisive postal shapes are recognised too', () => {
+  assert.equal(splitPostalAddress('14 Clerkenwell Road  London EC1M 5PA').country, 'United Kingdom');
+  assert.equal(splitPostalAddress('120 Bloor St W, Toronto M5S 1M8').country, 'Canada');
+});
+
+test('an address that does not settle the question is left alone', () => {
+  // Inferred ONLY from a format that admits one answer. A city name would be
+  // the guess doing real work, and a wrong country is worse than an empty box
+  // because it looks authoritative.
+  const r = splitPostalAddress('12 Rue de Rivoli, Paris');
+  assert.equal(r.country, null);
+  assert.equal(r.countryInferred, false);
+  // "TX" without a zip settles nothing either — plenty of places abbreviate.
+  assert.equal(splitPostalAddress('1 Main St, Springfield, TX').country, null);
+});
+
+test('a five-digit number alone is not a US address', () => {
+  // German postcodes are five digits too. Without a US state beside it the
+  // format is not decisive, so nothing is claimed.
+  assert.equal(splitPostalAddress('Hauptstrasse 12, Berlin 10115').country, null);
 });
 
 // --- a reference for an invoice that prints none -----------------------------

@@ -1591,6 +1591,11 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     ? remitToRaw
     : splitPostalAddress(str(extracted.vendorAddress));
   const usedVendorAddress = remitTo !== remitToRaw;
+  // Whether the country was worked out rather than read. Carried to the screen
+  // so the one field we are willing to fill without the document saying so is
+  // also the one field that admits it.
+  const countryInferred = usedVendorAddress
+    && splitPostalAddress(str(extracted.vendorAddress)).countryInferred;
   const remitToVerified = verifiedFields && isRecord(verifiedFields.remitTo) ? verifiedFields.remitTo : null;
   const remitPartSourceKey = { street: 'remitStreet', city: 'remitCity', state: 'remitState', zip: 'remitZip', country: 'remitCountry' } as const;
   const remitFields = (['street', 'city', 'state', 'zip', 'country'] as const).map((part) => {
@@ -1599,6 +1604,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       key: `remitTo.${part}`,
       label: part === 'zip' ? 'ZIP code' : part[0]!.toUpperCase() + part.slice(1),
       value,
+      inferred: part === 'country' && countryInferred,
       // Judge the value we are actually SHOWING. When these boxes fall back to
       // the letterhead address, the model's remitTo confidence is about a
       // remit-to panel that is not on the document — it hedges at 0.8 for the

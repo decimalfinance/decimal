@@ -32,7 +32,7 @@ const execFileAsync = promisify(execFile);
 
 // Version of the matcher; stamped wherever refinement ran so the review path
 // knows to re-run after matcher improvements.
-export const PROVENANCE_VERSION = 15; // v15: the address carries a country
+export const PROVENANCE_VERSION = 16; // v16: an unprinted country is worked out
 
 export type TextWord = { text: string; x0: number; y0: number; x1: number; y1: number }; // 0-1 fractions, top-left origin
 export type TextPage = {
@@ -459,8 +459,19 @@ export function splitPostalAddress(address: string | null): {
   /** Kept, not dropped: for a vendor abroad this is often the line that matters
    *  most, and most of the world has no state to fill the box beside it. */
   country: string | null;
+  /**
+   * True when the country was WORKED OUT rather than read off the page.
+   *
+   * The distinction has to travel with the value. Everything else on the bill
+   * screen shows only what the document says — that is the rule the highlight
+   * boxes are built on — and a country nobody printed is the one field that
+   * breaks it. It may still be filled, because "TX 78701" leaves no doubt and a
+   * bookkeeper would write United States without pausing; it may not pretend
+   * somebody read it there.
+   */
+  countryInferred: boolean;
 } {
-  const empty = { street: null, city: null, state: null, zip: null, country: null };
+  const empty = { street: null, city: null, state: null, zip: null, country: null, countryInferred: false };
   if (!address) return empty;
   // Letterheads separate address parts typographically as often as they use a
   // comma: "500 Howard St · San Francisco, CA 94105". Splitting on commas alone
@@ -529,7 +540,40 @@ export function splitPostalAddress(address: string | null): {
   }
 
   const city = parts.length > 1 ? parts.pop()! : null;
-  return { street: parts.join(', ') || null, city, state, zip, country };
+
+  // Most US invoices simply do not print a country, and leaving the box empty
+  // on "Austin, TX 78701" is pedantry rather than rigour: the postal format
+  // says it plainly. Worked out ONLY from a format that admits one answer —
+  // never from a city name, where the guess would be doing real work and could
+  // be wrong in a way that looks authoritative.
+  let inferred = false;
+  if (!country) {
+    const guess = countryFromPostalShape(state, zip);
+    if (guess) { country = guess; inferred = true; }
+  }
+  return { street: parts.join(', ') || null, city, state, zip, country, countryInferred: inferred };
+}
+
+/** Two-letter US state codes, for telling "TX 78701" from "Toronto M5S 1M8". */
+const US_STATES = new Set([
+  'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD',
+  'MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC',
+  'SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC','PR','VI','GU','AS','MP',
+]);
+
+/**
+ * The country a postal format can only belong to.
+ *
+ * Deliberately narrow. Each of these shapes is decisive on its own, so the
+ * answer is a fact about the format rather than a guess about the address —
+ * which is what makes it safe to fill a box the document left empty.
+ */
+function countryFromPostalShape(state: string | null, zip: string | null): string | null {
+  const z = (zip ?? '').trim().toUpperCase();
+  if (state && US_STATES.has(state.trim().toUpperCase()) && /^\d{5}(-\d{4})?$/.test(z)) return 'United States';
+  if (/^[A-Z]{1,2}\d[A-Z\d]? ?\d[A-Z]{2}$/.test(z)) return 'United Kingdom';
+  if (/^[A-Z]\d[A-Z] ?\d[A-Z]\d$/.test(z)) return 'Canada';
+  return null;
 }
 
 /**
@@ -1023,7 +1067,9 @@ export function refineInvoiceSources(invoice: ExtractedInvoice, pages: TextPage[
   // appear anywhere.
   if (invoice.vendorAddress) {
     setIfFound('vendorAddress', findTextMatches(pages, [invoice.vendorAddress]));
-    const parts = splitPostalAddress(invoice.vendorAddress);
+    // countryInferred is a fact about the parse, not a part to locate — and an
+    // inferred country is not on the page to be found anyway.
+    const { countryInferred: _inferred, ...parts } = splitPostalAddress(invoice.vendorAddress);
     for (const [part, box] of Object.entries(anchoredAddressParts(pages, parts, sources.vendorAddress ?? null))) {
       sources[`vendorAddress.${part}`] = toSource(box, pages[box.page - 1]);
       measured.add(`vendorAddress.${part}`);
