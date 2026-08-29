@@ -1536,7 +1536,9 @@ export interface BillDraft {
   sourceLabel: string | null;
   // An approver sent this bill back for changes — shown as the bill clerk's homework.
   sentBack: { reason: string | null; byName: string | null; at: string | null } | null;
-  vendor: { name: string; email: string | null; nameSource?: DocSource; emailSource?: DocSource; nameState: BillDraftField['state']; emailState: BillDraftField['state']; isNew: boolean; trustState: string };
+  /** `name` is what the DOCUMENT prints; `paidAs` is the vendor record it is
+   *  linked to, present only when that record goes by a different name. */
+  vendor: { name: string; paidAs?: string | null; email: string | null; nameSource?: DocSource; emailSource?: DocSource; nameState: BillDraftField['state']; emailState: BillDraftField['state']; isNew: boolean; trustState: string };
   document: { invoiceDocumentId: string; filename: string; mimeType: string; byteSize: number; pageCount: number | null } | null;
   fields: BillDraftField[];
   remitFields: BillDraftField[];

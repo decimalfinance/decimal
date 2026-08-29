@@ -1921,8 +1921,29 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       ? { reason: str(sentBackRaw.reason), byName: str(sentBackRaw.byName), at: str(sentBackRaw.at) }
       : null,
     vendor: {
+      // What the DOCUMENT says, not what the vendor record is called.
+      //
+      // These are two different facts and this line used to confuse them. Once
+      // a bill from "Brightwave Media Ltd" was attached to the vendor record
+      // "Brightwave Media", the screen started calling it Brightwave Media —
+      // rewriting, in effect, what the invoice in the next pane plainly said.
+      //
+      // A bill is a record of a document. It keeps the name printed on it; the
+      // vendor record it is linked to is separate, and named separately below.
+      // That is the vendor-master model: one canonical record per company,
+      // carrying every name it trades under, and invoices under any of those
+      // names matching it without being rewritten.
       name: (verifiedFields ? str(verifiedFields.vendorName) : null)
+        ?? str(extracted.vendorName)
         ?? (order.counterparty?.displayName ?? order.counterpartyWallet.label),
+      // The vendor record this bill is paid against, when it goes by another
+      // name. Null when they agree, so the screen only speaks up when the two
+      // genuinely differ.
+      paidAs: order.counterparty
+        && str(extracted.vendorName)
+        && order.counterparty.displayName !== str(extracted.vendorName)
+        ? order.counterparty.displayName
+        : null,
       email: (verifiedFields ? str(verifiedFields.vendorEmail) : null) ?? str(extracted.vendorEmail),
       nameSource: sourceOf('vendorName'),
       emailSource: sourceOf('vendorEmail'),
@@ -1934,6 +1955,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       nameState: fieldState({
         key: 'vendor.name',
         value: (verifiedFields ? str(verifiedFields.vendorName) : null)
+          ?? str(extracted.vendorName)
           ?? (order.counterparty?.displayName ?? order.counterpartyWallet.label),
         fieldConfidence,
         fieldStatus,

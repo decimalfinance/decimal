@@ -292,6 +292,7 @@ function DraftScreen(props: {
   type ResolutionAction = 'this_is_us' | 'not_ours' | 'ask_someone' | 'clear_duplicate' | 'fix_fields' | 'raise_ceiling' | 'release_vendor' | 'pay_the_lines'
     | 'same_vendor' | 'different_vendor';
   const [activeResolution, setActiveResolution] = useState<{ flag: string; action: ResolutionAction; targetId?: string } | null>(null);
+  const [mergeVendor, setMergeVendor] = useState<{ targetId: string; name: string } | null>(null);
   const [resolutionValue, setResolutionValue] = useState('');
   const [resolving, setResolving] = useState(false);
   const [askOf, setAskOf] = useState('');
@@ -541,6 +542,12 @@ function DraftScreen(props: {
   const resolutionNeedsReason = (action: ResolutionAction) =>
     action !== 'same_vendor' && action !== 'different_vendor';
 
+  // The vendor being merged into, as the flag already named it. Read from the
+  // sentence rather than threaded through: the flag is the only thing that
+  // knows it, and it is written right there.
+  const mergeTargetName = (message: string) =>
+    /you already pay "([^"]+)"/.exec(message)?.[1] ?? 'the existing vendor';
+
   function startResolution(flagKind: string, action: ResolutionAction) {
     // Actions that only point somewhere else need no input and no ceremony.
     if (action === 'fix_fields') {
@@ -582,6 +589,14 @@ function DraftScreen(props: {
     const flag = billDraft.flags.find((f) => f.kind === flagKind);
     const claimed = action === 'this_is_us' ? /addressed to "([^"]+)"/.exec(flag?.message ?? '')?.[1] ?? '' : '';
     const targetId = flag?.resolutions.find((r) => r.action === action)?.targetId;
+    // Merging two vendor records is a decision worth a second look: it moves
+    // the bill onto another company's record and retires the one it came in on.
+    // "Different company" is not — it changes nothing except that we stop
+    // asking — so it still happens on the click.
+    if (action === 'same_vendor') {
+      setMergeVendor({ targetId: targetId ?? '', name: mergeTargetName(flag?.message ?? '') });
+      return;
+    }
     // An answer that needs no reason needs no composer either. Opening a text
     // box to ask "why do you say they are the same company?" would invite a
     // sentence nobody wants to write and nobody will read; the click IS the
@@ -1374,6 +1389,14 @@ function DraftScreen(props: {
                     not say they had been asked about. A question naming "the
                     vendor details" pointed at six fields and visibly marked
                     four, missing the two it was most about. */}
+                {billDraft.vendor.paidAs ? (
+                  // The document says one name, the vendor record another. Both
+                  // are true and the screen says so, rather than quietly showing
+                  // one in place of the other.
+                  <span className="ftag" style={{ gridColumn: '1 / -1' }}>
+                    Paid against <b>{billDraft.vendor.paidAs}</b> — this invoice is printed with a name they also trade under.
+                  </span>
+                ) : null}
                 <VendorField
                   label="Vendor name"
                   value={vendorName}
@@ -1666,6 +1689,22 @@ function DraftScreen(props: {
           busy={submitting}
           onConfirm={() => { setConfirmOpen(false); void confirm(); }}
           onClose={() => setConfirmOpen(false)}
+        />
+      ) : null}
+
+      {mergeVendor ? (
+        <ConfirmDialog
+          title={`Same company as ${mergeVendor.name}?`}
+          body={`This bill will be paid against ${mergeVendor.name}, and "${vendorName}" will be kept as another name they trade under — so invoices arriving either way land on the one record. The bill keeps the name printed on it. The empty record it came in on is retired if nothing else uses it.`}
+          confirmLabel="Yes, same company"
+          busyLabel="Merging…"
+          busy={resolving}
+          onConfirm={() => {
+            const target = mergeVendor.targetId;
+            setMergeVendor(null);
+            void runResolution({ flag: 'similar_vendor', action: 'same_vendor', targetId: target });
+          }}
+          onClose={() => setMergeVendor(null)}
         />
       ) : null}
 

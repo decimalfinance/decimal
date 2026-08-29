@@ -734,6 +734,62 @@ test('a bill with no reference cannot be sent for approval', async () => {
   assert.equal(sent.detail.state, 'submitted');
 });
 
+test('a bill keeps the name printed on it, whatever the vendor record is called', async () => {
+  // Merging two vendor records must not rewrite the invoice. The bill is a
+  // record of a document: it says what the document says, and the vendor record
+  // it is linked to is a separate fact, named separately.
+  //
+  // Before this, attaching a bill from "Brightwave Media Ltd" to the vendor
+  // "Brightwave Media" made the screen call it Brightwave Media — contradicting
+  // the invoice open in the next pane.
+  const setup = await createPaymentOrderSetup();
+  const orgId = setup.organization.organizationId;
+  const vendorWallet = Keypair.generate().publicKey.toBase58();
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [{
+        counterparty: 'Brightwave Media Ltd',
+        amount: 1900, currency: 'USD', reference: 'BWL-077',
+        due_date: '2026-08-28', wallet_address: vendorWallet, notes: null,
+        source_invoice: {
+          vendorName: 'Brightwave Media Ltd', vendorAddress: null, vendorEmail: null,
+          amount: 1900, currency: 'USD', invoiceNumber: 'BWL-077',
+          invoiceDate: '2026-08-13', dueDate: '2026-08-28', terms: 'Net 15',
+          poNumber: null, earlyPayDiscount: null, subtotal: 1900, taxAmount: 0,
+          billToName: null, remitTo: { street: null, city: null, state: null, zip: null },
+          paymentDetails: null, walletAddress: vendorWallet,
+          lineItems: [{ description: 'Design retainer', quantity: 1, unitPrice: 1900, total: 1900 }],
+          categoryHint: 'Advertising', confidence: { vendor: 1, amount: 1, overall: 1 },
+        },
+      }],
+      modelLatencyMs: 3, pageCount: 1,
+    }),
+  });
+  const upload = await post(
+    `/organizations/${orgId}/invoices/upload`,
+    {
+      filename: 'D4-near-match-vendor.pdf', mimeType: 'application/pdf',
+      dataBase64: Buffer.from('%PDF-1.4 brightwave').toString('base64'),
+      sourceTreasuryWalletId: setup.sourceTreasuryWallet.treasuryWalletId,
+      autoAdvance: false,
+    },
+    setup.sessionToken,
+  );
+  const billId = upload.paymentOrders[0].paymentOrder.paymentOrderId;
+
+  // Rename the vendor record this bill landed on, standing in for the merge:
+  // what matters is that the record and the document disagree.
+  const order = await prisma.paymentOrder.findUniqueOrThrow({ where: { paymentOrderId: billId } });
+  await prisma.counterparty.update({
+    where: { counterpartyId: order.counterpartyId! },
+    data: { displayName: 'Brightwave Media' },
+  });
+
+  const draft = await get(`/organizations/${orgId}/bills/${billId}/draft`, setup.sessionToken);
+  assert.equal(draft.vendor.name, 'Brightwave Media Ltd', 'the bill says what the invoice says');
+  assert.equal(draft.vendor.paidAs, 'Brightwave Media', 'and names the record it is paid against');
+});
+
 test('a field the model could not read is marked for a look, in its own words', async () => {
   // The whole "check this field" mechanism keyed off a self-reported 0-1
   // confidence, and never fired: every C-series document came back at 0.98,
