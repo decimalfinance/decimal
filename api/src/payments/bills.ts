@@ -1620,15 +1620,21 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       // Remit To panel, silently had no highlight on any document. The refiner
       // produces the per-part keys now; this is the other half of the same fix,
       // and one without the other still shows nothing.
-      // Empty means empty: no box, not the whole address block.
+      // Nothing to point at means no box, rather than the whole address block.
       //
-      // D4 is a UK address, so it has no state and no zip — correctly, because
-      // there are none to read. Both boxes fell through to the whole-address
-      // match anyway, and clicking an empty field lit up the entire letterhead
-      // as though that were the answer. A highlight is a claim that the value
-      // came from there, and for a field with no value there is no such claim
-      // to make.
-      source: value == null || value === ''
+      // Two ways a field has nothing to point at. It can be empty: D4 is a UK
+      // address with no state and no zip, and both boxes fell through to the
+      // whole-address match, so clicking an empty field lit up the entire
+      // letterhead as though that were the answer.
+      //
+      // Or it can be INFERRED. "United States" is not printed anywhere on an
+      // invoice that says "Oakland, CA 94607" — that is the whole reason it was
+      // worked out — so it has no words of its own to match, and it fell
+      // through to exactly the same whole-address box. It arrived on the field
+      // marked Inferred and highlighted as though it had been read. A highlight
+      // is a claim about where a value came from, and both cases have no such
+      // claim to make.
+      source: value == null || value === '' || (part === 'country' && countryInferred)
         ? null
         : usedVendorAddress
           ? sourceOf(`vendorAddress.${part}`) ?? sourceOf('vendorAddress')
