@@ -78,6 +78,12 @@ export const VENDORS = {
     bank: 'First Interstate Bank', routing: '125000105', acct: '6621',
     accent: '#b3541e', template: 'minimal',
   },
+  merritt: {
+    name: 'Merritt Facilities Group', addr: '88 Wharf Rd', city: 'Oakland, CA 94607',
+    email: 'billing@merrittfacilities.example', phone: '(510) 555-0166',
+    bank: 'East Bay Commerce Bank', routing: '121000358', acct: '4417',
+    accent: '#2f5d50', template: 'letterhead',
+  },
   halstead: {
     name: 'Halstead Consulting', addr: '415 N Dearborn St', city: 'Chicago, IL 60654',
     email: 'billing@halsteadconsulting.example', phone: '(312) 555-0129',
@@ -338,6 +344,35 @@ export const CASES = [
       L('Rush production', 1, 450),
     ],
     expect: 'No invoice number anywhere on the document.',
+  },
+  {
+    id: 'D6', file: 'D-shape-variety/D6-mixed-coding.pdf', format: 'pdf',
+    vendor: 'merritt', invoiceNo: 'MFG-4471', date: '2026-08-18', due: '2026-09-17',
+    terms: 'Net 30', po: 'PO-7712',
+    // D1 is 22 lines from one cloud vendor, so nearly all of it codes to one
+    // account — correctly, which makes it a test of VOLUME and no test at all
+    // of category variety: "everything is Cloud hosting" is indistinguishable
+    // from the coder giving up.
+    //
+    // These 22 lines are one facilities vendor's monthly bill, and every group
+    // belongs somewhere different: paper and toner are office supplies, the
+    // courier is shipping, the copier is a rental, the cleaners are
+    // contractors, the permit is a tax. A wrong answer is visible here, which
+    // is the whole point.
+    lines: [
+      L('A4 paper — 40 reams', 40, 6), L('Toner cartridges', 6, 85),
+      L('Brochure printing — 2,000', 1, 940), L('Exhibition banner stand', 1, 320),
+      L('Overnight courier — 14 shipments', 14, 18), L('Pallet freight — depot transfer', 1, 480),
+      L('Photocopier lease — August', 1, 275), L('Floor scrubber hire — 3 days', 3, 60),
+      L('Meeting room hire — annexe', 1, 650), L('Electricity recharge — August', 1, 1180),
+      L('Broadband and phone lines', 1, 340), L('HVAC filter replacement', 1, 195),
+      L('Espresso machine service call', 1, 130), L('Night cleaning crew — August', 1, 1450),
+      L('Reception relief staff — 4 days', 4, 165), L('Waste collection permit', 1, 85),
+      L('Access control software — 12 seats', 12, 9), L('Safety gloves and hi-vis vests', 1, 145),
+      L('First aid kit restock', 1, 75), L('Card payment processing fees', 1, 96),
+      L('Client lunch catering — board meeting', 1, 285), L('Document shredding and storage', 1, 210),
+    ],
+    expect: '22 lines spanning a dozen different expense accounts. Sum $8,806. The real test of per-line GL coding: unlike D1, one account for everything is the WRONG answer here.',
   },
 
   // ---- E. Payment path ------------------------------------------------------

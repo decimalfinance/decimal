@@ -70,7 +70,7 @@ These test that low confidence surfaces rather than being guessed at.
 | C4 | A layout with two columns and the remit-to address in a footer |
 | C5 | Handwritten amount or a stamped "PAID" overlapping the total |
 
-## D. Shape variety — realistic mess (5 invoices)
+## D. Shape variety — realistic mess (6 invoices)
 
 | # | Make it |
 |---|---|
@@ -79,6 +79,18 @@ These test that low confidence surfaces rather than being guessed at.
 | D3 | Foreign currency (EUR or GBP) — should be refused as unsupported |
 | D4 | A vendor whose name nearly matches an existing one ("Brightwave Media Ltd" vs "Brightwave Media") |
 | D5 | No invoice number at all |
+| D6 | 22 lines spanning a dozen different expense accounts |
+
+D1 and D6 both carry 22 lines and they test different things. D1 is one cloud
+vendor, so nearly every line genuinely belongs to the same account — which makes
+it a test of VOLUME and no test at all of the coding, because "everything is
+Cloud hosting" is the right answer and therefore indistinguishable from the
+model giving up.
+
+D6 is one facilities vendor's monthly bill, where every group belongs somewhere
+different: paper and toner are office supplies, the courier is shipping, the
+copier is a rental, the cleaners are contractors, the permit is a tax. One
+account for everything is the WRONG answer here, so a wrong answer is visible.
 
 ## E. Payment-path (2 invoices)
 
