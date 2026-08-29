@@ -1401,10 +1401,17 @@ function DraftScreen(props: {
               <div className="sec-head">
                 <div className="sh-titles">
                   <h2>Vendor</h2>
+                  {/* One line, and the most specific true thing. Which vendor
+                      record a bill is paid against only needs saying when it
+                      differs from the name on the invoice — and when it does,
+                      that IS the sentence about this vendor, so it belongs here
+                      rather than in a row of its own below. */}
                   <p className="sh-desc">
-                    {billDraft.vendor.isNew
-                      ? 'First bill from this vendor — payment details go through verification.'
-                      : 'A vendor you already pay.'}
+                    {billDraft.vendor.paidAs
+                      ? <>Paid against <b>{billDraft.vendor.paidAs}</b> — this invoice prints another of their names.</>
+                      : billDraft.vendor.isNew
+                        ? 'First bill from this vendor — payment details go through verification.'
+                        : 'A vendor you already pay.'}
                   </p>
                 </div>
               </div>
@@ -1420,14 +1427,6 @@ function DraftScreen(props: {
                     not say they had been asked about. A question naming "the
                     vendor details" pointed at six fields and visibly marked
                     four, missing the two it was most about. */}
-                {billDraft.vendor.paidAs ? (
-                  // The document says one name, the vendor record another. Both
-                  // are true and the screen says so, rather than quietly showing
-                  // one in place of the other.
-                  <span className="ftag" style={{ gridColumn: '1 / -1' }}>
-                    Paid against <b>{billDraft.vendor.paidAs}</b> — this invoice is printed with a name they also trade under.
-                  </span>
-                ) : null}
                 <VendorField
                   label="Vendor name"
                   value={vendorName}
