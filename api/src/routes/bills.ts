@@ -7,7 +7,7 @@ import { asyncRoute } from '../infra/route-helpers.js';
 import { forbidden } from '../infra/api-errors.js';
 import { assertBillVisible } from '../payments/bill-visibility.js';
 import { prisma } from '../infra/prisma.js';
-import { getBillsWorkbench, getBillDraft, getBillDetail, getApprovalsInbox, submitBillForApproval, markNotABill, updateBillFacts, overrideDuplicateFlag, addOrganizationTradingName, listAskCandidates, askAboutBill, answerBillQuestion, sendApprovedBillBackToReview } from '../payments/bills.js';
+import { getBillsWorkbench, getBillDraft, getBillDetail, getApprovalsInbox, submitBillForApproval, markNotABill, updateBillFacts, overrideDuplicateFlag, addOrganizationTradingName, listAskCandidates, askAboutBill, answerBillQuestion, sendApprovedBillBackToReview, resolveSimilarVendor } from '../payments/bills.js';
 
 export const billsRouter = Router();
 
@@ -148,6 +148,30 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/duplicate
     reason: input.reason,
   });
   res.json(billDraft);
+}));
+
+// Two vendor records, one question: are they the same company?
+//
+// Not admin-gated. The person looking at the document is the one who can see
+// the letterhead, and both answers are recorded against their name. Neither
+// answer bypasses a control — the merge moves a bill between vendors we already
+// have, and the split changes nothing except that we stop asking.
+billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/similar-vendor', asyncRoute(async (req, res) => {
+  const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
+  const input = z.object({
+    otherCounterpartyId: z.string().uuid(),
+    same: z.boolean(),
+  }).parse(req.body);
+  const result = await resolveSimilarVendor({
+    organizationId,
+    paymentOrderId,
+    actorUserId: req.auth!.userId,
+    otherCounterpartyId: input.otherCounterpartyId,
+    same: input.same,
+  });
+  res.json({ ...result, draft: await getBillDraft(organizationId, paymentOrderId, req.auth!.userId) });
 }));
 
 // Pay what the bill itemises rather than what it prints, with a reason.

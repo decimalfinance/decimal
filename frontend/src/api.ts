@@ -1584,7 +1584,12 @@ export interface BillDraft {
     short: string;
     /** What can be done about it — rendered on the flag, never in a footer. */
     resolutions: Array<{
-      action: 'this_is_us' | 'not_ours' | 'ask_someone' | 'clear_duplicate' | 'fix_fields' | 'raise_ceiling' | 'release_vendor' | 'pay_the_lines';
+      action: 'this_is_us' | 'not_ours' | 'ask_someone' | 'clear_duplicate' | 'fix_fields' | 'raise_ceiling' | 'release_vendor' | 'pay_the_lines'
+        | 'same_vendor' | 'different_vendor';
+      /** The answer is a determination, so the composer asks for no reason. */
+      noReason?: boolean;
+      /** The other record the answer is about. */
+      targetId?: string;
       label: string;
       requires: 'anyone' | 'admin';
       detail: string;
@@ -1660,6 +1665,12 @@ export const billsApi = {
     return request<BillDetail>(`/organizations/${organizationId}/bills/${paymentOrderId}/detail`);
   },
   // Recall: the submitter asks, an admin answers. Raising freezes the bill.
+  resolveSimilarVendor(organizationId: string, paymentOrderId: string, otherCounterpartyId: string, same: boolean) {
+    return request<{ merged: boolean; draft: BillDraft }>(
+      `/organizations/${organizationId}/bills/${paymentOrderId}/similar-vendor`,
+      { method: 'POST', body: JSON.stringify({ otherCounterpartyId, same }) },
+    );
+  },
   requestRecall(organizationId: string, paymentOrderId: string, reason: string) {
     // `granted` is true when the asker was an admin and the recall therefore
     // happened immediately, rather than waiting for somebody to answer.

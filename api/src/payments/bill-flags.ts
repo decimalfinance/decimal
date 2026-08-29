@@ -33,6 +33,7 @@ export const BILL_FLAG_KINDS = [
   'looks_like_statement',
   'looks_like_credit_note',
   'approval_weakened',
+  'similar_vendor',
   'lines_do_not_sum',
   'total_does_not_reconcile',
   'short_paid',
@@ -44,10 +45,19 @@ export type BillFlagKind = (typeof BILL_FLAG_KINDS)[number];
 /** What a person can do about a flag, offered on the flag itself. */
 export type FlagResolution = {
   /** Stable identifier the UI posts back. */
-  action: 'this_is_us' | 'not_ours' | 'ask_someone' | 'clear_duplicate' | 'fix_fields' | 'raise_ceiling' | 'release_vendor' | 'pay_the_lines';
+  action: 'this_is_us' | 'not_ours' | 'ask_someone' | 'clear_duplicate' | 'fix_fields' | 'raise_ceiling' | 'release_vendor' | 'pay_the_lines'
+    | 'same_vendor' | 'different_vendor';
   label: string;
   /** Who may take it. The UI greys what the viewer cannot do and says why. */
   requires: 'anyone' | 'admin';
+  /**
+   * True when the answer is a determination rather than a judgement, and asking
+   * for written justification would only produce "yes it is". Whoever answered
+   * is recorded either way.
+   */
+  noReason?: boolean;
+  /** What the answer is ABOUT, when the flag concerns another record. */
+  targetId?: string;
   /** One line under the button — what happens, and whether it is permanent. */
   detail: string;
 };
@@ -117,6 +127,8 @@ export type BillFlagFacts = {
   ceilingMinor: bigint | null;
   duplicates: DuplicateMatch[];
   duplicateOverride: DuplicateOverride | null;
+  /** Vendors already on file whose identifying name matches this one's. */
+  similarVendors: Array<{ counterpartyId: string; displayName: string; billCount: number }>;
   /**
    * A recorded decision to pay what the bill itemises rather than the figure
    * printed on it. Present only once somebody has made it.
@@ -468,6 +480,31 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
       message: facts.shortPay.documentTotal !== null
         ? `Paying the ${money(facts.shortPay.itemisedTotal)} this bill itemises rather than the ${money(facts.shortPay.documentTotal)} printed on it — decided by ${facts.shortPay.byName}: “${facts.shortPay.reason}”.`
         : `Paying the ${money(facts.shortPay.itemisedTotal)} this bill itemises — decided by ${facts.shortPay.byName}: “${facts.shortPay.reason}”.`,
+    });
+  }
+
+  // A vendor we may already have, under a slightly different name.
+  //
+  // Not blocking: a company written with and without its legal suffix is the
+  // overwhelmingly common case and stopping every one of those would be noise
+  // that gets dismissed by reflex. But it goes in front of an approver, because
+  // they are the person positioned to think "why are we paying someone new
+  // whose name looks like someone we already pay" — which is exactly what a
+  // vendor impersonation is banking on nobody thinking.
+  if (facts.similarVendors.length > 0) {
+    const match = facts.similarVendors[0]!;
+    const seen = match.billCount === 1 ? '1 bill' : `${match.billCount} bills`;
+    flags.push({
+      kind: 'similar_vendor',
+      severity: 'warning',
+      blocking: false,
+      short: 'Similar to an existing vendor',
+      resolutions: [
+        { action: 'same_vendor', label: 'Same company', requires: 'anyone', noReason: true, targetId: match.counterpartyId, detail: `Move this bill onto ${match.displayName} and remember "${facts.vendorName}" as a name they also use.` },
+        { action: 'different_vendor', label: 'Different company', requires: 'anyone', noReason: true, targetId: match.counterpartyId, detail: 'Keep them as separate vendors, and stop asking about this pair.' },
+        ASK,
+      ],
+      message: `This bill names "${facts.vendorName}", and you already pay "${match.displayName}" (${seen}). If they are one company, keeping two records splits their history and lets the same invoice through twice.`,
     });
   }
 

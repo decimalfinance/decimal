@@ -20,6 +20,10 @@ import {
   ungroundedFields, splitPostalAddress, PROVENANCE_VERSION,
 } from './doc-provenance.js';
 import { DOUBTFUL_FIELD_STATUSES, renderDocumentToImages } from './document-extract.js';
+import {
+  loadVendorDirectory, similarVendorsIn, normalizeVendorName,
+  recordVendorAlias, recordVendorsDiffer,
+} from './vendor-similarity.js';
 import { findDuplicateBills, readDuplicateOverride, describeDuplicate, matchDuplicates } from './duplicate-check.js';
 import { readPayableHold, describePayableHold } from './vendor-payable.js';
 import { evaluateBillFlags, summarizeBillFlags, displayOrgName } from './bill-flags.js';
@@ -589,7 +593,14 @@ export async function flagsForOrder(
     planAlertsByOrder(organizationId, [order.paymentOrderId]),
   ]);
 
+  const vendorNameForFlags = order.counterparty?.displayName ?? order.counterpartyWallet.label;
+  const similarVendors = similarVendorsIn(
+    await loadVendorDirectory(organizationId),
+    vendorNameForFlags,
+    order.counterpartyId,
+  );
   return evaluateBillFlags({
+    similarVendors,
     vendorName: order.counterparty?.displayName ?? order.counterpartyWallet.label,
     organizationName: displayOrgName(org.organizationName),
     tradingNames: readTradingNames(org.tradingNames),
@@ -1009,6 +1020,8 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
   // scopes candidates, and cancelled orders are excluded for the same reason.
   const alertsByOrder = await planAlertsByOrder(organizationId, orders.map((o) => o.paymentOrderId));
   const liveOrders = orders.filter((o) => o.state !== 'cancelled');
+  // Once for the whole board, not once per row.
+  const vendorDirectory = await loadVendorDirectory(organizationId);
   const byVendor = new Map<string, typeof liveOrders>();
   for (const o of liveOrders) {
     const key = o.counterpartyId ?? `wallet:${o.counterpartyWalletId}`;
@@ -1077,6 +1090,14 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
     // own idea of "ready" that never consulted the flags. It no longer has one.
     const vendorKey = order.counterpartyId ?? `wallet:${order.counterpartyWalletId}`;
     const flags = evaluateBillFlags({
+      // Matched against a directory loaded once for the whole board. Looking it
+      // up per row would be a query per bill on the one screen built to show
+      // many of them.
+      similarVendors: similarVendorsIn(
+        vendorDirectory,
+        order.counterparty?.displayName ?? order.counterpartyWallet.label,
+        order.counterpartyId,
+      ),
       vendorName: order.counterparty?.displayName ?? order.counterpartyWallet.label,
       organizationName: org.organizationName,
       tradingNames: readTradingNames(org.tradingNames),
@@ -1816,6 +1837,11 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     select: { organizationName: true, tradingNames: true },
   });
   const flags = evaluateBillFlags({
+    similarVendors: similarVendorsIn(
+      await loadVendorDirectory(organizationId),
+      order.counterparty?.displayName ?? order.counterpartyWallet.label,
+      order.counterpartyId,
+    ),
     vendorName: order.counterparty?.displayName ?? order.counterpartyWallet.label,
     organizationName: displayOrgName(flagOrg.organizationName),
     tradingNames: readTradingNames(flagOrg.tradingNames),
@@ -2030,6 +2056,113 @@ export function billFieldCorrections(
     }
   }
   return out;
+}
+
+/**
+ * Somebody has answered whether two vendor records are one company.
+ *
+ * The answer is never guessed, for reasons on both sides: merging by ourselves
+ * would let an invoice inherit the payment details of a vendor we already
+ * trust, which is what a lookalike name is for; leaving it alone splits a real
+ * vendor's history and lets the same invoice through twice.
+ *
+ * Both answers are remembered, or the question returns with every invoice.
+ */
+export async function resolveSimilarVendor(input: {
+  organizationId: string;
+  paymentOrderId: string;
+  actorUserId: string;
+  otherCounterpartyId: string;
+  same: boolean;
+}): Promise<{ merged: boolean }> {
+  const order = await prisma.paymentOrder.findFirst({
+    where: { organizationId: input.organizationId, paymentOrderId: input.paymentOrderId },
+    include: { counterparty: true, counterpartyWallet: true },
+  });
+  if (!order) throw new Error('Bill not found');
+  const other = await prisma.counterparty.findFirst({
+    where: { organizationId: input.organizationId, counterpartyId: input.otherCounterpartyId },
+  });
+  if (!other) throw new Error('That vendor is no longer on file.');
+
+  const thisName = order.counterparty?.displayName ?? order.counterpartyWallet.label;
+  const actor = await prisma.user.findUnique({
+    where: { userId: input.actorUserId }, select: { displayName: true },
+  });
+  const byName = actor?.displayName ?? 'Someone';
+
+  if (!input.same) {
+    if (!order.counterpartyId) throw new Error('This bill has no vendor record to keep separate.');
+    await recordVendorsDiffer(order.counterpartyId, other.counterpartyId);
+    await prisma.paymentOrderEvent.create({
+      data: {
+        organizationId: input.organizationId,
+        paymentOrderId: input.paymentOrderId,
+        eventType: 'policy_overridden',
+        actorType: 'user',
+        actorId: input.actorUserId,
+        beforeState: order.state,
+        afterState: order.state,
+        payloadJson: {
+          rule: 'similar_vendor',
+          reason: `${byName} confirmed "${thisName}" and "${other.displayName}" are different companies.`,
+        },
+      },
+    });
+    return { merged: false };
+  }
+
+  // One company. The bill moves onto the record with the history, and the name
+  // it arrived under becomes an alias so the next one matches without asking.
+  const survivingWallet = await prisma.counterpartyWallet.findFirst({
+    where: { organizationId: input.organizationId, counterpartyId: other.counterpartyId, isActive: true },
+    orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+  });
+  if (!survivingWallet) throw new Error(`${other.displayName} has no payout record to move this bill onto.`);
+
+  const duplicateId = order.counterpartyId;
+  await prisma.paymentOrder.update({
+    where: { paymentOrderId: input.paymentOrderId },
+    data: {
+      counterpartyId: other.counterpartyId,
+      counterpartyWalletId: survivingWallet.counterpartyWalletId,
+    },
+  });
+  if (normalizeVendorName(thisName) === normalizeVendorName(other.displayName) && thisName !== other.displayName) {
+    await recordVendorAlias(other.counterpartyId, thisName);
+  }
+
+  // The record this bill came in on, if it exists only because of this mistake.
+  // Left alone the moment anything else refers to it — a vendor row with real
+  // history is not ours to delete on the strength of one bill's answer.
+  if (duplicateId && duplicateId !== other.counterpartyId) {
+    const stillUsed = await prisma.paymentOrder.count({ where: { counterpartyId: duplicateId } });
+    if (stillUsed === 0) {
+      await prisma.counterpartyWallet.updateMany({
+        where: { counterpartyId: duplicateId }, data: { isActive: false },
+      });
+      await prisma.counterparty.update({
+        where: { counterpartyId: duplicateId }, data: { status: 'merged' },
+      });
+    }
+  }
+
+  await prisma.paymentOrderEvent.create({
+    data: {
+      organizationId: input.organizationId,
+      paymentOrderId: input.paymentOrderId,
+      eventType: 'policy_overridden',
+      actorType: 'user',
+      actorId: input.actorUserId,
+      beforeState: order.state,
+      afterState: order.state,
+      payloadJson: {
+        rule: 'similar_vendor',
+        reason: `${byName} confirmed "${thisName}" is ${other.displayName} — this bill moved onto that vendor.`,
+      },
+    },
+  });
+  return { merged: true };
 }
 
 export type SubmitBillInput = {

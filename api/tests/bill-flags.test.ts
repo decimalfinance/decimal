@@ -58,6 +58,7 @@ const baseFacts = {
   vendorHold: null,
   ceilingMinor: null,
   duplicates: [],
+  similarVendors: [],
   duplicateOverride: null,
   shortPay: null,
   amounts: { lineItemsTotal: null, subtotal: null, tax: null, total: null },
@@ -498,4 +499,107 @@ test('an invoice is still held to its arithmetic', () => {
     documentType: { invoiceNumber: 'NW-3320', lineInvoiceRefs: [], declaredKind: 'invoice' },
   });
   assert.equal(flags.some((f) => f.kind === 'lines_do_not_sum'), true);
+});
+
+// --- a vendor we may already have, under another name ------------------------
+
+test('a legal suffix is not a different company', async () => {
+  const { normalizeVendorName } = await import('../src/payments/vendor-similarity.js');
+  // The case that started this: an invoice from "Brightwave Media Ltd" for an
+  // org that already pays "Brightwave Media" created a second vendor record in
+  // silence.
+  assert.equal(normalizeVendorName('Brightwave Media Ltd'), 'brightwavemedia');
+  assert.equal(normalizeVendorName('Brightwave Media'), 'brightwavemedia');
+  assert.equal(normalizeVendorName('BRIGHTWAVE MEDIA, LTD.'), 'brightwavemedia');
+  // Two suffixes, because "Acme Co Ltd" carries both.
+  assert.equal(normalizeVendorName('Acme Co Ltd'), 'acme');
+  assert.equal(normalizeVendorName('Acme, Inc.'), 'acme');
+});
+
+test('only legal suffixes are stripped, so different companies stay different', async () => {
+  const { normalizeVendorName } = await import('../src/payments/vendor-similarity.js');
+  // bill-flags has a broader noise list that also drops "media", "labs" and
+  // "group". Reusing it here would make these one vendor. They are not, and a
+  // flag that says they are gets dismissed by reflex — the same way the old
+  // confidence scores did.
+  assert.notEqual(normalizeVendorName('Brightwave Media'), normalizeVendorName('Brightwave Films'));
+  assert.notEqual(normalizeVendorName('Acme Labs'), normalizeVendorName('Acme Studios'));
+});
+
+test('a name that is nothing but a suffix matches nothing', async () => {
+  const { normalizeVendorName, similarVendorsIn } = await import('../src/payments/vendor-similarity.js');
+  // "Ltd" against "Inc" would otherwise both reduce to the empty string and be
+  // declared the same company.
+  assert.equal(normalizeVendorName('Ltd'), '');
+  assert.equal(similarVendorsIn(
+    [{ counterpartyId: 'a', displayName: 'Inc', billCount: 3, keys: [''], notSameAs: [] }],
+    'Ltd', null,
+  ).length, 0);
+});
+
+test('the vendor with the history is offered first', async () => {
+  const { similarVendorsIn } = await import('../src/payments/vendor-similarity.js');
+  const found = similarVendorsIn([
+    { counterpartyId: 'stub', displayName: 'Brightwave Media Ltd', billCount: 0, keys: ['brightwavemedia'], notSameAs: [] },
+    { counterpartyId: 'real', displayName: 'Brightwave Media', billCount: 4, keys: ['brightwavemedia'], notSameAs: [] },
+  ], 'Brightwave Media Ltd', null);
+  // If one of these is the real vendor it is almost always the one that has
+  // been paid before.
+  assert.deepEqual(found.map((f) => f.counterpartyId), ['real', 'stub']);
+});
+
+test('a bill never matches its own vendor', async () => {
+  const { similarVendorsIn } = await import('../src/payments/vendor-similarity.js');
+  const directory = [
+    { counterpartyId: 'self', displayName: 'Brightwave Media', billCount: 4, keys: ['brightwavemedia'], notSameAs: [] },
+  ];
+  assert.equal(similarVendorsIn(directory, 'Brightwave Media', 'self').length, 0);
+});
+
+test('once somebody says they are different companies, we stop asking', async () => {
+  const { similarVendorsIn } = await import('../src/payments/vendor-similarity.js');
+  const directory = [
+    { counterpartyId: 'self', displayName: 'Brightwave Media Ltd', billCount: 1, keys: ['brightwavemedia'], notSameAs: ['other'] },
+    { counterpartyId: 'other', displayName: 'Brightwave Media', billCount: 4, keys: ['brightwavemedia'], notSameAs: ['self'] },
+  ];
+  // Both directions, because the next invoice can arrive under either name and
+  // an answer given once should hold whichever way round it comes.
+  assert.equal(similarVendorsIn(directory, 'Brightwave Media Ltd', 'self').length, 0);
+  assert.equal(similarVendorsIn(directory, 'Brightwave Media', 'other').length, 0);
+});
+
+test('an alias makes the next invoice match without asking again', async () => {
+  const { similarVendorsIn } = await import('../src/payments/vendor-similarity.js');
+  // After "same company" is answered once, the surviving vendor carries the
+  // other spelling — so a bill arriving under it lands on the right vendor
+  // rather than raising the question a second time.
+  const directory = [
+    { counterpartyId: 'real', displayName: 'Brightwave Media', billCount: 4,
+      keys: ['brightwavemedia', 'brightwavemediagroup'], notSameAs: [] },
+  ];
+  assert.equal(similarVendorsIn(directory, 'Brightwave Media Group', null)[0]?.counterpartyId, 'real');
+});
+
+test('the flag warns, offers both answers, and does not block', () => {
+  const flags = evaluateBillFlags({
+    ...baseFacts,
+    vendorName: 'Brightwave Media Ltd',
+    similarVendors: [{ counterpartyId: 'real', displayName: 'Brightwave Media', billCount: 4 }],
+  });
+  const flag = flags.find((f) => f.kind === 'similar_vendor');
+  assert.ok(flag, 'the resemblance is stated');
+  // A company written with and without its legal suffix is the common case;
+  // stopping every one of those would be noise that gets dismissed by reflex.
+  assert.equal(flag!.blocking, false);
+  assert.equal(flag!.severity, 'warning');
+  assert.match(flag!.message, /Brightwave Media Ltd/);
+  assert.match(flag!.message, /4 bills/);
+  const actions = flag!.resolutions.map((r) => r.action);
+  assert.ok(actions.includes('same_vendor') && actions.includes('different_vendor'));
+  // Neither answer asks for a written justification — both are determinations,
+  // and the target rides along so the answer knows which vendor it is about.
+  for (const r of flag!.resolutions.filter((x) => x.action !== 'ask_someone')) {
+    assert.equal(r.noReason, true);
+    assert.equal(r.targetId, 'real');
+  }
 });

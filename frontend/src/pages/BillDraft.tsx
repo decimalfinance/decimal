@@ -289,8 +289,9 @@ function DraftScreen(props: {
   // Flag resolutions. One mechanism for every flag rather than a bespoke path
   // per kind — the backend says which are available and who may take them, so
   // this only has to run the one the person chose.
-  type ResolutionAction = 'this_is_us' | 'not_ours' | 'ask_someone' | 'clear_duplicate' | 'fix_fields' | 'raise_ceiling' | 'release_vendor' | 'pay_the_lines';
-  const [activeResolution, setActiveResolution] = useState<{ flag: string; action: ResolutionAction } | null>(null);
+  type ResolutionAction = 'this_is_us' | 'not_ours' | 'ask_someone' | 'clear_duplicate' | 'fix_fields' | 'raise_ceiling' | 'release_vendor' | 'pay_the_lines'
+    | 'same_vendor' | 'different_vendor';
+  const [activeResolution, setActiveResolution] = useState<{ flag: string; action: ResolutionAction; targetId?: string } | null>(null);
   const [resolutionValue, setResolutionValue] = useState('');
   const [resolving, setResolving] = useState(false);
   const [askOf, setAskOf] = useState('');
@@ -531,6 +532,15 @@ function DraftScreen(props: {
         };
 
 
+  // Some answers are a determination, not a justification.
+  //
+  // "Same company" and "Different company" answer a question of fact, and
+  // demanding a sentence alongside would only ever produce "yes it is".
+  // Everything else here changes what gets paid or bypasses a control, and
+  // there the reason IS the record.
+  const resolutionNeedsReason = (action: ResolutionAction) =>
+    action !== 'same_vendor' && action !== 'different_vendor';
+
   function startResolution(flagKind: string, action: ResolutionAction) {
     // Actions that only point somewhere else need no input and no ceremony.
     if (action === 'fix_fields') {
@@ -571,13 +581,27 @@ function DraftScreen(props: {
     // retyping a company name off the screen is a needless chance to fat-finger it.
     const flag = billDraft.flags.find((f) => f.kind === flagKind);
     const claimed = action === 'this_is_us' ? /addressed to "([^"]+)"/.exec(flag?.message ?? '')?.[1] ?? '' : '';
-    setActiveResolution({ flag: flagKind, action });
+    const targetId = flag?.resolutions.find((r) => r.action === action)?.targetId;
+    // An answer that needs no reason needs no composer either. Opening a text
+    // box to ask "why do you say they are the same company?" would invite a
+    // sentence nobody wants to write and nobody will read; the click IS the
+    // answer, and who clicked is recorded.
+    if (!resolutionNeedsReason(action)) {
+      void runResolution({ flag: flagKind, action, targetId });
+      return;
+    }
+    setActiveResolution({ flag: flagKind, action, targetId });
     setResolutionValue(claimed);
   }
 
-  const runResolution = async () => {
-    if (!activeResolution || resolutionValue.trim().length < 3) return;
-    const { action } = activeResolution;
+  const runResolution = async (override?: { flag: string; action: ResolutionAction; targetId?: string }) => {
+    // The override exists for the answers that skip the composer: they are run
+    // the moment they are clicked, before React has re-rendered with them in
+    // state, so reading state here would find the previous resolution or none.
+    const current = override ?? activeResolution;
+    if (!current) return;
+    const { action } = current;
+    if (resolutionNeedsReason(action) && resolutionValue.trim().length < 3) return;
     setResolving(true);
     try {
       if (action === 'this_is_us') {
@@ -586,11 +610,23 @@ function DraftScreen(props: {
       } else if (action === 'clear_duplicate') {
         await billsApi.overrideDuplicate(organizationId, billDraft.paymentOrderId, resolutionValue.trim());
         toast.success('Cleared — your reason is on the bill’s record.', 'Duplicate flag');
+      } else if (action === 'same_vendor' || action === 'different_vendor') {
+        if (!current.targetId) throw new Error('That vendor is no longer on file.');
+        const same = action === 'same_vendor';
+        const { merged } = await billsApi.resolveSimilarVendor(
+          organizationId, billDraft.paymentOrderId, current.targetId, same,
+        );
+        toast.success(
+          merged
+            ? 'Moved onto the existing vendor — the name it arrived under is remembered, so the next one will match.'
+            : 'Kept separate — you will not be asked about this pair again.',
+          same ? 'Same company' : 'Different company',
+        );
       } else if (action === 'ask_someone') {
         await billsApi.ask(organizationId, billDraft.paymentOrderId, {
           askedOfUserId: askOf,
           question: resolutionValue.trim(),
-          aboutFlag: activeResolution.flag,
+          aboutFlag: current.flag,
           highlightFields: askFields,
           suggestionId,
           questionScope,
