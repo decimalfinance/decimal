@@ -20,9 +20,17 @@ type Props = {
   tone?: 'primary' | 'danger';
   onConfirm: () => void;
   onClose: () => void;
+  /**
+   * A third answer, for when leaving without doing it is itself a choice rather
+   * than a cancellation. "Save and leave / Discard and leave / Cancel" needs
+   * all three: Cancel keeps you on the page, Discard takes you off it, and
+   * collapsing them would make one of those unreachable.
+   */
+  secondaryLabel?: string;
+  onSecondary?: () => void;
 };
 
-export function ConfirmDialog({ title, body, confirmLabel, busyLabel, busy, tone, onConfirm, onClose }: Props) {
+export function ConfirmDialog({ title, body, confirmLabel, busyLabel, busy, tone, onConfirm, onClose, secondaryLabel, onSecondary }: Props) {
   return (
     <div
       className="overlay"
@@ -39,6 +47,11 @@ export function ConfirmDialog({ title, body, confirmLabel, busyLabel, busy, tone
         </div>
         <div className="dialog-foot">
           <button type="button" className="btn btn-secondary" onClick={onClose} disabled={busy}>Cancel</button>
+          {secondaryLabel && onSecondary ? (
+            <button type="button" className="btn btn-ghost" onClick={onSecondary} disabled={busy}>
+              {secondaryLabel}
+            </button>
+          ) : null}
           <button
             type="button"
             className={`btn ${tone === 'danger' ? 'btn-danger' : 'btn-primary'}`}

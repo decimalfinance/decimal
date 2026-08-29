@@ -293,6 +293,7 @@ function DraftScreen(props: {
     | 'same_vendor' | 'different_vendor';
   const [activeResolution, setActiveResolution] = useState<{ flag: string; action: ResolutionAction; targetId?: string } | null>(null);
   const [mergeVendor, setMergeVendor] = useState<{ targetId: string; name: string } | null>(null);
+  const [leaveOpen, setLeaveOpen] = useState(false);
   const [resolutionValue, setResolutionValue] = useState('');
   const [resolving, setResolving] = useState(false);
   const [askOf, setAskOf] = useState('');
@@ -651,7 +652,12 @@ function DraftScreen(props: {
         // Save first. The server adds up the lines it has stored, so deciding
         // to pay them while the screen holds unsaved edits would record a
         // number nobody is looking at.
-        await billsApi.saveDraft(organizationId, billDraft.paymentOrderId, currentBody());
+        const sent = currentBody();
+      await billsApi.saveDraft(organizationId, billDraft.paymentOrderId, sent);
+      savedBody.current = JSON.stringify(sent);
+      savedFieldValues.current = Object.fromEntries(
+        Object.entries(fields).map(([k, v]) => [k, v.value]),
+      );
         await billsApi.payItemised(organizationId, billDraft.paymentOrderId, resolutionValue.trim());
         toast.success('Recorded — the approvers will see the amount and why it changed.', 'Paying the itemised total');
       }
@@ -844,6 +850,24 @@ function DraftScreen(props: {
     noteForApprovers: note.trim() || null,
   }), [fields, lines, documentTotal, taxNumber, note, vendorName, vendorEmail]);
 
+  // What was on the screen the last time it agreed with the server.
+  //
+  // Compared against the body that gets SENT, rather than tracking every input
+  // separately, so the two can never disagree about what "changed" means — and
+  // typing a value back to what it was correctly counts as no change.
+  const savedBody = useRef<string | null>(null);
+  // Per field, so the note can sit under the one that changed rather than
+  // announcing somewhere on the page that something, somewhere, is unsaved.
+  const savedFieldValues = useRef<Record<string, string> | null>(null);
+  if (savedFieldValues.current === null) {
+    savedFieldValues.current = Object.fromEntries(
+      Object.entries(fields).map(([k, v]) => [k, v.value]),
+    );
+  }
+  const currentSerialized = JSON.stringify(currentBody());
+  if (savedBody.current === null) savedBody.current = currentSerialized;
+  const hasUnsavedChanges = !readOnly && canEditBills && savedBody.current !== currentSerialized;
+
   // --- save: keep it, send nothing ------------------------------------------
   const saveChanges = useCallback(async () => {
     if (!canEditBills || readOnly || saving) return;
@@ -941,7 +965,8 @@ function DraftScreen(props: {
       {/* Topbar */}
       <div className="topbar">
         <div className="tb-context">
-          <button type="button" className="btn btn-ghost tb-back" onClick={onBack}>
+          <button type="button" className="btn btn-ghost tb-back"
+            onClick={() => { if (hasUnsavedChanges) setLeaveOpen(true); else onBack(); }}>
             <Ico.chevLeft w={15} /> Bills
           </button>
           {/* Who put this bill here — a bill clerk's first question when a bill
@@ -1431,6 +1456,8 @@ function DraftScreen(props: {
                     onChange={(v) => setFieldValue(f.key, v)}
                     onConfirm={() => confirmField(f.key)}
                     onFocusField={() => setActiveSource(f.source ?? null)}
+                    unsaved={savedFieldValues.current?.[f.key] !== undefined
+                      && savedFieldValues.current[f.key] !== (fields[f.key]?.value ?? '')}
                   />
                 ))}
               </div>
@@ -1460,6 +1487,8 @@ function DraftScreen(props: {
                     onChange={(v) => setFieldValue(f.key, v)}
                     onConfirm={() => confirmField(f.key)}
                     onFocusField={() => setActiveSource(f.source ?? null)}
+                    unsaved={savedFieldValues.current?.[f.key] !== undefined
+                      && savedFieldValues.current[f.key] !== (fields[f.key]?.value ?? '')}
                     // Only the invoice number, and only when the document had
                     // none: a bill cannot be sent without one, and inventing a
                     // reference is a real answer rather than a way round the
@@ -1689,6 +1718,20 @@ function DraftScreen(props: {
           busy={submitting}
           onConfirm={() => { setConfirmOpen(false); void confirm(); }}
           onClose={() => setConfirmOpen(false)}
+        />
+      ) : null}
+
+      {leaveOpen ? (
+        <ConfirmDialog
+          title="Save your changes first?"
+          body="This bill has edits that have not been saved. Leaving now loses them."
+          confirmLabel="Save and leave"
+          busyLabel="Saving…"
+          busy={saving}
+          onConfirm={async () => { await saveChanges(); setLeaveOpen(false); onBack(); }}
+          onClose={() => setLeaveOpen(false)}
+          secondaryLabel="Discard and leave"
+          onSecondary={() => { setLeaveOpen(false); onBack(); }}
         />
       ) : null}
 
@@ -2132,8 +2175,10 @@ function DraftField(props: {
   askedQuestion?: string | null;
   /** Offered under an empty field that can have a value constructed for it. */
   onGenerate?: () => void;
+  /** This field holds an edit that has not been saved. */
+  unsaved?: boolean;
 }) {
-  const { def, current, readOnly, onChange, onConfirm, onFocusField, askedBy, askedQuestion, onGenerate } = props;
+  const { def, current, readOnly, onChange, onConfirm, onFocusField, askedBy, askedQuestion, onGenerate, unsaved } = props;
   const needsLook = current.state === 'needs_look';
   // Reuse the amber "needs attention" state rather than inventing a second
   // visual language for the same idea: this field wants a human's eye.
@@ -2180,6 +2225,12 @@ function DraftField(props: {
             <button type="button" className="ftag-btn" onClick={onConfirm}>Confirm</button>
           ) : null}
         </span>
+      ) : unsaved ? (
+        // Same one-note slot as the rest. It outranks Generate — a field you
+        // have just typed into is not a field waiting to be filled — and sits
+        // below Confirmed, Asked and Check, which are all about the value
+        // itself rather than about whether it has reached the server yet.
+        <span className="ftag is-generate">Unsaved</span>
       ) : onGenerate && !current.value.trim() && !readOnly ? (
         // Sits in the same one-note slot as the others, never stacked with them
         // — an empty field has nothing to confirm and nobody waiting on it, so
