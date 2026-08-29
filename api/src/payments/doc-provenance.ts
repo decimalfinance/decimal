@@ -32,7 +32,7 @@ const execFileAsync = promisify(execFile);
 
 // Version of the matcher; stamped wherever refinement ran so the review path
 // knows to re-run after matcher improvements.
-export const PROVENANCE_VERSION = 12; // v12: address parts need corroboration
+export const PROVENANCE_VERSION = 13; // v13: margins scale with the text
 
 export type TextWord = { text: string; x0: number; y0: number; x1: number; y1: number }; // 0-1 fractions, top-left origin
 export type TextPage = {
@@ -746,7 +746,10 @@ const PAD = 0.006;
 // words for the border to sit in. A hairline outline fixed the look; the extra
 // height is back off.
 const TILTED_HALF_HEIGHT = 0.6;
-const TILTED_PAD = 0.25;
+// Vertical margin as a multiple of the text's own height. A box round one line
+// of a tightly-set letterhead has very little room before it starts covering
+// the line beneath.
+const BOX_PAD = 0.25;
 
 /**
  * The box the viewer draws — tightened and tilted to sit on tilted text.
@@ -773,28 +776,33 @@ const TILTED_PAD = 0.25;
  */
 function toSource(b: Box, page?: TextPage): SourceBox {
   let { y0, y1 } = b;
-  let padY = PAD;
   const skew = page?.skewDeg ?? 0;
   const tilted = page != null && Math.abs(skew) >= MIN_SKEW_DEG;
-  if (tilted) {
-    // How tall the text in this box actually is, measured from the words in it.
-    //
-    // The first attempt inferred it — enclosing height minus width x tan(tilt)
-    // — which is right on paper and fragile in practice: the subtraction ran
-    // slightly long, hit its own floor, and produced a bar THINNER than the
-    // glyphs, which the padding then had to make up. Measuring beats deriving
-    // when the measurement is sitting right there.
-    const inside = page.words.filter((w) => {
-      const cx = (w.x0 + w.x1) / 2;
-      const cy = (w.y0 + w.y1) / 2;
-      return cx >= b.x0 && cx <= b.x1 && cy >= b.y0 && cy <= b.y1;
-    });
-    const heights = inside.map((w) => w.y1 - w.y0).sort((a, b2) => a - b2);
-    if (heights.length > 0) {
-      // Median, so one tall glyph or one misread speck does not set the height
-      // for the whole run.
-      const line = heights[Math.floor(heights.length / 2)]!;
-      // And the CENTRE comes from the words too, not from the middle of the
+
+  // How tall the text in this box actually is, measured from the words in it.
+  //
+  // Measured for EVERY box now, not only tilted ones. A flat margin is a
+  // sensible-looking number and it is more than half the height of a box round
+  // one line of an address block: D4's street came out 31px tall around 12px of
+  // text, reaching into the line beneath and highlighting words that are not
+  // the answer. Letterheads are set tightly, so the margin has to know how big
+  // the type is.
+  const inside = page
+    ? page.words.filter((w) => {
+        const cx = (w.x0 + w.x1) / 2;
+        const cy = (w.y0 + w.y1) / 2;
+        return cx >= b.x0 && cx <= b.x1 && cy >= b.y0 && cy <= b.y1;
+      })
+    : [];
+  const heights = inside.map((w) => w.y1 - w.y0).sort((a, b2) => a - b2);
+  // Median, so one tall glyph or one misread speck does not set the height for
+  // the whole run.
+  const line = heights.length > 0 ? heights[Math.floor(heights.length / 2)]! : null;
+  const padY = line ? Math.min(PAD, line * BOX_PAD) : PAD;
+
+  if (tilted && page) {
+    if (line) {
+      // The CENTRE comes from the words too, not from the middle of the
       // rectangle that encloses them.
       //
       // C1's first row sat visibly high, and one token was the whole reason:
@@ -816,10 +824,6 @@ function toSource(b: Box, page?: TextPage): SourceBox {
       const cy = centres[Math.floor(centres.length / 2)]!;
       y0 = cy - line * TILTED_HALF_HEIGHT;
       y1 = cy + line * TILTED_HALF_HEIGHT;
-      // And a thinner margin, or the padding alone would be most of the box: a
-      // constant that looks snug round a whole upright cell is half again the
-      // height of a single tilted line of text.
-      padY = Math.min(PAD, line * TILTED_PAD);
     }
   }
   const px0 = Math.max(0, b.x0 - PAD);

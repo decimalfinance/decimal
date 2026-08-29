@@ -1561,7 +1561,8 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   const fields = headerFieldDefs.map((f) => ({
     ...f,
     ...fieldState({ key: f.key, value: f.value, fieldConfidence, fieldStatus, issues, ungrounded, confirmedKeys }),
-    source: sourceOf(sourceKeyByField[f.key] ?? f.key),
+    // A field with no value has nothing on the page to point at.
+    source: f.value == null || f.value === '' ? null : sourceOf(sourceKeyByField[f.key] ?? f.key),
   }));
 
   const remitToRaw = isRecord(extracted.remitTo) ? extracted.remitTo : {};
@@ -1598,9 +1599,19 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       // Remit To panel, silently had no highlight on any document. The refiner
       // produces the per-part keys now; this is the other half of the same fix,
       // and one without the other still shows nothing.
-      source: usedVendorAddress
-        ? sourceOf(`vendorAddress.${part}`) ?? sourceOf('vendorAddress')
-        : sourceOf(remitPartSourceKey[part]) ?? sourceOf('remitTo'),
+      // Empty means empty: no box, not the whole address block.
+      //
+      // D4 is a UK address, so it has no state and no zip — correctly, because
+      // there are none to read. Both boxes fell through to the whole-address
+      // match anyway, and clicking an empty field lit up the entire letterhead
+      // as though that were the answer. A highlight is a claim that the value
+      // came from there, and for a field with no value there is no such claim
+      // to make.
+      source: value == null || value === ''
+        ? null
+        : usedVendorAddress
+          ? sourceOf(`vendorAddress.${part}`) ?? sourceOf('vendorAddress')
+          : sourceOf(remitPartSourceKey[part]) ?? sourceOf('remitTo'),
     };
   });
 

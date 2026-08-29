@@ -766,3 +766,27 @@ test('the whitespace a letterhead actually uses survives', () => {
     '340 Congress St\r\n\tAustin, TX 78701',
   );
 });
+
+test('a box round one line of a letterhead does not reach the line below', () => {
+  // D4's street came out 31px tall around 12px of text, covering the line
+  // beneath it. The margin was a flat constant — a sensible-looking number that
+  // happens to be more than half the height of a box round one line of an
+  // address block. Letterheads are set tightly, so the margin has to know how
+  // big the type is.
+  const H = 0.009;                              // text height
+  const page: TextPage = {
+    aspect: 0.773, skewDeg: 0,
+    words: [
+      { text: '14', x0: 0.06, y0: 0.060, x1: 0.08, y1: 0.060 + H },
+      { text: 'Clerkenwell', x0: 0.085, y0: 0.060, x1: 0.20, y1: 0.060 + H },
+      { text: 'Road', x0: 0.205, y0: 0.060, x1: 0.25, y1: 0.060 + H },
+    ],
+  };
+  const invoice = fakeInvoice({ vendorAddress: '14 Clerkenwell Road' });
+  refineInvoiceSources(invoice, [page]);
+  const box = invoice.fieldSources!['vendorAddress.street'] ?? invoice.fieldSources!.vendorAddress!;
+  // Comfortably under twice the type size: enough to breathe, not enough to
+  // reach the next line of an address set on tight leading.
+  assert.ok(box.box[3] < H * 2, `box ${box.box[3]} should be under ${H * 2}`);
+  assert.ok(box.box[3] > H, 'and still clears the glyphs');
+});
