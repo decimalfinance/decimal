@@ -1408,7 +1408,12 @@ function DraftScreen(props: {
                   </p>
                 </div>
               </div>
-              <div className="rev-grid" style={{ gridTemplateColumns: '1fr 1fr', marginBottom: 16 }}>
+              {/* Name, email, street — then city, state, zip, country beneath.
+                  Two and five put the whole address on one line and squeezed
+                  State and ZIP into columns too narrow to read their own
+                  labels; three and four gives every box room and keeps the
+                  address reading in its printed order. */}
+              <div className="rev-grid" style={{ gridTemplateColumns: '1.4fr 1.4fr 1.2fr', marginBottom: 16 }}>
                 {/* Hand-rolled rather than DraftField because these two are
                     bound to their own state, not to billDraft.fields — which is
                     why they were the only fields in the vocabulary that could
@@ -1444,11 +1449,24 @@ function DraftScreen(props: {
                   onFocusField={() => setActiveSource(billDraft.vendor.emailSource ?? null)}
                   placeholder="Not on document"
                 />
+                {billDraft.remitFields.filter((f) => f.key === 'remitTo.street').map((f) => (
+                  <DraftField
+                    key={f.key}
+                    askedBy={askedFields.get(f.key)?.by ?? null}
+                    askedQuestion={askedFields.get(f.key)?.question ?? null}
+                    def={f}
+                    current={fields[f.key]!}
+                    readOnly={readOnly}
+                    onChange={(v) => setFieldValue(f.key, v)}
+                    onConfirm={() => confirmField(f.key)}
+                    onFocusField={() => setActiveSource(f.source ?? null)}
+                    unsaved={savedFieldValues.current?.[f.key] !== undefined
+                      && savedFieldValues.current[f.key] !== (fields[f.key]?.value ?? '')}
+                  />
+                ))}
               </div>
-              {/* Five now: most of the world has no state, and for a vendor
-                  abroad the country is often the line that matters most. */}
-              <div className="rev-grid" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr' }}>
-                {billDraft.remitFields.map((f) => (
+              <div className="rev-grid" style={{ gridTemplateColumns: '1fr 1fr 1fr 1fr' }}>
+                {billDraft.remitFields.filter((f) => f.key !== 'remitTo.street').map((f) => (
                   <DraftField
                     key={f.key}
                     askedBy={askedFields.get(f.key)?.by ?? null}
