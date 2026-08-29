@@ -553,6 +553,22 @@ function sumLineAmounts(rows: unknown[], amountKey: string): number | null {
  * how the first save on a bill gets a truthful baseline without anything having
  * been written at intake.
  */
+/**
+ * Bills from this vendor before this one.
+ *
+ * Read off the directory that is already loaded for the near-match check, so
+ * asking costs nothing extra. The directory counts every bill including the one
+ * being looked at, hence the subtraction.
+ */
+function priorBillsIn(
+  directory: Array<{ counterpartyId: string; billCount: number }>,
+  counterpartyId: string | null,
+): number {
+  if (!counterpartyId) return 0;
+  const found = directory.find((c) => c.counterpartyId === counterpartyId);
+  return Math.max(0, (found?.billCount ?? 0) - 1);
+}
+
 export async function flagsForOrder(
   organizationId: string,
   paymentOrderId: string,
@@ -594,13 +610,11 @@ export async function flagsForOrder(
   ]);
 
   const vendorNameForFlags = order.counterparty?.displayName ?? order.counterpartyWallet.label;
-  const similarVendors = similarVendorsIn(
-    await loadVendorDirectory(organizationId),
-    vendorNameForFlags,
-    order.counterpartyId,
-  );
+  const directory = await loadVendorDirectory(organizationId);
+  const similarVendors = similarVendorsIn(directory, vendorNameForFlags, order.counterpartyId);
   return evaluateBillFlags({
     similarVendors,
+    priorBillsFromVendor: priorBillsIn(directory, order.counterpartyId),
     vendorName: order.counterparty?.displayName ?? order.counterpartyWallet.label,
     organizationName: displayOrgName(org.organizationName),
     tradingNames: readTradingNames(org.tradingNames),
@@ -1098,6 +1112,7 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
         order.counterparty?.displayName ?? order.counterpartyWallet.label,
         order.counterpartyId,
       ),
+      priorBillsFromVendor: priorBillsIn(vendorDirectory, order.counterpartyId),
       vendorName: order.counterparty?.displayName ?? order.counterpartyWallet.label,
       organizationName: org.organizationName,
       tradingNames: readTradingNames(org.tradingNames),
@@ -1847,12 +1862,14 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     where: { organizationId },
     select: { organizationName: true, tradingNames: true },
   });
+  const draftDirectory = await loadVendorDirectory(organizationId);
   const flags = evaluateBillFlags({
     similarVendors: similarVendorsIn(
-      await loadVendorDirectory(organizationId),
+      draftDirectory,
       order.counterparty?.displayName ?? order.counterpartyWallet.label,
       order.counterpartyId,
     ),
+    priorBillsFromVendor: priorBillsIn(draftDirectory, order.counterpartyId),
     vendorName: order.counterparty?.displayName ?? order.counterpartyWallet.label,
     organizationName: displayOrgName(flagOrg.organizationName),
     tradingNames: readTradingNames(flagOrg.tradingNames),

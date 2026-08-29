@@ -59,6 +59,7 @@ const baseFacts = {
   ceilingMinor: null,
   duplicates: [],
   similarVendors: [],
+  priorBillsFromVendor: 0,
   duplicateOverride: null,
   shortPay: null,
   amounts: { lineItemsTotal: null, subtotal: null, tax: null, total: null },
@@ -602,4 +603,36 @@ test('the flag warns, offers both answers, and does not block', () => {
     assert.equal(r.noReason, true);
     assert.equal(r.targetId, 'real');
   }
+});
+
+test('a vendor with history is not announced as a new one', () => {
+  // The rule behind this flag is written at UPLOAD, from the state of the
+  // vendor's wallet at that moment. Answering "same company" on a near-match
+  // then moves the bill onto a record with years of history — and the flag went
+  // on saying "First bill from vendor" about a company with four bills, because
+  // it was describing a vendor record the bill no longer belonged to.
+  const flags = evaluateBillFlags({
+    ...baseFacts,
+    triggeredRules: ['unreviewed_counterparty'],
+    priorBillsFromVendor: 4,
+  });
+  assert.equal(flags.some((f) => f.kind === 'new_vendor'), false);
+});
+
+test('a genuinely first bill still says so', () => {
+  // The fix must not silence the flag entirely: on a real first bill it is the
+  // context an approver wants.
+  const flags = evaluateBillFlags({
+    ...baseFacts,
+    triggeredRules: ['unreviewed_counterparty'],
+    priorBillsFromVendor: 0,
+  });
+  assert.equal(flags.some((f) => f.kind === 'new_vendor'), true);
+});
+
+test('the count outranks the snapshot in both directions', () => {
+  // A bill whose intake raised nothing is not dressed up as a new vendor just
+  // because the count is zero — the snapshot still has to have said something.
+  const flags = evaluateBillFlags({ ...baseFacts, triggeredRules: [], priorBillsFromVendor: 0 });
+  assert.equal(flags.some((f) => f.kind === 'new_vendor'), false);
 });

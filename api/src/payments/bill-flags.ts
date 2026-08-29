@@ -130,6 +130,11 @@ export type BillFlagFacts = {
   /** Vendors already on file whose identifying name matches this one's. */
   similarVendors: Array<{ counterpartyId: string; displayName: string; billCount: number }>;
   /**
+   * Bills this org has had from this vendor BEFORE this one — counted now,
+   * not when the document was uploaded.
+   */
+  priorBillsFromVendor: number;
+  /**
    * A recorded decision to pay what the bill itemises rather than the figure
    * printed on it. Present only once somebody has made it.
    */
@@ -509,7 +514,18 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
   }
 
   // Informational, and deliberately last: it is context, not a problem.
-  if (rules.has('unreviewed_counterparty') || rules.has('new_counterparty_threshold')) {
+  //
+  // The rule behind it is a SNAPSHOT, written at upload from the state of the
+  // vendor's wallet at that moment. That is fine until the bill changes vendor:
+  // answering "same company" on a near-match moves it onto a record with years
+  // of history, and this went on announcing "first bill from vendor" about a
+  // company with four. The stored rule was describing a vendor record the bill
+  // no longer belongs to.
+  //
+  // So the snapshot proposes and the present decides. Anything counted now
+  // outranks anything recorded then.
+  if ((rules.has('unreviewed_counterparty') || rules.has('new_counterparty_threshold'))
+    && facts.priorBillsFromVendor === 0) {
     flags.push({
       kind: 'new_vendor',
       severity: 'info',
