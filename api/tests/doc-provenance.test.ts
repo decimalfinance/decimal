@@ -13,6 +13,7 @@ import {
   stripUnmeasuredSources,
   type TextPage,
 } from '../src/payments/doc-provenance.js';
+import { stripUnstorableCharacters } from '../src/payments/document-extract.js';
 
 // A miniature invoice text layer (fractions of a 1000x1000 page for readability).
 function word(text: string, x0: number, y0: number, x1: number, y1: number) {
@@ -734,4 +735,34 @@ test('a multi-page document reports all of its pages, not one', async () => {
   // the least wrong.
   assert.equal(documentPageCount(null, null), 1);
   assert.equal(documentPageCount({ length: 0 }, null), 1, 'zero renders is not zero pages');
+});
+
+// --- characters Postgres will not store --------------------------------------
+
+test('a NUL from the model is removed before anything tries to store it', () => {
+  // D4 failed to become a bill at all, on 22P05 — "\u0000 cannot be converted
+  // to text" — and the raw Prisma error went to the screen. A NUL is valid JSON
+  // and a valid JavaScript string and illegal in a Postgres text or jsonb
+  // value, so it travels from the model all the way to the INSERT before
+  // anything objects. The document was innocent: its text layer has no NUL in
+  // it anywhere. The model emitted one.
+  const dirty = {
+    vendorName: 'Brightwave Media Ltd\u0000',
+    lineItems: [{ description: 'Design retainer \u0000\u0001 August' }],
+    remitTo: { street: '14 Clerkenwell\u0007 Road' },
+  };
+  assert.deepEqual(stripUnstorableCharacters(dirty), {
+    vendorName: 'Brightwave Media Ltd',
+    lineItems: [{ description: 'Design retainer  August' }],
+    remitTo: { street: '14 Clerkenwell Road' },
+  });
+});
+
+test('the whitespace a letterhead actually uses survives', () => {
+  // Tab, newline and carriage return are how an address is printed across two
+  // lines — stripping those would undo the address splitting.
+  assert.equal(
+    stripUnstorableCharacters('340 Congress St\r\n\tAustin, TX 78701'),
+    '340 Congress St\r\n\tAustin, TX 78701',
+  );
 });

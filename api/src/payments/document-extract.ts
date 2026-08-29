@@ -388,6 +388,33 @@ const EXTRACTION_JSON_SCHEMA = {
  * open-ended map. Converting here means one place knows that, instead of every
  * consumer of an extraction.
  */
+/**
+ * Strip characters no Postgres text column will accept.
+ *
+ * NUL is the one that actually bites: valid JSON, valid in a JS string, and
+ * rejected outright by Postgres text and jsonb. The other C0 controls are taken
+ * with it — none of them can appear on a printed invoice, so their presence is
+ * always a transport artefact rather than something a vendor wrote. Tab,
+ * newline and carriage return stay, because a letterhead address uses them.
+ *
+ * Recursive, and it rebuilds rather than mutating: the parsed response is
+ * handed straight to Zod afterwards and should not be edited underneath it.
+ */
+export function stripUnstorableCharacters(value: unknown): unknown {
+  if (typeof value === 'string') {
+    // eslint-disable-next-line no-control-regex
+    return value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+  }
+  if (Array.isArray(value)) return value.map(stripUnstorableCharacters);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .map(([k, v]) => [stripUnstorableCharacters(k), stripUnstorableCharacters(v)]),
+    );
+  }
+  return value;
+}
+
 function foldKeyedArrays(invoice: Record<string, unknown>): Record<string, unknown> {
   const out = { ...invoice };
 
@@ -1001,6 +1028,19 @@ async function runExtractionLlm(args: {
   } catch {
     throw new Error(`Model response was not valid JSON. Got: ${content.slice(0, 500)}`);
   }
+  // Characters Postgres will not store, removed before anything tries.
+  //
+  // D4 died on insert with 22P05 — "\u0000 cannot be converted to text" — and
+  // the raw driver error went to the screen. A NUL is legal in JSON and legal
+  // in a JavaScript string, and illegal in a Postgres text or jsonb value, so
+  // it travels all the way from the model to the INSERT before anything
+  // objects. The document was innocent: its text layer has no NUL in it. The
+  // model emitted one.
+  //
+  // Here, because this is the boundary where the model's output stops being a
+  // response and becomes our data. Cleaning it later would mean finding every
+  // field that might carry one; cleaning it at the door is one pass.
+  raw = stripUnstorableCharacters(raw);
   // The wire sends fieldStatus and fieldSources as arrays because strict mode
   // cannot express an open-ended map; everything downstream reads records.
   // Folded here so exactly one place knows that.
