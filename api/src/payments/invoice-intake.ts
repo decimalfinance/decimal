@@ -478,10 +478,27 @@ export async function processInvoiceDocument(args: {
         paymentOrder,
       });
     } catch (error) {
+      // What the person is told depends on WHOSE problem it is.
+      //
+      // An unreadable amount is a fact about the document, and saying so helps.
+      // A failure inside the database is not — D4 put a Prisma stack trace on
+      // the screen, complete with file paths, line numbers and a Postgres error
+      // code, in place of anything a bill clerk could act on. The detail belongs
+      // in the log, where somebody can chase it; the screen gets the truth
+      // plainly, including whose fault it was.
+      const message = error instanceof RangeError && error.message
+        ? error.message
+        : 'We could not save this bill. That is a fault on our side rather than a problem with the document — the file is stored, so try the upload again.';
+      logger.error('invoice_intake.order_creation_failed', {
+        organizationId: args.organizationId,
+        filename: args.filename,
+        counterparty: row.counterparty,
+        ...(error instanceof Error ? { message: error.message, stack: error.stack } : { error: String(error) }),
+      });
       skipped.push(buildSkippedRow(
         row,
         error instanceof RangeError ? 'invalid_amount' : 'creation_failed',
-        error instanceof Error ? error.message : 'Payment order creation failed.',
+        message,
       ));
     }
   }
