@@ -13,7 +13,7 @@ import {
   stripUnmeasuredSources,
   type TextPage,
 } from '../src/payments/doc-provenance.js';
-import { stripUnstorableCharacters } from '../src/payments/document-extract.js';
+import { stripUnstorableCharacters, repairAgainstDocument } from '../src/payments/document-extract.js';
 
 // A miniature invoice text layer (fractions of a 1000x1000 page for readability).
 function word(text: string, x0: number, y0: number, x1: number, y1: number) {
@@ -789,4 +789,63 @@ test('a box round one line of a letterhead does not reach the line below', () =>
   // reach the next line of an address set on tight leading.
   assert.ok(box.box[3] < H * 2, `box ${box.box[3]} should be under ${H * 2}`);
   assert.ok(box.box[3] > H, 'and still clears the glyphs');
+});
+
+// --- what the model mistyped, put back from the document ---------------------
+
+const D4_TEXT = [
+  'Brightwave Media Ltd                          INVOICE',
+  'DESCRIPTION                          QTY   UNIT PRICE      AMOUNT',
+  'Design retainer — August               1    $1,900.00   $1,900.00',
+  '                                       Subtotal          $1,900.00',
+].join('\n');
+
+test('a mistyped character is restored from the document, not merely stripped', () => {
+  // D4 printed "Design retainer — August". The model returned the JSON escape
+  // \u00096 — malformed, but VALID JSON — which JSON.parse turned into a tab
+  // and a stray 6. Nothing downstream could object, because nothing downstream
+  // had the original to compare against.
+  //
+  // Stripping the control character is not enough: "Design retainer 6 August"
+  // reads like a fact about the invoice and is not one. The character it should
+  // have been cannot be recovered from the escape — \u0009 and \u2014 share no
+  // digits — but it is sitting in the document.
+  assert.equal(
+    repairAgainstDocument('Design retainer \u00096 August', D4_TEXT),
+    'Design retainer — August',
+  );
+});
+
+test('the description is taken from its own cell, not the whole row', () => {
+  // The line in the document carries the quantity and both amounts after it.
+  // Adopting the row wholesale would trade one wrong description for a longer
+  // one.
+  const repaired = repairAgainstDocument('Design retainer \u00096 August', D4_TEXT);
+  assert.doesNotMatch(repaired, /1,900/);
+  assert.doesNotMatch(repaired, /QTY/);
+});
+
+test('a description that matches nothing is left exactly as it was', () => {
+  // Only a slip is repaired. Where the words do not agree, the model may be
+  // reading something this crude line-splitting cannot see, and overwriting it
+  // would be the worse guess.
+  assert.equal(repairAgainstDocument('Consulting fees', D4_TEXT), 'Consulting fees');
+  assert.equal(repairAgainstDocument('Design retainer — August', null), 'Design retainer — August');
+});
+
+test('two lines with the same words repair to neither', () => {
+  // An invoice may bill the same thing twice. With no way to tell which line
+  // was meant, changing it is a coin flip dressed as a correction.
+  const twice = ['Monthly retainer — A   1  $10.00', 'Monthly retainer – B   1  $10.00'].join('\n');
+  const ambiguous = 'Monthly retainer X';
+  assert.equal(repairAgainstDocument(ambiguous, twice), ambiguous);
+});
+
+test('punctuation is what gets mangled, so it is not what we match on', () => {
+  // Matching on punctuation would defeat the purpose: the mangled character is
+  // punctuation. Words agreeing is the signal.
+  assert.equal(
+    repairAgainstDocument('Design retainer / August', D4_TEXT),
+    'Design retainer — August',
+  );
 });

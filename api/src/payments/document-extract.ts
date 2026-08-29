@@ -400,6 +400,46 @@ const EXTRACTION_JSON_SCHEMA = {
  * Recursive, and it rebuilds rather than mutating: the parsed response is
  * handed straight to Zod afterwards and should not be edited underneath it.
  */
+/**
+ * Put back what the model mistyped, using the document's own characters.
+ *
+ * On the text path the model is copying from text we already hold exactly, so a
+ * description that does not appear in that text is a transcription slip, not a
+ * reading of the page. D4 printed "Design retainer — August" and the model
+ * returned "Design retainer \u00096 August" — a malformed escape, VALID JSON,
+ * which JSON.parse duly turned into a tab and a stray 6. Nothing downstream
+ * could object, because nothing downstream had the original.
+ *
+ * Stripping the control character is not enough: it leaves "Design retainer 6
+ * August", which reads like a fact about the invoice and is not one. The
+ * character it was meant to be is unrecoverable from the escape — \u0009 and
+ * \u2014 share no digits — but it is sitting in the document.
+ *
+ * Matched on WORDS ONLY, deliberately. Punctuation is exactly what gets
+ * mangled, so comparing it would defeat the purpose; and requiring the words to
+ * agree exactly keeps this from rewriting one line item into another. Where two
+ * lines of a document have the same words, neither is adopted — an invoice with
+ * two identical descriptions gives us no way to tell which was meant.
+ */
+export function repairAgainstDocument(value: string, layoutText: string | null): string {
+  if (!layoutText) return value;
+  const words = (t: string) => (t.toLowerCase().match(/[a-z]+/g) ?? []).join(' ');
+  const key = words(value);
+  // A description of digits and punctuation alone gives nothing to match on.
+  if (key.length < 3) return value;
+
+  const candidates = new Set<string>();
+  for (const rawLine of layoutText.split(/\r?\n/)) {
+    // The description is the first cell: everything up to the run of spaces
+    // that separates it from the quantity column.
+    const cell = rawLine.split(/\s{2,}/)[0]?.trim();
+    if (!cell) continue;
+    if (words(cell) === key) candidates.add(cell);
+  }
+  // Exactly one line agrees, so there is no doubt about which text was meant.
+  return candidates.size === 1 ? [...candidates][0]! : value;
+}
+
 export function stripUnstorableCharacters(value: unknown): unknown {
   if (typeof value === 'string') {
     // eslint-disable-next-line no-control-regex
@@ -909,6 +949,16 @@ async function extractFromText(args: {
     model: config.openAiTextModel,
     mediumRules: TEXT_ONLY_RULES,
   });
+
+  // The characters are exact, so anything the model retyped can be checked
+  // against them. A description that does not appear in the text is a
+  // transcription slip rather than a reading of the page, and the page is right
+  // here to correct it from.
+  for (const invoice of attempt.invoices) {
+    for (const line of invoice.lineItems ?? []) {
+      if (line.description) line.description = repairAgainstDocument(line.description, args.layoutText);
+    }
+  }
 
   // No wallet retry on this path. That retry exists for a vision failure — 1/l/I
   // and 0/O confused by OCR — and the characters here are exact. A base58
