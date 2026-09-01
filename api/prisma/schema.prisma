@@ -645,6 +645,11 @@ model InboundEmailMessage {
   payloadJson           Json      @default("{}") @map("payload_json")
   receivedAt            DateTime  @default(now()) @map("received_at") @db.Timestamptz(6)
   processedAt           DateTime? @map("processed_at") @db.Timestamptz(6)
+  /// Set once, the first time we tell the sender their email made no bill.
+  /// Also the loop guard: an out-of-office reply to our notice must not earn
+  /// a second one.
+  senderNotifiedAt      DateTime? @map("sender_notified_at") @db.Timestamptz(6)
+  senderNoticeKind      String?   @map("sender_notice_kind")
   createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
   organization          Organization? @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)

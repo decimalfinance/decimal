@@ -97,6 +97,7 @@ Fixtures in `api/tests/fixtures/inbound-email/`:
 | `email-received.unknown-org.json` | address matches no org |
 | `email-received.no-attachments.json` | plain mail with nothing to read |
 | `email-received.multi-attachment.json` | inline logo skipped, .docx skipped, PDF ingested |
+| `email-received.outlook-signature.json` | a 3 KB `image001.png` sent as a real attachment, not inline — skipped by size and name once the bytes arrive, PDF beside it still ingests |
 
 `attachmentBytes` maps an attachment id to base64 bytes, which the fetcher
 consults before any network call. To use a real invoice instead of the tiny
@@ -106,6 +107,13 @@ Only signature verification is bypassed — org resolution, sender authorization
 dedupe, persistence, the fetch queue and the sweep are all the real code paths.
 Sending the same fixture twice should return `{"status":"deduped"}` and create
 nothing new.
+
+**The sender gets told when their email makes no bill.** Only ever a recognised
+member, never a stranger, and once per message. On the bench nothing actually
+leaves the machine unless `RESEND_API_KEY` and `RESEND_FROM_EMAIL` are set;
+either way, `inbound_email_messages.sender_notified_at` records whether a
+notice went out, and the `inbound_email.sender_notified` log line says which
+one. `email-received.no-attachments.json` is the quickest way to see it.
 
 **Feature flags:** the webhook 404s unless `INBOUND_EMAIL_DOMAIN` and
 `RESEND_INBOUND_WEBHOOK_SECRET` are both set in `api/.env` (they must be set

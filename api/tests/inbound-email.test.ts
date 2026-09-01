@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { after, before, beforeEach, test } from 'node:test';
 import { AddressInfo } from 'node:net';
 import { createApp } from '../src/app.js';
@@ -11,8 +12,13 @@ import { runInboundEmailIntakeOnce } from '../src/agents/inbound-email-intake.js
 import { setInvoiceIntakeRuntimeForTests } from '../src/payments/invoice-intake.js';
 import {
   clearSimulatedAttachmentBytes,
+  seedSimulatedAttachmentBytes,
   setResendInboundRuntimeForTests,
 } from '../src/payments/inbound-email/resend-inbound.js';
+import { drainBackgroundWork } from '../src/infra/background.js';
+import { setOutboundEmailRuntimeForTests, type OutboundEmail } from '../src/infra/email.js';
+import { notifySenderIfNeeded } from '../src/payments/inbound-email/notify-sender.js';
+import { decideAttachment, decideFetchedBytes } from '../src/payments/inbound-email/policy.js';
 import { signSvixPayloadForTests, verifySvixSignature } from '../src/payments/inbound-email/svix-signature.js';
 import {
   RESERVED_INTAKE_SLUGS,
@@ -58,11 +64,17 @@ before(async () => {
     });
 });
 
+/** Notices sent during the current test, newest last. */
+let sentNotices: OutboundEmail[] = [];
+
 beforeEach(async () => {
   // Let the previous test's detached intake finish BEFORE truncating. Without
   // this the suite was not testing the software, it was testing a race: the
   // last test's extraction ran on against tables this one was wiping.
   await drainAsyncIntake();
+  await drainBackgroundWork();
+  sentNotices = [];
+  setOutboundEmailRuntimeForTests({ send: async (email) => { sentNotices.push(email); } });
   resetRateLimitBuckets();
   config.rateLimitEnabled = false;
   setInvoiceIntakeRuntimeForTests(null);
@@ -72,6 +84,7 @@ beforeEach(async () => {
 });
 
 after(async () => {
+  setOutboundEmailRuntimeForTests(null);
   if (closeServer) await closeServer();
   await prisma.$disconnect();
 });
@@ -411,11 +424,13 @@ function receivedEvent(over: {
   from?: string;
   attachments?: Array<{ id: string; filename: string; content_type?: string; content_disposition?: string }>;
   emailId?: string;
+  headers?: Record<string, string>;
 } = {}) {
   emailSeq += 1;
   return {
     type: 'email.received',
     data: {
+      ...(over.headers ? { headers: over.headers } : {}),
       email_id: over.emailId ?? `email_${emailSeq}`,
       from: over.from ?? 'Priya Sharma <priya@acme.test>',
       to: [over.to ?? `acme@${DOMAIN}`],
@@ -585,6 +600,217 @@ test('a message whose attachments are all unsupported is rejected for no_support
   assert.equal((await response.json()).reason, 'no_supported_attachments');
 });
 
+// --- telling the sender ------------------------------------------------------
+
+/** The webhook fires the notice detached, so wait for it before asserting. */
+async function settleNotices() {
+  await drainBackgroundWork();
+}
+
+test('a member whose email carried no invoice is told, rather than left assuming it worked', async () => {
+  await seedOrgWithMember('Acme', 'priya@acme.test');
+
+  await postWebhook(receivedEvent({ attachments: [] }));
+  await settleNotices();
+
+  assert.equal(sentNotices.length, 1, 'one notice');
+  const notice = sentNotices[0]!;
+  assert.equal(notice.to, 'priya@acme.test');
+  assert.match(notice.text, /no attachment on it/);
+  assert.match(notice.text, /Hi Priya,/, 'addressed by first name');
+  assert.match(notice.text, /acme@bills\.decimal\.test/, 'says which address they sent it to');
+  assert.equal(notice.headers?.['Auto-Submitted'], 'auto-replied', 'RFC 3834: says a machine wrote it');
+
+  const message = await prisma.inboundEmailMessage.findFirstOrThrow();
+  assert.ok(message.senderNotifiedAt, 'recorded, so it can never be sent twice');
+  assert.equal(message.senderNoticeKind, 'no_attachments');
+});
+
+test('someone outside the organization is never answered', async () => {
+  // The anti-backscatter rule, and the reason we can afford to reply at all:
+  // we only ever write to an address we have already recognised as a member.
+  await seedOrgWithMember('Acme', 'priya@acme.test');
+
+  await postWebhook(receivedEvent({ from: 'stranger@elsewhere.test', attachments: [] }));
+  await settleNotices();
+
+  assert.equal(sentNotices.length, 0, 'a forged sender must not be able to make us write to them');
+});
+
+test('the notice names what we found instead of an invoice', async () => {
+  await seedOrgWithMember('Acme', 'priya@acme.test');
+
+  await postWebhook(
+    receivedEvent({
+      attachments: [
+        { id: 'att_doc', filename: 'contract.docx', content_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', content_disposition: 'attachment' },
+      ],
+    }),
+  );
+  await settleNotices();
+
+  assert.equal(sentNotices.length, 1);
+  assert.match(sentNotices[0]!.text, /contract\.docx: we can only read PDFs and images/);
+});
+
+test('winmail.dat tells the sender the one setting that fixes it', async () => {
+  await seedOrgWithMember('Acme', 'priya@acme.test');
+
+  await postWebhook(
+    receivedEvent({
+      attachments: [{ id: 'att_tnef', filename: 'winmail.dat', content_type: 'application/ms-tnef', content_disposition: 'attachment' }],
+    }),
+  );
+  await settleNotices();
+
+  assert.match(sentNotices[0]!.text, /Outlook, setting this contact to HTML or plain text/);
+});
+
+test('an out-of-office reply is not answered — that is how a mail loop starts', async () => {
+  await seedOrgWithMember('Acme', 'priya@acme.test');
+
+  await postWebhook(
+    receivedEvent({ attachments: [], headers: { 'Auto-Submitted': 'auto-replied' } }),
+  );
+  await settleNotices();
+
+  assert.equal(sentNotices.length, 0, 'RFC 3834: never answer something a machine sent');
+  const message = await prisma.inboundEmailMessage.findFirstOrThrow();
+  assert.equal(message.senderNotifiedAt, null);
+});
+
+test('mailing list traffic is not answered either', async () => {
+  await seedOrgWithMember('Acme', 'priya@acme.test');
+
+  await postWebhook(receivedEvent({ attachments: [], headers: { 'List-Id': '<vendors.example.test>' } }));
+  await settleNotices();
+
+  assert.equal(sentNotices.length, 0);
+});
+
+test('a sender is told once and only once', async () => {
+  await seedOrgWithMember('Acme', 'priya@acme.test');
+  await postWebhook(receivedEvent({ attachments: [] }));
+  await settleNotices();
+
+  const message = await prisma.inboundEmailMessage.findFirstOrThrow();
+  const again = await notifySenderIfNeeded(message.inboundEmailMessageId);
+
+  assert.deepEqual(again, { sent: false, skipped: 'already_notified' });
+  assert.equal(sentNotices.length, 1, 'the guard is in the database, not in the caller');
+});
+
+test('accepted mail says nothing — the bill is the notification', async () => {
+  await seedOrgWithMember('Acme', 'priya@acme.test');
+  stubExtraction();
+
+  await queueAndSweep();
+  await waitForPaymentOrders(1);
+  await settleNotices();
+
+  assert.equal(sentNotices.length, 0, 'nothing went wrong, so there is nothing to say');
+});
+
+test('an email whose only attachments were junk tells the sender after the sweep, not before', async () => {
+  // The handler cannot know: image001.png passes every check it can make
+  // without the bytes. So this notice comes from the sweep's roll-up.
+  await seedOrgWithMember('Acme', 'priya@acme.test');
+  stubFetchById({
+    att_a: { bytes: logoBytes(4), contentType: 'image/png', filename: 'image001.png' },
+    att_b: { bytes: logoBytes(3), contentType: 'image/png', filename: 'image002.png' },
+  });
+
+  await postWebhook(
+    receivedEvent({
+      attachments: [
+        { id: 'att_a', filename: 'image001.png', content_type: 'image/png', content_disposition: 'attachment' },
+        { id: 'att_b', filename: 'image002.png', content_type: 'image/png', content_disposition: 'attachment' },
+      ],
+    }),
+  );
+  await waitForQueueDrain();
+  await settleNotices();
+
+  assert.equal(sentNotices.length, 1);
+  assert.match(sentNotices[0]!.text, /image001\.png: looks like a signature logo/);
+});
+
+// --- what counts as a document ----------------------------------------------
+
+const KB = 1024;
+const skipReason = (decision: ReturnType<typeof decideFetchedBytes>) =>
+  decision.accept ? null : decision.reason;
+
+test('winmail.dat gets its own reason — the sender can fix that one themselves', () => {
+  const decision = decideAttachment(
+    { filename: 'winmail.dat', contentType: 'application/ms-tnef', contentDisposition: 'attachment' },
+    0,
+  );
+  assert.deepEqual(decision, { accept: false, reason: 'rich_text_wrapper' });
+});
+
+test('a signature logo that arrives as a normal attachment is still a signature logo', () => {
+  // The inline check misses this one: plenty of clients label embedded images
+  // `attachment`. Outlook's image001.png naming is what gives it away.
+  const decision = decideFetchedBytes({
+    byteLength: 4 * KB,
+    filename: 'image001.png',
+    mimeType: 'image/png',
+    isOnlyCandidate: false,
+  });
+  assert.equal(skipReason(decision), 'signature_image');
+});
+
+test('a large image named like a signature asset is kept — the name alone never decides', () => {
+  const decision = decideFetchedBytes({
+    byteLength: 400 * KB,
+    filename: 'image001.png',
+    mimeType: 'image/png',
+    isOnlyCandidate: false,
+  });
+  assert.equal(decision.accept, true);
+});
+
+test('a tiny image alongside a real invoice is dropped', () => {
+  assert.equal(
+    skipReason(decideFetchedBytes({ byteLength: 2 * KB, filename: 'icon.png', mimeType: 'image/png', isOnlyCandidate: false })),
+    'attachment_too_small',
+  );
+});
+
+test('the same tiny image on its own is kept — it may be a photographed receipt', () => {
+  // The floor is the rule most likely to throw away a real invoice, so it
+  // stands down when dropping it would leave the email with nothing.
+  const decision = decideFetchedBytes({
+    byteLength: 2 * KB,
+    filename: 'icon.png',
+    mimeType: 'image/png',
+    isOnlyCandidate: true,
+  });
+  assert.equal(decision.accept, true);
+});
+
+test('a small PDF is never junk — the size rules are for images only', () => {
+  const decision = decideFetchedBytes({
+    byteLength: 900,
+    filename: 'invoice.pdf',
+    mimeType: 'application/pdf',
+    isOnlyCandidate: false,
+  });
+  assert.equal(decision.accept, true);
+});
+
+test('an empty or oversized file is still refused, lone attachment or not', () => {
+  assert.equal(
+    skipReason(decideFetchedBytes({ byteLength: 0, filename: 'invoice.pdf', mimeType: 'application/pdf', isOnlyCandidate: true })),
+    'empty_attachment',
+  );
+  assert.equal(
+    skipReason(decideFetchedBytes({ byteLength: 200 * 1024 * 1024, filename: 'invoice.pdf', mimeType: 'application/pdf', isOnlyCandidate: true })),
+    'attachment_too_large',
+  );
+});
+
 // --- ingestion sweep ---------------------------------------------------------
 
 const PDF_BYTES = Buffer.from('%PDF-1.4 fake invoice bytes for the test suite', 'utf8');
@@ -697,6 +923,107 @@ test('the same invoice forwarded twice reuses the stored document and creates no
 
   assert.equal(await prisma.invoiceDocument.count(), 1, 'identical bytes reuse the stored document');
   assert.equal(await prisma.paymentOrder.count(), 1, 'and do not produce a duplicate bill');
+});
+
+/** Bytes per attachment id, so one message can carry a logo and a real bill. */
+function stubFetchById(byId: Record<string, { bytes: Buffer; contentType: string; filename: string }>) {
+  setResendInboundRuntimeForTests({
+    fetchAttachment: async ({ attachmentId }) => {
+      const found = byId[attachmentId];
+      if (!found) throw new Error(`test stub has no bytes for ${attachmentId}`);
+      return found;
+    },
+  });
+}
+
+const logoBytes = (kb: number) => Buffer.alloc(kb * 1024, 7);
+
+test('a signature logo sent as a real attachment is dropped, and the invoice beside it still lands', async () => {
+  await seedOrgWithMember('Acme', 'priya@acme.test');
+  stubExtraction();
+  stubFetchById({
+    att_logo: { bytes: logoBytes(4), contentType: 'image/png', filename: 'image001.png' },
+    att_bill: { bytes: PDF_BYTES, contentType: 'application/pdf', filename: 'invoice.pdf' },
+  });
+
+  // Note the disposition: `attachment`, not `inline`. This is the case the
+  // inline check cannot catch, and the one that used to become a bill.
+  await postWebhook(
+    receivedEvent({
+      attachments: [
+        { id: 'att_logo', filename: 'image001.png', content_type: 'image/png', content_disposition: 'attachment' },
+        { id: 'att_bill', filename: 'invoice.pdf', content_type: 'application/pdf', content_disposition: 'attachment' },
+      ],
+    }),
+  );
+  await waitForQueueDrain();
+
+  const rows = await prisma.inboundEmailAttachment.findMany({ orderBy: { filename: 'asc' } });
+  assert.deepEqual(
+    rows.map((r) => [r.filename, r.status, r.statusReason]),
+    [
+      ['image001.png', 'skipped', 'signature_image'],
+      ['invoice.pdf', 'ingested', null],
+    ],
+  );
+  assert.equal((await waitForPaymentOrders(1)).length, 1, 'one bill, from the PDF');
+});
+
+test('the bench fixture for an Outlook signature does what TESTBENCH.md says it does', async () => {
+  // The fixture is what a person reaches for when testing this by hand. If the
+  // thresholds move and nobody re-cuts it, it quietly stops demonstrating the
+  // rule it exists to demonstrate — so the suite drives the real file.
+  const { slug } = await seedOrgWithMember('Acme', 'priya@acme.test');
+  stubExtraction();
+
+  const fixture = JSON.parse(
+    await readFile(new URL('./fixtures/inbound-email/email-received.outlook-signature.json', import.meta.url), 'utf8'),
+  ) as { payload: { data: { to: string[]; attachments: Array<{ id: string }> } }; attachmentBytes: Record<string, string> };
+
+  // The fixture addresses the production domain; the suite runs on its own.
+  fixture.payload.data.to = [`${slug}@${DOMAIN}`];
+  seedSimulatedAttachmentBytes(fixture.attachmentBytes);
+
+  await postWebhook(fixture.payload);
+  await waitForQueueDrain();
+
+  const rows = await prisma.inboundEmailAttachment.findMany({ orderBy: { filename: 'asc' } });
+  assert.deepEqual(
+    rows.map((r) => [r.filename, r.status, r.statusReason]),
+    [
+      ['image001.png', 'skipped', 'signature_image'],
+      ['invoice.pdf', 'ingested', null],
+    ],
+    'the fixture still demonstrates the rule TESTBENCH.md claims for it',
+  );
+});
+
+test('two signature logos are two candidates, so neither is reprieved and no bill is made', async () => {
+  // Order-independence: whichever the sweep reaches second must not be treated
+  // as "the only attachment" just because the first one was already dropped.
+  await seedOrgWithMember('Acme', 'priya@acme.test');
+  stubExtraction();
+  stubFetchById({
+    att_a: { bytes: logoBytes(4), contentType: 'image/png', filename: 'image001.png' },
+    att_b: { bytes: logoBytes(3), contentType: 'image/png', filename: 'image002.png' },
+  });
+
+  await postWebhook(
+    receivedEvent({
+      attachments: [
+        { id: 'att_a', filename: 'image001.png', content_type: 'image/png', content_disposition: 'attachment' },
+        { id: 'att_b', filename: 'image002.png', content_type: 'image/png', content_disposition: 'attachment' },
+      ],
+    }),
+  );
+  await waitForQueueDrain();
+
+  const rows = await prisma.inboundEmailAttachment.findMany();
+  assert.deepEqual(
+    rows.map((r) => r.statusReason).sort(),
+    ['signature_image', 'signature_image'],
+  );
+  assert.equal(await prisma.paymentOrder.count(), 0, 'a signature block is not an invoice');
 });
 
 test('a transient fetch failure is retried with backoff and the attachment stays pending', async () => {

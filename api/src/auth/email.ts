@@ -1,10 +1,6 @@
-import { config } from '../config.js';
+import { isEmailDeliveryConfigured, sendEmail } from '../infra/email.js';
 
-const RESEND_API_URL = 'https://api.resend.com/emails';
-
-export function isEmailDeliveryConfigured() {
-  return Boolean(config.resendApiKey && config.resendFromEmail);
-}
+export { isEmailDeliveryConfigured };
 
 export async function sendVerificationEmail({
   toEmail,
@@ -15,14 +11,6 @@ export async function sendVerificationEmail({
   displayName: string | null;
   code: string;
 }): Promise<{ delivered: boolean }> {
-  if (!isEmailDeliveryConfigured()) {
-    return { delivered: false };
-  }
-
-  const fromHeader = config.resendFromName
-    ? `${config.resendFromName} <${config.resendFromEmail}>`
-    : config.resendFromEmail;
-
   const greeting = displayName ? `Hi ${displayName},` : 'Hi,';
   const subject = 'Your Decimal verification code';
   const text = [
@@ -44,27 +32,7 @@ export async function sendVerificationEmail({
     </div>
   `.trim();
 
-  const response = await fetch(RESEND_API_URL, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${config.resendApiKey}`,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      from: fromHeader,
-      to: [toEmail],
-      subject,
-      text,
-      html,
-    }),
-  });
-
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(`Resend send failed (${response.status}): ${body || response.statusText}`);
-  }
-
-  return { delivered: true };
+  return sendEmail({ to: toEmail, subject, text, html });
 }
 
 function escapeHtml(value: string) {

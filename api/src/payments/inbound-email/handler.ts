@@ -23,6 +23,7 @@ import {
   recordInboundMessage,
   type RecordMessageResult,
 } from './messages.js';
+import { queueSenderNotice } from './notify-sender.js';
 import { extractEmailAddress, parseIntakeAddress } from './slug.js';
 
 const attachmentSchema = z.object({
@@ -194,7 +195,11 @@ export async function handleInboundEmailEvent(args: HandleInboundArgs): Promise<
   }
 
   if (event.data.attachments.length === 0) {
-    return reject({ ...scoped, senderUserId: membership.userId, reason: 'no_attachments', attachments: [] });
+    const outcome = await reject({ ...scoped, senderUserId: membership.userId, reason: 'no_attachments', attachments: [] });
+    // A member gets told. Silence here is what makes someone assume their
+    // invoice landed when it didn't.
+    queueSenderNotice(outcome.inboundEmailMessageId);
+    return outcome;
   }
 
   // Triage the attachments: accepted ones queue for the fetch sweep, the rest
@@ -229,6 +234,7 @@ export async function handleInboundEmailEvent(args: HandleInboundArgs): Promise<
       attachments: rows,
     });
     logIgnored('no_supported_attachments', scoped.organizationId, fromAddress, args.source);
+    queueSenderNotice(recorded.inboundEmailMessageId);
     return {
       status: 'rejected',
       inboundEmailMessageId: recorded.inboundEmailMessageId,
@@ -271,7 +277,9 @@ type RejectArgs = Omit<Parameters<typeof recordInboundMessage>[0], 'disposition'
   attachments: Array<z.infer<typeof attachmentSchema>>;
 };
 
-async function reject(args: RejectArgs): Promise<InboundHandlerOutcome> {
+type RejectedOutcome = Extract<InboundHandlerOutcome, { status: 'rejected' }>;
+
+async function reject(args: RejectArgs): Promise<RejectedOutcome> {
   const { reason, attachments, ...rest } = args;
   // Attachments are recorded but never queued: we do not fetch bytes for mail
   // we are not accepting. Storing untrusted attachments from arbitrary senders
