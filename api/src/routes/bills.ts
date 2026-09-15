@@ -150,6 +150,35 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/duplicate
   res.json(billDraft);
 }));
 
+// Allow ONE bill past the org bill ceiling, leaving the ceiling alone.
+//
+// Primary admin only, and deliberately stricter than the duplicate override
+// above. Clearing a duplicate asserts a fact about the document; this permits
+// money past the org's own cap, which is the same authority as setting the cap,
+// and that is primary-admin-only everywhere else.
+const ceilingExceptionSchema = z.object({ reason: z.string().trim().min(3).max(300) });
+
+billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/ceiling-exception', asyncRoute(async (req, res) => {
+  const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
+  const { membership } = await assertOrganizationAccess(organizationId, req.auth!);
+  const { isPrimaryAdminRole } = await import('../auth/organization-access.js');
+  if (!isPrimaryAdminRole(membership?.role)) {
+    throw forbidden('Only the primary admin can allow a bill past the organization bill ceiling.');
+  }
+  await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
+  const input = ceilingExceptionSchema.parse(req.body);
+  const user = await prisma.user.findUniqueOrThrow({ where: { userId: req.auth!.userId }, select: { displayName: true } });
+  const { grantCeilingException } = await import('../payments/bills.js');
+  const billDraft = await grantCeilingException({
+    organizationId,
+    paymentOrderId,
+    actorUserId: req.auth!.userId,
+    actorName: user.displayName,
+    reason: input.reason,
+  });
+  res.json(billDraft);
+}));
+
 // Two vendor records, one question: are they the same company?
 //
 // Not admin-gated. The person looking at the document is the one who can see

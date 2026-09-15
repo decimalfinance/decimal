@@ -3313,6 +3313,101 @@ export async function overrideDuplicateFlag(args: {
 }
 
 /**
+ * Allow one bill past the organization's bill ceiling.
+ *
+ * Deliberately narrower than every other flag clearance in this file: the
+ * primary admin alone, because the ceiling is the org's standing answer to
+ * "how much may move at all", and a cap any admin can except is not a cap.
+ *
+ * The grant pins the amount, so it covers the bill that was actually looked at
+ * and not whatever that bill becomes later.
+ */
+export async function grantCeilingException(args: {
+  organizationId: string;
+  paymentOrderId: string;
+  actorUserId: string;
+  actorName: string;
+  reason: string;
+}) {
+  const order = await prisma.paymentOrder.findFirst({
+    where: { organizationId: args.organizationId, paymentOrderId: args.paymentOrderId },
+    select: { paymentOrderId: true, state: true, amountRaw: true, metadataJson: true },
+  });
+  if (!order) throw new Error('Bill not found');
+
+  const ceilingMinor = await getBillCeilingMinor(prisma, args.organizationId);
+  // Nothing to except. Refusing beats writing a grant that reads as though a
+  // control was overridden when none was in the way.
+  if (ceilingMinor === null || order.amountRaw <= ceilingMinor) {
+    throw new Error('This bill is not over the organization bill ceiling, so it needs no exception.');
+  }
+
+  const at = new Date();
+  const exception = {
+    byUserId: args.actorUserId,
+    byName: args.actorName,
+    reason: args.reason,
+    at: at.toISOString(),
+    amountRaw: order.amountRaw.toString(),
+    ceilingMinor: ceilingMinor.toString(),
+  };
+  const flagsBefore = await flagsForOrder(args.organizationId, order.paymentOrderId);
+  await prisma.$transaction([
+    prisma.paymentOrder.update({
+      where: { paymentOrderId: order.paymentOrderId },
+      data: {
+        metadataJson: {
+          ...(isRecord(order.metadataJson) ? order.metadataJson : {}),
+          ceilingException: exception,
+        } as Prisma.InputJsonValue,
+      },
+    }),
+    prisma.paymentOrderEvent.create({
+      data: {
+        organizationId: args.organizationId,
+        paymentOrderId: order.paymentOrderId,
+        eventType: 'policy_overridden',
+        actorType: 'user',
+        actorId: args.actorUserId,
+        beforeState: order.state,
+        afterState: order.state,
+        payloadJson: {
+          rule: 'bill_ceiling',
+          reason: args.reason,
+          amountRaw: order.amountRaw.toString(),
+          ceilingMinor: ceilingMinor.toString(),
+        },
+        createdAt: at,
+      },
+    }),
+  ]);
+
+  const flagsAfter = await flagsForOrder(args.organizationId, order.paymentOrderId);
+  await recordFlagChanges({
+    organizationId: args.organizationId,
+    paymentOrderId: order.paymentOrderId,
+    actorUserId: args.actorUserId,
+    before: flagsBefore,
+    after: flagsAfter,
+    state: order.state,
+    at,
+  });
+  const { settleQuestionsFromDeed } = await import('./question-settle.js');
+  await settleQuestionsFromDeed({
+    organizationId: args.organizationId,
+    paymentOrderId: order.paymentOrderId,
+    actorUserId: args.actorUserId,
+    actorName: args.actorName,
+    what: `allowed this bill past the ${usdText(ceilingMinor)} ceiling — “${args.reason}”`,
+    flagsBefore,
+    flagsAfter,
+    at,
+  });
+
+  return getBillDraft(args.organizationId, args.paymentOrderId);
+}
+
+/**
  * Record the decision to pay what the bill itemises rather than what it prints.
  *
  * The other half of an invoice that disagrees with itself. "Correct the
