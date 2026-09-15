@@ -16,6 +16,7 @@
 // the workbench batches across all rows) and the verdict cannot diverge
 // between them, because there is only one copy of the reasoning.
 import type { DuplicateMatch, DuplicateOverride } from './duplicate-check.js';
+import { ceilingExceptionCovers, type CeilingException } from './ceiling-exception.js';
 import { describeDuplicate } from './duplicate-check.js';
 import type { PayableHold } from './vendor-payable.js';
 import { describePayableHold } from './vendor-payable.js';
@@ -46,10 +47,14 @@ export type BillFlagKind = (typeof BILL_FLAG_KINDS)[number];
 export type FlagResolution = {
   /** Stable identifier the UI posts back. */
   action: 'this_is_us' | 'not_ours' | 'ask_someone' | 'clear_duplicate' | 'fix_fields' | 'raise_ceiling' | 'release_vendor' | 'pay_the_lines'
-    | 'same_vendor' | 'different_vendor';
+    | 'same_vendor' | 'different_vendor' | 'allow_over_ceiling';
   label: string;
-  /** Who may take it. The UI greys what the viewer cannot do and says why. */
-  requires: 'anyone' | 'admin';
+  /**
+   * Who may take it. The UI greys what the viewer cannot do and says why.
+   * `primary_admin` is strictly narrower than `admin`: it is reserved for the
+   * controls that decide how much money may move at all.
+   */
+  requires: 'anyone' | 'admin' | 'primary_admin';
   /**
    * True when the answer is a determination rather than a judgement, and asking
    * for written justification would only produce "yes it is". Whoever answered
@@ -125,6 +130,12 @@ export type BillFlagFacts = {
   vendorHold: PayableHold | null;
   /** Org bill ceiling in minor units; null when unset. */
   ceilingMinor: bigint | null;
+  /**
+   * A decision to let THIS bill past the ceiling. Read raw, not pre-validated:
+   * a grant that no longer matches the amount still has something to say, so
+   * the rules decide what it means rather than the caller.
+   */
+  ceilingException: CeilingException | null;
   duplicates: DuplicateMatch[];
   duplicateOverride: DuplicateOverride | null;
   /** Vendors already on file whose identifying name matches this one's. */
@@ -290,17 +301,44 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
     });
   }
 
-  // Org bill ceiling (policy P1): a hard cap no bill crosses. Not overridable
-  // per-bill — the primary admin raises the ceiling itself (Policies page).
+  // Org bill ceiling (policy P1): a hard cap no bill crosses.
+  //
+  // Raising the ceiling clears this for every bill over the line, which is the
+  // wrong instrument when one genuine invoice is large and the rest of the
+  // queue is not. So there are two doors: raise the standing rule, or allow
+  // this one bill past it. The second is the primary admin's alone.
   if (facts.ceilingMinor !== null && facts.amountRaw > facts.ceilingMinor) {
-    flags.push({
-      kind: 'over_ceiling',
-      severity: 'danger',
-      blocking: true,
-      short: 'Over bill ceiling',
-      resolutions: [{ action: 'raise_ceiling', label: 'Review the ceiling', requires: 'admin', detail: 'Only the primary admin can raise the organization ceiling, on the Policies page.' }, ASK],
-      message: `This bill (${usdText(facts.amountRaw)}) is over your organization's bill ceiling of ${usdText(facts.ceilingMinor)}. The primary admin can raise the ceiling on the Policies page.`,
-    });
+    const granted = facts.ceilingException;
+    const covers = granted !== null && ceilingExceptionCovers(granted, facts.amountRaw);
+    if (covers) {
+      flags.push({
+        kind: 'over_ceiling',
+        severity: 'info',
+        blocking: false,
+        short: 'Ceiling exception',
+        resolutions: [],
+        message: `Over the ${usdText(facts.ceilingMinor)} ceiling — allowed for this bill by ${granted.byName}: “${granted.reason}”. The ceiling itself is unchanged.`,
+      });
+    } else {
+      // A grant that no longer fits the bill it was granted for. Say so, rather
+      // than re-blocking with the generic message and leaving somebody to
+      // wonder where their exception went.
+      const stale = granted
+        ? ` An exception was allowed for ${usdText(BigInt(granted.amountRaw))}, but the bill has changed since, so it no longer applies.`
+        : '';
+      flags.push({
+        kind: 'over_ceiling',
+        severity: 'danger',
+        blocking: true,
+        short: 'Over bill ceiling',
+        resolutions: [
+          { action: 'allow_over_ceiling', label: 'Allow this bill', requires: 'primary_admin', detail: 'Let this one bill past the ceiling, with a reason. The ceiling stays where it is, and the decision becomes the audit record.' },
+          { action: 'raise_ceiling', label: 'Review the ceiling', requires: 'primary_admin', detail: 'Raise the organization ceiling itself, on the Policies page. This affects every bill.' },
+          ASK,
+        ],
+        message: `This bill (${usdText(facts.amountRaw)}) is over your organization's bill ceiling of ${usdText(facts.ceilingMinor)}.${stale} The primary admin can allow this one bill, or raise the ceiling on the Policies page.`,
+      });
+    }
   }
 
   // Duplicate gate (policy P0): on irreversible rails a duplicate payment is

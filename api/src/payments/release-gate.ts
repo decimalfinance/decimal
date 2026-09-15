@@ -8,6 +8,7 @@
 import { prisma } from '../infra/prisma.js';
 import { badRequest } from '../infra/api-errors.js';
 import { getBillCeilingMinor } from '../approvals/store.js';
+import { activeCeilingException } from './ceiling-exception.js';
 
 /**
  * Vendor payable status, re-checked at the last server choke point before
@@ -62,16 +63,23 @@ export async function assertBillApprovedForRelease(organizationId: string, payme
 
   const order = await prisma.paymentOrder.findFirst({
     where: { organizationId, paymentOrderId },
-    select: { amountRaw: true, counterpartyWalletId: true, counterpartyWallet: { select: { walletAddress: true } } },
+    select: { amountRaw: true, metadataJson: true, counterpartyWalletId: true, counterpartyWallet: { select: { walletAddress: true } } },
   });
   if (!order) return;
 
   // Org ceiling, re-checked at release: a ceiling lowered after approval
   // still binds — the ceiling is the org's standing rule, not a snapshot.
+  //
+  // A per-bill exception survives that re-check, because it was a deliberate
+  // decision about THIS bill rather than a snapshot of the rule. It survives
+  // only while the bill is still for the amount it was granted for. Without
+  // this the exception would clear the draft and the confirm, then die here
+  // with a message pointing at a ceiling nobody intended to change.
   const ceilingMinor = await getBillCeilingMinor(prisma, organizationId);
-  if (ceilingMinor !== null && order.amountRaw > ceilingMinor) {
+  if (ceilingMinor !== null && order.amountRaw > ceilingMinor
+    && !activeCeilingException(order.metadataJson, order.amountRaw)) {
     throw badRequest(
-      "This bill is over the organization's bill ceiling — the primary admin can raise it on the Policies page.",
+      "This bill is over the organization's bill ceiling — the primary admin can allow this one bill, or raise the ceiling on the Policies page.",
       { paymentOrderId, rule: 'bill_ceiling', ceilingMinor: ceilingMinor.toString() },
     );
   }

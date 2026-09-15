@@ -24,6 +24,7 @@ import {
   recordVendorAlias, recordVendorsDiffer,
 } from './vendor-similarity.js';
 import { findDuplicateBills, readDuplicateOverride, describeDuplicate, matchDuplicates } from './duplicate-check.js';
+import { readCeilingException, activeCeilingException } from './ceiling-exception.js';
 import { readPayableHold, describePayableHold } from './vendor-payable.js';
 import { evaluateBillFlags, summarizeBillFlags, displayOrgName } from './bill-flags.js';
 import { HIGHLIGHTABLE_FIELDS } from './question-fields.js';
@@ -624,6 +625,7 @@ export async function flagsForOrder(
     ceilingMinor,
     duplicates,
     duplicateOverride: readDuplicateOverride(metadata),
+    ceilingException: readCeilingException(metadata),
     shortPay: readShortPay(metadata),
     amounts: documentAmounts(extracted, verification),
     planAlerts: alerts.get(order.paymentOrderId) ?? [],
@@ -1130,6 +1132,7 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
         },
       ),
       duplicateOverride: readDuplicateOverride(order.metadataJson),
+      ceilingException: readCeilingException(order.metadataJson),
       shortPay: readShortPay(order.metadataJson),
       amounts: documentAmounts(extracted, isRecord(metadataRecord.verification) ? metadataRecord.verification : null),
       planAlerts: alertsByOrder.get(order.paymentOrderId) ?? [],
@@ -1891,6 +1894,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     ceilingMinor,
     duplicates,
     duplicateOverride: readDuplicateOverride(metadata),
+    ceilingException: readCeilingException(metadata),
     shortPay: readShortPay(metadata),
     amounts: documentAmounts(extracted, verification),
     planAlerts: (await planAlertsByOrder(organizationId, [order.paymentOrderId])).get(order.paymentOrderId) ?? [],
@@ -2456,8 +2460,13 @@ export async function submitBillForApproval(input: SubmitBillInput) {
     }
   }
   const confirmedAmountRaw = BigInt(Math.round(confirmedTotal * 10 ** USDC_DECIMALS));
-  if (confirmCeiling !== null && confirmedAmountRaw > confirmCeiling) {
-    throw new Error(`This bill (${usdText(confirmedAmountRaw)}) is over your organization's bill ceiling of ${usdText(confirmCeiling)}. The primary admin can raise the ceiling on the Policies page.`);
+  // The exception is checked against the CONFIRMED total for the same reason
+  // the flag is: it was granted for one number, and this is the number actually
+  // being sent for approval. Editing the total upward after the grant lands
+  // here, not past it.
+  if (confirmCeiling !== null && confirmedAmountRaw > confirmCeiling
+    && !activeCeilingException(metadata, confirmedAmountRaw)) {
+    throw new Error(`This bill (${usdText(confirmedAmountRaw)}) is over your organization's bill ceiling of ${usdText(confirmCeiling)}. The primary admin can allow this one bill, or raise the ceiling on the Policies page.`);
   }
   // Re-run the duplicate gate against the CONFIRMED values — the bill clerk may
   // have just edited the invoice number or total, and the draft-time flag
