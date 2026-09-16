@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { namesLookRelated, evaluateBillFlags, summarizeBillFlags } from '../src/payments/bill-flags.js';
+import { activeCeilingException, readCeilingException } from '../src/payments/ceiling-exception.js';
 import { pickAddressConfidenceKey } from '../src/payments/bills.js';
 
 // The "addressed to someone else" gate. Getting this wrong in the permissive
@@ -61,6 +62,7 @@ const baseFacts = {
   similarVendors: [],
   priorBillsFromVendor: 0,
   duplicateOverride: null,
+  ceilingException: null,
   shortPay: null,
   amounts: { lineItemsTotal: null, subtotal: null, tax: null, total: null },
   planAlerts: [] as string[],
@@ -635,4 +637,89 @@ test('the count outranks the snapshot in both directions', () => {
   // because the count is zero — the snapshot still has to have said something.
   const flags = evaluateBillFlags({ ...baseFacts, triggeredRules: [], priorBillsFromVendor: 0 });
   assert.equal(flags.some((f) => f.kind === 'new_vendor'), false);
+});
+
+// --- the ceiling, and the one bill allowed past it -----------------------
+//
+// Raising the ceiling clears every bill over the line at once. These assert
+// the narrow door: one named decision, about one bill, for one amount.
+
+const OVER = 150_000_000_000n;    // $150,000
+const CEILING = 100_000_000_000n; // $100,000
+
+const grantFor = (amountRaw: bigint) => ({
+  byUserId: '11111111-1111-1111-1111-111111111111',
+  byName: 'Zara Osei',
+  reason: 'Annual freight prepayment, agreed with the board.',
+  at: '2026-09-16T05:10:00.000Z',
+  amountRaw: amountRaw.toString(),
+  ceilingMinor: CEILING.toString(),
+});
+
+test('a bill over the ceiling blocks, and offers to allow just this one', () => {
+  const flags = evaluateBillFlags({ ...baseFacts, amountRaw: OVER, ceilingMinor: CEILING });
+  const flag = flags.find((f) => f.kind === 'over_ceiling');
+  assert.ok(flag, 'expected an over_ceiling flag');
+  assert.equal(flag.blocking, true);
+  assert.equal(flag.severity, 'danger');
+  const allow = flag.resolutions.find((r) => r.action === 'allow_over_ceiling');
+  assert.ok(allow, 'the blocked bill must offer the per-bill door');
+  // The whole point of the choice: only the person who sets the cap may
+  // except a bill from it. An admin-tier grant would make the cap advisory.
+  assert.equal(allow.requires, 'primary_admin');
+  assert.equal(flag.resolutions.find((r) => r.action === 'raise_ceiling')!.requires, 'primary_admin');
+});
+
+test('a granted exception turns the block into a note that names who allowed it', () => {
+  const flags = evaluateBillFlags({
+    ...baseFacts, amountRaw: OVER, ceilingMinor: CEILING, ceilingException: grantFor(OVER),
+  });
+  const flag = flags.find((f) => f.kind === 'over_ceiling');
+  assert.ok(flag);
+  assert.equal(flag.blocking, false);
+  assert.equal(flag.severity, 'info');
+  assert.match(flag.message, /Zara Osei/);
+  assert.match(flag.message, /Annual freight prepayment/);
+  // The reader must be able to tell the ceiling did not move.
+  assert.match(flag.message, /ceiling itself is unchanged/);
+  assert.equal(summarizeBillFlags(flags).blocking, false);
+});
+
+test('an exception does not survive the bill changing amount', () => {
+  // Granted for $150,000; the bill is now $175,000. The grant was a decision
+  // about a number, and this is a different number.
+  const flags = evaluateBillFlags({
+    ...baseFacts, amountRaw: 175_000_000_000n, ceilingMinor: CEILING, ceilingException: grantFor(OVER),
+  });
+  const flag = flags.find((f) => f.kind === 'over_ceiling');
+  assert.ok(flag);
+  assert.equal(flag.blocking, true, 'a stale grant must not let a larger bill through');
+  // And it says so, rather than re-blocking with the generic sentence and
+  // leaving somebody hunting for the exception they know they granted.
+  assert.match(flag.message, /no longer applies/);
+});
+
+test('an exception on a bill under the ceiling raises nothing at all', () => {
+  const flags = evaluateBillFlags({
+    ...baseFacts, amountRaw: 50_000_000_000n, ceilingMinor: CEILING, ceilingException: grantFor(50_000_000_000n),
+  });
+  assert.equal(flags.some((f) => f.kind === 'over_ceiling'), false);
+});
+
+test('activeCeilingException is the single answer the three gates share', () => {
+  const metadata = { ceilingException: grantFor(OVER) };
+  // Draft flag, confirm and release all ask this one question. If they ever
+  // disagree, a bill clears review and then dies at release.
+  assert.ok(activeCeilingException(metadata, OVER));
+  assert.equal(activeCeilingException(metadata, OVER + 1n), null);
+  assert.equal(activeCeilingException({}, OVER), null);
+  assert.equal(activeCeilingException(null, OVER), null);
+});
+
+test('a malformed grant is read as no grant, never as permission', () => {
+  assert.equal(readCeilingException({ ceilingException: { byUserId: 'u1' } }), null);
+  assert.equal(readCeilingException({ ceilingException: { reason: 'because' } }), null);
+  // Missing the pinned amount is the dangerous one: without it there is
+  // nothing to check the bill against, so it must not count as a grant.
+  assert.equal(readCeilingException({ ceilingException: { byUserId: 'u1', reason: 'ok' } }), null);
 });
