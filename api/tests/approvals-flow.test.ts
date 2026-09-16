@@ -2984,3 +2984,53 @@ test('an uploaded document shows on the list before it has been read, then becom
   assert.equal(after.bills.length, 1);
   assert.equal(after.counts.draft, 1, 'still one thing in drafts, not two');
 });
+
+// A country typed on the screen has to survive the save.
+//
+// It did not. The extractor returns a country, and for an invoice that prints
+// none the postal shape works one out ("New York, NY 10010" can only be the
+// United States). Both reached the draft screen. Then the route schema for
+// remitTo declared street, city, state and zip and NOT country, so Zod — which
+// strips what it does not declare — dropped it on the way in, on confirm and
+// on save alike.
+//
+// Nothing failed. The bill screen kept showing the country it had worked out
+// for itself, so the loss was invisible until a bill came back from approval
+// and redrew from the stored values, where the box was empty. Every bill in
+// the dev database had a remitTo with four keys and no country.
+test('a country survives confirm, whether it was typed or worked out', async () => {
+  const { orgId, owner } = await makeOrg();
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'Harborline Construction', amount: 4200, invoiceNo: 'HC-9' });
+
+  await post(`/organizations/${orgId}/bills/${bill.billId}/save`, {
+    fields: {
+      invoiceNumber: 'HC-9', invoiceDate: '2026-08-02', dueDate: '2026-08-30',
+      terms: 'Net 30', currency: 'USD', total: 4200, taxAmount: 0,
+      remitTo: { street: '210 5th Ave', city: 'New York', state: 'NY', zip: '10010', country: 'United States' },
+    },
+    lines: [{ description: 'Cloud hosting', quantity: 1, unitPrice: 4200, amount: 4200, category: 'Cloud hosting & infrastructure' }],
+    confirmedFieldKeys: [],
+  }, owner.token);
+
+  const draft = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, owner.token);
+  const country = draft.remitFields.find((f: { key: string }) => f.key === 'remitTo.country');
+  assert.ok(country, 'the screen has a country box');
+  assert.equal(country.value, 'United States', 'the country that was saved comes back');
+
+  // And again through confirm, which is the path that recorded four keys and
+  // no country for every bill that has ever been through this product.
+  await post(`/organizations/${orgId}/bills/${bill.billId}/confirm`, {
+    fields: {
+      invoiceNumber: 'HC-9', invoiceDate: '2026-08-02', dueDate: '2026-08-30',
+      terms: 'Net 30', currency: 'USD', total: 4200, taxAmount: 0,
+      remitTo: { street: '210 5th Ave', city: 'New York', state: 'NY', zip: '10010', country: 'United States' },
+    },
+    lines: [{ description: 'Cloud hosting', quantity: 1, unitPrice: 4200, amount: 4200, category: 'Cloud hosting & infrastructure' }],
+    confirmedFieldKeys: [],
+  }, owner.token);
+
+  const after = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, owner.token);
+  const afterCountry = after.remitFields.find((f: { key: string }) => f.key === 'remitTo.country');
+  assert.equal(afterCountry?.value, 'United States',
+    'a confirmed bill still knows its country — this is what a rejected bill redraws from');
+});

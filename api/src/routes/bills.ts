@@ -71,6 +71,10 @@ const confirmSchema = z.object({
       city: z.string().trim().max(100).nullable().optional(),
       state: z.string().trim().max(100).nullable().optional(),
       zip: z.string().trim().max(20).nullable().optional(),
+      // Zod strips what it does not declare, so a country reached the screen
+      // and was dropped here in silence — the one worked out from the postal
+      // shape, and the one somebody typed themselves.
+      country: z.string().trim().max(100).nullable().optional(),
     }).optional(),
   }),
   lines: z.array(z.object({
@@ -456,6 +460,7 @@ const factsSchema = z.object({
     city: z.string().trim().max(100).nullable().optional(),
     state: z.string().trim().max(100).nullable().optional(),
     zip: z.string().trim().max(20).nullable().optional(),
+    country: z.string().trim().max(100).nullable().optional(),
   }).optional(),
 });
 
