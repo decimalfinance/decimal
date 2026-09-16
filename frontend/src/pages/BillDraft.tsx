@@ -570,8 +570,17 @@ function DraftScreen(props: {
       toast.info('Correct the fields below, then confirm the bill.', 'Check the details');
       return;
     }
-    if (action === 'raise_ceiling' || action === 'release_vendor') {
-      toast.info('This is changed where it was set, not on the bill — Policies for a ceiling, the vendor for a hold.', 'Needs an admin');
+    // Both of these are changed where they were SET, not on the bill. They used
+    // to share one toast titled "Needs an admin", which told the primary admin
+    // — the one person who can do it — that somebody else was needed, and
+    // explained vendor holds to a reader who had clicked a ceiling. Each says
+    // its own thing now, and says where to go rather than who to find.
+    if (action === 'raise_ceiling') {
+      toast.info('The bill ceiling is set for the whole organization, on the Policies page. To let this one bill through instead, use "Allow this bill".', 'Change it on Policies');
+      return;
+    }
+    if (action === 'release_vendor') {
+      toast.info('A hold is released on the vendor record, where it was placed — not on the bill.', 'Change it on the vendor');
       return;
     }
     // Closing a bill ends it. It went straight through from an inline box —
