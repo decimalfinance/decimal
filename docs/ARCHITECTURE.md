@@ -91,7 +91,9 @@ In code and the database a bill is a `PaymentOrder`. In every piece of UI copy i
 1. **Arrival.** Upload (`invoice-intake.ts`), CSV (`csv-intake.ts`), or forwarded email (`agents/inbound-email-intake.ts`). Only team members may forward mail in.
 2. **Extraction.** `document-extract.ts` sends the document to an OpenAI model and validates the result with Zod into an `ExtractedInvoice`. Scans and photos are rendered to images for a vision model. A PDF with its own text layer takes a cheaper text-only path. Both models are config (`openAiModel`, `openAiTextModel`), not code.
 3. **Provenance.** `doc-provenance.ts` locates every extracted value in the document's text layer and stores its page and bounding box. This powers "click a field, see where it came from" in the UI.
-4. **Flags.** `bill-flags.ts` evaluates problems. Two are policy gates: `duplicate-check.ts` and `vendor-payable.ts`. `vendor-similarity.ts` catches near-duplicate vendor names. Each flag carries its own resolutions.
+4. **Flags.** `bill-flags.ts` evaluates problems. Three are policy gates: `duplicate-check.ts`, `vendor-payable.ts` and the org bill ceiling. `vendor-similarity.ts` catches near-duplicate vendor names. Each flag carries its own resolutions, and a resolution names who may take it: `anyone`, `admin`, or `primary_admin`.
+
+   The bill ceiling is checked in three places and they must not drift: the draft flag, the confirm gate in `bills.ts`, and `release-gate.ts`. A bill may be let past it one at a time — `ceiling-exception.ts`, primary admin only, with a reason, leaving the ceiling itself unchanged. All three gates ask `activeCeilingException`, which returns a grant only while the bill is still for the amount it was granted for. Changing the total voids it.
 5. **Review.** `bills.ts` serves the workbench list and the draft screen. Questions and comments live in the bill thread (`question-fields.ts`, `question-settle.ts`). Every edit is logged (`bill-history.ts`).
 6. **Confirm.** The reviewer confirms, which submits the bill to the approval engine. Verification always happens before routing.
 
