@@ -120,6 +120,7 @@ export function BillDraftPage() {
       organizationId={organizationId}
       billDraft={billDraft.data}
       canOverrideDuplicate={Boolean(myAccess.data?.isPrimaryOrAdmin)}
+      canAllowOverCeiling={myAccess.data?.membershipRole === 'primary_admin'}
       canEditBills={myAccess.data ? myAccess.data.capabilities.includes('bills.edit') : true}
       onBack={() => navigate(`/organizations/${organizationId}/bills`)}
       onDone={() => {
@@ -267,12 +268,17 @@ function DraftScreen(props: {
   organizationId: string;
   billDraft: BillDraft;
   canOverrideDuplicate: boolean;
+  /**
+   * Narrower than canOverrideDuplicate on purpose: only the primary admin may
+   * let a bill past the org ceiling, because only they may set it.
+   */
+  canAllowOverCeiling: boolean;
   canEditBills: boolean;
   onBack: () => void;
   onDone: () => void;
   toast: ReturnType<typeof useToast>;
 }) {
-  const { organizationId, billDraft, canOverrideDuplicate, canEditBills, onBack, onDone, toast } = props;
+  const { organizationId, billDraft, canOverrideDuplicate, canAllowOverCeiling, canEditBills, onBack, onDone, toast } = props;
   // The server already refuses the save and now says so in `readOnly`; this
   // also folds in the viewer's own capabilities, which the Confirm button has
   // always consulted. Both, because myAccess assumes editable while it loads —
@@ -290,7 +296,7 @@ function DraftScreen(props: {
   // per kind — the backend says which are available and who may take them, so
   // this only has to run the one the person chose.
   type ResolutionAction = 'this_is_us' | 'not_ours' | 'ask_someone' | 'clear_duplicate' | 'fix_fields' | 'raise_ceiling' | 'release_vendor' | 'pay_the_lines'
-    | 'same_vendor' | 'different_vendor';
+    | 'same_vendor' | 'different_vendor' | 'allow_over_ceiling';
   const [activeResolution, setActiveResolution] = useState<{ flag: string; action: ResolutionAction; targetId?: string } | null>(null);
   const [mergeVendor, setMergeVendor] = useState<{ targetId: string; name: string } | null>(null);
   const [leaveOpen, setLeaveOpen] = useState(false);
@@ -526,6 +532,15 @@ function DraftScreen(props: {
           label: 'Why pay the itemised total?',
           cta: `Pay ${usd(computedTotal)}`,
         }
+      : action === 'allow_over_ceiling'
+      ? {
+          // The ceiling figure is in the flag's own sentence directly above
+          // this box, so repeating it here would only crowd the decision.
+          title: `Allow this ${usd(computedTotal)} bill past the ceiling?`,
+          help: 'This bill only. The ceiling stays exactly where it is, and every other bill over it stays blocked. Your reason becomes the audit record, and the exception lapses if the total changes afterwards.',
+          label: 'Why does this bill get through?',
+          cta: 'Allow this bill',
+        }
       : {
           title: 'Clear the duplicate flag?',
           help: 'You are asserting this is a genuinely new bill, not one already paid. Your reason becomes the audit record for that decision.',
@@ -626,6 +641,9 @@ function DraftScreen(props: {
       } else if (action === 'clear_duplicate') {
         await billsApi.overrideDuplicate(organizationId, billDraft.paymentOrderId, resolutionValue.trim());
         toast.success('Cleared — your reason is on the bill’s record.', 'Duplicate flag');
+      } else if (action === 'allow_over_ceiling') {
+        await billsApi.allowOverCeiling(organizationId, billDraft.paymentOrderId, resolutionValue.trim());
+        toast.success('Allowed — the ceiling is unchanged, and your reason is on the bill’s record.', 'Over the ceiling');
       } else if (action === 'same_vendor' || action === 'different_vendor') {
         if (!current.targetId) throw new Error('That vendor is no longer on file.');
         const same = action === 'same_vendor';
@@ -1354,14 +1372,18 @@ function DraftScreen(props: {
                       // with the reason in the tooltip. Hiding it would leave a
                       // reviewer staring at a blocked bill wondering what the
                       // route forward even is.
-                      const blocked = r.requires === 'admin' && !canOverrideDuplicate;
+                      const blocked = r.requires === 'primary_admin'
+                        ? !canAllowOverCeiling
+                        : r.requires === 'admin' && !canOverrideDuplicate;
                       // The title has to sit on a WRAPPER. Browsers suppress
                       // pointer events on a disabled control, so a tooltip on
                       // the button itself never appears — the one explanation
                       // of why the button is dead was unreachable by hovering
                       // the dead button.
                       const why = blocked
-                        ? 'Only a primary admin or admin can do this — ask one to look, or ask a question on this bill.'
+                        ? (r.requires === 'primary_admin'
+                          ? 'Only the primary admin can do this — ask them to look, or ask a question on this bill.'
+                          : 'Only a primary admin or admin can do this — ask one to look, or ask a question on this bill.')
                         : r.detail;
                       return (
                         <span key={r.action} title={why} style={{ display: 'inline-flex', flex: 'none' }}>

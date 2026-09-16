@@ -1343,13 +1343,14 @@ export interface BillDraft {
     /** What can be done about it — rendered on the flag, never in a footer. */
     resolutions: Array<{
       action: 'this_is_us' | 'not_ours' | 'ask_someone' | 'clear_duplicate' | 'fix_fields' | 'raise_ceiling' | 'release_vendor' | 'pay_the_lines'
+        | 'allow_over_ceiling'
         | 'same_vendor' | 'different_vendor';
       /** The answer is a determination, so the composer asks for no reason. */
       noReason?: boolean;
       /** The other record the answer is about. */
       targetId?: string;
       label: string;
-      requires: 'anyone' | 'admin';
+      requires: 'anyone' | 'admin' | 'primary_admin';
       detail: string;
     }>;
   }>;
@@ -1532,6 +1533,14 @@ export const billsApi = {
   // Admin-only: clear the duplicate-bill flag with a logged reason.
   overrideDuplicate(organizationId: string, paymentOrderId: string, reason: string) {
     return request<BillDraft>(`/organizations/${organizationId}/bills/${paymentOrderId}/duplicate-override`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  },
+  // Primary-admin only: let THIS bill past the org ceiling, with a logged
+  // reason. The ceiling itself is untouched.
+  allowOverCeiling(organizationId: string, paymentOrderId: string, reason: string) {
+    return request<BillDraft>(`/organizations/${organizationId}/bills/${paymentOrderId}/ceiling-exception`, {
       method: 'POST',
       body: JSON.stringify({ reason }),
     });
