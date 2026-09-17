@@ -103,6 +103,28 @@ Note the dev server will not work directly: Vite rejects unknown hostnames and t
 3. **Skip the verifier** for now. Revisit only for checking generated pages against Decimal's own system, and only after the fix list stops producing noise on identical pages.
 4. A fairer test of real value would be one product screen redesigned twice as standalone prototypes, once with Taste Labs and once without, compared side by side.
 
+## Product UI redesign test (Bills list and bill detail)
+
+Prototype: `prototypes/bills-redesign.html`. One self-contained file, both screens, mock data, light and dark, with an accent switch between Decimal pink and Mercury blue. Every label, column, status and action matches the current `Bills.tsx` and `BillDetail.tsx`.
+
+**The free allowance ran out before this started.** Deep search returned `402` after about 15 credits in total. No new extraction or deep search was possible, so the redesign is built from the Mercury extraction already in hand. Reading a stored result is free.
+
+What Taste Engine actually contributed:
+
+- Light surface ladder `#FBFCFD`, `#F4F5F9`, `#EDEDF3`, `#DDDDE5` and ink `#272735`, `#535461`.
+- The full dark palette `#171721`, `#1E1E2A`, `#272735`, text `#EDEDF3`, `#C3C3CC`. This made a credible dark mode nearly free.
+- The type ramp and its unusual weights: 360 body, 420 interface labels, 480 headings. Geist is variable, so these work today.
+- A serif counterpoint for titles and big amounts. Instrument Serif stands in for Mercury's Tiempos and is already a Decimal dependency.
+- Pill buttons, a tonal secondary at 10, 16 and 22 percent accent tint, pill tabs with the same tonal states, 12px button-group gap.
+- The three-layer card shadow, the frosted hairline, the blurred sticky bar, and "no dividers between major sections".
+
+What it could not contribute:
+
+- **Tables.** The extraction's `tables` and `charts` lists were empty. The bills table, status cells, approval timeline, reference card and decision bar are all designed by hand on top of the tokens.
+- Any layout precedent for an operator screen. The corpus is marketing pages.
+
+Read on value: Taste gave a coherent token set quickly and accurately. It did not design the screens. For product UI it is a token source, not a designer.
+
 ## Leftovers from this test
 
 - A seeded test organization named "Taste Eval …" with three `@dev.decimal.test` personas exists in the bench database `usdc_ops_bench`. Harmless, clears with a bench reset.
