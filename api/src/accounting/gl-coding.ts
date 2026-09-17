@@ -2,8 +2,8 @@
 // how this vendor's prior payments were coded, and persist the operator's decision.
 // Phase 1 of the coding agent: per-vendor memory lookup (the QuickBooks finding that
 // reusing the customer's own past coding beats a model). No LLM. The persisted row
-// doubles as the decision log (predicted vs confirmed, source, confidence, override)
-// that a later consolidation step promotes into `coding_rules`.
+// doubles as the decision log (predicted vs confirmed, source, confidence, override).
+// Repeated decisions promote into per-vendor memory in `vendor_coding_rules`.
 
 import { Prisma } from '@prisma/client';
 import { prisma } from '../infra/prisma.js';

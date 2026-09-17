@@ -33,35 +33,6 @@ async function assertOrganizationNameAvailable(organizationName: string) {
   }
 }
 
-organizationsRouter.get('/organizations', async (req, res, next) => {
-  try {
-    // Scoped to the current user's memberships. We intentionally do not expose
-    // a directory of other organizations — users only see what they belong to.
-    const items = await prisma.organization.findMany({
-      where: {
-        memberships: {
-          some: {
-            userId: req.auth!.userId,
-            status: 'active',
-          },
-        },
-      },
-      orderBy: { createdAt: 'asc' },
-    });
-
-    res.json({
-      items: items.map((organization) => ({
-        organizationId: organization.organizationId,
-        organizationName: organization.organizationName,
-        status: organization.status,
-        isMember: true,
-      })),
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
 organizationsRouter.get('/organizations/:organizationId/summary', async (req, res, next) => {
   try {
     const { organizationId } = orgParamsSchema.parse(req.params);

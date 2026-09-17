@@ -184,7 +184,7 @@ test('session auth supports organization and address-book setup', async () => {
 
   const destinationWallet = Keypair.generate().publicKey.toBase58();
   const destination = await post(
-    `/organizations/${organization.organizationId}/destinations`,
+    `/organizations/${organization.organizationId}/counterparty-wallets`,
     {
       walletAddress: destinationWallet,
       label: 'Fuyo payout wallet',
@@ -1270,7 +1270,7 @@ test('Squads vault payment proposals turn payment orders into executable treasur
     register.sessionToken,
   );
   const destination = await post(
-    `/organizations/${organization.organizationId}/destinations`,
+    `/organizations/${organization.organizationId}/counterparty-wallets`,
     {
       walletAddress: Keypair.generate().publicKey.toBase58(),
       label: 'Vendor wallet',
@@ -1427,7 +1427,7 @@ test('Squads vault payment proposals turn payment orders into executable treasur
   const runDestinationOne = Keypair.generate().publicKey.toBase58();
   const runDestinationTwo = Keypair.generate().publicKey.toBase58();
   await post(
-    `/organizations/${organization.organizationId}/destinations`,
+    `/organizations/${organization.organizationId}/counterparty-wallets`,
     {
       walletAddress: runDestinationOne,
       label: 'Batch Vendor A wallet',
@@ -1437,7 +1437,7 @@ test('Squads vault payment proposals turn payment orders into executable treasur
     register.sessionToken,
   );
   await post(
-    `/organizations/${organization.organizationId}/destinations`,
+    `/organizations/${organization.organizationId}/counterparty-wallets`,
     {
       walletAddress: runDestinationTwo,
       label: 'Batch Vendor B wallet',

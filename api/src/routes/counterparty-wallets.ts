@@ -209,13 +209,6 @@ counterpartyWalletsRouter.get('/organizations/:organizationId/counterparty-walle
   sendList(res, unwrapItems(await listCounterpartyWallets(organizationId, query)), { limit: query.limit });
 }));
 
-counterpartyWalletsRouter.get('/organizations/:organizationId/destinations', asyncRoute(async (req, res) => {
-  const { organizationId } = organizationParamsSchema.parse(req.params);
-  const query = listAddressBookQuerySchema.parse(req.query);
-  await assertOrganizationAccess(organizationId, req.auth!);
-  sendList(res, unwrapItems(await listCounterpartyWallets(organizationId, { ...query, view: 'destinations' })), { limit: query.limit });
-}));
-
 counterpartyWalletsRouter.post('/organizations/:organizationId/counterparty-wallets', asyncRoute(async (req, res) => {
   const { organizationId } = organizationParamsSchema.parse(req.params);
   await assertOrganizationAdmin(organizationId, req.auth!);
@@ -226,33 +219,7 @@ counterpartyWalletsRouter.post('/organizations/:organizationId/counterparty-wall
   }));
 }));
 
-counterpartyWalletsRouter.post('/organizations/:organizationId/destinations', asyncRoute(async (req, res) => {
-  const { organizationId } = organizationParamsSchema.parse(req.params);
-  await assertOrganizationAdmin(organizationId, req.auth!);
-  const input = createCounterpartyWalletSchema.parse(req.body);
-  sendCreated(res, await createCounterpartyWallet(organizationId, {
-    ...input,
-    walletType: input.destinationType ?? input.walletType,
-  }));
-}));
-
 counterpartyWalletsRouter.patch('/organizations/:organizationId/counterparty-wallets/:counterpartyWalletId', asyncRoute(async (req, res) => {
-  const { organizationId, counterpartyWalletId } = counterpartyWalletParamsSchema.parse(req.params);
-  await assertOrganizationAdmin(organizationId, req.auth!);
-  const input = updateCounterpartyWalletSchema.parse(req.body);
-  const updated = await updateCounterpartyWallet(organizationId, counterpartyWalletId, {
-    ...input,
-    walletType: input.destinationType ?? input.walletType,
-  });
-  // Trusting a wallet here should un-stick any payment parked in review only because
-  // the wallet wasn't trusted yet — advance them to draft (not auto-paid).
-  if (input.trustState === 'trusted') {
-    await advancePendingReviewsForWallet({ organizationId, counterpartyWalletId, actorUserId: req.auth!.userId ?? null });
-  }
-  sendJson(res, updated);
-}));
-
-counterpartyWalletsRouter.patch('/organizations/:organizationId/destinations/:counterpartyWalletId', asyncRoute(async (req, res) => {
   const { organizationId, counterpartyWalletId } = counterpartyWalletParamsSchema.parse(req.params);
   await assertOrganizationAdmin(organizationId, req.auth!);
   const input = updateCounterpartyWalletSchema.parse(req.body);

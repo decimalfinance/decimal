@@ -1044,22 +1044,9 @@ CREATE TABLE IF NOT EXISTS accounting_account_maps
   UNIQUE (organization_id, provider)
 );
 
--- Cache / operator override of a Decimal vendor (by label, optionally linked to
--- a counterparty) → the provider's vendor id.
-CREATE TABLE IF NOT EXISTS accounting_vendor_maps
-(
-  accounting_vendor_map_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  organization_id UUID NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
-  provider TEXT NOT NULL DEFAULT 'quickbooks',
-  counterparty_id UUID REFERENCES counterparties(counterparty_id) ON DELETE CASCADE,
-  vendor_label TEXT NOT NULL,
-  external_vendor_id TEXT NOT NULL,
-  external_vendor_name TEXT,
-  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (organization_id, provider, vendor_label)
-);
+-- accounting_vendor_maps was created here but never read or written by the app.
+-- Removed 2026-09-17. The drop keeps existing databases in step.
+DROP TABLE IF EXISTS accounting_vendor_maps;
 
 -- One sync record per payment order + provider (the idempotent ledger of the push).
 CREATE TABLE IF NOT EXISTS accounting_syncs
@@ -1084,7 +1071,6 @@ CREATE TABLE IF NOT EXISTS accounting_syncs
 );
 
 CREATE INDEX IF NOT EXISTS idx_accounting_connections_org ON accounting_connections(organization_id);
-CREATE INDEX IF NOT EXISTS idx_accounting_vendor_maps_counterparty ON accounting_vendor_maps(counterparty_id);
 CREATE INDEX IF NOT EXISTS idx_accounting_syncs_org_status_created_at
   ON accounting_syncs(organization_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_accounting_syncs_payment_order ON accounting_syncs(payment_order_id);
@@ -1097,11 +1083,6 @@ FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS trg_accounting_account_maps_updated_at ON accounting_account_maps;
 CREATE TRIGGER trg_accounting_account_maps_updated_at
 BEFORE UPDATE ON accounting_account_maps
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-
-DROP TRIGGER IF EXISTS trg_accounting_vendor_maps_updated_at ON accounting_vendor_maps;
-CREATE TRIGGER trg_accounting_vendor_maps_updated_at
-BEFORE UPDATE ON accounting_vendor_maps
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_accounting_syncs_updated_at ON accounting_syncs;
@@ -1149,31 +1130,7 @@ CREATE TRIGGER trg_payment_order_gl_codings_updated_at
 BEFORE UPDATE ON payment_order_gl_codings
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
--- Phase 2 stub: promoted per-vendor coding rules. The consolidation job + confidence
--- gates will populate these from payment_order_gl_codings; not yet read/written by the app.
-CREATE TABLE IF NOT EXISTS coding_rules
-(
-  coding_rule_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  organization_id UUID NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
-  provider TEXT NOT NULL DEFAULT 'quickbooks',
-  match_vendor_label TEXT NOT NULL,
-  coded_expense_account_id TEXT NOT NULL,
-  coded_expense_account_name TEXT,
-  support_count INTEGER NOT NULL DEFAULT 0,
-  agreement_rate NUMERIC,
-  status TEXT NOT NULL DEFAULT 'shadow',   -- 'shadow' | 'active' | 'retired'
-  source_decision_ids UUID[] NOT NULL DEFAULT '{}',
-  valid_from TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  valid_to TIMESTAMPTZ,
-  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_coding_rules_org_vendor
-  ON coding_rules(organization_id, match_vendor_label) WHERE valid_to IS NULL;
-
-DROP TRIGGER IF EXISTS trg_coding_rules_updated_at ON coding_rules;
-CREATE TRIGGER trg_coding_rules_updated_at
-BEFORE UPDATE ON coding_rules
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+-- coding_rules was a stub for promoted per-vendor rules that was never wired up.
+-- Vendor coding memory lives in vendor_coding_rules (010-coding-rules.sql).
+-- Removed 2026-09-17. The drop keeps existing databases in step.
+DROP TABLE IF EXISTS coding_rules;

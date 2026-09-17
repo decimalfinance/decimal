@@ -40,11 +40,9 @@ model Organization {
   spendingLimitExecutions SpendingLimitExecution[]
   accountingConnections AccountingConnection[]
   accountingAccountMaps AccountingAccountMap[]
-  accountingVendorMaps AccountingVendorMap[]
   accountingSyncs AccountingSync[]
   paymentOrderGlCodings PaymentOrderGlCoding[]
   vendorCodingRules     VendorCodingRule[]
-  codingRules CodingRule[]
   invoiceDocuments InvoiceDocument[]
   inboundEmailMessages InboundEmailMessage[]
 
@@ -92,26 +90,6 @@ model AccountingAccountMap {
   @@map("accounting_account_maps")
 }
 
-// Cache / operator override of a Decimal vendor (by label, optionally linked to a
-// counterparty) → the provider's vendor id.
-model AccountingVendorMap {
-  accountingVendorMapId String        @id @default(dbgenerated("gen_random_uuid()")) @map("accounting_vendor_map_id") @db.Uuid
-  organizationId        String        @map("organization_id") @db.Uuid
-  provider              String        @default("quickbooks")
-  counterpartyId        String?       @map("counterparty_id") @db.Uuid
-  vendorLabel           String        @map("vendor_label")
-  externalVendorId      String        @map("external_vendor_id")
-  externalVendorName    String?       @map("external_vendor_name")
-  metadataJson          Json          @default("{}") @map("metadata_json")
-  createdAt             DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt             DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization          Organization  @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
-  counterparty          Counterparty? @relation(fields: [counterpartyId], references: [counterpartyId], onDelete: Cascade)
-
-  @@unique([organizationId, provider, vendorLabel])
-  @@index([counterpartyId])
-  @@map("accounting_vendor_maps")
-}
 
 // One sync record per payment order + provider (the idempotent ledger of the push).
 model AccountingSync {
@@ -187,28 +165,6 @@ model PaymentOrderGlCoding {
 
   @@index([organizationId, createdAt(sort: Desc)])
   @@map("payment_order_gl_codings")
-}
-
-model CodingRule {
-  codingRuleId            String       @id @default(dbgenerated("gen_random_uuid()")) @map("coding_rule_id") @db.Uuid
-  organizationId          String       @map("organization_id") @db.Uuid
-  provider                String       @default("quickbooks")
-  matchVendorLabel        String       @map("match_vendor_label")
-  codedExpenseAccountId   String       @map("coded_expense_account_id")
-  codedExpenseAccountName String?      @map("coded_expense_account_name")
-  supportCount            Int          @default(0) @map("support_count")
-  agreementRate           Decimal?     @map("agreement_rate") @db.Decimal
-  status                  String       @default("shadow")
-  sourceDecisionIds       String[]     @default([]) @map("source_decision_ids") @db.Uuid
-  validFrom               DateTime     @default(now()) @map("valid_from") @db.Timestamptz(6)
-  validTo                 DateTime?    @map("valid_to") @db.Timestamptz(6)
-  metadataJson            Json         @default("{}") @map("metadata_json")
-  createdAt               DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt               DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization            Organization @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
-
-  @@index([organizationId, matchVendorLabel])
-  @@map("coding_rules")
 }
 
 model User {
@@ -472,7 +428,6 @@ model Counterparty {
   organization      Organization     @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
   wallets           CounterpartyWallet[]
   paymentOrders     PaymentOrder[]
-  accountingVendorMaps AccountingVendorMap[]
   vendorCodingRules VendorCodingRule[]
 
   @@index([organizationId, createdAt(sort: Desc)])

@@ -2,17 +2,11 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../infra/prisma.js';
 import { assertOrganizationAccess } from '../auth/organization-access.js';
-import { listOrganizationAuditLog } from '../audit/organization-audit-log.js';
 
 export const opsRouter = Router();
 
 const organizationParamsSchema = z.object({
   organizationId: z.string().uuid(),
-});
-
-const auditLogQuerySchema = z.object({
-  limit: z.coerce.number().int().min(1).max(250).default(100),
-  entityType: z.enum(['payment_order', 'transfer_request', 'execution']).optional(),
 });
 
 opsRouter.get('/organizations/:organizationId/members', async (req, res, next) => {
@@ -53,60 +47,3 @@ opsRouter.get('/organizations/:organizationId/members', async (req, res, next) =
     next(error);
   }
 });
-
-opsRouter.get('/organizations/:organizationId/audit-log', async (req, res, next) => {
-  try {
-    const { organizationId } = organizationParamsSchema.parse(req.params);
-    const query = auditLogQuerySchema.parse(req.query);
-    await assertOrganizationAccess(organizationId, req.auth!);
-
-    res.json(await listOrganizationAuditLog({
-      organizationId,
-      limit: query.limit,
-      entityType: query.entityType,
-    }));
-  } catch (error) {
-    next(error);
-  }
-});
-
-opsRouter.get('/organizations/:organizationId/ops-health', async (req, res, next) => {
-  try {
-    const { organizationId } = organizationParamsSchema.parse(req.params);
-    await assertOrganizationAccess(organizationId, req.auth!);
-
-    await prisma.$queryRaw`SELECT 1`;
-    const [proposalCounts, paymentCounts] = await Promise.all([
-      prisma.decimalProposal.groupBy({
-        by: ['status'],
-        where: { organizationId },
-        _count: { status: true },
-      }),
-      prisma.paymentOrder.groupBy({
-        by: ['state'],
-        where: { organizationId },
-        _count: { state: true },
-      }),
-    ]);
-
-    res.json({
-      postgres: 'ok',
-      settlementMode: 'rpc',
-      indexerStatus: 'not_required',
-      proposals: groupCounts(proposalCounts, 'status'),
-      paymentOrders: groupCounts(paymentCounts, 'state'),
-      generatedAt: new Date().toISOString(),
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-function groupCounts<T extends string>(
-  rows: Array<Record<T, string> & { _count: Record<T, number> }>,
-  key: T,
-) {
-  return Object.fromEntries(
-    rows.map((row) => [row[key], row._count[key]]),
-  );
-}

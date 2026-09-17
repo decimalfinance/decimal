@@ -6,9 +6,8 @@ import { assertOrganizationAccess } from '../auth/organization-access.js';
 import { badRequest, forbidden, notFound, conflict } from '../infra/api-errors.js';
 import { asyncRoute, sendCreated, sendJson, sendList } from '../infra/route-helpers.js';
 import { prisma } from '../infra/prisma.js';
-import { executeCommand, submitApprovable, spawnReleaseRun } from './lifecycle.js';
+import { executeCommand } from './lifecycle.js';
 import { ApprovalEngineError, approverCommandSchema } from './schemas.js';
-import { getActivePlan, listEvents } from './store.js';
 
 export const approvalsRouter = Router();
 
@@ -32,47 +31,8 @@ function mapEngineError(e: unknown): never {
   throw e;
 }
 
-const submitSchema = z.object({
-  type: z.enum(['invoice', 'vendor_change', 'payment_run', 'po']),
-  totalMinorBase: z.string().regex(/^\d+$/),
-  vendorId: z.string().uuid().nullish(),
-  attributes: z.record(z.unknown()).optional(),
-  lines: z.array(z.object({
-    amountMinor: z.string().regex(/^\d+$/),
-    currency: z.string().length(3),
-    description: z.string().nullish(),
-    dimensions: z.record(z.string().uuid()).optional(),
-  })).min(1),
-});
-
-approvalsRouter.post('/organizations/:organizationId/approvals', asyncRoute(async (req, res) => {
-  const { organizationId } = orgParams.parse(req.params);
-  await assertOrganizationAccess(organizationId, req.auth!);
-  const input = submitSchema.parse(req.body);
-  const { ensureEngineSetup } = await import('./wiring.js');
-  await ensureEngineSetup(organizationId); // first touch self-initializes the org's default policy
-  const requesterId = await personForUser(organizationId, req.auth!.userId);
-  const result = await submitApprovable({
-    organizationId,
-    type: input.type,
-    requesterId,
-    vendorId: input.vendorId ?? null,
-    totalMinorBase: BigInt(input.totalMinorBase),
-    attributes: input.attributes,
-    lines: input.lines.map((l) => ({
-      amountMinor: BigInt(l.amountMinor), currency: l.currency,
-      description: l.description ?? null, dimensions: l.dimensions,
-    })),
-  }).catch(mapEngineError);
-  sendCreated(res, {
-    approvableId: result.approvableId,
-    state: result.macroState,
-    steps: result.compile.steps.map((s) => ({
-      index: s.index, mode: s.step, purpose: s.purpose,
-      approvers: s.approvers.map((a) => a.personId),
-    })),
-  });
-}));
+// Bills enter the engine in-process through wiring.ts (bill confirm), never over
+// HTTP, so there is deliberately no generic "submit an approvable" route here.
 
 approvalsRouter.get('/organizations/:organizationId/approvals/tasks', asyncRoute(async (req, res) => {
   const { organizationId } = orgParams.parse(req.params);
@@ -473,33 +433,6 @@ approvalsRouter.post('/organizations/:organizationId/approvals/pipeline/simulate
     flagsOverride: body.separation ?? null,
   }));
 }));
-
-approvalsRouter.get('/organizations/:organizationId/approvals/:approvableId', asyncRoute(async (req, res) => {
-  const { organizationId } = orgParams.parse(req.params);
-  const { approvableId } = z.object({ approvableId: z.string().uuid() }).parse(req.params);
-  await assertOrganizationAccess(organizationId, req.auth!);
-  const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
-    SELECT id, type, macro_state, total_minor_base::text AS total_minor_base, vendor_id, attributes
-    FROM approval.approvables WHERE id = ${approvableId}::uuid AND organization_id = ${organizationId}::uuid`;
-  if (rows.length === 0) throw notFound('Approval not found');
-  const plan = await getActivePlan(prisma, approvableId);
-  const events = await listEvents(organizationId, approvableId);
-  sendJson(res, {
-    ...rows[0],
-    plan: plan ? { id: plan.id, steps: plan.steps, sodOutcomes: plan.sod_outcomes } : null,
-    events: events.map((e) => ({ seq: String(e.seq), at: e.at, actorId: e.actor_id, payload: e.payload })),
-  });
-}));
-
-approvalsRouter.post('/organizations/:organizationId/approvals/:approvableId/release', asyncRoute(async (req, res) => {
-  const { organizationId } = orgParams.parse(req.params);
-  const { approvableId } = z.object({ approvableId: z.string().uuid() }).parse(req.params);
-  await assertOrganizationAccess(organizationId, req.auth!);
-  const result = await spawnReleaseRun(approvableId).catch(mapEngineError);
-  sendCreated(res, { releaseRunId: result.approvableId, state: result.macroState });
-}));
-
-
 
 async function requireOrgAdmin(organizationId: string, auth: NonNullable<import('express').Request['auth']>) {
   await assertOrganizationAccess(organizationId, auth);

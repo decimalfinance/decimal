@@ -72,7 +72,7 @@ Conventions that hold everywhere:
 
 **Two schemas.**
 
-- `public` holds the product tables, mirrored in `schema.prisma` (39 models). The main groups:
+- `public` holds the product tables, mirrored in `schema.prisma` (37 models). The main groups:
   - Identity: `Organization`, `User`, `OrganizationMembership`, `OrganizationInvite`, `AuthSession`.
   - Bills: `PaymentOrder` is the bill. Also `InvoiceDocument`, `InvoiceDocumentPage`, `PaymentOrderEvent`.
   - Bill collaboration: `BillComment`, `BillQuestion`, `BillFieldChange`, `AiSuggestion`, `AiSuggestionOutcome`.
@@ -81,8 +81,6 @@ Conventions that hold everywhere:
   - Inbound email: `InboundEmailMessage`, `InboundEmailAttachment`.
   - Payment execution, frozen: `TreasuryWallet`, `DecimalProposal`, `SpendingLimitPolicy`, `SpendingLimitExecution`, `TransferRequest`, `ExecutionRecord`, `AutomationAgent`, `AgentWallet`.
 - `approval` holds the approval engine (21 tables, defined from `002-approval-engine.sql` onward). It is **deliberately outside Prisma** and is reached only through raw SQL in `api/src/approvals/store.ts`. Do not model these tables in Prisma.
-
-Known dead tables: `coding_rules` (`CodingRule`) and `accounting_vendor_maps` (`AccountingVendorMap`). No code reads or writes them. Vendor coding lives in `vendor_coding_rules`.
 
 In code and the database a bill is a `PaymentOrder`. In every piece of UI copy it is a "bill". Its states are `draft`, `submitted`, `proposed`, `executed`, `settled`, `cancelled` (`payments/order-state.ts`). The operator sees five buckets derived from those: Draft, In approval, To pay, Done, Needs attention.
 

@@ -42,7 +42,6 @@ export const API_ENDPOINTS = [
     requestBody: { serializedTransactionBase64: 'string base64' },
   }),
 
-  endpoint('list_organizations', 'GET', '/organizations', ['organizations'], 'List organizations for the current user', 'session'),
   endpoint('organization_summary', 'GET', '/organizations/{organizationId}/summary', ['organizations'], 'Lightweight organization counts for shell navigation', 'session', { scope: 'organization:read' }),
   endpoint('create_organization', 'POST', '/organizations', ['organizations'], 'Create organization and provision default wallets when enabled', 'session', {
     scope: 'organization:write',
@@ -221,8 +220,6 @@ export const API_ENDPOINTS = [
   }),
 
   endpoint('members', 'GET', '/organizations/{organizationId}/members', ['ops'], 'List organization organization members', 'session', { scope: 'organization:read' }),
-  endpoint('audit_log', 'GET', '/organizations/{organizationId}/audit-log', ['ops'], 'Organization audit log', 'session', { scope: 'proofs:read' }),
-  endpoint('ops_health', 'GET', '/organizations/{organizationId}/ops-health', ['ops'], 'Organization Postgres/RPC product health metrics', 'session', { scope: 'organization:read' }),
 ] as const satisfies readonly ApiEndpoint[];
 
 export type ApiEndpointId = (typeof API_ENDPOINTS)[number]['id'];
