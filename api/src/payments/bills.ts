@@ -1,5 +1,4 @@
-// The bills workbench + bill draft backend (AP workbench redesign,
-// uploads/ap-claude-code-handoff.md).
+// The bills workbench + bill draft backend.
 //
 // Workbench: every payment order, grouped into the five operator buckets
 // (draft / in approval / to pay / done / needs attention) with the

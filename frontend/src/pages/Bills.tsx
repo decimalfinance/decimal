@@ -1,4 +1,4 @@
-// Bills workbench — the operator's home (uploads/ap-claude-code-handoff.md §2).
+// Bills workbench — the operator's home.
 // A triage surface: five lifecycle tabs over one bills query, urgency-sorted,
 // rows routing to the draft screen or detail (everything else).
 import { useMemo, useState } from 'react';

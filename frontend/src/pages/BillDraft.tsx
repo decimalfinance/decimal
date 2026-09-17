@@ -1,5 +1,5 @@
 // The bill draft — verify what was read from the document, then send for
-// approval (uploads/ap-claude-code-handoff.md §3). Document left, one flat
+// approval. Document left, one flat
 // field list right, user-resizable split, sticky commit bar.
 //
 // Design rulings preserved: per-field read markers (no confidence sections),
