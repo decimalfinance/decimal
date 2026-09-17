@@ -389,21 +389,10 @@ export const api = {
   listVendorCodingRules(organizationId: string) {
     return request<{ items: VendorCodingRule[] }>(`/organizations/${organizationId}/vendor-coding-rules`);
   },
-  setVendorCodingRule(organizationId: string, counterpartyId: string, body: { accountId: string; accountName?: string | null }) {
-    return request<VendorCodingRule>(`/organizations/${organizationId}/counterparties/${counterpartyId}/coding-rule`, {
-      method: 'PUT',
-      body: JSON.stringify(body),
-    });
-  },
   clearVendorCodingRule(organizationId: string, counterpartyId: string) {
     return request<{ ok: boolean }>(`/organizations/${organizationId}/counterparties/${counterpartyId}/coding-rule`, {
       method: 'DELETE',
     });
-  },
-  getGlCandidates(organizationId: string, paymentOrderId: string) {
-    return request<{ candidates: GlCandidate[]; vendorLabel: string | null }>(
-      `/organizations/${organizationId}/payment-orders/${paymentOrderId}/gl-coding/candidates`,
-    );
   },
   syncCodedPayments(organizationId: string) {
     return request<{ synced: number; skipped: number; error: number }>(
@@ -592,53 +581,6 @@ export const api = {
     });
   },
 
-  // Wallet authorizations — explicit bridge between a personal wallet and an
-  // organization (or specific treasury wallet within it).
-  listWalletAuthorizations(
-    organizationId: string,
-    params: {
-      treasuryWalletId?: string;
-      userWalletId?: string;
-      status?: WalletAuthorizationStatus;
-    } = {},
-  ) {
-    const qs = new URLSearchParams();
-    if (params.treasuryWalletId) qs.set('treasuryWalletId', params.treasuryWalletId);
-    if (params.userWalletId) qs.set('userWalletId', params.userWalletId);
-    if (params.status) qs.set('status', params.status);
-    const query = qs.toString();
-    return request<{ items: WalletAuthorization[] }>(
-      `/organizations/${organizationId}/wallet-authorizations${query ? `?${query}` : ''}`,
-    );
-  },
-  createWalletAuthorization(
-    organizationId: string,
-    input: {
-      userWalletId: string;
-      treasuryWalletId?: string | null;
-      membershipId?: string;
-      role?: WalletAuthorizationRole;
-      scope?: WalletAuthorizationScope;
-      metadataJson?: Record<string, unknown>;
-    },
-  ) {
-    return request<WalletAuthorization>(
-      `/organizations/${organizationId}/wallet-authorizations`,
-      {
-        method: 'POST',
-        body: JSON.stringify(input),
-      },
-    );
-  },
-  revokeWalletAuthorization(organizationId: string, walletAuthorizationId: string) {
-    return request<WalletAuthorization>(
-      `/organizations/${organizationId}/wallet-authorizations/${walletAuthorizationId}/revoke`,
-      {
-        method: 'POST',
-        body: JSON.stringify({}),
-      },
-    );
-  },
   listTreasuryWallets(organizationId: string) {
     return request<{ items: TreasuryWallet[] }>(`/organizations/${organizationId}/treasury-wallets`);
   },
@@ -668,20 +610,6 @@ export const api = {
   ) {
     return request<Counterparty>(`/organizations/${organizationId}/counterparties/${counterpartyId}/payable-status`, {
       method: 'PATCH',
-      body: JSON.stringify(input),
-    });
-  },
-  createCounterparty(
-    organizationId: string,
-    input: {
-      displayName: string;
-      category?: string;
-      externalReference?: string;
-      status?: string;
-    },
-  ) {
-    return request<Counterparty>(`/organizations/${organizationId}/counterparties`, {
-      method: 'POST',
       body: JSON.stringify(input),
     });
   },
@@ -842,67 +770,10 @@ export const api = {
       { method: 'POST', body: JSON.stringify(input) },
     );
   },
-  createSquadsConfigProposalApprovalIntent(
-    organizationId: string,
-    treasuryWalletId: string,
-    transactionIndex: string,
-    input: SquadsConfigProposalApproveRequest,
-  ) {
-    return request<SquadsConfigProposalIntentResponse>(
-      `/organizations/${organizationId}/treasury-wallets/${treasuryWalletId}/squads/config-proposals/${transactionIndex}/approve-intent`,
-      { method: 'POST', body: JSON.stringify(input) },
-    );
-  },
-  createSquadsConfigProposalExecuteIntent(
-    organizationId: string,
-    treasuryWalletId: string,
-    transactionIndex: string,
-    input: SquadsConfigProposalExecuteRequest,
-  ) {
-    return request<SquadsConfigProposalIntentResponse>(
-      `/organizations/${organizationId}/treasury-wallets/${treasuryWalletId}/squads/config-proposals/${transactionIndex}/execute-intent`,
-      { method: 'POST', body: JSON.stringify(input) },
-    );
-  },
   syncSquadsTreasuryMembers(organizationId: string, treasuryWalletId: string) {
     return request<SquadsTreasuryDetail>(
       `/organizations/${organizationId}/treasury-wallets/${treasuryWalletId}/squads/sync-members`,
       { method: 'POST', body: JSON.stringify({}) },
-    );
-  },
-  // Aggregated across all org Squads treasuries the actor is a member of.
-  listOrganizationSquadsProposals(
-    organizationId: string,
-    options: { status?: SquadsProposalListStatusFilter; limit?: number } = {},
-  ) {
-    const params = new URLSearchParams();
-    if (options.status) params.set('status', options.status);
-    if (options.limit !== undefined) params.set('limit', String(options.limit));
-    const query = params.toString();
-    return request<{ items: SquadsConfigProposalWithTreasury[] }>(
-      `/organizations/${organizationId}/squads/proposals${query ? `?${query}` : ''}`,
-    );
-  },
-  listSquadsConfigProposals(
-    organizationId: string,
-    treasuryWalletId: string,
-    options: { status?: SquadsProposalListStatusFilter; limit?: number } = {},
-  ) {
-    const params = new URLSearchParams();
-    if (options.status) params.set('status', options.status);
-    if (options.limit !== undefined) params.set('limit', String(options.limit));
-    const query = params.toString();
-    return request<{ items: SquadsConfigProposal[] }>(
-      `/organizations/${organizationId}/treasury-wallets/${treasuryWalletId}/squads/config-proposals${query ? `?${query}` : ''}`,
-    );
-  },
-  getSquadsConfigProposal(
-    organizationId: string,
-    treasuryWalletId: string,
-    transactionIndex: string,
-  ) {
-    return request<SquadsConfigProposal>(
-      `/organizations/${organizationId}/treasury-wallets/${treasuryWalletId}/squads/config-proposals/${transactionIndex}`,
     );
   },
 
@@ -993,22 +864,6 @@ export const api = {
       { method: 'POST', body: JSON.stringify(input) },
     );
   },
-  // Batch variant: one Squads vault proposal that bundles up to 8 USDC
-  // transfers (passed as paymentOrderIds). Optional inputBatchId tags the
-  // proposal with the originating CSV batch. Backend rejects if any order
-  // still needs Decimal-side approval (400) or if any of them already has
-  // an active proposal (409 with the existing decimalProposalId in the
-  // error payload).
-  createSquadsBatchedPaymentProposalIntent(
-    organizationId: string,
-    treasuryWalletId: string,
-    input: CreateSquadsBatchedPaymentProposalRequest,
-  ) {
-    return request<DecimalProposalIntentResponse>(
-      `/organizations/${organizationId}/treasury-wallets/${treasuryWalletId}/squads/vault-proposals/payment-batch-intent`,
-      { method: 'POST', body: JSON.stringify(input) },
-    );
-  },
 
   listPaymentOrders(
     organizationId: string,
@@ -1021,53 +876,6 @@ export const api = {
       `/organizations/${organizationId}/payment-orders?${params.toString()}`,
     );
   },
-  // Manual single-payment intake. Creates a PaymentOrder directly and,
-  // with autoAdvance, runs the unified agent router in the same call.
-  createPaymentOrder(
-    organizationId: string,
-    input: {
-      counterpartyWalletId: string;
-      amountRaw: string;
-      asset?: string;
-      memo?: string;
-      externalReference?: string;
-      invoiceNumber?: string;
-      attachmentUrl?: string;
-      dueAt?: string;
-      sourceTreasuryWalletId?: string;
-      metadataJson?: Record<string, unknown>;
-      autoAdvance?: boolean;
-    },
-  ) {
-    return request<PaymentOrder & { automation?: PaymentOrderAgentAdvanceResult }>(
-      `/organizations/${organizationId}/payment-orders`,
-      { method: 'POST', body: JSON.stringify(input) },
-    );
-  },
-  // Bulk-create N PaymentOrders from a CSV string. Each row becomes a
-  // PaymentOrder tagged with the same inputBatchId. With autoAdvance the
-  // agent immediately routes each clean row through a spending limit or
-  // Squads proposal.
-  uploadBatchCsv(
-    organizationId: string,
-    input: {
-      csv: string;
-      sourceTreasuryWalletId?: string;
-      batchLabel?: string;
-      autoAdvance?: boolean;
-    },
-  ) {
-    return request<BatchCsvUploadResult>(
-      `/organizations/${organizationId}/payment-orders/batch-csv`,
-      { method: 'POST', body: JSON.stringify(input) },
-    );
-  },
-  previewBatchCsv(organizationId: string, csv: string) {
-    return request<BatchCsvPdraftResult>(
-      `/organizations/${organizationId}/payment-orders/batch-csv/preview`,
-      { method: 'POST', body: JSON.stringify({ csv }) },
-    );
-  },
   getPaymentOrderDetail(organizationId: string, paymentOrderId: string) {
     return request<PaymentOrder>(`/organizations/${organizationId}/payment-orders/${paymentOrderId}`);
   },
@@ -1076,26 +884,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({}),
     });
-  },
-  // Agent-aware invoice upload. Creates payment orders from the document and,
-  // when autoAdvance is true (default), asks the Decimal org agent to route
-  // any proposal-ready rows. Risky
-  // rows come back as draft and the user clears them via
-  // markBillSubmitted.
-  uploadInvoice(
-    organizationId: string,
-    input: {
-      filename: string;
-      mimeType: string;
-      dataBase64: string;
-      sourceTreasuryWalletId?: string | null;
-      autoAdvance?: boolean;
-    },
-  ) {
-    return request<InvoiceUploadResult>(
-      `/organizations/${organizationId}/invoices/upload`,
-      { method: 'POST', body: JSON.stringify(input) },
-    );
   },
   // Clear a draft payment order. With autoAdvance the backend will
   // also kicks the agent router in the same call, returning the result in
@@ -1193,16 +981,6 @@ export const api = {
     );
   },
 
-  replaceSpendingLimitPolicyIntent(
-    organizationId: string,
-    spendingLimitPolicyId: string,
-    body: ReplaceSpendingLimitPolicyIntentRequest,
-  ) {
-    return request<ReplaceSpendingLimitPolicyIntentResponse>(
-      `/organizations/${organizationId}/spending-limit-policies/${spendingLimitPolicyId}/replace-intent`,
-      { method: 'POST', body: JSON.stringify(body) },
-    );
-  },
 
   removeSpendingLimitPolicyIntent(
     organizationId: string,
@@ -1294,12 +1072,6 @@ export interface ApprovalFlowSummary {
 }
 
 export const approvalsApi = {
-  listMyTasks(organizationId: string) {
-    return request<{ items: ApprovalTask[] }>(`/organizations/${organizationId}/approvals/tasks`);
-  },
-  getPolicy(organizationId: string) {
-    return request<{ flows: ApprovalFlowSummary[] }>(`/organizations/${organizationId}/approvals/policy`);
-  },
   actOnTask(organizationId: string, taskId: string, command: Record<string, unknown>) {
     return request<{ replay: boolean; taskState: string; macroState: string }>(
       `/organizations/${organizationId}/approvals/tasks/${taskId}/command`,
@@ -1380,24 +1152,6 @@ export interface InvoiceDocumentMeta {
   createdAt: string;
 }
 
-export const invoiceDocumentsApi = {
-  meta(organizationId: string, invoiceDocumentId: string) {
-    return request<InvoiceDocumentMeta>(`/organizations/${organizationId}/invoice-documents/${invoiceDocumentId}/meta`);
-  },
-  // The document endpoint needs the auth header, so a plain URL in <iframe src>
-  // won't work — fetch the bytes and hand back an object URL. Callers must
-  // URL.revokeObjectURL it when the viewer unmounts.
-  async fetchObjectUrl(organizationId: string, invoiceDocumentId: string) {
-    const response = await fetch(`${API_BASE_URL}/organizations/${organizationId}/invoice-documents/${invoiceDocumentId}`, {
-      headers: sessionToken ? { authorization: `Bearer ${sessionToken}` } : {},
-    });
-    if (!response.ok) {
-      throw new ApiError('Could not load the invoice document.', response.status, null);
-    }
-    const blob = await response.blob();
-    return { url: URL.createObjectURL(blob), mimeType: blob.type };
-  },
-};
 
 export type BillBucket = 'draft' | 'in_approval' | 'to_pay' | 'done' | 'needs_attention';
 
@@ -1693,11 +1447,6 @@ export const billsApi = {
     return request<{ paymentOrderId: string | null }>(
       `/organizations/${organizationId}/recall-requests/${recallRequestId}/withdraw`,
       { method: 'POST' },
-    );
-  },
-  pendingRecalls(organizationId: string) {
-    return request<Array<BillRecall & { paymentOrderId: string | null; vendorName: string | null; amountMinor: string }>>(
-      `/organizations/${organizationId}/recall-requests`,
     );
   },
   updateFacts(organizationId: string, paymentOrderId: string, facts: Record<string, unknown>) {
@@ -2063,16 +1812,6 @@ export const approvalsInboxApi = {
 };
 
 export interface ReleaseConfig { approvers: string[]; quorum: 'all' | 'any' | number; configured: boolean; people: FlowPerson[] }
-export const releaseApi = {
-  get(organizationId: string) {
-    return request<ReleaseConfig>(`/organizations/${organizationId}/approvals/release`);
-  },
-  publish(organizationId: string, approvers: string[], quorum: 'all' | 'any' | number) {
-    return request<{ policyId: string; version: number }>(`/organizations/${organizationId}/approvals/release/publish`, {
-      method: 'POST', body: JSON.stringify({ approvers, quorum }),
-    });
-  },
-};
 
 // draft stage (control point #1) — same shape as the approval flow, on its own
 // endpoint. A bill must clear this before it enters approval.

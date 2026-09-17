@@ -9,9 +9,9 @@ import { getOrganizations, queryKeys } from './lib/app-helpers';
 import { useLiveOrgEvents } from './lib/use-live-org-events';
 
 // Lazy-loaded route pages. Each becomes its own chunk, so the main bundle
-// only ships the shell + the first matched page. Notably keeps Three.js
-// (Landing) and Solana web3 (Wallets, PaymentDetail, TreasuryWalletDetail,
-// OrganizationProposalDetail) out of the initial download for everyone else.
+// only ships the shell + the first matched page. Notably keeps Solana web3
+// (Wallets, PaymentDetail, TreasuryWalletDetail, OrganizationProposalDetail)
+// out of the initial download for everyone else.
 const InboxPage = lazy(() => import('./pages/Inbox').then((m) => ({ default: m.InboxPage })));
 const ProposalRedirectPage = lazy(() => import('./pages/ProposalRedirect').then((m) => ({ default: m.ProposalRedirectPage })));
 const BillsPage = lazy(() => import('./pages/Bills').then((m) => ({ default: m.BillsPage })));
@@ -22,10 +22,7 @@ const FlowBuilderPage = lazy(() => import('./pages/FlowBuilder').then((m) => ({ 
 const PaymentDetailPageV2 = lazy(() => import('./pages/PaymentDetail').then((m) => ({ default: m.PaymentDetailPage })));
 const WalletsPage = lazy(() => import('./pages/Wallets').then((m) => ({ default: m.WalletsPage })));
 const CounterpartiesPage = lazy(() => import('./pages/Counterparties').then((m) => ({ default: m.CounterpartiesPage })));
-const LandingPageV1 = lazy(() => import('./pages/landing-v1').then((m) => ({ default: m.LandingPage })));
-const LandingPageV2 = lazy(() => import('./pages/Landing').then((m) => ({ default: m.LandingPage })));
-const LandingPageV3 = lazy(() => import('./pages/landing-v3').then((m) => ({ default: m.LandingPage })));
-const LandingPageV4 = lazy(() => import('./pages/landing-v4').then((m) => ({ default: m.LandingPage })));
+const LandingPage = lazy(() => import('./pages/landing-v4').then((m) => ({ default: m.LandingPage })));
 const MembersPage = lazy(() => import('./pages/Members').then((m) => ({ default: m.MembersPage })));
 const ApprovalsPage = lazy(() => import('./pages/Approvals').then((m) => ({ default: m.ApprovalsPage })));
 const ProtectionsPage = lazy(() => import('./pages/Protections').then((m) => ({ default: m.ProtectionsPage })));
@@ -85,11 +82,7 @@ export function App() {
   return (
     <Suspense fallback={<RouteFallback />}>
       <Routes>
-        {/* Landing history, numbered oldest to newest: /1 = v1 (original), /2 = v2, /3 = v3, / = v4 (current). */}
-        <Route path="/" element={<LandingPageV4 />} />
-        <Route path="/3" element={<LandingPageV3 />} />
-        <Route path="/2" element={<LandingPageV2 />} />
-        <Route path="/1" element={<LandingPageV1 />} />
+        <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         {/* Testing sign-in. Not linked from anywhere in the product, and the
