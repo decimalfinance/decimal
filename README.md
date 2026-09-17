@@ -41,4 +41,3 @@ make help    show this list
 | `docs/OPEN-WORK.md` | Designed but not yet built. |
 | `TESTBENCH.md` | How changes get verified in a real browser by an agent. |
 | `frontend/src/pages/PAGE-PLAYBOOK.md` | The design system contract for every page. |
-| `approvals and research/` | The research behind approvals, roles, policies, coding and intake. |

@@ -25,8 +25,9 @@ scripts/        Shell scripts behind the Makefile, plus the test-invoice generat
 config/         Committed, non-secret runtime config.
 docs/           This file, open work, and frozen reference material.
 .design-sync/   Pipeline that publishes UI primitives to the external Claude Design project.
-"approvals and research/"   Design research behind approvals, roles, policies, GL coding, intake.
 ```
+
+Code comments that cite a `*-research` document refer to a research folder that was removed. `docs/OPEN-WORK.md` explains how to read it from git history.
 
 ## Runtime (Live)
 
