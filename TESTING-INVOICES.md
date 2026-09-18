@@ -92,12 +92,22 @@ different: paper and toner are office supplies, the courier is shipping, the
 copier is a rental, the cleaners are contractors, the permit is a tax. One
 account for everything is the WRONG answer here, so a wrong answer is visible.
 
-## E. Payment-path (2 invoices)
+## E. Payment-path (6 invoices)
 
 | # | Amount | Purpose |
 |---|---|---|
 | E1 | $850.00 | clean bill for the full walk: draft → approve → release by Dara |
 | E2 | $150,000.00 | above any sane ceiling — tests the over-ceiling block |
+| E3 | $104,200.00 | just over a $100,000 ceiling — the judgement case for a per-bill exception |
+| E4 | $127,500.00 | over the ceiling, single line |
+| E5 | $222,500.00 | over the ceiling, several lines |
+| E6 | $419,000.00 | far over the ceiling, several lines |
+
+E3–E6 test the per-bill ceiling exception: with the ceiling at $100,000, all
+four block with `over_ceiling`, and the primary admin lets chosen ones through
+with a reason while the ceiling stays where it is. Each comes from a vendor used
+nowhere else in the set and is otherwise clean, so the ceiling is the only
+thing that can block it.
 
 ---
 

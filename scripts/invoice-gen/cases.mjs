@@ -84,6 +84,30 @@ export const VENDORS = {
     bank: 'East Bay Commerce Bank', routing: '121000358', acct: '4417',
     accent: '#2f5d50', template: 'letterhead',
   },
+  harborline: {
+    name: 'Harborline Construction Inc.', addr: '1900 Alameda St', city: 'San Francisco, CA 94103',
+    email: 'ar@harborlinebuild.example', phone: '(415) 555-0192',
+    bank: 'Presidio Commercial Bank', routing: '026009593', acct: '3086',
+    accent: '#3b4a5a', template: 'letterhead',
+  },
+  tidewater: {
+    name: 'Tidewater Data Systems LLC', addr: '400 Atlantic Ave', city: 'Norfolk, VA 23510',
+    email: 'billing@tidewaterdata.example', phone: '(757) 555-0133',
+    bank: 'Chesapeake Trust Bank', routing: '031176110', acct: '7215',
+    accent: '#11607a', template: 'minimal',
+  },
+  castellan: {
+    name: 'Castellan Workplace Furniture', addr: '2250 W Fulton St', city: 'Chicago, IL 60612',
+    email: 'invoices@castellanworkplace.example', phone: '(312) 555-0178',
+    bank: 'Great Lakes Commerce Bank', routing: '071000013', acct: '5902',
+    accent: '#6b4e2e', template: 'minimal',
+  },
+  keystone: {
+    name: 'Keystone Mechanical Services', addr: '75 Liberty Ave', city: 'Pittsburgh, PA 15222',
+    email: 'billing@keystonemech.example', phone: '(412) 555-0164',
+    bank: 'Allegheny National Bank', routing: '043000096', acct: '6634',
+    accent: '#8c2f1b', template: 'letterhead',
+  },
   halstead: {
     name: 'Halstead Consulting', addr: '415 N Dearborn St', city: 'Chicago, IL 60654',
     email: 'billing@halsteadconsulting.example', phone: '(312) 555-0129',
@@ -389,5 +413,51 @@ export const CASES = [
     terms: 'Net 30',
     lines: [L('Annual freight contract — prepayment', 1, 150000)],
     expect: '$150,000 → over_ceiling blocks Confirm. REQUIRES a ceiling set first (Zara, Policies page).',
+  },
+
+  // E3–E6: a batch of bills over the $100,000 ceiling, so the per-bill
+  // exception can be tested as "most stay blocked, a chosen few go through".
+  // Each is clean apart from the amount: new vendors, remit details present,
+  // no tax, lines that sum exactly. over_ceiling must be the only blocker.
+  {
+    id: 'E3', file: 'E-payment-path/E3-just-over-ceiling-104200.pdf', format: 'pdf',
+    vendor: 'harborline', invoiceNo: 'HCI-20931', date: '2026-09-08', due: '2026-10-08',
+    terms: 'Net 30', po: 'PO-7741',
+    lines: [
+      L('Office fit-out, phase 2 — partitions and glazing', 1, 68500),
+      L('Electrical rough-in and lighting', 1, 21400),
+      L('Carpet tile installation (5,200 sq ft)', 5200, 2.75),
+    ],
+    expect: '$104,200, just over the $100,000 ceiling → over_ceiling blocks Confirm. The judgement case: cleared by a per-bill ceiling exception with a reason, NOT by raising the ceiling.',
+  },
+  {
+    id: 'E4', file: 'E-payment-path/E4-over-ceiling-127500.pdf', format: 'pdf',
+    vendor: 'tidewater', invoiceNo: 'TDS-5518', date: '2026-09-02', due: '2026-10-17',
+    terms: 'Net 45',
+    lines: [L('Enterprise data platform licence — annual, 250 seats', 250, 510)],
+    expect: '$127,500 single line → over_ceiling blocks Confirm. Cleared by a per-bill ceiling exception, NOT by raising the ceiling.',
+  },
+  {
+    id: 'E5', file: 'E-payment-path/E5-over-ceiling-222500.pdf', format: 'pdf',
+    vendor: 'castellan', invoiceNo: 'CWF-11862', date: '2026-09-10', due: '2026-10-10',
+    terms: 'Net 30', po: 'PO-7753',
+    lines: [
+      L('Ergonomic task chairs', 180, 645),
+      L('Sit-stand desks, 60 x 30 in', 180, 520),
+      L('Delivery and installation', 1, 12800),
+    ],
+    expect: '$222,500 → over_ceiling blocks Confirm. Cleared by a per-bill ceiling exception, NOT by raising the ceiling.',
+  },
+  {
+    id: 'E6', file: 'E-payment-path/E6-over-ceiling-419000.pdf', format: 'pdf',
+    vendor: 'keystone', invoiceNo: 'KMS-7740', date: '2026-09-04', due: '2026-10-04',
+    terms: 'Net 30', po: 'PO-7738',
+    lines: [
+      L('Rooftop HVAC unit replacement, 40-ton', 4, 78500),
+      L('Ductwork modification', 1, 61250),
+      L('Controls integration and commissioning', 1, 28900),
+      L('Crane hire', 2, 7425),
+    ],
+    expect: '$419,000, far over the ceiling → over_ceiling blocks Confirm. Cleared by a per-bill ceiling exception, NOT by raising the ceiling.',
   },
 ];
