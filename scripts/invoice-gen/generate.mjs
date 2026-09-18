@@ -163,6 +163,14 @@ const nums = CASES.filter((s) => s.invoiceNo && s.id !== 'B4').map((s) => s.invo
 check(new Set(nums).size === nums.length, 'invoice numbers must be unique apart from B4');
 check(CASES.filter((s) => s.vendor === 'juniper').length === 1, "A3's vendor must appear nowhere else");
 
+// E3–E6 test the per-bill ceiling exception, so the ceiling must be their only
+// blocker: every one over $100,000, and each from a vendor used nowhere else.
+for (const id of ['E3', 'E4', 'E5', 'E6']) {
+  const { spec, computed } = byId[id];
+  check(cents(computed.shownTotal) > 10_000_000, `${id} must be over the $100,000 ceiling`);
+  check(CASES.filter((s) => s.vendor === spec.vendor).length === 1, `${id}'s vendor must appear nowhere else`);
+}
+
 // Text layer + renderability (uses the same tools intake uses, when present).
 const has = (cmd) => spawnSync('which', [cmd]).status === 0;
 if (has('pdftotext')) {
