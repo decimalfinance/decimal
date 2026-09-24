@@ -1353,8 +1353,36 @@ export interface BillDraft {
       requires: 'anyone' | 'admin' | 'primary_admin';
       detail: string;
     }>;
+    /** The exception agent's investigation of this flag, when it has one. */
+    brief?: ExceptionBrief;
   }>;
   verification: { confirmedAt: string | null; confirmedByUserId: string | null; noteForApprovers: string | null } | null;
+}
+
+/**
+ * What the exception agent found about a flag, from THIS bill's point of view.
+ * Advisory only: the flag still blocks, and a person still confirms.
+ */
+export interface ExceptionBrief {
+  briefId: string;
+  status: 'running' | 'ready' | 'failed';
+  verdict: 'duplicate' | 'replacement' | 'not_duplicate' | 'unsure' | null;
+  confidence: 'high' | 'medium' | 'low' | null;
+  headline: string | null;
+  /** Prefilled as the reason when the person takes the recommended action. */
+  reason: string | null;
+  /** What the verdict means for this bill — one of the flag's own resolutions. */
+  recommendedAction: 'clear_duplicate' | 'not_ours' | 'ask_someone' | null;
+  side: 'older' | 'newer';
+  otherBill: { paymentOrderId: string; invoiceNumber: string | null };
+  findings: Array<{
+    claim: string;
+    /** `bill` is null for evidence about neither bill alone (the comparison, the vendor's history). */
+    evidence: Array<{ bill: 'this' | 'other' | null; key: string }>;
+  }>;
+  checked: string[];
+  couldNotCheck: string[];
+  generatedAt: string | null;
 }
 
 export interface ConfirmBillBody {

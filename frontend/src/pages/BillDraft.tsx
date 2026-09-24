@@ -21,6 +21,7 @@ import {
   type BillWorkLogEntry,
   type ConfirmBillBody,
   type DocSource,
+  type ExceptionBrief,
 } from '../api';
 import { Ico } from '../dec/icons';
 import { BillWorkLog } from '../dec/primitives';
@@ -72,6 +73,9 @@ export function BillDraftPage() {
     queryKey: ['bill-billDraft', organizationId, paymentOrderId],
     queryFn: () => billsApi.draft(organizationId, paymentOrderId),
     enabled: Boolean(organizationId && paymentOrderId),
+    // Only while the exception agent is still investigating a flag: the screen
+    // picks up its answer without a reload, and stops asking once it has one.
+    refetchInterval: (q) => (q.state.data?.flags.some((f) => f.brief?.status === 'running') ? 2000 : false),
   });
   // Admin tier decides who may clear a duplicate flag (policy override).
   const myAccess = useQuery({
@@ -279,6 +283,7 @@ function DraftScreen(props: {
   toast: ReturnType<typeof useToast>;
 }) {
   const { organizationId, billDraft, canOverrideDuplicate, canAllowOverCeiling, canEditBills, onBack, onDone, toast } = props;
+  const navigateTo = useNavigate();
   // The server already refuses the save and now says so in `readOnly`; this
   // also folds in the viewer's own capabilities, which the Confirm button has
   // always consulted. Both, because myAccess assumes editable while it loads —
@@ -564,7 +569,10 @@ function DraftScreen(props: {
   const mergeTargetName = (message: string) =>
     /you already pay "([^"]+)"/.exec(message)?.[1] ?? 'the existing vendor';
 
-  function startResolution(flagKind: string, action: ResolutionAction) {
+  // `prefill` is the exception agent's reason, passed only when the person is
+  // taking the action it recommended. It lands in the box they confirm from, so
+  // agreeing is one click — and still their words to change before it is final.
+  function startResolution(flagKind: string, action: ResolutionAction, prefill?: string) {
     // Actions that only point somewhere else need no input and no ceremony.
     if (action === 'fix_fields') {
       toast.info('Correct the fields below, then confirm the bill.', 'Check the details');
@@ -595,6 +603,7 @@ function DraftScreen(props: {
           : flagKind === 'possible_duplicate' ? 'duplicate'
           : 'not_ours',
       );
+      setCloseNote(prefill ?? '');
       setNotABillOpen(true);
       return;
     }
@@ -631,7 +640,7 @@ function DraftScreen(props: {
       return;
     }
     setActiveResolution({ flag: flagKind, action, targetId });
-    setResolutionValue(claimed);
+    setResolutionValue(prefill ?? claimed);
   }
 
   const runResolution = async (override?: { flag: string; action: ResolutionAction; targetId?: string }) => {
@@ -730,9 +739,25 @@ function DraftScreen(props: {
   // recorded reason matches the check that stopped it. A statement closed as
   // "not ours" reads as somebody else's bill when it is ours, listed six times.
   const [closeReason, setCloseReason] = useState<NotABillReason>('duplicate');
+  // The exception agent's reason, when closing is what it recommended. Only
+  // ever prefilled from its recommendation, and cleared for any other close.
+  const [closeNote, setCloseNote] = useState('');
   const [confirmOpen, setConfirmOpen] = useState(false);
   // Field ↔ document linking: focusing a field highlights where it was read.
   const [activeSource, setActiveSource] = useState<DocSource>(null);
+
+  // Evidence the exception agent cited. On this bill it lights up where the
+  // value was read, the same highlight a focused field gets; on the other bill
+  // of the pair it opens that bill.
+  const briefEvidenceShown = (ev: BriefEvidence) =>
+    ev.bill === 'other' || (ev.bill === 'this' && evidenceSource(billDraft, ev.key) !== null);
+  const showBriefEvidence = (brief: ExceptionBrief, ev: BriefEvidence) => {
+    if (ev.bill === 'other') {
+      navigateTo(`/organizations/${organizationId}/bills/${brief.otherBill.paymentOrderId}/draft`);
+      return;
+    }
+    if (ev.bill === 'this') setActiveSource(evidenceSource(billDraft, ev.key));
+  };
 
   // Chart of accounts for the category picker — same source and cache as the
   // coding inbox. Falls back to the draft packet's options, then to whatever
@@ -1185,6 +1210,13 @@ function DraftScreen(props: {
                 <Ico.shield w={16} />
                 <span style={{ flex: 1, minWidth: 0 }}>
                   {flag.message}
+                  {flag.brief ? (
+                    <ExceptionBriefBlock
+                      brief={flag.brief}
+                      canShow={briefEvidenceShown}
+                      onEvidence={(ev) => showBriefEvidence(flag.brief!, ev)}
+                    />
+                  ) : null}
                   {activeResolution?.flag === flag.kind ? (() => {
                     const asking = activeResolution.action === 'ask_someone';
                     const claimed = /addressed to "([^"]+)"/.exec(flag.message)?.[1] ?? '';
@@ -1376,7 +1408,16 @@ function DraftScreen(props: {
                 </span>
                 {activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
                   <span style={{ display: 'flex', gap: 6, flex: 'none' }}>
-                    {flag.resolutions.map((r) => {
+                    {/* What the exception agent recommends goes first and is
+                        the primary button; the rest stay, as secondary, for
+                        whoever disagrees. The person still clicks either way. */}
+                    {(() => {
+                      const advised = flag.brief?.status === 'ready' ? flag.brief.recommendedAction : null;
+                      return advised
+                        ? [...flag.resolutions].sort((a, b) => Number(b.action === advised) - Number(a.action === advised))
+                        : flag.resolutions;
+                    })().map((r) => {
+                      const recommended = flag.brief?.status === 'ready' && flag.brief.recommendedAction === r.action;
                       // An admin-only action stays visible to everyone, disabled,
                       // with the reason in the tooltip. Hiding it would leave a
                       // reviewer staring at a blocked bill wondering what the
@@ -1398,13 +1439,13 @@ function DraftScreen(props: {
                         <span key={r.action} title={why} style={{ display: 'inline-flex', flex: 'none' }}>
                           <button
                             type="button"
-                            className="btn btn-secondary btn-sm"
+                            className={`btn ${recommended ? 'btn-primary' : 'btn-secondary'} btn-sm`}
                             style={{ flex: 'none' }}
                             disabled={blocked}
-                            aria-label={blocked ? `${r.label} — ${why}` : undefined}
-                            onClick={() => startResolution(flag.kind, r.action)}
+                            aria-label={blocked ? `${r.label} — ${why}` : recommended ? `${r.label} (recommended)` : undefined}
+                            onClick={() => startResolution(flag.kind, r.action, recommended ? flag.brief?.reason ?? undefined : undefined)}
                           >
-                            {r.label}
+                            {recommended ? <><Ico.sparkle w={11} /> {r.label}</> : r.label}
                           </button>
                         </span>
                       );
@@ -1728,7 +1769,7 @@ function DraftScreen(props: {
       {/* Commit bar */}
       {!readOnly ? (
         <div className="commit-bar">
-          <button type="button" className="btn btn-ghost" onClick={() => setNotABillOpen(true)}>
+          <button type="button" className="btn btn-ghost" onClick={() => { setCloseNote(''); setNotABillOpen(true); }}>
             {/* It usually IS a bill — just not one to pay. The old label made
                 you assert something false to get unstuck. */}
             Close this bill
@@ -1807,6 +1848,7 @@ function DraftScreen(props: {
           organizationId={organizationId}
           paymentOrderId={billDraft.paymentOrderId}
           initialReason={closeReason}
+          initialNote={closeNote}
           onClose={() => setNotABillOpen(false)}
           onDone={() => { setNotABillOpen(false); onDone(); }}
           toast={toast}
@@ -2634,12 +2676,14 @@ function NotABillDialog(props: {
   paymentOrderId: string;
   /** What the flag that led here says it is, so the record matches the check. */
   initialReason?: NotABillReason;
+  /** Prefilled detail — the exception agent's reason, when closing is what it advised. */
+  initialNote?: string;
   onClose: () => void;
   onDone: () => void;
   toast: ReturnType<typeof useToast>;
 }) {
   const [reason, setReason] = useState<NotABillReason>(props.initialReason ?? 'duplicate');
-  const [detail, setDetail] = useState('');
+  const [detail, setDetail] = useState(props.initialNote ?? '');
   const [running, setRunning] = useState(false);
 
   const reasons: Array<{ key: NotABillReason; label: string }> = [
@@ -2704,5 +2748,150 @@ function NotABillDialog(props: {
         </div>
       </div>
     </div>
+  );
+}
+
+// ---- the exception agent's brief -------------------------------------------
+//
+// A flag says what is wrong. The brief is the investigation done before anyone
+// looked: a verdict in one sentence, what it means for THIS bill, and — folded,
+// because the headline is the answer and the rest is the proof — the evidence,
+// each piece one click from where it came from. It never says "model" or
+// "confidence": it says what it found and how sure the finding is.
+
+type BriefEvidence = ExceptionBrief['findings'][number]['evidence'][number];
+
+const CERTAINTY: Record<NonNullable<ExceptionBrief['confidence']>, { label: string; tone: string }> = {
+  high: { label: 'Clear-cut', tone: 'pill-success' },
+  medium: { label: 'Likely', tone: 'pill-warning' },
+  low: { label: 'Not certain', tone: 'pill-neutral' },
+};
+
+/** Where a piece of evidence on THIS bill was read, if the page can point at it. */
+function evidenceSource(draft: BillDraft, key: string): DocSource {
+  if (key === 'total') return draft.totalsSources?.total ?? null;
+  if (key === 'tax') return draft.totalsSources?.tax ?? null;
+  if (key === 'subtotal') return draft.totalsSources?.lineItems ?? null;
+  const line = /^line\.(\d+)$/.exec(key);
+  if (line) return draft.lines[Number(line[1])]?.source ?? null;
+  return draft.fields.find((f) => f.key === key)?.source ?? null;
+}
+
+function evidenceLabel(brief: ExceptionBrief, ev: BriefEvidence): string {
+  if (ev.bill === null) {
+    if (ev.key.startsWith('compare.')) return 'Side-by-side comparison';
+    if (ev.key.startsWith('history.')) return "Vendor's earlier bills";
+    return 'Other evidence';
+  }
+  const whose = ev.bill === 'this' ? 'This bill' : `${brief.otherBill.invoiceNumber ?? 'The other bill'} (other copy)`;
+  const line = /^line\.(\d+)$/.exec(ev.key);
+  const what = line ? `line ${Number(line[1]) + 1}`
+    : ev.key.startsWith('doc.') ? 'document text'
+    : ({ total: 'total', tax: 'tax', subtotal: 'subtotal', invoiceNumber: 'invoice number', invoiceDate: 'invoice date', dueDate: 'due date', poNumber: 'PO number' } as Record<string, string>)[ev.key] ?? ev.key;
+  return `${whose}: ${what}`;
+}
+
+/** The recommendation in words, for this bill. */
+function briefAdvice(brief: ExceptionBrief): string {
+  const other = brief.otherBill.invoiceNumber ?? 'the other bill';
+  switch (brief.recommendedAction) {
+    case 'clear_duplicate':
+      if (brief.verdict === 'duplicate') return `Keep this one. The copy of ${other} is the one to close.`;
+      if (brief.verdict === 'replacement') return `Keep this one: it corrects ${other}, which should be closed so only one is paid.`;
+      return 'Not a duplicate. Clear the flag and carry on.';
+    case 'not_ours':
+      return brief.verdict === 'replacement'
+        ? `Close this one: ${other} replaces it.`
+        : `Close this one: it is a copy of ${other}.`;
+    case 'ask_someone':
+      return 'The evidence does not settle it. Worth asking someone who knows this vendor.';
+    default:
+      return '';
+  }
+}
+
+function ExceptionBriefBlock(props: {
+  brief: ExceptionBrief;
+  canShow: (ev: BriefEvidence) => boolean;
+  onEvidence: (ev: BriefEvidence) => void;
+}) {
+  const { brief } = props;
+  const [open, setOpen] = useState(false);
+
+  if (brief.status === 'running') {
+    return (
+      <span style={{ display: 'block', marginTop: 10 }}>
+        <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <Ico.sparkle w={12} /> Looking into it: comparing both bills and the vendor's history…
+        </span>
+        <span className="skeleton" style={{ display: 'block', height: 10, marginTop: 8 }} />
+      </span>
+    );
+  }
+  if (brief.status !== 'ready' || !brief.headline) return null;
+  const certainty = brief.confidence ? CERTAINTY[brief.confidence] : null;
+
+  return (
+    <span style={{ display: 'block', marginTop: 10 }}>
+      <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Ico.sparkle w={13} />
+        <strong>{brief.headline}</strong>
+        {certainty ? <span className={`pill pill-min ${certainty.tone}`}>{certainty.label}</span> : null}
+      </span>
+      <span style={{ display: 'block', marginTop: 2, opacity: 0.85 }}>{briefAdvice(brief)}</span>
+
+      {brief.findings.length > 0 ? (
+        <>
+          <span
+            className="collapse-head"
+            role="button"
+            tabIndex={0}
+            aria-expanded={open}
+            onClick={() => setOpen(!open)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(!open); } }}
+          >
+            <span className="ch-title">Why</span>
+            <span className="ch-chev">{open ? <Ico.chevDown w={12} /> : <Ico.chevRight w={12} />}</span>
+          </span>
+          {open ? (
+            <span style={{ display: 'block' }}>
+              {brief.findings.map((f, i) => {
+                // One chip per distinct place, however many times it was cited.
+                const seen = new Set<string>();
+                const chips = f.evidence.filter((ev) => {
+                  const label = evidenceLabel(brief, ev);
+                  if (seen.has(label)) return false;
+                  seen.add(label);
+                  return true;
+                });
+                return (
+                  <span key={i} style={{ display: 'block', marginTop: i === 0 ? 0 : 10 }}>
+                    {f.claim}
+                    {chips.length > 0 ? (
+                      <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+                        {chips.map((ev) => (props.canShow(ev) ? (
+                          <button key={evidenceLabel(brief, ev)} type="button" className="btn btn-ghost btn-sm"
+                            onClick={() => props.onEvidence(ev)}>
+                            {evidenceLabel(brief, ev)}
+                          </button>
+                        ) : (
+                          <span key={evidenceLabel(brief, ev)} className="pill pill-min pill-neutral">{evidenceLabel(brief, ev)}</span>
+                        )))}
+                      </span>
+                    ) : null}
+                  </span>
+                );
+              })}
+              {brief.checked.length > 0 ? (
+                <span className="input-help" style={{ display: 'block', marginTop: 12 }}>Checked: {brief.checked.join(' · ')}</span>
+              ) : null}
+              {brief.couldNotCheck.length > 0 ? (
+                <span className="input-help" style={{ display: 'block' }}>Couldn't check: {brief.couldNotCheck.join(' · ')}</span>
+              ) : null}
+            </span>
+          ) : null}
+        </>
+      ) : null}
+    </span>
   );
 }
