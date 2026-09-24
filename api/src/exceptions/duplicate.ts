@@ -35,7 +35,8 @@ Decide exactly one verdict:
 
 How to work:
 - Call get_bill for both bills and compare_bills before deciding. Read the documents with read_document when the figures alone do not settle it, for example to find a service period or a note saying the bill was corrected. Call vendor_history when the same amount recurs, to see whether this vendor bills that amount regularly.
-- Every finding must cite the refs of the evidence it rests on, exactly as the tools returned them. A claim with no ref will be discarded.
+- Every finding must cite the refs of the evidence it rests on, exactly as the tools returned them, in its refs list. A claim with no ref will be discarded. Never write refs into the claim text itself: the claim is a sentence a person reads.
+- Write money as a person would: $4,500.00, not 4500.
 - Never do arithmetic yourself. compare_bills has already computed every difference.
 - confidence: high only when the evidence leaves no reasonable doubt; medium when it points one way but something is missing; low otherwise.
 - headline: one plain sentence a finance person reads first, under 120 characters, for example "Corrected reissue of HCI-20931: tax fixed from $0 to $8,336". Say "bill", never "payment order".

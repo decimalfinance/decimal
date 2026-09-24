@@ -217,3 +217,14 @@ test('the finding schema satisfies strict mode: every property required, nothing
   const { SUBMIT_FINDING_SCHEMA } = await import('../src/exceptions/duplicate.js');
   assert.deepEqual(strictSchemaViolations(SUBMIT_FINDING_SCHEMA), []);
 });
+
+test('refs written into a claim are taken out, leaving the sentence', async () => {
+  const { stripInlineRefs } = await import('../src/exceptions/duplicate-logic.js');
+  // Verbatim from the first real-model run (gpt-4.1-mini, B4 vs A2).
+  assert.equal(
+    stripInlineRefs('Both bills have identical invoice number BW-2210, invoice date 2026-08-06, and total $4500 (refs: this.invoiceNumber, other.invoiceNumber, this.invoiceDate, other.invoiceDate, compare.totals).'),
+    'Both bills have identical invoice number BW-2210, invoice date 2026-08-06, and total $4500.',
+  );
+  assert.equal(stripInlineRefs('Tax is the only difference [see: compare.tax].'), 'Tax is the only difference.');
+  assert.equal(stripInlineRefs('A plain sentence stays as it is.'), 'A plain sentence stays as it is.');
+});

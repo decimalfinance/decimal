@@ -257,6 +257,22 @@ const textList = (v: unknown, maxItems: number, maxLen: number): string[] =>
   (Array.isArray(v) ? v : []).map((x) => clampText(x, maxLen)).filter(Boolean).slice(0, maxItems);
 
 /**
+ * Refs belong in the refs list, not the sentence. A model that writes
+ * "(refs: this.total, compare.lines)" into a claim has put internal ids on a
+ * screen a finance person reads; the prompt asks it not to, and this makes
+ * sure — a prompt is a request, this is the guarantee.
+ */
+export function stripInlineRefs(text: unknown): unknown {
+  if (typeof text !== 'string') return text;
+  return text
+    .replace(/\s*[([]\s*(?:refs?|sources?|see|evidence)\s*:[^)\]]*[)\]]/gi, '')
+    .replace(/\b(?:this|other|compare|history)\.[A-Za-z0-9_.]+/g, '')
+    .replace(/\s+([.,;:])/g, '$1')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+/**
  * Trust nothing the model says (the same rule as `sanitizeFlow`).
  *
  *  - A finding survives only if it cites evidence a tool actually returned in
@@ -282,7 +298,7 @@ export function validateFinding(
   const findings: Finding[] = [];
   for (const f of rawFindings) {
     if (!isRecord(f)) { dropped += 1; continue; }
-    const claim = clampText(f.claim, 240);
+    const claim = clampText(stripInlineRefs(f.claim), 240);
     const refs = (Array.isArray(f.refs) ? f.refs : []).filter((r): r is string => typeof r === 'string' && seenRefs.has(r));
     if (!claim || refs.length === 0) { dropped += 1; continue; }
     findings.push({ claim, refs: [...new Set(refs)] });
