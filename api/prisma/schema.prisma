@@ -976,3 +976,39 @@ model AiSuggestionOutcome {
   @@index([aiSuggestionId])
   @@map("ai_suggestion_outcomes")
 }
+
+/// What the exception agent found when a flag fired, one row per bill PAIR.
+/// Mutable current view; the append-only record lives in ai_suggestions.
+/// Mirrors postgres/init/026-exception-briefs.sql — the SQL is the source of truth.
+model BillExceptionBrief {
+  briefId              String    @id @default(uuid()) @map("brief_id") @db.Uuid
+  organizationId       String    @map("organization_id") @db.Uuid
+  flagKind             String    @map("flag_kind")
+  pairKey              String    @map("pair_key")
+  firstPaymentOrderId  String    @map("first_payment_order_id") @db.Uuid
+  secondPaymentOrderId String    @map("second_payment_order_id") @db.Uuid
+  status               String
+  fingerprint          String
+  leaseUntil           DateTime? @map("lease_until") @db.Timestamptz(6)
+  verdict              String?
+  headline             String?
+  reason               String?
+  confidence           String?
+  findings             Json      @default("[]")
+  checked              Json      @default("[]")
+  couldNotCheck        Json      @default("[]") @map("could_not_check")
+  model                String?
+  latencyMs            Int?      @map("latency_ms")
+  promptTokens         Int?      @map("prompt_tokens")
+  completionTokens     Int?      @map("completion_tokens")
+  turns                Int?
+  error                String?
+  aiSuggestionId       String?   @map("ai_suggestion_id") @db.Uuid
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([pairKey, flagKind], map: "uq_bill_exception_briefs_pair")
+  @@index([firstPaymentOrderId], map: "idx_bill_exception_briefs_first")
+  @@index([secondPaymentOrderId], map: "idx_bill_exception_briefs_second")
+  @@map("bill_exception_briefs")
+}
