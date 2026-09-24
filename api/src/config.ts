@@ -90,6 +90,13 @@ type DecimalConfig = {
    * config change rather than a code change. Empty falls back to openAiModel.
    */
   openAiTextModel: string;
+  /**
+   * Model for the exception agent, which reasons over a flagged bill with
+   * tools. Separate from extraction because the job is different — judging
+   * evidence, not reading characters — and the eval decides whether the
+   * extraction model is good enough at it. Empty falls back to openAiModel.
+   */
+  openAiAgentModel: string;
   squadsProgramId: string;
   squadsDefaultVaultIndex: number;
   squadsDefaultTimelockSeconds: number;
@@ -182,6 +189,7 @@ function buildConfig(): DecimalConfig {
     openAiApiKey: (process.env.OPENAI_API_KEY ?? '').trim(),
     openAiModel: (process.env.OPENAI_MODEL ?? fileConfig.openAiModel ?? 'gpt-4o-mini').trim(),
     openAiTextModel: (process.env.OPENAI_TEXT_MODEL ?? '').trim(),
+    openAiAgentModel: (process.env.OPENAI_AGENT_MODEL ?? '').trim(),
     squadsProgramId:
       (process.env.SQUADS_V4_PROGRAM_ID ?? fileConfig.squadsProgramId ?? 'SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf').trim(),
     squadsDefaultVaultIndex: Number(process.env.SQUADS_DEFAULT_VAULT_INDEX ?? fileConfig.squadsDefaultVaultIndex ?? 0),
