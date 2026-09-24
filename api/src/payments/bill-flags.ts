@@ -360,7 +360,15 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
         severity: 'danger',
         blocking: true,
         short: 'Possible duplicate',
-        resolutions: [{ action: 'clear_duplicate', label: 'Not a duplicate', requires: 'admin', detail: 'Clear the flag with a reason. The clearance itself becomes the audit record.' }, ASK],
+        // Both answers live on the flag. Closing used to be a separate button
+        // off to the side, so "yes, it is a duplicate" had no place here — and
+        // the exception agent, which recommends one of these, had nowhere to
+        // point when that was its answer.
+        resolutions: [
+          { action: 'clear_duplicate', label: 'Not a duplicate', requires: 'admin', detail: 'Clear the flag with a reason. The clearance itself becomes the audit record.' },
+          { action: 'not_ours', label: 'Close as duplicate', requires: 'admin', detail: 'Close this bill as a duplicate so it is never paid. The other bill is unaffected.' },
+          ASK,
+        ],
         message: `${describeDuplicate(facts.duplicates[0]!)} If it's genuinely a new bill, an admin can clear this flag.`,
       });
     }

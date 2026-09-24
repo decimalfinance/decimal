@@ -13,7 +13,7 @@ import { prisma } from '../infra/prisma.js';
 import { trackBackgroundWork } from '../infra/background.js';
 import { logger } from '../infra/logger.js';
 import { describeDuplicate, findDuplicateBills, readDuplicateOverride, type DuplicateMatch } from '../payments/duplicate-check.js';
-import { logSuggestion } from '../payments/suggestion-log.js';
+import { logSuggestion, logSuggestionOutcome } from '../payments/suggestion-log.js';
 import { isExceptionAgentConfigured } from './agent.js';
 import { investigateDuplicatePair, DUPLICATE_PRODUCER } from './duplicate.js';
 import {
@@ -288,5 +288,63 @@ export async function startDuplicateBriefForBill(organizationId: string, payment
     await duplicateBriefFor({ organizationId, bill, duplicates });
   } catch (error) {
     logger.warn('exception_agent.intake_trigger_failed', { paymentOrderId, ...(error instanceof Error ? { message: error.message } : {}) });
+  }
+}
+
+/**
+ * What the person did about a recommendation, logged against it.
+ *
+ * Called from the three ways a duplicate flag is answered: cleared, closed, or
+ * asked about. Compared with what the brief recommended for THIS bill's side of
+ * the pair: the same action is accepted (edited, if the reason was reworded),
+ * any other is rejected. That is the agreement rate, per flag kind, from the
+ * first day — the number that says whether the agent is worth trusting.
+ *
+ * Best-effort and silent: instrumentation must never be why a bill cannot be
+ * resolved. No ready brief means nothing was recommended, so nothing is logged.
+ */
+export async function recordBriefOutcome(args: {
+  organizationId: string;
+  paymentOrderId: string;
+  action: RecommendedAction;
+  reason: string | null;
+  actorUserId: string;
+}): Promise<void> {
+  try {
+    const brief = await prisma.billExceptionBrief.findFirst({
+      where: {
+        organizationId: args.organizationId,
+        flagKind: FLAG_KIND,
+        status: 'ready',
+        aiSuggestionId: { not: null },
+        OR: [{ firstPaymentOrderId: args.paymentOrderId }, { secondPaymentOrderId: args.paymentOrderId }],
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+    if (!brief?.verdict || !brief.aiSuggestionId) return;
+    const otherId = brief.firstPaymentOrderId === args.paymentOrderId ? brief.secondPaymentOrderId : brief.firstPaymentOrderId;
+    const bills = await prisma.paymentOrder.findMany({
+      where: { organizationId: args.organizationId, paymentOrderId: { in: [args.paymentOrderId, otherId] } },
+      select: { paymentOrderId: true, createdAt: true },
+    });
+    const self = bills.find((b) => b.paymentOrderId === args.paymentOrderId);
+    const other = bills.find((b) => b.paymentOrderId === otherId);
+    if (!self || !other) return;
+    const recommended = recommendationFor(brief.verdict as Verdict, sideOf(
+      { id: self.paymentOrderId, createdAt: self.createdAt },
+      { id: other.paymentOrderId, createdAt: other.createdAt },
+    ));
+    // A question is not a reworded reason, so asking when asking was advised
+    // counts as agreement whatever it says.
+    const sameReason = args.action === 'ask_someone' || (args.reason ?? '').trim() === (brief.reason ?? '').trim();
+    const outcome = args.action !== recommended ? 'rejected' : sameReason ? 'accepted' : 'edited';
+    await logSuggestionOutcome({
+      aiSuggestionId: brief.aiSuggestionId,
+      outcome,
+      finalValue: { billId: args.paymentOrderId, action: args.action, recommended, reason: args.reason },
+      decidedByUserId: args.actorUserId,
+    });
+  } catch (error) {
+    logger.warn('exception_agent.outcome_failed', { paymentOrderId: args.paymentOrderId, ...(error instanceof Error ? { message: error.message } : {}) });
   }
 }

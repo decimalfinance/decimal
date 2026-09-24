@@ -2702,12 +2702,24 @@ export async function markNotABill(args: {
     },
   });
 
-  return cancelPaymentOrder({
+  const closed = await cancelPaymentOrder({
     organizationId: args.organizationId,
     paymentOrderId: args.paymentOrderId,
     actorUserId: args.actorUserId,
     actorType: 'user',
   });
+  // If the exception agent had a view on this bill, closing it is an answer to
+  // that view, whatever reason was picked. Logged after the close, so a logging
+  // failure can never leave a bill half-closed.
+  const { recordBriefOutcome } = await import('../exceptions/briefs.js');
+  await recordBriefOutcome({
+    organizationId: args.organizationId,
+    paymentOrderId: args.paymentOrderId,
+    action: 'not_ours',
+    reason: str(args.note ?? null),
+    actorUserId: args.actorUserId,
+  });
+  return closed;
 }
 
 // Clear the duplicate flag: an ADMIN asserts this is genuinely a new bill.
@@ -3250,7 +3262,7 @@ export async function askAboutBill(args: {
     : (suggested?.fields ?? []);
   const questionScope = args.questionScope ?? suggested?.scope ?? 'asks_more';
 
-  return prisma.billQuestion.create({
+  const created = await prisma.billQuestion.create({
     data: {
       organizationId: args.organizationId,
       paymentOrderId: args.paymentOrderId,
@@ -3263,6 +3275,19 @@ export async function askAboutBill(args: {
       highlightFields,
     },
   });
+  // Asking about the duplicate flag is also an answer to the exception agent:
+  // it is what the agent recommends when unsure, and a pass on anything else.
+  if (args.aboutFlag === 'possible_duplicate') {
+    const { recordBriefOutcome } = await import('../exceptions/briefs.js');
+    await recordBriefOutcome({
+      organizationId: args.organizationId,
+      paymentOrderId: args.paymentOrderId,
+      action: 'ask_someone',
+      reason: question,
+      actorUserId: args.askedByUserId,
+    });
+  }
+  return created;
 }
 
 export async function overrideDuplicateFlag(args: {
@@ -3333,6 +3358,15 @@ export async function overrideDuplicateFlag(args: {
     flagsBefore,
     flagsAfter,
     at,
+  });
+  // Against whatever the exception agent recommended for this bill, if anything.
+  const { recordBriefOutcome } = await import('../exceptions/briefs.js');
+  await recordBriefOutcome({
+    organizationId: args.organizationId,
+    paymentOrderId: order.paymentOrderId,
+    action: 'clear_duplicate',
+    reason: args.reason,
+    actorUserId: args.actorUserId,
   });
 
   return getBillDraft(args.organizationId, args.paymentOrderId);

@@ -3168,3 +3168,26 @@ test('exception agent: with no model, or a failed run, the flag is exactly what 
   const afterFailure = dupFlag(await get(`/organizations/${orgId}/bills/${b.billId}/draft`, owner.token))!;
   assert.equal(afterFailure.brief, undefined, 'a recent failure is not retried on every read, and shows nothing');
 });
+
+test('exception agent: what the admin did is logged against what the agent advised', async () => {
+  scriptedInvestigator('duplicate');
+  const { orgId, owner } = await makeOrg();
+  const first = await uploadAndConfirm(orgId, owner.token, { vendor: 'Outcome Ltd', amount: 700, invoiceNo: 'OL-5' });
+  const second = await uploadAndConfirm(orgId, owner.token, { vendor: 'Outcome Ltd', amount: 700, invoiceNo: 'OL-5' });
+  await drainAsyncIntake();
+
+  const newer = dupFlag(await get(`/organizations/${orgId}/bills/${second.billId}/draft`, owner.token))!;
+  assert.ok(newer.resolutions.some((r: { action: string }) => r.action === 'not_ours'), 'closing as a duplicate lives on the flag now');
+
+  // The older bill was advised "keep", and the admin keeps it with the brief's
+  // own words: agreement.
+  const olderBrief = dupFlag(await get(`/organizations/${orgId}/bills/${first.billId}/draft`, owner.token))!.brief;
+  await post(`/organizations/${orgId}/bills/${first.billId}/duplicate-override`, { reason: olderBrief.reason }, owner.token);
+  // The newer bill was advised "close", and the admin clears it instead:
+  // disagreement, and exactly the case worth reading later.
+  await post(`/organizations/${orgId}/bills/${second.billId}/duplicate-override`, { reason: 'Different job, checked with the vendor.' }, owner.token);
+
+  const outcomes = await prisma.aiSuggestionOutcome.findMany({ orderBy: { decidedAt: 'asc' } });
+  assert.deepEqual(outcomes.map((o) => o.outcome), ['accepted', 'rejected']);
+  assert.equal((outcomes[1]!.finalValue as { recommended: string }).recommended, 'not_ours');
+});
