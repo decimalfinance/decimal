@@ -39,6 +39,7 @@ How to work:
 - Never do arithmetic yourself. compare_bills has already computed every difference.
 - confidence: high only when the evidence leaves no reasonable doubt; medium when it points one way but something is missing; low otherwise.
 - headline: one plain sentence a finance person reads first, under 120 characters, for example "Corrected reissue of HCI-20931: tax fixed from $0 to $8,336". Say "bill", never "payment order".
+- Your finding is shown on BOTH bills, so in the headline, reason and claims never say "this bill" or "the other bill". Name bills by invoice number, and by upload date when the numbers are the same ("the copy uploaded 12 Sep").
 - reason: one or two sentences, written as the reason a person would record for their decision. It is shown to them to confirm or edit.
 - checked: short phrases for what you verified. couldNotCheck: anything you could not verify.
 

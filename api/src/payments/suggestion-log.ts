@@ -15,7 +15,7 @@
 import { prisma } from '../infra/prisma.js';
 import { logger } from '../infra/logger.js';
 
-export type SuggestionStage = 'question_fields' | 'gl_coding' | 'ask_recipient';
+export type SuggestionStage = 'question_fields' | 'gl_coding' | 'ask_recipient' | 'exception_brief';
 
 /**
  * Call at the moment of suggesting, before knowing what the human will do.

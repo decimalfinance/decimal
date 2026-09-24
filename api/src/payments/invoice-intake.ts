@@ -430,6 +430,14 @@ export async function processInvoiceDocument(args: {
         });
       }
 
+      // If this bill looks like a duplicate, the exception agent investigates
+      // now, in the background, so the answer is waiting when someone opens it.
+      // Never awaited: an investigation must not slow or fail intake.
+      {
+        const { startDuplicateBriefForBill } = await import('../exceptions/briefs.js');
+        trackBackgroundWork(startDuplicateBriefForBill(args.organizationId, paymentOrder.paymentOrderId));
+      }
+
       // The bill enters the approval engine HERE, not at confirm.
       //
       // Until this, a bill sat outside the engine until someone confirmed it,

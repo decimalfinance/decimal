@@ -11,6 +11,7 @@ import { createApp } from '../src/app.js';
 import { prisma } from '../src/infra/prisma.js';
 import { requireTestDatabase } from './helpers/require-test-database.js';
 import { setInvoiceIntakeRuntimeForTests } from '../src/payments/invoice-intake.js';
+import { setExceptionAgentRuntimeForTests, type ChatMessage } from '../src/exceptions/agent.js';
 import { config } from '../src/config.js';
 
 let baseUrl = '';
@@ -41,6 +42,7 @@ beforeEach(async () => {
   // must not still be running against tables this one is wiping.
   await drainAsyncIntake();
   setInvoiceIntakeRuntimeForTests(null);
+  setExceptionAgentRuntimeForTests(null);
   await prisma.$executeRawUnsafe(`TRUNCATE approval.approval_events, approval.tasks, approval.approval_plans,
     approval.policy_sets, approval.policies, approval.approvable_lines, approval.approvables, approval.rule_relaxations,
     approval.constraint_rules, approval.seat_assignments, approval.authority_grants, approval.seats,
@@ -3033,4 +3035,136 @@ test('a country survives confirm, whether it was typed or worked out', async () 
   const afterCountry = after.remitFields.find((f: { key: string }) => f.key === 'remitTo.country');
   assert.equal(afterCountry?.value, 'United States',
     'a confirmed bill still knows its country — this is what a rejected bill redraws from');
+});
+
+// ---- the exception agent: duplicate briefs ----------------------------------
+//
+// These drive the real HTTP API with a scripted model, so what is asserted is
+// the plumbing: when a run starts, that a pair shares one brief, what each side
+// is told to do, and that nothing runs where it should not.
+
+/** A model that investigates in one turn and submits in the next. Counts runs. */
+function scriptedInvestigator(verdict: 'duplicate' | 'replacement' | 'not_duplicate' | 'unsure', opts: { fail?: boolean } = {}) {
+  const state = { runs: 0 };
+  let n = 0;
+  const id = () => `call_${++n}`;
+  setExceptionAgentRuntimeForTests({
+    isConfigured: () => true,
+    callModel: async ({ messages }: { messages: ChatMessage[] }) => {
+      const firstTurn = !messages.some((m) => m.role === 'assistant');
+      if (firstTurn) state.runs += 1;
+      if (opts.fail) throw new Error('OpenAI 500');
+      const usage = { promptTokens: 10, completionTokens: 5 };
+      if (firstTurn) {
+        return { usage, message: { role: 'assistant' as const, content: null, tool_calls: [
+          { id: id(), type: 'function' as const, function: { name: 'compare_bills', arguments: '{}' } },
+          { id: id(), type: 'function' as const, function: { name: 'get_bill', arguments: '{"which":"this"}' } },
+        ] } };
+      }
+      return { usage, message: { role: 'assistant' as const, content: null, tool_calls: [
+        { id: id(), type: 'function' as const, function: { name: 'submit_finding', arguments: JSON.stringify({
+          verdict, confidence: 'high',
+          headline: 'Same bill uploaded twice: TS-100 matches line for line',
+          reason: 'Every figure and line matches; the second upload is a copy.',
+          findings: [
+            { claim: 'Every line and figure matches.', refs: ['compare.identical', 'compare.totals'] },
+            { claim: 'The total is the same.', refs: ['this.total'] },
+            { claim: 'An invented source.', refs: ['email.42'] },
+          ],
+          checked: ['totals', 'lines'], couldNotCheck: [],
+        }) } },
+      ] } };
+    },
+  });
+  return state;
+}
+
+const dupFlag = (draft: { flags: Array<{ kind: string; blocking: boolean; brief?: any }> }) =>
+  draft.flags.find((f) => f.kind === 'possible_duplicate');
+
+test('exception agent: a flagged pair shares one brief, and each bill is told its own part', async () => {
+  const model = scriptedInvestigator('duplicate');
+  const { orgId, owner } = await makeOrg();
+  const first = await uploadAndConfirm(orgId, owner.token, { vendor: 'Twin Supply', amount: 1200, invoiceNo: 'TS-100' });
+  const second = await uploadAndConfirm(orgId, owner.token, { vendor: 'Twin Supply', amount: 1200, invoiceNo: 'TS-100' });
+  await drainAsyncIntake();
+
+  // The second upload is what created the pair, so intake investigated it
+  // before anyone opened either bill.
+  assert.equal(model.runs, 1, 'one investigation for the pair, started at intake');
+
+  const newer = dupFlag(await get(`/organizations/${orgId}/bills/${second.billId}/draft`, owner.token))!;
+  assert.equal(newer.blocking, true, 'the brief never softens the gate');
+  assert.equal(newer.brief.status, 'ready');
+  assert.equal(newer.brief.verdict, 'duplicate');
+  assert.equal(newer.brief.side, 'newer');
+  assert.equal(newer.brief.recommendedAction, 'not_ours', 'the copy is the one to close');
+  assert.equal(newer.brief.otherBill.paymentOrderId, first.billId);
+  assert.equal(newer.brief.findings.length, 2, 'the finding citing evidence no tool returned was dropped');
+
+  const older = dupFlag(await get(`/organizations/${orgId}/bills/${first.billId}/draft`, owner.token))!;
+  assert.equal(older.brief.briefId, newer.brief.briefId, 'both bills read the same brief');
+  assert.equal(older.brief.side, 'older');
+  assert.equal(older.brief.recommendedAction, 'clear_duplicate', 'the original is the one to keep');
+  // Evidence cited as "this" by the run resolves to the right bill from each side.
+  const totalRef = (b: any) => b.findings.flatMap((f: any) => f.evidence).find((e: any) => e.key === 'total');
+  assert.equal(totalRef(newer.brief).bill === 'this', totalRef(older.brief).bill === 'other');
+
+  await drainAsyncIntake();
+  assert.equal(model.runs, 1, 'reading current briefs starts nothing');
+
+  const logged = await prisma.aiSuggestion.findMany({ where: { organizationId: orgId, stage: 'exception_brief' } });
+  assert.equal(logged.length, 1, 'the recommendation is in the suggestion log');
+});
+
+test('exception agent: concurrent reads of a stale pair start exactly one run', async () => {
+  const { orgId, owner } = await makeOrg();
+  const a = await uploadAndConfirm(orgId, owner.token, { vendor: 'Race Parts', amount: 800, invoiceNo: 'RP-1' });
+  const b = await uploadAndConfirm(orgId, owner.token, { vendor: 'Race Parts', amount: 800, invoiceNo: 'RP-1' });
+  await drainAsyncIntake();
+  assert.equal(await prisma.billExceptionBrief.count(), 0, 'no model configured at upload, so no brief');
+
+  const model = scriptedInvestigator('duplicate');
+  const drafts = await Promise.all([
+    get(`/organizations/${orgId}/bills/${a.billId}/draft`, owner.token),
+    get(`/organizations/${orgId}/bills/${b.billId}/draft`, owner.token),
+    get(`/organizations/${orgId}/bills/${b.billId}/draft`, owner.token),
+  ]);
+  // A scripted model is fast enough that a later read may already see the
+  // answer; what matters is how many runs started, not which status won.
+  for (const d of drafts) assert.ok(['running', 'ready'].includes(dupFlag(d)!.brief.status));
+  await drainAsyncIntake();
+  assert.equal(model.runs, 1, 'the lease let one read win');
+  const row = await prisma.billExceptionBrief.findFirstOrThrow();
+  assert.equal(row.status, 'ready');
+});
+
+test('exception agent: opening the workbench never starts an investigation', async () => {
+  const { orgId, owner } = await makeOrg();
+  await uploadAndConfirm(orgId, owner.token, { vendor: 'Board Co', amount: 500, invoiceNo: 'BC-9' });
+  await uploadAndConfirm(orgId, owner.token, { vendor: 'Board Co', amount: 500, invoiceNo: 'BC-9' });
+  await drainAsyncIntake();
+  const model = scriptedInvestigator('duplicate');
+  await get(`/organizations/${orgId}/bills/workbench`, owner.token);
+  await drainAsyncIntake();
+  assert.equal(model.runs, 0);
+  assert.equal(await prisma.billExceptionBrief.count(), 0);
+});
+
+test('exception agent: with no model, or a failed run, the flag is exactly what it was', async () => {
+  const { orgId, owner } = await makeOrg();
+  await uploadAndConfirm(orgId, owner.token, { vendor: 'Plain Vendor', amount: 300, invoiceNo: 'PV-1' });
+  const b = await uploadAndConfirm(orgId, owner.token, { vendor: 'Plain Vendor', amount: 300, invoiceNo: 'PV-1' });
+  await drainAsyncIntake();
+  const unconfigured = dupFlag(await get(`/organizations/${orgId}/bills/${b.billId}/draft`, owner.token))!;
+  assert.equal(unconfigured.blocking, true);
+  assert.equal(unconfigured.brief, undefined);
+
+  scriptedInvestigator('duplicate', { fail: true });
+  await get(`/organizations/${orgId}/bills/${b.billId}/draft`, owner.token);
+  await drainAsyncIntake();
+  const row = await prisma.billExceptionBrief.findFirstOrThrow();
+  assert.equal(row.status, 'failed');
+  const afterFailure = dupFlag(await get(`/organizations/${orgId}/bills/${b.billId}/draft`, owner.token))!;
+  assert.equal(afterFailure.brief, undefined, 'a recent failure is not retried on every read, and shows nothing');
 });

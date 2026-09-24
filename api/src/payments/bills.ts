@@ -1901,6 +1901,32 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     documentType: documentTypeSignals(extracted, order.invoiceNumber),
   });
 
+  // The exception agent's investigation of the duplicate flag, started here if
+  // none is current. ONLY here, and never inside flagsForOrder or the
+  // workbench: those run for every row on the board and around every override.
+  // Best-effort — any failure leaves the flag exactly as it always was.
+  const duplicateBrief = flags.some((f) => f.kind === 'possible_duplicate' && f.blocking)
+    ? await (async () => {
+      const { duplicateBriefFor } = await import('../exceptions/briefs.js');
+      return duplicateBriefFor({
+        organizationId,
+        bill: {
+          paymentOrderId: order.paymentOrderId,
+          invoiceNumber: order.invoiceNumber,
+          amountRaw: order.amountRaw,
+          counterpartyId: order.counterpartyId,
+          state: order.state,
+          createdAt: order.createdAt,
+          metadataJson: metadata,
+        },
+        duplicates,
+      });
+    })().catch((error) => {
+      logger.warn('exception_agent.draft_brief_failed', { paymentOrderId: order.paymentOrderId, ...(error instanceof Error ? { message: error.message } : {}) });
+      return null;
+    })
+    : null;
+
   const sentBackRaw = isRecord(metadata.sentBack) ? metadata.sentBack : null;
   return {
     paymentOrderId: order.paymentOrderId,
@@ -2061,7 +2087,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       matchesVerified: order.counterpartyWallet.trustState === 'trusted'
         && !flags.some((f) => f.kind === 'payee_mismatch'),
     },
-    flags,
+    flags: flags.map((f) => (f.kind === 'possible_duplicate' && duplicateBrief ? { ...f, brief: duplicateBrief } : f)),
     verification: verification
       ? {
           confirmedAt: str(verification.confirmedAt),
