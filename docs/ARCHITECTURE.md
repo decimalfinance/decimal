@@ -2,7 +2,7 @@
 
 How Decimal is built, by subsystem. Each section opens with its status so a reader knows how much to trust it as a foundation.
 
-Verified against the code on 2026-09-17. When you change a subsystem, update its section in the same commit.
+Verified against the code on 2026-09-17; the exception agent section on 2026-09-24. When you change a subsystem, update its section in the same commit.
 
 | Status | Meaning |
 |---|---|
@@ -98,6 +98,18 @@ In code and the database a bill is a `PaymentOrder`. In every piece of UI copy i
 6. **Confirm.** The reviewer confirms, which submits the bill to the approval engine. Verification always happens before routing.
 
 Frontend: `pages/Bills.tsx` (list), `pages/BillDraft.tsx` (review and coding, with the document pane), `pages/BillDetail.tsx` (approval tracking).
+
+## Exception agent (Live)
+
+`api/src/exceptions/`. When a flag fires, an agent investigates it before anyone opens the bill and recommends one of the flag's own resolutions, with evidence. It never acts: the flag still blocks, and a person confirms. Only `possible_duplicate` has an investigator so far.
+
+- `agent.ts` is a generic tool-calling loop (6 turns, one timeout, a terminal tool ends the run). `setExceptionAgentRuntimeForTests` replaces the model with a script. The model is `OPENAI_AGENT_MODEL`, falling back to `OPENAI_MODEL`. With no key, nothing runs and flags behave as they always did.
+- `duplicate-logic.ts` is everything that must not be a model: bill facts in the draft screen's precedence, a line-by-line comparison, the pair key and fingerprint, the verdict → action mapping, and the validator. Findings must cite refs a tool returned in that run, and figures that contradict a verdict cap its confidence.
+- `duplicate.ts` is the investigator: tools `get_bill`, `compare_bills`, `vendor_history`, `read_document`, and a strict-schema `submit_finding`. Verdicts are `duplicate`, `replacement`, `not_duplicate` and `unsure`. A duplicate keeps the older bill; a replacement keeps the newer one. Exactly one side is ever closed.
+- `briefs.ts` decides when it runs and stores the answer in `bill_exception_briefs`, **one row per bill pair**, since a duplicate flag sits on both bills. It runs from exactly two places: after intake, and when `getBillDraft` is read. Never from `flagsForOrder` or the workbench. A read claims the run with one atomic upsert, so concurrent reads start one investigation. A fingerprint over both bills (including whether each was cleared) re-runs a stale brief.
+- Every recommendation goes to the suggestion log under stage `exception_brief`, and clearing, closing or asking logs what the person did against it (`recordBriefOutcome`). That is the agreement rate.
+
+Frontend: the brief renders on its flag in `BillDraft.tsx`. The recommended resolution is the primary button with its reason prefilled, and a "Why" fold links each piece of evidence to where it was read. Evaluate with `api/scripts/exception-eval.mts` on the bench.
 
 ## Approval engine (Live)
 

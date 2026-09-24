@@ -6,7 +6,7 @@ Guidance for Claude Code and other agents working in this repository. Keep it sh
 
 Decimal is an accounts-payable product. A bill arrives by upload or forwarded email, a model extracts it into structured fields, a person checks it, each line is coded to a ledger account, an approval flow routes it, and approved bills sync to QuickBooks Online.
 
-**Built and live:** extraction, bill review, GL coding, the approval engine with its Flow Builder and policies, roles, QuickBooks sync, inbound email, the agent test bench.
+**Built and live:** extraction, bill review, GL coding, the approval engine with its Flow Builder and policies, roles, QuickBooks sync, inbound email, the agent test bench, and the exception agent (it investigates duplicate flags and recommends a resolution; a person confirms).
 
 **Frozen:** payment execution (Squads treasury on Solana, USDC). The code is wired and tested but has not been developed since mid-August 2026, and no real payment has ever executed. Do not extend it, and do not describe it as working, without a product decision.
 

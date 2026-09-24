@@ -4,13 +4,13 @@ Things that were designed but never built. Compiled 2026-09-17 by checking the o
 
 ## Designed, not built
 
-- **Auto-approve fast path in the Flow Builder,** and vendor or category conditions on flow rules.
-- **Advisory chip for approvers** that says whether a bill looks routine. A `signal` already reaches the bill detail screen. The open part is making it a considered, trustworthy recommendation.
+- **More exception investigators.** The exception agent investigates `possible_duplicate` only. Next, on the same framework (`api/src/exceptions/`): lines that do not sum, totals that do not reconcile, and statement or credit note. Each needs an eval set before it ships. This replaces the old "advisory chip" idea: an investigation of a specific flag, rather than a guess at whether a bill looks routine.
+- **Evaluate the duplicate investigator on hard cases.** It is proven on one real pair (B4 against A2). The X-series — corrected reissues, recurring same-amount bills, reused numbers, a genuinely ambiguous pair — is requested from the invoice agent; run `api/scripts/exception-eval.mts` once it exists.
 - **Documentation and memo rules** as a policy type: require a note or attachment above a threshold.
 - **Budgets.**
 - **Class and Location pass-through to QuickBooks, bulk coding, and a coding accuracy view.**
 - **Multi-invoice PDFs.** One upload that contains several bills should offer to split into several bills.
-- **Intake actions to check against the code before building:** retract an approval, mark as synced, vendor-level hold.
+- **Retract an approval** (an approver takes back their own sign-off; recall is the submitter's tool) and **mark as synced** (resolve a bill already entered in QuickBooks by hand). Neither exists. Vendor-level hold, once on this list, is built.
 
 ## Deferred on purpose
 
