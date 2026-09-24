@@ -209,3 +209,11 @@ test('an unknown verdict reads as unsure, and an empty reason falls back to the 
   assert.equal(v.reason, 'Looks like a duplicate of INV-1');
   assert.deepEqual(v.checked, []);
 });
+
+// ---- the terminal tool ------------------------------------------------------
+
+test('the finding schema satisfies strict mode: every property required, nothing extra', async () => {
+  const { strictSchemaViolations } = await import('../src/payments/document-extract.js');
+  const { SUBMIT_FINDING_SCHEMA } = await import('../src/exceptions/duplicate.js');
+  assert.deepEqual(strictSchemaViolations(SUBMIT_FINDING_SCHEMA), []);
+});
