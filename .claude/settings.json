@@ -1,9 +1,12 @@
 {
+  "enabledPlugins": {
+    "vercel@claude-plugins-official": false
+  },
   "permissions": {
     "allow": [
       "WebFetch",
       "Bash(npx tsc --noEmit)",
-      "Bash(make test-api)",
+      "Bash(make test)",
       "Bash(npm run typecheck)",
       "mcp__Claude_Browser__read_page",
       "mcp__Claude_Browser__navigate",
