@@ -94,10 +94,14 @@ function AnswerText({ text, failed }: { text: string; failed?: boolean }) {
 
 type Message = CompanionChat['messages'][number];
 
+/** "$4,500.00", "12", "-3.5%", "—". */
+const NUMERIC = /^(?:[-+]?[$€£]?\s?[\d,]+(?:\.\d+)?%?|—|-)$/;
+
 function Thoughts({ message }: { message: Message }) {
   const running = message.status === 'running';
   const [open, setOpen] = useState(running);
-  useEffect(() => { if (running) setOpen(true); }, [running]);
+  // Open while the work happens; folded once the answer lands, like Stack's.
+  useEffect(() => { setOpen(running); }, [running]);
   if (!running && message.thoughts.length === 0) return null;
   const label = running
     ? 'Working…'
@@ -133,23 +137,27 @@ function Answer({ message, bills, onOpenBill }: {
     <div className="ch-answer">
       <Thoughts message={message} />
       {message.status !== 'running' ? <AnswerText text={message.text} failed={message.status === 'failed'} /> : null}
-      {message.tables.map((t, i) => (
-        <Fragment key={i}>
-          {t.title ? <div className="cc-group" style={{ padding: 0 }}>{t.title}</div> : null}
-          <div className="tbl-card">
-            <table className="tbl tbl-slim">
-              <thead><tr>{t.columns.map((c, j) => <th key={j} className={j === t.columns.length - 1 && t.columns.length > 1 ? 'num' : undefined}>{c}</th>)}</tr></thead>
-              <tbody>
-                {t.rows.map((r, j) => (
-                  <tr key={j} style={{ cursor: 'default' }}>
-                    {r.map((cell, k) => <td key={k} className={k === r.length - 1 && r.length > 1 ? 'td-num' : undefined}>{cell}</td>)}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Fragment>
-      ))}
+      {message.tables.map((t, i) => {
+        // A column is set as figures only when every cell in it is one.
+        const numeric = t.columns.map((_, k) => t.rows.length > 0 && t.rows.every((r) => NUMERIC.test((r[k] ?? '').trim())));
+        return (
+          <Fragment key={i}>
+            {t.title ? <div className="cc-group" style={{ padding: 0 }}>{t.title}</div> : null}
+            <div className="tbl-card">
+              <table className="tbl tbl-slim">
+                <thead><tr>{t.columns.map((c, j) => <th key={j} className={numeric[j] ? 'num' : undefined}>{c}</th>)}</tr></thead>
+                <tbody>
+                  {t.rows.map((r, j) => (
+                    <tr key={j} style={{ cursor: 'default' }}>
+                      {r.map((cell, k) => <td key={k} className={numeric[k] ? 'td-num' : undefined}>{cell}</td>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Fragment>
+        );
+      })}
       {cards.length > 0 ? (
         <div className="ch-bills">
           {cards.map((b) => (

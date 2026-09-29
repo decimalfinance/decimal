@@ -1135,6 +1135,8 @@
 .dec .cp-input { border: none; outline: none; resize: none; background: transparent; font: inherit; font-size: 14.5px;
   color: var(--text-primary); line-height: 1.5; min-height: 24px; max-height: 200px; width: 100%; }
 .dec .cp-input::placeholder { color: var(--text-faint); }
+/* The box shows focus; the field inside it must not draw a second ring. */
+.dec .cp-input:focus, .dec .cp-input:focus-visible { outline: none; box-shadow: none; border: none; }
 .dec .cp-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .dec .cp-hint { font-size: 11.5px; color: var(--text-faint); }
 .dec .cp-send { width: 30px; height: 30px; border-radius: 50%; border: none; background: var(--solid);
