@@ -3231,3 +3231,63 @@ test('duplicate gate: clearing one bill settles the pair, and a later copy is fl
   assert.ok(aRow, 'the twin is on the board');
   assert.equal(aRow.duplicateCleared?.reason, 'Two separate orders, confirmed with the vendor.', 'the twin row shows the clearance too');
 });
+
+// ---- the companion's briefing -------------------------------------------------
+
+test('companion: the briefing sorts drafts into ready and needs-you, and says what it learned', async () => {
+  const { orgId, owner } = await makeOrg();
+  const first = await uploadAndConfirm(orgId, owner.token, { vendor: 'Steady Supply', amount: 300, invoiceNo: 'SS-1' });
+
+  let today = await get(`/organizations/${orgId}/companion/today`, owner.token);
+  assert.equal(today.since, null, 'a first visit has no "since"');
+  assert.equal(today.viewer.canReview, true);
+  const lone = today.needsYou.find((b: { paymentOrderId: string }) => b.paymentOrderId === first.billId);
+  assert.ok(lone, 'a first bill from a vendor needs a person');
+  assert.equal(lone.reason, 'First bill from Steady Supply');
+  assert.equal(today.ready.length, 0);
+
+  // A second bill from the vendor, and a category habit learned for it.
+  const second = await uploadAndConfirm(orgId, owner.token, { vendor: 'Steady Supply', amount: 310, invoiceNo: 'SS-2' });
+  const { counterpartyId } = await prisma.paymentOrder.findUniqueOrThrow({ where: { paymentOrderId: second.billId }, select: { counterpartyId: true } });
+  await prisma.vendorCodingRule.create({
+    data: { organizationId: orgId, counterpartyId: counterpartyId!, accountId: 'Cloud hosting & infrastructure', accountName: 'Cloud hosting & infrastructure', source: 'learned', learnedFromCount: 3 },
+  });
+
+  today = await get(`/organizations/${orgId}/companion/today`, owner.token);
+  assert.ok(today.ready.some((b: { paymentOrderId: string }) => b.paymentOrderId === second.billId), 'known vendor, a habit, nothing doubtful: ready');
+  assert.equal(today.arrived.count, 2);
+  assert.deepEqual(
+    today.learned.map((l: { vendorName: string; category: string; fromBills: number }) => [l.vendorName, l.category, l.fromBills]),
+    [['Steady Supply', 'Cloud hosting & infrastructure', 3]],
+  );
+});
+
+test('companion: a refresh keeps the window, and a later visit reports from the last one', async () => {
+  const { orgId, owner } = await makeOrg();
+  const { openVisit } = await import('../src/companion/today.js');
+  const t0 = new Date('2026-09-29T09:00:00Z');
+  const at = (minutes: number) => new Date(t0.getTime() + minutes * 60_000);
+  assert.equal(await openVisit(orgId, owner.userId, t0), null);
+  assert.equal(await openVisit(orgId, owner.userId, at(10)), null, 'reloading during a first visit keeps it a first visit');
+  const since = await openVisit(orgId, owner.userId, at(180));
+  assert.equal(since?.toISOString(), at(10).toISOString(), 'coming back reports from the end of the last visit');
+  assert.equal((await openVisit(orgId, owner.userId, at(185)))?.toISOString(), at(10).toISOString(), 'and reloading keeps that window');
+});
+
+test('companion: an approver sees what waits on them; an admin sees who is holding what', async () => {
+  const { orgId, owner, a2, a3 } = await makeOrg();
+  const flow = await get(`/organizations/${orgId}/approvals/flow`, owner.token);
+  const byUser = new Map(flow.people.map((p: { user_id: string; id: string }) => [p.user_id, p.id]));
+  await publishLadder(orgId, owner.token, [byUser.get(a2.userId) as string], byUser.get(a3.userId) as string);
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'Zephyr Analytics', amount: 15000, invoiceNo: 'ZA-9' });
+  await bill.confirm();
+
+  const approver = await get(`/organizations/${orgId}/companion/today`, a2.token);
+  assert.ok(approver.waitingOnYou.some((w: { paymentOrderId: string }) => w.paymentOrderId === bill.billId), 'the bill waits on a2');
+  assert.deepEqual(approver.holding, [], 'other people\'s queues are for admins');
+
+  const admin = await get(`/organizations/${orgId}/companion/today`, owner.token);
+  const a2Row = admin.holding.find((h: { name: string }) => h.name === 'approver-a');
+  assert.ok(a2Row, 'the admin sees a2 holding a bill');
+  assert.equal(a2Row.openCount, 1);
+});

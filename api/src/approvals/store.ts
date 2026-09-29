@@ -223,6 +223,31 @@ export async function setSodFlags(tx: Tx, organizationId: string, flags: SodFlag
 
 // Org bill ceiling (policy P1): a hard cap no bill may cross without the
 // primary admin raising it. NULL = no ceiling configured.
+/**
+ * Who is holding approvals, and since when: each person with open tasks, how
+ * many, and how long the oldest has sat. "Since" is the last time that bill
+ * moved in approval (its latest event, or when its plan was compiled if nothing
+ * has happened yet) — tasks carry no timestamp of their own, and that is the
+ * honest measure of how long something has waited on someone.
+ */
+export async function openTasksByPerson(tx: Tx, organizationId: string): Promise<Array<{
+  personId: string; userId: string | null; name: string; openCount: number; waitingSince: Date;
+}>> {
+  const rows = await tx.$queryRaw<Array<{ person_id: string; user_id: string | null; name: string; open_count: number; waiting_since: Date }>>`
+    SELECT pe.id AS person_id, pe.user_id, pe.name, COUNT(*)::int AS open_count,
+           MIN(COALESCE((SELECT MAX(e.at) FROM approval.approval_events e WHERE e.plan_id = p.id), p.compiled_at)) AS waiting_since
+    FROM approval.tasks t
+    JOIN approval.approval_plans p ON p.id = t.plan_id AND p.superseded_by IS NULL
+    JOIN approval.approvables a ON a.id = p.approvable_id
+    JOIN approval.people pe ON pe.id = t.person_id
+    WHERE a.organization_id = ${organizationId}::uuid
+      AND t.state = 'open'
+      AND a.macro_state IN ('pending_approval', 'returned_for_info')
+    GROUP BY pe.id, pe.user_id, pe.name
+    ORDER BY waiting_since ASC`;
+  return rows.map((r) => ({ personId: r.person_id, userId: r.user_id, name: r.name, openCount: r.open_count, waitingSince: r.waiting_since }));
+}
+
 export async function getBillCeilingMinor(tx: Tx, organizationId: string): Promise<bigint | null> {
   const rows = await tx.$queryRaw<{ bill_ceiling_minor: bigint | null }[]>`
     SELECT bill_ceiling_minor FROM approval.org_settings WHERE organization_id = ${organizationId}::uuid`;

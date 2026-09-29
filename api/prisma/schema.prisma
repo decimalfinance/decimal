@@ -1012,3 +1012,15 @@ model BillExceptionBrief {
   @@index([secondPaymentOrderId], map: "idx_bill_exception_briefs_second")
   @@map("bill_exception_briefs")
 }
+
+/// When each person last looked at the companion's briefing.
+/// Mirrors postgres/init/027-companion-views.sql — the SQL is the source of truth.
+model CompanionView {
+  organizationId String    @map("organization_id") @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  previousSeenAt DateTime? @map("previous_seen_at") @db.Timestamptz(6)
+  lastSeenAt     DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+
+  @@id([organizationId, userId])
+  @@map("companion_views")
+}

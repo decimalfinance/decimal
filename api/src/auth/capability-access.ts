@@ -67,6 +67,9 @@ const RULES: Array<{ pattern: RegExp; view: Need; act: Need }> = [
   // Vendors (incl. payment rails).
   { pattern: /^\/(counterparties|counterparty-wallets|destinations|vendors)(\/|$)/, view: 'vendors.view', act: 'vendors.manage' },
   { pattern: /^\/accounting(\/|$)/, view: 'accounting.view', act: 'accounting.manage' },
+  // The companion's briefing is every member's: what it shows is filtered to the
+  // viewer's own work inside the briefing, so any active member may read it.
+  { pattern: /^\/companion(\/|$)/, view: null, act: null },
   // Team administration (role assignment endpoints also re-check admin inside).
   { pattern: /^\/(members|invites|roles)(\/|$)/, view: 'members.view', act: 'members.manage' },
   // my-access, summary, audit-log, protections, join, personal-wallets, ops-health…
