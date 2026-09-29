@@ -564,6 +564,10 @@
 .dec .brief-compare tbody td { height: 34px; }
 .dec .brief-compare .cell-mono { color: var(--text-primary); }
 .dec .brief-compare tr.is-diff td { background: color-mix(in srgb, var(--warning) 8%, transparent); }
+/* Shown when someone clears a bill the agent was sure should be closed: the
+   one choice that can pay the same bill twice. A warning, never a block. */
+.dec .brief-warning { display: flex; gap: 8px; align-items: flex-start; margin-top: 8px; padding: 8px 10px; border-radius: var(--r-sm); font-weight: 500; color: var(--warning); background: color-mix(in srgb, var(--warning) 10%, transparent); border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent); }
+.dec .brief-warning svg { flex: 0 0 auto; margin-top: 2px; }
 
 /* Field ↔ document linking: the page image wrapper + the highlight box that
    marks where a focused field was read from. */

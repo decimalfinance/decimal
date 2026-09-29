@@ -1027,6 +1027,23 @@ activeResolution?.flag === flag.kind ? (() => {
                     const ready = asking
                       ? Boolean(askOf) && resolutionValue.trim().length >= 3
                       : resolutionValue.trim().length >= 3;
+                    // Going against a clear-cut "close this one". Clearing a bill
+                    // the agent found to be a copy, or to be superseded, lets it be
+                    // approved and paid alongside the bill it copies, so that is
+                    // said plainly before the reason is written. Only this
+                    // direction: keeping a bill the agent would close is the one
+                    // that can pay twice. It warns, it never blocks — the person
+                    // decides.
+                    const brief = flag.brief?.status === 'ready' ? flag.brief : null;
+                    const otherNum = brief?.otherBill.invoiceNumber ?? 'the other bill';
+                    const payTwiceWarning = activeResolution.action === 'clear_duplicate'
+                      && brief?.recommendedAction === 'not_ours' && brief.confidence === 'high'
+                      ? (brief.verdict === 'replacement'
+                        ? `A later ${otherNum} corrects this bill. Clearing this means both versions can be approved and paid.`
+                        : brief.comparison?.identical
+                          ? 'Every figure on these two bills matches. Clearing this means both can be approved and paid.'
+                          : `This looks like a second copy of ${otherNum}. Clearing it means both can be approved and paid.`)
+                      : null;
                     return (
                       <span style={{ display: 'block', marginTop: 10 }}>
                         {/* State the question. A bare box under the flag's own
@@ -1040,6 +1057,12 @@ activeResolution?.flag === flag.kind ? (() => {
                             ? 'The bill waits for their answer instead of moving on. Anyone can ask.'
                             : ask!.help}
                         </span>
+                        {payTwiceWarning ? (
+                          <span className="brief-warning" role="alert">
+                            <Ico.info w={14} />
+                            <span>{payTwiceWarning}</span>
+                          </span>
+                        ) : null}
 
                         {asking && people.length === 0 ? (
                           <span style={{ display: 'block', marginTop: 8 }}>
