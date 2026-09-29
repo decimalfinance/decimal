@@ -122,7 +122,9 @@ Frontend: the brief renders on its flag in `BillDraft.tsx`. The recommended reso
 - **Console** (`today.ts`, `GET /companion/console`). Running: documents being read and bills being investigated. Waiting on you: approvals, drafts needing input, bills sent back, unreadable documents, ready drafts to sign off. Done: bills that moved past review in the window, and learned habits. The window is "since you last looked" (`companion_views`; a gap over 30 minutes starts a new visit). A bill waiting on you is never also done, and a draft still being worked on is running, not waiting. Each person sees their own work; admins also see who is holding approvals.
 - **Jobs** (`GET /companion/jobs/:jobId`). A job's steps and bills, to whoever may see its bills (`involvedBillIds`).
 
-Frontend: `pages/Home.tsx`. Three columns of cards; a card opens its job's steps in a drawer, polled every second while it runs.
+- **Chat** (`chat.ts`, `chat-tools.ts`, tables `companion_chats` and `companion_messages`). Ramp Stack style: a person asks, the answer is worked out in the background with the exception agent's loop (`runAgent`, with the conversation as history), and each tool call appends a thought to the answer while it runs. Tools are read-only and read the same workbench the Bills page does, so the companion sees exactly what the asker can: `find_bills`, `get_bill`, `spend_summary`, `vendor_profile`, `whats_waiting`. The answer is text, up to three tables, and the bills it rests on; bill ids a tool never returned are dropped. Chats belong to the asker. Nothing changes a bill from chat yet.
+
+Frontend: `pages/Home.tsx` is the prompt ("What can I help you with?") with suggestions, above three columns of cards; a card opens its job's steps in a drawer, polled every second while it runs. `pages/Chat.tsx` is a conversation: the person's words, then each answer's thoughts (live while running), text, tables and bill cards, with a follow-up box docked at the bottom. Recent chats are listed in the sidebar.
 
 ## Approval engine (Live)
 

@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { accessApi, type AuthenticatedSession, type Capability, type OrganizationMembership } from './api';
+import { accessApi, companionApi, type AuthenticatedSession, type Capability, type OrganizationMembership } from './api';
 import { Ico } from './dec/icons';
 
 type OrganizationContext = {
@@ -234,6 +234,7 @@ export function AppSidebar({
             <div className="sb-group-label">Operations</div>
             <NavItem to={base} end icon={<Ico.sparkle w={16} />} label="Home" />
             {can('bills.view') ? <NavItem to={`${base}/bills`} icon={<Ico.doc w={16} />} label="Bills" badge={paymentsIncompleteCount} /> : null}
+            <RecentChats organizationId={activeOrganization!.organizationId} base={base} />
 
             <div className="sb-group-label">Registry</div>
             {can('treasury.view') ? <NavItem to={`${base}/wallets`} icon={<Ico.treasury w={16} />} label="Treasury accounts" /> : null}
@@ -376,6 +377,33 @@ export function AppSidebar({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * The person's recent chats with the companion, under Home. "New chat" goes
+ * home, where the prompt is. Only the latest few; older ones are a scroll
+ * away on Home once there are many.
+ */
+function RecentChats({ organizationId, base }: { organizationId: string; base: string }) {
+  const q = useQuery({
+    queryKey: ['companion-chats', organizationId],
+    queryFn: () => companionApi.chats(organizationId),
+    staleTime: 10_000,
+  });
+  const chats = (q.data?.chats ?? []).slice(0, 6);
+  return (
+    <>
+      <div className="sb-group-label">Chats</div>
+      {/* A plain link, not a NavLink: it points at Home too, and two items lit at once reads as a bug. */}
+      <Link to={base} className="sb-item" style={{ textDecoration: 'none' }}>
+        <Ico.plus w={16} />
+        <span className="sb-label">New chat</span>
+      </Link>
+      {chats.map((c) => (
+        <NavItem key={c.chatId} to={`${base}/chat/${c.chatId}`} icon={<Ico.chat w={16} />} label={c.title} />
+      ))}
+    </>
   );
 }
 

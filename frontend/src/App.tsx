@@ -13,6 +13,7 @@ import { useLiveOrgEvents } from './lib/use-live-org-events';
 // (Wallets, PaymentDetail, TreasuryWalletDetail, OrganizationProposalDetail)
 // out of the initial download for everyone else.
 const HomePage = lazy(() => import('./pages/Home').then((m) => ({ default: m.HomePage })));
+const ChatPage = lazy(() => import('./pages/Chat').then((m) => ({ default: m.ChatPage })));
 const ProposalRedirectPage = lazy(() => import('./pages/ProposalRedirect').then((m) => ({ default: m.ProposalRedirectPage })));
 const BillsPage = lazy(() => import('./pages/Bills').then((m) => ({ default: m.BillsPage })));
 const BillDraftPage = lazy(() => import('./pages/BillDraft').then((m) => ({ default: m.BillDraftPage })));
@@ -198,6 +199,7 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
               <Route path="/setup" element={<SetupPage />} />
               <Route path="/profile" element={<ProfilePage session={session} />} />
               <Route path="/organizations/:organizationId" element={<HomePage />} />
+              <Route path="/organizations/:organizationId/chat/:chatId" element={<ChatPage />} />
               <Route path="/organizations/:organizationId/wallets" element={<WalletsPage session={session} />} />
               <Route path="/organizations/:organizationId/wallets/:treasuryWalletId" element={<TreasuryWalletDetailPage session={session} />} />
               <Route path="/organizations/:organizationId/vaults/:treasuryWalletId" element={<VaultDetailPage />} />

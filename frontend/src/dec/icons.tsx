@@ -220,6 +220,16 @@ export const Ico = {
     </I>
   ),
   // AI assistant sparkle (8-ray burst) — the flow builder's assistant glyph.
+  chat: (p: IcoProps = {}) => (
+    <I {...p}>
+      <path d="M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-7l-4 3v-3H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z" />
+    </I>
+  ),
+  send: (p: IcoProps = {}) => (
+    <I {...p}>
+      <path d="M12 19V5M6 11l6-6 6 6" />
+    </I>
+  ),
   sparkle: (p: IcoProps = {}) => (
     <I {...p}>
       <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" />

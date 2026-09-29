@@ -425,7 +425,7 @@
 .dec .sb-item svg { width: 16px; height: 16px; flex: 0 0 auto; }
 .dec .sb-item:hover { background: var(--bg-surface-2); color: var(--text-primary); }
 .dec .sb-item.is-active { background: var(--bg-surface-2); color: var(--text-primary); border-left-color: var(--accent); border-radius: 0 var(--r-sm) var(--r-sm) 0; }
-.dec .sb-item .sb-label { flex: 1; }
+.dec .sb-item .sb-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dec .sb-badge { font-family: var(--font-mono); font-size: 10px; font-weight: 600; min-width: 18px; height: 18px; padding: 0 5px; border-radius: var(--r-pill); background: color-mix(in srgb, var(--warning) 16%, transparent); color: var(--warning); display: inline-flex; align-items: center; justify-content: center; }
 
 .dec .sb-footer { border-top: 1px solid var(--border); padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }
@@ -1257,6 +1257,45 @@
 .dec .tl-event.failed .tl-dot { background: var(--danger-vivid); border-color: var(--danger-vivid); }
 .dec .tl-event.sub { padding-left: 20px; }
 .dec .tl-detail { font-size: 12.5px; color: var(--text-muted); line-height: 1.45; }
+
+/* ---- Companion chat ----
+   A prompt box (Home and the chat page), the conversation, and the thoughts
+   the companion writes while it works an answer out. Answers sit on the page;
+   the person's own words sit in a quiet bubble on the right. */
+.dec .cp-box { background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-md);
+  padding: 12px 14px 10px; display: flex; flex-direction: column; gap: 8px; transition: border-color .12s ease; }
+.dec .cp-box:focus-within { border-color: var(--border-strong); }
+.dec .cp-input { border: none; outline: none; resize: none; background: transparent; font: inherit; font-size: 14.5px;
+  color: var(--text-primary); line-height: 1.5; min-height: 24px; max-height: 200px; width: 100%; }
+.dec .cp-input::placeholder { color: var(--text-faint); }
+.dec .cp-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.dec .cp-hint { font-size: 11.5px; color: var(--text-faint); }
+.dec .cp-send { width: 30px; height: 30px; border-radius: 50%; border: none; background: var(--solid);
+  color: var(--solid-contrast); display: flex; align-items: center; justify-content: center; cursor: pointer; flex: 0 0 auto; }
+.dec .cp-send:disabled { background: var(--border-strong); cursor: default; }
+.dec .cp-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.dec .cp-chip { border: 1px solid var(--border); background: var(--bg-surface); border-radius: 999px; padding: 6px 12px;
+  font: inherit; font-size: 12.5px; color: var(--text-muted); cursor: pointer; }
+.dec .cp-chip:hover { border-color: var(--border-strong); color: var(--text-primary); }
+
+.dec .ch-thread { display: flex; flex-direction: column; gap: 22px; padding-bottom: 12px; }
+.dec .ch-user { align-self: flex-end; background: var(--bg-surface-2); border: 1px solid var(--border); border-radius: var(--r-md);
+  padding: 9px 13px; font-size: 14px; color: var(--text-primary); line-height: 1.5; white-space: pre-wrap; }
+.dec .ch-answer { display: flex; flex-direction: column; gap: 12px; }
+.dec .ch-text { font-size: 14px; color: var(--text-primary); line-height: 1.6; }
+.dec .ch-text p { margin: 0 0 8px; }
+.dec .ch-text p:last-child { margin-bottom: 0; }
+.dec .ch-text ul { margin: 0 0 8px; padding-left: 18px; }
+.dec .ch-text.is-failed { color: var(--text-muted); }
+.dec .ch-thoughts-head { display: inline-flex; align-items: center; gap: 7px; font: inherit; font-size: 12.5px; color: var(--text-muted);
+  background: none; border: none; padding: 0; cursor: pointer; }
+.dec .ch-thoughts { display: flex; flex-direction: column; gap: 8px; padding: 4px 0 2px 14px; border-left: 1.5px solid var(--border); }
+.dec .ch-thought { display: flex; flex-direction: column; gap: 1px; }
+.dec .ch-thought-text { font-size: 12.5px; color: var(--text-primary); }
+.dec .ch-thought-detail { font-size: 12px; color: var(--text-muted); }
+.dec .ch-bills { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+/* The follow-up box stays in reach at the bottom of a long conversation. */
+.dec .ch-dock { position: sticky; bottom: 0; padding: 12px 0 20px; background: var(--bg-canvas); }
 /* ============================================================
    DECIMAL — page-level layout (full app screens on canvas)
    Builds on tokens.css + components.css. Namespaced under .dec.

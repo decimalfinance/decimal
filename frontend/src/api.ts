@@ -2025,7 +2025,46 @@ export const companionApi = {
   job(organizationId: string, jobId: string) {
     return request<CompanionJob>(`/organizations/${organizationId}/companion/jobs/${jobId}`);
   },
+  chats(organizationId: string) {
+    return request<{ chats: CompanionChatSummary[] }>(`/organizations/${organizationId}/companion/chats`);
+  },
+  startChat(organizationId: string, text: string) {
+    return request<{ chatId: string }>(`/organizations/${organizationId}/companion/chats`, {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    });
+  },
+  chat(organizationId: string, chatId: string) {
+    return request<CompanionChat>(`/organizations/${organizationId}/companion/chats/${chatId}`);
+  },
+  followUp(organizationId: string, chatId: string, text: string) {
+    return request<{ chatId: string }>(`/organizations/${organizationId}/companion/chats/${chatId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    });
+  },
 };
+
+export interface CompanionChatSummary { chatId: string; title: string; updatedAt: string }
+
+/** A chat with the companion. Answers carry the thoughts that produced them. */
+export interface CompanionChat {
+  chatId: string;
+  title: string;
+  running: boolean;
+  messages: Array<{
+    messageId: string;
+    role: 'user' | 'assistant';
+    status: 'running' | 'done' | 'failed';
+    text: string;
+    thoughts: Array<{ text: string; detail: string | null; at: string }>;
+    tables: Array<{ title: string; columns: string[]; rows: string[][] }>;
+    billIds: string[];
+    createdAt: string;
+  }>;
+  /** The bills answers point at, as they are now. */
+  bills: Record<string, { paymentOrderId: string; vendorName: string; invoiceNumber: string | null; amountUsd: number; state: string }>;
+}
 
 export const accessApi = {
   get(organizationId: string) {

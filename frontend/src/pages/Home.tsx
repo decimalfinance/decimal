@@ -9,7 +9,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   companionApi,
   type CompanionConsole,
@@ -21,6 +21,16 @@ import {
 } from '../api';
 import { Ico } from '../dec/icons';
 import { PageHead } from '../dec/primitives';
+import { useToast } from '../ui/Toast';
+import { Composer } from './Chat';
+
+/** Questions worth asking on day one, answered from the tools the chat has. */
+const SUGGESTIONS = [
+  'What is waiting on me?',
+  'Which bills need a person, and why?',
+  'Spend by vendor this month',
+  'Who is holding approvals up?',
+];
 
 function usd(amount: number): string {
   return amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
@@ -98,6 +108,16 @@ export function HomePage() {
     if (h < 18) return 'Good afternoon';
     return 'Good evening';
   }, []);
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const ask = useMutation({
+    mutationFn: (text: string) => companionApi.startChat(organizationId, text),
+    onSuccess: ({ chatId }) => {
+      void queryClient.invalidateQueries({ queryKey: ['companion-chats', organizationId] });
+      navigate(`/organizations/${organizationId}/chat/${chatId}`);
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Could not ask that.'),
+  });
   const c = q.data;
   const firstName = c?.viewer.name?.trim().split(/\s+/)[0];
   const base = `/organizations/${organizationId}`;
@@ -122,6 +142,15 @@ export function HomePage() {
           title={firstName ? `${greeting}, ${firstName}` : greeting}
           desc={c ? <><Ico.sparkle w={14} /> {openingLine(c)}</> : undefined}
         />
+
+        <section className="stack stack-16">
+          <Composer placeholder="What can I help you with?" busy={ask.isPending} onSend={(t) => ask.mutate(t)} autoFocus />
+          <div className="cp-chips">
+            {SUGGESTIONS.map((s) => (
+              <button key={s} type="button" className="cp-chip" disabled={ask.isPending} onClick={() => ask.mutate(s)}>{s}</button>
+            ))}
+          </div>
+        </section>
 
         {q.isLoading ? <div className="skeleton" style={{ height: 320 }} /> : null}
         {q.isError ? (
