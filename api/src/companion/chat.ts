@@ -16,6 +16,7 @@ import { trackBackgroundWork } from '../infra/background.js';
 import { badRequest, notFound } from '../infra/api-errors.js';
 import { isExceptionAgentConfigured, runAgent, type ChatMessage } from '../exceptions/agent.js';
 import { chatTools, localDay, type Thought } from './chat-tools.js';
+import { orgTools } from './chat-tools-org.js';
 import { ACTION_KINDS, buildActionCards, doneText, type ActionCard, type ProposedAction } from './actions.js';
 
 const MAX_TURNS = 8;
@@ -25,11 +26,23 @@ const HISTORY_MESSAGES = 12;
 export type ChatTable = { title: string; columns: string[]; rows: string[][] };
 export type ChatBlocks = { tables?: ChatTable[]; billIds?: string[]; actions?: ActionCard[] };
 
+/** The server's time zone, e.g. "Asia/Kolkata (UTC+05:30)" — the one flags and screens speak in. */
+function teamTimeZone(): string {
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const minutes = -new Date().getTimezoneOffset();
+  const sign = minutes >= 0 ? '+' : '-';
+  const hh = String(Math.floor(Math.abs(minutes) / 60)).padStart(2, '0');
+  const mm = String(Math.abs(minutes) % 60).padStart(2, '0');
+  return `${zone} (UTC${sign}${hh}:${mm})`;
+}
+
 function system(today: string): string {
-  return `You are Decimal's accounts-payable companion. You work for the team: you read every bill that comes in, check it, categorise it, investigate anything odd, and answer questions about their bills. Today is ${today}.
+  return `You are Decimal's accounts-payable companion. You work for the team: you read every bill that comes in, check it, categorise it, investigate anything odd, and answer questions about their bills. Today is ${today}. The team's time zone is ${teamTimeZone()}: timestamps from tools ending in Z are UTC, so convert them before you state a date or time.
 
 How to answer:
-- Use the tools for every fact. Never guess a figure, a vendor, or a date. If the tools do not have it, say so plainly.
+- Use the tools for every fact. Never guess a figure, a vendor, a date, or a person's responsibility. If the tools do not have it, say so plainly.
+- For "who" questions (who does this, who is it waiting on, who should I ask), use team, approval_trail and bill_history, and name the people.
+- A bill named by its number ("BW-2210") is found with find_bills invoiceNumber, then read with get_bill, approval_trail or bill_history.
 - Call as many tools as you need, then finish by calling respond. Do not ask the person to wait.
 - Be brief and plain: a sentence or two, then a table if the answer is a list or a set of numbers. No preamble, no sign-off.
 - Money is USD: write $4,500.00. Dates as 3 Sep 2026.
@@ -157,6 +170,7 @@ async function answerQuestion(args: {
   try {
     const tools = [
       ...chatTools({ organizationId: args.organizationId, viewerUserId: args.userId, onThought, seen }),
+      ...orgTools({ organizationId: args.organizationId, viewerUserId: args.userId, onThought, seen }),
       { name: 'respond', description: 'Finish with your answer.', terminal: true, parameters: RESPOND_SCHEMA },
     ];
     const run = await runAgent({

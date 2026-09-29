@@ -3501,3 +3501,53 @@ test('companion chat: proposals become cards only when they fit, and a card runs
   });
   assert.equal(foreign.status, 404);
 });
+
+// ---- the companion knows the team and who does what -------------------------------
+
+test('companion chat: it can find a bill by number and say whose job each thing is', async () => {
+  const { orgId, owner } = await makeOrg();
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'Numbered Ltd', amount: 75, invoiceNo: 'NL-77' });
+  await drainAsyncIntake();
+  const results: Record<string, any> = {};
+  let n = 0;
+  setExceptionAgentRuntimeForTests({
+    isConfigured: () => true,
+    callModel: async ({ messages }: { messages: ChatMessage[] }) => {
+      const usage = { promptTokens: 10, completionTokens: 5 };
+      const lastUser = messages.map((m) => m.role).lastIndexOf('user');
+      const tools = messages.slice(lastUser).filter((m) => m.role === 'tool');
+      if (tools.length === 0) {
+        return { usage, message: { role: 'assistant' as const, content: null, tool_calls: [
+          { id: `t_${++n}`, type: 'function' as const, function: { name: 'find_bills', arguments: JSON.stringify({ invoiceNumber: 'nl 77' }) } },
+          { id: `t_${++n}`, type: 'function' as const, function: { name: 'team', arguments: '{}' } },
+          { id: `t_${++n}`, type: 'function' as const, function: { name: 'approval_rules', arguments: '{}' } },
+        ] } };
+      }
+      results.find = JSON.parse(tools[0]!.content as string);
+      results.team = JSON.parse(tools[1]!.content as string);
+      results.rules = JSON.parse(tools[2]!.content as string);
+      return { usage, message: { role: 'assistant' as const, content: null, tool_calls: [
+        { id: `t_${++n}`, type: 'function' as const, function: { name: 'respond', arguments: JSON.stringify({ message: 'ok', tables: [], billIds: [], actions: [] }) } },
+      ] } };
+    },
+  });
+  const { chatId } = await post(`/organizations/${orgId}/companion/chats`, { text: 'Who codes NL-77?' }, owner.token);
+  await drainAsyncIntake();
+
+  assert.deepEqual(results.find.bills.map((b: { billId: string }) => b.billId), [bill.billId], 'found by its number, however it was typed');
+  const coding = results.team.jobs.find((j: { job: string }) => /assign categories/.test(j.job));
+  const me = results.team.people.find((p: { isYou: boolean }) => p.isYou);
+  assert.ok(coding.people.includes(me.name), 'the owner, an admin, can assign categories');
+  const clearing = results.team.jobs.find((j: { job: string }) => /duplicate flag/.test(j.job));
+  assert.match(clearing.rule, /Admins only/);
+  assert.ok(results.team.people.some((p: { isYou: boolean }) => p.isYou), 'it knows who is asking');
+  assert.ok(Array.isArray(results.rules.flow) && results.rules.flow.length > 0, 'the approval flow in words');
+  assert.ok('reviewerMayApprove' in results.rules.separationOfDuties);
+
+  const chat = await get(`/organizations/${orgId}/companion/chats/${chatId}`, owner.token);
+  assert.deepEqual(chat.messages[1].thoughts.map((t: { text: string }) => t.text).slice(0, 3), [
+    'Searched bills numbered nl 77',
+    'Looked up the team and who does what',
+    'Read the approval rules',
+  ]);
+});

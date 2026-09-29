@@ -63,7 +63,7 @@ org creation, invites — behaves exactly as it does for a customer.
   builds users + org + active memberships + role bundles in one call and returns
   a session token per persona — worth it because assembling that through real
   endpoints is a dozen round-trips. `secret` = `DEV_AUTH_SECRET` in `api/.env`.
-  Roles: reviewer / approver / payer (any casing). Access: admin | member.
+  Roles: bill_clerk / approver / payer / viewer. Access: admin | member.
 - Use `Authorization: Bearer <sessionToken>` to act as any persona over the API.
 
 Both affordances are off unless `DEV_AUTH_SECRET` is set, which it never is in

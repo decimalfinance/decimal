@@ -8,7 +8,8 @@
 // Each call also says, in a sentence, what it did — that is the "thought" the
 // chat shows while the answer is worked out.
 import { prisma } from '../infra/prisma.js';
-import { getBillsWorkbench } from '../payments/bills.js';
+import { getApprovalsInbox, getBillsWorkbench } from '../payments/bills.js';
+import { readPayableHold } from '../payments/vendor-payable.js';
 import type { AgentTool } from '../exceptions/agent.js';
 import { getCompanionConsole } from './today.js';
 import { plural } from './steps.js';
@@ -104,8 +105,10 @@ export function chatTools(args: {
     const from = parseDay(a.from);
     const to = parseDay(a.to, true);
     const bucket = typeof a.status === 'string' ? STATUS_TO_BUCKET[a.status] : null;
+    const number = typeof a.invoiceNumber === 'string' && a.invoiceNumber.trim() ? norm(a.invoiceNumber) : null;
     return rows.filter((r) =>
       vendorMatches(r, a.vendor)
+      && (!number || norm(r.invoiceNumber ?? '').includes(number))
       && (!bucket || r.bucket === bucket)
       && (!from || r.createdAt >= from)
       && (!to || r.createdAt <= to)
@@ -114,6 +117,7 @@ export function chatTools(args: {
   };
   const scope = (a: Record<string, unknown>) => {
     const parts: string[] = [];
+    if (typeof a.invoiceNumber === 'string' && a.invoiceNumber.trim()) parts.push(`numbered ${a.invoiceNumber.trim()}`);
     if (typeof a.vendor === 'string' && a.vendor.trim()) parts.push(`from ${a.vendor.trim()}`);
     if (typeof a.status === 'string') parts.push(a.status.replace('_', ' '));
     if (typeof a.from === 'string' || typeof a.to === 'string') parts.push(`received ${a.from ?? 'any time'} to ${a.to ?? 'today'}`);
@@ -125,11 +129,12 @@ export function chatTools(args: {
   return [
     {
       name: 'find_bills',
-      description: 'Search the bills this person can see. Filter by vendor (partial name), state, the date the bill was received (YYYY-MM-DD), and amount in USD. Returns the count, the total, and up to 25 bills, newest first, each with a billId you can cite.',
+      description: 'Search the bills this person can see. Filter by invoice number (e.g. "BW-2210"; use this whenever the person names a bill by its number), vendor (partial name), state, the date the bill was received (YYYY-MM-DD), and amount in USD. Returns the count, the total, and up to 25 bills, newest first, each with a billId you can cite.',
       parameters: {
         type: 'object',
         additionalProperties: false,
         properties: {
+          invoiceNumber: { ...NULLABLE_STRING, description: 'The invoice number, or part of it.' },
           vendor: NULLABLE_STRING,
           status: STATUS_PARAM,
           from: { ...NULLABLE_STRING, description: 'Received on or after, YYYY-MM-DD.' },
@@ -163,9 +168,13 @@ export function chatTools(args: {
           return { error: 'No such bill, or this person cannot see it.' };
         }
         args.seen.add(row.paymentOrderId);
-        const [coding, order] = await Promise.all([
+        const [coding, order, sync] = await Promise.all([
           prisma.paymentOrderGlCoding.findUnique({ where: { paymentOrderId: row.paymentOrderId }, select: { lines: true } }),
           prisma.paymentOrder.findUnique({ where: { paymentOrderId: row.paymentOrderId }, select: { metadataJson: true } }),
+          prisma.accountingSync.findUnique({
+            where: { paymentOrderId_provider: { paymentOrderId: row.paymentOrderId, provider: 'quickbooks' } },
+            select: { status: true, syncedAt: true, error: true },
+          }).catch(() => null),
         ]);
         const extracted = ((order?.metadataJson as Record<string, any> | null)?.agent?.extracted ?? {}) as Record<string, any>;
         const lines = Array.isArray(coding?.lines) && (coding!.lines as unknown[]).length > 0
@@ -180,6 +189,7 @@ export function chatTools(args: {
           categorised: Boolean(coding),
           flags: row.flags.map((f) => ({ kind: f.kind, what: f.short, detail: f.message, holdsTheBill: f.blocking })),
           duplicateCleared: row.duplicateCleared,
+          quickBooks: sync ? { status: sync.status, syncedAt: sync.syncedAt?.toISOString() ?? null, error: sync.error } : 'not synced yet',
         };
       },
     },
@@ -246,8 +256,9 @@ export function chatTools(args: {
         const names = [...new Set(rows.map((r) => r.vendorName))];
         const counterparty = await prisma.counterparty.findFirst({
           where: { organizationId: args.organizationId, displayName: { in: names } },
-          select: { counterpartyId: true, displayName: true },
+          select: { counterpartyId: true, displayName: true, metadataJson: true },
         });
+        const hold = counterparty ? readPayableHold(counterparty.metadataJson) : null;
         const habit = counterparty
           ? await prisma.vendorCodingRule.findFirst({ where: { organizationId: args.organizationId, counterpartyId: counterparty.counterpartyId }, select: { accountName: true, accountId: true, source: true, learnedFromCount: true } })
           : null;
@@ -266,6 +277,7 @@ export function chatTools(args: {
           latestBill: day(sorted[sorted.length - 1]!.createdAt),
           open: open.map(brief),
           categoryHabit: habit ? { category: habit.accountName ?? habit.accountId, learned: habit.source === 'learned', fromBills: habit.learnedFromCount } : null,
+          paymentHold: hold ? { status: hold.status, reason: hold.reason, by: hold.byName, at: hold.at } : null,
         };
       },
     },
@@ -274,7 +286,12 @@ export function chatTools(args: {
       description: 'The console for this person: what the companion is still working on, what is waiting on them (approvals, drafts that need input, drafts ready to sign off, bills sent back), what finished recently, and for admins who is holding approvals.',
       parameters: { type: 'object', additionalProperties: false, properties: {} },
       run: async () => {
-        const c = await getCompanionConsole(args.organizationId, args.viewerUserId, new Date(), { recordVisit: false });
+        const [c, inbox] = await Promise.all([
+          getCompanionConsole(args.organizationId, args.viewerUserId, new Date(), { recordVisit: false }),
+          getApprovalsInbox(args.organizationId, args.viewerUserId),
+        ]);
+        const questions = (inbox.questionsForYou ?? []) as Array<{ paymentOrderId: string; question: string; askedByName: string | null; askedAt: string | Date; vendorName: string; invoiceNumber: string | null }>;
+        for (const q of questions) args.seen.add(q.paymentOrderId);
         for (const w of c.waiting) if (w.paymentOrderId) args.seen.add(w.paymentOrderId);
         for (const d of c.done) if (d.paymentOrderId) args.seen.add(d.paymentOrderId);
         await args.onThought({
@@ -286,6 +303,7 @@ export function chatTools(args: {
           waiting: c.waiting.map((w) => ({ kind: w.kind, billId: w.paymentOrderId, vendor: w.title, invoiceNumber: w.invoiceNumber, amountUsd: w.amountUsd, why: w.reason })),
           done: c.done.map((d) => ({ billId: d.paymentOrderId, what: d.title, outcome: d.outcome, at: d.at })),
           holdingApprovals: c.holding,
+          questionsForYou: questions.map((q) => ({ billId: q.paymentOrderId, vendor: q.vendorName, invoiceNumber: q.invoiceNumber, askedBy: q.askedByName, question: q.question, askedAt: q.askedAt })),
         };
       },
     },
