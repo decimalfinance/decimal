@@ -9,6 +9,7 @@
 import { randomUUID } from 'node:crypto';
 import { getOrgAccess } from '../approvals/permissions.js';
 import { getApprovalsInbox, getBillsWorkbench } from '../payments/bills.js';
+import { logger } from '../infra/logger.js';
 import { usd } from './chat-tools.js';
 
 export const ACTION_KINDS = ['send_for_approval', 'close_duplicate', 'clear_duplicate', 'approve'] as const;
@@ -107,7 +108,11 @@ export async function buildActionCards(args: {
         break;
       }
     }
-    if (!call) continue;
+    if (!call) {
+      // Worth seeing: a proposal the model made that the bill does not allow.
+      logger.info('companion_action.dropped', { kind: p.kind, billId: p.billId, state: row.state, ready: row.companion?.ready ?? null, isAdmin });
+      continue;
+    }
     once.add(key);
     cards.push({
       actionId: randomUUID(),

@@ -1179,7 +1179,9 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
       } else {
         subStatus = { kind: 'plain', text: 'Ready for approval', tone: 'success' };
       }
-    } else if (flagSummary.worst?.severity === 'danger' && bucket !== 'done') {
+    } else if (flagSummary.worst?.severity === 'danger' && bucket !== 'done' && order.state !== 'cancelled') {
+      // (Not on a closed bill: once it is closed as a duplicate or not a bill,
+      // its flags no longer ask anything of anyone.)
       // A danger flag does not stop mattering once a bill leaves draft. A bill
       // sitting in approval or queued to pay while addressed to another company
       // is the same failure, one stage later and with less scrutiny left. Paid

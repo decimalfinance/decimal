@@ -1165,3 +1165,39 @@
 .dec .ch-bills { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
 /* The follow-up box stays in reach at the bottom of a long conversation. */
 .dec .ch-dock { position: sticky; bottom: 0; padding: 12px 0 20px; background: var(--bg-canvas); }
+
+/* ---- Companion workspace ----
+   Home and every chat share one frame: the conversation fills the space and
+   scrolls on its own, the prompt is docked at the bottom, and a fixed rail on
+   the right keeps what is waiting on you in view the whole time. Below tablet
+   width the rail drops under the conversation. */
+.dec .cw { display: grid; grid-template-columns: minmax(0, 1fr) 360px; height: 100vh; }
+.dec .cw-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.dec .cw-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 28px 32px 8px; }
+.dec .cw-dock { padding: 10px 32px 20px; background: var(--bg-canvas); }
+.dec .cw-hello { min-height: 100%; display: flex; flex-direction: column; justify-content: flex-end; gap: 16px; padding-bottom: 8px; }
+.dec .cw-hello h1 { margin: 0; font-family: var(--font-display); font-size: 30px; font-weight: 600; letter-spacing: -0.02em; color: var(--text-primary); }
+.dec .cw-hello-line { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text-muted); }
+.dec .cw-rail { border-left: 1px solid var(--border); background: var(--bg-surface-2); min-height: 0; overflow-y: auto;
+  padding: 20px 16px 24px; display: flex; flex-direction: column; gap: 22px; }
+.dec .cw-sec { display: flex; flex-direction: column; gap: 8px; }
+.dec .cw-sec-head { display: flex; align-items: center; gap: 8px; padding: 0 2px; }
+.dec .cw-sec-head h3 { margin: 0; font-family: var(--font-display); font-size: 14px; font-weight: 600; letter-spacing: -0.01em; color: var(--text-primary); }
+@media (max-width: 960px) {
+  .dec .cw { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .dec .cw-rail { border-left: none; border-top: 1px solid var(--border); }
+  .dec .cw-scroll { overflow: visible; }
+}
+
+/* An action the companion proposes: what, why, and one button. The person's
+   click is what carries it out; afterwards the card says what happened. */
+.dec .ac-card { border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--bg-surface);
+  padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.dec .ac-card.is-done { border-color: var(--border); }
+.dec .ac-title { font-size: 13.5px; font-weight: 600; color: var(--text-primary); }
+.dec .ac-detail { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-faint); }
+.dec .ac-reason { font-size: 13px; color: var(--text-muted); line-height: 1.45; }
+.dec .ac-foot { display: flex; align-items: center; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
+.dec .ac-status { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--success); }
+.dec .ac-status.is-failed { color: var(--danger-vivid); }
+.dec .ac-list { display: flex; flex-direction: column; gap: 8px; }

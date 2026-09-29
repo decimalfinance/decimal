@@ -40,7 +40,7 @@ How to answer:
   - send_for_approval: a draft that is ready (checked, nothing flagged).
   - close_duplicate: the copy in a duplicate pair. Keep the older bill; close the newer copy. reason says why it is a copy.
   - clear_duplicate: a duplicate flag on bills that are genuinely different. reason says why.
-  - approve: a bill waiting on this person's approval.
+  - approve: a bill waiting on this person's approval (whats_waiting lists it under kind "approval"). "In approval" is exactly when to propose it. Do not second-guess the approval rules or flags: they are checked when the person clicks, and the card will say if they stop it.
   Propose when the person asks you to do something, or when one of these is plainly the next step. Say in the message what you are proposing and why; never say it is done. Anything else (editing a bill, categories, paying) is done on the bill: say where.
 - Payments are not live in Decimal: never say a bill was paid out unless its state says paid.`;
 }

@@ -182,7 +182,9 @@ export async function getCompanionConsole(
     .filter((b) => !b.companion!.ready)
     .sort((a, b) => Number(b.blocking) - Number(a.blocking) || b.amountUsd - a.amountUsd);
   for (const b of needsInput) waiting.push(card(b, 'input', b.companion!.reason ?? 'Needs a look'));
-  for (const b of bills.filter((x) => x.bucket === 'needs_attention')) waiting.push(card(b, 'sent_back', b.subStatus.text));
+  // Only a bill that was turned down needs someone. A bill closed on purpose
+  // (not a bill, a duplicate) is finished work, and goes to Done.
+  for (const b of bills.filter((x) => x.bucket === 'needs_attention' && x.subStatus.kind === 'loud')) waiting.push(card(b, 'sent_back', b.subStatus.text));
   for (const d of board?.pending ?? []) {
     if (d.status !== 'failed') continue;
     waiting.push({
@@ -198,7 +200,7 @@ export async function getCompanionConsole(
   const done: DoneCard[] = [];
   const movedOn = canReview
     ? await prisma.paymentOrder.findMany({
-      where: { organizationId, updatedAt: { gt: windowStart }, paymentOrderId: { in: bills.filter((b) => b.bucket === 'in_approval' || b.bucket === 'to_pay' || b.bucket === 'done').map((b) => b.paymentOrderId) } },
+      where: { organizationId, updatedAt: { gt: windowStart }, paymentOrderId: { in: bills.filter((b) => b.bucket === 'in_approval' || b.bucket === 'to_pay' || b.bucket === 'done' || (b.bucket === 'needs_attention' && b.subStatus.kind === 'plain')).map((b) => b.paymentOrderId) } },
       select: { paymentOrderId: true, updatedAt: true },
     })
     : [];
@@ -212,7 +214,7 @@ export async function getCompanionConsole(
     done.push({
       key: `bill:${b.paymentOrderId}`, kind: 'bill', jobId: b.invoiceDocumentId, paymentOrderId: b.paymentOrderId,
       title: b.vendorName, invoiceNumber: b.invoiceNumber, amountUsd: b.amountUsd,
-      outcome: b.bucket === 'in_approval' ? `In approval: ${b.subStatus.text.toLowerCase()}` : b.subStatus.text,
+      outcome: b.bucket === 'in_approval' ? `In approval: ${b.subStatus.text.toLowerCase()}` : b.bucket === 'needs_attention' ? 'Closed' : b.subStatus.text,
       at: at.toISOString(),
     });
   }

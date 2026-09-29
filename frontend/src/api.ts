@@ -2037,6 +2037,19 @@ export const companionApi = {
   chat(organizationId: string, chatId: string) {
     return request<CompanionChat>(`/organizations/${organizationId}/companion/chats/${chatId}`);
   },
+  /** Carry out a card: its own request, sent as the person clicking. */
+  runAction(organizationId: string, card: CompanionActionCard) {
+    return request<unknown>(`/organizations/${organizationId}${card.call.path}`, {
+      method: 'POST',
+      body: JSON.stringify(card.call.body),
+    });
+  },
+  recordOutcome(organizationId: string, chatId: string, actionId: string, outcome: { ok: boolean; message?: string | null }) {
+    return request<{ status: string; result: string | null }>(`/organizations/${organizationId}/companion/chats/${chatId}/actions/${actionId}/outcome`, {
+      method: 'POST',
+      body: JSON.stringify(outcome),
+    });
+  },
   followUp(organizationId: string, chatId: string, text: string) {
     return request<{ chatId: string }>(`/organizations/${organizationId}/companion/chats/${chatId}/messages`, {
       method: 'POST',
@@ -2046,6 +2059,20 @@ export const companionApi = {
 };
 
 export interface CompanionChatSummary { chatId: string; title: string; updatedAt: string }
+
+/** An action the companion proposes. The request is built by the server; the person's click sends it. */
+export interface CompanionActionCard {
+  actionId: string;
+  kind: 'send_for_approval' | 'close_duplicate' | 'clear_duplicate' | 'approve';
+  billId: string;
+  title: string;
+  detail: string;
+  reason: string | null;
+  button: string;
+  call: { path: string; body: Record<string, unknown> };
+  status: 'proposed' | 'done' | 'failed';
+  result: string | null;
+}
 
 /** A chat with the companion. Answers carry the thoughts that produced them. */
 export interface CompanionChat {
@@ -2060,6 +2087,7 @@ export interface CompanionChat {
     thoughts: Array<{ text: string; detail: string | null; at: string }>;
     tables: Array<{ title: string; columns: string[]; rows: string[][] }>;
     billIds: string[];
+    actions: CompanionActionCard[];
     createdAt: string;
   }>;
   /** The bills answers point at, as they are now. */

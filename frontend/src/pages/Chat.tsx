@@ -8,7 +8,8 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { companionApi, type CompanionChat } from '../api';
+import { companionApi, type CompanionActionCard, type CompanionChat } from '../api';
+import { Workspace } from './CompanionRail';
 import { Ico } from '../dec/icons';
 import { PageHead } from '../dec/primitives';
 import { useToast } from '../ui/Toast';
@@ -127,10 +128,76 @@ function Thoughts({ message }: { message: Message }) {
   );
 }
 
-function Answer({ message, bills, onOpenBill }: {
+// ─── Action cards ─────────────────────────────────────────────────────────
+// The companion proposes; the click carries it out, as the person clicking,
+// through the bill's own endpoint. Afterwards the card says what happened.
+
+function ActionCards({ organizationId, chatId, cards, bills, onOpenBill }: {
+  organizationId: string;
+  chatId: string;
+  cards: CompanionActionCard[];
+  bills: CompanionChat['bills'];
+  onOpenBill: (id: string, state: string) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [busy, setBusy] = useState<string | null>(null);
+  if (cards.length === 0) return null;
+  const run = async (card: CompanionActionCard) => {
+    setBusy(card.actionId);
+    try {
+      await companionApi.runAction(organizationId, card);
+      await companionApi.recordOutcome(organizationId, chatId, card.actionId, { ok: true });
+    } catch (e) {
+      await companionApi.recordOutcome(organizationId, chatId, card.actionId, {
+        ok: false,
+        message: e instanceof Error ? e.message : 'That did not go through.',
+      }).catch(() => null);
+    } finally {
+      setBusy(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['companion-chat', organizationId, chatId] }),
+        queryClient.invalidateQueries({ queryKey: ['companion-console', organizationId] }),
+        queryClient.invalidateQueries({ queryKey: ['bills-workbench', organizationId] }),
+      ]);
+    }
+  };
+  return (
+    <div className="ac-list">
+      {cards.map((card) => {
+        const bill = bills[card.billId];
+        return (
+          <div key={card.actionId} className={`ac-card${card.status === 'done' ? ' is-done' : ''}`}>
+            <div className="ac-title">{card.title}</div>
+            <div className="ac-detail">{card.detail}</div>
+            {card.reason ? <div className="ac-reason">{card.reason}</div> : null}
+            <div className="ac-foot">
+              {card.status === 'proposed' ? (
+                <button type="button" className="btn btn-primary btn-sm" disabled={busy !== null} onClick={() => void run(card)}>
+                  {busy === card.actionId ? 'Working…' : card.button}
+                </button>
+              ) : (
+                <span className={`ac-status${card.status === 'failed' ? ' is-failed' : ''}`}>
+                  {card.status === 'done' ? <Ico.checkSm w={13} /> : <Ico.info w={13} />}
+                  {card.result}
+                </span>
+              )}
+              {bill ? (
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => onOpenBill(bill.paymentOrderId, bill.state)}>Open the bill</button>
+              ) : null}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function Answer({ message, bills, onOpenBill, organizationId, chatId }: {
   message: Message;
   bills: CompanionChat['bills'];
   onOpenBill: (id: string, state: string) => void;
+  organizationId: string;
+  chatId: string;
 }) {
   const cards = message.billIds.map((id) => bills[id]).filter(Boolean);
   return (
@@ -158,6 +225,7 @@ function Answer({ message, bills, onOpenBill }: {
           </Fragment>
         );
       })}
+      <ActionCards organizationId={organizationId} chatId={chatId} cards={message.actions ?? []} bills={bills} onOpenBill={onOpenBill} />
       {cards.length > 0 ? (
         <div className="ch-bills">
           {cards.map((b) => (
@@ -206,33 +274,35 @@ export function ChatPage() {
     navigate(`/organizations/${organizationId}/bills/${id}${state === 'draft' ? '/draft' : ''}`);
 
   return (
-    <div className="page page-wide">
-      <div className="stack stack-24">
-        <PageHead eyebrow="Ask Decimal" title={chat?.title ?? 'Chat'} />
-        {q.isLoading ? <div className="skeleton" style={{ height: 240 }} /> : null}
-        {q.isError ? (
-          <div className="empty">
-            <div className="empty-icon"><Ico.info w={22} /></div>
-            <h4>This chat could not be opened</h4>
-            <p>It may belong to someone else, or no longer exist.</p>
-          </div>
-        ) : null}
-        {chat ? (
-          <div className="ch-thread">
-            {chat.messages.map((m) => (
-              m.role === 'user'
-                ? <div key={m.messageId} className="ch-user">{m.text}</div>
-                : <Answer key={m.messageId} message={m} bills={chat.bills} onOpenBill={openBill} />
-            ))}
-            <div ref={bottom} />
-          </div>
-        ) : null}
+    <Workspace>
+      <div className="cw-scroll">
+        <div className="stack stack-24">
+          <PageHead eyebrow="Ask Decimal" title={chat?.title ?? 'Chat'} />
+          {q.isLoading ? <div className="skeleton" style={{ height: 240 }} /> : null}
+          {q.isError ? (
+            <div className="empty">
+              <div className="empty-icon"><Ico.info w={22} /></div>
+              <h4>This chat could not be opened</h4>
+              <p>It may belong to someone else, or no longer exist.</p>
+            </div>
+          ) : null}
+          {chat ? (
+            <div className="ch-thread">
+              {chat.messages.map((m) => (
+                m.role === 'user'
+                  ? <div key={m.messageId} className="ch-user">{m.text}</div>
+                  : <Answer key={m.messageId} message={m} bills={chat.bills} onOpenBill={openBill} organizationId={organizationId} chatId={chatId} />
+              ))}
+              <div ref={bottom} />
+            </div>
+          ) : null}
+        </div>
       </div>
       {chat ? (
-        <div className="ch-dock">
+        <div className="cw-dock">
           <Composer placeholder="Ask a follow-up…" busy={chat.running || ask.isPending} onSend={(t) => ask.mutate(t)} />
         </div>
       ) : null}
-    </div>
+    </Workspace>
   );
 }
