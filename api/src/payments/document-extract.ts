@@ -24,6 +24,7 @@ import { config } from '../config.js';
 import { ungroundedFields, type TextPage } from './doc-provenance.js';
 import { logger } from '../infra/logger.js';
 import { badRequest } from '../infra/api-errors.js';
+import { chatCompletionBody } from '../infra/openai-params.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -1061,7 +1062,7 @@ async function runExtractionLlm(args: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${config.openAiApiKey}`,
     },
-    body: JSON.stringify({
+    body: JSON.stringify(chatCompletionBody({
       model: args.model || config.openAiModel,
       // Multi-page extraction needs more headroom than the provider
       // default (often 512). 4096 covers ~10 invoice rows comfortably
@@ -1075,7 +1076,7 @@ async function runExtractionLlm(args: {
         json_schema: { name: 'extracted_invoices', strict: true, schema: EXTRACTION_JSON_SCHEMA },
       },
       messages,
-    }),
+    })),
   });
   const latencyMs = Date.now() - t0;
 

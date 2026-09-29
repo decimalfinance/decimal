@@ -16,6 +16,7 @@
 // call for a scripted one, the same seam intake uses for extraction.
 import { config } from '../config.js';
 import { logger } from '../infra/logger.js';
+import { chatCompletionBody } from '../infra/openai-params.js';
 
 export type ChatMessage = {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -72,7 +73,7 @@ const callOpenAi: ModelCall = async ({ model, messages, tools, signal }) => {
   const res = await fetch(OPENAI_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.openAiApiKey}` },
-    body: JSON.stringify({ model, temperature: 0, max_tokens: 1500, messages, tools: toOpenAiTools(tools), tool_choice: 'required' }),
+    body: JSON.stringify(chatCompletionBody({ model, temperature: 0, max_tokens: 1500, messages, tools: toOpenAiTools(tools), tool_choice: 'required' })),
     signal,
   });
   if (!res.ok) throw new Error(`OpenAI ${res.status}`);

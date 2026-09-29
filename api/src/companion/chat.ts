@@ -15,7 +15,7 @@ import { logger } from '../infra/logger.js';
 import { trackBackgroundWork } from '../infra/background.js';
 import { badRequest, notFound } from '../infra/api-errors.js';
 import { isExceptionAgentConfigured, runAgent, type ChatMessage } from '../exceptions/agent.js';
-import { chatTools, type Thought } from './chat-tools.js';
+import { chatTools, localDay, type Thought } from './chat-tools.js';
 
 const MAX_TURNS = 8;
 const TIMEOUT_MS = 90_000;
@@ -140,7 +140,7 @@ async function answerQuestion(args: {
     ];
     const run = await runAgent({
       label: 'chat',
-      system: system(new Date().toISOString().slice(0, 10)),
+      system: system(localDay(new Date())),
       history: args.history,
       user: args.question,
       tools,

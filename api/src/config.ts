@@ -187,7 +187,7 @@ function buildConfig(): DecimalConfig {
     resendFromEmail: (process.env.RESEND_FROM_EMAIL ?? '').trim(),
     resendFromName: (process.env.RESEND_FROM_NAME ?? 'Decimal').trim(),
     openAiApiKey: (process.env.OPENAI_API_KEY ?? '').trim(),
-    openAiModel: (process.env.OPENAI_MODEL ?? fileConfig.openAiModel ?? 'gpt-4o-mini').trim(),
+    openAiModel: (process.env.OPENAI_MODEL ?? fileConfig.openAiModel ?? 'gpt-6-luna').trim(),
     openAiTextModel: (process.env.OPENAI_TEXT_MODEL ?? '').trim(),
     openAiAgentModel: (process.env.OPENAI_AGENT_MODEL ?? '').trim(),
     squadsProgramId:

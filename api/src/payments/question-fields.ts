@@ -18,6 +18,7 @@
 //      attention away from what was asked.
 import { config } from '../config.js';
 import { logger } from '../infra/logger.js';
+import { chatCompletionBody } from '../infra/openai-params.js';
 
 const OPENAI_CHAT_COMPLETIONS_URL = 'https://api.openai.com/v1/chat/completions';
 
@@ -93,7 +94,7 @@ export async function fieldsForQuestion(
     const response = await fetch(OPENAI_CHAT_COMPLETIONS_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.openAiApiKey}` },
-      body: JSON.stringify({
+      body: JSON.stringify(chatCompletionBody({
         model: config.openAiModel,
         max_tokens: 200,
         temperature: 0,
@@ -107,7 +108,7 @@ export async function fieldsForQuestion(
               : `Check raised: none\n\nQuestion: ${question.slice(0, 500)}`,
           },
         ],
-      }),
+      })),
     });
     if (!response.ok) return unjudged;
     const body = (await response.json()) as { choices?: Array<{ message?: { content?: string | null } }> };

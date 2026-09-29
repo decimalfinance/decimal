@@ -12,6 +12,7 @@
 import { config } from '../config.js';
 import { logger } from '../infra/logger.js';
 import { getQuickBooksForOrg } from './connections.js';
+import { chatCompletionBody } from '../infra/openai-params.js';
 
 const OPENAI_CHAT_COMPLETIONS_URL = 'https://api.openai.com/v1/chat/completions';
 
@@ -157,7 +158,7 @@ export async function matchExpenseAccounts(args: {
     const response = await fetch(OPENAI_CHAT_COMPLETIONS_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.openAiApiKey}` },
-      body: JSON.stringify({
+      body: JSON.stringify(chatCompletionBody({
         model: config.openAiModel,
         // Sized to the invoice, because the answer grows with it.
         //
@@ -177,7 +178,7 @@ export async function matchExpenseAccounts(args: {
           { role: 'system', content: 'You map purchases to GL expense accounts. Respond with JSON only, using exact account names from the provided list.' },
           { role: 'user', content: prompt },
         ],
-      }),
+      })),
     });
     if (!response.ok) return empty;
     const body = (await response.json()) as { choices?: Array<{ message?: { content?: string | null } }> };

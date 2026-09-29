@@ -534,6 +534,7 @@ export async function simulatePipeline(organizationId: string, input: {
 // report the outcome (and catch a deadlock in plain words).
 import { config } from '../config.js';
 import { logger } from '../infra/logger.js';
+import { chatCompletionBody } from '../infra/openai-params.js';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 
@@ -680,7 +681,7 @@ async function callOpenAiWithTools(messages: ChatMessage[], signal?: AbortSignal
   const res = await fetch(OPENAI_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.openAiApiKey}` },
-    body: JSON.stringify({ model: config.openAiModel, temperature: 0, max_tokens: 1500, messages, tools: ASSIST_TOOLS, tool_choice: 'auto' }),
+    body: JSON.stringify(chatCompletionBody({ model: config.openAiModel, temperature: 0, max_tokens: 1500, messages, tools: ASSIST_TOOLS, tool_choice: 'auto' })),
     signal,
   });
   if (!res.ok) throw new Error(`OpenAI ${res.status}`);

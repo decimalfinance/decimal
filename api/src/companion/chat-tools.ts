@@ -30,14 +30,23 @@ export function usd(n: number): string {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 }
 
+/**
+ * A calendar day in the server's own time zone, the same one the flags and the
+ * rest of the product speak in. UTC dates had the chat saying 29 Sep about a
+ * bill a flag called 30 Sep.
+ */
+export function localDay(d: Date): string {
+  return d.toLocaleDateString('en-CA');
+}
+
 function day(d: Date | string | null | undefined): string | null {
   if (!d) return null;
-  return (typeof d === 'string' ? new Date(d) : d).toISOString().slice(0, 10);
+  return localDay(typeof d === 'string' ? new Date(d) : d);
 }
 
 function parseDay(s: unknown, endOfDay = false): Date | null {
   if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
-  const d = new Date(`${s}T00:00:00Z`);
+  const d = new Date(`${s}T00:00:00`);
   if (Number.isNaN(d.getTime())) return null;
   return endOfDay ? new Date(d.getTime() + 86_400_000 - 1) : d;
 }
@@ -211,7 +220,7 @@ export function chatTools(args: {
             else for (const l of lines) add(l.accountName ?? 'Uncategorised', Number(l.amount) || 0);
           }
         } else {
-          for (const r of rows) add(a.groupBy === 'month' ? r.createdAt.toISOString().slice(0, 7) : r.vendorName, r.amountUsd);
+          for (const r of rows) add(a.groupBy === 'month' ? localDay(r.createdAt).slice(0, 7) : r.vendorName, r.amountUsd);
         }
         const out = [...groups.entries()]
           .map(([key, g]) => ({ [a.groupBy as string]: key, totalUsd: Math.round(g.total * 100) / 100, count: g.count }))
