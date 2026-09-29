@@ -725,3 +725,39 @@ test('safety: the console and job steps show nothing to someone outside, and job
     assert.ok([404, 405].includes((await raw(method, `/organizations/${w.orgId}/companion/jobs/${jobId}`, w.owner.token, {})).status), `${method} on a job does nothing`);
   }
 });
+
+// ─── 9. Found by the live red team ────────────────────────────────────────────
+
+test('safety: an answer left running by a restart is settled, and the chat can be used again', async () => {
+  const w = await makeWorld();
+  const chat = await prisma.companionChat.create({ data: { organizationId: w.orgId, userId: w.owner.userId, title: 'Interrupted' } });
+  const longAgo = new Date(Date.now() - 10 * 60_000);
+  await prisma.companionMessage.create({ data: { chatId: chat.chatId, role: 'user', status: 'done', text: 'q', createdAt: longAgo } });
+  await prisma.companionMessage.create({ data: { chatId: chat.chatId, role: 'assistant', status: 'running', createdAt: longAgo } });
+  // A running answer that is only seconds old is left alone.
+  const fresh = await prisma.companionChat.create({ data: { organizationId: w.orgId, userId: w.owner.userId, title: 'Still going' } });
+  await prisma.companionMessage.create({ data: { chatId: fresh.chatId, role: 'assistant', status: 'running' } });
+
+  const read = await get(`/organizations/${w.orgId}/companion/chats/${chat.chatId}`, w.owner.token);
+  assert.equal(read.running, false, 'no longer "still working" forever');
+  assert.equal(read.messages[1].status, 'failed');
+  assert.match(read.messages[1].text, /interrupted/);
+  hostile({ turns: [], respond: () => EMPTY });
+  await post(`/organizations/${w.orgId}/companion/chats/${chat.chatId}/messages`, { text: 'again' }, w.owner.token);
+  await drainAsyncIntake();
+  assert.equal((await get(`/organizations/${w.orgId}/companion/chats/${fresh.chatId}`, w.owner.token)).running, true, 'a live answer is not cut short');
+});
+
+test('safety: the model is told who it is talking to, so "my approval" means the asker', async () => {
+  const w = await makeWorld();
+  const seen = hostile({ turns: [], respond: () => EMPTY });
+  await ask(w.orgId, w.apprA.token, 'Approve the bill waiting on me.');
+  const prompt = String(seen.messages[0]?.find((m) => m.role === 'system')?.content ?? '');
+  assert.match(prompt, /You are talking to Adam Approver \(member; roles: Approver\)/);
+  assert.match(prompt, /"I", "me" and "my" mean Adam Approver/);
+  seen.messages.length = 0;
+  hostile({ turns: [], respond: () => EMPTY });
+  const owner = hostile({ turns: [], respond: () => EMPTY });
+  await ask(w.orgId, w.owner.token, 'Hello');
+  assert.match(String(owner.messages[0]?.find((m) => m.role === 'system')?.content ?? ''), /\(primary admin\)/);
+});

@@ -40,6 +40,11 @@ export function localDay(d: Date): string {
   return d.toLocaleDateString('en-CA');
 }
 
+/** "2026-09-30 02:08" in the team's time zone: enough to order two uploads on one day. */
+function localTime(d: Date): string {
+  return `${localDay(d)} ${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+}
+
 function day(d: Date | string | null | undefined): string | null {
   if (!d) return null;
   return localDay(typeof d === 'string' ? new Date(d) : d);
@@ -68,6 +73,7 @@ function brief(row: Row) {
     status: STATUS_WORDS[row.bucket] ?? row.bucket,
     detail: row.subStatus.text,
     received: day(row.createdAt),
+    receivedAt: localTime(row.createdAt),
     due: day(row.dueAt),
     needsAttention: row.companion && !row.companion.ready ? row.companion.reason : null,
     blocked: row.blocking,

@@ -15,6 +15,7 @@ import { logger } from '../infra/logger.js';
 import { trackBackgroundWork } from '../infra/background.js';
 import { badRequest, notFound } from '../infra/api-errors.js';
 import { isExceptionAgentConfigured, runAgent, type ChatMessage } from '../exceptions/agent.js';
+import { getOrgAccess } from '../approvals/permissions.js';
 import { chatTools, localDay, type Thought } from './chat-tools.js';
 import { orgTools } from './chat-tools-org.js';
 import { ACTION_KINDS, buildActionCards, doneText, type ActionCard, type ProposedAction } from './actions.js';
@@ -36,8 +37,12 @@ function teamTimeZone(): string {
   return `${zone} (UTC${sign}${hh}:${mm})`;
 }
 
-function system(today: string): string {
+type Asker = { name: string; access: string; roles: string[] };
+
+function system(today: string, asker: Asker): string {
   return `You are Decimal's accounts-payable companion. You work for the team: you read every bill that comes in, check it, categorise it, investigate anything odd, and answer questions about their bills. Today is ${today}. The team's time zone is ${teamTimeZone()}: timestamps from tools ending in Z are UTC, so convert them before you state a date or time.
+
+You are talking to ${asker.name} (${asker.access}${asker.roles.length ? `; roles: ${asker.roles.join(', ')}` : ''}). "I", "me" and "my" mean ${asker.name}: a bill waiting on ${asker.name}'s approval is waiting on the person you are talking to.
 
 How to answer:
 - Use the tools for every fact. Never guess a figure, a vendor, a date, or a person's responsibility. If the tools do not have it, say so plainly.
@@ -54,7 +59,7 @@ How to answer:
   - close_duplicate: the copy in a duplicate pair. Keep the older bill; close the newer copy. reason says why it is a copy.
   - clear_duplicate: a duplicate flag on bills that are genuinely different. reason says why.
   - approve: a bill waiting on this person's approval (whats_waiting lists it under kind "approval"). "In approval" is exactly when to propose it. Do not second-guess the approval rules or flags: they are checked when the person clicks, and the card will say if they stop it.
-  Propose when the person asks you to do something, or when one of these is plainly the next step. Say in the message what you are proposing and why; never say it is done. Anything else (editing a bill, categories, paying) is done on the bill: say where.
+  Propose when the person asks you to do something, or when one of these is plainly the next step. Propose only an action that IS what was asked: if none of the four fits (a category, an edit, a payment, a setting), propose nothing and say where it is done. Never offer a different action in its place. Say in the message what you are proposing and why; never say it is done. Anything you say you are proposing MUST be in actions: a proposal only in words is no use to anyone. Anything else (editing a bill, categories, paying) is done on the bill: say where.
 - Payments are not live in Decimal: never say a bill was paid out unless its state says paid.`;
 }
 
@@ -95,6 +100,35 @@ const RESPOND_SCHEMA = {
   },
 };
 
+/** Who is asking, for the prompt: "I" and "me" must mean someone. */
+async function askerOf(organizationId: string, userId: string): Promise<Asker> {
+  const [user, access] = await Promise.all([
+    prisma.user.findUnique({ where: { userId }, select: { displayName: true, email: true } }),
+    getOrgAccess(organizationId, userId),
+  ]);
+  const ROLE_NAMES: Record<string, string> = { bill_clerk: 'Bill Clerk', approver: 'Approver', payer: 'Payer', viewer: 'Viewer' };
+  const ACCESS: Record<string, string> = { primary_admin: 'primary admin', admin: 'admin', member: 'member' };
+  return {
+    name: user?.displayName?.trim() || user?.email || 'the person asking',
+    access: ACCESS[access?.membershipRole ?? ''] ?? 'member',
+    roles: (access?.roles ?? []).map((r) => ROLE_NAMES[r] ?? r),
+  };
+}
+
+/**
+ * An answer is worked out in this process, in the background. If the process
+ * restarts mid-answer, nothing finishes it, and the chat would say "still
+ * working" forever and refuse every follow-up. Past the time an answer can
+ * possibly take, a running answer is marked as interrupted.
+ */
+const INTERRUPTED_AFTER_MS = TIMEOUT_MS + 60_000;
+async function settleInterrupted(chatId: string): Promise<void> {
+  await prisma.companionMessage.updateMany({
+    where: { chatId, status: 'running', createdAt: { lt: new Date(Date.now() - INTERRUPTED_AFTER_MS) } },
+    data: { status: 'failed', text: 'I was interrupted before I finished this one. Ask again and I will pick it up.' },
+  }).catch(() => null);
+}
+
 function titleFrom(text: string): string {
   const t = text.replace(/\s+/g, ' ').trim();
   return t.length > 60 ? `${t.slice(0, 57).trimEnd()}…` : t;
@@ -122,6 +156,7 @@ export async function followUp(organizationId: string, userId: string, chatId: s
   const question = text.trim();
   if (!question) throw badRequest('Ask something.');
   await ownChat(organizationId, userId, chatId);
+  await settleInterrupted(chatId);
   const busy = await prisma.companionMessage.findFirst({ where: { chatId, status: 'running' }, select: { messageId: true } });
   if (busy) throw badRequest('Still working on the last question.');
   await ask(organizationId, userId, chatId, question);
@@ -175,7 +210,7 @@ async function answerQuestion(args: {
     ];
     const run = await runAgent({
       label: 'chat',
-      system: system(localDay(new Date())),
+      system: system(localDay(new Date()), await askerOf(args.organizationId, args.userId)),
       history: args.history,
       user: args.question,
       tools,
@@ -206,9 +241,16 @@ async function answerQuestion(args: {
       .filter((x): x is ProposedAction => Boolean(x) && (ACTION_KINDS as readonly string[]).includes((x as ProposedAction).kind) && typeof (x as ProposedAction).billId === 'string')
       .map((x) => ({ kind: x.kind, billId: x.billId, reason: String(x.reason ?? '') }));
     const actions = await buildActionCards({ organizationId: args.organizationId, viewerUserId: args.userId, proposals, seen });
+    // Never promise a button that is not there: the model said it was
+    // proposing something, but no card survived (it left it out, or the bill
+    // does not allow it for this person).
+    const promisesACard = /\b(i'?m proposing|i propose|proposing to|here(?:'s| is) (?:a|the) card|click (?:the|to))\b/i.test(message);
+    const answerText = promisesACard && actions.length === 0
+      ? `${message}\n\nI could not turn that into something you can click here, so do it on the bill itself.`
+      : message;
     await finish({
       status: 'done',
-      text: message,
+      text: answerText,
       blocks: { tables, billIds, actions } as unknown as Prisma.InputJsonValue,
       model: run.model,
       latencyMs: run.latencyMs,
@@ -231,6 +273,7 @@ export async function listChats(organizationId: string, userId: string) {
 
 export async function getChat(organizationId: string, userId: string, chatId: string) {
   const chat = await ownChat(organizationId, userId, chatId);
+  await settleInterrupted(chatId);
   const messages = await prisma.companionMessage.findMany({ where: { chatId }, orderBy: { createdAt: 'asc' } });
   // The bills an answer points at, as cards: looked up now, so a card shows the
   // bill as it is, not as it was when the answer was written.

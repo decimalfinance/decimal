@@ -20,9 +20,33 @@ FE_PORT=5274
 BENCH_DB=usdc_ops_bench
 mkdir -p "$RUN"
 
+# The process holding the port is only the child: `tsx watch` above it respawns
+# it with the environment it was started with. Killing just the child left a
+# watcher from weeks earlier serving the bench with a stale api/.env (the old
+# model), racing any new one for the port. So stop the watcher chain too —
+# only ancestors that are this stack's own dev processes, never a shell.
+kill_watchers_of() {
+  local pid=$1 parent cmd
+  for _ in 1 2 3; do
+    # The process may already be gone (its parent was just stopped): that is
+    # the end of the chain, not an error.
+    parent=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ' || true)
+    [[ -z "$parent" || "$parent" == "1" ]] && return 0
+    cmd=$(ps -o command= -p "$parent" 2>/dev/null || true)
+    if [[ "$cmd" == *"tsx watch"* || "$cmd" == *"npm run dev"* || "$cmd" == *"vite"* ]]; then
+      kill "$parent" 2>/dev/null || true
+      pid=$parent
+    else
+      return 0
+    fi
+  done
+}
+
 kill_port() {
   local port=$1
   local pids
+  pids=$(lsof -ti ":$port" -sTCP:LISTEN 2>/dev/null || true)
+  for p in ${(f)pids}; do kill_watchers_of "$p"; done
   pids=$(lsof -ti ":$port" 2>/dev/null || true)
   if [[ -n "$pids" ]]; then
     echo "$pids" | xargs kill 2>/dev/null || true
