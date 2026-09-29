@@ -3193,3 +3193,41 @@ test('exception agent: what the admin did is logged against what the agent advis
   assert.deepEqual(outcomes.map((o) => o.outcome), ['accepted', 'rejected']);
   assert.equal((outcomes[1]!.finalValue as { recommended: string }).recommended, 'not_ours');
 });
+
+test('duplicate gate: clearing one bill settles the pair, and a later copy is flagged afresh', async () => {
+  const { orgId, owner } = await makeOrg();
+  const a = await uploadAndConfirm(orgId, owner.token, { vendor: 'Pair Co', amount: 450, invoiceNo: 'PC-1' });
+  const b = await uploadAndConfirm(orgId, owner.token, { vendor: 'Pair Co', amount: 450, invoiceNo: 'PC-1' });
+  const flagOf = async (id: string) => (await get(`/organizations/${orgId}/bills/${id}/draft`, owner.token))
+    .flags.find((f: { kind: string }) => f.kind === 'possible_duplicate') as { blocking: boolean; message: string } | undefined;
+  assert.equal((await flagOf(a.billId))?.blocking, true, 'the flag sits on both bills');
+  assert.equal((await flagOf(b.billId))?.blocking, true);
+
+  // Cleared on ONE bill — which is exactly what happened in testing.
+  await post(`/organizations/${orgId}/bills/${b.billId}/duplicate-override`, { reason: 'Two separate orders, confirmed with the vendor.' }, owner.token);
+
+  // The twin is settled too, and says who decided and why.
+  const twin = await flagOf(a.billId);
+  assert.equal(twin?.blocking, false, 'the pair was answered, so neither side is still asking');
+  assert.match(twin!.message, /cleared on that bill by .*Two separate orders, confirmed with the vendor\./);
+  assert.match((await flagOf(b.billId))!.message, /— cleared by /);
+
+  // The twin's history records its flag stopping, not just the cleared bill's.
+  const twinEvents = await prisma.paymentOrderEvent.findMany({ where: { paymentOrderId: a.billId, eventType: 'bill_flag_cleared' } });
+  assert.equal(twinEvents.length, 1);
+
+  // Both can go through: confirm asks about the pair, not the bill.
+  await a.confirm();
+  await b.confirm();
+
+  // A third copy was never part of that decision, so it is flagged afresh.
+  const c = await uploadAndConfirm(orgId, owner.token, { vendor: 'Pair Co', amount: 450, invoiceNo: 'PC-1' });
+  assert.equal((await flagOf(c.billId))?.blocking, true, 'a clearance never covers a bill nobody has looked at');
+
+  // The workbench tells the same story as the draft screen.
+  const board = await get(`/organizations/${orgId}/bills/workbench`, owner.token);
+  const aRow = (board.bills as Array<{ paymentOrderId: string; duplicateCleared: { reason: string } | null }>)
+    .find((r) => r.paymentOrderId === a.billId);
+  assert.ok(aRow, 'the twin is on the board');
+  assert.equal(aRow.duplicateCleared?.reason, 'Two separate orders, confirmed with the vendor.', 'the twin row shows the clearance too');
+});

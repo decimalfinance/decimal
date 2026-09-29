@@ -151,13 +151,15 @@ export function registerPaymentApprovalBridge(): void {
       // confirmed or PAID while this one sat in approval. Settlement is
       // irreversible — hold the release and record why; after an admin clears
       // the flag, a payer retries via the advance endpoint.
-      const { findDuplicateBills, readDuplicateOverride, describeDuplicate } = await import('./duplicate-check.js');
+      const { findDuplicateBills, settleDuplicates, describeDuplicate } = await import('./duplicate-check.js');
       const releaseOrder = await prisma.paymentOrder.findFirst({
         where: { organizationId: approvable.organization_id, paymentOrderId },
         select: { counterpartyId: true, counterpartyWalletId: true, invoiceNumber: true, externalReference: true, amountRaw: true, createdAt: true, state: true, metadataJson: true },
       });
-      if (releaseOrder && !readDuplicateOverride(releaseOrder.metadataJson)) {
-        const dupes = await findDuplicateBills(approvable.organization_id, {
+      // Asked of each pair: settled on either bill means settled, and a twin
+      // nobody has looked at still holds the release.
+      if (releaseOrder) {
+        const found = await findDuplicateBills(approvable.organization_id, {
           excludePaymentOrderId: paymentOrderId,
           counterpartyId: releaseOrder.counterpartyId,
           counterpartyWalletId: releaseOrder.counterpartyWalletId,
@@ -166,6 +168,7 @@ export function registerPaymentApprovalBridge(): void {
           amountRaw: releaseOrder.amountRaw,
           createdAt: releaseOrder.createdAt,
         });
+        const dupes = (await settleDuplicates(approvable.organization_id, { paymentOrderId, createdAt: releaseOrder.createdAt, metadataJson: releaseOrder.metadataJson }, found)).open;
         if (dupes.length > 0) {
           await prisma.paymentOrderEvent.create({
             data: {

@@ -100,7 +100,18 @@ export function matchDuplicates(candidates: DuplicateCandidate[], input: {
   return matches;
 }
 
-export type DuplicateOverride = { byUserId: string; byName: string; reason: string; at: string };
+export type DuplicateOverride = {
+  byUserId: string;
+  byName: string;
+  reason: string;
+  at: string;
+  /**
+   * The bills this clearance settles. "Not a duplicate" is a statement about a
+   * PAIR, so it names the other side. Null on clearances recorded before that
+   * was so; see `covers`.
+   */
+  against: string[] | null;
+};
 
 export function readDuplicateOverride(metadata: unknown): DuplicateOverride | null {
   if (!metadata || typeof metadata !== 'object') return null;
@@ -113,7 +124,86 @@ export function readDuplicateOverride(metadata: unknown): DuplicateOverride | nu
     byName: typeof r.byName === 'string' ? r.byName : 'an admin',
     reason: r.reason,
     at: typeof r.at === 'string' ? r.at : '',
+    against: Array.isArray(r.against) ? r.against.filter((x): x is string => typeof x === 'string') : null,
   };
+}
+
+// ---- which duplicate pairs a person has settled ----------------------------
+//
+// A duplicate flag sits on BOTH bills of a pair, and "not a duplicate" answers
+// for the pair. Recorded on one bill only, it left the twin blocked on a
+// question somebody had already answered — and every place that checks for
+// duplicates asked the per-bill question ("is THIS bill cleared?") instead of
+// the real one ("has somebody settled THIS PAIR?").
+//
+// Every duplicate check now asks the real one, here, so the draft flag, the
+// workbench, confirm, release and the exception agent cannot disagree.
+
+/** Does a clearance recorded on one bill settle its pairing with `other`? */
+function covers(o: DuplicateOverride, other: { paymentOrderId: string; createdAt: Date }): boolean {
+  if (o.against) return o.against.includes(other.paymentOrderId);
+  // Given before clearances named their bills. It was meant for the bills in
+  // front of the person at the time, so it covers those — and nothing uploaded
+  // afterwards, which nobody could have looked at.
+  const at = Date.parse(o.at);
+  return Number.isFinite(at) ? other.createdAt.getTime() <= at : true;
+}
+
+export type DuplicateClearance = {
+  byName: string;
+  reason: string;
+  at: string;
+  /** Recorded on the bill being evaluated, or on its twin. */
+  onThisBill: boolean;
+};
+
+export type SettledDuplicates = {
+  /** Pairs nobody has settled. Any of these blocks the bill. */
+  open: DuplicateMatch[];
+  /** Pairs a person settled, and who, and why. */
+  cleared: Array<{ match: DuplicateMatch; clearance: DuplicateClearance }>;
+};
+
+/**
+ * Sort a bill's matches into settled and unsettled, with the other bills'
+ * metadata supplied by the caller. For callers that already hold the rows —
+ * the workbench — so it costs no query.
+ */
+export function settleDuplicatesWith(
+  bill: { paymentOrderId: string; createdAt: Date; metadataJson: unknown },
+  matches: DuplicateMatch[],
+  metadataOf: (paymentOrderId: string) => unknown,
+): SettledDuplicates {
+  const mine = readDuplicateOverride(bill.metadataJson);
+  const out: SettledDuplicates = { open: [], cleared: [] };
+  for (const match of matches) {
+    if (mine && covers(mine, match)) {
+      out.cleared.push({ match, clearance: { byName: mine.byName, reason: mine.reason, at: mine.at, onThisBill: true } });
+      continue;
+    }
+    const theirs = readDuplicateOverride(metadataOf(match.paymentOrderId));
+    if (theirs && covers(theirs, bill)) {
+      out.cleared.push({ match, clearance: { byName: theirs.byName, reason: theirs.reason, at: theirs.at, onThisBill: false } });
+      continue;
+    }
+    out.open.push(match);
+  }
+  return out;
+}
+
+/** The same, fetching the matched bills' metadata in one query. */
+export async function settleDuplicates(
+  organizationId: string,
+  bill: { paymentOrderId: string; createdAt: Date; metadataJson: unknown },
+  matches: DuplicateMatch[],
+): Promise<SettledDuplicates> {
+  if (matches.length === 0) return { open: [], cleared: [] };
+  const rows = await prisma.paymentOrder.findMany({
+    where: { organizationId, paymentOrderId: { in: matches.map((m) => m.paymentOrderId) } },
+    select: { paymentOrderId: true, metadataJson: true },
+  });
+  const byId = new Map(rows.map((r) => [r.paymentOrderId, r.metadataJson]));
+  return settleDuplicatesWith(bill, matches, (id) => byId.get(id));
 }
 
 export function describeDuplicate(match: DuplicateMatch): string {

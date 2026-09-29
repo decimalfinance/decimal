@@ -61,7 +61,7 @@ const baseFacts = {
   duplicates: [],
   similarVendors: [],
   priorBillsFromVendor: 0,
-  duplicateOverride: null,
+  duplicateClearances: [],
   ceilingException: null,
   shortPay: null,
   amounts: { lineItemsTotal: null, subtotal: null, tax: null, total: null },
@@ -722,4 +722,78 @@ test('a malformed grant is read as no grant, never as permission', () => {
   // Missing the pinned amount is the dangerous one: without it there is
   // nothing to check the bill against, so it must not count as a grant.
   assert.equal(readCeilingException({ ceilingException: { byUserId: 'u1', reason: 'ok' } }), null);
+});
+
+// ---- duplicate pairs a person settled ----------------------------------------
+//
+// "Not a duplicate" answers for a PAIR. Recorded on one bill only, it left the
+// twin blocked on a question already answered. These pin the rule every
+// duplicate check now shares.
+
+test('a clearance settles the bills it names, and only those', async () => {
+  const { settleDuplicatesWith } = await import('../src/payments/duplicate-check.js');
+  const at = new Date('2026-09-29T10:00:00Z');
+  const m = (id: string) => ({ paymentOrderId: id, invoiceNumber: 'PC-1', amountRaw: 1n, state: 'draft', createdAt: at, matchKind: 'same_invoice_number' as const });
+  const bill = {
+    paymentOrderId: 'b', createdAt: at,
+    metadataJson: { duplicateOverride: { byUserId: 'u', byName: 'Zara Okafor', reason: 'Two orders.', at: at.toISOString(), against: ['a'] } },
+  };
+  const out = settleDuplicatesWith(bill, [m('a'), m('c')], () => ({}));
+  assert.deepEqual(out.cleared.map((x) => x.match.paymentOrderId), ['a']);
+  assert.equal(out.cleared[0]!.clearance.onThisBill, true);
+  assert.deepEqual(out.open.map((x) => x.paymentOrderId), ['c'], 'a bill it never named is not covered');
+});
+
+test('a clearance on the twin settles this bill too', async () => {
+  const { settleDuplicatesWith } = await import('../src/payments/duplicate-check.js');
+  const at = new Date('2026-09-29T10:00:00Z');
+  const twin = { paymentOrderId: 'b', invoiceNumber: 'PC-1', amountRaw: 1n, state: 'draft', createdAt: at, matchKind: 'same_invoice_number' as const };
+  const out = settleDuplicatesWith(
+    { paymentOrderId: 'a', createdAt: at, metadataJson: {} },
+    [twin],
+    (id) => (id === 'b' ? { duplicateOverride: { byUserId: 'u', byName: 'Zara Okafor', reason: 'Two orders.', at: at.toISOString(), against: ['a'] } } : {}),
+  );
+  assert.equal(out.open.length, 0);
+  assert.equal(out.cleared[0]!.clearance.onThisBill, false);
+  assert.equal(out.cleared[0]!.clearance.reason, 'Two orders.');
+});
+
+test('an older clearance that names no bills covers what existed when it was given, not what came later', async () => {
+  const { settleDuplicatesWith } = await import('../src/payments/duplicate-check.js');
+  const given = new Date('2026-09-29T10:00:00Z');
+  const before = { paymentOrderId: 'a', invoiceNumber: 'PC-1', amountRaw: 1n, state: 'draft', createdAt: new Date('2026-09-29T09:00:00Z'), matchKind: 'same_invoice_number' as const };
+  const after = { ...before, paymentOrderId: 'c', createdAt: new Date('2026-09-29T11:00:00Z') };
+  const out = settleDuplicatesWith(
+    { paymentOrderId: 'b', createdAt: given, metadataJson: { duplicateOverride: { byUserId: 'u', byName: 'Zara', reason: 'ok ok', at: given.toISOString() } } },
+    [before, after],
+    () => ({}),
+  );
+  assert.deepEqual(out.cleared.map((x) => x.match.paymentOrderId), ['a']);
+  assert.deepEqual(out.open.map((x) => x.paymentOrderId), ['c']);
+});
+
+test('a settled pair shows as a note naming who cleared it and where, and never blocks', () => {
+  const match = { paymentOrderId: 'b', invoiceNumber: 'BW-2210', amountRaw: 1n, state: 'draft', createdAt: new Date(), matchKind: 'same_invoice_number' as const };
+  const onTwin = evaluateBillFlags({
+    ...baseFacts,
+    duplicateClearances: [{ match, clearance: { byName: 'Zara Okafor', reason: 'Two orders.', at: '', onThisBill: false } }],
+  }).find((f) => f.kind === 'possible_duplicate')!;
+  assert.equal(onTwin.blocking, false);
+  assert.equal(onTwin.message, 'Looked like a duplicate of invoice BW-2210 — cleared on that bill by Zara Okafor: “Two orders.”.');
+  const onThis = evaluateBillFlags({
+    ...baseFacts,
+    duplicateClearances: [{ match, clearance: { byName: 'Zara Okafor', reason: 'Two orders.', at: '', onThisBill: true } }],
+  }).find((f) => f.kind === 'possible_duplicate')!;
+  assert.match(onThis.message, /^Looked like a duplicate of invoice BW-2210 — cleared by Zara Okafor/);
+});
+
+test('an unsettled pair still blocks even when another pair on the same bill was settled', () => {
+  const settled = { paymentOrderId: 'a', invoiceNumber: 'PC-1', amountRaw: 1n, state: 'draft', createdAt: new Date(), matchKind: 'same_invoice_number' as const };
+  const fresh = { ...settled, paymentOrderId: 'c' };
+  const flag = evaluateBillFlags({
+    ...baseFacts,
+    duplicates: [fresh],
+    duplicateClearances: [{ match: settled, clearance: { byName: 'Zara', reason: 'ok ok', at: '', onThisBill: true } }],
+  }).find((f) => f.kind === 'possible_duplicate')!;
+  assert.equal(flag.blocking, true);
 });

@@ -23,7 +23,7 @@ import {
   loadVendorDirectory, similarVendorsIn, normalizeVendorName,
   recordVendorAlias, recordVendorsDiffer,
 } from './vendor-similarity.js';
-import { findDuplicateBills, readDuplicateOverride, describeDuplicate, matchDuplicates } from './duplicate-check.js';
+import { findDuplicateBills, readDuplicateOverride, describeDuplicate, matchDuplicates, settleDuplicates, settleDuplicatesWith } from './duplicate-check.js';
 import { readCeilingException, activeCeilingException } from './ceiling-exception.js';
 import { readPayableHold, describePayableHold } from './vendor-payable.js';
 import { evaluateBillFlags, summarizeBillFlags, displayOrgName } from './bill-flags.js';
@@ -609,6 +609,8 @@ export async function flagsForOrder(
     planAlertsByOrder(organizationId, [order.paymentOrderId]),
   ]);
 
+  // Pairs a person already settled, on either bill, do not block.
+  const settled = await settleDuplicates(organizationId, { paymentOrderId: order.paymentOrderId, createdAt: order.createdAt, metadataJson: metadata }, duplicates);
   const vendorNameForFlags = order.counterparty?.displayName ?? order.counterpartyWallet.label;
   const directory = await loadVendorDirectory(organizationId);
   const similarVendors = similarVendorsIn(directory, vendorNameForFlags, order.counterpartyId);
@@ -623,8 +625,8 @@ export async function flagsForOrder(
     triggeredRules: triggeredRules.map((r) => str(r.rule)).filter((r): r is string => Boolean(r)),
     vendorHold: order.counterparty ? readPayableHold(order.counterparty.metadataJson) : null,
     ceilingMinor,
-    duplicates,
-    duplicateOverride: readDuplicateOverride(metadata),
+    duplicates: settled.open,
+    duplicateClearances: settled.cleared,
     ceilingException: readCeilingException(metadata),
     shortPay: readShortPay(metadata),
     amounts: documentAmounts(extracted, verification),
@@ -1038,6 +1040,7 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
   // Once for the whole board, not once per row.
   const vendorDirectory = await loadVendorDirectory(organizationId);
   const byVendor = new Map<string, typeof liveOrders>();
+  const liveById = new Map(liveOrders.map((o) => [o.paymentOrderId, o]));
   for (const o of liveOrders) {
     const key = o.counterpartyId ?? `wallet:${o.counterpartyWalletId}`;
     const list = byVendor.get(key);
@@ -1104,6 +1107,20 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
     // company used to read "Ready for approval" here, because this row had its
     // own idea of "ready" that never consulted the flags. It no longer has one.
     const vendorKey = order.counterpartyId ?? `wallet:${order.counterpartyWalletId}`;
+    // The same pair rule as every other duplicate check, over rows in hand.
+    const settledDupes = settleDuplicatesWith(
+      order,
+      matchDuplicates(
+        (byVendor.get(vendorKey) ?? []).filter((c) => c.paymentOrderId !== order.paymentOrderId),
+        {
+          invoiceNumber: order.invoiceNumber,
+          externalReference: order.externalReference,
+          amountRaw: order.amountRaw,
+          createdAt: order.createdAt,
+        },
+      ),
+      (id) => liveById.get(id)?.metadataJson,
+    );
     const flags = evaluateBillFlags({
       // Matched against a directory loaded once for the whole board. Looking it
       // up per row would be a query per bill on the one screen built to show
@@ -1122,16 +1139,8 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
       triggeredRules: triggeredRules.map((r) => str(r.rule)).filter((r): r is string => Boolean(r)),
       vendorHold: order.counterparty ? readPayableHold(order.counterparty.metadataJson) : null,
       ceilingMinor,
-      duplicates: matchDuplicates(
-        (byVendor.get(vendorKey) ?? []).filter((c) => c.paymentOrderId !== order.paymentOrderId),
-        {
-          invoiceNumber: order.invoiceNumber,
-          externalReference: order.externalReference,
-          amountRaw: order.amountRaw,
-          createdAt: order.createdAt,
-        },
-      ),
-      duplicateOverride: readDuplicateOverride(order.metadataJson),
+      duplicates: settledDupes.open,
+      duplicateClearances: settledDupes.cleared,
       ceilingException: readCeilingException(order.metadataJson),
       shortPay: readShortPay(order.metadataJson),
       amounts: documentAmounts(extracted, isRecord(metadataRecord.verification) ? metadataRecord.verification : null),
@@ -1196,9 +1205,10 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
       missing,
       // A cleared duplicate flag must stay VISIBLE on the row — the operator
       // scanning To-pay is the last human checkpoint (testbench 001 §5).
+      // Settled on either bill of the pair: the twin of a cleared bill shows it too.
       duplicateCleared: (() => {
-        const o = readDuplicateOverride(order.metadataJson);
-        return o ? { byName: o.byName, reason: o.reason } : null;
+        const c = settledDupes.cleared[0]?.clearance;
+        return c ? { byName: c.byName, reason: c.reason } : null;
       })(),
       // Somebody is waiting on this reader for an answer about THIS bill.
       questionForYou: questionByOrder.get(order.paymentOrderId) ?? null,
@@ -1851,6 +1861,8 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       createdAt: order.createdAt,
     }),
   ]);
+  // Pairs settled on either bill do not block, and are what the flag reports.
+  const settledDuplicates = await settleDuplicates(organizationId, { paymentOrderId: order.paymentOrderId, createdAt: order.createdAt, metadataJson: metadata }, duplicates);
   // A document that is not an invoice, and what it means against our records.
   // The classification is the model's; the reconciliation is a join.
   const declaredKind = str(extracted.documentKind);
@@ -1892,8 +1904,8 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     triggeredRules: triggeredRules.map((r) => str(r.rule)).filter((r): r is string => Boolean(r)),
     vendorHold: order.counterparty ? readPayableHold(order.counterparty.metadataJson) : null,
     ceilingMinor,
-    duplicates,
-    duplicateOverride: readDuplicateOverride(metadata),
+    duplicates: settledDuplicates.open,
+    duplicateClearances: settledDuplicates.cleared,
     ceilingException: readCeilingException(metadata),
     shortPay: readShortPay(metadata),
     amounts: documentAmounts(extracted, verification),
@@ -1919,7 +1931,8 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
           createdAt: order.createdAt,
           metadataJson: metadata,
         },
-        duplicates,
+        // Only pairs nobody has settled: a person's decision is not reopened.
+        duplicates: settledDuplicates.open,
       });
     })().catch((error) => {
       logger.warn('exception_agent.draft_brief_failed', { paymentOrderId: order.paymentOrderId, ...(error instanceof Error ? { message: error.message } : {}) });
@@ -2497,7 +2510,10 @@ export async function submitBillForApproval(input: SubmitBillInput) {
   // Re-run the duplicate gate against the CONFIRMED values — the bill clerk may
   // have just edited the invoice number or total, and the draft-time flag
   // only saw the extracted ones.
-  if (!readDuplicateOverride(metadata)) {
+  // Asked of every pair, not of this bill alone: a clearance recorded on the
+  // twin settles this pair too, and a clearance here never covers a twin that
+  // nobody has looked at.
+  {
     const confirmedDuplicates = await findDuplicateBills(input.organizationId, {
       excludePaymentOrderId: order.paymentOrderId,
       counterpartyId: order.counterpartyId,
@@ -2506,8 +2522,9 @@ export async function submitBillForApproval(input: SubmitBillInput) {
       amountRaw: confirmedAmountRaw,
       createdAt: order.createdAt,
     });
-    if (confirmedDuplicates.length > 0) {
-      throw new Error(`${describeDuplicate(confirmedDuplicates[0]!)} An admin can clear this flag if it's genuinely a new bill.`);
+    const { open } = await settleDuplicates(input.organizationId, { paymentOrderId: order.paymentOrderId, createdAt: order.createdAt, metadataJson: metadata }, confirmedDuplicates);
+    if (open.length > 0) {
+      throw new Error(`${describeDuplicate(open[0]!)} An admin can clear this flag if it's genuinely a new bill.`);
     }
   }
   const dueAt = input.fields.dueDate ? new Date(input.fields.dueDate) : order.dueAt;
@@ -3299,9 +3316,27 @@ export async function overrideDuplicateFlag(args: {
 }) {
   const order = await prisma.paymentOrder.findFirst({
     where: { organizationId: args.organizationId, paymentOrderId: args.paymentOrderId },
-    select: { paymentOrderId: true, state: true, metadataJson: true },
+    select: {
+      paymentOrderId: true, state: true, metadataJson: true, invoiceNumber: true, amountRaw: true,
+      createdAt: true, counterpartyId: true, counterpartyWalletId: true,
+    },
   });
   if (!order) throw new Error('Bill not found');
+
+  // "Not a duplicate" answers for the PAIR, so the clearance names the bills it
+  // settles: everything this bill is paired with right now, plus anything an
+  // earlier clearance here already covered. It does not cover a bill uploaded
+  // later — nobody has looked at that pair.
+  const twins = (await findDuplicateBills(args.organizationId, {
+    excludePaymentOrderId: order.paymentOrderId,
+    counterpartyId: order.counterpartyId,
+    counterpartyWalletId: order.counterpartyWalletId,
+    invoiceNumber: order.invoiceNumber,
+    amountRaw: order.amountRaw,
+    createdAt: order.createdAt,
+  })).map((m) => m.paymentOrderId);
+  const earlier = readDuplicateOverride(order.metadataJson)?.against ?? [];
+  const against = [...new Set([...earlier, ...twins])];
 
   const at = new Date();
   const override = {
@@ -3309,10 +3344,13 @@ export async function overrideDuplicateFlag(args: {
     byName: args.actorName,
     reason: args.reason,
     at: at.toISOString(),
+    against,
   };
   // Same omission as the trading name: clearing a duplicate wrote the override
   // and the policy event, but nothing saying the flag stopped being raised.
+  // The twins' flags stop too, so their history is recorded the same way.
   const flagsBefore = await flagsForOrder(args.organizationId, order.paymentOrderId);
+  const twinFlagsBefore = new Map(await Promise.all(twins.map(async (id) => [id, await flagsForOrder(args.organizationId, id)] as const)));
   await prisma.$transaction([
     prisma.paymentOrder.update({
       where: { paymentOrderId: order.paymentOrderId },
@@ -3332,7 +3370,7 @@ export async function overrideDuplicateFlag(args: {
         actorId: args.actorUserId,
         beforeState: order.state,
         afterState: order.state,
-        payloadJson: { rule: 'duplicate_bill', reason: args.reason },
+        payloadJson: { rule: 'duplicate_bill', reason: args.reason, against },
         createdAt: at,
       },
     }),
@@ -3359,6 +3397,35 @@ export async function overrideDuplicateFlag(args: {
     flagsAfter,
     at,
   });
+  // Each twin's flag stopped being raised by this same decision. Record it on
+  // the twin, and settle any question there that the flag was the subject of.
+  const twinStates = await prisma.paymentOrder.findMany({
+    where: { organizationId: args.organizationId, paymentOrderId: { in: twins } },
+    select: { paymentOrderId: true, state: true },
+  });
+  for (const twin of twinStates) {
+    const before = twinFlagsBefore.get(twin.paymentOrderId) ?? [];
+    const after = await flagsForOrder(args.organizationId, twin.paymentOrderId);
+    await recordFlagChanges({
+      organizationId: args.organizationId,
+      paymentOrderId: twin.paymentOrderId,
+      actorUserId: args.actorUserId,
+      before,
+      after,
+      state: twin.state,
+      at,
+    });
+    await settleQuestionsFromDeed({
+      organizationId: args.organizationId,
+      paymentOrderId: twin.paymentOrderId,
+      actorUserId: args.actorUserId,
+      actorName: args.actorName,
+      what: `cleared the duplicate flag on the other bill — “${args.reason}”`,
+      flagsBefore: before,
+      flagsAfter: after,
+      at,
+    });
+  }
   // Against whatever the exception agent recommended for this bill, if anything.
   const { recordBriefOutcome } = await import('../exceptions/briefs.js');
   await recordBriefOutcome({

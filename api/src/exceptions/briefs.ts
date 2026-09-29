@@ -12,7 +12,7 @@
 import { prisma } from '../infra/prisma.js';
 import { trackBackgroundWork } from '../infra/background.js';
 import { logger } from '../infra/logger.js';
-import { describeDuplicate, findDuplicateBills, readDuplicateOverride, type DuplicateMatch } from '../payments/duplicate-check.js';
+import { describeDuplicate, findDuplicateBills, readDuplicateOverride, settleDuplicates, type DuplicateMatch } from '../payments/duplicate-check.js';
 import { logSuggestion, logSuggestionOutcome } from '../payments/suggestion-log.js';
 import { isExceptionAgentConfigured } from './agent.js';
 import { investigateDuplicatePair, DUPLICATE_PRODUCER } from './duplicate.js';
@@ -232,7 +232,7 @@ async function runInvestigation(args: {
  * never repeats the duplicate query.
  *
  * Returns null — and the screen behaves exactly as before the agent existed —
- * when there is no blocking duplicate, the bill was already cleared, there is
+ * when there is no unsettled duplicate, there is
  * no model configured, or a recent run failed.
  */
 export async function duplicateBriefFor(args: {
@@ -241,7 +241,9 @@ export async function duplicateBriefFor(args: {
   duplicates: DuplicateMatch[];
 }): Promise<DuplicateBriefView | null> {
   const match = args.duplicates[0];
-  if (!match || readDuplicateOverride(args.bill.metadataJson)) return null;
+  // Callers pass only pairs nobody has settled: once a person has decided about
+  // a pair, the agent does not reopen it.
+  if (!match) return null;
   const other = await prisma.paymentOrder.findFirst({
     where: { organizationId: args.organizationId, paymentOrderId: match.paymentOrderId },
     select: PAIR_BILL_SELECT,
@@ -297,7 +299,8 @@ export async function startDuplicateBriefForBill(organizationId: string, payment
       amountRaw: bill.amountRaw,
       createdAt: bill.createdAt,
     });
-    await duplicateBriefFor({ organizationId, bill, duplicates });
+    const { open } = await settleDuplicates(organizationId, bill, duplicates);
+    await duplicateBriefFor({ organizationId, bill, duplicates: open });
   } catch (error) {
     logger.warn('exception_agent.intake_trigger_failed', { paymentOrderId, ...(error instanceof Error ? { message: error.message } : {}) });
   }

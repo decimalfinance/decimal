@@ -346,9 +346,9 @@ async function evaluateDraftGate(paymentOrder: AgentPaymentOrder, context: Payme
     });
   }
 
-  const { findDuplicateBills, readDuplicateOverride } = await import('../payments/duplicate-check.js');
-  if (!readDuplicateOverride(paymentOrder.metadataJson)) {
-    const dupes = await findDuplicateBills(paymentOrder.organizationId, {
+  const { findDuplicateBills, settleDuplicates } = await import('../payments/duplicate-check.js');
+  {
+    const found = await findDuplicateBills(paymentOrder.organizationId, {
       excludePaymentOrderId: paymentOrder.paymentOrderId,
       counterpartyId: paymentOrder.counterpartyId,
       counterpartyWalletId: paymentOrder.counterpartyWalletId,
@@ -357,6 +357,8 @@ async function evaluateDraftGate(paymentOrder: AgentPaymentOrder, context: Payme
       amountRaw: paymentOrder.amountRaw,
       createdAt: paymentOrder.createdAt,
     });
+    // The same pair rule as every other duplicate check.
+    const dupes = (await settleDuplicates(paymentOrder.organizationId, { paymentOrderId: paymentOrder.paymentOrderId, createdAt: paymentOrder.createdAt, metadataJson: paymentOrder.metadataJson }, found)).open;
     if (dupes.length > 0) {
       reasons.push({
         code: 'possible_duplicate',

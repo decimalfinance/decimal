@@ -15,7 +15,7 @@
 // the facts however is cheapest for them (the draft screen queries per bill;
 // the workbench batches across all rows) and the verdict cannot diverge
 // between them, because there is only one copy of the reasoning.
-import type { DuplicateMatch, DuplicateOverride } from './duplicate-check.js';
+import type { DuplicateClearance, DuplicateMatch } from './duplicate-check.js';
 import { ceilingExceptionCovers, type CeilingException } from './ceiling-exception.js';
 import { describeDuplicate } from './duplicate-check.js';
 import type { PayableHold } from './vendor-payable.js';
@@ -137,7 +137,11 @@ export type BillFlagFacts = {
    */
   ceilingException: CeilingException | null;
   duplicates: DuplicateMatch[];
-  duplicateOverride: DuplicateOverride | null;
+  /**
+   * Pairs a person already settled as "not a duplicate", on this bill or on
+   * its twin. `duplicates` holds only the pairs nobody has settled.
+   */
+  duplicateClearances: Array<{ match: DuplicateMatch; clearance: DuplicateClearance }>;
   /** Vendors already on file whose identifying name matches this one's. */
   similarVendors: Array<{ counterpartyId: string; displayName: string; billCount: number }>;
   /**
@@ -344,34 +348,41 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
   // Duplicate gate (policy P0): on irreversible rails a duplicate payment is
   // unrecoverable, so this BLOCKS confirm unless an admin explicitly clears
   // it — and the clearance itself becomes the audit record.
+  // Only pairs nobody has settled block. A pair settled on EITHER bill reads
+  // as settled on both: "not a duplicate" answers for the pair, and asking it
+  // again on the twin was asking a question somebody had already answered.
   if (facts.duplicates.length > 0) {
-    if (facts.duplicateOverride) {
-      flags.push({
-        kind: 'possible_duplicate',
-        severity: 'info',
-        blocking: false,
-        short: 'Duplicate cleared',
-        resolutions: [],
-        message: `Looked like a duplicate — cleared by ${facts.duplicateOverride.byName}: “${facts.duplicateOverride.reason}”.`,
-      });
-    } else {
-      flags.push({
-        kind: 'possible_duplicate',
-        severity: 'danger',
-        blocking: true,
-        short: 'Possible duplicate',
-        // Both answers live on the flag. Closing used to be a separate button
-        // off to the side, so "yes, it is a duplicate" had no place here — and
-        // the exception agent, which recommends one of these, had nowhere to
-        // point when that was its answer.
-        resolutions: [
-          { action: 'clear_duplicate', label: 'Not a duplicate', requires: 'admin', detail: 'Clear the flag with a reason. The clearance itself becomes the audit record.' },
-          { action: 'not_ours', label: 'Close as duplicate', requires: 'admin', detail: 'Close this bill as a duplicate so it is never paid. The other bill is unaffected.' },
-          ASK,
-        ],
-        message: `${describeDuplicate(facts.duplicates[0]!)} If it's genuinely a new bill, an admin can clear this flag.`,
-      });
-    }
+    flags.push({
+      kind: 'possible_duplicate',
+      severity: 'danger',
+      blocking: true,
+      short: 'Possible duplicate',
+      // Both answers live on the flag. Closing used to be a separate button
+      // off to the side, so "yes, it is a duplicate" had no place here — and
+      // the exception agent, which recommends one of these, had nowhere to
+      // point when that was its answer.
+      resolutions: [
+        { action: 'clear_duplicate', label: 'Not a duplicate', requires: 'admin', detail: 'Clear the flag with a reason. It clears the other bill too, and the clearance itself becomes the audit record.' },
+        { action: 'not_ours', label: 'Close as duplicate', requires: 'admin', detail: 'Close this bill as a duplicate so it is never paid. The other bill is unaffected.' },
+        ASK,
+      ],
+      message: `${describeDuplicate(facts.duplicates[0]!)} If it's genuinely a new bill, an admin can clear this flag.`,
+    });
+  } else if (facts.duplicateClearances.length > 0) {
+    // Settled, and still said: whoever reads this bill next should see that it
+    // looked like a duplicate, who decided otherwise, and why.
+    const { match, clearance } = facts.duplicateClearances[0]!;
+    const other = match.invoiceNumber ? `invoice ${match.invoiceNumber}` : 'another bill';
+    flags.push({
+      kind: 'possible_duplicate',
+      severity: 'info',
+      blocking: false,
+      short: 'Duplicate cleared',
+      resolutions: [],
+      message: clearance.onThisBill
+        ? `Looked like a duplicate of ${other} — cleared by ${clearance.byName}: “${clearance.reason}”.`
+        : `Looked like a duplicate of ${other} — cleared on that bill by ${clearance.byName}: “${clearance.reason}”.`,
+    });
   }
 
   // Is this an invoice at all?
