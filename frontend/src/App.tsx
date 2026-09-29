@@ -12,7 +12,7 @@ import { useLiveOrgEvents } from './lib/use-live-org-events';
 // only ships the shell + the first matched page. Notably keeps Solana web3
 // (Wallets, PaymentDetail, TreasuryWalletDetail, OrganizationProposalDetail)
 // out of the initial download for everyone else.
-const InboxPage = lazy(() => import('./pages/Inbox').then((m) => ({ default: m.InboxPage })));
+const TodayPage = lazy(() => import('./pages/Today').then((m) => ({ default: m.TodayPage })));
 const ProposalRedirectPage = lazy(() => import('./pages/ProposalRedirect').then((m) => ({ default: m.ProposalRedirectPage })));
 const BillsPage = lazy(() => import('./pages/Bills').then((m) => ({ default: m.BillsPage })));
 const BillDraftPage = lazy(() => import('./pages/BillDraft').then((m) => ({ default: m.BillDraftPage })));
@@ -197,7 +197,7 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
               <Route path="/" element={<HomeRedirect session={session} />} />
               <Route path="/setup" element={<SetupPage />} />
               <Route path="/profile" element={<ProfilePage session={session} />} />
-              <Route path="/organizations/:organizationId" element={<InboxPage session={session} />} />
+              <Route path="/organizations/:organizationId" element={<TodayPage />} />
               <Route path="/organizations/:organizationId/wallets" element={<WalletsPage session={session} />} />
               <Route path="/organizations/:organizationId/wallets/:treasuryWalletId" element={<TreasuryWalletDetailPage session={session} />} />
               <Route path="/organizations/:organizationId/vaults/:treasuryWalletId" element={<VaultDetailPage />} />

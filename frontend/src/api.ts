@@ -1949,6 +1949,37 @@ export type Capability =
   | 'vendors.view' | 'vendors.manage' | 'accounting.view' | 'accounting.manage'
   | 'members.view' | 'members.manage' | 'governance.view' | 'governance.edit';
 export interface MyAccess { membershipRole: string; roles: RoleKey[]; capabilities: Capability[]; isPrimaryOrAdmin: boolean }
+/** One bill as the companion's briefing lists it. */
+export interface CompanionBill {
+  paymentOrderId: string;
+  vendorName: string;
+  invoiceNumber: string | null;
+  amountUsd: number;
+  dueAt: string | null;
+  /** Why it needs a person. Null when ready. */
+  reason: string | null;
+}
+
+/** What happened since this person last looked, and what is left for them. */
+export interface CompanionToday {
+  /** Start of the previous visit; null on a first visit. */
+  since: string | null;
+  viewer: { name: string | null; canReview: boolean; isAdmin: boolean };
+  arrived: { count: number; ready: number; stillReading: number };
+  ready: CompanionBill[];
+  needsYou: CompanionBill[];
+  waitingOnYou: Array<{ paymentOrderId: string; vendorName: string; invoiceNumber: string | null; amountUsd: number; overdueDays: number | null; blocked: boolean }>;
+  /** Admins only: who is holding approvals, oldest wait first. */
+  holding: Array<{ name: string; openCount: number; waitingSince: string; isYou: boolean }>;
+  learned: Array<{ id: string; vendorName: string; category: string; fromBills: number; at: string }>;
+}
+
+export const companionApi = {
+  today(organizationId: string) {
+    return request<CompanionToday>(`/organizations/${organizationId}/companion/today`);
+  },
+};
+
 export const accessApi = {
   get(organizationId: string) {
     return request<MyAccess>(`/organizations/${organizationId}/my-access`);
