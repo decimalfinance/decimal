@@ -6,7 +6,7 @@ import { assertOrganizationAccess } from '../auth/organization-access.js';
 import { notFound } from '../infra/api-errors.js';
 import { asyncRoute } from '../infra/route-helpers.js';
 import { getCompanionConsole, getCompanionJob } from './today.js';
-import { followUp, getChat, listChats, startChat } from './chat.js';
+import { followUp, getChat, listChats, recordActionOutcome, startChat } from './chat.js';
 
 export const companionRouter = Router();
 
@@ -55,4 +55,14 @@ companionRouter.post('/organizations/:organizationId/companion/chats/:chatId/mes
   await assertOrganizationAccess(organizationId, req.auth!);
   const { text } = askBody.parse(req.body);
   res.status(201).json(await followUp(organizationId, req.auth!.userId, chatId, text));
+}));
+
+const actionParams = chatParams.extend({ actionId: z.string().uuid() });
+const outcomeBody = z.object({ ok: z.boolean(), message: z.string().max(1000).nullable().optional() });
+
+companionRouter.post('/organizations/:organizationId/companion/chats/:chatId/actions/:actionId/outcome', asyncRoute(async (req, res) => {
+  const { organizationId, chatId, actionId } = actionParams.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  const { ok, message } = outcomeBody.parse(req.body);
+  res.json(await recordActionOutcome(organizationId, req.auth!.userId, chatId, actionId, { ok, message: message ?? null }));
 }));

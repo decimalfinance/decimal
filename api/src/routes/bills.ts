@@ -107,6 +107,16 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/confirm',
   res.json(result);
 }));
 
+// Confirm a ready bill exactly as it was read — the companion's "Send for
+// approval" card. Same guards as confirm; refused unless the bill is ready.
+billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/confirm-as-read', asyncRoute(async (req, res) => {
+  const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
+  const { confirmBillAsRead } = await import('../payments/bills.js');
+  res.json(await confirmBillAsRead(organizationId, paymentOrderId, req.auth!.userId));
+}));
+
 // Keep what has been typed, without sending the bill anywhere.
 //
 // Confirm was the only way to persist a draft, and confirm submits it for

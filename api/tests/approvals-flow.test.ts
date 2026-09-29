@@ -3419,3 +3419,85 @@ test('companion chat: with no model, the answer says so instead of hanging', asy
   assert.equal(chat.messages[1].status, 'failed');
   assert.match(chat.messages[1].text, /no AI model/);
 });
+
+// ---- action cards --------------------------------------------------------------
+
+test('companion chat: proposals become cards only when they fit, and a card runs as the person who clicks', async () => {
+  const { orgId, owner, a2 } = await makeOrg();
+  // A ready bill: a second from a known vendor with a category habit.
+  await uploadAndConfirm(orgId, owner.token, { vendor: 'Steady Supply', amount: 300, invoiceNo: 'SS-1' });
+  // Not ready: a first bill from a vendor nobody has seen.
+  const lonely = await uploadAndConfirm(orgId, owner.token, { vendor: 'Lonely Ltd', amount: 90, invoiceNo: 'LL-1' });
+  const ready = await uploadAndConfirm(orgId, owner.token, { vendor: 'Steady Supply', amount: 310, invoiceNo: 'SS-2' });
+  const { counterpartyId } = await prisma.paymentOrder.findUniqueOrThrow({ where: { paymentOrderId: ready.billId }, select: { counterpartyId: true } });
+  await prisma.vendorCodingRule.create({
+    data: { organizationId: orgId, counterpartyId: counterpartyId!, accountId: 'Cloud hosting & infrastructure', accountName: 'Cloud hosting & infrastructure', source: 'learned', learnedFromCount: 3 },
+  });
+  // A duplicate pair.
+  await uploadAndConfirm(orgId, owner.token, { vendor: 'Twin Supply', amount: 1200, invoiceNo: 'TS-100' });
+  const copy = await uploadAndConfirm(orgId, owner.token, { vendor: 'Twin Supply', amount: 1200, invoiceNo: 'TS-100' });
+  await drainAsyncIntake();
+
+  let n = 0;
+  setExceptionAgentRuntimeForTests({
+    isConfigured: () => true,
+    callModel: async ({ messages }: { messages: ChatMessage[] }) => {
+      const usage = { promptTokens: 10, completionTokens: 5 };
+      const lastUser = messages.map((m) => m.role).lastIndexOf('user');
+      if (!messages.slice(lastUser).some((m) => m.role === 'tool')) {
+        return { usage, message: { role: 'assistant' as const, content: null, tool_calls: [
+          { id: `a_${++n}`, type: 'function' as const, function: { name: 'find_bills', arguments: '{}' } },
+        ] } };
+      }
+      return { usage, message: { role: 'assistant' as const, content: null, tool_calls: [
+        { id: `a_${++n}`, type: 'function' as const, function: { name: 'respond', arguments: JSON.stringify({
+          message: 'SS-2 is ready, and the second TS-100 is a copy.',
+          tables: [], billIds: [],
+          actions: [
+            { kind: 'send_for_approval', billId: ready.billId, reason: 'Checked and ready.' },
+            { kind: 'send_for_approval', billId: lonely.billId, reason: 'Not actually ready: a first bill.' },
+            { kind: 'close_duplicate', billId: copy.billId, reason: 'Same number, same figures, uploaded twice.' },
+            { kind: 'clear_duplicate', billId: ready.billId, reason: 'There is no duplicate flag here.' },
+            { kind: 'approve', billId: '00000000-0000-0000-0000-000000000000', reason: 'Invented.' },
+          ],
+        }) } },
+      ] } };
+    },
+  });
+
+  const { chatId } = await post(`/organizations/${orgId}/companion/chats`, { text: 'Tidy up what you can.' }, owner.token);
+  await drainAsyncIntake();
+  let chat = await get(`/organizations/${orgId}/companion/chats/${chatId}`, owner.token);
+  const cards = chat.messages[1].actions as Array<{ actionId: string; kind: string; billId: string; title: string; button: string; call: { path: string; body: unknown }; status: string }>;
+  assert.deepEqual(
+    cards.map((c) => [c.kind, c.billId]),
+    [['send_for_approval', ready.billId], ['close_duplicate', copy.billId]],
+    'only the proposals that fit the bills as they are now',
+  );
+  assert.equal(cards[0]!.title, 'Send for approval: Steady Supply SS-2');
+  assert.equal(cards[0]!.call.path, `/bills/${ready.billId}/confirm-as-read`, 'the request is built in code');
+
+  // Carrying out the card: the same endpoint, as the person clicking.
+  await post(`/organizations/${orgId}${cards[0]!.call.path}`, cards[0]!.call.body, owner.token);
+  const sent = await prisma.paymentOrder.findUniqueOrThrow({ where: { paymentOrderId: ready.billId }, select: { state: true } });
+  assert.notEqual(sent.state, 'draft', 'the bill left review');
+  const recorded = await post(`/organizations/${orgId}/companion/chats/${chatId}/actions/${cards[0]!.actionId}/outcome`, { ok: true }, owner.token);
+  assert.deepEqual(recorded, { status: 'done', result: 'Sent for approval' });
+  chat = await get(`/organizations/${orgId}/companion/chats/${chatId}`, owner.token);
+  assert.equal(chat.messages[1].actions[0].status, 'done');
+  const again = await post(`/organizations/${orgId}/companion/chats/${chatId}/actions/${cards[0]!.actionId}/outcome`, { ok: false, message: 'late' }, owner.token);
+  assert.equal(again.status, 'done', 'a card done once stays done');
+
+  // "Confirm as read" refuses a bill that needs a look.
+  const refused = await fetch(`${baseUrl}/organizations/${orgId}/bills/${lonely.billId}/confirm-as-read`, {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${owner.token}` }, body: '{}',
+  });
+  assert.equal(refused.status, 409);
+  assert.match(await refused.text(), /First bill from Lonely Ltd/, 'and says why');
+
+  // Someone else cannot record an outcome on your chat.
+  const foreign = await fetch(`${baseUrl}/organizations/${orgId}/companion/chats/${chatId}/actions/${cards[1]!.actionId}/outcome`, {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${a2.token}` }, body: JSON.stringify({ ok: true }),
+  });
+  assert.equal(foreign.status, 404);
+});

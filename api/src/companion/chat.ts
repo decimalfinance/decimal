@@ -16,13 +16,14 @@ import { trackBackgroundWork } from '../infra/background.js';
 import { badRequest, notFound } from '../infra/api-errors.js';
 import { isExceptionAgentConfigured, runAgent, type ChatMessage } from '../exceptions/agent.js';
 import { chatTools, localDay, type Thought } from './chat-tools.js';
+import { ACTION_KINDS, buildActionCards, doneText, type ActionCard, type ProposedAction } from './actions.js';
 
 const MAX_TURNS = 8;
 const TIMEOUT_MS = 90_000;
 const HISTORY_MESSAGES = 12;
 
 export type ChatTable = { title: string; columns: string[]; rows: string[][] };
-export type ChatBlocks = { tables?: ChatTable[]; billIds?: string[] };
+export type ChatBlocks = { tables?: ChatTable[]; billIds?: string[]; actions?: ActionCard[] };
 
 function system(today: string): string {
   return `You are Decimal's accounts-payable companion. You work for the team: you read every bill that comes in, check it, categorise it, investigate anything odd, and answer questions about their bills. Today is ${today}.
@@ -35,13 +36,19 @@ How to answer:
 - Put the bills your answer rests on in billIds, using billIds the tools returned. Never invent one.
 - Tables: a short title, a few columns, cells as short text. Put the amount column last, always with cents ($4,500.00). Never put a billId or any other internal id in a table or in the message: a person identifies a bill by vendor and invoice number, and billIds is where ids go.
 - Words to use: bill, approval, approvers, team members, category, vendor. Never "payment order", "GL code", "multisig", "wallet".
-- You cannot change anything from this chat. If asked to approve, send, clear, pay, or edit, say what you found and tell them where to do it (the bill, or the approvals page). Payments are not live in Decimal: never say a bill was paid out unless its state says paid.`;
+- You never change anything yourself. You can PROPOSE actions in actions, and the person clicks to carry them out:
+  - send_for_approval: a draft that is ready (checked, nothing flagged).
+  - close_duplicate: the copy in a duplicate pair. Keep the older bill; close the newer copy. reason says why it is a copy.
+  - clear_duplicate: a duplicate flag on bills that are genuinely different. reason says why.
+  - approve: a bill waiting on this person's approval.
+  Propose when the person asks you to do something, or when one of these is plainly the next step. Say in the message what you are proposing and why; never say it is done. Anything else (editing a bill, categories, paying) is done on the bill: say where.
+- Payments are not live in Decimal: never say a bill was paid out unless its state says paid.`;
 }
 
 const RESPOND_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['message', 'tables', 'billIds'],
+  required: ['message', 'tables', 'billIds', 'actions'],
   properties: {
     message: { type: 'string', description: 'The answer, in plain sentences. **bold** and lines starting "- " are allowed.' },
     tables: {
@@ -58,6 +65,20 @@ const RESPOND_SCHEMA = {
       },
     },
     billIds: { type: 'array', items: { type: 'string' } },
+    actions: {
+      type: 'array',
+      description: 'Actions to propose for the person to confirm. Empty when there is nothing to do.',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['kind', 'billId', 'reason'],
+        properties: {
+          kind: { type: 'string', enum: [...ACTION_KINDS] },
+          billId: { type: 'string' },
+          reason: { type: 'string', description: 'One sentence: why this action, for this bill.' },
+        },
+      },
+    },
   },
 };
 
@@ -165,10 +186,16 @@ async function answerQuestion(args: {
     // Only bills a tool actually returned. An answer pointing at a bill it
     // never looked at is exactly the invented fact this is meant to stop.
     const billIds = [...new Set((Array.isArray(a.billIds) ? a.billIds : []).map(String))].filter((id) => seen.has(id)).slice(0, 12);
+    // Proposals become cards only if they fit the bill as it is now; the
+    // request each button sends is built in code, never taken from the model.
+    const proposals = (Array.isArray(a.actions) ? a.actions : [])
+      .filter((x): x is ProposedAction => Boolean(x) && (ACTION_KINDS as readonly string[]).includes((x as ProposedAction).kind) && typeof (x as ProposedAction).billId === 'string')
+      .map((x) => ({ kind: x.kind, billId: x.billId, reason: String(x.reason ?? '') }));
+    const actions = await buildActionCards({ organizationId: args.organizationId, viewerUserId: args.userId, proposals, seen });
     await finish({
       status: 'done',
       text: message,
-      blocks: { tables, billIds } as unknown as Prisma.InputJsonValue,
+      blocks: { tables, billIds, actions } as unknown as Prisma.InputJsonValue,
       model: run.model,
       latencyMs: run.latencyMs,
     });
@@ -220,8 +247,30 @@ export async function getChat(organizationId: string, userId: string, chatId: st
       thoughts: (m.thoughts as Array<Thought & { at: string }>) ?? [],
       tables: (m.blocks as ChatBlocks | null)?.tables ?? [],
       billIds: (m.blocks as ChatBlocks | null)?.billIds ?? [],
+      actions: ((m.blocks as ChatBlocks | null)?.actions ?? []).map((c) => ({ ...c, call: { path: c.call.path, body: c.call.body } })),
       createdAt: m.createdAt.toISOString(),
     })),
     bills,
   };
+}
+
+/**
+ * What happened when the person clicked a card. The click itself went to the
+ * bill's own endpoint, as them; this records the outcome on the card so the
+ * chat shows it, and a card can only be carried out once.
+ */
+export async function recordActionOutcome(organizationId: string, userId: string, chatId: string, actionId: string, outcome: { ok: boolean; message: string | null }) {
+  await ownChat(organizationId, userId, chatId);
+  const messages = await prisma.companionMessage.findMany({ where: { chatId, role: 'assistant' }, select: { messageId: true, blocks: true } });
+  for (const m of messages) {
+    const blocks = (m.blocks ?? {}) as ChatBlocks;
+    const card = blocks.actions?.find((c) => c.actionId === actionId);
+    if (!card) continue;
+    if (card.status === 'done') return { status: card.status, result: card.result };
+    card.status = outcome.ok ? 'done' : 'failed';
+    card.result = outcome.ok ? doneText(card.kind) : (outcome.message?.slice(0, 300) || 'That did not go through.');
+    await prisma.companionMessage.update({ where: { messageId: m.messageId }, data: { blocks: blocks as unknown as Prisma.InputJsonValue } });
+    return { status: card.status, result: card.result };
+  }
+  throw notFound('No such action.');
 }

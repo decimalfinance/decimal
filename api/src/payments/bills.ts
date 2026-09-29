@@ -33,6 +33,7 @@ import type { BillFlag } from './bill-flags.js';
 import { getBillCeilingMinor } from '../approvals/store.js';
 import { involvedBillIds } from './bill-visibility.js';
 import type { ExtractedInvoice } from './document-extract.js';
+import { conflict, forbidden, notFound } from '../infra/api-errors.js';
 
 // Exact field→document boxes for ANY bill, whenever it is opened: if this
 // order's extraction predates the provenance pass (or the matcher improved),
@@ -4805,4 +4806,71 @@ export async function saveBillDraft(input: {
   }
 
   return { savedAt };
+}
+
+/**
+ * Send a bill for approval exactly as it was read, with no edits.
+ *
+ * What the companion's "Send for approval" card does. It builds the same body
+ * the review screen would send if the person pressed Confirm without touching
+ * anything, and goes through the same submitBillForApproval, so every gate —
+ * flags, holds, the ceiling — is re-checked at the click.
+ *
+ * Refused unless the companion rates the bill ready: nothing is unchecked,
+ * nothing is flagged, the vendor and its category are known. A bill that needs
+ * a look must be looked at on the bill, not waved through from a chat.
+ */
+export async function confirmBillAsRead(organizationId: string, paymentOrderId: string, actorUserId: string) {
+  const board = await getBillsWorkbench(organizationId, actorUserId);
+  const row = board.bills.find((b) => b.paymentOrderId === paymentOrderId);
+  if (!row) throw notFound('No such bill.');
+  if (!row.companion?.ready) {
+    throw conflict(row.companion?.reason
+      ? `This bill needs a look first: ${row.companion.reason}. Open it to review.`
+      : 'This bill is not a draft ready to send.');
+  }
+  const draft = await getBillDraft(organizationId, paymentOrderId, actorUserId) as unknown as {
+    readOnly: boolean;
+    fields: Array<{ key: string; value: string | number | null; state: string }>;
+    remitFields: Array<{ key: string; value: string | number | null; state: string }>;
+    vendor: { name: string; email: string | null };
+    lines: Array<{ description: string; quantity: number | null; unitPrice: number | null; amount: number | null; category: string | null }>;
+    taxAmount: number | null;
+  };
+  if (draft.readOnly) throw forbidden('You cannot send this bill for approval.');
+  const byKey = new Map([...draft.fields, ...draft.remitFields].map((f) => [f.key, f]));
+  const text = (key: string) => {
+    const v = byKey.get(key)?.value;
+    return v === null || v === undefined || v === '' ? null : String(v);
+  };
+  return submitBillForApproval({
+    organizationId,
+    paymentOrderId,
+    actorUserId,
+    fields: {
+      vendorName: draft.vendor.name.trim() || null,
+      vendorEmail: draft.vendor.email?.trim() || null,
+      invoiceNumber: text('invoiceNumber'),
+      invoiceDate: text('invoiceDate'),
+      dueDate: text('dueDate'),
+      terms: text('terms'),
+      poNumber: text('poNumber'),
+      discount: text('discount'),
+      currency: text('currency') ?? 'USD',
+      total: Number(byKey.get('total')?.value) || 0,
+      taxAmount: draft.taxAmount ?? 0,
+      remitTo: {
+        street: text('remitTo.street'),
+        city: text('remitTo.city'),
+        state: text('remitTo.state'),
+        zip: text('remitTo.zip'),
+        country: text('remitTo.country'),
+      },
+    },
+    lines: draft.lines
+      .filter((l) => l.description.trim())
+      .map((l) => ({ description: l.description, quantity: l.quantity, unitPrice: l.unitPrice, amount: l.amount, category: l.category ?? null })),
+    confirmedFieldKeys: [...byKey.values()].filter((f) => f.state === 'confirmed').map((f) => f.key),
+    noteForApprovers: null,
+  });
 }

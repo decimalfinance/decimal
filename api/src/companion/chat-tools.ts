@@ -178,7 +178,7 @@ export function chatTools(args: {
           description: row.description,
           lines,
           categorised: Boolean(coding),
-          flags: row.flags.map((f) => ({ what: f.short, detail: f.message, holdsTheBill: f.blocking })),
+          flags: row.flags.map((f) => ({ kind: f.kind, what: f.short, detail: f.message, holdsTheBill: f.blocking })),
           duplicateCleared: row.duplicateCleared,
         };
       },
