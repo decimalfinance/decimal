@@ -232,7 +232,7 @@ export function AppSidebar({
         {base ? (
           <>
             <div className="sb-group-label">Operations</div>
-            <NavItem to={base} end icon={<Ico.sparkle w={16} />} label="Today" />
+            <NavItem to={base} end icon={<Ico.sparkle w={16} />} label="Home" />
             {can('bills.view') ? <NavItem to={`${base}/bills`} icon={<Ico.doc w={16} />} label="Bills" badge={paymentsIncompleteCount} /> : null}
 
             <div className="sb-group-label">Registry</div>

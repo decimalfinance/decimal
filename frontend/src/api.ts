@@ -1949,34 +1949,81 @@ export type Capability =
   | 'vendors.view' | 'vendors.manage' | 'accounting.view' | 'accounting.manage'
   | 'members.view' | 'members.manage' | 'governance.view' | 'governance.edit';
 export interface MyAccess { membershipRole: string; roles: RoleKey[]; capabilities: Capability[]; isPrimaryOrAdmin: boolean }
-/** One bill as the companion's briefing lists it. */
-export interface CompanionBill {
-  paymentOrderId: string;
-  vendorName: string;
-  invoiceNumber: string | null;
-  amountUsd: number;
-  dueAt: string | null;
-  /** Why it needs a person. Null when ready. */
-  reason: string | null;
+/** Something the companion is working on right now. */
+export interface ConsoleRunning {
+  jobId: string;
+  title: string;
+  /** What it is doing at this moment, in its words. */
+  step: string;
+  startedAt: string;
 }
 
-/** What happened since this person last looked, and what is left for them. */
-export interface CompanionToday {
+export type ConsoleWaitingKind = 'approval' | 'input' | 'sent_back' | 'unreadable' | 'sign_off';
+
+/** Something waiting on this person. */
+export interface ConsoleWaiting {
+  key: string;
+  kind: ConsoleWaitingKind;
+  jobId: string | null;
+  paymentOrderId: string | null;
+  title: string;
+  invoiceNumber: string | null;
+  amountUsd: number | null;
+  reason: string;
+}
+
+/** Something finished in this window: a bill that moved on, or a habit learned. */
+export interface ConsoleDone {
+  key: string;
+  kind: 'bill' | 'learned';
+  jobId: string | null;
+  paymentOrderId: string | null;
+  title: string;
+  invoiceNumber: string | null;
+  amountUsd: number | null;
+  outcome: string;
+  at: string;
+}
+
+/** The companion's console: running, waiting on you, done. */
+export interface CompanionConsole {
   /** Start of the previous visit; null on a first visit. */
   since: string | null;
   viewer: { name: string | null; canReview: boolean; isAdmin: boolean };
-  arrived: { count: number; ready: number; stillReading: number };
-  ready: CompanionBill[];
-  needsYou: CompanionBill[];
-  waitingOnYou: Array<{ paymentOrderId: string; vendorName: string; invoiceNumber: string | null; amountUsd: number; overdueDays: number | null; blocked: boolean }>;
+  running: ConsoleRunning[];
+  waiting: ConsoleWaiting[];
+  done: ConsoleDone[];
   /** Admins only: who is holding approvals, oldest wait first. */
   holding: Array<{ name: string; openCount: number; waitingSince: string; isYou: boolean }>;
-  learned: Array<{ id: string; vendorName: string; category: string; fromBills: number; at: string }>;
+}
+
+export type CompanionStepStatus = 'running' | 'done' | 'noted' | 'failed';
+
+/** One job, step by step. The sentences come from the server. */
+export interface CompanionJob {
+  jobId: string;
+  filename: string;
+  receivedAt: string;
+  running: boolean;
+  billIds: string[];
+  steps: Array<{
+    id: string;
+    kind: string;
+    status: CompanionStepStatus;
+    text: string;
+    detail: string | null;
+    startedAt: string;
+    finishedAt: string | null;
+    paymentOrderId: string | null;
+  }>;
 }
 
 export const companionApi = {
-  today(organizationId: string) {
-    return request<CompanionToday>(`/organizations/${organizationId}/companion/today`);
+  console(organizationId: string) {
+    return request<CompanionConsole>(`/organizations/${organizationId}/companion/console`);
+  },
+  job(organizationId: string, jobId: string) {
+    return request<CompanionJob>(`/organizations/${organizationId}/companion/jobs/${jobId}`);
   },
 };
 

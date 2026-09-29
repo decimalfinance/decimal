@@ -1217,6 +1217,46 @@
   font-size: 11.5px; color: var(--text-faint); }
 .dec .bt-divider::before, .dec .bt-divider::after {
   content: ''; height: 1px; background: var(--border); flex: 1; }
+
+/* ---- Companion console (Home) ----
+   Three columns — running, waiting on you, done — the three questions a person
+   has when they sit down. Cards are one job each; clicking one opens its steps
+   in a drawer. Columns collapse to one below tablet width. */
+.dec .cc-board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
+@media (max-width: 960px) { .dec .cc-board { grid-template-columns: minmax(0, 1fr); } }
+.dec .cc-col { background: var(--bg-surface-2); border: 1px solid var(--border); border-radius: var(--r-md);
+  padding: 12px; display: flex; flex-direction: column; gap: 8px; min-height: 160px; }
+.dec .cc-col-head { display: flex; align-items: center; gap: 8px; padding: 2px 4px 6px; }
+.dec .cc-col-head h3 { margin: 0; font-family: var(--font-display); font-size: 14px; font-weight: 600;
+  letter-spacing: -0.01em; color: var(--text-primary); }
+.dec .cc-col-count { font-family: var(--font-mono); font-size: 12px; color: var(--text-faint); }
+.dec .cc-group { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--text-faint); padding: 6px 4px 0; }
+.dec .cc-card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-md);
+  padding: 11px 13px; display: flex; flex-direction: column; gap: 4px; cursor: pointer; text-align: left;
+  font: inherit; color: inherit; width: 100%; transition: border-color .12s ease; }
+.dec .cc-card:hover { border-color: var(--border-strong); }
+.dec .cc-card.is-static { cursor: default; }
+.dec .cc-card.is-static:hover { border-color: var(--border); }
+.dec .cc-card-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-width: 0; }
+.dec .cc-card-title { font-size: 13.5px; font-weight: 600; color: var(--text-primary); min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dec .cc-card-amt { font-family: var(--font-mono); font-size: 12.5px; color: var(--text-primary); flex: 0 0 auto; }
+.dec .cc-card-sub { font-size: 12.5px; color: var(--text-muted); line-height: 1.45; }
+.dec .cc-card-meta { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); }
+.dec .cc-card-live { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-primary); }
+.dec .cc-empty { font-size: 12.5px; color: var(--text-faint); padding: 18px 4px; text-align: center; }
+/* A pulsing dot for work happening now. Same pulse as the flow builder's. */
+.dec .cc-live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: 0 0 auto;
+  animation: fbpulse 1.3s ease-in-out infinite; }
+
+/* Timeline states for a job's steps: running pulses, noted is amber, failed
+   is red, and an investigation's own steps sit indented under it. */
+.dec .tl-event.running .tl-dot { background: var(--accent); border-color: var(--accent); animation: fbpulse 1.3s ease-in-out infinite; }
+.dec .tl-event.noted .tl-dot { background: var(--warning); border-color: var(--warning); }
+.dec .tl-event.failed .tl-dot { background: var(--danger-vivid); border-color: var(--danger-vivid); }
+.dec .tl-event.sub { padding-left: 20px; }
+.dec .tl-detail { font-size: 12.5px; color: var(--text-muted); line-height: 1.45; }
 /* ============================================================
    DECIMAL — page-level layout (full app screens on canvas)
    Builds on tokens.css + components.css. Namespaced under .dec.

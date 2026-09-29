@@ -113,6 +113,17 @@ Frontend: `pages/Bills.tsx` (list), `pages/BillDraft.tsx` (review and coding, wi
 
 Frontend: the brief renders on its flag in `BillDraft.tsx`. The recommended resolution is the primary button with its reason prefilled, and a "Why" fold links each piece of evidence to where it was read. Evaluate with `api/scripts/exception-eval.mts` on the bench.
 
+## Companion (Live)
+
+`api/src/companion/`. The companion does the work before a person looks and shows it happening. The landing page is its console.
+
+- **Steps** (`steps.ts`, table `companion_steps`). A job is one document. Intake writes each stage as a step as it happens (received, opened, read, figures checked, categories, vendor, checks) with a sentence the server writes once. The duplicate investigation writes a step for itself and one per tool call, by wrapping each tool's `run`. Recording is best-effort and never throws. Steps left running by a crash are closed as interrupted when the console loads.
+- **Readiness** (`readiness.ts`). A strict verdict per draft: ready only when nothing calls for judgement, otherwise the single most important reason. Attached to each workbench row as `companion`.
+- **Console** (`today.ts`, `GET /companion/console`). Running: documents being read and bills being investigated. Waiting on you: approvals, drafts needing input, bills sent back, unreadable documents, ready drafts to sign off. Done: bills that moved past review in the window, and learned habits. The window is "since you last looked" (`companion_views`; a gap over 30 minutes starts a new visit). A bill waiting on you is never also done, and a draft still being worked on is running, not waiting. Each person sees their own work; admins also see who is holding approvals.
+- **Jobs** (`GET /companion/jobs/:jobId`). A job's steps and bills, to whoever may see its bills (`involvedBillIds`).
+
+Frontend: `pages/Home.tsx`. Three columns of cards; a card opens its job's steps in a drawer, polled every second while it runs.
+
 ## Approval engine (Live)
 
 `api/src/approvals/`. An in-house routing and approval system with three configurable stages: review, approve, release.
