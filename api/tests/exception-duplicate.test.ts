@@ -228,3 +228,32 @@ test('refs written into a claim are taken out, leaving the sentence', async () =
   assert.equal(stripInlineRefs('Tax is the only difference [see: compare.tax].'), 'Tax is the only difference.');
   assert.equal(stripInlineRefs('A plain sentence stays as it is.'), 'A plain sentence stays as it is.');
 });
+
+// ---- the comparison table ---------------------------------------------------
+
+test('the comparison table shows two identical bills as the same on every row', async () => {
+  const { comparisonRows } = await import('../src/exceptions/duplicate-logic.js');
+  const a = facts({ id: 'a' }); const b = facts({ id: 'b' });
+  const rows = comparisonRows(a, b, compareBills(a, b));
+  assert.deepEqual(rows.map((r) => r.label), ['Invoice number', 'Invoice date', 'Line items', 'Subtotal', 'Tax', 'Total']);
+  assert.ok(rows.every((r) => r.same === true));
+  assert.equal(rows.find((r) => r.key === 'total')!.here, '$1,000.00');
+});
+
+test('a corrected tax shows as the rows that differ, and only those', async () => {
+  const { comparisonRows } = await import('../src/exceptions/duplicate-logic.js');
+  const a = facts({ id: 'a', tax: 0, total: 1000 }); const b = facts({ id: 'b', tax: 82.5, total: 1082.5 });
+  const differs = comparisonRows(a, b, compareBills(a, b)).filter((r) => r.same === false);
+  assert.deepEqual(differs.map((r) => [r.label, r.here, r.there]), [['Tax', '$0.00', '$82.50'], ['Total', '$1,000.00', '$1,082.50']]);
+});
+
+test('a PO number row appears only when a bill has one, and a reissued number still counts as the same', async () => {
+  const { comparisonRows } = await import('../src/exceptions/duplicate-logic.js');
+  const plain = comparisonRows(facts({ id: 'a' }), facts({ id: 'b' }), compareBills(facts({ id: 'a' }), facts({ id: 'b' })));
+  assert.equal(plain.some((r) => r.key === 'poNumber'), false);
+  const a = facts({ id: 'a', poNumber: 'PO-7', invoiceNumber: 'INV-1' });
+  const b = facts({ id: 'b', poNumber: 'po 7', invoiceNumber: 'inv-1' });
+  const rows = comparisonRows(a, b, compareBills(a, b));
+  assert.equal(rows.find((r) => r.key === 'poNumber')!.same, true, 'formatting is not a difference');
+  assert.equal(rows.find((r) => r.key === 'invoiceNumber')!.same, true);
+});

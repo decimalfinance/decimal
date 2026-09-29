@@ -1013,6 +1013,250 @@ function DraftScreen(props: {
     };
   }, [dragging]);
 
+  type DraftFlag = BillDraft['flags'][number];
+  // The two halves of answering a flag, shared by the plain flag and the one
+  // carrying the exception agent's answer: the composer while an answer is
+  // being written, the buttons otherwise. Each renders nothing when the other
+  // is showing.
+  const renderResolutionComposer = (flag: DraftFlag) => (
+activeResolution?.flag === flag.kind ? (() => {
+                    const asking = activeResolution.action === 'ask_someone';
+                    const claimed = /addressed to "([^"]+)"/.exec(flag.message)?.[1] ?? '';
+                    const ask = asking ? null : resolutionAsk(activeResolution.action, claimed);
+                    const people = askCandidates.data?.candidates ?? [];
+                    const ready = asking
+                      ? Boolean(askOf) && resolutionValue.trim().length >= 3
+                      : resolutionValue.trim().length >= 3;
+                    return (
+                      <span style={{ display: 'block', marginTop: 10 }}>
+                        {/* State the question. A bare box under the flag's own
+                            sentence never said what you were typing or what it
+                            would do. */}
+                        <strong style={{ display: 'block' }}>
+                          {asking ? 'Who should answer this?' : ask!.title}
+                        </strong>
+                        <span style={{ display: 'block', marginTop: 2, opacity: 0.85 }}>
+                          {asking
+                            ? 'The bill waits for their answer instead of moving on. Anyone can ask.'
+                            : ask!.help}
+                        </span>
+
+                        {asking && people.length === 0 ? (
+                          <span style={{ display: 'block', marginTop: 8 }}>
+                            There is nobody else in this organization to ask yet. Invite a colleague from Members first.
+                          </span>
+                        ) : (
+                          <span style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
+                            {asking ? (
+                              <select className="input" value={askOf} onChange={(e) => setAskOf(e.target.value)}
+                                style={{ flex: '0 0 240px', height: 32 }}>
+                                <option value="">Choose a colleague…</option>
+                                {/* Split, not filtered. The people who can settle
+                                    this go first; everyone else stays reachable,
+                                    because "do we trade as Halcyon Labs?" is a
+                                    question for whoever KNOWS, who is often not
+                                    an admin. */}
+                                {people.some((c) => c.canSettle) ? (
+                                  <>
+                                    <optgroup label="Can settle this">
+                                      {people.filter((c) => c.canSettle).map((c) => (
+                                        <option key={c.userId} value={c.userId}>
+                                          {c.name}{c.answered > 0 ? ` — answered ${c.answered}` : ''}
+                                        </option>
+                                      ))}
+                                    </optgroup>
+                                    <optgroup label="Can help, but can't settle it">
+                                      {people.filter((c) => !c.canSettle).map((c) => (
+                                        <option key={c.userId} value={c.userId}>
+                                          {c.name}{c.jobRole ? ` — ${c.jobRole.replace(/_/g, ' ')}` : ''}
+                                        </option>
+                                      ))}
+                                    </optgroup>
+                                  </>
+                                ) : (
+                                  people.map((c) => (
+                                    <option key={c.userId} value={c.userId}>
+                                      {c.name}{c.answered > 0 ? ` — answered ${c.answered}` : ''}
+                                    </option>
+                                  ))
+                                )}
+                              </select>
+                            ) : null}
+                            <input
+                              className="input"
+                              autoFocus={!asking}
+                              value={resolutionValue}
+                              placeholder={asking ? 'What do you want to know?' : ask!.label}
+                              onChange={(e) => setResolutionValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key !== 'Enter' || !ready) return;
+                                // Enter used to call runResolution directly and
+                                // skip straight past the confirm step — so the
+                                // question went out with fields nobody had been
+                                // shown, chosen server-side, which is precisely
+                                // the "a suggestion nobody sees is an assertion"
+                                // this two-step exists to prevent. It has to
+                                // advance the same way the button does.
+                                if (asking && askFields === null) {
+                                  void suggestFields(resolutionValue, activeResolution.flag);
+                                  return;
+                                }
+                                void runResolution();
+                              }}
+                              style={{ flex: 1, minWidth: 0, height: 32 }}
+                            />
+                            <button type="button" className="btn btn-primary btn-sm" style={{ flex: 'none' }}
+                              disabled={resolving || !ready || (asking && suggesting)}
+                              onClick={() => {
+                                // Two steps on purpose: suggest, then confirm.
+                                // The asker sees exactly what the other person
+                                // will be pointed at before it is sent.
+                                if (asking && askFields === null) { void suggestFields(resolutionValue, activeResolution.flag); return; }
+                                void runResolution();
+                              }}>
+                              {resolving ? 'Saving…'
+                                : asking && suggesting ? 'Reading…'
+                                : asking && askFields === null ? 'Next'
+                                : asking ? 'Ask' : ask!.cta}
+                            </button>
+                          </span>
+                        )}
+                        {asking && askFields !== null ? (() => {
+                          // Unticking used to DELETE the row, so a mis-click was
+                          // unrecoverable — the field left the list and there
+                          // was no way back to it. And the model's guess was the
+                          // whole universe: nothing could be added that it had
+                          // not thought of.
+                          //
+                          // Suggested fields stay on screen whether ticked or
+                          // not, and everything else in the vocabulary is one
+                          // click away. `suggestedFields` is frozen at the
+                          // moment of suggestion so the list does not reshuffle
+                          // under the cursor as boxes are ticked.
+                          const picked = new Set(askFields);
+                          const shown = [...new Set([...suggestedFields, ...askFields])];
+                          const rest = billDraft.highlightableFields.filter((k) => !shown.includes(k));
+                          const toggle = (key: string) => setAskFields(
+                            picked.has(key) ? askFields.filter((k) => k !== key) : [...askFields, key],
+                          );
+                          return (
+                          <span style={{ display: 'block', marginTop: 10 }}>
+                            <strong style={{ display: 'block' }}>
+                              {shown.length > 0
+                                ? 'These are the fields they will be asked to fill — right?'
+                                : 'This does not look like it is about a specific field.'}
+                            </strong>
+                            <span style={{ display: 'block', marginTop: 2, opacity: 0.85 }}>
+                              {shown.length > 0
+                                ? 'Ticked ones are highlighted on their screen. Untick what does not belong, and add anything missing.'
+                                : 'It will be sent as a plain question unless you point at something.'}
+                            </span>
+                            {shown.length > 0 ? (
+                              <span style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
+                                {shown.map((key) => (
+                                  <label key={key} style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={picked.has(key)}
+                                      onChange={() => toggle(key)}
+                                    />
+                                    {fieldLabel(key)}
+                                  </label>
+                                ))}
+                              </span>
+                            ) : null}
+
+                            {/* Anything the model did not think of. A question
+                                is often about a field precisely BECAUSE the
+                                reading of it looks wrong, which is the case a
+                                suggestion is least likely to cover. */}
+                            {rest.length > 0 ? (
+                              <span style={{ display: 'block', marginTop: 8 }}>
+                                {addingField ? (
+                                  <span style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                                    {rest.map((key) => (
+                                      <button
+                                        key={key}
+                                        type="button"
+                                        className="btn btn-ghost btn-sm"
+                                        onClick={() => { setAskFields([...askFields, key]); }}
+                                      >
+                                        + {fieldLabel(key)}
+                                      </button>
+                                    ))}
+                                    <button type="button" className="btn btn-ghost btn-sm"
+                                      onClick={() => setAddingField(false)}>
+                                      Done
+                                    </button>
+                                  </span>
+                                ) : (
+                                  <button type="button" className="btn btn-ghost btn-sm"
+                                    onClick={() => setAddingField(true)}>
+                                    <Ico.plus w={12} /> Add a field
+                                  </button>
+                                )}
+                              </span>
+                            ) : null}
+                          </span>
+                          );
+                        })() : null}
+                        <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} disabled={resolving}
+                          onClick={() => { setActiveResolution(null); setResolutionValue(''); setAskOf(''); setAskFields(null); }}>
+                          Cancel
+                        </button>
+                      </span>
+                    );
+                  })() : null
+  );
+  const renderResolutionButtons = (flag: DraftFlag) => (
+activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
+                  <span style={{ display: 'flex', gap: 6, flex: 'none', flexWrap: 'wrap' }}>
+                    {/* What the exception agent recommends goes first and is
+                        the primary button; the rest stay, as secondary, for
+                        whoever disagrees. The person still clicks either way. */}
+                    {(() => {
+                      const advised = flag.brief?.status === 'ready' ? flag.brief.recommendedAction : null;
+                      return advised
+                        ? [...flag.resolutions].sort((a, b) => Number(b.action === advised) - Number(a.action === advised))
+                        : flag.resolutions;
+                    })().map((r) => {
+                      const recommended = flag.brief?.status === 'ready' && flag.brief.recommendedAction === r.action;
+                      // An admin-only action stays visible to everyone, disabled,
+                      // with the reason in the tooltip. Hiding it would leave a
+                      // reviewer staring at a blocked bill wondering what the
+                      // route forward even is.
+                      const blocked = r.requires === 'primary_admin'
+                        ? !canAllowOverCeiling
+                        : r.requires === 'admin' && !canOverrideDuplicate;
+                      // The title has to sit on a WRAPPER. Browsers suppress
+                      // pointer events on a disabled control, so a tooltip on
+                      // the button itself never appears — the one explanation
+                      // of why the button is dead was unreachable by hovering
+                      // the dead button.
+                      const why = blocked
+                        ? (r.requires === 'primary_admin'
+                          ? 'Only the primary admin can do this — ask them to look, or ask a question on this bill.'
+                          : 'Only a primary admin or admin can do this — ask one to look, or ask a question on this bill.')
+                        : r.detail;
+                      return (
+                        <span key={r.action} title={why} style={{ display: 'inline-flex', flex: 'none' }}>
+                          <button
+                            type="button"
+                            className={`btn ${recommended ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                            style={{ flex: 'none' }}
+                            disabled={blocked}
+                            aria-label={blocked ? `${r.label} — ${why}` : recommended ? `${r.label} (recommended)` : undefined}
+                            onClick={() => startResolution(flag.kind, r.action, recommended ? flag.brief?.reason ?? undefined : undefined)}
+                          >
+                            {r.label}
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </span>
+                ) : null
+  );
+
   return (
     <div className="rev-shell" ref={shellRef}>
       {/* Topbar */}
@@ -1202,258 +1446,44 @@ function DraftScreen(props: {
             {/* A flag states what is wrong AND what can be done about it. The
                 rule the backend enforces: every blocking flag offers at least
                 one way out, so this never renders a dead end. */}
-            {billDraft.flags.map((flag) => (
-              <div
-                key={flag.kind}
-                className={`callout ${flag.severity === 'danger' ? 'callout-danger' : flag.severity === 'warning' ? 'callout-warning' : 'callout-info'}`}
-              >
-                <Ico.shield w={16} />
-                <span style={{ flex: 1, minWidth: 0 }}>
-                  {flag.message}
-                  {flag.brief ? (
+            {billDraft.flags.map((flag) => {
+              const tone = flag.severity === 'danger' ? 'callout-danger' : flag.severity === 'warning' ? 'callout-warning' : 'callout-info';
+              // Once the exception agent has an answer, the answer IS the flag:
+              // it replaces the generic sentence rather than stacking under it,
+              // reads in body text rather than alarm colour (the border still
+              // says the bill is blocked), and puts the choice under the answer.
+              if (flag.brief?.status === 'ready') {
+                return (
+                  <div key={flag.kind} className={`callout ${tone} has-brief`}>
                     <ExceptionBriefBlock
                       brief={flag.brief}
                       canShow={briefEvidenceShown}
                       onEvidence={(ev) => showBriefEvidence(flag.brief!, ev)}
-                    />
-                  ) : null}
-                  {activeResolution?.flag === flag.kind ? (() => {
-                    const asking = activeResolution.action === 'ask_someone';
-                    const claimed = /addressed to "([^"]+)"/.exec(flag.message)?.[1] ?? '';
-                    const ask = asking ? null : resolutionAsk(activeResolution.action, claimed);
-                    const people = askCandidates.data?.candidates ?? [];
-                    const ready = asking
-                      ? Boolean(askOf) && resolutionValue.trim().length >= 3
-                      : resolutionValue.trim().length >= 3;
-                    return (
-                      <span style={{ display: 'block', marginTop: 10 }}>
-                        {/* State the question. A bare box under the flag's own
-                            sentence never said what you were typing or what it
-                            would do. */}
-                        <strong style={{ display: 'block' }}>
-                          {asking ? 'Who should answer this?' : ask!.title}
-                        </strong>
-                        <span style={{ display: 'block', marginTop: 2, opacity: 0.85 }}>
-                          {asking
-                            ? 'The bill waits for their answer instead of moving on. Anyone can ask.'
-                            : ask!.help}
-                        </span>
-
-                        {asking && people.length === 0 ? (
-                          <span style={{ display: 'block', marginTop: 8 }}>
-                            There is nobody else in this organization to ask yet. Invite a colleague from Members first.
-                          </span>
-                        ) : (
-                          <span style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
-                            {asking ? (
-                              <select className="input" value={askOf} onChange={(e) => setAskOf(e.target.value)}
-                                style={{ flex: '0 0 240px', height: 32 }}>
-                                <option value="">Choose a colleague…</option>
-                                {/* Split, not filtered. The people who can settle
-                                    this go first; everyone else stays reachable,
-                                    because "do we trade as Halcyon Labs?" is a
-                                    question for whoever KNOWS, who is often not
-                                    an admin. */}
-                                {people.some((c) => c.canSettle) ? (
-                                  <>
-                                    <optgroup label="Can settle this">
-                                      {people.filter((c) => c.canSettle).map((c) => (
-                                        <option key={c.userId} value={c.userId}>
-                                          {c.name}{c.answered > 0 ? ` — answered ${c.answered}` : ''}
-                                        </option>
-                                      ))}
-                                    </optgroup>
-                                    <optgroup label="Can help, but can't settle it">
-                                      {people.filter((c) => !c.canSettle).map((c) => (
-                                        <option key={c.userId} value={c.userId}>
-                                          {c.name}{c.jobRole ? ` — ${c.jobRole.replace(/_/g, ' ')}` : ''}
-                                        </option>
-                                      ))}
-                                    </optgroup>
-                                  </>
-                                ) : (
-                                  people.map((c) => (
-                                    <option key={c.userId} value={c.userId}>
-                                      {c.name}{c.answered > 0 ? ` — answered ${c.answered}` : ''}
-                                    </option>
-                                  ))
-                                )}
-                              </select>
-                            ) : null}
-                            <input
-                              className="input"
-                              autoFocus={!asking}
-                              value={resolutionValue}
-                              placeholder={asking ? 'What do you want to know?' : ask!.label}
-                              onChange={(e) => setResolutionValue(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key !== 'Enter' || !ready) return;
-                                // Enter used to call runResolution directly and
-                                // skip straight past the confirm step — so the
-                                // question went out with fields nobody had been
-                                // shown, chosen server-side, which is precisely
-                                // the "a suggestion nobody sees is an assertion"
-                                // this two-step exists to prevent. It has to
-                                // advance the same way the button does.
-                                if (asking && askFields === null) {
-                                  void suggestFields(resolutionValue, activeResolution.flag);
-                                  return;
-                                }
-                                void runResolution();
-                              }}
-                              style={{ flex: 1, minWidth: 0, height: 32 }}
-                            />
-                            <button type="button" className="btn btn-primary btn-sm" style={{ flex: 'none' }}
-                              disabled={resolving || !ready || (asking && suggesting)}
-                              onClick={() => {
-                                // Two steps on purpose: suggest, then confirm.
-                                // The asker sees exactly what the other person
-                                // will be pointed at before it is sent.
-                                if (asking && askFields === null) { void suggestFields(resolutionValue, activeResolution.flag); return; }
-                                void runResolution();
-                              }}>
-                              {resolving ? 'Saving…'
-                                : asking && suggesting ? 'Reading…'
-                                : asking && askFields === null ? 'Next'
-                                : asking ? 'Ask' : ask!.cta}
-                            </button>
-                          </span>
-                        )}
-                        {asking && askFields !== null ? (() => {
-                          // Unticking used to DELETE the row, so a mis-click was
-                          // unrecoverable — the field left the list and there
-                          // was no way back to it. And the model's guess was the
-                          // whole universe: nothing could be added that it had
-                          // not thought of.
-                          //
-                          // Suggested fields stay on screen whether ticked or
-                          // not, and everything else in the vocabulary is one
-                          // click away. `suggestedFields` is frozen at the
-                          // moment of suggestion so the list does not reshuffle
-                          // under the cursor as boxes are ticked.
-                          const picked = new Set(askFields);
-                          const shown = [...new Set([...suggestedFields, ...askFields])];
-                          const rest = billDraft.highlightableFields.filter((k) => !shown.includes(k));
-                          const toggle = (key: string) => setAskFields(
-                            picked.has(key) ? askFields.filter((k) => k !== key) : [...askFields, key],
-                          );
-                          return (
-                          <span style={{ display: 'block', marginTop: 10 }}>
-                            <strong style={{ display: 'block' }}>
-                              {shown.length > 0
-                                ? 'These are the fields they will be asked to fill — right?'
-                                : 'This does not look like it is about a specific field.'}
-                            </strong>
-                            <span style={{ display: 'block', marginTop: 2, opacity: 0.85 }}>
-                              {shown.length > 0
-                                ? 'Ticked ones are highlighted on their screen. Untick what does not belong, and add anything missing.'
-                                : 'It will be sent as a plain question unless you point at something.'}
-                            </span>
-                            {shown.length > 0 ? (
-                              <span style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
-                                {shown.map((key) => (
-                                  <label key={key} style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
-                                    <input
-                                      type="checkbox"
-                                      checked={picked.has(key)}
-                                      onChange={() => toggle(key)}
-                                    />
-                                    {fieldLabel(key)}
-                                  </label>
-                                ))}
-                              </span>
-                            ) : null}
-
-                            {/* Anything the model did not think of. A question
-                                is often about a field precisely BECAUSE the
-                                reading of it looks wrong, which is the case a
-                                suggestion is least likely to cover. */}
-                            {rest.length > 0 ? (
-                              <span style={{ display: 'block', marginTop: 8 }}>
-                                {addingField ? (
-                                  <span style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                                    {rest.map((key) => (
-                                      <button
-                                        key={key}
-                                        type="button"
-                                        className="btn btn-ghost btn-sm"
-                                        onClick={() => { setAskFields([...askFields, key]); }}
-                                      >
-                                        + {fieldLabel(key)}
-                                      </button>
-                                    ))}
-                                    <button type="button" className="btn btn-ghost btn-sm"
-                                      onClick={() => setAddingField(false)}>
-                                      Done
-                                    </button>
-                                  </span>
-                                ) : (
-                                  <button type="button" className="btn btn-ghost btn-sm"
-                                    onClick={() => setAddingField(true)}>
-                                    <Ico.plus w={12} /> Add a field
-                                  </button>
-                                )}
-                              </span>
-                            ) : null}
-                          </span>
-                          );
-                        })() : null}
-                        <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} disabled={resolving}
-                          onClick={() => { setActiveResolution(null); setResolutionValue(''); setAskOf(''); setAskFields(null); }}>
-                          Cancel
-                        </button>
-                      </span>
-                    );
-                  })() : null}
-                </span>
-                {activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
-                  <span style={{ display: 'flex', gap: 6, flex: 'none' }}>
-                    {/* What the exception agent recommends goes first and is
-                        the primary button; the rest stay, as secondary, for
-                        whoever disagrees. The person still clicks either way. */}
-                    {(() => {
-                      const advised = flag.brief?.status === 'ready' ? flag.brief.recommendedAction : null;
-                      return advised
-                        ? [...flag.resolutions].sort((a, b) => Number(b.action === advised) - Number(a.action === advised))
-                        : flag.resolutions;
-                    })().map((r) => {
-                      const recommended = flag.brief?.status === 'ready' && flag.brief.recommendedAction === r.action;
-                      // An admin-only action stays visible to everyone, disabled,
-                      // with the reason in the tooltip. Hiding it would leave a
-                      // reviewer staring at a blocked bill wondering what the
-                      // route forward even is.
-                      const blocked = r.requires === 'primary_admin'
-                        ? !canAllowOverCeiling
-                        : r.requires === 'admin' && !canOverrideDuplicate;
-                      // The title has to sit on a WRAPPER. Browsers suppress
-                      // pointer events on a disabled control, so a tooltip on
-                      // the button itself never appears — the one explanation
-                      // of why the button is dead was unreachable by hovering
-                      // the dead button.
-                      const why = blocked
-                        ? (r.requires === 'primary_admin'
-                          ? 'Only the primary admin can do this — ask them to look, or ask a question on this bill.'
-                          : 'Only a primary admin or admin can do this — ask one to look, or ask a question on this bill.')
-                        : r.detail;
-                      return (
-                        <span key={r.action} title={why} style={{ display: 'inline-flex', flex: 'none' }}>
-                          <button
-                            type="button"
-                            className={`btn ${recommended ? 'btn-primary' : 'btn-secondary'} btn-sm`}
-                            style={{ flex: 'none' }}
-                            disabled={blocked}
-                            aria-label={blocked ? `${r.label} — ${why}` : recommended ? `${r.label} (recommended)` : undefined}
-                            onClick={() => startResolution(flag.kind, r.action, recommended ? flag.brief?.reason ?? undefined : undefined)}
-                          >
-                            {recommended ? <><Ico.sparkle w={11} /> {r.label}</> : r.label}
-                          </button>
-                        </span>
-                      );
-                    })}
+                    >
+                      {renderResolutionComposer(flag)}
+                      {renderResolutionButtons(flag)}
+                    </ExceptionBriefBlock>
+                  </div>
+                );
+              }
+              return (
+                <div key={flag.kind} className={`callout ${tone}`}>
+                  <Ico.shield w={16} />
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    {flag.message}
+                    {flag.brief ? (
+                      <ExceptionBriefBlock
+                        brief={flag.brief}
+                        canShow={briefEvidenceShown}
+                        onEvidence={(ev) => showBriefEvidence(flag.brief!, ev)}
+                      />
+                    ) : null}
+                    {renderResolutionComposer(flag)}
                   </span>
-                ) : null}
-              </div>
-            ))}
+                  {renderResolutionButtons(flag)}
+                </div>
+              );
+            })}
 
             {/* A document that is not an invoice gets its own screen, not the
                 bill form with a warning on top. The flags above still show —
@@ -2753,11 +2783,15 @@ function NotABillDialog(props: {
 
 // ---- the exception agent's brief -------------------------------------------
 //
-// A flag says what is wrong. The brief is the investigation done before anyone
-// looked: a verdict in one sentence, what it means for THIS bill, and — folded,
-// because the headline is the answer and the rest is the proof — the evidence,
-// each piece one click from where it came from. It never says "model" or
-// "confidence": it says what it found and how sure the finding is.
+// The agent's answer, said once. A flag with a ready brief no longer shows its
+// generic sentence: the title says what to do with THIS bill, one line says why,
+// the choice sits directly under it, and the proof is the two bills side by
+// side, every figure marked the same or different, folded until asked for.
+//
+// The model's own findings appear only where they add something the table
+// cannot show: the documents' own words, or the vendor's history. Everything
+// else they said is already a row in the table, and saying it twice is how the
+// first version of this ended up repeating one fact four times.
 
 type BriefEvidence = ExceptionBrief['findings'][number]['evidence'][number];
 
@@ -2767,7 +2801,7 @@ const CERTAINTY: Record<NonNullable<ExceptionBrief['confidence']>, { label: stri
   low: { label: 'Not certain', tone: 'pill-neutral' },
 };
 
-/** Where a piece of evidence on THIS bill was read, if the page can point at it. */
+/** Where a value on THIS bill was read, if the page can point at it. */
 function evidenceSource(draft: BillDraft, key: string): DocSource {
   if (key === 'total') return draft.totalsSources?.total ?? null;
   if (key === 'tax') return draft.totalsSources?.tax ?? null;
@@ -2777,36 +2811,34 @@ function evidenceSource(draft: BillDraft, key: string): DocSource {
   return draft.fields.find((f) => f.key === key)?.source ?? null;
 }
 
-function evidenceLabel(brief: ExceptionBrief, ev: BriefEvidence): string {
-  if (ev.bill === null) {
-    if (ev.key.startsWith('compare.')) return 'Side-by-side comparison';
-    if (ev.key.startsWith('history.')) return "Vendor's earlier bills";
-    return 'Other evidence';
-  }
-  const whose = ev.bill === 'this' ? 'This bill' : `${brief.otherBill.invoiceNumber ?? 'The other bill'} (other copy)`;
-  const line = /^line\.(\d+)$/.exec(ev.key);
-  const what = line ? `line ${Number(line[1]) + 1}`
-    : ev.key.startsWith('doc.') ? 'document text'
-    : ({ total: 'total', tax: 'tax', subtotal: 'subtotal', invoiceNumber: 'invoice number', invoiceDate: 'invoice date', dueDate: 'due date', poNumber: 'PO number' } as Record<string, string>)[ev.key] ?? ev.key;
-  return `${whose}: ${what}`;
+/** When the other bill arrived, the way a person would say it. */
+function whenUploaded(iso: string): string {
+  const d = new Date(iso);
+  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  return d.toDateString() === new Date().toDateString()
+    ? `today, ${time}`
+    : `${d.getDate()} ${d.toLocaleString('en-US', { month: 'short' })}, ${time}`;
 }
 
-/** The recommendation in words, for this bill. */
-function briefAdvice(brief: ExceptionBrief): string {
-  const other = brief.otherBill.invoiceNumber ?? 'the other bill';
-  switch (brief.recommendedAction) {
-    case 'clear_duplicate':
-      if (brief.verdict === 'duplicate') return `Keep this one. The copy of ${other} is the one to close.`;
-      if (brief.verdict === 'replacement') return `Keep this one: it corrects ${other}, which should be closed so only one is paid.`;
-      return 'Not a duplicate. Clear the flag and carry on.';
-    case 'not_ours':
-      return brief.verdict === 'replacement'
-        ? `Close this one: ${other} replaces it.`
-        : `Close this one: it is a copy of ${other}.`;
-    case 'ask_someone':
-      return 'The evidence does not settle it. Worth asking someone who knows this vendor.';
+/** What to do with THIS bill, in one sentence. The verdict, from this bill's side. */
+function briefTitle(brief: ExceptionBrief): string {
+  const num = brief.otherBill.invoiceNumber ?? 'the other bill';
+  const newer = brief.side === 'newer';
+  switch (brief.verdict) {
+    case 'duplicate':
+      return newer
+        ? `A second copy of ${num}. Close this one and keep the original.`
+        : `This is the original ${num}. Keep it and close the later copy.`;
+    case 'replacement':
+      return newer
+        ? `This corrects the original ${num}. Keep this one and close the original.`
+        : `A later ${num} corrects this one. Close this one.`;
+    case 'not_duplicate':
+      return `Not the same bill as ${newer ? 'the earlier' : 'the later'} ${num}, despite the match. Safe to clear.`;
+    case 'unsure':
+      return `The documents don't settle whether this is the same bill as ${num}. Worth asking someone who knows.`;
     default:
-      return '';
+      return brief.headline ?? '';
   }
 }
 
@@ -2814,6 +2846,8 @@ function ExceptionBriefBlock(props: {
   brief: ExceptionBrief;
   canShow: (ev: BriefEvidence) => boolean;
   onEvidence: (ev: BriefEvidence) => void;
+  /** The flag's choices, placed directly under the answer. */
+  children?: React.ReactNode;
 }) {
   const { brief } = props;
   const [open, setOpen] = useState(false);
@@ -2828,21 +2862,31 @@ function ExceptionBriefBlock(props: {
       </span>
     );
   }
-  if (brief.status !== 'ready' || !brief.headline) return null;
+  if (brief.status !== 'ready') return null;
+
   const certainty = brief.confidence ? CERTAINTY[brief.confidence] : null;
+  const rows = brief.comparison?.rows ?? [];
+  const differences = rows.filter((r) => r.same === false).length;
+  const otherLabel = brief.side === 'newer' ? 'Original' : 'Later copy';
+  const beyondTheTable = brief.findings.filter((f) =>
+    f.evidence.some((e) => e.key.startsWith('doc.') || e.key.startsWith('history.')));
 
   return (
-    <span style={{ display: 'block', marginTop: 10 }}>
-      <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <Ico.sparkle w={13} />
-        <strong>{brief.headline}</strong>
-        {certainty ? <span className={`pill pill-min ${certainty.tone}`}>{certainty.label}</span> : null}
-      </span>
-      <span style={{ display: 'block', marginTop: 2, opacity: 0.85 }}>{briefAdvice(brief)}</span>
+    <>
+      <div className="brief-title">
+        <Ico.sparkle w={14} />
+        <span>{briefTitle(brief)}</span>
+      </div>
+      <div className="brief-body">
+        {brief.reason}
+        {certainty ? <> <span className={`pill pill-min ${certainty.tone}`}>{certainty.label}</span></> : null}
+      </div>
 
-      {brief.findings.length > 0 ? (
+      {props.children ? <div className="brief-actions">{props.children}</div> : null}
+
+      {rows.length > 0 ? (
         <>
-          <span
+          <div
             className="collapse-head"
             role="button"
             tabIndex={0}
@@ -2850,48 +2894,65 @@ function ExceptionBriefBlock(props: {
             onClick={() => setOpen(!open)}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(!open); } }}
           >
-            <span className="ch-title">Why</span>
-            <span className="ch-chev">{open ? <Ico.chevDown w={12} /> : <Ico.chevRight w={12} />}</span>
-          </span>
-          {open ? (
-            <span style={{ display: 'block' }}>
-              {brief.findings.map((f, i) => {
-                // One chip per distinct place, however many times it was cited.
-                const seen = new Set<string>();
-                const chips = f.evidence.filter((ev) => {
-                  const label = evidenceLabel(brief, ev);
-                  if (seen.has(label)) return false;
-                  seen.add(label);
-                  return true;
-                });
-                return (
-                  <span key={i} style={{ display: 'block', marginTop: i === 0 ? 0 : 10 }}>
-                    {f.claim}
-                    {chips.length > 0 ? (
-                      <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
-                        {chips.map((ev) => (props.canShow(ev) ? (
-                          <button key={evidenceLabel(brief, ev)} type="button" className="btn btn-ghost btn-sm"
-                            onClick={() => props.onEvidence(ev)}>
-                            {evidenceLabel(brief, ev)}
-                          </button>
-                        ) : (
-                          <span key={evidenceLabel(brief, ev)} className="pill pill-min pill-neutral">{evidenceLabel(brief, ev)}</span>
-                        )))}
-                      </span>
-                    ) : null}
-                  </span>
-                );
-              })}
-              {brief.checked.length > 0 ? (
-                <span className="input-help" style={{ display: 'block', marginTop: 12 }}>Checked: {brief.checked.join(' · ')}</span>
-              ) : null}
-              {brief.couldNotCheck.length > 0 ? (
-                <span className="input-help" style={{ display: 'block' }}>Couldn't check: {brief.couldNotCheck.join(' · ')}</span>
-              ) : null}
+            <span className="ch-title">
+              Compare the two bills
+              <span className="brief-count">
+                {differences === 0 ? 'every figure matches' : `${differences} ${differences === 1 ? 'difference' : 'differences'}`}
+              </span>
             </span>
+            <span className="ch-chev">{open ? <Ico.chevDown w={12} /> : <Ico.chevRight w={12} />}</span>
+          </div>
+          {open ? (
+            <>
+              <div className="tbl-card">
+                <table className="tbl tbl-slim brief-compare">
+                  <thead>
+                    <tr>
+                      <th />
+                      <th>This bill</th>
+                      <th>{otherLabel} · {brief.comparison ? whenUploaded(brief.comparison.otherUploadedAt) : ''}</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r) => {
+                      const ev: BriefEvidence = { bill: 'this', key: r.key };
+                      const shown = props.canShow(ev);
+                      return (
+                        <tr
+                          key={r.key}
+                          className={r.same === false ? 'is-diff' : undefined}
+                          onClick={shown ? () => props.onEvidence(ev) : undefined}
+                          title={shown ? 'Show where this was read on the document' : undefined}
+                        >
+                          <td>{r.label}</td>
+                          <td className="cell-mono">{r.here ?? '—'}</td>
+                          <td className="cell-mono">{r.there ?? '—'}</td>
+                          <td>
+                            {r.same === false ? <span className="pill pill-min pill-warning">Differs</span>
+                              : r.same ? <Ico.checkSm w={12} /> : null}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {beyondTheTable.map((f, i) => (
+                <div key={i} className="brief-body">{f.claim}</div>
+              ))}
+              {brief.couldNotCheck.length > 0 ? (
+                <div className="input-help">Couldn't check: {brief.couldNotCheck.join(' · ')}</div>
+              ) : null}
+              <div>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => props.onEvidence({ bill: 'other', key: 'total' })}>
+                  Open the {otherLabel.toLowerCase()} <Ico.arrowRight w={12} />
+                </button>
+              </div>
+            </>
           ) : null}
         </>
       ) : null}
-    </span>
+    </>
   );
 }

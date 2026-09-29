@@ -684,6 +684,20 @@
 .dec .callout-warning { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 40%, transparent); background: color-mix(in srgb, var(--warning) 8%, transparent); }
 .dec .callout-info { color: var(--info); border-color: color-mix(in srgb, var(--info) 35%, transparent); background: color-mix(in srgb, var(--info) 7%, transparent); }
 
+/* The exception agent's answer on a flag (BillDraft). It reads as body text,
+   not alarm: the callout's border and tint still say the bill is blocked.
+   Content runs full width and the choice sits under the answer. */
+.dec .callout.has-brief { flex-direction: column; align-items: stretch; gap: 8px; color: var(--text-primary); }
+.dec .callout.has-brief .brief-title { display: flex; gap: 8px; align-items: flex-start; font-weight: 600; font-size: 14px; }
+.dec .callout.has-brief .brief-title svg { color: var(--accent); margin-top: 2px; }
+.dec .callout.has-brief .brief-body { color: var(--text-muted); }
+.dec .callout.has-brief .brief-actions { margin-top: 2px; }
+.dec .callout.has-brief .collapse-head { padding: 4px 0 0; }
+.dec .callout.has-brief .brief-count { margin-left: 8px; font-weight: 400; color: var(--text-muted); }
+.dec .brief-compare tbody td { height: 34px; }
+.dec .brief-compare .cell-mono { color: var(--text-primary); }
+.dec .brief-compare tr.is-diff td { background: color-mix(in srgb, var(--warning) 8%, transparent); }
+
 /* Field ↔ document linking: the page image wrapper + the highlight box that
    marks where a focused field was read from. */
 .dec .doc-page { position: relative; width: 100%; flex: none; }
@@ -1137,6 +1151,68 @@
 .dec .pc .seg { display: flex; padding: 3px; gap: 3px; background: var(--bg-surface-2); border: 1px solid var(--border); border-radius: var(--r-md); }
 .dec .pc .seg button { flex: 1; height: 30px; border: none; border-radius: var(--r-sm); background: transparent; color: var(--text-muted); font-size: 12px; font-weight: 500; font-family: var(--font-body); cursor: pointer; white-space: nowrap; padding: 0 10px; }
 .dec .pc .seg button.on { background: var(--bg-surface); color: var(--text-primary); box-shadow: 0 1px 2px rgba(0,0,0,.06); font-weight: 600; }
+
+/* ── Bill thread ─────────────────────────────────────────────────────────────
+   The conversation on a bill, rendered as a chat because that is what it is:
+   people talking about one invoice while they work it. Two kinds of message
+   share the stream — a QUESTION, which names somebody and parks the bill, and a
+   COMMENT, which parks nothing. The shapes differ so the difference is visible
+   without reading; the semantics live in the data, not in these rules. */
+.dec .bthread { display: flex; flex-direction: column; gap: 14px; padding: 4px 0 2px; }
+.dec .bt-msg { display: flex; gap: 10px; align-items: flex-start; }
+.dec .bt-av { width: 28px; height: 28px; border-radius: 50%; flex: 0 0 auto; display: inline-flex;
+  align-items: center; justify-content: center; font-size: 11px; font-weight: 700;
+  letter-spacing: -0.02em; color: #fff; background: var(--text-faint); }
+.dec .bt-col { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.dec .bt-who { display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  font-size: 12.5px; color: var(--text-muted); }
+.dec .bt-who strong { color: var(--text-primary); font-weight: 600; }
+.dec .bt-when { font-size: 11.5px; color: var(--text-faint); }
+
+/* A comment: quiet, no border, nothing owed. */
+.dec .bt-bubble { background: var(--bg-surface-2); border-radius: 4px 12px 12px 12px;
+  padding: 9px 12px; font-size: 13px; line-height: 1.5; color: var(--text-primary); }
+
+/* A question: bordered, because it is a hold on the bill and should not read as
+   chatter. Amber while somebody owes an answer, quiet once settled. */
+.dec .bt-bubble.is-question { background: var(--bg-surface); border: 1px solid var(--border);
+  border-radius: 4px 12px 12px 12px; }
+.dec .bt-bubble.is-waiting { border-color: var(--warning); background: color-mix(in srgb, var(--warning) 7%, transparent); }
+
+/* What a reply is replying to, quoted so the stream stays flat and still reads. */
+.dec .bt-quote { border-left: 2px solid var(--border); padding-left: 8px; margin-bottom: 5px;
+  font-size: 12px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+
+.dec .bt-fields { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 7px; }
+.dec .bt-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+.dec .bt-note { font-size: 12.5px; color: var(--text-muted); margin-top: 5px; }
+
+/* The composer sits at the bottom of the stream, where a chat puts it. */
+.dec .bt-composer { display: flex; gap: 8px; align-items: flex-start; padding-top: 4px; }
+.dec .bt-composer .input { flex: 1; min-width: 0; }
+
+/* Threads. Each subject is a root that folds; replies sit under it, indented
+   once and no further. Two levels is the whole structure — what makes this
+   readable is knowing which subject a remark belongs to, and a third rung
+   answers that no better while costing width the pane does not have. */
+.dec .bt-thread { border-top: 1px solid var(--border); padding-top: 12px; }
+.dec .bt-thread:first-child { border-top: none; padding-top: 0; }
+.dec .bt-av.is-sm { width: 22px; height: 22px; font-size: 9.5px; }
+.dec .bt-replies { display: flex; flex-direction: column; gap: 10px; margin-top: 9px;
+  padding-left: 12px; border-left: 2px solid var(--border); }
+.dec .bt-more { background: none; border: none; padding: 0; cursor: pointer; text-align: left;
+  font-family: var(--font-body); font-size: 12.5px; font-weight: 600; color: var(--accent); }
+.dec .bt-more:hover { text-decoration: underline; }
+
+/* The moment the bill left the clerk and became somebody's to approve. A line
+   ACROSS the conversation rather than a split down it: threads start in draft
+   and get replied to after submission, and cutting the stream there would tear
+   them in half to answer a question the reader can answer by looking. */
+.dec .bt-divider { display: flex; align-items: center; gap: 10px; margin: 4px 0 2px;
+  font-size: 11.5px; color: var(--text-faint); }
+.dec .bt-divider::before, .dec .bt-divider::after {
+  content: ''; height: 1px; background: var(--border); flex: 1; }
 /* ============================================================
    DECIMAL — page-level layout (full app screens on canvas)
    Builds on tokens.css + components.css. Namespaced under .dec.

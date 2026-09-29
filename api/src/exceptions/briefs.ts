@@ -17,8 +17,8 @@ import { logSuggestion, logSuggestionOutcome } from '../payments/suggestion-log.
 import { isExceptionAgentConfigured } from './agent.js';
 import { investigateDuplicatePair, DUPLICATE_PRODUCER } from './duplicate.js';
 import {
-  pairFingerprint, pairKey, recommendationFor, sideOf,
-  type Confidence, type FingerprintSide, type RecommendedAction, type Verdict,
+  billFactsFrom, compareBills, comparisonRows, pairFingerprint, pairKey, recommendationFor, sideOf,
+  type BillRow, type ComparisonRow, type Confidence, type FingerprintSide, type RecommendedAction, type Verdict,
 } from './duplicate-logic.js';
 
 const FLAG_KIND = 'possible_duplicate';
@@ -55,6 +55,12 @@ export type DuplicateBriefView = {
   checked: string[];
   couldNotCheck: string[];
   generatedAt: string | null;
+  /**
+   * The two bills side by side, computed from their current values on every
+   * read. This is the evidence a person reads; the model's findings are shown
+   * only where they add something the table cannot (the document's own words).
+   */
+  comparison: { identical: boolean; otherUploadedAt: string; rows: ComparisonRow[] } | null;
 };
 
 const sideFrom = (b: PairBill): FingerprintSide => ({
@@ -119,6 +125,12 @@ function view(row: BriefRow | null, args: {
     checked: ready ? asStrings(row.checked) : [],
     couldNotCheck: ready ? asStrings(row.couldNotCheck) : [],
     generatedAt: ready ? row.updatedAt.toISOString() : null,
+    comparison: ready ? (() => {
+      const here = billFactsFrom(args.viewer as BillRow);
+      const there = billFactsFrom(args.other as BillRow);
+      const c = compareBills(here, there);
+      return { identical: c.identical, otherUploadedAt: args.other.createdAt.toISOString(), rows: comparisonRows(here, there, c) };
+    })() : null,
   };
 }
 

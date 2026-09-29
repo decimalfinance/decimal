@@ -1383,6 +1383,12 @@ export interface ExceptionBrief {
   checked: string[];
   couldNotCheck: string[];
   generatedAt: string | null;
+  /** The two bills side by side, computed from their current values. The evidence a person reads. */
+  comparison: {
+    identical: boolean;
+    otherUploadedAt: string;
+    rows: Array<{ key: string; label: string; here: string | null; there: string | null; same: boolean | null }>;
+  } | null;
 }
 
 export interface ConfirmBillBody {

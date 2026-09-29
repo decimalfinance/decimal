@@ -551,6 +551,20 @@
 .dec .callout-warning { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 40%, transparent); background: color-mix(in srgb, var(--warning) 8%, transparent); }
 .dec .callout-info { color: var(--info); border-color: color-mix(in srgb, var(--info) 35%, transparent); background: color-mix(in srgb, var(--info) 7%, transparent); }
 
+/* The exception agent's answer on a flag (BillDraft). It reads as body text,
+   not alarm: the callout's border and tint still say the bill is blocked.
+   Content runs full width and the choice sits under the answer. */
+.dec .callout.has-brief { flex-direction: column; align-items: stretch; gap: 8px; color: var(--text-primary); }
+.dec .callout.has-brief .brief-title { display: flex; gap: 8px; align-items: flex-start; font-weight: 600; font-size: 14px; }
+.dec .callout.has-brief .brief-title svg { color: var(--accent); margin-top: 2px; }
+.dec .callout.has-brief .brief-body { color: var(--text-muted); }
+.dec .callout.has-brief .brief-actions { margin-top: 2px; }
+.dec .callout.has-brief .collapse-head { padding: 4px 0 0; }
+.dec .callout.has-brief .brief-count { margin-left: 8px; font-weight: 400; color: var(--text-muted); }
+.dec .brief-compare tbody td { height: 34px; }
+.dec .brief-compare .cell-mono { color: var(--text-primary); }
+.dec .brief-compare tr.is-diff td { background: color-mix(in srgb, var(--warning) 8%, transparent); }
+
 /* Field ↔ document linking: the page image wrapper + the highlight box that
    marks where a focused field was read from. */
 .dec .doc-page { position: relative; width: 100%; flex: none; }

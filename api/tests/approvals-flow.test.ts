@@ -3101,6 +3101,8 @@ test('exception agent: a flagged pair shares one brief, and each bill is told it
   assert.equal(newer.brief.recommendedAction, 'not_ours', 'the copy is the one to close');
   assert.equal(newer.brief.otherBill.paymentOrderId, first.billId);
   assert.equal(newer.brief.findings.length, 2, 'the finding citing evidence no tool returned was dropped');
+  assert.ok(newer.brief.comparison.identical, 'the comparison table is computed from both bills');
+  assert.ok(newer.brief.comparison.rows.every((r: { same: boolean | null }) => r.same !== false));
 
   const older = dupFlag(await get(`/organizations/${orgId}/bills/${first.billId}/draft`, owner.token))!;
   assert.equal(older.brief.briefId, newer.brief.briefId, 'both bills read the same brief');

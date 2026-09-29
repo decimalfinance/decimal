@@ -335,3 +335,44 @@ export function validateFinding(
     adjustments,
   };
 }
+
+// ---- the comparison, as a person reads it ----------------------------------
+
+export type ComparisonRow = {
+  /** The draft field it corresponds to, so the screen can light up where it was read. */
+  key: string;
+  label: string;
+  here: string | null;
+  there: string | null;
+  /** null when neither bill has a value, so there is nothing to compare. */
+  same: boolean | null;
+};
+
+const money = (n: number | null) => (n === null ? null : `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+
+/**
+ * The two bills side by side, one row per thing that matters for "is this the
+ * same bill?". Built from the same comparison the agent was given, so the
+ * table a person reads and the evidence the verdict rests on cannot disagree.
+ * Optional fields only appear when at least one bill has them.
+ */
+export function comparisonRows(a: BillFacts, b: BillFacts, c: BillComparison): ComparisonRow[] {
+  const row = (key: string, label: string, here: string | null, there: string | null, same?: boolean | null): ComparisonRow => ({
+    key, label, here, there,
+    same: same !== undefined ? same : here === null && there === null ? null : here === there,
+  });
+  const linesSame = c.lines.onlyInA.length === 0 && c.lines.onlyInB.length === 0
+    && c.lines.matched.every((m) => m.delta === 0 || m.delta === null);
+  const lineCount = (f: BillFacts) => `${f.lines.length} ${f.lines.length === 1 ? 'line' : 'lines'}`;
+
+  const rows: ComparisonRow[] = [
+    row('invoiceNumber', 'Invoice number', a.invoiceNumber, b.invoiceNumber, c.sameInvoiceNumber),
+    row('invoiceDate', 'Invoice date', a.invoiceDate, b.invoiceDate),
+  ];
+  if (a.poNumber || b.poNumber) rows.push(row('poNumber', 'PO number', a.poNumber, b.poNumber, c.samePoNumber));
+  rows.push(row('line.0', 'Line items', lineCount(a), lineCount(b), linesSame));
+  if (a.subtotal !== null || b.subtotal !== null) rows.push(row('subtotal', 'Subtotal', money(a.subtotal), money(b.subtotal)));
+  if (a.tax !== null || b.tax !== null) rows.push(row('tax', 'Tax', money(a.tax ?? 0), money(b.tax ?? 0)));
+  rows.push(row('total', 'Total', money(a.total), money(b.total)));
+  return rows;
+}
