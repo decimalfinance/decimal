@@ -45,13 +45,15 @@ async function ensureProvenance(order: {
   paymentOrderId: string;
   invoiceDocumentId: string | null;
   metadataJson: unknown;
-}): Promise<{ extracted: Record<string, unknown> | null; metadata: Record<string, unknown> }> {
+}, readOnly = false): Promise<{ extracted: Record<string, unknown> | null; metadata: Record<string, unknown> }> {
   const metadata = isRecord(order.metadataJson) ? order.metadataJson : {};
   const agent = isRecord(metadata.agent) ? metadata.agent : null;
   const extracted = agent && isRecord(agent.extracted) ? agent.extracted : null;
   if (!agent || !extracted) return { extracted, metadata };
   if (agent.provenanceVersion === PROVENANCE_VERSION) return { extracted, metadata };
   if (!order.invoiceDocumentId) return { extracted, metadata };
+  // A read-only look takes the bill as stored; the backfill waits for a person.
+  if (readOnly) return { extracted, metadata };
 
   try {
     const doc = await prisma.invoiceDocument.findUnique({
@@ -1522,7 +1524,16 @@ function buildChartOptions(chart: Awaited<ReturnType<typeof listChartOfAccounts>
     }));
 }
 
-export async function getBillDraft(organizationId: string, paymentOrderId: string, viewerUserId?: string) {
+/**
+ * `readOnly`: look without touching anything. The bill screen's loader also
+ * keeps the bill's derived data fresh as a person opens it — provenance boxes,
+ * category suggestions, the proposed-categories baseline — and starts a
+ * duplicate investigation when one is due. The companion's tools read bills
+ * constantly on someone's behalf, and a read on someone's behalf must not
+ * write, spend a model call or start work. With readOnly the bill is returned
+ * exactly as stored.
+ */
+export async function getBillDraft(organizationId: string, paymentOrderId: string, viewerUserId?: string, opts: { readOnly?: boolean } = {}) {
   const order = await prisma.paymentOrder.findFirst({
     where: { organizationId, paymentOrderId },
     include: {
@@ -1564,7 +1575,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   // work was redone on every single open, forever. It also made the version
   // stamp lie — I read v8 as "the fix has not run" when the truth was "the fix
   // runs every time and is thrown away".
-  const provenance = await ensureProvenance(order);
+  const provenance = await ensureProvenance(order, opts.readOnly === true);
   const metadata = provenance.metadata;
   const agent = isRecord(metadata.agent) ? metadata.agent : {};
   const extracted = provenance.extracted ?? (isRecord(agent.extracted) ? agent.extracted : {});
@@ -1705,7 +1716,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   // a `lines` array either way, so it is asked once and not on every view.
   const missingLineCoding = ocrCoding != null && !Array.isArray(ocrCoding.lines);
   const chartArrived = chart.length > 0 && metadata.ocrCodingChart !== 'quickbooks';
-  if (order.state === 'draft' && (chartArrived || missingLineCoding)) {
+  if (!opts.readOnly && order.state === 'draft' && (chartArrived || missingLineCoding)) {
     const top = ocrCoding && Array.isArray(ocrCoding.suggestions) && isRecord(ocrCoding.suggestions[0])
       ? (ocrCoding.suggestions[0] as Record<string, unknown>)
       : null;
@@ -1858,7 +1869,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   // Once a bill is confirmed the proposal is gone — verifiedLines replaces it —
   // so it has to be written down while it still exists. Recomputed on read
   // like the OCR coding above, and only written when it actually moved.
-  if (!verifiedLines && proposedLines.length > 0) {
+  if (!opts.readOnly && !verifiedLines && proposedLines.length > 0) {
     const proposed = proposedLines.map((l, i) => ({ index: i, description: l.description, category: l.category ?? null }));
     const stored = metadata.proposedLineCategories;
     if (JSON.stringify(stored ?? null) !== JSON.stringify(proposed)) {
@@ -1943,7 +1954,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   // none is current. ONLY here, and never inside flagsForOrder or the
   // workbench: those run for every row on the board and around every override.
   // Best-effort — any failure leaves the flag exactly as it always was.
-  const duplicateBrief = flags.some((f) => f.kind === 'possible_duplicate' && f.blocking)
+  const duplicateBrief = !opts.readOnly && flags.some((f) => f.kind === 'possible_duplicate' && f.blocking)
     ? await (async () => {
       const { duplicateBriefFor } = await import('../exceptions/briefs.js');
       return duplicateBriefFor({
@@ -3811,8 +3822,8 @@ async function approvalBlockedFor(
   return { rule: veto.rule, ...copy };
 }
 
-export async function getBillDetail(organizationId: string, paymentOrderId: string, viewerUserId: string) {
-  const billDraft = await getBillDraft(organizationId, paymentOrderId);
+export async function getBillDetail(organizationId: string, paymentOrderId: string, viewerUserId: string, opts: { readOnly?: boolean } = {}) {
+  const billDraft = await getBillDraft(organizationId, paymentOrderId, undefined, opts);
   if (!billDraft) return null;
 
   const order = await prisma.paymentOrder.findFirstOrThrow({

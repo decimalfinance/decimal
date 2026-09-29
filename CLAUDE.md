@@ -23,20 +23,21 @@ Decimal is an accounts-payable product. A bill arrives by upload or forwarded em
 
 ## Commands
 
-Run from the repo root. These six are the whole surface. Check `make help` if in doubt.
+Run from the repo root. These are the whole surface. Check `make help` if in doubt.
 
 | Command | What it does |
 |---|---|
 | `make dev` | Postgres, API on `:3100`, frontend on `:5174`, against `usdc_ops_local`. |
 | `make bench` | Background hot-reloading stack for agents: API `:3200`, frontend `:5274`, database `usdc_ops_bench`, fake Squads chain. |
 | `make test` | API typecheck, API tests against `usdc_ops_test`, frontend build. |
+| `make test-one FILE=tests/x.test.ts` | One API test file against `usdc_ops_test`, for iterating. `make test` still gates a commit. |
 | `make reset` | Wipes dev and bench data. Schema stays. |
 | `make stop` | Stops everything including Docker. |
 | `make help` | Lists the above. |
 
 `make bench-stop` stops only the bench and leaves `:3100` and `:5174` alone. `dev` and `bench` run side by side on purpose.
 
-**Never run `tsx --test` or `npm test` directly inside `api/`.** It inherits the dev database URL, and the tests truncate every table. This wiped the dev database once. Always use `make test`.
+**Never run `tsx --test` or `npm test` directly inside `api/`.** It inherits the dev database URL, and the tests truncate every table. This wiped the dev database once. Always use `make test` or `make test-one`.
 
 **Never touch `:3100`, `:5174` or `usdc_ops_local` from an agent session.** That is the human's stack. Use the bench.
 

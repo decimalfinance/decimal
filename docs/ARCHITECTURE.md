@@ -195,5 +195,7 @@ Deep reference lives in `docs/reference/`. Read it only when payment work resume
 
 - `make test` runs the API typecheck, the API tests against `usdc_ops_test`, and the frontend build.
 - **Never run `tsx --test` or `npm test` directly inside `api/`.** It inherits the dev database URL and the tests truncate every table.
+- `make test-one FILE=tests/x.test.ts [NAME=pattern]` runs one file (or matching tests) against `usdc_ops_test`, for iterating. `make test` still gates every commit.
+- `api/tests/companion-safety.test.ts` attacks the companion with a hostile scripted model: every tool with every malformed argument, cross-organisation reads, a (person × action × bill) matrix of card proposals, smuggled requests and junk in answers, double clicks, stale cards, a model that throws or loops. "Changed nothing" is measured by fingerprinting every row of every business table before and after; only the companion's own tables may move. Each protection was deliberately broken once to prove a test catches it.
 - `make bench` starts an isolated stack for agent-driven browser verification. `TESTBENCH.md` is the contract.
 - `TESTING-INVOICES.md` specifies the synthetic invoice set. The generator is `scripts/invoice-gen/`.

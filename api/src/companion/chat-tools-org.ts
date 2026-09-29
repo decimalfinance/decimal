@@ -37,6 +37,8 @@ const JOBS: Array<{ job: string; who: 'capability' | 'admin' | 'primary_admin' |
   { job: 'Answer a question about a bill', who: 'capability', capability: 'bills.view', note: 'Whoever it was asked of.' },
 ];
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const ACCESS_WORDS: Record<string, string> = { primary_admin: 'Primary admin', admin: 'Admin', member: 'Member' };
 
 function describeFlow(nodes: FlowNode[], names: Map<string, string>, depth = 0): string[] {
@@ -73,8 +75,10 @@ export function orgTools(args: {
     return visible === null || visible.has(billId);
   };
   const detailFor = async (billId: unknown) => {
-    if (typeof billId !== 'string' || !(await canSee(billId))) return null;
-    return getBillDetail(args.organizationId, billId, args.viewerUserId).catch(() => null);
+    if (typeof billId !== 'string' || !UUID.test(billId) || !(await canSee(billId))) return null;
+    // Read-only: looking on someone's behalf must not refresh, backfill or
+    // start an investigation (see getBillDraft).
+    return getBillDetail(args.organizationId, billId, args.viewerUserId, { readOnly: true }).catch(() => null);
   };
 
   return [

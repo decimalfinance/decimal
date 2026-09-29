@@ -22,7 +22,7 @@ PG       := postgresql://usdc_ops:usdc_ops@127.0.0.1:54329
 DB ?= $(DEV_DB)
 
 .SILENT:
-.PHONY: dev stop test reset bench bench-stop help sync-postgres-schema
+.PHONY: dev stop test test-one reset bench bench-stop help sync-postgres-schema
 
 # Two rules here, both learned the hard way.
 #
@@ -64,6 +64,13 @@ test: ## run all tests
 	$(MAKE) sync-postgres-schema DB=$(TEST_DB) && \
 	(cd api && npm run prisma:generate >/dev/null && npm run typecheck && npm test) && \
 	(cd frontend && npm run build)
+
+test-one: ## run one API test file against the test database: make test-one FILE=tests/x.test.ts [NAME=pattern]
+	set -euo pipefail && \
+	test -n "$(FILE)" || { echo "usage: make test-one FILE=tests/<name>.test.ts"; exit 1; } && \
+	export DATABASE_URL="$(PG)/$(TEST_DB)?schema=public" && \
+	$(MAKE) sync-postgres-schema DB=$(TEST_DB) && \
+	(cd api && npm run prisma:generate >/dev/null && NODE_ENV=test INBOUND_EMAIL_DOMAIN=bills.decimal.test RESEND_INBOUND_WEBHOOK_SECRET="whsec_$$(printf 'decimal-test-only-not-a-secret' | base64)" npx tsx --test --test-concurrency=1 $(if $(NAME),--test-name-pattern="$(NAME)") $(FILE))
 
 reset: ## wipe local dev data (schema stays)
 	set -euo pipefail && ./scripts/db-reset.sh $(DEV_DB) $(BENCH_DB)

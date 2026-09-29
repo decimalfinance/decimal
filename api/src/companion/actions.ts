@@ -12,6 +12,9 @@ import { getApprovalsInbox, getBillsWorkbench } from '../payments/bills.js';
 import { logger } from '../infra/logger.js';
 import { usd } from './chat-tools.js';
 
+/** Cards in one answer: enough to tidy a batch, few enough to read. */
+const MAX_CARDS = 12;
+
 export const ACTION_KINDS = ['send_for_approval', 'close_duplicate', 'clear_duplicate', 'approve'] as const;
 export type ActionKind = (typeof ACTION_KINDS)[number];
 
@@ -55,7 +58,9 @@ export async function buildActionCards(args: {
   /** Bills a tool returned in this answer; a card may only be about one of them. */
   seen: Set<string>;
 }): Promise<ActionCard[]> {
-  const proposals = args.proposals.filter((p) => args.seen.has(p.billId)).slice(0, 6);
+  // Every proposal is judged; only the cards are capped. Capping proposals
+  // first let a model's invalid ones crowd out the valid ones behind them.
+  const proposals = args.proposals.filter((p) => args.seen.has(p.billId)).slice(0, 200);
   if (proposals.length === 0) return [];
   const [board, inbox, access] = await Promise.all([
     getBillsWorkbench(args.organizationId, args.viewerUserId),
@@ -63,6 +68,7 @@ export async function buildActionCards(args: {
     getOrgAccess(args.organizationId, args.viewerUserId),
   ]);
   const isAdmin = access?.isPrimaryOrAdmin ?? false;
+  const canEdit = isAdmin || (access?.capabilities.includes('bills.edit') ?? false);
   const rows = new Map(board.bills.map((b) => [b.paymentOrderId, b]));
   const tasks = new Map((inbox.waitingOnYou as Array<{ paymentOrderId: string; taskId: string; blocked?: boolean }>).map((w) => [w.paymentOrderId, w]));
   const cards: ActionCard[] = [];
@@ -83,7 +89,9 @@ export async function buildActionCards(args: {
       case 'send_for_approval':
         // Only a draft the companion rates ready: anything that needs a look is
         // looked at on the bill.
-        if (row.state === 'draft' && row.companion?.ready) {
+        // And only for someone whose job it is: a viewer or an approver would
+        // be shown a button the server then refuses.
+        if (canEdit && row.state === 'draft' && row.companion?.ready) {
           call = { path: `/bills/${row.paymentOrderId}/confirm-as-read`, body: {} };
           detail = `${usd(row.amountUsd)} · checked and ready, sent exactly as read`;
         }
@@ -110,10 +118,11 @@ export async function buildActionCards(args: {
     }
     if (!call) {
       // Worth seeing: a proposal the model made that the bill does not allow.
-      logger.info('companion_action.dropped', { kind: p.kind, billId: p.billId, state: row.state, ready: row.companion?.ready ?? null, isAdmin });
+      logger.info('companion_action.dropped', { kind: p.kind, billId: p.billId, state: row.state, ready: row.companion?.ready ?? null, isAdmin, canEdit });
       continue;
     }
     once.add(key);
+    if (cards.length >= MAX_CARDS) break;
     cards.push({
       actionId: randomUUID(),
       kind: p.kind,
