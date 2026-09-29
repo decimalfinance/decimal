@@ -3093,6 +3093,17 @@ test('exception agent: a flagged pair shares one brief, and each bill is told it
   // before anyone opened either bill.
   assert.equal(model.runs, 1, 'one investigation for the pair, started at intake');
 
+  // The investigation is written on the newer bill's job, tool by tool.
+  const { invoiceDocumentId } = await prisma.paymentOrder.findUniqueOrThrow({ where: { paymentOrderId: second.billId }, select: { invoiceDocumentId: true } });
+  const job = await get(`/organizations/${orgId}/companion/jobs/${invoiceDocumentId}`, owner.token);
+  const investigation = job.steps.filter((s: { kind: string }) => s.kind.startsWith('investigate'));
+  assert.deepEqual(
+    investigation.map((s: { kind: string }) => s.kind),
+    ['investigate', 'investigate.compare_bills', 'investigate.get_bill'],
+  );
+  assert.equal(investigation[0].text, 'Concluded it is a copy');
+  assert.equal(investigation[1].detail, 'Every figure, line and date agrees.');
+
   const newer = dupFlag(await get(`/organizations/${orgId}/bills/${second.billId}/draft`, owner.token))!;
   assert.equal(newer.blocking, true, 'the brief never softens the gate');
   assert.equal(newer.brief.status, 'ready');
@@ -3232,19 +3243,22 @@ test('duplicate gate: clearing one bill settles the pair, and a later copy is fl
   assert.equal(aRow.duplicateCleared?.reason, 'Two separate orders, confirmed with the vendor.', 'the twin row shows the clearance too');
 });
 
-// ---- the companion's briefing -------------------------------------------------
+// ---- the companion's console ---------------------------------------------------
 
-test('companion: the briefing sorts drafts into ready and needs-you, and says what it learned', async () => {
-  const { orgId, owner } = await makeOrg();
+type Card = { kind: string; paymentOrderId: string | null; reason?: string; outcome?: string; jobId: string | null };
+
+test('companion: the console sorts work into waiting on you and done, and says what it learned', async () => {
+  const { orgId, owner, a2 } = await makeOrg();
   const first = await uploadAndConfirm(orgId, owner.token, { vendor: 'Steady Supply', amount: 300, invoiceNo: 'SS-1' });
 
-  let today = await get(`/organizations/${orgId}/companion/today`, owner.token);
-  assert.equal(today.since, null, 'a first visit has no "since"');
-  assert.equal(today.viewer.canReview, true);
-  const lone = today.needsYou.find((b: { paymentOrderId: string }) => b.paymentOrderId === first.billId);
-  assert.ok(lone, 'a first bill from a vendor needs a person');
+  let board = await get(`/organizations/${orgId}/companion/console`, owner.token);
+  assert.equal(board.since, null, 'a first visit has no "since"');
+  assert.equal(board.viewer.canReview, true);
+  assert.deepEqual(board.running, [], 'nothing is still being read once intake has returned');
+  const lone = board.waiting.find((c: Card) => c.paymentOrderId === first.billId);
+  assert.equal(lone?.kind, 'input', 'a first bill from a vendor needs a person');
   assert.equal(lone.reason, 'First bill from Steady Supply');
-  assert.equal(today.ready.length, 0);
+  assert.ok(lone.jobId, 'the card links to the job behind it');
 
   // A second bill from the vendor, and a category habit learned for it.
   const second = await uploadAndConfirm(orgId, owner.token, { vendor: 'Steady Supply', amount: 310, invoiceNo: 'SS-2' });
@@ -3253,13 +3267,45 @@ test('companion: the briefing sorts drafts into ready and needs-you, and says wh
     data: { organizationId: orgId, counterpartyId: counterpartyId!, accountId: 'Cloud hosting & infrastructure', accountName: 'Cloud hosting & infrastructure', source: 'learned', learnedFromCount: 3 },
   });
 
-  today = await get(`/organizations/${orgId}/companion/today`, owner.token);
-  assert.ok(today.ready.some((b: { paymentOrderId: string }) => b.paymentOrderId === second.billId), 'known vendor, a habit, nothing doubtful: ready');
-  assert.equal(today.arrived.count, 2);
+  board = await get(`/organizations/${orgId}/companion/console`, owner.token);
+  assert.equal(board.waiting.find((c: Card) => c.paymentOrderId === second.billId)?.kind, 'sign_off', 'known vendor, a habit, nothing doubtful: ready to sign off');
+  const learned = board.done.find((c: Card) => c.kind === 'learned');
+  assert.equal(learned?.outcome, 'Learned: Steady Supply goes to Cloud hosting & infrastructure, from 3 bills');
+
+  // Sending a bill on takes it off the sign-off pile. With someone else as the
+  // approver, the owner's part is finished, so it is done for them.
+  const flow = await get(`/organizations/${orgId}/approvals/flow`, owner.token);
+  const byUser = new Map(flow.people.map((p: { user_id: string; id: string }) => [p.user_id, p.id]));
+  await publishLadder(orgId, owner.token, [byUser.get(a2.userId) as string], byUser.get(a2.userId) as string);
+  await second.confirm();
+  board = await get(`/organizations/${orgId}/companion/console`, owner.token);
+  assert.ok(!board.waiting.some((c: Card) => c.paymentOrderId === second.billId), 'nothing left for the owner to do');
+  const doneCard = board.done.find((c: Card) => c.paymentOrderId === second.billId);
+  assert.equal(doneCard?.kind, 'bill', 'so it is done for them');
+  assert.match(doneCard.outcome, /^In approval/);
+
+  // For the approver it is waiting, not done.
+  const theirs = await get(`/organizations/${orgId}/companion/console`, a2.token);
+  assert.equal(theirs.waiting.find((c: Card) => c.paymentOrderId === second.billId)?.kind, 'approval');
+});
+
+test('companion: a job is written down step by step as intake works', async () => {
+  const { orgId, owner } = await makeOrg();
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'Stepwise Ltd', amount: 420, invoiceNo: 'SW-1' });
+  const { invoiceDocumentId } = await prisma.paymentOrder.findUniqueOrThrow({ where: { paymentOrderId: bill.billId }, select: { invoiceDocumentId: true } });
+
+  const job = await get(`/organizations/${orgId}/companion/jobs/${invoiceDocumentId}`, owner.token);
+  assert.equal(job.running, false);
+  assert.deepEqual(job.billIds, [bill.billId]);
   assert.deepEqual(
-    today.learned.map((l: { vendorName: string; category: string; fromBills: number }) => [l.vendorName, l.category, l.fromBills]),
-    [['Steady Supply', 'Cloud hosting & infrastructure', 3]],
+    job.steps.map((s: { kind: string }) => s.kind),
+    ['received', 'open', 'read', 'figures', 'categories', 'vendor', 'checks'],
+    'every stage of intake, in the order it happened',
   );
+  assert.ok(job.steps.every((s: { status: string; finishedAt: string | null }) => s.status !== 'running' && s.finishedAt), 'all finished');
+  const read = job.steps.find((s: { kind: string }) => s.kind === 'read');
+  assert.match(read.text, /^Read a bill from Stepwise Ltd, invoice SW-1, for \$420\.00$/);
+  assert.equal(job.steps.find((s: { kind: string }) => s.kind === 'vendor').text, 'Stepwise Ltd is a new vendor');
 });
 
 test('companion: a refresh keeps the window, and a later visit reports from the last one', async () => {
@@ -3282,11 +3328,15 @@ test('companion: an approver sees what waits on them; an admin sees who is holdi
   const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'Zephyr Analytics', amount: 15000, invoiceNo: 'ZA-9' });
   await bill.confirm();
 
-  const approver = await get(`/organizations/${orgId}/companion/today`, a2.token);
-  assert.ok(approver.waitingOnYou.some((w: { paymentOrderId: string }) => w.paymentOrderId === bill.billId), 'the bill waits on a2');
+  const approver = await get(`/organizations/${orgId}/companion/console`, a2.token);
+  const mine = approver.waiting.find((c: Card) => c.paymentOrderId === bill.billId);
+  assert.equal(mine?.kind, 'approval', 'the bill waits on a2');
+  assert.ok(mine.jobId, 'and the approver can open the work behind it');
+  const job = await get(`/organizations/${orgId}/companion/jobs/${mine.jobId}`, a2.token);
+  assert.ok(job.steps.length > 0);
   assert.deepEqual(approver.holding, [], 'other people\'s queues are for admins');
 
-  const admin = await get(`/organizations/${orgId}/companion/today`, owner.token);
+  const admin = await get(`/organizations/${orgId}/companion/console`, owner.token);
   const a2Row = admin.holding.find((h: { name: string }) => h.name === 'approver-a');
   assert.ok(a2Row, 'the admin sees a2 holding a bill');
   assert.equal(a2Row.openCount, 1);

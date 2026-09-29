@@ -17,7 +17,8 @@ import {
   extractPdfTextLayer, extractImageTextLayer, refineInvoiceSources, stripUnmeasuredSources,
   PROVENANCE_VERSION,
 } from './doc-provenance.js';
-import { suggestOcrCodings } from '../accounting/ocr-coding.js';
+import { suggestOcrCodings, type OcrCoding } from '../accounting/ocr-coding.js';
+import { listWords, plural, recordStep, startStep, type JobRef } from '../companion/steps.js';
 import { INVOICE_IMPORT_REVIEW_NOTE } from '../counterparty-wallets.js';
 
 const NEW_COUNTERPARTY_DRAFT_THRESHOLD_RAW = 1_000n * 10n ** BigInt(USDC_DECIMALS);
@@ -145,6 +146,18 @@ export async function processInvoiceDocument(args: {
   sourceTreasuryWalletId?: string | null;
   intakeChannel?: IntakeChannel | null;
 }) {
+  // Every stage below writes a step, so the console can show the work as it
+  // happens. See companion/steps.ts; recording never throws.
+  const job: JobRef = { organizationId: args.organizationId, invoiceDocumentId: args.invoiceDocumentId };
+  await recordStep(
+    job,
+    'received',
+    'done',
+    args.intakeChannel ? `Received ${args.filename} by email` : `Received ${args.filename}`,
+    args.intakeChannel ? `From ${args.intakeChannel.fromAddress}${args.intakeChannel.subject ? `: "${args.intakeChannel.subject}"` : ''}` : null,
+  );
+  const opening = await startStep(job, 'open', 'Opening the document');
+
   // Render page images once — the draft screen displays these (never a PDF
   // viewer), and extraction reuses the same renders. Best-effort: if rendering
   // fails, extraction falls back to its own render and reports the real error.
@@ -211,8 +224,16 @@ export async function processInvoiceDocument(args: {
   if (!boxPages && prerenderedPages?.length) {
     boxPages = await extractImageTextLayer(prerenderedPages);
   }
+  await opening.done(
+    prerenderedPages?.length ? `Opened ${plural(prerenderedPages.length, 'page')}` : 'Opened the document',
+    textPages
+      ? 'It has a text layer, so I read the words exactly as printed.'
+      : 'It is a scan or a photo, so I read it from the image.',
+  );
 
   const invoiceDocumentId = args.invoiceDocumentId;
+  const reading = await startStep(job, 'read', 'Reading the bill');
+  let unreadable = false;
   let extraction: Awaited<ReturnType<typeof runtime.extractRowsFromDocument>>;
   try {
     extraction = await runtime.extractRowsFromDocument({
@@ -235,7 +256,12 @@ export async function processInvoiceDocument(args: {
     // Only when the DOCUMENT defeated us. A provider being down is not a fact
     // about the invoice, and turning an outage into a queue full of empty
     // drafts somebody has to clean up would be worse than the outage.
-    if (!isDocumentDefeatedUs(error)) throw error;
+    if (!isDocumentDefeatedUs(error)) {
+      await reading.failed('Could not read it: a fault on our side', 'The document is stored. Try the upload again.');
+      throw error;
+    }
+    unreadable = true;
+    await reading.noted('I could not read this document', 'The fields are left empty for a person to type in. Nothing was guessed.');
     const message = error instanceof Error ? error.message : 'Could not read this document.';
     logger.warn('invoice_intake.unreadable_document', {
       organizationId: args.organizationId,
@@ -244,6 +270,7 @@ export async function processInvoiceDocument(args: {
     });
     extraction = { rows: [unreadableRow(args.filename, message)], modelLatencyMs: 0, pageCount: prerenderedPages?.length ?? 1 };
   }
+  if (!unreadable) await reading.done(...describeRead(extraction.rows));
 
   // Exact provenance: re-locate every extracted value among the words actually
   // printed on the page and replace the model's box with the real coordinates.
@@ -290,6 +317,10 @@ export async function processInvoiceDocument(args: {
     });
   }
 
+  if (!unreadable && extraction.rows.length > 0) {
+    await recordStep(job, 'figures', ...describeGrounding(extraction.rows, Boolean(textPages)));
+  }
+
   if (invoiceDocumentId && extraction.pageCount != null) {
     await setInvoiceDocumentPageCount(invoiceDocumentId, extraction.pageCount).catch(() => {});
   }
@@ -300,6 +331,8 @@ export async function processInvoiceDocument(args: {
 
   // OCR-driven coding: map each invoice's "what it's for" to an expense account in the
   // org's chart (no-op when QuickBooks isn't connected). Surfaced later as a candidate.
+  const categorising = await startStep(job, 'categories', 'Working out what each line is for');
+  const categoryOutcomes: Array<[text: string, detail: string | null, noted: boolean]> = [];
   const ocrCodings = await suggestOcrCodings(
     args.organizationId,
     extraction.rows.map((r) => ({
@@ -421,13 +454,19 @@ export async function processInvoiceDocument(args: {
       // What this document arrived carrying. Flags are derived, so nothing
       // records the ones a bill is born with — and a bill that came in broken
       // and was then fixed would show the fix with no trace of the fault.
+      const billJob: JobRef = { ...job, paymentOrderId: paymentOrder.paymentOrderId };
+      const vendorName = counterpartyWallet.counterparty?.displayName ?? row.counterparty;
+      await recordStep(billJob, 'vendor', ...(await describeVendor(args.organizationId, counterpartyWallet, paymentOrder.paymentOrderId, vendorName)));
+      categoryOutcomes.push(await describeCategories(args.organizationId, counterpartyWallet.counterpartyId, vendorName, ocrCodings[index] ?? null));
+
       {
         const { recordOpeningFlags } = await import('./bills.js');
-        await recordOpeningFlags({
+        const flags = await recordOpeningFlags({
           organizationId: args.organizationId,
           paymentOrderId: paymentOrder.paymentOrderId,
           actorUserId: args.actorUserId ?? null,
         });
+        await recordStep(billJob, 'checks', ...describeChecks(flags));
       }
 
       // If this bill looks like a duplicate, the exception agent investigates
@@ -540,8 +579,20 @@ export async function processInvoiceDocument(args: {
     }
   }
 
+  // One categories step per document; a document carrying several bills says
+  // so rather than pretending to be one of them.
+  if (categoryOutcomes.length === 1) {
+    const [text, detail, noted] = categoryOutcomes[0]!;
+    await (noted ? categorising.noted(text, detail) : categorising.done(text, detail));
+  } else if (categoryOutcomes.length > 1) {
+    await categorising.done(`Categorised ${plural(categoryOutcomes.length, 'bill')}`, categoryOutcomes.map(([t]) => t).join('. '));
+  } else {
+    await categorising.failed('No bill came out of this document to categorise');
+  }
+
   if (created.length === 0) {
     const detail = skipped.slice(0, 3).map((row) => `${row.counterparty}: ${row.message}`).join(' | ');
+    await recordStep(job, 'result', 'failed', 'No bill could be made from this document', detail || null);
     logger.warn('invoice_intake.no_orders_created', {
       organizationId: args.organizationId,
       filename: args.filename,
@@ -1156,4 +1207,108 @@ function shortenAddress(address: string) {
 
 function isRecordLike(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+// ─── The companion's sentences for each intake step ─────────────────────────
+// Written once, here, from facts intake already holds. Screens show them as
+// they are.
+
+const FIGURE_WORDS: Record<string, string> = {
+  total: 'total',
+  subtotal: 'subtotal',
+  invoiceNumber: 'invoice number',
+  taxAmount: 'tax',
+  dueDate: 'due date',
+  invoiceDate: 'invoice date',
+};
+
+function money(amount: number, currency: string): string {
+  const usdLike = isUsdLikeCurrency(currency);
+  const n = amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return usdLike ? `$${n}` : `${n} ${currency}`;
+}
+
+function describeRead(rows: ExtractedRow[]): [string, string | null] {
+  if (rows.length === 0) return ['Found nothing payable in this document', null];
+  if (rows.length > 1) {
+    return [`Found ${plural(rows.length, 'bill')} in this document`, rows.map((r) => `${r.counterparty}, ${money(r.amount, r.currency)}`).join('; ')];
+  }
+  const row = rows[0]!;
+  const lines = row.source_invoice?.lineItems?.length ?? 0;
+  return [
+    `Read a bill from ${row.counterparty}${row.reference ? `, invoice ${row.reference}` : ''}, for ${money(row.amount, row.currency)}`,
+    lines > 0 ? `${plural(lines, 'line item')}.` : 'No line items on it.',
+  ];
+}
+
+function describeGrounding(rows: ExtractedRow[], hasTextLayer: boolean): ['done' | 'noted', string, string | null] {
+  if (!hasTextLayer) {
+    return ['noted', 'Could not check the figures against the page', 'A scan has no text to check against, so the figures are as read, not verified.'];
+  }
+  const missing = new Set<string>();
+  for (const row of rows) {
+    const ungrounded = (row.source_invoice as unknown as Record<string, unknown> | null | undefined)?.ungrounded;
+    if (Array.isArray(ungrounded)) for (const key of ungrounded) missing.add(FIGURE_WORDS[String(key)] ?? String(key));
+  }
+  if (missing.size === 0) return ['done', 'Every figure is on the page', 'I found each amount and number printed where the bill says it is.'];
+  return ['noted', `Could not find the ${listWords([...missing])} on the page`, 'Worth a second look before this goes further.'];
+}
+
+async function describeVendor(
+  organizationId: string,
+  wallet: CounterpartyWallet,
+  paymentOrderId: string,
+  vendorName: string,
+): Promise<['done' | 'noted', string, string | null]> {
+  const earlier = await prisma.paymentOrder.count({
+    where: {
+      organizationId,
+      paymentOrderId: { not: paymentOrderId },
+      ...(wallet.counterpartyId ? { counterpartyId: wallet.counterpartyId } : { counterpartyWalletId: wallet.counterpartyWalletId }),
+    },
+  }).catch(() => 0);
+  return earlier > 0
+    ? ['done', `Recognised ${vendorName}`, `${plural(earlier, 'earlier bill')} from them.`]
+    : ['noted', `${vendorName} is a new vendor`, 'This is their first bill, so there is nothing to compare it with yet.'];
+}
+
+async function describeCategories(
+  organizationId: string,
+  counterpartyId: string | null,
+  vendorName: string,
+  coding: OcrCoding | null,
+): Promise<[string, string | null, boolean]> {
+  const rule = counterpartyId
+    ? await prisma.vendorCodingRule.findFirst({ where: { organizationId, counterpartyId } }).catch(() => null)
+    : null;
+  if (rule) {
+    return [
+      `Coded to ${rule.accountName ?? rule.accountId}`,
+      rule.source === 'learned'
+        ? `The habit I learned for ${vendorName}, from ${plural(rule.learnedFromCount, 'bill')} your team coded that way.`
+        : `The category your team set for ${vendorName}.`,
+      false,
+    ];
+  }
+  const lineAccounts = [...new Set((coding?.lines ?? []).map((l) => l.accountName))];
+  if (lineAccounts.length > 0) {
+    return [
+      `Suggested ${lineAccounts.length === 1 ? lineAccounts[0] : `${lineAccounts.length} categories`} from what the lines are for`,
+      `${lineAccounts.length > 1 ? `${listWords(lineAccounts)}. ` : ''}No habit for ${vendorName} yet, so these are suggestions for you to check.`,
+      true,
+    ];
+  }
+  const top = coding?.suggestions[0];
+  if (top) return [`Suggested ${top.accountName}`, `From what the bill says it is for. No habit for ${vendorName} yet.`, true];
+  return ['Could not suggest a category', 'Nothing on the bill says what it is for.', true];
+}
+
+function describeChecks(flags: Array<{ blocking: boolean; severity: string; short: string }>): ['done' | 'noted', string, string | null] {
+  const worth = flags.filter((f) => f.blocking || f.severity !== 'info');
+  if (worth.length === 0) return ['done', 'Ran the checks: nothing to flag', 'Duplicates, arithmetic, your bill ceiling and vendor holds.'];
+  return [
+    'noted',
+    `Flagged ${plural(worth.length, 'thing')}`,
+    worth.map((f) => `${f.short}${f.blocking ? ' (holds the bill)' : ''}`).join('. '),
+  ];
 }

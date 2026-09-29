@@ -14,6 +14,7 @@ import { trackBackgroundWork } from '../infra/background.js';
 import { logger } from '../infra/logger.js';
 import { describeDuplicate, findDuplicateBills, readDuplicateOverride, settleDuplicates, type DuplicateMatch } from '../payments/duplicate-check.js';
 import { logSuggestion, logSuggestionOutcome } from '../payments/suggestion-log.js';
+import { startStep, type JobRef } from '../companion/steps.js';
 import { isExceptionAgentConfigured } from './agent.js';
 import { investigateDuplicatePair, DUPLICATE_PRODUCER } from './duplicate.js';
 import {
@@ -154,6 +155,14 @@ async function claimRun(args: { organizationId: string; key: string; firstId: st
   return rows[0]?.brief_id ?? null;
 }
 
+/** How a verdict reads as the investigation's last step. */
+const VERDICT_WORDS: Record<string, string> = {
+  duplicate: 'Concluded it is a copy',
+  replacement: 'Concluded one bill corrects the other',
+  not_duplicate: 'Concluded they are different bills',
+  unsure: 'Could not settle it, so a person should decide',
+};
+
 async function runInvestigation(args: {
   briefId: string; organizationId: string; key: string; fingerprint: string;
   thisId: string; otherId: string; match: DuplicateMatch;
@@ -163,6 +172,21 @@ async function runInvestigation(args: {
       where: { briefId: args.briefId, fingerprint: args.fingerprint },
       data: { status: 'failed', error: error.slice(0, 500), leaseUntil: null, updatedAt: new Date(), ...metrics },
     });
+  // The investigation is written as steps on the job of the bill it started
+  // from, so whoever watches that bill sees the agent at work.
+  const bills = await prisma.paymentOrder.findMany({
+    where: { organizationId: args.organizationId, paymentOrderId: { in: [args.thisId, args.otherId] } },
+    select: { paymentOrderId: true, invoiceDocumentId: true, invoiceNumber: true },
+  }).catch(() => []);
+  const thisBill = bills.find((b) => b.paymentOrderId === args.thisId);
+  const otherBill = bills.find((b) => b.paymentOrderId === args.otherId);
+  const job: JobRef = { organizationId: args.organizationId, invoiceDocumentId: thisBill?.invoiceDocumentId ?? null, paymentOrderId: args.thisId };
+  const step = await startStep(
+    job,
+    'investigate',
+    `Investigating a possible copy of ${otherBill?.invoiceNumber ? `bill ${otherBill.invoiceNumber}` : 'another bill'}`,
+    describeDuplicate(args.match),
+  );
   try {
     const inv = await investigateDuplicatePair({
       organizationId: args.organizationId,
@@ -170,15 +194,18 @@ async function runInvestigation(args: {
       otherId: args.otherId,
       matchKind: args.match.matchKind,
       fallbackHeadline: describeDuplicate(args.match),
+      job,
     });
     const metrics = {
       model: inv.run.model, latencyMs: inv.run.latencyMs, turns: inv.run.turns,
       promptTokens: inv.run.promptTokens, completionTokens: inv.run.completionTokens,
     };
     if (!inv.run.ok || !inv.finding) {
+      await step.failed('Could not finish the investigation', 'The flag stays for a person to decide, as it would without me.');
       await fail(inv.run.ok ? 'no finding' : inv.run.error, metrics);
       return;
     }
+    await step.done(VERDICT_WORDS[inv.finding.verdict], inv.finding.headline);
     const f = inv.finding;
     const suggestionId = await logSuggestion({
       organizationId: args.organizationId,
@@ -222,6 +249,7 @@ async function runInvestigation(args: {
     });
   } catch (error) {
     logger.warn('exception_agent.run_failed', { briefId: args.briefId, ...(error instanceof Error ? { message: error.message } : {}) });
+    await step.failed('Could not finish the investigation', 'The flag stays for a person to decide, as it would without me.');
     await fail(error instanceof Error ? error.message : 'the investigation failed').catch(() => {});
   }
 }

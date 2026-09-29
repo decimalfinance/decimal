@@ -1024,3 +1024,19 @@ model CompanionView {
   @@id([organizationId, userId])
   @@map("companion_views")
 }
+
+model CompanionStep {
+  stepId            String    @id @default(dbgenerated("gen_random_uuid()")) @map("step_id") @db.Uuid
+  organizationId    String    @map("organization_id") @db.Uuid
+  invoiceDocumentId String    @map("invoice_document_id") @db.Uuid
+  paymentOrderId    String?   @map("payment_order_id") @db.Uuid
+  kind              String
+  status            String    @default("running")
+  text              String
+  detail            String?
+  startedAt         DateTime  @default(dbgenerated("clock_timestamp()")) @map("started_at") @db.Timestamptz(6)
+  finishedAt        DateTime? @map("finished_at") @db.Timestamptz(6)
+
+  @@index([invoiceDocumentId, startedAt], map: "companion_steps_job_idx")
+  @@map("companion_steps")
+}

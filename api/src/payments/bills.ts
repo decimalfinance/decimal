@@ -665,21 +665,24 @@ export async function recordOpeningFlags(args: {
   organizationId: string;
   paymentOrderId: string;
   actorUserId: string | null;
-}) {
+}): Promise<BillFlag[]> {
   try {
+    const flags = await flagsForOrder(args.organizationId, args.paymentOrderId);
     await recordFlagChanges({
       organizationId: args.organizationId,
       paymentOrderId: args.paymentOrderId,
       actorUserId: args.actorUserId,
       before: [],
-      after: await flagsForOrder(args.organizationId, args.paymentOrderId),
+      after: flags,
       state: 'draft',
     });
+    return flags;
   } catch (error) {
     logger.warn('bill_opening_flags.failed', {
       paymentOrderId: args.paymentOrderId,
       ...(error instanceof Error ? { message: error.message } : {}),
     });
+    return [];
   }
 }
 

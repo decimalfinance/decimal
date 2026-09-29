@@ -6,6 +6,7 @@
 // is decided in code (`recommendationFor`), and the person confirms.
 import { prisma } from '../infra/prisma.js';
 import { extractPdfLayoutText } from '../payments/doc-provenance.js';
+import { plural, startStep, type JobRef } from '../companion/steps.js';
 import { runAgent, type AgentRun, type AgentTool } from './agent.js';
 import {
   billFactsFrom, compareBills, validateFinding, VERDICTS,
@@ -121,6 +122,8 @@ export async function investigateDuplicatePair(args: {
   otherId: string;
   matchKind: 'same_invoice_number' | 'same_amount_near_date';
   fallbackHeadline: string;
+  /** When set, each thing the agent looks at is written as a step on this job. */
+  job?: JobRef;
 }): Promise<DuplicateInvestigation> {
   const [thisOrder, otherOrder] = await Promise.all([
     loadBill(args.organizationId, args.thisId),
@@ -223,6 +226,8 @@ export async function investigateDuplicatePair(args: {
     },
   ];
 
+  if (args.job) traceTools(tools, args.job, facts, comparison);
+
   const why = args.matchKind === 'same_invoice_number'
     ? 'they share an invoice number'
     : 'they are for exactly the same amount and were uploaded within 14 days of each other, and at least one has no invoice number';
@@ -235,4 +240,87 @@ export async function investigateDuplicatePair(args: {
     ? validateFinding(run.terminal.args, seen, comparison, args.fallbackHeadline)
     : null;
   return { run, finding, comparison, facts };
+}
+
+// ─── The investigation, step by step ────────────────────────────────────────
+// Each tool call becomes a step on the bill's job, so a person watching sees
+// the agent read both bills, compare them, and check the vendor's history,
+// in the order it chose to.
+
+const LOOKING: Record<string, string> = {
+  get_bill: 'Reading a bill',
+  compare_bills: 'Comparing the two bills',
+  vendor_history: "Looking through the vendor's earlier bills",
+  read_document: 'Reading the document text',
+};
+
+const DIFFERENCE_WORDS: Record<BillComparison['totalDifferenceExplainedBy'], string> = {
+  no_difference: 'The totals agree.',
+  tax: 'The totals differ, and the tax accounts for all of it.',
+  subtotal: 'The totals differ, and the subtotal accounts for all of it.',
+  lines: 'The totals differ, and the lines account for all of it.',
+  unexplained: 'The totals differ, and nothing on the bills explains why.',
+};
+
+function money(n: number | null, currency: string): string {
+  if (n == null) return 'no total';
+  const s = n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return currency.toUpperCase() === 'USD' || currency.toUpperCase() === 'USDC' ? `$${s}` : `${s} ${currency}`;
+}
+
+function describeToolCall(
+  name: string,
+  args: Record<string, unknown>,
+  output: unknown,
+  facts: Record<Which, BillFacts>,
+  comparison: BillComparison,
+): [string, string | null] {
+  const which: Which = args.which === 'other' ? 'other' : 'this';
+  const out = (output ?? {}) as Record<string, unknown>;
+  switch (name) {
+    case 'get_bill': {
+      const f = facts[which];
+      return [
+        which === 'this' ? `Read this bill, ${f.invoiceNumber ?? 'no number'}` : `Read the other bill, ${f.invoiceNumber ?? 'no number'}`,
+        `${money(f.total, f.currency)}, ${plural(f.lines.length, 'line')}, uploaded ${f.uploadedAt.slice(0, 10)}.`,
+      ];
+    }
+    case 'compare_bills':
+      return [
+        'Compared the two bills line by line',
+        comparison.identical ? 'Every figure, line and date agrees.' : DIFFERENCE_WORDS[comparison.totalDifferenceExplainedBy],
+      ];
+    case 'vendor_history': {
+      const n = Array.isArray(out.bills) ? out.bills.length : 0;
+      return [
+        `Looked through ${plural(n, 'earlier bill')} from ${facts.this.vendorName ?? 'the vendor'}`,
+        n === 0 ? 'There are none besides these two.' : 'To tell a recurring charge from a repeated one.',
+      ];
+    }
+    case 'read_document':
+      return [
+        `Read the text of ${which === 'this' ? 'this' : 'the other'} document`,
+        out.textLayer === false ? 'It is a scan, so there was no text to read.' : 'Looking for notes like "corrected" or "replaces".',
+      ];
+    default:
+      return [LOOKING[name] ?? name, null];
+  }
+}
+
+function traceTools(tools: AgentTool[], job: JobRef, facts: Record<Which, BillFacts>, comparison: BillComparison): void {
+  for (const tool of tools) {
+    const run = tool.run;
+    if (tool.terminal || !run) continue;
+    tool.run = async (a) => {
+      const step = await startStep(job, `investigate.${tool.name}`, LOOKING[tool.name] ?? tool.name);
+      try {
+        const output = await run(a);
+        await step.done(...describeToolCall(tool.name, a, output, facts, comparison));
+        return output;
+      } catch (error) {
+        await step.failed(`${LOOKING[tool.name] ?? tool.name} failed`);
+        throw error;
+      }
+    };
+  }
 }
