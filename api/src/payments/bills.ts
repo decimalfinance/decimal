@@ -24,6 +24,7 @@ import {
   recordVendorAlias, recordVendorsDiffer,
 } from './vendor-similarity.js';
 import { findDuplicateBills, readDuplicateOverride, describeDuplicate, matchDuplicates, settleDuplicates, settleDuplicatesWith } from './duplicate-check.js';
+import { companionReadiness } from '../companion/readiness.js';
 import { readCeilingException, activeCeilingException } from './ceiling-exception.js';
 import { readPayableHold, describePayableHold } from './vendor-payable.js';
 import { evaluateBillFlags, summarizeBillFlags, displayOrgName } from './bill-flags.js';
@@ -1085,6 +1086,12 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
     uploadedByName: d.uploadedByUser?.displayName ?? null,
   }));
 
+  // Which vendors have a coding habit, learned or set: their categories are
+  // not a guess. Once for the board, for the companion's readiness.
+  const vendorsWithCodingRule = new Set(
+    (await prisma.vendorCodingRule.findMany({ where: { organizationId }, select: { counterpartyId: true } }))
+      .map((r) => r.counterpartyId),
+  );
   const bills = orders.map((order) => {
     const invoice = engine.invoiceByOrder.get(order.paymentOrderId);
     const release = invoice ? engine.releaseBySource.get(invoice.id) : undefined;
@@ -1203,6 +1210,19 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
       subStatus,
       readiness,
       missing,
+      // The companion's stricter verdict: ready means nothing about this bill
+      // calls for judgement. Null once the bill has left draft.
+      companion: companionReadiness({
+        state: order.state,
+        vendorName,
+        flags,
+        missing,
+        priorBillsFromVendor: priorBillsIn(vendorDirectory, order.counterpartyId),
+        hasCodingRule: order.counterpartyId ? vendorsWithCodingRule.has(order.counterpartyId) : false,
+        fieldStatus: isRecord(extracted?.fieldStatus) ? extracted!.fieldStatus : null,
+        ungrounded: Array.isArray(extracted?.ungrounded) ? (extracted!.ungrounded as unknown[]).filter((x): x is string => typeof x === 'string') : [],
+        confirmedByPerson: isRecord(metadataRecord.verification) && Boolean(metadataRecord.verification.confirmedAt),
+      }),
       // A cleared duplicate flag must stay VISIBLE on the row — the operator
       // scanning To-pay is the last human checkpoint (testbench 001 §5).
       // Settled on either bill of the pair: the twin of a cleared bill shows it too.
