@@ -114,6 +114,8 @@ export async function runAgent(args: {
   tools: AgentTool[];
   maxTurns?: number;
   timeoutMs?: number;
+  /** Earlier turns of a conversation, placed between the system prompt and `user`. */
+  history?: ChatMessage[];
 }): Promise<AgentRun> {
   const model = exceptionAgentModel();
   const maxTurns = args.maxTurns ?? 6;
@@ -122,6 +124,7 @@ export async function runAgent(args: {
   const byName = new Map(args.tools.map((t) => [t.name, t]));
   const messages: ChatMessage[] = [
     { role: 'system', content: args.system },
+    ...(args.history ?? []),
     { role: 'user', content: args.user },
   ];
   let promptTokens = 0;

@@ -1040,3 +1040,33 @@ model CompanionStep {
   @@index([invoiceDocumentId, startedAt], map: "companion_steps_job_idx")
   @@map("companion_steps")
 }
+
+model CompanionChat {
+  chatId         String             @id @default(dbgenerated("gen_random_uuid()")) @map("chat_id") @db.Uuid
+  organizationId String             @map("organization_id") @db.Uuid
+  userId         String             @map("user_id") @db.Uuid
+  title          String
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime           @default(now()) @map("updated_at") @db.Timestamptz(6)
+  messages       CompanionMessage[]
+
+  @@index([organizationId, userId, updatedAt(sort: Desc)], map: "companion_chats_owner_idx")
+  @@map("companion_chats")
+}
+
+model CompanionMessage {
+  messageId String        @id @default(dbgenerated("gen_random_uuid()")) @map("message_id") @db.Uuid
+  chatId    String        @map("chat_id") @db.Uuid
+  role      String
+  status    String        @default("done")
+  text      String        @default("")
+  thoughts  Json          @default("[]")
+  blocks    Json          @default("{}")
+  model     String?
+  latencyMs Int?          @map("latency_ms")
+  createdAt DateTime      @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz(6)
+  chat      CompanionChat @relation(fields: [chatId], references: [chatId], onDelete: Cascade)
+
+  @@index([chatId, createdAt], map: "companion_messages_chat_idx")
+  @@map("companion_messages")
+}

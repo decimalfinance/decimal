@@ -3341,3 +3341,81 @@ test('companion: an approver sees what waits on them; an admin sees who is holdi
   assert.ok(a2Row, 'the admin sees a2 holding a bill');
   assert.equal(a2Row.openCount, 1);
 });
+
+// ---- chatting with the companion ---------------------------------------------
+
+/** A model that searches in one turn and answers in the next. Records what it was sent. */
+function scriptedChat(answer: { billIds: (seen: string[]) => string[] }) {
+  const seenMessages: ChatMessage[][] = [];
+  let n = 0;
+  const id = () => `chat_${++n}`;
+  setExceptionAgentRuntimeForTests({
+    isConfigured: () => true,
+    callModel: async ({ messages }: { messages: ChatMessage[] }) => {
+      seenMessages.push(messages);
+      const usage = { promptTokens: 10, completionTokens: 5 };
+      const lastUser = messages.map((m) => m.role).lastIndexOf('user');
+      const toolResults = messages.slice(lastUser).filter((m) => m.role === 'tool');
+      if (toolResults.length === 0) {
+        return { usage, message: { role: 'assistant' as const, content: null, tool_calls: [
+          { id: id(), type: 'function' as const, function: { name: 'find_bills', arguments: JSON.stringify({ vendor: 'Chatty' }) } },
+        ] } };
+      }
+      const found = JSON.parse(toolResults[0]!.content as string) as { bills: Array<{ billId: string }> };
+      return { usage, message: { role: 'assistant' as const, content: null, tool_calls: [
+        { id: id(), type: 'function' as const, function: { name: 'respond', arguments: JSON.stringify({
+          message: `You have **${found.bills.length}** bill from Chatty Supplies.`,
+          tables: [{ title: 'Bills', columns: ['Invoice', 'Amount'], rows: [['CS-1', '$250.00']] }],
+          billIds: answer.billIds(found.bills.map((b) => b.billId)),
+        }) } },
+      ] } };
+    },
+  });
+  return { seenMessages };
+}
+
+test('companion chat: a question is answered from tools, with the thoughts and only real bills', async () => {
+  const model = scriptedChat({ billIds: (seen) => [...seen, '00000000-0000-0000-0000-000000000000'] });
+  const { orgId, owner, a2 } = await makeOrg();
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'Chatty Supplies', amount: 250, invoiceNo: 'CS-1' });
+
+  const { chatId } = await post(`/organizations/${orgId}/companion/chats`, { text: 'What do I owe Chatty Supplies?' }, owner.token);
+  await drainAsyncIntake();
+
+  const chat = await get(`/organizations/${orgId}/companion/chats/${chatId}`, owner.token);
+  assert.equal(chat.title, 'What do I owe Chatty Supplies?');
+  assert.equal(chat.running, false);
+  assert.deepEqual(chat.messages.map((m: { role: string }) => m.role), ['user', 'assistant']);
+  const answer = chat.messages[1];
+  assert.equal(answer.status, 'done');
+  assert.equal(answer.text, 'You have **1** bill from Chatty Supplies.');
+  assert.equal(answer.thoughts[0].text, 'Searched bills from Chatty');
+  assert.equal(answer.thoughts[0].detail, 'Found 1 bill, $250.00 in total.');
+  assert.deepEqual(answer.billIds, [bill.billId], 'a bill the tools never returned is dropped');
+  assert.equal(chat.bills[bill.billId].vendorName, 'Chatty Supplies');
+  assert.equal(answer.tables[0].rows[0][1], '$250.00');
+
+  // A follow-up carries the conversation so far.
+  await post(`/organizations/${orgId}/companion/chats/${chatId}/messages`, { text: 'And last month?' }, owner.token);
+  await drainAsyncIntake();
+  const followUpCall = model.seenMessages.find((ms) => ms.some((m) => m.content === 'And last month?'))!;
+  assert.ok(followUpCall.some((m) => m.role === 'user' && m.content === 'What do I owe Chatty Supplies?'), 'the earlier question is in the history');
+  assert.ok(followUpCall.some((m) => m.role === 'assistant' && m.content === 'You have **1** bill from Chatty Supplies.'), 'and the earlier answer');
+
+  // Chats are their owner's alone.
+  const list = await get(`/organizations/${orgId}/companion/chats`, owner.token);
+  assert.equal(list.chats[0].chatId, chatId);
+  assert.deepEqual((await get(`/organizations/${orgId}/companion/chats`, a2.token)).chats, []);
+  const peek = await fetch(`${baseUrl}/organizations/${orgId}/companion/chats/${chatId}`, { headers: { authorization: `Bearer ${a2.token}` } });
+  assert.equal(peek.status, 404);
+});
+
+test('companion chat: with no model, the answer says so instead of hanging', async () => {
+  setExceptionAgentRuntimeForTests({ isConfigured: () => false });
+  const { orgId, owner } = await makeOrg();
+  const { chatId } = await post(`/organizations/${orgId}/companion/chats`, { text: 'Anything waiting?' }, owner.token);
+  await drainAsyncIntake();
+  const chat = await get(`/organizations/${orgId}/companion/chats/${chatId}`, owner.token);
+  assert.equal(chat.messages[1].status, 'failed');
+  assert.match(chat.messages[1].text, /no AI model/);
+});

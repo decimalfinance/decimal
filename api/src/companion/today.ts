@@ -46,6 +46,12 @@ export async function openVisit(organizationId: string, userId: string, now = ne
   return row.previousSeenAt;
 }
 
+/** The window a visit would report from, without starting or extending one. */
+async function peekVisit(organizationId: string, userId: string): Promise<Date | null> {
+  const row = await prisma.companionView.findUnique({ where: { organizationId_userId: { organizationId, userId } } });
+  return row?.previousSeenAt ?? null;
+}
+
 export type RunningCard = {
   jobId: string;
   title: string;
@@ -80,10 +86,16 @@ export type DoneCard = {
   at: string;
 };
 
-export async function getCompanionConsole(organizationId: string, viewerUserId: string, now = new Date()) {
+export async function getCompanionConsole(
+  organizationId: string,
+  viewerUserId: string,
+  now = new Date(),
+  /** False when the companion reads the console for a chat: that is not the person looking. */
+  opts: { recordVisit?: boolean } = {},
+) {
   const [access, since, viewer] = await Promise.all([
     getOrgAccess(organizationId, viewerUserId),
-    openVisit(organizationId, viewerUserId, now),
+    opts.recordVisit === false ? peekVisit(organizationId, viewerUserId) : openVisit(organizationId, viewerUserId, now),
     prisma.user.findUnique({ where: { userId: viewerUserId }, select: { displayName: true } }),
     closeAbandonedSteps(organizationId),
   ]);
