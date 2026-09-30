@@ -15,6 +15,7 @@ import { getMembersAndRoles } from '../approvals/roles.js';
 import { involvedBillIds } from '../payments/bill-visibility.js';
 import { classifyAsk } from './ask-classifier.js';
 import { getInbox } from './inbox.js';
+import { resolveCategory } from './knowledge.js';
 import { prisma } from '../infra/prisma.js';
 
 /** Cards in one answer: enough to tidy a batch, few enough to read. */
@@ -108,8 +109,8 @@ export async function buildActionCards(args: {
     switch (p.kind) {
       case 'save_habit':
       case 'forget_habit': {
-        // Habits are admins' to set and forget, as on the Vendors page.
-        if (!isAdmin) break;
+        // Habits belong to whoever codes bills: bill clerks and admins.
+        if (!canEdit) break;
         const vendor = await prisma.paymentOrder.findUnique({ where: { paymentOrderId: row.paymentOrderId }, select: { counterpartyId: true } });
         if (!vendor?.counterpartyId) break;
         const current = await prisma.vendorCodingRule.findFirst({ where: { organizationId: args.organizationId, counterpartyId: vendor.counterpartyId } });
@@ -119,7 +120,7 @@ export async function buildActionCards(args: {
           if (!current) break;
           title = `Forget: ${row.vendorName} goes to ${current.accountName ?? current.accountId}`;
           detail = 'New bills from this vendor stop being pre-filled; drafts nobody saved are re-coded; confirmed bills keep what was confirmed.';
-          call = { method: 'DELETE', path: `/counterparties/${vendor.counterpartyId}/coding-rule`, body: {} };
+          call = { method: 'DELETE', path: `/knowledge/habits/${vendor.counterpartyId}`, body: {} };
         } else {
           const account = await resolveCategory(args.organizationId, p.category ?? '');
           if (!account) break;
@@ -128,7 +129,7 @@ export async function buildActionCards(args: {
           detail = current
             ? `Replaces ${current.accountName ?? current.accountId}. New bills from this vendor are pre-filled with it.`
             : 'New bills from this vendor are pre-filled with it.';
-          call = { method: 'PUT', path: `/counterparties/${vendor.counterpartyId}/coding-rule`, body: { accountId: account.id, accountName: account.name } };
+          call = { method: 'PUT', path: '/knowledge/habits', body: { counterpartyId: vendor.counterpartyId, category: account.name } };
         }
         break;
       }
@@ -235,19 +236,4 @@ async function resolvePerson(organizationId: string, query: string): Promise<{ u
   const email = members.filter((m) => m.email.toLowerCase() === q || m.email.toLowerCase().split('@')[0] === q);
   if (email.length === 1) return { userId: email[0]!.userId, name: email[0]!.name };
   return null;
-}
-
-/** A category name, matched to the chart the picker offers (QuickBooks when connected, else the standard list). */
-async function resolveCategory(organizationId: string, name: string): Promise<{ id: string; name: string } | null> {
-  const q = name.trim().toLowerCase();
-  if (!q) return null;
-  const { listChartOfAccounts } = await import('../accounting/ocr-coding.js');
-  const { DEFAULT_EXPENSE_ACCOUNTS } = await import('../accounting/default-chart.js');
-  const chart = await listChartOfAccounts(organizationId).catch(() => []);
-  if (chart.length > 0) {
-    const a = chart.find((x) => (x.fullyQualifiedName ?? x.name).toLowerCase() === q || x.name.toLowerCase() === q);
-    return a ? { id: a.id, name: a.fullyQualifiedName ?? a.name } : null;
-  }
-  const a = DEFAULT_EXPENSE_ACCOUNTS.find((x) => x.name.toLowerCase() === q);
-  return a ? { id: a.id, name: a.name } : null;
 }

@@ -1,5 +1,6 @@
-// Learning you can see: a habit names who taught it, is announced to the
-// admins once, can be kept or forgotten, and a forget sticks.
+// Learning you can see: a habit names who taught it, is announced once to
+// whoever codes bills — the bill clerks whose job it is, and admins — can be
+// kept, forgotten or taught by hand by any of them, and a forget sticks.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { prisma } from '../src/infra/prisma.js';
@@ -25,7 +26,7 @@ const habitItems = async (w: World, token: string) =>
   ((await get(`/organizations/${w.orgId}/inbox`, token)).items as Array<{ key: string; habit?: { ruleId: string } | null; lines: Array<{ kind: string; text: string }> }>)
     .filter((i) => i.habit);
 
-test('learning: three bills a clerk confirmed make a habit that names her, announced to the admins once', async () => {
+test('learning: three bills a clerk confirmed make a habit that names her, announced to whoever codes bills once', async () => {
   const w = await makeWorld();
   for (const n of [1, 2, 3]) await teach(w, w.clerk, 'Brightwave Media', `BW-${n}`, 'Advertising & marketing');
   const rule = await ruleFor(w.orgId, 'Brightwave Media');
@@ -33,20 +34,25 @@ test('learning: three bills a clerk confirmed make a habit that names her, annou
   assert.equal(rule!.accountName, 'Advertising & marketing');
   assert.deepEqual(rule!.taughtBy, [w.clerk.userId], 'taught by the clerk who confirmed them');
 
-  const ownerHabits = await habitItems(w, w.owner.token);
-  const item = ownerHabits.find((i) => i.habit!.ruleId === rule!.vendorCodingRuleId);
-  assert.ok(item, 'the admin hears about it');
+  const clerkHabits = await habitItems(w, w.clerk.token);
+  const item = clerkHabits.find((i) => i.habit!.ruleId === rule!.vendorCodingRuleId);
+  assert.ok(item, 'the clerk, whose job coding is, hears about it');
   assert.equal(item!.lines[0]!.kind, 'learned');
   assert.equal(item!.lines[0]!.text, 'I learned: Brightwave Media goes to Advertising & marketing, from 3 bills Clara Clerk coded that way. I\'ll pre-fill it on new Brightwave Media bills.');
-  assert.deepEqual(await habitItems(w, w.clerk.token), [], 'a clerk is not asked to keep it: keeping is an admin\'s call');
+  assert.ok((await habitItems(w, w.owner.token)).some((i) => i.key === item!.key), 'an admin, who can code too, also sees it');
+  assert.deepEqual(await habitItems(w, w.apprA.token), [], 'an approver does not: coding is not their job');
+  assert.deepEqual(await habitItems(w, w.viewer.token), [], 'nor a viewer');
 
-  // Anyone may see what it knows; only an admin may keep it.
+  // Anyone may see what it knows; only someone who codes bills may keep it.
   const k = await get(`/organizations/${w.orgId}/knowledge`, w.viewer.token);
   const habit = k.habits.find((h: { ruleId: string }) => h.ruleId === rule!.vendorCodingRuleId);
-  assert.deepEqual([habit.taughtBy, habit.fromBills, habit.acknowledged, k.canManage], [['Clara Clerk'], 3, false, false]);
-  assert.equal((await raw('POST', `/organizations/${w.orgId}/knowledge/${rule!.vendorCodingRuleId}/keep`, w.clerk.token, {})).status, 403);
-  await post(`/organizations/${w.orgId}/knowledge/${rule!.vendorCodingRuleId}/keep`, {}, w.owner.token);
-  assert.equal((await habitItems(w, w.owner.token)).some((i) => i.habit!.ruleId === rule!.vendorCodingRuleId), false, 'kept: no longer news');
+  assert.deepEqual([habit.taughtBy, habit.fromBills, habit.acknowledged, k.canManage, k.choices], [['Clara Clerk'], 3, false, false, null]);
+  assert.equal((await get(`/organizations/${w.orgId}/knowledge`, w.clerk.token)).canManage, true);
+  assert.equal((await raw('POST', `/organizations/${w.orgId}/knowledge/${rule!.vendorCodingRuleId}/keep`, w.apprA.token, {})).status, 403);
+  assert.equal((await raw('POST', `/organizations/${w.orgId}/knowledge/${rule!.vendorCodingRuleId}/keep`, w.viewer.token, {})).status, 403);
+  await post(`/organizations/${w.orgId}/knowledge/${rule!.vendorCodingRuleId}/keep`, {}, w.clerk.token);
+  assert.equal((await habitItems(w, w.clerk.token)).some((i) => i.habit!.ruleId === rule!.vendorCodingRuleId), false, 'kept: no longer news');
+  assert.equal((await habitItems(w, w.owner.token)).some((i) => i.habit!.ruleId === rule!.vendorCodingRuleId), false, 'kept by one, gone for all');
 
   // Growing more certain is not news; changing is.
   await teach(w, w.clerk, 'Brightwave Media', 'BW-4', 'Advertising & marketing');
@@ -69,13 +75,13 @@ test('learning: forgetting stops a habit at once, un-prefills drafts nobody save
   assert.equal(before.lines[0].category, 'Advertising & marketing');
 
   const { counterpartyId } = (await ruleFor(w.orgId, 'Brightwave Media'))!;
-  assert.equal((await raw('DELETE', `/organizations/${w.orgId}/counterparties/${counterpartyId}/coding-rule`, w.clerk.token)).status, 403, 'a clerk cannot forget it');
-  await raw('DELETE', `/organizations/${w.orgId}/counterparties/${counterpartyId}/coding-rule`, w.owner.token);
+  assert.equal((await raw('DELETE', `/organizations/${w.orgId}/knowledge/habits/${counterpartyId}`, w.apprA.token)).status, 403, 'an approver cannot forget it');
+  assert.ok((await raw('DELETE', `/organizations/${w.orgId}/knowledge/habits/${counterpartyId}`, w.clerk.token)).status < 400, 'the clerk can');
   assert.equal(await ruleFor(w.orgId, 'Brightwave Media'), null, 'forgotten at once');
   const after = await get(`/organizations/${w.orgId}/bills/${draft}/draft`, w.owner.token);
   assert.notEqual(after.codingSuggestionSource?.kind, 'rule', 'the draft nobody saved is no longer pre-filled from it');
   const k = await get(`/organizations/${w.orgId}/knowledge`, w.owner.token);
-  assert.deepEqual(k.forgotten.map((f: { vendorName: string; category: string; by: string }) => [f.vendorName, f.category, f.by]), [['Brightwave Media', 'Advertising & marketing', w.owner.name.trim()]]);
+  assert.deepEqual(k.forgotten.map((f: { vendorName: string; category: string; by: string }) => [f.vendorName, f.category, f.by]), [['Brightwave Media', 'Advertising & marketing', 'Clara Clerk']]);
   const confirmedEarlier = await prisma.paymentOrderGlCoding.count({ where: { organizationId: w.orgId, codedExpenseAccountName: 'Advertising & marketing' } });
   assert.equal(confirmedEarlier, 3, 'confirmed bills keep what was confirmed');
 
@@ -90,23 +96,30 @@ test('learning: forgetting stops a habit at once, un-prefills drafts nobody save
   assert.equal(await prisma.forgottenHabit.count({ where: { organizationId: w.orgId } }), 0);
 });
 
-test('learning: a habit a person sets needs no announcement, and lifts a forget', async () => {
+test('learning: a clerk can teach a habit by hand; it needs no announcement, and lifts a forget', async () => {
   const w = await makeWorld();
   for (const n of [1, 2, 3]) await teach(w, w.clerk, 'Brightwave Media', `BW-${n}`, 'Advertising & marketing');
   const { counterpartyId } = (await ruleFor(w.orgId, 'Brightwave Media'))!;
-  await raw('DELETE', `/organizations/${w.orgId}/counterparties/${counterpartyId}/coding-rule`, w.owner.token);
-  const set = await raw('PUT', `/organizations/${w.orgId}/counterparties/${counterpartyId}/coding-rule`, w.owner.token, { accountId: 'builtin:travel', accountName: 'Travel' });
+  await raw('DELETE', `/organizations/${w.orgId}/knowledge/habits/${counterpartyId}`, w.clerk.token);
+
+  const choices = (await get(`/organizations/${w.orgId}/knowledge`, w.clerk.token)).choices;
+  assert.ok(choices.vendors.some((v: { name: string }) => v.name === 'Brightwave Media'), 'the clerk can pick the vendor here without seeing the Vendors page');
+  assert.ok(choices.categories.includes('Travel'));
+  assert.equal((await raw('PUT', `/organizations/${w.orgId}/knowledge/habits`, w.apprA.token, { counterpartyId, category: 'Travel' })).status, 403, 'not an approver');
+  assert.equal((await raw('PUT', `/organizations/${w.orgId}/knowledge/habits`, w.clerk.token, { counterpartyId, category: 'Snacks' })).status, 400, 'not a made-up category');
+  const set = await raw('PUT', `/organizations/${w.orgId}/knowledge/habits`, w.clerk.token, { counterpartyId, category: 'travel' });
   assert.ok(set.status < 400, set.text);
   const rule = await ruleFor(w.orgId, 'Brightwave Media');
   assert.equal(rule!.source, 'manual');
   assert.ok(rule!.acknowledgedAt, 'set by a person: nothing to announce');
   assert.equal((await habitItems(w, w.owner.token)).some((i) => i.habit!.ruleId === rule!.vendorCodingRuleId), false);
   assert.equal(await prisma.forgottenHabit.count({ where: { organizationId: w.orgId } }), 0, 'the forget is lifted');
-  const k = await get(`/organizations/${w.orgId}/knowledge`, w.clerk.token);
-  assert.equal(k.habits.find((h: { ruleId: string }) => h.ruleId === rule!.vendorCodingRuleId).setBy, w.owner.name.trim());
+  assert.equal(rule!.accountName, 'Travel', 'matched to the real category name');
+  const k = await get(`/organizations/${w.orgId}/knowledge`, w.viewer.token);
+  assert.equal(k.habits.find((h: { ruleId: string }) => h.ruleId === rule!.vendorCodingRuleId).setBy, 'Clara Clerk');
 });
 
-test('learning: the companion can propose remembering or forgetting a habit — for admins, through the vendor routes', async () => {
+test('learning: the companion can propose remembering or forgetting a habit — for whoever codes bills, not approvers', async () => {
   const w = await makeWorld();
   const proposals = [
     { kind: 'save_habit', billId: w.bills.lonely, reason: 'Lonely Ltd is always travel.', toPerson: null, message: null, category: 'travel' },
@@ -116,23 +129,23 @@ test('learning: the companion can propose remembering or forgetting a habit — 
     { kind: 'forget_habit', billId: w.bills.lonely, reason: 'No habit to forget.', toPerson: null, message: null, category: null },
   ];
   hostile({ turns: [[{ name: 'find_bills', args: {} }]], respond: () => ({ ...EMPTY, actions: proposals }) });
-  const clerkTurn = await ask(w.orgId, w.clerk.token, 'Tidy up the habits.');
-  assert.deepEqual(clerkTurn.answer.actions, [], 'habits are an admin\'s to change');
+  const approverTurn = await ask(w.orgId, w.apprA.token, 'Tidy up the habits.');
+  assert.deepEqual(approverTurn.answer.actions, [], 'coding is not an approver\'s job');
 
   hostile({ turns: [[{ name: 'find_bills', args: {} }]], respond: () => ({ ...EMPTY, actions: proposals }) });
-  const { answer } = await ask(w.orgId, w.owner.token, 'Tidy up the habits.');
+  const { answer } = await ask(w.orgId, w.clerk.token, 'Tidy up the habits.');
   const cards = answer.actions as Array<{ kind: string; title: string; call: { method: string; path: string; body: any } }>;
   assert.deepEqual(cards.map((c) => c.kind), ['save_habit', 'forget_habit'], 'only a real new category, and a habit that exists');
   const [save, forget] = cards;
   const lonelyVendor = (await prisma.paymentOrder.findUniqueOrThrow({ where: { paymentOrderId: w.bills.lonely }, select: { counterpartyId: true } })).counterpartyId;
-  assert.deepEqual(save!.call, { method: 'PUT', path: `/counterparties/${lonelyVendor}/coding-rule`, body: { accountId: 'builtin:travel', accountName: 'Travel' } });
+  assert.deepEqual(save!.call, { method: 'PUT', path: '/knowledge/habits', body: { counterpartyId: lonelyVendor, category: 'Travel' } });
   assert.equal(save!.title, 'Remember: Lonely Ltd goes to Travel');
   assert.equal(forget!.call.method, 'DELETE');
   assert.equal(forget!.title, 'Forget: Steady Supply goes to Cloud hosting & infrastructure');
 
-  // Clicked, as the admin.
-  assert.ok((await raw(save!.call.method, `/organizations/${w.orgId}${save!.call.path}`, w.owner.token, save!.call.body)).status < 400);
+  // Clicked, as the clerk.
+  assert.ok((await raw(save!.call.method, `/organizations/${w.orgId}${save!.call.path}`, w.clerk.token, save!.call.body)).status < 400);
   assert.equal((await ruleFor(w.orgId, 'Lonely Ltd'))?.accountName, 'Travel');
-  assert.ok((await raw(forget!.call.method, `/organizations/${w.orgId}${forget!.call.path}`, w.owner.token, {})).status < 400);
+  assert.ok((await raw(forget!.call.method, `/organizations/${w.orgId}${forget!.call.path}`, w.clerk.token, {})).status < 400);
   assert.equal(await ruleFor(w.orgId, 'Steady Supply'), null);
 });

@@ -1,7 +1,7 @@
 -- Learning you can see.
 --
 -- A category habit names the people who taught it (whose confirmed bills
--- agreed), and is announced to the admins once — "I learned: Brightwave goes to
+-- agreed), and is announced once to whoever codes bills (bill clerks, admins) — "I learned: Brightwave goes to
 -- Marketing, from 3 bills Priya coded that way" — until one of them keeps or
 -- forgets it. Changing the habit announces it again.
 ALTER TABLE vendor_coding_rules ADD COLUMN IF NOT EXISTS taught_by JSONB NOT NULL DEFAULT '[]';

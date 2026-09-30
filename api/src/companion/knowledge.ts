@@ -1,11 +1,12 @@
 // What the companion knows: every category habit, who taught it, and what it
 // was told to forget. Readable by anyone on the team — knowing why a bill was
-// pre-filled is part of trusting it — and changed only by admins, through the
-// same routes the Vendors page uses.
+// pre-filled is part of trusting it. Changed by whoever codes bills: that is
+// the bill clerk's job (and an admin's, who can do everything), not something
+// to escalate to an admin (Zaid, 2026-09-30).
 import { prisma } from '../infra/prisma.js';
-import { forbidden, notFound } from '../infra/api-errors.js';
+import { badRequest, forbidden, notFound } from '../infra/api-errors.js';
 import { getOrgAccess } from '../approvals/permissions.js';
-import { acknowledgeHabit } from '../accounting/gl-coding.js';
+import { acknowledgeHabit, clearVendorCodingRule, setVendorCodingRule } from '../accounting/gl-coding.js';
 
 export type Habit = {
   ruleId: string;
@@ -22,7 +23,7 @@ export type Habit = {
   since: string;
   /** Bills from this vendor that came in since the habit took hold. */
   billsSince: number;
-  /** Kept (or set) by an admin; false while it is still being announced. */
+  /** Kept (or set) by someone who codes bills; false while it is still being announced. */
   acknowledged: boolean;
 };
 
@@ -64,8 +65,12 @@ export async function getKnowledge(organizationId: string, viewerUserId: string)
     billsSince: bills.filter((b) => b.counterpartyId === r.counterpartyId && b.createdAt > r.updatedAt).length,
     acknowledged: r.source === 'manual' || Boolean(r.acknowledgedAt),
   }));
+  const canManage = canCode(access);
   return {
-    canManage: access?.isPrimaryOrAdmin ?? false,
+    canManage,
+    // What someone teaching a habit by hand picks from. Only for them: a clerk
+    // cannot see the vendor list otherwise, and does not need to.
+    choices: canManage ? await teachingChoices(organizationId) : null,
     habits,
     forgotten: forgotten.map((f) => ({
       counterpartyId: f.counterpartyId,
@@ -77,16 +82,74 @@ export async function getKnowledge(organizationId: string, viewerUserId: string)
   };
 }
 
-/** An admin keeps an announced habit. */
+/** Whoever codes bills: bill clerks, and admins. */
+export function canCode(access: Awaited<ReturnType<typeof getOrgAccess>>): boolean {
+  return (access?.isPrimaryOrAdmin ?? false) || (access?.capabilities.includes('bills.edit') ?? false);
+}
+
+async function assertCanCode(organizationId: string, userId: string) {
+  if (!canCode(await getOrgAccess(organizationId, userId))) {
+    throw forbidden('Only someone who codes bills — a bill clerk or an admin — can change what I know.');
+  }
+}
+
+/** Keep an announced habit: it stops being news. */
 export async function keepHabit(organizationId: string, viewerUserId: string, ruleId: string) {
-  const access = await getOrgAccess(organizationId, viewerUserId);
-  if (!access?.isPrimaryOrAdmin) throw forbidden('Only an admin can keep or forget what I learned.');
+  await assertCanCode(organizationId, viewerUserId);
   const kept = await acknowledgeHabit(organizationId, ruleId, viewerUserId);
   if (!kept) throw notFound('No such habit.');
   return { ok: true };
 }
 
-/** The line an announced habit shows in an admin's inbox. */
+/** Teach a habit by hand: this vendor's bills go to this category. */
+export async function setHabit(organizationId: string, viewerUserId: string, counterpartyId: string, category: string) {
+  await assertCanCode(organizationId, viewerUserId);
+  const vendor = await prisma.counterparty.findFirst({ where: { organizationId, counterpartyId }, select: { counterpartyId: true } });
+  if (!vendor) throw notFound('No such vendor.');
+  const account = await resolveCategory(organizationId, category);
+  if (!account) throw badRequest(`"${category}" is not one of your categories.`);
+  await setVendorCodingRule({ organizationId, counterpartyId, accountId: account.id, accountName: account.name, actorUserId: viewerUserId });
+  return { ok: true, category: account.name };
+}
+
+/** Forget a vendor's habit (see clearVendorCodingRule for what that does). */
+export async function forgetHabit(organizationId: string, viewerUserId: string, counterpartyId: string) {
+  await assertCanCode(organizationId, viewerUserId);
+  const rule = await prisma.vendorCodingRule.findFirst({ where: { organizationId, counterpartyId } });
+  if (!rule) throw notFound('There is no habit for this vendor.');
+  await clearVendorCodingRule(organizationId, counterpartyId, viewerUserId);
+  return { ok: true };
+}
+
+async function teachingChoices(organizationId: string) {
+  const { listChartOfAccounts } = await import('../accounting/ocr-coding.js');
+  const { DEFAULT_EXPENSE_ACCOUNTS } = await import('../accounting/default-chart.js');
+  const [vendors, chart] = await Promise.all([
+    prisma.counterparty.findMany({ where: { organizationId }, orderBy: { displayName: 'asc' }, select: { counterpartyId: true, displayName: true } }),
+    listChartOfAccounts(organizationId).catch(() => []),
+  ]);
+  return {
+    vendors: vendors.map((v) => ({ counterpartyId: v.counterpartyId, name: v.displayName })),
+    categories: chart.length > 0 ? chart.map((a) => a.fullyQualifiedName ?? a.name) : DEFAULT_EXPENSE_ACCOUNTS.map((a) => a.name),
+  };
+}
+
+/** A category name, matched to the chart the picker offers (QuickBooks when connected, else the standard list). */
+export async function resolveCategory(organizationId: string, name: string): Promise<{ id: string; name: string } | null> {
+  const q = name.trim().toLowerCase();
+  if (!q) return null;
+  const { listChartOfAccounts } = await import('../accounting/ocr-coding.js');
+  const { DEFAULT_EXPENSE_ACCOUNTS } = await import('../accounting/default-chart.js');
+  const chart = await listChartOfAccounts(organizationId).catch(() => []);
+  if (chart.length > 0) {
+    const a = chart.find((x) => (x.fullyQualifiedName ?? x.name).toLowerCase() === q || x.name.toLowerCase() === q);
+    return a ? { id: a.id, name: a.fullyQualifiedName ?? a.name } : null;
+  }
+  const a = DEFAULT_EXPENSE_ACCOUNTS.find((x) => x.name.toLowerCase() === q);
+  return a ? { id: a.id, name: a.name } : null;
+}
+
+/** The line an announced habit shows in the inbox of whoever codes bills. */
 export function announce(h: Habit): string {
   const who = h.taughtBy.length === 0 ? '' : h.taughtBy.length === 1 ? `${h.taughtBy[0]} ` : `${h.taughtBy.slice(0, -1).join(', ')} and ${h.taughtBy.at(-1)} `;
   return `I learned: ${h.vendorName} goes to ${h.category}, from ${h.fromBills} ${h.fromBills === 1 ? 'bill' : 'bills'} ${who}coded that way. I'll pre-fill it on new ${h.vendorName} bills.`;

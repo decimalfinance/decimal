@@ -1,7 +1,9 @@
 // What I know — every category habit the companion applies, who taught it,
 // and what it was told to forget. Anyone on the team can read it: knowing why
-// a bill was pre-filled is part of trusting it. Admins keep or forget.
+// a bill was pre-filled is part of trusting it. Whoever codes bills — bill
+// clerks, and admins — keeps, forgets, or teaches one by hand.
 
+import { useState } from 'react';
 import { useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { knowledgeApi, type Habit } from '../api';
@@ -44,6 +46,22 @@ export function KnowledgePage() {
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not forget it.'); }
     void refresh();
   };
+  const [vendorId, setVendorId] = useState('');
+  const [category, setCategory] = useState('');
+  const [teaching, setTeaching] = useState(false);
+  const teach = async () => {
+    const vendor = data?.choices?.vendors.find((v) => v.counterpartyId === vendorId);
+    if (!vendor || !category) return;
+    setTeaching(true);
+    try {
+      const r = await knowledgeApi.teach(organizationId, vendor.counterpartyId, category);
+      toast.success('Remembered', `New ${vendor.name} bills will be pre-filled with ${r.category}.`);
+      setVendorId('');
+      setCategory('');
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not save it.'); }
+    setTeaching(false);
+    void refresh();
+  };
   const data = q.data;
   const canManage = data?.canManage ?? false;
 
@@ -56,6 +74,36 @@ export function KnowledgePage() {
           desc="The category habits I apply to new bills, learned from what your team confirmed or set by hand. Forgetting one stops it at once: drafts nobody has saved are re-coded without it, and confirmed bills keep what was confirmed."
         />
         {q.isLoading ? <div className="skeleton" style={{ height: 240 }} /> : null}
+
+        {canManage && data?.choices ? (
+          <section>
+            <div className="sec-head">
+              <div className="sh-titles">
+                <h2>Teach a habit</h2>
+                <p className="sh-desc">Tell me where a vendor's bills go and I'll pre-fill it from the next bill on. It replaces anything I learned for that vendor.</p>
+              </div>
+            </div>
+            <div className="tbl-card" style={{ padding: 18 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 12, alignItems: 'end' }}>
+                <label className="field">
+                  <span className="field-label">Vendor</span>
+                  <select className="input" value={vendorId} onChange={(e) => setVendorId(e.target.value)}>
+                    <option value="">Choose a vendor</option>
+                    {data.choices.vendors.map((v) => <option key={v.counterpartyId} value={v.counterpartyId}>{v.name}</option>)}
+                  </select>
+                </label>
+                <label className="field">
+                  <span className="field-label">Category</span>
+                  <select className="input" value={category} onChange={(e) => setCategory(e.target.value)}>
+                    <option value="">Choose a category</option>
+                    {data.choices.categories.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </label>
+                <button type="button" className="btn btn-primary" disabled={!vendorId || !category || teaching} onClick={() => void teach()}>{teaching ? 'Saving…' : 'Remember'}</button>
+              </div>
+            </div>
+          </section>
+        ) : null}
 
         {data && data.habits.length === 0 ? (
           <div className="empty">
@@ -70,7 +118,7 @@ export function KnowledgePage() {
             <div className="sec-head">
               <div className="sh-titles">
                 <h2>Category habits</h2>
-                <p className="sh-desc">{data.habits.length} {data.habits.length === 1 ? 'vendor' : 'vendors'}.{canManage ? '' : ' Only an admin can keep or forget one.'}</p>
+                <p className="sh-desc">{data.habits.length} {data.habits.length === 1 ? 'vendor' : 'vendors'}.{canManage ? '' : ' Only someone who codes bills — a bill clerk or an admin — can keep or forget one.'}</p>
               </div>
             </div>
             <div className="tbl-card">

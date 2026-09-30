@@ -73,7 +73,8 @@ const RULES: Array<{ pattern: RegExp; view: Need; act: Need }> = [
   // The inbox is every member's own; nudging checks bill visibility inside,
   // because approvers (who cannot edit bills) must be able to nudge too.
   { pattern: /^\/inbox(\/|$)/, view: null, act: null },
-  // What the companion knows: readable by the team; keeping checks admin inside.
+  // What the companion knows: readable by the team; changing it checks inside
+  // that the person codes bills (bill clerks, admins).
   { pattern: /^\/knowledge(\/|$)/, view: null, act: null },
   // Team administration (role assignment endpoints also re-check admin inside).
   { pattern: /^\/(members|invites|roles)(\/|$)/, view: 'members.view', act: 'members.manage' },

@@ -197,9 +197,10 @@ export async function getInbox(organizationId: string, viewerUserId: string, opt
     }
   }
 
-  // Habits the companion learned and is announcing, for the admins who can
-  // keep or forget them. Not a bill, so an item of its own.
-  if (isAdmin) {
+  // Habits the companion learned and is announcing, for whoever codes bills —
+  // the bill clerks whose job it is, and admins. Not a bill, so an item of
+  // its own. Kept or forgotten by any one of them, it leaves everyone's inbox.
+  if (canReview) {
     const { getKnowledge, announce } = await import('./knowledge.js');
     const { habits } = await getKnowledge(organizationId, viewerUserId);
     for (const h of habits.filter((x) => !x.acknowledged)) {

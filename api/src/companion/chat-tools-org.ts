@@ -30,7 +30,7 @@ const JOBS: Array<{ job: string; who: 'capability' | 'admin' | 'primary_admin' |
   { job: 'Send a bill for approval', who: 'capability', capability: 'bills.edit', note: 'Whoever reviews it: bill clerks and admins.' },
   { job: 'Approve a bill', who: 'flow', note: 'The approval flow decides who, bill by bill (by amount, vendor or category). People with the Approver role can be placed in it. Separation-of-duties rules may stop someone approving a bill they submitted.' },
   { job: 'Clear a duplicate flag, or close a bill as not a bill', who: 'admin', note: 'Admins only: it overrides a check or removes a payable.' },
-  { job: 'Save a category habit for a vendor', who: 'admin', note: 'Admins only.' },
+  { job: 'Teach, keep or forget a category habit for a vendor', who: 'capability', capability: 'bills.edit', note: 'Whoever codes bills: bill clerks and admins. New habits are announced to them in the Inbox.' },
   { job: 'Let one bill past the bill ceiling', who: 'primary_admin', note: 'The primary admin only.' },
   { job: 'Change the approval flow, the ceiling or the separation-of-duties rules', who: 'primary_admin', note: 'The primary admin only.' },
   { job: 'Invite people and assign roles', who: 'admin', note: 'Admins.' },

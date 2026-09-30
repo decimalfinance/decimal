@@ -8,7 +8,7 @@ import { asyncRoute } from '../infra/route-helpers.js';
 import { getCompanionConsole, getCompanionJob } from './today.js';
 import { followUp, getChat, listChats, recordActionOutcome, startChat } from './chat.js';
 import { getInbox, markAllInboxSeen, markInboxSeen, nudgeAboutBill, tickAsk } from './inbox.js';
-import { getKnowledge, keepHabit } from './knowledge.js';
+import { forgetHabit, getKnowledge, keepHabit, setHabit } from './knowledge.js';
 
 export const companionRouter = Router();
 
@@ -122,4 +122,20 @@ companionRouter.post('/organizations/:organizationId/knowledge/:ruleId/keep', as
   const { organizationId, ruleId } = habitParams.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
   res.json(await keepHabit(organizationId, req.auth!.userId, ruleId));
+}));
+
+const setHabitBody = z.object({ counterpartyId: z.string().uuid(), category: z.string().trim().min(1).max(200) });
+const vendorParams = orgParams.extend({ counterpartyId: z.string().uuid() });
+
+companionRouter.put('/organizations/:organizationId/knowledge/habits', asyncRoute(async (req, res) => {
+  const { organizationId } = orgParams.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  const { counterpartyId, category } = setHabitBody.parse(req.body);
+  res.json(await setHabit(organizationId, req.auth!.userId, counterpartyId, category));
+}));
+
+companionRouter.delete('/organizations/:organizationId/knowledge/habits/:counterpartyId', asyncRoute(async (req, res) => {
+  const { organizationId, counterpartyId } = vendorParams.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  res.json(await forgetHabit(organizationId, req.auth!.userId, counterpartyId));
 }));

@@ -2036,7 +2036,7 @@ export interface InboxItem {
   status: string | null;
   dueAt: string | null;
   href: 'draft' | 'bill' | null;
-  /** A habit the companion learned, for an admin to keep or forget. */
+  /** A habit the companion learned, for whoever codes bills to keep or forget. */
   habit?: { ruleId: string; counterpartyId: string } | null;
   lines: Array<{ kind: InboxLineKind; text: string; at: string; from?: string | null; askId?: string }>;
   latestAt: string;
@@ -2060,13 +2060,16 @@ export interface Habit {
 
 export const knowledgeApi = {
   get(organizationId: string) {
-    return request<{ canManage: boolean; habits: Habit[]; forgotten: Array<{ counterpartyId: string; vendorName: string; category: string | null; at: string; by: string | null }> }>(`/organizations/${organizationId}/knowledge`);
+    return request<{ canManage: boolean; choices: { vendors: Array<{ counterpartyId: string; name: string }>; categories: string[] } | null; habits: Habit[]; forgotten: Array<{ counterpartyId: string; vendorName: string; category: string | null; at: string; by: string | null }> }>(`/organizations/${organizationId}/knowledge`);
   },
   keep(organizationId: string, ruleId: string) {
     return request<{ ok: true }>(`/organizations/${organizationId}/knowledge/${ruleId}/keep`, { method: 'POST', body: '{}' });
   },
   forget(organizationId: string, counterpartyId: string) {
-    return request<{ ok: boolean }>(`/organizations/${organizationId}/counterparties/${counterpartyId}/coding-rule`, { method: 'DELETE' });
+    return request<{ ok: boolean }>(`/organizations/${organizationId}/knowledge/habits/${counterpartyId}`, { method: 'DELETE' });
+  },
+  teach(organizationId: string, counterpartyId: string, category: string) {
+    return request<{ ok: boolean; category: string }>(`/organizations/${organizationId}/knowledge/habits`, { method: 'PUT', body: JSON.stringify({ counterpartyId, category }) });
   },
 };
 
