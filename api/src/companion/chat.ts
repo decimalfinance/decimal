@@ -58,6 +58,7 @@ How to answer:
   - send_for_approval: a draft that is ready (checked, nothing flagged).
   - close_duplicate: the copy in a duplicate pair. Keep the older bill; close the newer copy. reason says why it is a copy.
   - clear_duplicate: a duplicate flag on bills that are genuinely different. reason says why.
+  - ask_person: ask a teammate to do or answer something about a bill (toPerson: their name from the team tool; message: the ask, written to them, e.g. "While you're approving this, check the tax line."). You do not decide how it is sent: the system checks their inbox and makes it a nudge (does not hold the bill), a question (holds it until they answer), or tells the person it is already there. Use it when someone asks you to chase, remind, or ask a colleague.
   - approve: a bill waiting on this person's approval (whats_waiting lists it under kind "approval"). "In approval" is exactly when to propose it. Do not second-guess the approval rules or flags: they are checked when the person clicks, and the card will say if they stop it.
   Propose when the person asks you to do something, or when one of these is plainly the next step. Propose only an action that IS what was asked: if none of the four fits (a category, an edit, a payment, a setting), propose nothing and say where it is done. Never offer a different action in its place. Say in the message what you are proposing and why; never say it is done. Anything you say you are proposing MUST be in actions: a proposal only in words is no use to anyone. Anything else (editing a bill, categories, paying) is done on the bill: say where.
 - Payments are not live in Decimal: never say a bill was paid out unless its state says paid.`;
@@ -89,11 +90,13 @@ const RESPOND_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['kind', 'billId', 'reason'],
+        required: ['kind', 'billId', 'reason', 'toPerson', 'message'],
         properties: {
           kind: { type: 'string', enum: [...ACTION_KINDS] },
           billId: { type: 'string' },
           reason: { type: 'string', description: 'One sentence: why this action, for this bill.' },
+          toPerson: { type: ['string', 'null'], description: 'ask_person only: the teammate\'s name, as the team tool lists it. Null otherwise.' },
+          message: { type: ['string', 'null'], description: 'ask_person only: what you are asking them, written to them. Null otherwise.' },
         },
       },
     },
@@ -239,7 +242,7 @@ async function answerQuestion(args: {
     // request each button sends is built in code, never taken from the model.
     const proposals = (Array.isArray(a.actions) ? a.actions : [])
       .filter((x): x is ProposedAction => Boolean(x) && (ACTION_KINDS as readonly string[]).includes((x as ProposedAction).kind) && typeof (x as ProposedAction).billId === 'string')
-      .map((x) => ({ kind: x.kind, billId: x.billId, reason: String(x.reason ?? '') }));
+      .map((x) => ({ kind: x.kind, billId: x.billId, reason: String(x.reason ?? ''), toPerson: typeof x.toPerson === 'string' ? x.toPerson : null, message: typeof x.message === 'string' ? x.message : null }));
     const actions = await buildActionCards({ organizationId: args.organizationId, viewerUserId: args.userId, proposals, seen });
     // Never promise a button that is not there: the model said it was
     // proposing something, but no card survived (it left it out, or the bill
@@ -323,7 +326,7 @@ export async function recordActionOutcome(organizationId: string, userId: string
     const blocks = (m.blocks ?? {}) as ChatBlocks;
     const card = blocks.actions?.find((c) => c.actionId === actionId);
     if (!card) continue;
-    if (card.status === 'done') return { status: card.status, result: card.result };
+    if (card.status === 'done' || card.status === 'info') return { status: card.status, result: card.result };
     card.status = outcome.ok ? 'done' : 'failed';
     card.result = outcome.ok ? doneText(card.kind) : (outcome.message?.slice(0, 300) || 'That did not go through.');
     await prisma.companionMessage.update({ where: { messageId: m.messageId }, data: { blocks: blocks as unknown as Prisma.InputJsonValue } });

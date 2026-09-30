@@ -7,6 +7,7 @@ import { notFound } from '../infra/api-errors.js';
 import { asyncRoute } from '../infra/route-helpers.js';
 import { getCompanionConsole, getCompanionJob } from './today.js';
 import { followUp, getChat, listChats, recordActionOutcome, startChat } from './chat.js';
+import { getInbox, markInboxSeen, nudgeAboutBill, tickAsk } from './inbox.js';
 
 export const companionRouter = Router();
 
@@ -65,4 +66,37 @@ companionRouter.post('/organizations/:organizationId/companion/chats/:chatId/act
   await assertOrganizationAccess(organizationId, req.auth!);
   const { ok, message } = outcomeBody.parse(req.body);
   res.json(await recordActionOutcome(organizationId, req.auth!.userId, chatId, actionId, { ok, message: message ?? null }));
+}));
+
+// The inbox. Anyone on the team has one; what is in it is filtered inside.
+const seenBody = z.object({ billId: z.string().uuid() });
+const nudgeBody = z.object({ billId: z.string().uuid(), toUserId: z.string().uuid(), text: z.string().trim().min(3).max(500) });
+const askParams = orgParams.extend({ askId: z.string().uuid() });
+
+companionRouter.get('/organizations/:organizationId/inbox', asyncRoute(async (req, res) => {
+  const { organizationId } = orgParams.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  res.json(await getInbox(organizationId, req.auth!.userId));
+}));
+
+companionRouter.post('/organizations/:organizationId/inbox/seen', asyncRoute(async (req, res) => {
+  const { organizationId } = orgParams.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  const { billId } = seenBody.parse(req.body);
+  res.json(await markInboxSeen(organizationId, req.auth!.userId, billId));
+}));
+
+companionRouter.post('/organizations/:organizationId/inbox/asks/:askId/done', asyncRoute(async (req, res) => {
+  const { organizationId, askId } = askParams.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  res.json(await tickAsk(organizationId, req.auth!.userId, askId));
+}));
+
+// Ask a colleague to do something on a bill without holding it. Anyone who can
+// see the bill may ask anyone else who can: asking is never the dangerous act.
+companionRouter.post('/organizations/:organizationId/inbox/nudge', asyncRoute(async (req, res) => {
+  const { organizationId } = orgParams.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  const input = nudgeBody.parse(req.body);
+  res.status(201).json(await nudgeAboutBill({ organizationId, fromUserId: req.auth!.userId, toUserId: input.toUserId, billId: input.billId, text: input.text, via: req.get('x-decimal-via') === 'companion' ? 'companion' : 'person' }));
 }));

@@ -1070,3 +1070,30 @@ model CompanionMessage {
   @@index([chatId, createdAt], map: "companion_messages_chat_idx")
   @@map("companion_messages")
 }
+
+model InboxAsk {
+  askId          String    @id @default(dbgenerated("gen_random_uuid()")) @map("ask_id") @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  paymentOrderId String    @map("payment_order_id") @db.Uuid
+  toUserId       String    @map("to_user_id") @db.Uuid
+  fromUserId     String    @map("from_user_id") @db.Uuid
+  via            String    @default("person")
+  text           String
+  status         String    @default("open")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  closedAt       DateTime? @map("closed_at") @db.Timestamptz(6)
+  closedReason   String?   @map("closed_reason")
+
+  @@index([paymentOrderId], map: "inbox_asks_bill_idx")
+  @@map("inbox_asks")
+}
+
+model InboxSeen {
+  organizationId String   @map("organization_id") @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  paymentOrderId String   @map("payment_order_id") @db.Uuid
+  seenAt         DateTime @default(now()) @map("seen_at") @db.Timestamptz(6)
+
+  @@id([organizationId, userId, paymentOrderId])
+  @@map("inbox_seen")
+}

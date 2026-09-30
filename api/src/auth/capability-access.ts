@@ -70,6 +70,9 @@ const RULES: Array<{ pattern: RegExp; view: Need; act: Need }> = [
   // The companion's briefing is every member's: what it shows is filtered to the
   // viewer's own work inside the briefing, so any active member may read it.
   { pattern: /^\/companion(\/|$)/, view: null, act: null },
+  // The inbox is every member's own; nudging checks bill visibility inside,
+  // because approvers (who cannot edit bills) must be able to nudge too.
+  { pattern: /^\/inbox(\/|$)/, view: null, act: null },
   // Team administration (role assignment endpoints also re-check admin inside).
   { pattern: /^\/(members|invites|roles)(\/|$)/, view: 'members.view', act: 'members.manage' },
   // my-access, summary, audit-log, protections, join, personal-wallets, ops-health…
