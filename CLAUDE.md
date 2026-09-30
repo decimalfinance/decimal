@@ -56,7 +56,7 @@ Run from the repo root. These are the whole surface. Check `make help` if in dou
 
 Committed, non-secret config: `config/api.config.json` and `frontend/src/public-config.json`. Secrets live in `api/.env`, which is gitignored. `config.ts` refuses the fake-chain and dev-auth flags in production.
 
-Dev sign-in for testing: the `/dev-login` page, or `POST /auth/dev/login` and `POST /auth/dev/seed` with `DEV_AUTH_SECRET` from `api/.env`. Only `@dev.decimal.test` addresses work.
+Dev sign-in for testing: the `/dev-login` page, or `POST /auth/dev/seed` (with `DEV_AUTH_SECRET` from `api/.env`) to build a team and get a session per person. A seeded person signs in later through ordinary `POST /auth/register` with any password: a passwordless `@dev.decimal.test` account claims it on first use. Only `@dev.decimal.test` addresses work.
 
 `synthetic_data/` and `outputs/` are gitignored. Never commit regenerable fixtures or pitch material.
 

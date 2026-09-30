@@ -2063,16 +2063,45 @@ export interface CompanionChatSummary { chatId: string; title: string; updatedAt
 /** An action the companion proposes. The request is built by the server; the person's click sends it. */
 export interface CompanionActionCard {
   actionId: string;
-  kind: 'send_for_approval' | 'close_duplicate' | 'clear_duplicate' | 'approve';
+  kind: 'send_for_approval' | 'close_duplicate' | 'clear_duplicate' | 'approve' | 'nudge' | 'question' | 'already_asked';
   billId: string;
   title: string;
   detail: string;
   reason: string | null;
   button: string;
   call: { path: string; body: Record<string, unknown> };
-  status: 'proposed' | 'done' | 'failed';
+  /** info: nothing to click — e.g. the person already has it in their inbox. */
+  status: 'proposed' | 'done' | 'failed' | 'info';
   result: string | null;
 }
+
+export type InboxLineKind = 'approval' | 'question' | 'review' | 'sign_off' | 'sent_back' | 'unreadable' | 'ask';
+
+/** One bill in a person's inbox, with everything wanted of them on it. */
+export interface InboxItem {
+  key: string;
+  billId: string | null;
+  jobId: string | null;
+  vendorName: string;
+  invoiceNumber: string | null;
+  amountUsd: number | null;
+  href: 'draft' | 'bill' | null;
+  lines: Array<{ kind: InboxLineKind; text: string; at: string; from?: string | null; askId?: string }>;
+  latestAt: string;
+  isNew: boolean;
+}
+
+export const inboxApi = {
+  get(organizationId: string) {
+    return request<{ items: InboxItem[]; count: number; newCount: number }>(`/organizations/${organizationId}/inbox`);
+  },
+  seen(organizationId: string, billId: string) {
+    return request<{ ok: true }>(`/organizations/${organizationId}/inbox/seen`, { method: 'POST', body: JSON.stringify({ billId }) });
+  },
+  tick(organizationId: string, askId: string) {
+    return request<{ ok: true }>(`/organizations/${organizationId}/inbox/asks/${askId}/done`, { method: 'POST', body: '{}' });
+  },
+};
 
 /** A chat with the companion. Answers carry the thoughts that produced them. */
 export interface CompanionChat {

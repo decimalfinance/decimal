@@ -1334,6 +1334,21 @@
 .dec .ac-status { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--success); }
 .dec .ac-status.is-failed { color: var(--danger-vivid); }
 .dec .ac-list { display: flex; flex-direction: column; gap: 8px; }
+
+/* ---- Inbox (the rail's first section) ----
+   One card per bill; inside it, every line of what is wanted of this person,
+   the system's first, then what people asked. A dot marks a card with
+   something new since they last opened it. */
+.dec .ib-lines { display: flex; flex-direction: column; gap: 5px; margin-top: 2px; }
+.dec .ib-line { display: flex; align-items: baseline; gap: 7px; font-size: 12.5px; color: var(--text-muted); line-height: 1.4; }
+.dec .ib-line.is-ask { color: var(--text-primary); }
+.dec .ib-kind { flex: 0 0 auto; font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-faint); }
+.dec .ib-line.is-question .ib-kind, .dec .ib-line.is-approval .ib-kind { color: var(--accent); }
+.dec .ib-text { flex: 1; min-width: 0; }
+.dec .ib-tick { flex: 0 0 auto; border: 1px solid var(--border); background: var(--bg-surface); border-radius: 999px; padding: 1px 8px;
+  font: inherit; font-size: 11px; color: var(--text-muted); cursor: pointer; }
+.dec .ib-tick:hover { border-color: var(--border-strong); color: var(--text-primary); }
+.dec .ib-new { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: 0 0 auto; align-self: center; }
 /* ============================================================
    DECIMAL — page-level layout (full app screens on canvas)
    Builds on tokens.css + components.css. Namespaced under .dec.

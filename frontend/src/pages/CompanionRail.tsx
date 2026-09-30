@@ -5,14 +5,15 @@
 // first, then what is running, then what got done. Every card is a job;
 // opening one shows the work step by step in a drawer, live while it runs.
 
-import { Fragment, useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   companionApi,
+  inboxApi,
+  type InboxItem,
   type CompanionConsole,
   type CompanionJob,
-  type ConsoleWaitingKind,
 } from '../api';
 import { Ico } from '../dec/icons';
 
@@ -45,15 +46,6 @@ function took(start: string, end: string | null): string | null {
   if (ms < 1000) return null;
   return ms < 60_000 ? `took ${(ms / 1000).toFixed(1)}s` : `took ${Math.round(ms / 60_000)} min`;
 }
-
-/** The order "Waiting on you" reads in: what blocks other people first. */
-const WAITING_GROUPS: Array<{ kind: ConsoleWaitingKind; label: string }> = [
-  { kind: 'approval', label: 'Your approval' },
-  { kind: 'input', label: 'Needs your input' },
-  { kind: 'sent_back', label: 'Sent back' },
-  { kind: 'unreadable', label: "Couldn't read" },
-  { kind: 'sign_off', label: 'Ready to sign off' },
-];
 
 /** The console, shared by Home and the chat page (same query key, one fetch). */
 export function useConsole(organizationId: string) {
@@ -101,8 +93,8 @@ function ConsoleRail() {
   }, []);
   const c = q.data;
   const base = `/organizations/${organizationId}`;
-  const hrefFor = (kind: ConsoleWaitingKind | 'done', id: string | null) =>
-    !id ? null : kind === 'input' || kind === 'sign_off' || kind === 'sent_back' ? `${base}/bills/${id}/draft` : `${base}/bills/${id}`;
+  // Done cards open the bill itself: everything in Done has left review.
+  const hrefFor = (_kind: 'done', id: string | null) => (id ? `${base}/bills/${id}` : null);
   const open = (jobId: string | null, title: string, href: string | null) => {
     if (jobId) setSelected({ jobId, title, href });
     else if (href) navigate(href);
@@ -113,29 +105,7 @@ function ConsoleRail() {
       {q.isLoading ? <div className="skeleton" style={{ height: 200 }} /> : null}
       {c ? (
         <>
-          <section className="cw-sec">
-            <div className="cw-sec-head"><h3>Waiting on you</h3><span className="cc-col-count">{c.waiting.length}</span></div>
-            {c.waiting.length === 0 ? <div className="cc-empty">Nothing is waiting on you.</div> : null}
-            {WAITING_GROUPS.map(({ kind, label }) => {
-              const cards = c.waiting.filter((w) => w.kind === kind);
-              if (cards.length === 0) return null;
-              return (
-                <Fragment key={kind}>
-                  <div className="cc-group">{label}</div>
-                  {cards.map((w) => (
-                    <button key={w.key} type="button" className="cc-card" onClick={() => open(w.jobId, w.title, hrefFor(w.kind, w.paymentOrderId))}>
-                      <div className="cc-card-top">
-                        <span className="cc-card-title">{w.title}</span>
-                        {w.amountUsd != null ? <span className="cc-card-amt">{usd(w.amountUsd)}</span> : null}
-                      </div>
-                      <div className="cc-card-sub">{w.reason}</div>
-                      {w.invoiceNumber ? <div className="cc-card-meta">{w.invoiceNumber}</div> : null}
-                    </button>
-                  ))}
-                </Fragment>
-              );
-            })}
-          </section>
+          <InboxSection organizationId={organizationId} onOpenJob={(jobId, title) => setSelected({ jobId, title, href: null })} />
 
           <section className="cw-sec">
             <div className="cw-sec-head"><h3>Running</h3><span className="cc-col-count">{c.running.length}</span></div>
@@ -268,5 +238,81 @@ function JobDrawer({ organizationId, selection, onClose, onOpenBill }: {
         </div>
       </div>
     </div>
+  );
+}
+
+/** What each kind of inbox line is called, in a word. */
+const LINE_LABEL: Record<InboxItem['lines'][number]['kind'], string> = {
+  question: 'Question', approval: 'Approve', ask: 'Ask', sent_back: 'Sent back', review: 'Review', sign_off: 'Sign off', unreadable: "Can't read",
+};
+
+/**
+ * The inbox: one card per bill, every line of what is wanted of this person on
+ * it. Opening a card marks it seen and goes to where the work is done; an ask
+ * can be ticked off without opening anything.
+ */
+function InboxSection({ organizationId, onOpenJob }: { organizationId: string; onOpenJob: (jobId: string, title: string) => void }) {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const q = useQuery({
+    queryKey: ['inbox', organizationId],
+    queryFn: () => inboxApi.get(organizationId),
+    enabled: Boolean(organizationId),
+    refetchInterval: 15_000,
+  });
+  const refresh = () => Promise.all([
+    queryClient.invalidateQueries({ queryKey: ['inbox', organizationId] }),
+  ]);
+  const open = async (item: InboxItem) => {
+    if (item.billId) {
+      await inboxApi.seen(organizationId, item.billId).catch(() => null);
+      void refresh();
+      navigate(`/organizations/${organizationId}/bills/${item.billId}${item.href === 'draft' ? '/draft' : ''}`);
+    } else if (item.jobId) {
+      onOpenJob(item.jobId, item.vendorName);
+    }
+  };
+  const tick = async (askId: string) => {
+    await inboxApi.tick(organizationId, askId).catch(() => null);
+    void refresh();
+  };
+  const data = q.data;
+  return (
+    <section className="cw-sec">
+      <div className="cw-sec-head">
+        <h3>Inbox</h3>
+        <span className="cc-col-count">{data ? (data.newCount ? `${data.newCount} new · ${data.count}` : data.count) : ''}</span>
+      </div>
+      {q.isLoading ? <div className="skeleton" style={{ height: 120 }} /> : null}
+      {data && data.items.length === 0 ? <div className="cc-empty">Nothing is waiting on you.</div> : null}
+      {data?.items.map((item) => (
+        <div
+          key={item.key}
+          role="button"
+          tabIndex={0}
+          className="cc-card"
+          onClick={() => void open(item)}
+          onKeyDown={(e) => { if (e.key === 'Enter') void open(item); }}
+        >
+          <div className="cc-card-top">
+            <span className="cc-card-title">{item.vendorName}</span>
+            {item.isNew ? <span className="ib-new" aria-label="New" /> : null}
+            {item.amountUsd != null ? <span className="cc-card-amt">{usd(item.amountUsd)}</span> : null}
+          </div>
+          <div className="ib-lines">
+            {item.lines.map((l, i) => (
+              <div key={l.askId ?? `${l.kind}:${i}`} className={`ib-line is-${l.kind}`}>
+                <span className="ib-kind">{LINE_LABEL[l.kind]}</span>
+                <span className="ib-text">{l.kind === 'ask' ? <><strong>{l.from ?? 'Someone'}:</strong> {l.text}</> : l.text}</span>
+                {l.askId ? (
+                  <button type="button" className="ib-tick" onClick={(e) => { e.stopPropagation(); void tick(l.askId!); }}>Done</button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+          {item.invoiceNumber ? <div className="cc-card-meta">{item.invoiceNumber}</div> : null}
+        </div>
+      ))}
+    </section>
   );
 }

@@ -158,6 +158,7 @@ function ActionCards({ organizationId, chatId, cards, bills, onOpenBill }: {
         queryClient.invalidateQueries({ queryKey: ['companion-chat', organizationId, chatId] }),
         queryClient.invalidateQueries({ queryKey: ['companion-console', organizationId] }),
         queryClient.invalidateQueries({ queryKey: ['bills-workbench', organizationId] }),
+        queryClient.invalidateQueries({ queryKey: ['inbox', organizationId] }),
       ]);
     }
   };
@@ -171,7 +172,7 @@ function ActionCards({ organizationId, chatId, cards, bills, onOpenBill }: {
             <div className="ac-detail">{card.detail}</div>
             {card.reason ? <div className="ac-reason">{card.reason}</div> : null}
             <div className="ac-foot">
-              {card.status === 'proposed' ? (
+              {card.status === 'info' ? null : card.status === 'proposed' ? (
                 <button type="button" className="btn btn-primary btn-sm" disabled={busy !== null} onClick={() => void run(card)}>
                   {busy === card.actionId ? 'Working…' : card.button}
                 </button>

@@ -248,9 +248,14 @@ async function answerQuestion(args: {
     // proposing something, but no card survived (it left it out, or the bill
     // does not allow it for this person).
     const promisesACard = /\b(i'?m proposing|i propose|proposing to|here(?:'s| is) (?:a|the) card|click (?:the|to))\b/i.test(message);
-    const answerText = promisesACard && actions.length === 0
+    // An ask the system found already covered sends nothing; say so, so the
+    // answer never reads as if a nudge is on its way when none is.
+    const covered = actions.filter((c) => c.kind === 'already_asked');
+    const actionable = actions.filter((c) => c.status === 'proposed');
+    let answerText = promisesACard && actionable.length === 0 && covered.length === 0
       ? `${message}\n\nI could not turn that into something you can click here, so do it on the bill itself.`
       : message;
+    for (const c of covered) answerText += `\n\nNothing to send: ${c.detail}`;
     await finish({
       status: 'done',
       text: answerText,

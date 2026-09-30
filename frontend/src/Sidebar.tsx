@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { accessApi, companionApi, type AuthenticatedSession, type Capability, type OrganizationMembership } from './api';
+import { accessApi, companionApi, inboxApi, type AuthenticatedSession, type Capability, type OrganizationMembership } from './api';
 import { Ico } from './dec/icons';
 
 type OrganizationContext = {
@@ -99,6 +99,14 @@ export function AppSidebar({
   const { theme, setTheme } = useTheme();
 
   const base = activeOrganization ? `/organizations/${activeOrganization.organizationId}` : null;
+  // New items in the person's inbox, on Home: that is where the inbox lives.
+  const inboxQuery = useQuery({
+    queryKey: ['inbox', activeOrganization?.organizationId ?? ''],
+    queryFn: () => inboxApi.get(activeOrganization!.organizationId),
+    enabled: Boolean(activeOrganization),
+    refetchInterval: 30_000,
+  });
+  const inboxNew = inboxQuery.data?.newCount ?? 0;
   const onProfilePage = location.pathname === '/profile';
 
   // Role-gated nav: hide surfaces the person's roles don't include (same
@@ -232,7 +240,7 @@ export function AppSidebar({
         {base ? (
           <>
             <div className="sb-group-label">Operations</div>
-            <NavItem to={base} end icon={<Ico.sparkle w={16} />} label="Home" />
+            <NavItem to={base} end icon={<Ico.sparkle w={16} />} label="Home" badge={inboxNew} />
             {can('bills.view') ? <NavItem to={`${base}/bills`} icon={<Ico.doc w={16} />} label="Bills" badge={paymentsIncompleteCount} /> : null}
             <RecentChats organizationId={activeOrganization!.organizationId} base={base} />
 
