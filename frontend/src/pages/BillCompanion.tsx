@@ -148,7 +148,7 @@ export function BillCompanion({ organizationId, billId, vendorName, flags, flagH
                 ? n.habit.source === 'manual'
                   ? <>{vendorName} goes to <strong>{n.habit.category}</strong>: a habit a person set.</>
                   : <>{vendorName} goes to <strong>{n.habit.category}</strong>: I learned it from {n.habit.fromBills} confirmed bills.</>
-                : <>I picked one for each line from what it's for. There's nothing to teach me separately: when this bill is confirmed, with my categories or yours, I learn from it, and once three {vendorName} bills are coded the same way I'll fill it in from habit.</>}
+                : <>I picked one for each line from what it's for.</>}
             </div>
           </div>
 
