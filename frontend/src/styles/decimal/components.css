@@ -1237,3 +1237,28 @@
 .dec .ib-detail-when { font-size: 12px; color: var(--text-faint); }
 .dec .ib-detail-foot { display: flex; gap: 8px; flex-wrap: wrap; }
 .dec .cw-sec-link { margin-left: auto; }
+
+/* ─── The companion on a bill's own screen (pages/BillCompanion.tsx) ────────
+   One bordered note under the bill's heading. The head is a single line —
+   who, verdict pill, the one reason — and folds the rest away. */
+.dec .bn { background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-md); }
+.dec .bn-head { display: flex; align-items: center; gap: 10px; width: 100%; padding: 11px 14px; background: none; border: 0;
+  font: inherit; text-align: left; cursor: pointer; color: var(--text-primary); }
+.dec .bn-who { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; flex: 0 0 auto; }
+.dec .bn-who svg { color: var(--accent); }
+.dec .bn-line { flex: 1 1 auto; min-width: 0; font-size: 13px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dec .bn-head .ch-chev { flex: 0 0 auto; }
+.dec .bn-head[aria-expanded="true"] .ch-chev svg { transform: rotate(180deg); }
+.dec .bn-body { display: flex; flex-direction: column; gap: 14px; padding: 4px 14px 14px; border-top: 1px solid var(--border); padding-top: 12px; }
+.dec .bn-sec { display: flex; flex-direction: column; gap: 6px; }
+.dec .bn-label { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
+.dec .bn-text { font-size: 13px; line-height: 1.5; color: var(--text-primary); }
+.dec .tick-list .tick-item.bn-waiting svg { color: var(--warning); }
+.dec .bn-steps { display: flex; flex-direction: column; gap: 6px; padding-left: 2px; }
+.dec .bn-step { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; line-height: 1.5; color: var(--text-primary); }
+.dec .bn-step svg { flex: 0 0 auto; margin-top: 2px; color: var(--success); }
+.dec .bn-step.is-noted svg { color: var(--warning); }
+.dec .bn-step.is-failed svg { color: var(--danger); }
+.dec .bn-step .cc-live-dot { margin-top: 6px; }
+.dec .bn-detail { color: var(--text-muted); }
+.dec .bn-chat { gap: 14px; padding-bottom: 0; }

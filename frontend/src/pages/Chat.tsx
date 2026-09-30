@@ -159,6 +159,9 @@ function ActionCards({ organizationId, chatId, cards, bills, onOpenBill }: {
         queryClient.invalidateQueries({ queryKey: ['companion-console', organizationId] }),
         queryClient.invalidateQueries({ queryKey: ['bills-workbench', organizationId] }),
         queryClient.invalidateQueries({ queryKey: ['inbox', organizationId] }),
+        // Clicked from a bill's own screen: the bill underneath changed too.
+        queryClient.invalidateQueries({ queryKey: ['bill-billDraft', organizationId] }),
+        queryClient.invalidateQueries({ queryKey: ['bill-companion', organizationId] }),
       ]);
     }
   };
@@ -193,7 +196,7 @@ function ActionCards({ organizationId, chatId, cards, bills, onOpenBill }: {
   );
 }
 
-function Answer({ message, bills, onOpenBill, organizationId, chatId }: {
+export function Answer({ message, bills, onOpenBill, organizationId, chatId }: {
   message: Message;
   bills: CompanionChat['bills'];
   onOpenBill: (id: string, state: string) => void;

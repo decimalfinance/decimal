@@ -14,6 +14,7 @@ import { prisma } from '../infra/prisma.js';
 import { logger } from '../infra/logger.js';
 import { trackBackgroundWork } from '../infra/background.js';
 import { badRequest, notFound } from '../infra/api-errors.js';
+import { involvedBillIds } from '../payments/bill-visibility.js';
 import { isExceptionAgentConfigured, runAgent, type ChatMessage } from '../exceptions/agent.js';
 import { getOrgAccess } from '../approvals/permissions.js';
 import { chatTools, localDay, type Thought } from './chat-tools.js';
@@ -56,7 +57,7 @@ How to answer:
 - Words to use: bill, approval, approvers, team members, category, vendor. Never "payment order", "GL code", "multisig", "wallet".
 - You never change anything yourself. You can PROPOSE actions in actions, and the person clicks to carry them out:
   - send_for_approval: a draft that is ready (checked, nothing flagged).
-  - close_duplicate: the copy in a duplicate pair. Keep the older bill; close the newer copy. reason says why it is a copy.
+  - close_duplicate: the copy in a duplicate pair. Keep the older bill; close the newer copy. reason says why it is a copy. When get_bill has a duplicateInvestigation, that is what the team's duplicate check concluded and what the bill's screen shows: follow its verdict and which bill it says to keep, and say so, rather than working it out again.
   - clear_duplicate: a duplicate flag on bills that are genuinely different. reason says why.
   - ask_person: ask a teammate to do or answer something about a bill (toPerson: their name from the team tool; message: the ask, written to them, e.g. "While you're approving this, check the tax line."). You do not decide how it is sent: the system checks their inbox and makes it a nudge (does not hold the bill), a question (holds it until they answer), or tells the person it is already there. Use it when someone asks you to chase, remind, or ask a colleague.
   - save_habit: remember that a vendor's bills go to a category (billId: any bill from that vendor; category: the name from the categories tool). For whoever codes bills.
@@ -147,11 +148,17 @@ async function ownChat(organizationId: string, userId: string, chatId: string) {
 }
 
 /** Start a chat with its first question. The answer is worked out in the background. */
-export async function startChat(organizationId: string, userId: string, text: string) {
+export async function startChat(organizationId: string, userId: string, text: string, billId: string | null = null) {
   const question = text.trim();
   if (!question) throw badRequest('Ask something.');
+  // Asked from a bill's screen: only a bill this person can see.
+  let title = titleFrom(question);
+  if (billId) {
+    const bill = await billContext(organizationId, userId, billId);
+    title = titleFrom(`${bill.label}: ${question}`);
+  }
   const chat = await prisma.companionChat.create({
-    data: { organizationId, userId, title: titleFrom(question) },
+    data: { organizationId, userId, title, billId },
   });
   await ask(organizationId, userId, chat.chatId, question);
   return { chatId: chat.chatId };
@@ -169,6 +176,18 @@ export async function followUp(organizationId: string, userId: string, chatId: s
   return { chatId };
 }
 
+/** The bill a chat was started from, if this person can still see it. */
+async function billContext(organizationId: string, userId: string, billId: string) {
+  const visible = await involvedBillIds(organizationId, userId);
+  const bill = visible !== null && !visible.has(billId) ? null : await prisma.paymentOrder.findFirst({
+    where: { organizationId, paymentOrderId: billId },
+    select: { paymentOrderId: true, invoiceNumber: true, counterparty: { select: { displayName: true } } },
+  });
+  if (!bill) throw notFound('No such bill.');
+  const vendor = bill.counterparty?.displayName ?? 'Unknown vendor';
+  return { billId: bill.paymentOrderId, label: bill.invoiceNumber ? `${vendor} ${bill.invoiceNumber}` : vendor };
+}
+
 async function ask(organizationId: string, userId: string, chatId: string, question: string) {
   const history = await prisma.companionMessage.findMany({
     where: { chatId, status: 'done' },
@@ -178,12 +197,17 @@ async function ask(organizationId: string, userId: string, chatId: string, quest
   });
   await prisma.companionMessage.create({ data: { chatId, role: 'user', status: 'done', text: question } });
   const answer = await prisma.companionMessage.create({ data: { chatId, role: 'assistant', status: 'running' } });
-  await prisma.companionChat.update({ where: { chatId }, data: { updatedAt: new Date() } });
+  const chat = await prisma.companionChat.update({ where: { chatId }, data: { updatedAt: new Date() }, select: { billId: true } });
+  // On a bill's screen, "this bill" is that bill. Told to the model, not
+  // stored in what the person wrote.
+  const bill = chat.billId ? await billContext(organizationId, userId, chat.billId).catch(() => null) : null;
   trackBackgroundWork(answerQuestion({
     organizationId,
     userId,
     messageId: answer.messageId,
-    question,
+    question: bill
+      ? `(Asked on the screen of the bill ${bill.label}, billId ${bill.billId}. "This bill", "it" and "here" mean that bill: read it with get_bill before answering.)\n\n${question}`
+      : question,
     history: history.reverse().map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text }) as ChatMessage),
   }));
 }
@@ -270,6 +294,16 @@ async function answerQuestion(args: {
     logger.warn('companion_chat.error', { ...(error instanceof Error ? { message: error.message } : {}) });
     await finish({ status: 'failed', text: 'Something went wrong on our side while I was working that out. Try again.' });
   }
+}
+
+/** This person's latest chat about a bill, for the bill's own screen. */
+export async function latestBillChat(organizationId: string, userId: string, billId: string) {
+  const chat = await prisma.companionChat.findFirst({
+    where: { organizationId, userId, billId },
+    orderBy: { updatedAt: 'desc' },
+    select: { chatId: true },
+  });
+  return chat?.chatId ?? null;
 }
 
 export async function listChats(organizationId: string, userId: string) {

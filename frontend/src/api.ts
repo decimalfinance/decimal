@@ -1975,11 +1975,15 @@ export const companionApi = {
   chats(organizationId: string) {
     return request<{ chats: CompanionChatSummary[] }>(`/organizations/${organizationId}/companion/chats`);
   },
-  startChat(organizationId: string, text: string) {
+  startChat(organizationId: string, text: string, billId?: string) {
     return request<{ chatId: string }>(`/organizations/${organizationId}/companion/chats`, {
       method: 'POST',
-      body: JSON.stringify({ text }),
+      body: JSON.stringify(billId ? { text, billId } : { text }),
     });
+  },
+  /** The companion's note on one bill, for the bill's own screen. */
+  billNote(organizationId: string, billId: string) {
+    return request<BillCompanionNote>(`/organizations/${organizationId}/bills/${billId}/companion`);
   },
   chat(organizationId: string, chatId: string) {
     return request<CompanionChat>(`/organizations/${organizationId}/companion/chats/${chatId}`);
@@ -2007,6 +2011,15 @@ export const companionApi = {
 };
 
 export interface CompanionChatSummary { chatId: string; title: string; updatedAt: string }
+
+export interface BillCompanionNote {
+  verdict: { ready: boolean; reason: string | null } | null;
+  standing: string | null;
+  waiting: Array<{ kind: InboxLineKind; text: string; from: string | null }>;
+  did: Array<{ id: string; status: 'running' | 'done' | 'noted' | 'failed'; text: string; detail: string | null }>;
+  habit: { category: string; source: 'learned' | 'manual'; fromBills: number } | null;
+  chatId: string | null;
+}
 
 /** An action the companion proposes. The request is built by the server; the person's click sends it. */
 export interface CompanionActionCard {

@@ -8,6 +8,7 @@
 // Each call also says, in a sentence, what it did — that is the "thought" the
 // chat shows while the answer is worked out.
 import { prisma } from '../infra/prisma.js';
+import { peekDuplicateBrief } from '../exceptions/briefs.js';
 import { getApprovalsInbox, getBillsWorkbench } from '../payments/bills.js';
 import { readPayableHold } from '../payments/vendor-payable.js';
 import type { AgentTool } from '../exceptions/agent.js';
@@ -174,13 +175,16 @@ export function chatTools(args: {
           return { error: 'No such bill, or this person cannot see it.' };
         }
         args.seen.add(row.paymentOrderId);
-        const [coding, order, sync] = await Promise.all([
+        const [coding, order, sync, investigation] = await Promise.all([
           prisma.paymentOrderGlCoding.findUnique({ where: { paymentOrderId: row.paymentOrderId }, select: { lines: true } }),
           prisma.paymentOrder.findUnique({ where: { paymentOrderId: row.paymentOrderId }, select: { metadataJson: true } }),
           prisma.accountingSync.findUnique({
             where: { paymentOrderId_provider: { paymentOrderId: row.paymentOrderId, provider: 'quickbooks' } },
             select: { status: true, syncedAt: true, error: true },
           }).catch(() => null),
+          row.flags.some((f) => f.kind === 'possible_duplicate')
+            ? peekDuplicateBrief(args.organizationId, row.paymentOrderId).catch(() => null)
+            : null,
         ]);
         const extracted = ((order?.metadataJson as Record<string, any> | null)?.agent?.extracted ?? {}) as Record<string, any>;
         const lines = Array.isArray(coding?.lines) && (coding!.lines as unknown[]).length > 0
@@ -195,6 +199,17 @@ export function chatTools(args: {
           categorised: Boolean(coding),
           flags: row.flags.map((f) => ({ kind: f.kind, what: f.short, detail: f.message, holdsTheBill: f.blocking })),
           duplicateCleared: row.duplicateCleared,
+          // What the duplicate investigation already concluded about this
+          // bill, from its side. Say this; do not work it out again.
+          duplicateInvestigation: investigation ? {
+            verdict: investigation.verdict,
+            confidence: investigation.confidence,
+            finding: investigation.headline,
+            why: investigation.reason,
+            recommendedForThisBill: investigation.recommendedAction,
+            thisBillIs: investigation.side === 'newer' ? 'the newer upload of the pair' : 'the older upload of the pair',
+            otherBillId: investigation.otherBill.paymentOrderId,
+          } : null,
           quickBooks: sync ? { status: sync.status, syncedAt: sync.syncedAt?.toISOString() ?? null, error: sync.error } : 'not synced yet',
         };
       },

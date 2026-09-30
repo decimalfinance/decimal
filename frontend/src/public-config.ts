@@ -9,6 +9,8 @@ import frontendPublicConfig from './public-config.json';
 type PublicConfig = {
   apiBaseUrl: string;
   localApiBaseUrl?: string;
+  /** The companion's note on a bill's own screen (pages/BillCompanion.tsx). An experiment: false hides it. */
+  companionOnBill?: boolean;
 };
 
 const config = frontendPublicConfig as PublicConfig;
@@ -29,6 +31,10 @@ export function getPublicApiBaseUrl() {
     throw new Error('frontend/src/public-config.json must define apiBaseUrl.');
   }
   return value.replace(/\/+$/, '');
+}
+
+export function isCompanionOnBillEnabled(): boolean {
+  return config.companionOnBill === true;
 }
 
 function shouldUseLocalApiBaseUrl() {

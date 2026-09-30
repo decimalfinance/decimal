@@ -307,6 +307,27 @@ export async function duplicateBriefFor(args: {
 }
 
 /**
+ * The finished investigation of a bill's duplicate flag, seen from that bill's
+ * side — if there is one and it still describes the pair as it is now. Strictly
+ * read-only: never starts or refreshes a run. For readers such as the
+ * companion's chat, which must say what the investigation found rather than
+ * work it out again and disagree with it.
+ */
+export async function peekDuplicateBrief(organizationId: string, paymentOrderId: string): Promise<DuplicateBriefView | null> {
+  const row = await prisma.billExceptionBrief.findFirst({
+    where: { organizationId, flagKind: FLAG_KIND, status: 'ready', OR: [{ firstPaymentOrderId: paymentOrderId }, { secondPaymentOrderId: paymentOrderId }] },
+    orderBy: { updatedAt: 'desc' },
+  });
+  if (!row) return null;
+  const otherId = row.firstPaymentOrderId === paymentOrderId ? row.secondPaymentOrderId : row.firstPaymentOrderId;
+  const [bill, other] = await Promise.all([paymentOrderId, otherId].map((id) =>
+    prisma.paymentOrder.findFirst({ where: { organizationId, paymentOrderId: id }, select: PAIR_BILL_SELECT })));
+  if (!bill || !other) return null;
+  if (row.fingerprint !== pairFingerprint(sideFrom(bill), sideFrom(other))) return null;
+  return view(row, { viewer: bill, other, briefId: row.briefId, status: 'ready' });
+}
+
+/**
  * The post-intake trigger: investigate a new bill's duplicate before anyone
  * opens it. Does its own duplicate lookup because intake has not computed one.
  * Never throws — an investigation must not be the reason intake fails.

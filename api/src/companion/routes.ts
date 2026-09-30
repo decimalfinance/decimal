@@ -9,6 +9,7 @@ import { getCompanionConsole, getCompanionJob } from './today.js';
 import { followUp, getChat, listChats, recordActionOutcome, startChat } from './chat.js';
 import { getInbox, markAllInboxSeen, markInboxSeen, nudgeAboutBill, tickAsk } from './inbox.js';
 import { forgetHabit, getKnowledge, keepHabit, setHabit } from './knowledge.js';
+import { getBillNote } from './bill-note.js';
 
 export const companionRouter = Router();
 
@@ -31,7 +32,7 @@ companionRouter.get('/organizations/:organizationId/companion/jobs/:jobId', asyn
 
 // Chats are the asker's own. Every route checks the chat belongs to them.
 const chatParams = orgParams.extend({ chatId: z.string().uuid() });
-const askBody = z.object({ text: z.string().min(1).max(2000) });
+const askBody = z.object({ text: z.string().min(1).max(2000), billId: z.string().uuid().nullish() });
 
 companionRouter.get('/organizations/:organizationId/companion/chats', asyncRoute(async (req, res) => {
   const { organizationId } = orgParams.parse(req.params);
@@ -42,8 +43,8 @@ companionRouter.get('/organizations/:organizationId/companion/chats', asyncRoute
 companionRouter.post('/organizations/:organizationId/companion/chats', asyncRoute(async (req, res) => {
   const { organizationId } = orgParams.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
-  const { text } = askBody.parse(req.body);
-  res.status(201).json(await startChat(organizationId, req.auth!.userId, text));
+  const { text, billId } = askBody.parse(req.body);
+  res.status(201).json(await startChat(organizationId, req.auth!.userId, text, billId ?? null));
 }));
 
 companionRouter.get('/organizations/:organizationId/companion/chats/:chatId', asyncRoute(async (req, res) => {
@@ -138,4 +139,12 @@ companionRouter.delete('/organizations/:organizationId/knowledge/habits/:counter
   const { organizationId, counterpartyId } = vendorParams.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
   res.json(await forgetHabit(organizationId, req.auth!.userId, counterpartyId));
+}));
+
+// The companion's note on one bill, for the bill's own screen.
+const billNoteParams = orgParams.extend({ paymentOrderId: z.string().uuid() });
+companionRouter.get('/organizations/:organizationId/bills/:paymentOrderId/companion', asyncRoute(async (req, res) => {
+  const { organizationId, paymentOrderId } = billNoteParams.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  res.json(await getBillNote(organizationId, req.auth!.userId, paymentOrderId));
 }));

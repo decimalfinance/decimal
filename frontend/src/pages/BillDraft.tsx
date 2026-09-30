@@ -27,6 +27,8 @@ import { Ico } from '../dec/icons';
 import { BillWorkLog } from '../dec/primitives';
 import { BillConversation } from '../dec/BillConversation';
 import { useToast } from '../ui/Toast';
+import { BillCompanion } from './BillCompanion';
+import { isCompanionOnBillEnabled } from '../public-config';
 
 function usd(amount: number): string {
   return amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
@@ -1333,6 +1335,16 @@ activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
                 {usd(billDraft.notABill?.kind === 'credit_note' ? -Math.abs(documentTotal) : documentTotal)}
               </div>
             </div>
+
+            {/* The companion's note on this bill. An experiment behind a switch
+                (public-config.json "companionOnBill"); see BillCompanion.tsx. */}
+            {isCompanionOnBillEnabled() ? (
+              <BillCompanion
+                organizationId={organizationId}
+                billId={billDraft.paymentOrderId}
+                onOpenBill={(id, state) => navigateTo(`/organizations/${organizationId}/bills/${id}${state === 'draft' ? '/draft' : ''}`)}
+              />
+            ) : null}
 
             {/* Sent back by an approver — the bill clerk's homework, above all flags */}
             {billDraft.sentBack ? (
