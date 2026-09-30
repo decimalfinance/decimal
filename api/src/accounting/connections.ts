@@ -26,7 +26,14 @@ export async function getConnection(organizationId: string): Promise<AccountingC
 }
 
 /** Build a QuickBooks client for an org that persists rotated tokens back to the DB. */
+let testClient: ((organizationId: string) => QuickBooks | null) | null = null;
+/** Replace the QuickBooks client in tests (a fake that records what is sent). `null` restores it. */
+export function setQuickBooksForTests(fn: ((organizationId: string) => QuickBooks | null) | null) {
+  testClient = fn;
+}
+
 export async function getQuickBooksForOrg(organizationId: string): Promise<QuickBooks | null> {
+  if (testClient) return testClient(organizationId);
   const row = await getConnection(organizationId);
   if (!row || row.status !== 'connected') {
     return null;

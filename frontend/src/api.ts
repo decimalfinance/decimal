@@ -218,30 +218,6 @@ export interface GlCandidate {
   rationale?: string | null;
 }
 
-export interface CodedLine {
-  accountId: string;
-  accountName?: string | null;
-  amount: number;
-  description?: string | null;
-}
-
-export interface CodingInboxItem {
-  hasUncategorizedLines?: boolean;
-  paymentOrderId: string;
-  vendorLabel: string | null;
-  amountUsdc: number;
-  invoiceNumber: string | null;
-  createdAt: string;
-  coding: {
-    accountId: string;
-    accountName: string | null;
-    lines: CodedLine[];
-    billHeader?: { vendorName?: string | null; invoiceNumber?: string | null; billDate?: string | null };
-  } | null;
-  candidates: GlCandidate[];
-  syncStatus: string | null;
-}
-
 export interface FailedSync {
   paymentOrderId: string;
   vendor: string;
@@ -258,6 +234,8 @@ export interface SyncedPayment {
   invoiceNumber: string | null;
   account: string | null;
   billId: string | null;
+  /** Posted at approval; true once the payment has been recorded against it. */
+  paid: boolean;
   syncedAt: string | null;
 }
 
@@ -380,11 +358,6 @@ export const api = {
       { method: 'POST' },
     );
   },
-  listCodingInbox(organizationId: string) {
-    return request<{ items: CodingInboxItem[] }>(
-      `/organizations/${organizationId}/accounting/quickbooks/coding-inbox`,
-    );
-  },
   // Vendor coding rules: the vendor's default expense account (learned or manual).
   listVendorCodingRules(organizationId: string) {
     return request<{ items: VendorCodingRule[] }>(`/organizations/${organizationId}/vendor-coding-rules`);
@@ -393,32 +366,6 @@ export const api = {
     return request<{ ok: boolean }>(`/organizations/${organizationId}/counterparties/${counterpartyId}/coding-rule`, {
       method: 'DELETE',
     });
-  },
-  syncCodedPayments(organizationId: string) {
-    return request<{ synced: number; skipped: number; error: number }>(
-      `/organizations/${organizationId}/accounting/quickbooks/sync-coded`,
-      { method: 'POST' },
-    );
-  },
-  setPaymentOrderGlCoding(
-    organizationId: string,
-    paymentOrderId: string,
-    body: {
-      lines?: CodedLine[];
-      codedExpenseAccountId?: string;
-      codedExpenseAccountName?: string | null;
-      predictedAccountId?: string | null;
-      predictedAccountName?: string | null;
-      predictionSource?: string | null;
-      confidenceScore?: number | null;
-      billHeader?: { vendorName?: string | null; invoiceNumber?: string | null; billDate?: string | null };
-      correctionNote?: string | null;
-    },
-  ) {
-    return request<{ codedExpenseAccountId: string; codedExpenseAccountName: string | null; predictionSource: string | null; confidenceScore: number | null; wasOverridden: boolean }>(
-      `/organizations/${organizationId}/payment-orders/${paymentOrderId}/gl-coding`,
-      { method: 'POST', body: JSON.stringify(body) },
-    );
   },
   listOrganizationMembers(organizationId: string) {
     return request<{ items: OrganizationMember[] }>(
@@ -2075,7 +2022,7 @@ export interface CompanionActionCard {
   result: string | null;
 }
 
-export type InboxLineKind = 'approval' | 'question' | 'review' | 'sign_off' | 'sent_back' | 'unreadable' | 'ask';
+export type InboxLineKind = 'approval' | 'question' | 'review' | 'sign_off' | 'sent_back' | 'unreadable' | 'ask' | 'sync_failed';
 
 /** One bill in a person's inbox, with everything wanted of them on it. */
 export interface InboxItem {

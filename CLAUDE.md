@@ -4,7 +4,7 @@ Guidance for Claude Code and other agents working in this repository. Keep it sh
 
 ## What this is
 
-Decimal is an accounts-payable product. A bill arrives by upload or forwarded email, a model extracts it into structured fields, a person checks it, each line is coded to a ledger account, an approval flow routes it, and approved bills sync to QuickBooks Online.
+Decimal is an accounts-payable product. A bill arrives by upload or forwarded email, a model extracts it into structured fields, a person checks it and picks a category for each line, an approval flow routes it, and the moment it is approved it is posted to QuickBooks Online as a bill (the payment is recorded against it when it is paid).
 
 **Built and live:** extraction, bill review, GL coding, the approval engine with its Flow Builder and policies, roles, QuickBooks sync, inbound email, the agent test bench, and the exception agent (it investigates duplicate flags and recommends a resolution; a person confirms).
 

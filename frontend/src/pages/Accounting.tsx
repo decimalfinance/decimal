@@ -3,7 +3,7 @@
 // payments are posted automatically by the backend sync agent.
 
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router';
+import { Link, useNavigate, useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api';
 import type { AuthenticatedSession } from '../types';
@@ -14,6 +14,7 @@ export function AccountingPage({ session }: { session: AuthenticatedSession }) {
   const { organizationId } = useParams<{ organizationId: string }>();
   const orgId = organizationId!;
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const { success, error: toastError } = useToast();
 
   const membership = useMemo(
@@ -77,6 +78,13 @@ export function AccountingPage({ session }: { session: AuthenticatedSession }) {
     enabled: connected && (status?.syncCounts?.error ?? 0) > 0,
   });
   const failed = failedQuery.data?.items ?? [];
+  // What has reached QuickBooks: posted at approval, paid once the money moves.
+  const syncedQuery = useQuery({
+    queryKey: ['accounting-synced', orgId] as const,
+    queryFn: () => api.listSyncedPayments(orgId),
+    enabled: connected,
+  });
+  const synced = syncedQuery.data?.items ?? [];
 
   const retryMutation = useMutation({
     mutationFn: (paymentOrderId: string) => api.syncPaymentOrderAccounting(orgId, paymentOrderId),
@@ -261,7 +269,7 @@ export function AccountingPage({ session }: { session: AuthenticatedSession }) {
             <div className="sec-head">
               <div className="sh-titles">
                 <h2>Sync health</h2>
-                <p className="sh-desc">Settled payments post automatically. Failures retry on their own.</p>
+                <p className="sh-desc">Approved bills post to QuickBooks automatically; the payment is recorded against the bill when it is paid. Failures retry on their own and land in the Inbox of whoever manages accounting.</p>
               </div>
             </div>
             <div className="metrics" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
@@ -298,7 +306,7 @@ export function AccountingPage({ session }: { session: AuthenticatedSession }) {
                   >
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 600 }}>
-                        {f.vendor} · {(Number(f.amountRaw) / 1e6).toFixed(2)} USDC
+                        {f.vendor} · {(Number(f.amountRaw) / 1e6).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
                       </div>
                       <div
                         style={{
@@ -314,7 +322,7 @@ export function AccountingPage({ session }: { session: AuthenticatedSession }) {
                     </div>
                     <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
                       <Link
-                        to={`/organizations/${orgId}/payments/${f.paymentOrderId}`}
+                        to={`/organizations/${orgId}/bills/${f.paymentOrderId}`}
                         className="btn btn-ghost btn-sm"
                       >
                         View
@@ -333,6 +341,35 @@ export function AccountingPage({ session }: { session: AuthenticatedSession }) {
                   </div>
                 ))}
               </div>
+            ) : null}
+
+            {synced.length > 0 ? (
+              <section style={{ marginTop: 24 }}>
+                <div className="sec-head">
+                  <div className="sh-titles">
+                    <h2>Posted to QuickBooks</h2>
+                    <p className="sh-desc">Newest first.</p>
+                  </div>
+                </div>
+                <div className="tbl-card">
+                  <table className="tbl" style={{ tableLayout: 'fixed' }}>
+                    <thead>
+                      <tr><th style={{ width: '30%' }}>Vendor</th><th style={{ width: '16%' }}>Invoice</th><th style={{ width: '22%' }}>Category</th><th className="num" style={{ width: '14%' }}>Amount</th><th style={{ width: '18%' }}>In QuickBooks</th></tr>
+                    </thead>
+                    <tbody>
+                      {synced.map((r) => (
+                        <tr key={r.paymentOrderId} onClick={() => navigate(`/organizations/${orgId}/bills/${r.paymentOrderId}`)}>
+                          <td><div className="cell-vendor"><div className="v-name">{r.vendor}</div></div></td>
+                          <td><span className="cell-mono">{r.invoiceNumber ?? '—'}</span></td>
+                          <td>{r.account ?? '—'}</td>
+                          <td className="td-num">{(Number(r.amountRaw) / 1e6).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</td>
+                          <td>{r.paid ? 'Bill and payment' : 'Bill, not yet paid'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
             ) : null}
           </div>
         ) : null}

@@ -11,7 +11,7 @@ Verified against the code on 2026-09-17; the exception agent section on 2026-09-
 
 ## What the product does
 
-Decimal is an accounts-payable product. A bill arrives by upload or forwarded email. A vision model reads it into structured fields. A person checks it, the system codes each line to a ledger account, and an approval flow routes it to the right people. Approved bills sync to QuickBooks Online.
+Decimal is an accounts-payable product. A bill arrives by upload or forwarded email. A vision model reads it into structured fields. A person checks it and picks a category for each line, and an approval flow routes it to the right people. When it is approved it is posted to QuickBooks Online as a bill; the payment is recorded against it when it is paid.
 
 The final step, paying the bill, is the frozen part. See [Payment execution](#payment-execution-frozen).
 
@@ -159,11 +159,15 @@ Frontend: `pages/FlowBuilder.tsx`, `pages/Approvals.tsx`, `pages/Protections.tsx
 
 - `gl-coding.ts` runs the coding waterfall for each bill line: explicit rules, then vendor memory (`VendorCodingRule`), then AI for the blanks, then a catch-all. Repeated corrections promote into vendor memory.
 - `ocr-coding.ts` and `default-chart.ts` supply the chart of accounts, with a built-in fallback when QuickBooks is not connected.
-- `quickbooks.ts`, `connections.ts`, `account-sync.ts` and `sync.ts` handle QuickBooks Online OAuth, account sync and bill sync.
+- `quickbooks.ts` and `connections.ts` handle QuickBooks Online OAuth (`setQuickBooksForTests` swaps in a fake client).
+- **Categories are chosen in review.** At confirm, `recordReviewCoding` turns each line's category name into a coding row (`payment_order_gl_codings`) with the account id from the QuickBooks chart, or the standard list when not connected. This is also what vendor habits learn from.
+- **Posting happens in two moments** (`account-sync.ts`, `sync.ts`). When a bill's approval completes, the approval bridge calls `syncApprovedBill`, which posts it as a QuickBooks Bill, one line per category (`postBillToQuickBooks`). When it is paid (settled), `syncSettledPaymentOrder` records a BillPayment from the clearing account against that Bill (`recordBillPaymentInQuickBooks`); a bill paid before it was ever posted gets both at once. One `accounting_syncs` row carries both ids. Idempotent through QuickBooks requestids.
+- A category missing from the chart re-checks the live chart before failing, then fails with the category named. Failures retry in the background (`sweepUnsyncedSettledOrders`, up to five attempts; it also posts approved bills that were never posted, e.g. approved before QuickBooks was connected) and land in the Inbox of admins and anyone with `accounting.manage`. A person retries from the Accounting page (`syncBillNow`). An organisation without QuickBooks leaves no trace.
+- The Coding inbox (coding bills after they were paid) was removed on 2026-09-30: categories are chosen in review, and bills post at approval.
 
 The UI never says "GL coding". It says "Line items" and "Category".
 
-Frontend: `pages/Accounting.tsx`, `pages/CodingInbox.tsx`.
+Frontend: `pages/Accounting.tsx` (connection, account map, sync health, failures with Retry, and the posted-to-QuickBooks history).
 
 ## Auth and roles (Live)
 

@@ -243,7 +243,7 @@ function JobDrawer({ organizationId, selection, onClose, onOpenBill }: {
 
 /** What each kind of inbox line is called, in a word. */
 const LINE_LABEL: Record<InboxItem['lines'][number]['kind'], string> = {
-  question: 'Question', approval: 'Approve', ask: 'Ask', sent_back: 'Sent back', review: 'Review', sign_off: 'Sign off', unreadable: "Can't read",
+  question: 'Question', approval: 'Approve', ask: 'Ask', sent_back: 'Sent back', review: 'Review', sign_off: 'Sign off', unreadable: "Can't read", sync_failed: 'QuickBooks',
 };
 
 /**

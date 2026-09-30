@@ -411,46 +411,51 @@ export async function predictGlCandidates(
   return { candidates: out, vendorLabel };
 }
 
-/** The coding inbox: settled payments not yet in QuickBooks, each with its coding + candidates. */
-export async function getCodingInbox(organizationId: string) {
-  const orders = await prisma.paymentOrder.findMany({
-    where: { organizationId, state: 'settled', accountingSyncs: { none: { provider: PROVIDER, status: 'synced' } } },
-    include: {
-      counterparty: true,
-      counterpartyWallet: true,
-      glCoding: true,
-      accountingSyncs: { where: { provider: PROVIDER }, take: 1, orderBy: { createdAt: 'desc' } },
-    },
-    orderBy: { createdAt: 'desc' },
-    take: 100,
+// ─── The coding a person confirmed in review ────────────────────────────────
+// Review is where categories are chosen: each line's category is a NAME from
+// the picker (the QuickBooks chart when connected, the standard list when
+// not). This turns the confirmed lines into a coding row with account ids, so
+// the bill can be posted to QuickBooks at approval and so vendor habits learn
+// from what people actually confirm. A name the chart does not have lands on
+// the catch-all, and the sync says which one.
+
+type ReviewLine = { description?: string | null; amount?: number | null; category?: string | null };
+
+export async function recordReviewCoding(organizationId: string, paymentOrderId: string, actorUserId: string | null) {
+  const order = await prisma.paymentOrder.findFirst({
+    where: { organizationId, paymentOrderId },
+    select: { amountRaw: true, invoiceNumber: true, metadataJson: true },
   });
-  const items = [];
-  const { UNCATEGORIZED_ACCOUNT } = await import('./default-chart.js');
-  for (const o of orders) {
-    const { candidates } = await predictGlCandidates(organizationId, o.paymentOrderId);
-    // Reviewer parked lines in the catch-all — the accountant's sweep signal.
-    const meta = (o.metadataJson ?? {}) as Record<string, unknown>;
-    const verification = meta.verification && typeof meta.verification === 'object' ? meta.verification as Record<string, unknown> : null;
-    const vLines = verification && Array.isArray(verification.lines) ? verification.lines : [];
-    const hasUncategorizedLines = vLines.some((l) => !!l && typeof l === 'object' && (l as Record<string, unknown>).category === UNCATEGORIZED_ACCOUNT.name);
-    items.push({
-      paymentOrderId: o.paymentOrderId,
-      hasUncategorizedLines,
-      vendorLabel: o.counterparty?.displayName ?? o.counterpartyWallet?.label ?? null,
-      amountUsdc: Number(o.amountRaw) / 1e6,
-      invoiceNumber: o.invoiceNumber,
-      createdAt: o.createdAt,
-      coding: o.glCoding
-        ? {
-            accountId: o.glCoding.codedExpenseAccountId,
-            accountName: o.glCoding.codedExpenseAccountName,
-            lines: Array.isArray(o.glCoding.lines) ? o.glCoding.lines : [],
-            billHeader: (o.glCoding.billHeader ?? {}) as Record<string, unknown>,
-          }
-        : null,
-      candidates,
-      syncStatus: o.accountingSyncs[0]?.status ?? null,
-    });
+  const verification = (order?.metadataJson as { verification?: { lines?: ReviewLine[]; fields?: Record<string, unknown> } } | null)?.verification;
+  const lines = (verification?.lines ?? []).filter((l) => (l.description ?? '').trim() || Number(l.amount));
+  if (!order || lines.length === 0) return null;
+
+  const { listChartOfAccounts } = await import('./ocr-coding.js');
+  const { DEFAULT_EXPENSE_ACCOUNTS, UNCATEGORIZED_ACCOUNT } = await import('./default-chart.js');
+  const chart = await listChartOfAccounts(organizationId).catch(() => []);
+  const key = (s: string) => s.trim().toLowerCase();
+  const byName = new Map<string, { id: string; name: string }>();
+  if (chart.length > 0) {
+    for (const a of chart) {
+      byName.set(key(a.fullyQualifiedName ?? a.name), { id: a.id, name: a.fullyQualifiedName ?? a.name });
+      if (!byName.has(key(a.name))) byName.set(key(a.name), { id: a.id, name: a.fullyQualifiedName ?? a.name });
+    }
+  } else {
+    for (const a of DEFAULT_EXPENSE_ACCOUNTS) byName.set(key(a.name), { id: a.id, name: a.name });
   }
-  return items;
+  const coded = lines.map((l) => {
+    const account = l.category ? byName.get(key(l.category)) : undefined;
+    return {
+      accountId: account?.id ?? UNCATEGORIZED_ACCOUNT.id,
+      accountName: account?.name ?? l.category ?? UNCATEGORIZED_ACCOUNT.name,
+      amount: Number(l.amount) || 0,
+      description: l.description ?? null,
+    };
+  });
+  const billDate = typeof verification?.fields?.invoiceDate === 'string' ? verification.fields.invoiceDate : null;
+  return setPaymentOrderGlCoding(organizationId, paymentOrderId, {
+    lines: coded,
+    predictionSource: 'review',
+    billHeader: { invoiceNumber: order.invoiceNumber, billDate },
+  }, actorUserId);
 }

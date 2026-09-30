@@ -72,7 +72,6 @@ export function AppSidebar({
   activeOrganizationId,
   paymentsIncompleteCount,
   unreviewedWalletsCount,
-  codingInboxCount,
   onOrganizationSwitch,
   onLogout,
 }: {
@@ -81,7 +80,6 @@ export function AppSidebar({
   activeOrganizationId?: string;
   paymentsIncompleteCount?: number;
   unreviewedWalletsCount?: number;
-  codingInboxCount?: number;
   onOrganizationSwitch: (organizationId: string) => void;
   onLogout: () => void;
 }) {
@@ -267,7 +265,6 @@ export function AppSidebar({
               <>
                 <div className="sb-group-label">Integrations</div>
                 <NavItem to={`${base}/accounting`} end icon={<Ico.book w={16} />} label="Accounting" />
-                <NavItem to={`${base}/accounting/coding`} icon={<Ico.inbox w={16} />} label="Coding inbox" badge={codingInboxCount} />
               </>
             ) : null}
           </>

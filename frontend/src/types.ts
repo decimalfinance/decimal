@@ -46,7 +46,6 @@ export type OrganizationSummary = {
   executionQueueCount: number;
   paymentsIncompleteCount: number;
   unreviewedWalletsCount: number;
-  codingInboxCount: number;
   generatedAt: string;
 };
 

@@ -2721,6 +2721,16 @@ export async function submitBillForApproval(input: SubmitBillInput) {
     approvableId,
   });
 
+  // The categories just confirmed become the bill's coding: what QuickBooks
+  // receives at approval, and what vendor habits learn from. Best-effort — a
+  // chart lookup failing must never undo a confirmed bill.
+  try {
+    const { recordReviewCoding } = await import('../accounting/gl-coding.js');
+    await recordReviewCoding(input.organizationId, input.paymentOrderId, input.actorUserId);
+  } catch (error) {
+    logger.warn('review_coding.failed', { paymentOrderId: input.paymentOrderId, ...(error instanceof Error ? { message: error.message } : {}) });
+  }
+
   return { detail: await getPaymentOrderDetail(input.organizationId, input.paymentOrderId), approvableId };
 }
 

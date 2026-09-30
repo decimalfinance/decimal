@@ -19,7 +19,7 @@ import { getApprovalsInbox, getBillsWorkbench } from '../payments/bills.js';
 import { involvedBillIds } from '../payments/bill-visibility.js';
 import { getOrgAccess } from '../approvals/permissions.js';
 
-export type InboxLineKind = 'approval' | 'question' | 'review' | 'sign_off' | 'sent_back' | 'unreadable' | 'ask';
+export type InboxLineKind = 'approval' | 'question' | 'review' | 'sign_off' | 'sent_back' | 'unreadable' | 'ask' | 'sync_failed';
 
 export type InboxLine = {
   kind: InboxLineKind;
@@ -47,7 +47,7 @@ export type InboxItem = {
   isNew: boolean;
 };
 
-const URGENCY: Record<InboxLineKind, number> = { question: 0, approval: 1, ask: 2, sent_back: 3, review: 4, unreadable: 5, sign_off: 6 };
+const URGENCY: Record<InboxLineKind, number> = { question: 0, approval: 1, ask: 2, sync_failed: 3, sent_back: 3, review: 4, unreadable: 5, sign_off: 6 };
 
 /**
  * Close asks the recipient has already dealt with: they commented on the bill
@@ -160,6 +160,19 @@ export async function getInbox(organizationId: string, viewerUserId: string, opt
       }
     }
   }
+  // A bill QuickBooks would not take, for whoever manages accounting. It
+  // clears itself the moment a retry (or the sweep) gets it through.
+  const managesAccounting = isAdmin || (access?.capabilities.includes('accounting.manage') ?? false);
+  if (managesAccounting) {
+    const failed = await prisma.accountingSync.findMany({
+      where: { organizationId, provider: 'quickbooks', status: 'error', paymentOrder: { state: { not: 'cancelled' } } },
+      select: { paymentOrderId: true, error: true, updatedAt: true },
+    });
+    for (const f of failed) {
+      add(itemFor(f.paymentOrderId), { kind: 'sync_failed', text: `Couldn't post to QuickBooks: ${f.error ?? 'unknown error'}`, at: f.updatedAt.toISOString() });
+    }
+  }
+
   // What people asked, layered onto the same item.
   const names = new Map((await prisma.user.findMany({
     where: { userId: { in: [...new Set(asks.map((a) => a.fromUserId))] } },

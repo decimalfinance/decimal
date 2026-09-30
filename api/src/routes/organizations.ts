@@ -42,7 +42,6 @@ organizationsRouter.get('/organizations/:organizationId/summary', async (req, re
       executionQueueCount,
       paymentsIncompleteCount,
       unreviewedWalletsCount,
-      codingInboxCount,
     ] = await Promise.all([
       prisma.paymentOrder.count({ where: { organizationId, state: 'submitted' } }),
       prisma.paymentOrder.count({ where: { organizationId, state: { in: ['submitted', 'proposed', 'executed'] } } }),
@@ -54,13 +53,6 @@ organizationsRouter.get('/organizations/:organizationId/summary', async (req, re
           isActive: true,
         },
       }),
-      prisma.paymentOrder.count({
-        where: {
-          organizationId,
-          state: 'settled',
-          accountingSyncs: { none: { provider: 'quickbooks', status: 'synced' } },
-        },
-      }),
     ]);
 
     res.json({
@@ -68,7 +60,6 @@ organizationsRouter.get('/organizations/:organizationId/summary', async (req, re
       executionQueueCount,
       paymentsIncompleteCount,
       unreviewedWalletsCount,
-      codingInboxCount,
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {

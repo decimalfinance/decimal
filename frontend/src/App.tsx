@@ -29,7 +29,6 @@ const MembersPage = lazy(() => import('./pages/Members').then((m) => ({ default:
 const ApprovalsPage = lazy(() => import('./pages/Approvals').then((m) => ({ default: m.ApprovalsPage })));
 const ProtectionsPage = lazy(() => import('./pages/Protections').then((m) => ({ default: m.ProtectionsPage })));
 const AccountingPage = lazy(() => import('./pages/Accounting').then((m) => ({ default: m.AccountingPage })));
-const CodingInboxPage = lazy(() => import('./pages/CodingInbox').then((m) => ({ default: m.CodingInboxPage })));
 const TreasuryWalletDetailPage = lazy(() => import('./pages/TreasuryWalletDetail').then((m) => ({ default: m.TreasuryWalletDetailPage })));
 const VaultDetailPage = lazy(() => import('./pages/VaultDetail').then((m) => ({ default: m.VaultDetailPage })));
 const OrganizationProposalsPage = lazy(() => import('./pages/OrganizationProposals').then((m) => ({ default: m.OrganizationProposalsPage })));
@@ -161,7 +160,6 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
   });
   const paymentsIncompleteCount = organizationSummaryQuery.data?.paymentsIncompleteCount ?? 0;
   const unreviewedWalletsCount = organizationSummaryQuery.data?.unreviewedWalletsCount ?? 0;
-  const codingInboxCount = organizationSummaryQuery.data?.codingInboxCount ?? 0;
 
   // Treasury gate removed — per the design handoff, Overview itself shows
   // a "Finish setting up" checklist when the org has no treasury yet, instead
@@ -188,7 +186,6 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
           activeOrganizationId={activeOrganizationId}
           paymentsIncompleteCount={paymentsIncompleteCount}
           unreviewedWalletsCount={unreviewedWalletsCount}
-          codingInboxCount={codingInboxCount}
           onOrganizationSwitch={(organizationId) => navigate(`/organizations/${organizationId}`)}
           onLogout={logout}
         />
@@ -217,7 +214,8 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
               <Route path="/organizations/:organizationId/proposals/:decimalProposalId/legacy" element={<OrganizationProposalDetailPage session={session} />} />
               <Route path="/organizations/:organizationId/members" element={<MembersPage session={session} />} />
               <Route path="/organizations/:organizationId/accounting" element={<AccountingPage session={session} />} />
-              <Route path="/organizations/:organizationId/accounting/coding" element={<CodingInboxPage session={session} />} />
+              {/* The Coding inbox is gone: categories are chosen in review, and approved bills post to QuickBooks. */}
+              <Route path="/organizations/:organizationId/accounting/coding" element={<OrgRedirect to="inbox" />} />
               <Route path="/organizations/:organizationId/counterparties" element={<CounterpartiesPage session={session} />} />
               <Route path="/organizations/:organizationId/destinations" element={<OrgRedirect to="counterparties" />} />
               <Route path="/organizations/:organizationId/bills" element={<BillsPage />} />

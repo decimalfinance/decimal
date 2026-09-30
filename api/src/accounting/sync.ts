@@ -1,6 +1,7 @@
-// The push: a settled payment -> QBO Bill + BillPayment (from the clearing
-// account), idempotent via requestid. Uses the org's configured account map so
-// the operator controls which GL accounts get posted to.
+// The push to QuickBooks, in two moments. When a bill is APPROVED it is posted
+// as a Bill (the books learn the money is owed); when it is PAID, a BillPayment
+// is recorded against it from the clearing account. Both idempotent through the
+// requestid. A bill paid before it was ever posted gets both at once.
 
 import { QuickBooks, qboLiteral } from './quickbooks.js';
 
@@ -35,11 +36,24 @@ export interface SyncResult {
   billBalance: number;
 }
 
-export async function syncPaymentToQuickBooks(
+export interface PostedBill {
+  vendorId: string;
+  billId: string;
+  billTotal: number;
+  billBalance: number;
+}
+
+/**
+ * Post a bill to QuickBooks: find or create the vendor, then create the Bill
+ * with one line per coded line. This is the moment the books learn the money
+ * is owed — when the bill is approved, not when it is paid. Idempotent through
+ * the requestid, so a retry never makes a second bill.
+ */
+export async function postBillToQuickBooks(
   qb: QuickBooks,
   payment: SyncablePayment,
-  accounts: AccountMap,
-): Promise<SyncResult> {
+  accounts: { defaultExpenseAccountId?: string | null; apAccountId?: string | null },
+): Promise<PostedBill> {
   // QBO holds money at 2-decimal (cent) precision and stores DisplayName trimmed,
   // control-char-free, and <=100 chars. Normalize once so the Bill, the
   // BillPayment, and any re-sync vendor lookup all agree with what QBO records —
@@ -63,6 +77,9 @@ export async function syncPaymentToQuickBooks(
 
   // One Bill line per coded line (account + amount + description); otherwise a single
   // line on the default expense account. All amounts at 2dp.
+  if ((!payment.codedLines || payment.codedLines.length === 0) && !accounts.defaultExpenseAccountId) {
+    throw new Error('This bill has no categories to post, and no default expense account is set.');
+  }
   const billLines =
     payment.codedLines && payment.codedLines.length > 0
       ? payment.codedLines.map((l) => ({
@@ -75,7 +92,7 @@ export async function syncPaymentToQuickBooks(
           {
             Amount: amount,
             DetailType: 'AccountBasedExpenseLineDetail',
-            AccountBasedExpenseLineDetail: { AccountRef: { value: accounts.defaultExpenseAccountId } },
+            AccountBasedExpenseLineDetail: { AccountRef: { value: accounts.defaultExpenseAccountId! } },
           },
         ];
   const billTotal = Math.round(billLines.reduce((sum, l) => sum + Number(l.Amount), 0) * 100) / 100;
@@ -95,28 +112,49 @@ export async function syncPaymentToQuickBooks(
   if (payment.txnDate?.trim()) billBody.TxnDate = payment.txnDate.trim();
 
   const bill = (await qb.createBill(billBody, `${payment.id}_bill`)).Bill;
+  const after = (await qb.readEntity('bill', bill.Id)).Bill;
+  return { vendorId: vendor.Id, billId: bill.Id, billTotal, billBalance: Number(after.Balance) };
+}
 
-  // BillPayment from the clearing account, linked to the Bill.
+/**
+ * Record the payment against a bill already in QuickBooks: a BillPayment from
+ * the clearing account, linked to the Bill. Runs when the money actually
+ * moves. Idempotent through the requestid.
+ */
+export async function recordBillPaymentInQuickBooks(
+  qb: QuickBooks,
+  payment: { id: string; vendorId: string; billId: string; total: number; txSignature?: string | null },
+  clearingAccountId: string,
+): Promise<{ billPaymentId: string; billBalance: number }> {
+  const total = Math.round(payment.total * 100) / 100;
   const billPayment = (
     await qb.createBillPayment(
       {
-        VendorRef: { value: vendor.Id },
+        VendorRef: { value: payment.vendorId },
         PayType: 'Check',
-        TotalAmt: billTotal,
-        CheckPayment: { BankAccountRef: { value: accounts.clearingAccountId } },
+        TotalAmt: total,
+        CheckPayment: { BankAccountRef: { value: clearingAccountId } },
         PrivateNote: `USDC settlement${payment.txSignature ? ` | sig ${payment.txSignature}` : ''}`,
-        Line: [{ Amount: billTotal, LinkedTxn: [{ TxnId: bill.Id, TxnType: 'Bill' }] }],
+        Line: [{ Amount: total, LinkedTxn: [{ TxnId: payment.billId, TxnType: 'Bill' }] }],
       },
       `${payment.id}_pmt`,
     )
   ).BillPayment;
+  const after = (await qb.readEntity('bill', payment.billId)).Bill;
+  return { billPaymentId: billPayment.Id, billBalance: Number(after.Balance) };
+}
 
-  const after = (await qb.readEntity('bill', bill.Id)).Bill;
-
-  return {
-    vendorId: vendor.Id,
-    billId: bill.Id,
-    billPaymentId: billPayment.Id,
-    billBalance: Number(after.Balance),
-  };
+/** Bill and payment together — for a bill that was never posted before it was paid. */
+export async function syncPaymentToQuickBooks(
+  qb: QuickBooks,
+  payment: SyncablePayment,
+  accounts: AccountMap,
+): Promise<SyncResult> {
+  const bill = await postBillToQuickBooks(qb, payment, accounts);
+  const paid = await recordBillPaymentInQuickBooks(
+    qb,
+    { id: payment.id, vendorId: bill.vendorId, billId: bill.billId, total: bill.billTotal, txSignature: payment.txSignature },
+    accounts.clearingAccountId,
+  );
+  return { vendorId: bill.vendorId, billId: bill.billId, billPaymentId: paid.billPaymentId, billBalance: paid.billBalance };
 }

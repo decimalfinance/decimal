@@ -13,6 +13,7 @@ import { registerApprovalHook } from '../approvals/hooks.js';
 import { spawnReleaseRun } from '../approvals/lifecycle.js';
 import { tryAdvancePaymentOrderWithAgent } from '../agents/payment-automation.js';
 import { cancelPaymentOrder, markBillSubmitted } from './orders.js';
+import { trackBackgroundWork } from '../infra/background.js';
 
 // The most recent reject command's reason + who said it, for the send-back note.
 async function latestRejection(approvableId: string): Promise<{ reason: string | null; byName: string | null }> {
@@ -50,6 +51,17 @@ export function registerPaymentApprovalBridge(): void {
             actorType: 'system',
             submitNote: 'Cleared by approval engine: bill approved',
           });
+        }
+        // Approved is when the books learn the money is owed: post the bill to
+        // QuickBooks now, in the background. It never holds up or fails the
+        // approval; the sweep retries, and a failure lands in the inbox of
+        // whoever manages accounting.
+        {
+          const { syncApprovedBill } = await import('../accounting/account-sync.js');
+          trackBackgroundWork(syncApprovedBill(paymentOrderId).catch((error) => {
+            logger.warn('approval_bridge.bill_post_failed', { paymentOrderId, ...(error instanceof Error ? { message: error.message } : {}) });
+            return 'error' as const;
+          }));
         }
         // Approved ≠ paid: the release ceremony is its own consent (H rows).
         const existing = await prisma.$queryRaw<{ id: string }[]>`
