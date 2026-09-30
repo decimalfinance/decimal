@@ -103,18 +103,10 @@ export async function getCompanionConsole(
   const canReview = isAdmin || (access?.capabilities.includes('bills.edit') ?? false);
   const windowStart = since ?? new Date(now.getTime() - FIRST_VISIT_LOOKBACK_MS);
 
-  const [board, inbox, holding, learnedRules, runningSteps] = await Promise.all([
+  const [board, inbox, holding, runningSteps] = await Promise.all([
     canReview ? getBillsWorkbench(organizationId, viewerUserId) : null,
     getApprovalsInbox(organizationId, viewerUserId),
     isAdmin ? openTasksByPerson(prisma, organizationId) : Promise.resolve([]),
-    canReview
-      ? prisma.vendorCodingRule.findMany({
-        where: { organizationId, source: 'learned', updatedAt: { gt: windowStart } },
-        orderBy: { updatedAt: 'desc' },
-        take: 10,
-        select: { vendorCodingRuleId: true, accountName: true, accountId: true, learnedFromCount: true, updatedAt: true, counterparty: { select: { displayName: true } } },
-      })
-      : Promise.resolve([]),
     canReview
       ? prisma.companionStep.findMany({
         where: { organizationId, status: 'running' },
@@ -195,8 +187,9 @@ export async function getCompanionConsole(
   for (const b of drafts.filter((x) => x.companion!.ready)) waiting.push(card(b, 'sign_off', 'Checked and ready: confirm to send it for approval'));
 
   // ── Done: what finished in this window ───────────────────────────────────
-  // A bill that came in during the window and has moved past review. Learned
-  // habits are the companion's own finished work, so they sit here too.
+  // A bill that came in during the window and has moved past review. What the
+  // companion learns about categories happens in the background and is not
+  // announced here (see "What I know").
   const done: DoneCard[] = [];
   const movedOn = canReview
     ? await prisma.paymentOrder.findMany({
@@ -216,14 +209,6 @@ export async function getCompanionConsole(
       title: b.vendorName, invoiceNumber: b.invoiceNumber, amountUsd: b.amountUsd,
       outcome: b.bucket === 'in_approval' ? `In approval: ${b.subStatus.text.toLowerCase()}` : b.bucket === 'needs_attention' ? 'Closed' : b.subStatus.text,
       at: at.toISOString(),
-    });
-  }
-  for (const r of learnedRules) {
-    done.push({
-      key: `learned:${r.vendorCodingRuleId}`, kind: 'learned', jobId: null, paymentOrderId: null,
-      title: r.counterparty.displayName, invoiceNumber: null, amountUsd: null,
-      outcome: `Learned: ${r.counterparty.displayName} goes to ${r.accountName ?? r.accountId}, from ${r.learnedFromCount} ${r.learnedFromCount === 1 ? 'bill' : 'bills'}`,
-      at: r.updatedAt.toISOString(),
     });
   }
   done.sort((a, b) => b.at.localeCompare(a.at));

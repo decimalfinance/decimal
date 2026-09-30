@@ -8,7 +8,7 @@ import { asyncRoute } from '../infra/route-helpers.js';
 import { getCompanionConsole, getCompanionJob } from './today.js';
 import { followUp, getChat, listChats, recordActionOutcome, startChat } from './chat.js';
 import { getInbox, markAllInboxSeen, markInboxSeen, nudgeAboutBill, tickAsk } from './inbox.js';
-import { forgetHabit, getKnowledge, keepHabit, setHabit } from './knowledge.js';
+import { forgetHabit, forgetLine, getKnowledge, setHabit } from './knowledge.js';
 import { getBillNote } from './bill-note.js';
 import { getReadyBills } from './ready-pass.js';
 
@@ -110,9 +110,8 @@ companionRouter.post('/organizations/:organizationId/inbox/nudge', asyncRoute(as
   res.status(201).json(await nudgeAboutBill({ organizationId, fromUserId: req.auth!.userId, toUserId: input.toUserId, billId: input.billId, text: input.text, via: req.get('x-decimal-via') === 'companion' ? 'companion' : 'person' }));
 }));
 
-// What the companion knows. Anyone on the team may read it; keeping (and,
-// through the Vendors routes, changing or forgetting) is for admins.
-const habitParams = orgParams.extend({ ruleId: z.string().uuid() });
+// What the companion knows. Anyone on the team may read it; forgetting a line
+// and setting vendor defaults is for whoever codes bills (checked inside).
 
 companionRouter.get('/organizations/:organizationId/knowledge', asyncRoute(async (req, res) => {
   const { organizationId } = orgParams.parse(req.params);
@@ -120,10 +119,12 @@ companionRouter.get('/organizations/:organizationId/knowledge', asyncRoute(async
   res.json(await getKnowledge(organizationId, req.auth!.userId));
 }));
 
-companionRouter.post('/organizations/:organizationId/knowledge/:ruleId/keep', asyncRoute(async (req, res) => {
-  const { organizationId, ruleId } = habitParams.parse(req.params);
+const forgetLineBody = z.object({ description: z.string().trim().min(1).max(500) });
+companionRouter.post('/organizations/:organizationId/knowledge/lines/forget', asyncRoute(async (req, res) => {
+  const { organizationId } = orgParams.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
-  res.json(await keepHabit(organizationId, req.auth!.userId, ruleId));
+  const { description } = forgetLineBody.parse(req.body);
+  res.json(await forgetLine(organizationId, req.auth!.userId, description));
 }));
 
 const setHabitBody = z.object({ counterpartyId: z.string().uuid(), category: z.string().trim().min(1).max(200) });

@@ -1,81 +1,97 @@
-// What the companion knows: every category habit, who taught it, and what it
-// was told to forget. Readable by anyone on the team — knowing why a bill was
-// pre-filled is part of trusting it. Changed by whoever codes bills: that is
-// the bill clerk's job (and an admin's, who can do everything), not something
-// to escalate to an admin (Zaid, 2026-09-30).
+// What the companion knows, for "What I know".
+//
+// Mostly LINE MEMORY (accounting/line-memory.ts): the kinds of line the team
+// has settled a category for, learned in the background from confirmed bills
+// and from categories people changed on saved drafts. Nobody teaches it on
+// purpose (Zaid, 2026-10-01); this page is where you can see it, and forget a
+// line it got wrong. Vendor defaults a person set by hand are listed too: they
+// are the last resort for a line nothing else speaks to.
+//
+// Readable by anyone on the team — knowing why a bill was pre-filled is part
+// of trusting it. Changed by whoever codes bills: bill clerks and admins.
 import { prisma } from '../infra/prisma.js';
 import { badRequest, forbidden, notFound } from '../infra/api-errors.js';
 import { getOrgAccess } from '../approvals/permissions.js';
-import { acknowledgeHabit, clearVendorCodingRule, setVendorCodingRule } from '../accounting/gl-coding.js';
+import { clearVendorCodingRule, setVendorCodingRule } from '../accounting/gl-coding.js';
+import { lineKey, loadPrecedents } from '../accounting/line-memory.js';
 
-export type Habit = {
+export type RememberedLine = {
+  key: string;
+  /** The line as a person last saw it. */
+  description: string;
+  category: string;
+  /** The bill it was last settled on. */
+  invoiceNumber: string | null;
+  billId: string;
+  by: string | null;
+  at: string;
+  /** How many settled lines read like this one. */
+  fromLines: number;
+};
+
+export type VendorDefault = {
   ruleId: string;
   counterpartyId: string;
   vendorName: string;
   category: string;
-  source: 'learned' | 'manual';
-  /** Learned: from how many agreeing bills. */
-  fromBills: number;
-  /** Learned: the people whose confirmed bills taught it. */
-  taughtBy: string[];
-  /** Set by hand: who. */
   setBy: string | null;
   since: string;
-  /** Bills from this vendor that came in since the habit took hold. */
-  billsSince: number;
-  /** Kept (or set) by someone who codes bills; false while it is still being announced. */
-  acknowledged: boolean;
 };
 
 export async function getKnowledge(organizationId: string, viewerUserId: string) {
-  const [access, rules, forgotten] = await Promise.all([
+  const [access, precedents, defaults, forgotten] = await Promise.all([
     getOrgAccess(organizationId, viewerUserId),
+    loadPrecedents(organizationId),
     prisma.vendorCodingRule.findMany({
-      where: { organizationId },
+      where: { organizationId, source: 'manual' },
       orderBy: { updatedAt: 'desc' },
       include: { counterparty: { select: { displayName: true } } },
     }),
-    prisma.forgottenHabit.findMany({ where: { organizationId }, orderBy: { forgottenAt: 'desc' }, take: 20 }),
+    prisma.forgottenLine.findMany({ where: { organizationId }, orderBy: { forgottenAt: 'desc' }, take: 20 }),
   ]);
-  const userIds = new Set<string>();
-  for (const r of rules) {
-    for (const id of (Array.isArray(r.taughtBy) ? r.taughtBy : []) as string[]) userIds.add(id);
-    if (r.setByUserId) userIds.add(r.setByUserId);
+  // One entry per kind of line; precedents are newest first, so the first
+  // seen is the decision in force.
+  const byKey = new Map<string, { latest: (typeof precedents)[number]; count: number }>();
+  for (const p of precedents) {
+    const had = byKey.get(p.key);
+    if (had) had.count += 1;
+    else byKey.set(p.key, { latest: p, count: 1 });
   }
+  const userIds = new Set<string>();
+  for (const { latest } of byKey.values()) if (latest.byUserId) userIds.add(latest.byUserId);
+  for (const d of defaults) if (d.setByUserId) userIds.add(d.setByUserId);
   for (const f of forgotten) if (f.forgottenByUserId) userIds.add(f.forgottenByUserId);
-  const counterpartyIds = [...new Set([...rules.map((r) => r.counterpartyId), ...forgotten.map((f) => f.counterpartyId)])];
-  const [users, vendors, bills] = await Promise.all([
-    prisma.user.findMany({ where: { userId: { in: [...userIds] } }, select: { userId: true, displayName: true, email: true } }),
-    prisma.counterparty.findMany({ where: { counterpartyId: { in: counterpartyIds } }, select: { counterpartyId: true, displayName: true } }),
-    prisma.paymentOrder.findMany({ where: { organizationId, counterpartyId: { in: rules.map((r) => r.counterpartyId) } }, select: { counterpartyId: true, createdAt: true } }),
-  ]);
+  const users = await prisma.user.findMany({ where: { userId: { in: [...userIds] } }, select: { userId: true, displayName: true, email: true } });
   const name = new Map(users.map((u) => [u.userId, u.displayName?.trim() || u.email]));
-  const vendor = new Map(vendors.map((v) => [v.counterpartyId, v.displayName]));
 
-  const habits: Habit[] = rules.map((r) => ({
-    ruleId: r.vendorCodingRuleId,
-    counterpartyId: r.counterpartyId,
-    vendorName: r.counterparty.displayName,
-    category: r.accountName ?? r.accountId,
-    source: r.source === 'manual' ? 'manual' : 'learned',
-    fromBills: r.learnedFromCount,
-    taughtBy: ((Array.isArray(r.taughtBy) ? r.taughtBy : []) as string[]).map((id) => name.get(id)).filter((n): n is string => Boolean(n)),
-    setBy: r.setByUserId ? name.get(r.setByUserId) ?? null : null,
-    since: r.updatedAt.toISOString(),
-    billsSince: bills.filter((b) => b.counterpartyId === r.counterpartyId && b.createdAt > r.updatedAt).length,
-    acknowledged: r.source === 'manual' || Boolean(r.acknowledgedAt),
+  const lines: RememberedLine[] = [...byKey.values()].map(({ latest, count }) => ({
+    key: latest.key,
+    description: latest.description,
+    category: latest.category,
+    invoiceNumber: latest.invoiceNumber,
+    billId: latest.paymentOrderId,
+    by: latest.byUserId ? name.get(latest.byUserId) ?? null : null,
+    at: new Date(latest.at).toISOString(),
+    fromLines: count,
   }));
   const canManage = canCode(access);
   return {
     canManage,
-    // What someone teaching a habit by hand picks from. Only for them: a clerk
+    // What someone setting a vendor default picks from. Only for them: a clerk
     // cannot see the vendor list otherwise, and does not need to.
     choices: canManage ? await teachingChoices(organizationId) : null,
-    habits,
+    lines,
+    vendorDefaults: defaults.map((r): VendorDefault => ({
+      ruleId: r.vendorCodingRuleId,
+      counterpartyId: r.counterpartyId,
+      vendorName: r.counterparty.displayName,
+      category: r.accountName ?? r.accountId,
+      setBy: r.setByUserId ? name.get(r.setByUserId) ?? null : null,
+      since: r.updatedAt.toISOString(),
+    })),
     forgotten: forgotten.map((f) => ({
-      counterpartyId: f.counterpartyId,
-      vendorName: vendor.get(f.counterpartyId) ?? 'A vendor',
-      category: f.accountName,
+      description: f.description,
+      category: f.category,
       at: f.forgottenAt.toISOString(),
       by: f.forgottenByUserId ? name.get(f.forgottenByUserId) ?? null : null,
     })),
@@ -93,15 +109,7 @@ async function assertCanCode(organizationId: string, userId: string) {
   }
 }
 
-/** Keep an announced habit: it stops being news. */
-export async function keepHabit(organizationId: string, viewerUserId: string, ruleId: string) {
-  await assertCanCode(organizationId, viewerUserId);
-  const kept = await acknowledgeHabit(organizationId, ruleId, viewerUserId);
-  if (!kept) throw notFound('No such habit.');
-  return { ok: true };
-}
-
-/** Teach a habit by hand: this vendor's bills go to this category. */
+/** Set a vendor default by hand: the last resort for this vendor's lines. */
 export async function setHabit(organizationId: string, viewerUserId: string, counterpartyId: string, category: string) {
   await assertCanCode(organizationId, viewerUserId);
   const vendor = await prisma.counterparty.findFirst({ where: { organizationId, counterpartyId }, select: { counterpartyId: true } });
@@ -112,11 +120,11 @@ export async function setHabit(organizationId: string, viewerUserId: string, cou
   return { ok: true, category: account.name };
 }
 
-/** Forget a vendor's habit (see clearVendorCodingRule for what that does). */
+/** Remove a vendor default. */
 export async function forgetHabit(organizationId: string, viewerUserId: string, counterpartyId: string) {
   await assertCanCode(organizationId, viewerUserId);
   const rule = await prisma.vendorCodingRule.findFirst({ where: { organizationId, counterpartyId } });
-  if (!rule) throw notFound('There is no habit for this vendor.');
+  if (!rule) throw notFound('There is no default for this vendor.');
   await clearVendorCodingRule(organizationId, counterpartyId, viewerUserId);
   return { ok: true };
 }
@@ -149,8 +157,20 @@ export async function resolveCategory(organizationId: string, name: string): Pro
   return a ? { id: a.id, name: a.name } : null;
 }
 
-/** The line an announced habit shows in the inbox of whoever codes bills. */
-export function announce(h: Habit): string {
-  const who = h.taughtBy.length === 0 ? '' : h.taughtBy.length === 1 ? `${h.taughtBy[0]} ` : `${h.taughtBy.slice(0, -1).join(', ')} and ${h.taughtBy.at(-1)} `;
-  return `I learned: ${h.vendorName} goes to ${h.category}, from ${h.fromBills} ${h.fromBills === 1 ? 'bill' : 'bills'} ${who}coded that way. I'll pre-fill it on new ${h.vendorName} bills.`;
+/**
+ * Forget a kind of line: lines settled before now stop teaching its category.
+ * Lines people settle from now on teach it again, so a forget is never a ban.
+ */
+export async function forgetLine(organizationId: string, viewerUserId: string, description: string) {
+  await assertCanCode(organizationId, viewerUserId);
+  const key = lineKey(description);
+  if (!key) throw badRequest('That line has nothing to remember it by.');
+  const current = (await loadPrecedents(organizationId)).find((p) => p.key === key);
+  if (!current) throw notFound('I do not remember a line like that.');
+  await prisma.forgottenLine.upsert({
+    where: { organizationId_lineKey: { organizationId, lineKey: key } },
+    create: { organizationId, lineKey: key, description: current.description, category: current.category, forgottenByUserId: viewerUserId },
+    update: { description: current.description, category: current.category, forgottenAt: new Date(), forgottenByUserId: viewerUserId },
+  });
+  return { ok: true };
 }

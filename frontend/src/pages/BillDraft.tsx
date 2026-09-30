@@ -925,11 +925,19 @@ function DraftScreen(props: {
   const hasUnsavedChanges = !readOnly && canEditBills && savedBody.current !== currentSerialized;
 
   // --- save: keep it, send nothing ------------------------------------------
+  // What was just sent becomes the saved baseline, so the page stops calling
+  // the bill unsaved once it is kept (it used to stay "unsaved" after Save).
+  const markSaved = (sent: ReturnType<typeof currentBody>) => {
+    savedBody.current = JSON.stringify(sent);
+    savedFieldValues.current = Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, v.value]));
+  };
   const saveChanges = useCallback(async () => {
     if (!canEditBills || readOnly || saving) return;
     setSaving(true);
     try {
-      await billsApi.saveDraft(organizationId, billDraft.paymentOrderId, currentBody());
+      const sent = currentBody();
+      await billsApi.saveDraft(organizationId, billDraft.paymentOrderId, sent);
+      markSaved(sent);
       // Stay on the bill. Saving is not leaving — being thrown back to the list
       // every time you keep your work makes the button feel like a way out
       // rather than a way to hold on to what you typed.
@@ -950,6 +958,33 @@ function DraftScreen(props: {
       setSaving(false);
     }
   }, [canEditBills, readOnly, saving, organizationId, billDraft.paymentOrderId, currentBody, toast, queryClient]);
+
+  // --- auto-save ------------------------------------------------------------
+  // People do not press Save. Three seconds after the last change, the draft is
+  // kept, quietly: no toast, a word in the commit bar. Never while sending,
+  // saving, or on a bill this person cannot edit.
+  const [autoSave, setAutoSave] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle');
+  useEffect(() => {
+    if (!hasUnsavedChanges || saving || submitting) return;
+    const timer = window.setTimeout(() => {
+      const sent = currentBody();
+      setAutoSave('saving');
+      billsApi.saveDraft(organizationId, billDraft.paymentOrderId, sent)
+        .then(async () => {
+          markSaved(sent);
+          setAutoSave('saved');
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ['bill-billDraft', organizationId, billDraft.paymentOrderId] }),
+            queryClient.invalidateQueries({ queryKey: ['bills-workbench', organizationId] }),
+            queryClient.invalidateQueries({ queryKey: ['bill-companion', organizationId, billDraft.paymentOrderId] }),
+          ]);
+        })
+        .catch(() => setAutoSave('failed'));
+    }, 3000);
+    return () => window.clearTimeout(timer);
+    // currentSerialized is the whole form: any edit restarts the wait.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSerialized, hasUnsavedChanges, saving, submitting]);
 
   // --- commit ---------------------------------------------------------------
   const confirm = useCallback(async () => {
@@ -1390,6 +1425,7 @@ activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
                 organizationId={organizationId}
                 billId={billDraft.paymentOrderId}
                 vendorName={vendorName}
+                lines={billDraft.lines}
                 flags={billDraft.flags.length > 0 ? flagCallouts : null}
                 flagHeadline={billDraft.flags[0] ? (billDraft.flags[0].brief?.status === 'ready' && billDraft.flags[0].brief.headline ? billDraft.flags[0].brief.headline : billDraft.flags[0].short) : null}
                 filled={{
@@ -1866,6 +1902,14 @@ activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
               : tier1Gap ?? uncheckedGap ?? 'Recorded with exactly what you see on this screen.'}
           </span>
           <span className="commit-spacer" />
+          {canEditBills && !readOnly ? (
+            <span className="autosave-note">
+              {autoSave === 'saving' ? 'Saving…'
+                : autoSave === 'failed' ? 'Could not save automatically'
+                  : hasUnsavedChanges ? 'Unsaved changes'
+                    : autoSave === 'saved' ? 'All changes saved' : null}
+            </span>
+          ) : null}
           {/* This button was called "Save for later", which read as a way to
               defer the bill rather than a way to keep what you had typed — and
               for most of the screen's life it kept nothing at all, since it

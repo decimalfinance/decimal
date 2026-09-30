@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { inboxApi, knowledgeApi, type InboxItem, type InboxLineKind } from '../api';
+import { inboxApi, type InboxItem, type InboxLineKind } from '../api';
 import { ReadyPassButton } from './ReadyPass';
 import { Ico } from '../dec/icons';
 import { PageHead } from '../dec/primitives';
@@ -88,11 +88,6 @@ export function InboxPage() {
   };
   const tick = async (askId: string) => {
     await inboxApi.tick(organizationId, askId).catch(() => null);
-    void refresh();
-  };
-  const keepOrForget = async (habit: NonNullable<InboxItem['habit']>, keep: boolean) => {
-    await (keep ? knowledgeApi.keep(organizationId, habit.ruleId) : knowledgeApi.forget(organizationId, habit.counterpartyId)).catch(() => null);
-    setSelectedKey(null);
     void refresh();
   };
   const markAll = async () => {
@@ -188,13 +183,7 @@ export function InboxPage() {
                 ))}
               </div>
               <div className="ib-detail-foot">
-                {selected.habit ? (
-                  <>
-                    <button type="button" className="btn btn-primary" onClick={() => void keepOrForget(selected.habit!, true)}>Keep it</button>
-                    <button type="button" className="btn btn-secondary" onClick={() => void keepOrForget(selected.habit!, false)}>Forget it</button>
-                    <button type="button" className="btn btn-ghost" onClick={() => navigate(`/organizations/${organizationId}/knowledge`)}>See what I know</button>
-                  </>
-                ) : (
+                {(
                   <button type="button" className="btn btn-primary" onClick={() => openBill(selected)}>
                     {selected.billId ? actionFor(selected) : 'Go to bills'} <Ico.arrowRight w={14} />
                   </button>

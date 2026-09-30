@@ -40,8 +40,6 @@ export type InboxItem = {
   /** Where the bill stands, in the bills list's words. */
   status: string | null;
   dueAt: string | null;
-  /** A habit the companion learned, for an admin to keep or forget. */
-  habit?: { ruleId: string; counterpartyId: string } | null;
   /** Where to act: the review screen for drafts, the bill for everything else. */
   href: 'draft' | 'bill' | null;
   lines: InboxLine[];
@@ -193,22 +191,6 @@ export async function getInbox(organizationId: string, viewerUserId: string, opt
         key: `doc:${d.invoiceDocumentId}`, billId: null, jobId: d.invoiceDocumentId, vendorName: d.filename, invoiceNumber: null, amountUsd: null, status: 'Could not be read', dueAt: null, href: null,
         lines: [{ kind: 'unreadable', text: d.error ?? 'Could not make a bill from this document', at: d.createdAt.toISOString() }],
         latestAt: d.createdAt.toISOString(), isNew: false,
-      });
-    }
-  }
-
-  // Habits the companion learned and is announcing, for whoever codes bills —
-  // the bill clerks whose job it is, and admins. Not a bill, so an item of
-  // its own. Kept or forgotten by any one of them, it leaves everyone's inbox.
-  if (canReview) {
-    const { getKnowledge, announce } = await import('./knowledge.js');
-    const { habits } = await getKnowledge(organizationId, viewerUserId);
-    for (const h of habits.filter((x) => !x.acknowledged)) {
-      items.set(`habit:${h.ruleId}`, {
-        key: `habit:${h.ruleId}`, billId: null, jobId: null, vendorName: h.vendorName, invoiceNumber: null, amountUsd: null,
-        status: null, dueAt: null, href: null, habit: { ruleId: h.ruleId, counterpartyId: h.counterpartyId },
-        lines: [{ kind: 'learned', text: announce(h), at: h.since }],
-        latestAt: h.since, isNew: false,
       });
     }
   }

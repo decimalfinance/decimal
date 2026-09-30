@@ -11,7 +11,7 @@ test('bill note: says what it did, whether the bill is ready, and where its cate
   const w = await makeWorld();
   const ready = await noteOf(w.orgId, w.bills.ready, w.owner.token);
   assert.deepEqual(ready.verdict, { ready: true, reason: null });
-  assert.deepEqual(ready.habit, { category: 'Cloud hosting & infrastructure', source: 'learned', fromBills: 3 });
+  assert.deepEqual(ready.vendorDefault, { category: 'Cloud hosting & infrastructure' }, 'the vendor default a person set');
   assert.ok(ready.did.length > 0, 'the steps it took reading the document');
   assert.ok(ready.did.every((s: { status: string; text: string }) => ['done', 'noted', 'failed', 'running'].includes(s.status) && s.text));
   assert.equal(ready.chatId, null);
@@ -19,7 +19,7 @@ test('bill note: says what it did, whether the bill is ready, and where its cate
   const dup = await noteOf(w.orgId, w.bills.dupNew, w.owner.token);
   assert.equal(dup.verdict.ready, false);
   assert.match(dup.verdict.reason, /duplicate/i, 'the one reason it needs a person');
-  assert.equal(dup.habit, null, 'no habit: categories are a guess');
+  assert.equal(dup.vendorDefault, null);
 
   const submitted = await noteOf(w.orgId, w.bills.submitted, w.owner.token);
   assert.equal(submitted.verdict, null, 'past review: no ready-or-not verdict');

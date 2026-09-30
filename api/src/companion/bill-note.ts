@@ -51,9 +51,9 @@ export async function getBillNote(organizationId: string, viewerUserId: string, 
     standing: row?.subStatus.text ?? null,
     waiting: waiting.map((l) => ({ kind: l.kind, text: l.text, from: l.from ?? null })),
     did: steps.map((s) => ({ id: s.stepId, status: s.status, text: s.text, detail: s.detail })),
-    habit: rule
-      ? { category: rule.accountName ?? rule.accountId, source: rule.source === 'manual' ? 'manual' : 'learned', fromBills: rule.learnedFromCount }
-      : null,
+    // A vendor default a person set: the last resort for a line. Where each
+    // line's category came from is on the draft's own lines (categoryFrom).
+    vendorDefault: rule ? { category: rule.accountName ?? rule.accountId } : null,
     chatId,
   };
 }

@@ -1115,3 +1115,16 @@ model ForgottenHabit {
   @@id([organizationId, counterpartyId])
   @@map("forgotten_habits")
 }
+
+/// Line memory: a kind of line the companion was told to forget (033-forgotten-lines.sql).
+model ForgottenLine {
+  organizationId    String   @map("organization_id") @db.Uuid
+  lineKey           String   @map("line_key")
+  description       String
+  category          String?
+  forgottenAt       DateTime @default(now()) @map("forgotten_at") @db.Timestamptz(6)
+  forgottenByUserId String?  @map("forgotten_by_user_id") @db.Uuid
+
+  @@id([organizationId, lineKey])
+  @@map("forgotten_lines")
+}

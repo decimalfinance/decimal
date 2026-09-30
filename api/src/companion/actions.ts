@@ -57,8 +57,8 @@ const COPY: Record<CardKind, { verb: string; button: string; done: string }> = {
   nudge: { verb: 'Nudge', button: 'Send nudge', done: 'Nudge sent' },
   question: { verb: 'Ask', button: 'Ask (holds the bill)', done: 'Question sent' },
   already_asked: { verb: 'Already asked', button: '', done: '' },
-  save_habit: { verb: 'Remember', button: 'Remember this', done: 'Remembered' },
-  forget_habit: { verb: 'Forget', button: 'Forget it', done: 'Forgotten' },
+  save_habit: { verb: 'Set a default', button: 'Set the default', done: 'Default set' },
+  forget_habit: { verb: 'Remove the default', button: 'Remove it', done: 'Default removed' },
 };
 
 export function doneText(kind: CardKind): string {
@@ -118,17 +118,17 @@ export async function buildActionCards(args: {
         if (once.has(key)) break;
         if (p.kind === 'forget_habit') {
           if (!current) break;
-          title = `Forget: ${row.vendorName} goes to ${current.accountName ?? current.accountId}`;
-          detail = 'New bills from this vendor stop being pre-filled; drafts nobody saved are re-coded; confirmed bills keep what was confirmed.';
+          title = `Remove the default: ${row.vendorName} → ${current.accountName ?? current.accountId}`;
+          detail = "This vendor's lines stop falling back to it. Lines like ones your team settled keep their categories; confirmed bills keep what was confirmed.";
           call = { method: 'DELETE', path: `/knowledge/habits/${vendor.counterpartyId}`, body: {} };
         } else {
           const account = await resolveCategory(args.organizationId, p.category ?? '');
           if (!account) break;
           if (current && (current.accountName === account.name || current.accountId === account.id)) break;
-          title = `Remember: ${row.vendorName} goes to ${account.name}`;
+          title = `Set a default: ${row.vendorName} → ${account.name}`;
           detail = current
-            ? `Replaces ${current.accountName ?? current.accountId}. New bills from this vendor are pre-filled with it.`
-            : 'New bills from this vendor are pre-filled with it.';
+            ? `Replaces ${current.accountName ?? current.accountId}. Used for this vendor's lines when nothing else says what they are.`
+            : "Used for this vendor's lines when nothing else says what they are.";
           call = { method: 'PUT', path: '/knowledge/habits', body: { counterpartyId: vendor.counterpartyId, category: account.name } };
         }
         break;

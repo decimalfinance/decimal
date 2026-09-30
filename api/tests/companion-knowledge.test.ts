@@ -1,6 +1,6 @@
-// Learning you can see: a habit names who taught it, is announced once to
-// whoever codes bills — the bill clerks whose job it is, and admins — can be
-// kept, forgotten or taught by hand by any of them, and a forget sticks.
+// Learning by line, in the background: a category a person settles for a line
+// fills in the next line like it — whoever the vendor — and nothing about a
+// vendor is learned. What I know shows it; whoever codes bills can forget one.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { prisma } from '../src/infra/prisma.js';
@@ -9,143 +9,105 @@ import { raw, post, get, upload, makeWorld, hostile, ask, EMPTY } from './helper
 
 type World = Awaited<ReturnType<typeof makeWorld>>;
 
-/** A bill from a vendor, confirmed by `who` with every line in `category`. */
-async function teach(w: World, who: { token: string }, vendor: string, invoiceNo: string, category: string, amount = 400) {
-  const id = await upload(w.orgId, w.owner.token, w.orgName, { vendor, amount, invoiceNo });
+const FIELDS = (invoiceNo: string, amount: number) => ({ invoiceNumber: invoiceNo, invoiceDate: '2026-08-02', dueDate: '2026-08-30', terms: 'Net 30', currency: 'USD', total: amount, taxAmount: 0 });
+
+/** Upload a bill whose one line reads `line`, and return its id, read. */
+async function bill(w: World, vendor: string, invoiceNo: string, line: string, amount = 400) {
+  const id = await upload(w.orgId, w.owner.token, w.orgName, { vendor, amount, invoiceNo, line });
   await drainAsyncIntake();
-  await post(`/organizations/${w.orgId}/bills/${id}/confirm`, {
-    fields: { invoiceNumber: invoiceNo, invoiceDate: '2026-08-02', dueDate: '2026-08-30', terms: 'Net 30', currency: 'USD', total: amount, taxAmount: 0 },
-    lines: [{ description: 'Campaign work', quantity: 1, unitPrice: amount, amount, category }],
-    confirmedFieldKeys: [],
-  }, who.token);
   return id;
 }
+const draftOf = (w: World, id: string, token = w.clerk.token) => get(`/organizations/${w.orgId}/bills/${id}/draft`, token);
+const remembered = async (w: World, line: string) =>
+  ((await get(`/organizations/${w.orgId}/knowledge`, w.clerk.token)).lines as Array<{ description: string; category: string; invoiceNumber: string; by: string }>)
+    .filter((l) => l.description.toLowerCase().startsWith(line.toLowerCase().slice(0, 12)));
 
-const ruleFor = (orgId: string, vendor: string) => prisma.vendorCodingRule.findFirst({ where: { organizationId: orgId, counterparty: { displayName: vendor } } });
-const habitItems = async (w: World, token: string) =>
-  ((await get(`/organizations/${w.orgId}/inbox`, token)).items as Array<{ key: string; habit?: { ruleId: string } | null; lines: Array<{ kind: string; text: string }> }>)
-    .filter((i) => i.habit);
+/** Confirm a bill whose one line reads `description`, in `category`. */
+async function settle(w: World, id: string, invoiceNo: string, description: string, category: string, amount = 400) {
+  await post(`/organizations/${w.orgId}/bills/${id}/confirm`, {
+    fields: FIELDS(invoiceNo, amount),
+    lines: [{ description, quantity: 1, unitPrice: amount, amount, category }],
+    confirmedFieldKeys: [],
+  }, w.clerk.token);
+}
 
-test('learning: three bills a clerk confirmed make a habit that names her, announced to whoever codes bills once', async () => {
+test('line memory: a line a clerk confirmed fills in the next line like it, from any vendor, and says where it came from', async () => {
   const w = await makeWorld();
-  for (const n of [1, 2, 3]) await teach(w, w.clerk, 'Brightwave Media', `BW-${n}`, 'Advertising & marketing');
-  const rule = await ruleFor(w.orgId, 'Brightwave Media');
-  assert.ok(rule, 'learned');
-  assert.equal(rule!.accountName, 'Advertising & marketing');
-  assert.deepEqual(rule!.taughtBy, [w.clerk.userId], 'taught by the clerk who confirmed them');
+  const first = await bill(w, 'Brightwave Media', 'BW-1', 'Stock photography licenses (8)');
+  await settle(w, first, 'BW-1', 'Stock photography licenses (8)', 'Taxes & licenses');
 
-  const clerkHabits = await habitItems(w, w.clerk.token);
-  const item = clerkHabits.find((i) => i.habit!.ruleId === rule!.vendorCodingRuleId);
-  assert.ok(item, 'the clerk, whose job coding is, hears about it');
-  assert.equal(item!.lines[0]!.kind, 'learned');
-  assert.equal(item!.lines[0]!.text, 'I learned: Brightwave Media goes to Advertising & marketing, from 3 bills Clara Clerk coded that way. I\'ll pre-fill it on new Brightwave Media bills.');
-  assert.ok((await habitItems(w, w.owner.token)).some((i) => i.key === item!.key), 'an admin, who can code too, also sees it');
-  assert.deepEqual(await habitItems(w, w.apprA.token), [], 'an approver does not: coding is not their job');
-  assert.deepEqual(await habitItems(w, w.viewer.token), [], 'nor a viewer');
+  const next = (await draftOf(w, await bill(w, 'Pixel Foundry', 'PF-1', 'Stock photography licenses (20)'))).lines[0];
+  assert.equal(next.category, 'Taxes & licenses', 'the same kind of line, from a different vendor, gets what the team settled');
+  assert.equal(next.categoryFrom.kind, 'memory');
+  assert.equal(next.categoryFrom.invoiceNumber, 'BW-1');
+  assert.equal(next.categoryFrom.by, 'Clara Clerk');
 
-  // Anyone may see what it knows; only someone who codes bills may keep it.
-  const k = await get(`/organizations/${w.orgId}/knowledge`, w.viewer.token);
-  const habit = k.habits.find((h: { ruleId: string }) => h.ruleId === rule!.vendorCodingRuleId);
-  assert.deepEqual([habit.taughtBy, habit.fromBills, habit.acknowledged, k.canManage, k.choices], [['Clara Clerk'], 3, false, false, null]);
-  assert.equal((await get(`/organizations/${w.orgId}/knowledge`, w.clerk.token)).canManage, true);
-  assert.equal((await raw('POST', `/organizations/${w.orgId}/knowledge/${rule!.vendorCodingRuleId}/keep`, w.apprA.token, {})).status, 403);
-  assert.equal((await raw('POST', `/organizations/${w.orgId}/knowledge/${rule!.vendorCodingRuleId}/keep`, w.viewer.token, {})).status, 403);
-  await post(`/organizations/${w.orgId}/knowledge/${rule!.vendorCodingRuleId}/keep`, {}, w.clerk.token);
-  assert.equal((await habitItems(w, w.clerk.token)).some((i) => i.habit!.ruleId === rule!.vendorCodingRuleId), false, 'kept: no longer news');
-  assert.equal((await habitItems(w, w.owner.token)).some((i) => i.habit!.ruleId === rule!.vendorCodingRuleId), false, 'kept by one, gone for all');
+  const other = (await draftOf(w, await bill(w, 'Brightwave Media', 'BW-2', 'Social media management — August'))).lines[0];
+  assert.notEqual(other.categoryFrom?.kind, 'memory', 'a different thing from the same vendor is not coded like the licenses');
 
-  // Growing more certain is not news; changing is.
-  await teach(w, w.clerk, 'Brightwave Media', 'BW-4', 'Advertising & marketing');
-  assert.equal((await habitItems(w, w.owner.token)).some((i) => i.habit!.ruleId === rule!.vendorCodingRuleId), false, 'same habit, more certain');
-  for (const n of [5, 6, 7]) await teach(w, w.owner, 'Brightwave Media', `BW-${n}`, 'Contractors');
-  const changed = await ruleFor(w.orgId, 'Brightwave Media');
-  assert.equal(changed!.accountName, 'Contractors');
-  assert.deepEqual(changed!.taughtBy, [w.owner.userId]);
-  const again = (await habitItems(w, w.owner.token)).find((i) => i.habit!.ruleId === changed!.vendorCodingRuleId);
-  assert.match(again!.lines[0]!.text, /goes to Contractors, from 3 bills Owner Halcyon coded that way/, 'a changed habit is announced again');
+  assert.equal(await prisma.vendorCodingRule.count({ where: { organizationId: w.orgId, source: 'learned' } }), 0, 'nothing about a vendor was learned');
 });
 
-test('learning: forgetting stops a habit at once, un-prefills drafts nobody saved, and is not relearned from old history', async () => {
+test('line memory: a category changed on a saved draft teaches too; one left as proposed does not', async () => {
   const w = await makeWorld();
-  for (const n of [1, 2, 3]) await teach(w, w.clerk, 'Brightwave Media', `BW-${n}`, 'Advertising & marketing');
-  const draft = await upload(w.orgId, w.owner.token, w.orgName, { vendor: 'Brightwave Media', amount: 400, invoiceNo: 'BW-9' });
-  await drainAsyncIntake();
-  const before = await get(`/organizations/${w.orgId}/bills/${draft}/draft`, w.owner.token);
-  assert.equal(before.codingSuggestionSource?.kind, 'rule', 'a new draft is pre-filled from the habit');
-  assert.equal(before.lines[0].category, 'Advertising & marketing');
-
-  const { counterpartyId } = (await ruleFor(w.orgId, 'Brightwave Media'))!;
-  assert.equal((await raw('DELETE', `/organizations/${w.orgId}/knowledge/habits/${counterpartyId}`, w.apprA.token)).status, 403, 'an approver cannot forget it');
-  assert.ok((await raw('DELETE', `/organizations/${w.orgId}/knowledge/habits/${counterpartyId}`, w.clerk.token)).status < 400, 'the clerk can');
-  assert.equal(await ruleFor(w.orgId, 'Brightwave Media'), null, 'forgotten at once');
-  const after = await get(`/organizations/${w.orgId}/bills/${draft}/draft`, w.owner.token);
-  assert.notEqual(after.codingSuggestionSource?.kind, 'rule', 'the draft nobody saved is no longer pre-filled from it');
-  const k = await get(`/organizations/${w.orgId}/knowledge`, w.owner.token);
-  assert.deepEqual(k.forgotten.map((f: { vendorName: string; category: string; by: string }) => [f.vendorName, f.category, f.by]), [['Brightwave Media', 'Advertising & marketing', 'Clara Clerk']]);
-  const confirmedEarlier = await prisma.paymentOrderGlCoding.count({ where: { organizationId: w.orgId, codedExpenseAccountName: 'Advertising & marketing' } });
-  assert.equal(confirmedEarlier, 3, 'confirmed bills keep what was confirmed');
-
-  // One more bill the same way: not enough to relearn — the old three do not count.
-  await teach(w, w.clerk, 'Brightwave Media', 'BW-4', 'Advertising & marketing');
-  assert.equal(await ruleFor(w.orgId, 'Brightwave Media'), null, 'not relearned from the history it was told to forget');
-  for (const n of [5, 6]) await teach(w, w.clerk, 'Brightwave Media', `BW-${n}`, 'Advertising & marketing');
-  const relearned = await ruleFor(w.orgId, 'Brightwave Media');
-  assert.ok(relearned, 'three bills confirmed since the forget teach it again');
-  assert.equal(relearned!.learnedFromCount, 3);
-  assert.equal(relearned!.acknowledgedAt, null, 'and it is announced again');
-  assert.equal(await prisma.forgottenHabit.count({ where: { organizationId: w.orgId } }), 0);
+  const a = await bill(w, 'Brightwave Media', 'BW-1', 'Brand workshop facilitation');
+  const proposed = (await draftOf(w, a)).lines[0];
+  const saveWith = (category: string | null) => post(`/organizations/${w.orgId}/bills/${a}/save`, {
+    fields: FIELDS('BW-1', 400), lines: [{ description: proposed.description, quantity: 1, unitPrice: 400, amount: 400, category }], confirmedFieldKeys: [],
+  }, w.clerk.token);
+  await saveWith(proposed.category);
+  assert.deepEqual(await remembered(w, 'Brand workshop'), [], 'saved as proposed: not a lesson');
+  const changed = proposed.category === 'Taxes & licenses' ? 'Travel' : 'Taxes & licenses';
+  await saveWith(changed);
+  assert.deepEqual((await remembered(w, 'Brand workshop')).map((l) => [l.category, l.invoiceNumber, l.by]), [[changed, 'BW-1', 'Clara Clerk']],
+    'changed and saved: a lesson, before the bill is confirmed');
+  const b = await bill(w, 'Other Vendor', 'OV-1', 'Brand workshop facilitation');
+  assert.equal((await draftOf(w, b)).lines[0].category, changed);
 });
 
-test('learning: a clerk can teach a habit by hand; it needs no announcement, and lifts a forget', async () => {
+test('line memory: readiness needs every line to be one the team settled; forgetting a line stops it, and only an editor may', async () => {
   const w = await makeWorld();
-  for (const n of [1, 2, 3]) await teach(w, w.clerk, 'Brightwave Media', `BW-${n}`, 'Advertising & marketing');
-  const { counterpartyId } = (await ruleFor(w.orgId, 'Brightwave Media'))!;
-  await raw('DELETE', `/organizations/${w.orgId}/knowledge/habits/${counterpartyId}`, w.clerk.token);
+  const desc = 'Analytics retainer';
+  const a = await bill(w, 'Brightwave Media', 'BW-1', desc);
+  const b = await bill(w, 'Brightwave Media', 'BW-2', desc);
+  const ready = async () => ((await get(`/organizations/${w.orgId}/companion/ready`, w.clerk.token)).bills as Array<{ billId: string }>).map((x) => x.billId);
+  assert.equal((await ready()).includes(b), false, 'a first guess is not ready');
+  await settle(w, a, 'BW-1', desc, 'Advertising & marketing');
+  assert.equal((await ready()).includes(b), true, 'every line matches one the team settled: ready');
 
-  const choices = (await get(`/organizations/${w.orgId}/knowledge`, w.clerk.token)).choices;
-  assert.ok(choices.vendors.some((v: { name: string }) => v.name === 'Brightwave Media'), 'the clerk can pick the vendor here without seeing the Vendors page');
-  assert.ok(choices.categories.includes('Travel'));
-  assert.equal((await raw('PUT', `/organizations/${w.orgId}/knowledge/habits`, w.apprA.token, { counterpartyId, category: 'Travel' })).status, 403, 'not an approver');
-  assert.equal((await raw('PUT', `/organizations/${w.orgId}/knowledge/habits`, w.clerk.token, { counterpartyId, category: 'Snacks' })).status, 400, 'not a made-up category');
-  const set = await raw('PUT', `/organizations/${w.orgId}/knowledge/habits`, w.clerk.token, { counterpartyId, category: 'travel' });
-  assert.ok(set.status < 400, set.text);
-  const rule = await ruleFor(w.orgId, 'Brightwave Media');
-  assert.equal(rule!.source, 'manual');
-  assert.ok(rule!.acknowledgedAt, 'set by a person: nothing to announce');
-  assert.equal((await habitItems(w, w.owner.token)).some((i) => i.habit!.ruleId === rule!.vendorCodingRuleId), false);
-  assert.equal(await prisma.forgottenHabit.count({ where: { organizationId: w.orgId } }), 0, 'the forget is lifted');
-  assert.equal(rule!.accountName, 'Travel', 'matched to the real category name');
-  const k = await get(`/organizations/${w.orgId}/knowledge`, w.viewer.token);
-  assert.equal(k.habits.find((h: { ruleId: string }) => h.ruleId === rule!.vendorCodingRuleId).setBy, 'Clara Clerk');
+  assert.equal((await raw('POST', `/organizations/${w.orgId}/knowledge/lines/forget`, w.apprA.token, { description: desc })).status, 403, 'not an approver');
+  assert.ok((await raw('POST', `/organizations/${w.orgId}/knowledge/lines/forget`, w.clerk.token, { description: desc })).status < 400);
+  assert.deepEqual(await remembered(w, desc), [], 'forgotten');
+  assert.equal((await get(`/organizations/${w.orgId}/knowledge`, w.clerk.token)).forgotten[0].by, 'Clara Clerk');
+  assert.equal((await ready()).includes(b), false, 'back to a first guess');
+  const c = await bill(w, 'Brightwave Media', 'BW-3', desc);
+  assert.notEqual((await draftOf(w, c)).lines[0].categoryFrom?.kind, 'memory', 'new lines like it are no longer filled in from it');
+
+  await settle(w, c, 'BW-3', desc, 'Advertising & marketing');
+  assert.equal((await remembered(w, desc)).length, 1, 'settled again after the forget: it teaches again');
 });
 
-test('learning: the companion can propose remembering or forgetting a habit — for whoever codes bills, not approvers', async () => {
+test('vendor defaults: set by hand only, the last resort for a line; the companion proposes them for whoever codes bills', async () => {
   const w = await makeWorld();
   const proposals = [
     { kind: 'save_habit', billId: w.bills.lonely, reason: 'Lonely Ltd is always travel.', toPerson: null, message: null, category: 'travel' },
     { kind: 'save_habit', billId: w.bills.held, reason: 'Made up.', toPerson: null, message: null, category: 'Not A Real Category' },
-    { kind: 'save_habit', billId: w.bills.ready, reason: 'Already so.', toPerson: null, message: null, category: 'Cloud hosting & infrastructure' },
     { kind: 'forget_habit', billId: w.bills.ready, reason: 'Steady changed what they sell.', toPerson: null, message: null, category: null },
-    { kind: 'forget_habit', billId: w.bills.lonely, reason: 'No habit to forget.', toPerson: null, message: null, category: null },
+    { kind: 'forget_habit', billId: w.bills.lonely, reason: 'No default to remove.', toPerson: null, message: null, category: null },
   ];
   hostile({ turns: [[{ name: 'find_bills', args: {} }]], respond: () => ({ ...EMPTY, actions: proposals }) });
-  const approverTurn = await ask(w.orgId, w.apprA.token, 'Tidy up the habits.');
-  assert.deepEqual(approverTurn.answer.actions, [], 'coding is not an approver\'s job');
+  assert.deepEqual((await ask(w.orgId, w.apprA.token, 'Tidy up the defaults.')).answer.actions, [], 'not for an approver');
 
   hostile({ turns: [[{ name: 'find_bills', args: {} }]], respond: () => ({ ...EMPTY, actions: proposals }) });
-  const { answer } = await ask(w.orgId, w.clerk.token, 'Tidy up the habits.');
-  const cards = answer.actions as Array<{ kind: string; title: string; call: { method: string; path: string; body: any } }>;
-  assert.deepEqual(cards.map((c) => c.kind), ['save_habit', 'forget_habit'], 'only a real new category, and a habit that exists');
-  const [save, forget] = cards;
+  const cards = (await ask(w.orgId, w.clerk.token, 'Tidy up the defaults.')).answer.actions as Array<{ kind: string; title: string; call: { method: string; path: string; body: any } }>;
+  assert.deepEqual(cards.map((c) => c.kind), ['save_habit', 'forget_habit']);
   const lonelyVendor = (await prisma.paymentOrder.findUniqueOrThrow({ where: { paymentOrderId: w.bills.lonely }, select: { counterpartyId: true } })).counterpartyId;
-  assert.deepEqual(save!.call, { method: 'PUT', path: '/knowledge/habits', body: { counterpartyId: lonelyVendor, category: 'Travel' } });
-  assert.equal(save!.title, 'Remember: Lonely Ltd goes to Travel');
-  assert.equal(forget!.call.method, 'DELETE');
-  assert.equal(forget!.title, 'Forget: Steady Supply goes to Cloud hosting & infrastructure');
-
-  // Clicked, as the clerk.
-  assert.ok((await raw(save!.call.method, `/organizations/${w.orgId}${save!.call.path}`, w.clerk.token, save!.call.body)).status < 400);
-  assert.equal((await ruleFor(w.orgId, 'Lonely Ltd'))?.accountName, 'Travel');
-  assert.ok((await raw(forget!.call.method, `/organizations/${w.orgId}${forget!.call.path}`, w.clerk.token, {})).status < 400);
-  assert.equal(await ruleFor(w.orgId, 'Steady Supply'), null);
+  assert.deepEqual(cards[0]!.call, { method: 'PUT', path: '/knowledge/habits', body: { counterpartyId: lonelyVendor, category: 'Travel' } });
+  assert.equal(cards[0]!.title, 'Set a default: Lonely Ltd → Travel');
+  assert.ok((await raw(cards[0]!.call.method, `/organizations/${w.orgId}${cards[0]!.call.path}`, w.clerk.token, cards[0]!.call.body)).status < 400);
+  const k = await get(`/organizations/${w.orgId}/knowledge`, w.viewer.token);
+  assert.ok(k.vendorDefaults.some((d: { vendorName: string; category: string; setBy: string }) => d.vendorName === 'Lonely Ltd' && d.category === 'Travel' && d.setBy === 'Clara Clerk'));
+  assert.equal(k.choices, null, 'a viewer gets no choices to set one');
+  assert.ok((await raw(cards[1]!.call.method, `/organizations/${w.orgId}${cards[1]!.call.path}`, w.clerk.token, {})).status < 400);
+  assert.equal(await prisma.vendorCodingRule.count({ where: { organizationId: w.orgId, counterparty: { displayName: 'Steady Supply' } } }), 0);
 });

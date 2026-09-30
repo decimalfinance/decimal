@@ -98,7 +98,7 @@ export async function register(name: string): Promise<Person> {
   return { token: r.sessionToken, userId: r.user.userId, name };
 }
 
-export function extractionOf(over: { vendor: string; amount: number; invoiceNo: string; billTo: string }) {
+export function extractionOf(over: { vendor: string; amount: number; invoiceNo: string; billTo: string; line?: string }) {
   setInvoiceIntakeRuntimeForTests({
     extractRowsFromDocument: async () => ({
       rows: [{
@@ -109,7 +109,7 @@ export function extractionOf(over: { vendor: string; amount: number; invoiceNo: 
           invoiceNumber: over.invoiceNo, invoiceDate: '2026-08-02', dueDate: '2026-08-30', terms: 'Net 30',
           poNumber: null, earlyPayDiscount: null, subtotal: over.amount, taxAmount: 0, billToName: over.billTo,
           remitTo: null, paymentDetails: { method: 'ACH', bankName: 'First Interstate Bank', accountLast4: '6621', routingNumber: '125000105' },
-          walletAddress: null, lineItems: [{ description: 'Services', quantity: 1, unitPrice: over.amount, total: over.amount }],
+          walletAddress: null, lineItems: [{ description: over.line ?? 'Services', quantity: 1, unitPrice: over.amount, total: over.amount }],
           categoryHint: 'Cloud hosting', confidence: { vendor: 1, amount: 1, overall: 1 }, fieldConfidence: null,
         },
       }],
@@ -118,7 +118,7 @@ export function extractionOf(over: { vendor: string; amount: number; invoiceNo: 
   });
 }
 
-export async function upload(orgId: string, token: string, billTo: string, over: { vendor: string; amount: number; invoiceNo: string }) {
+export async function upload(orgId: string, token: string, billTo: string, over: { vendor: string; amount: number; invoiceNo: string; line?: string }) {
   extractionOf({ ...over, billTo });
   const up = await post(`/organizations/${orgId}/invoices/upload`, {
     filename: `${over.invoiceNo}.pdf`, mimeType: 'application/pdf', dataBase64: Buffer.from(`%PDF ${crypto.randomUUID()}`).toString('base64'), autoAdvance: false,
@@ -167,7 +167,7 @@ export async function makeWorld(orgName = 'Halcyon Labs, Inc.') {
   const steady1 = await upload(orgId, owner.token, billTo, { vendor: 'Steady Supply', amount: 300, invoiceNo: 'SS-1' });
   const ready = await upload(orgId, owner.token, billTo, { vendor: 'Steady Supply', amount: 310, invoiceNo: 'SS-2' });
   const { counterpartyId: steadyId } = await prisma.paymentOrder.findUniqueOrThrow({ where: { paymentOrderId: ready }, select: { counterpartyId: true } });
-  await prisma.vendorCodingRule.create({ data: { organizationId: orgId, counterpartyId: steadyId!, accountId: 'Cloud hosting & infrastructure', accountName: 'Cloud hosting & infrastructure', source: 'learned', learnedFromCount: 3 } });
+  await prisma.vendorCodingRule.create({ data: { organizationId: orgId, counterpartyId: steadyId!, accountId: 'Cloud hosting & infrastructure', accountName: 'Cloud hosting & infrastructure', source: 'manual', learnedFromCount: 0 } });
   const dupOld = await upload(orgId, owner.token, billTo, { vendor: 'Twin Supply', amount: 1200, invoiceNo: 'TS-100' });
   const dupNew = await upload(orgId, owner.token, billTo, { vendor: 'Twin Supply', amount: 1200, invoiceNo: 'TS-100' });
   const lonely = await upload(orgId, owner.token, billTo, { vendor: 'Lonely Ltd', amount: 90, invoiceNo: 'LL-1' });

@@ -11,7 +11,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   companionApi,
   inboxApi,
-  knowledgeApi,
   type InboxItem,
   type CompanionConsole,
   type CompanionJob,
@@ -265,9 +264,7 @@ function InboxSection({ organizationId, onOpenJob }: { organizationId: string; o
     queryClient.invalidateQueries({ queryKey: ['inbox', organizationId] }),
   ]);
   const open = async (item: InboxItem) => {
-    if (item.habit) {
-      navigate(`/organizations/${organizationId}/knowledge`);
-    } else if (item.billId) {
+    if (item.billId) {
       await inboxApi.seen(organizationId, item.billId).catch(() => null);
       void refresh();
       navigate(`/organizations/${organizationId}/bills/${item.billId}${item.href === 'draft' ? '/draft' : ''}`);
@@ -278,11 +275,6 @@ function InboxSection({ organizationId, onOpenJob }: { organizationId: string; o
   const tick = async (askId: string) => {
     await inboxApi.tick(organizationId, askId).catch(() => null);
     void refresh();
-  };
-  const keepOrForget = async (habit: NonNullable<InboxItem['habit']>, keep: boolean) => {
-    await (keep ? knowledgeApi.keep(organizationId, habit.ruleId) : knowledgeApi.forget(organizationId, habit.counterpartyId)).catch(() => null);
-    void refresh();
-    void queryClient.invalidateQueries({ queryKey: ['knowledge', organizationId] });
   };
   const data = q.data;
   return (
@@ -320,12 +312,6 @@ function InboxSection({ organizationId, onOpenJob }: { organizationId: string; o
             ))}
           </div>
           {item.invoiceNumber ? <div className="cc-card-meta">{item.invoiceNumber}</div> : null}
-          {item.habit ? (
-            <div className="ac-foot">
-              <button type="button" className="ib-tick" onClick={(e) => { e.stopPropagation(); void keepOrForget(item.habit!, true); }}>Keep</button>
-              <button type="button" className="ib-tick" onClick={(e) => { e.stopPropagation(); void keepOrForget(item.habit!, false); }}>Forget</button>
-            </div>
-          ) : null}
         </div>
       ))}
     </section>

@@ -206,24 +206,23 @@ export function orgTools(args: {
     },
     {
       name: 'what_i_know',
-      description: 'The category habits the companion has learned or been told, vendor by vendor: which category, learned from how many bills and taught by whom (the people whose confirmed bills agreed), or set by a person; whether an admin has kept it yet; and habits it was told to forget.',
+      description: 'What the companion has learned about categories. Mostly kinds of line: a line description, the category the team settled on for lines like it (from confirmed bills, and categories people changed on saved drafts), the bill and person it was last settled by, and how many lines agree. Also vendor defaults a person set by hand (the last resort for a line), and lines it was told to forget.',
       parameters: { type: 'object', additionalProperties: false, properties: {} },
       run: async () => {
         const { getKnowledge } = await import('./knowledge.js');
         const k = await getKnowledge(args.organizationId, args.viewerUserId);
-        await args.onThought({ text: 'Checked what I have learned', detail: `${plural(k.habits.length, 'category habit')}${k.forgotten.length ? `, ${k.forgotten.length} forgotten` : ''}.` });
+        await args.onThought({ text: 'Checked what I have learned', detail: `${plural(k.lines.length, 'kind of line')}${k.vendorDefaults.length ? `, ${plural(k.vendorDefaults.length, 'vendor default')}` : ''}${k.forgotten.length ? `, ${k.forgotten.length} forgotten` : ''}.` });
         return {
-          habits: k.habits.map((h) => ({
-            vendor: h.vendorName,
-            category: h.category,
-            how: h.source === 'learned'
-              ? `learned from ${plural(h.fromBills, 'bill')}${h.taughtBy.length ? ` ${h.taughtBy.join(', ')} coded that way` : ''}`
-              : `set by ${h.setBy ?? 'a person'}`,
-            keptByAnAdmin: h.acknowledged,
-            since: localDay(new Date(h.since)),
-            billsSince: h.billsSince,
+          lines: k.lines.slice(0, 100).map((l) => ({
+            line: l.description,
+            category: l.category,
+            lastSettledOn: l.invoiceNumber,
+            by: l.by,
+            on: localDay(new Date(l.at)),
+            agreeingLines: l.fromLines,
           })),
-          forgotten: k.forgotten.map((f) => ({ vendor: f.vendorName, category: f.category, forgottenBy: f.by, on: localDay(new Date(f.at)) })),
+          vendorDefaults: k.vendorDefaults.map((d) => ({ vendor: d.vendorName, category: d.category, setBy: d.setBy, since: localDay(new Date(d.since)) })),
+          forgotten: k.forgotten.map((f) => ({ line: f.description, category: f.category, forgottenBy: f.by, on: localDay(new Date(f.at)) })),
         };
       },
     },

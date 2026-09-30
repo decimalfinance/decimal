@@ -4,7 +4,8 @@
 // briefing is only worth reading if "ready" can be trusted. So this is strict:
 // a bill is ready only when nothing about it calls for judgement — no flag, no
 // doubtful read, a vendor seen before, and categories that come from a habit
-// rather than a guess. Everything else needs a person, with the single most
+// rather than a guess (line memory: every line reads like one the team already
+// settled). Everything else needs a person, with the single most
 // important reason in one line.
 //
 // Starting strict is deliberate. A too-generous "ready" is the fastest way to
@@ -36,8 +37,8 @@ export function companionReadiness(args: {
   /** Facts the bill cannot leave draft without (amount, line items). */
   missing: string[];
   priorBillsFromVendor: number;
-  /** A coding rule exists for this vendor, so its categories are not a guess. */
-  hasCodingRule: boolean;
+  /** Every line's category comes from what the team did before (or a vendor default a person set). */
+  categoriesKnown: boolean;
   /** How sure the reader was of each field, as extracted. */
   fieldStatus: Record<string, unknown> | null;
   /** Values the reader gave that appear nowhere in the document. */
@@ -67,7 +68,7 @@ export function companionReadiness(args: {
   }
 
   if (args.priorBillsFromVendor === 0) return { ready: false, reason: `First bill from ${args.vendorName}` };
-  if (!args.hasCodingRule) return { ready: false, reason: `No category habit for ${args.vendorName} yet` };
+  if (!args.categoriesKnown) return { ready: false, reason: 'Some categories are a first guess' };
 
   return { ready: true, reason: null };
 }

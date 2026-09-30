@@ -1202,6 +1202,8 @@ export interface BillDraftLine {
   unitPrice: number | null;
   amount: number | null;
   category: string | null;
+  /** Why this line has its category (unsaved drafts only): a line the team settled before, the model's reading, or the vendor default. */
+  categoryFrom?: { kind: 'memory'; like: string; invoiceNumber: string | null; paymentOrderId: string; by: string | null } | { kind: 'model' } | { kind: 'vendor' };
   source?: DocSource;
 }
 
@@ -2025,7 +2027,7 @@ export interface BillCompanionNote {
   standing: string | null;
   waiting: Array<{ kind: InboxLineKind; text: string; from: string | null }>;
   did: Array<{ id: string; status: 'running' | 'done' | 'noted' | 'failed'; text: string; detail: string | null }>;
-  habit: { category: string; source: 'learned' | 'manual'; fromBills: number } | null;
+  vendorDefault: { category: string } | null;
   chatId: string | null;
 }
 
@@ -2057,34 +2059,45 @@ export interface InboxItem {
   status: string | null;
   dueAt: string | null;
   href: 'draft' | 'bill' | null;
-  /** A habit the companion learned, for whoever codes bills to keep or forget. */
-  habit?: { ruleId: string; counterpartyId: string } | null;
   lines: Array<{ kind: InboxLineKind; text: string; at: string; from?: string | null; askId?: string }>;
   latestAt: string;
   isNew: boolean;
 }
 
-/** A category habit, and who taught it. */
-export interface Habit {
+/** A kind of line the companion remembers a category for, learned from lines people settled. */
+export interface RememberedLine {
+  key: string;
+  description: string;
+  category: string;
+  invoiceNumber: string | null;
+  billId: string;
+  by: string | null;
+  at: string;
+  fromLines: number;
+}
+
+/** A default category for a vendor, set by a person: the last resort for a line. */
+export interface VendorDefault {
   ruleId: string;
   counterpartyId: string;
   vendorName: string;
   category: string;
-  source: 'learned' | 'manual';
-  fromBills: number;
-  taughtBy: string[];
   setBy: string | null;
   since: string;
-  billsSince: number;
-  acknowledged: boolean;
 }
 
 export const knowledgeApi = {
   get(organizationId: string) {
-    return request<{ canManage: boolean; choices: { vendors: Array<{ counterpartyId: string; name: string }>; categories: string[] } | null; habits: Habit[]; forgotten: Array<{ counterpartyId: string; vendorName: string; category: string | null; at: string; by: string | null }> }>(`/organizations/${organizationId}/knowledge`);
+    return request<{
+      canManage: boolean;
+      choices: { vendors: Array<{ counterpartyId: string; name: string }>; categories: string[] } | null;
+      lines: RememberedLine[];
+      vendorDefaults: VendorDefault[];
+      forgotten: Array<{ description: string; category: string | null; at: string; by: string | null }>;
+    }>(`/organizations/${organizationId}/knowledge`);
   },
-  keep(organizationId: string, ruleId: string) {
-    return request<{ ok: true }>(`/organizations/${organizationId}/knowledge/${ruleId}/keep`, { method: 'POST', body: '{}' });
+  forgetLine(organizationId: string, description: string) {
+    return request<{ ok: boolean }>(`/organizations/${organizationId}/knowledge/lines/forget`, { method: 'POST', body: JSON.stringify({ description }) });
   },
   forget(organizationId: string, counterpartyId: string) {
     return request<{ ok: boolean }>(`/organizations/${organizationId}/knowledge/habits/${counterpartyId}`, { method: 'DELETE' });

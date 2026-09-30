@@ -1111,12 +1111,23 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
     uploadedByName: d.uploadedByUser?.displayName ?? null,
   }));
 
-  // Which vendors have a coding habit, learned or set: their categories are
-  // not a guess. Once for the board, for the companion's readiness.
-  const vendorsWithCodingRule = new Set(
-    (await prisma.vendorCodingRule.findMany({ where: { organizationId }, select: { counterpartyId: true } }))
+  // Are a draft's categories known, or a guess? Known when every line reads
+  // like one a person settled on ANOTHER bill (line memory), or when someone
+  // set a default for the vendor by hand. Once for the board, for the
+  // companion's readiness.
+  const vendorsWithManualDefault = new Set(
+    (await prisma.vendorCodingRule.findMany({ where: { organizationId, source: 'manual' }, select: { counterpartyId: true } }))
       .map((r) => r.counterpartyId),
   );
+  const { loadPrecedents, matchLine } = await import('../accounting/line-memory.js');
+  const boardPrecedents = orders.some((o) => o.state === 'draft') ? await loadPrecedents(organizationId).catch(() => []) : [];
+  const categoriesKnown = (paymentOrderId: string, counterpartyId: string | null, lineItems: unknown[]): boolean => {
+    if (counterpartyId && vendorsWithManualDefault.has(counterpartyId)) return true;
+    const descriptions = lineItems.filter(isRecord).map((l) => str(l.description)).filter((d): d is string => Boolean(d));
+    if (descriptions.length === 0) return false;
+    const others = boardPrecedents.filter((p) => p.paymentOrderId !== paymentOrderId);
+    return descriptions.every((d) => matchLine(d, others) !== null);
+  };
   const bills = orders.map((order) => {
     const invoice = engine.invoiceByOrder.get(order.paymentOrderId);
     const release = invoice ? engine.releaseBySource.get(invoice.id) : undefined;
@@ -1245,7 +1256,9 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
         flags,
         missing,
         priorBillsFromVendor: priorBillsIn(vendorDirectory, order.counterpartyId),
-        hasCodingRule: order.counterpartyId ? vendorsWithCodingRule.has(order.counterpartyId) : false,
+        categoriesKnown: order.state === 'draft'
+          ? categoriesKnown(order.paymentOrderId, order.counterpartyId, Array.isArray(extracted?.lineItems) ? (extracted!.lineItems as unknown[]) : [])
+          : false,
         fieldStatus: isRecord(extracted?.fieldStatus) ? extracted!.fieldStatus : null,
         ungrounded: Array.isArray(extracted?.ungrounded) ? (extracted!.ungrounded as unknown[]).filter((x): x is string => typeof x === 'string') : [],
         confirmedByPerson: isRecord(metadataRecord.verification) && Boolean(metadataRecord.verification.confirmedAt),
@@ -1865,22 +1878,45 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       ?? categoryOptions.find((o) => hint.toLowerCase().includes(o.value.toLowerCase()));
     return match?.value ?? codingSuggestion;
   };
-  const proposedLines = extractedLines.filter(isRecord).map((line, i) => ({
-    description: str(line.description) ?? '',
-    quantity: num(line.quantity),
-    unitPrice: num(line.unitPrice),
-    amount: num(line.total),
-    // With a vendor habit, the habit decides — unless the document itself
-    // labels this line (resolveLineCategory: a recognised hint wins, else the
-    // habit). A habit is what the team confirmed, bill after bill; the model's
-    // guess about a line is exactly what they kept correcting, and letting it
-    // win meant a learned habit never showed on a new bill. Without a habit,
-    // the model's own reading of the line comes first, as before.
-    category: ruleSuggestion
-      ? resolveLineCategory(str(line.categoryHint))
-      : resolveModelLine(i) ?? resolveLineCategory(str(line.categoryHint)),
-    source: lineSource(line),
-  }));
+  // Line memory: what the team did with lines like this one (line-memory.ts).
+  // It comes first — a person's decision about "stock photography licenses"
+  // is better evidence about the next such line than anything else here.
+  // Then the model's reading of the line, then a label the document prints on
+  // it, and only then the vendor default: a vendor sells different things, so
+  // "this vendor goes to X" is the weakest signal about any one line
+  // (Zaid, 2026-10-01). Only for lines nobody has saved yet.
+  const { loadPrecedents, matchLine } = await import('../accounting/line-memory.js');
+  const precedents = verifiedLines ? [] : await loadPrecedents(organizationId, { excludeBillId: order.paymentOrderId }).catch(() => []);
+  const pickerName = (name: string): string | null => {
+    const account = chart.find((a) => a.name === name || a.fullyQualifiedName === name);
+    if (chart.length > 0) return account?.fullyQualifiedName ?? (chartNames.has(name) ? name : null);
+    return categoryOptions.some((o) => o.value === name) ? name : null;
+  };
+  const precedentNames = new Map<string, string>();
+  const precedentPeople = [...new Set(precedents.map((p) => p.byUserId).filter((id): id is string => Boolean(id)))];
+  if (precedentPeople.length > 0) {
+    for (const u of await prisma.user.findMany({ where: { userId: { in: precedentPeople } }, select: { userId: true, displayName: true, email: true } })) {
+      precedentNames.set(u.userId, u.displayName?.trim() || u.email);
+    }
+  }
+  const proposedLines = extractedLines.filter(isRecord).map((line, i) => {
+    const description = str(line.description) ?? '';
+    const memory = matchLine(description, precedents);
+    const remembered = memory ? pickerName(memory.category) : null;
+    const modelGuess = remembered ? null : resolveModelLine(i);
+    return {
+      description,
+      quantity: num(line.quantity),
+      unitPrice: num(line.unitPrice),
+      amount: num(line.total),
+      category: remembered ?? modelGuess ?? resolveLineCategory(str(line.categoryHint)),
+      // Why this line has the category it has, so the screen can say so.
+      categoryFrom: remembered && memory
+        ? { kind: 'memory' as const, like: memory.like, invoiceNumber: memory.invoiceNumber, paymentOrderId: memory.paymentOrderId, by: memory.byUserId ? precedentNames.get(memory.byUserId) ?? null : null }
+        : modelGuess ? { kind: 'model' as const } : ruleSuggestion ? { kind: 'vendor' as const } : { kind: 'model' as const },
+      source: lineSource(line),
+    };
+  });
   const lines = verifiedLines ?? proposedLines;
 
   // Remember the categories this screen is about to propose.

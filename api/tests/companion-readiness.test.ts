@@ -12,7 +12,7 @@ const clean = {
   flags: [] as Array<{ severity: 'danger' | 'warning' | 'info'; blocking: boolean; short: string }>,
   missing: [] as string[],
   priorBillsFromVendor: 4,
-  hasCodingRule: true,
+  categoriesKnown: true,
   fieldStatus: { vendorName: 'confident', total: 'confident', invoiceNumber: 'confident' } as Record<string, unknown>,
   ungrounded: [] as string[],
   confirmedByPerson: false,
@@ -30,7 +30,7 @@ test('a blocking flag is the reason, ahead of everything else', () => {
   const v = companionReadiness({
     ...clean,
     priorBillsFromVendor: 0,
-    hasCodingRule: false,
+    categoriesKnown: false,
     flags: [{ severity: 'info', blocking: false, short: 'First bill from vendor' }, { severity: 'danger', blocking: true, short: 'Possible duplicate' }],
   })!;
   assert.equal(v.ready, false);
@@ -55,5 +55,5 @@ test('a doubtful read of a key field needs a look, unless a person already confi
 
 test('a first bill from a vendor, or one with no category habit, is not ready', () => {
   assert.equal(companionReadiness({ ...clean, priorBillsFromVendor: 0 })!.reason, 'First bill from Brightwave Media');
-  assert.equal(companionReadiness({ ...clean, hasCodingRule: false })!.reason, 'No category habit for Brightwave Media yet');
+  assert.equal(companionReadiness({ ...clean, categoriesKnown: false })!.reason, 'Some categories are a first guess');
 });

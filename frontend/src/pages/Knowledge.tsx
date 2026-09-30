@@ -1,12 +1,18 @@
-// What I know — every category habit the companion applies, who taught it,
-// and what it was told to forget. Anyone on the team can read it: knowing why
-// a bill was pre-filled is part of trusting it. Whoever codes bills — bill
-// clerks, and admins — keeps, forgets, or teaches one by hand.
+// What I know — the categories the companion fills in, and why.
+//
+// Mostly kinds of line: "Stock photography licenses" goes to Taxes & licenses,
+// because that is what the team settled on for lines like it. Learned in the
+// background from confirmed bills and from categories people changed; nobody
+// teaches it on purpose. This page is where you can see it and forget a line it
+// got wrong. Vendor defaults a person set are the last resort for a line.
+//
+// Anyone on the team can read it. Whoever codes bills — bill clerks, and
+// admins — can forget a line or set a vendor default.
 
 import { useState } from 'react';
 import { useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { knowledgeApi, type Habit } from '../api';
+import { knowledgeApi, type RememberedLine, type VendorDefault } from '../api';
 import { Ico } from '../dec/icons';
 import { PageHead } from '../dec/primitives';
 import { useToast } from '../ui/Toast';
@@ -14,12 +20,6 @@ import { useToast } from '../ui/Toast';
 function day(iso: string): string {
   const d = new Date(iso);
   return `${d.getDate()} ${d.toLocaleDateString('en-US', { month: 'short' })} ${d.getFullYear()}`;
-}
-
-function how(h: Habit): string {
-  if (h.source === 'manual') return `Set by ${h.setBy ?? 'a person'}`;
-  const who = h.taughtBy.length === 0 ? '' : ` ${h.taughtBy.join(', ')} coded that way`;
-  return `Learned from ${h.fromBills} ${h.fromBills === 1 ? 'bill' : 'bills'}${who}`;
 }
 
 export function KnowledgePage() {
@@ -31,39 +31,39 @@ export function KnowledgePage() {
     queryFn: () => knowledgeApi.get(organizationId),
     enabled: Boolean(organizationId),
   });
-  const refresh = () => Promise.all([
-    queryClient.invalidateQueries({ queryKey: ['knowledge', organizationId] }),
-    queryClient.invalidateQueries({ queryKey: ['inbox', organizationId] }),
-  ]);
-  const keep = async (h: Habit) => {
-    try { await knowledgeApi.keep(organizationId, h.ruleId); toast.success(`${h.vendorName} goes to ${h.category}.`, 'Kept'); } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not keep it.'); }
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['knowledge', organizationId] });
+  const forgetLine = async (l: RememberedLine) => {
+    try {
+      await knowledgeApi.forgetLine(organizationId, l.description);
+      toast.success(`New lines like "${l.description}" stop being filled in with ${l.category}. Bills already saved keep what they have.`, 'Forgotten');
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not forget it.'); }
     void refresh();
   };
-  const forget = async (h: Habit) => {
+  const removeDefault = async (d: VendorDefault) => {
     try {
-      await knowledgeApi.forget(organizationId, h.counterpartyId);
-      toast.success(`New ${h.vendorName} bills stop being pre-filled with ${h.category}. Confirmed bills are unchanged.`, 'Forgotten');
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not forget it.'); }
+      await knowledgeApi.forget(organizationId, d.counterpartyId);
+      toast.success(`${d.vendorName} no longer has a default category.`, 'Removed');
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not remove it.'); }
     void refresh();
   };
   const [vendorId, setVendorId] = useState('');
   const [category, setCategory] = useState('');
-  const [teaching, setTeaching] = useState(false);
-  const teach = async () => {
+  const [setting, setSetting] = useState(false);
+  const data = q.data;
+  const canManage = data?.canManage ?? false;
+  const setDefault = async () => {
     const vendor = data?.choices?.vendors.find((v) => v.counterpartyId === vendorId);
     if (!vendor || !category) return;
-    setTeaching(true);
+    setSetting(true);
     try {
       const r = await knowledgeApi.teach(organizationId, vendor.counterpartyId, category);
-      toast.success(`New ${vendor.name} bills will be pre-filled with ${r.category}.`, 'Remembered');
+      toast.success(`${vendor.name}'s lines fall back to ${r.category} when nothing else says what they are.`, 'Default set');
       setVendorId('');
       setCategory('');
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not save it.'); }
-    setTeaching(false);
+    setSetting(false);
     void refresh();
   };
-  const data = q.data;
-  const canManage = data?.canManage ?? false;
 
   return (
     <div className="page page-wide">
@@ -71,84 +71,51 @@ export function KnowledgePage() {
         <PageHead
           eyebrow="Operations"
           title="What I know"
-          desc="The category habits I apply to new bills, learned from what your team confirmed or set by hand. Forgetting one stops it at once: drafts nobody has saved are re-coded without it, and confirmed bills keep what was confirmed."
+          desc="The categories I fill in on new bills, learned from the lines your team settles: when a bill is confirmed, or a category is changed on a saved draft, lines like it get that category next time."
         />
         {q.isLoading ? <div className="skeleton" style={{ height: 240 }} /> : null}
 
-        {canManage && data?.choices ? (
-          <section>
-            <div className="sec-head">
-              <div className="sh-titles">
-                <h2>Teach a habit</h2>
-                <p className="sh-desc">Tell me where a vendor's bills go and I'll pre-fill it from the next bill on. It replaces anything I learned for that vendor.</p>
-              </div>
-            </div>
-            <div className="tbl-card" style={{ padding: 18 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 12, alignItems: 'end' }}>
-                <label className="field">
-                  <span className="field-label">Vendor</span>
-                  <select className="input" value={vendorId} onChange={(e) => setVendorId(e.target.value)}>
-                    <option value="">Choose a vendor</option>
-                    {data.choices.vendors.map((v) => <option key={v.counterpartyId} value={v.counterpartyId}>{v.name}</option>)}
-                  </select>
-                </label>
-                <label className="field">
-                  <span className="field-label">Category</span>
-                  <select className="input" value={category} onChange={(e) => setCategory(e.target.value)}>
-                    <option value="">Choose a category</option>
-                    {data.choices.categories.map((c) => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </label>
-                <button type="button" className="btn btn-primary" disabled={!vendorId || !category || teaching} onClick={() => void teach()}>{teaching ? 'Saving…' : 'Remember'}</button>
-              </div>
-            </div>
-          </section>
-        ) : null}
-
-        {data && data.habits.length === 0 ? (
+        {data && data.lines.length === 0 ? (
           <div className="empty">
             <div className="empty-icon"><Ico.sparkle w={22} /></div>
             <h4>Nothing learned yet</h4>
-            <p>When your team codes three bills from a vendor the same way, I learn it and tell you here and in your Inbox.</p>
+            <p>As your team confirms bills, I remember the category for each kind of line and fill it in on the next bill with a line like it.</p>
           </div>
         ) : null}
 
-        {data && data.habits.length > 0 ? (
+        {data && data.lines.length > 0 ? (
           <section>
             <div className="sec-head">
               <div className="sh-titles">
-                <h2>Category habits</h2>
-                <p className="sh-desc">{data.habits.length} {data.habits.length === 1 ? 'vendor' : 'vendors'}.{canManage ? '' : ' Only someone who codes bills — a bill clerk or an admin — can keep or forget one.'}</p>
+                <h2>Lines I've learned</h2>
+                <p className="sh-desc">{data.lines.length} {data.lines.length === 1 ? 'kind of line' : 'kinds of line'}.{canManage ? '' : ' Only someone who codes bills can forget one.'}</p>
               </div>
             </div>
             <div className="tbl-card">
               <table className="tbl" style={{ tableLayout: 'fixed' }}>
                 <thead>
                   <tr>
-                    <th style={{ width: '22%' }}>Vendor</th>
-                    <th style={{ width: '20%' }}>Category</th>
-                    <th style={{ width: '28%' }}>How I know</th>
-                    <th style={{ width: '10%' }}>Since</th>
-                    <th className="num" style={{ width: '8%' }}>Bills since</th>
+                    <th style={{ width: '32%' }}>Line</th>
+                    <th style={{ width: '22%' }}>Category</th>
+                    <th style={{ width: '26%' }}>Last settled</th>
+                    <th className="num" style={{ width: '8%' }}>Lines</th>
                     <th style={{ width: '12%' }} />
                   </tr>
                 </thead>
                 <tbody>
-                  {data.habits.map((h) => (
-                    <tr key={h.ruleId} style={{ cursor: 'default' }}>
+                  {data.lines.map((l) => (
+                    <tr key={l.key} style={{ cursor: 'default' }}>
+                      <td>{l.description}</td>
+                      <td>{l.category}</td>
                       <td>
-                        <div className="cell-vendor"><div className="v-name">{h.vendorName}</div></div>
-                        {!h.acknowledged ? <span className="pill pill-min pill-info">New</span> : null}
+                        <span className="cell-mono">{l.invoiceNumber ?? 'A bill'}</span>
+                        <span style={{ color: 'var(--text-muted)' }}>{l.by ? ` · ${l.by}` : ''} · {day(l.at)}</span>
                       </td>
-                      <td>{h.category}</td>
-                      <td>{how(h)}</td>
-                      <td><span className="cell-mono">{day(h.since)}</span></td>
-                      <td className="td-num">{h.billsSince}</td>
+                      <td className="td-num">{l.fromLines}</td>
                       <td>
                         {canManage ? (
                           <div className="ac-foot" style={{ marginTop: 0, justifyContent: 'flex-end' }}>
-                            {!h.acknowledged ? <button type="button" className="ib-tick" onClick={() => void keep(h)}>Keep</button> : null}
-                            <button type="button" className="ib-tick" onClick={() => void forget(h)}>Forget</button>
+                            <button type="button" className="ib-tick" onClick={() => void forgetLine(l)}>Forget</button>
                           </div>
                         ) : null}
                       </td>
@@ -160,19 +127,83 @@ export function KnowledgePage() {
           </section>
         ) : null}
 
+        {data && (data.vendorDefaults.length > 0 || (canManage && data.choices)) ? (
+          <section>
+            <div className="sec-head">
+              <div className="sh-titles">
+                <h2>Vendor defaults</h2>
+                <p className="sh-desc">Optional. A category for a vendor's lines when nothing else says what they are: no similar line before, nothing on the document.</p>
+              </div>
+            </div>
+            <div className="stack stack-16">
+              {data.vendorDefaults.length > 0 ? (
+                <div className="tbl-card">
+                  <table className="tbl" style={{ tableLayout: 'fixed' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ width: '30%' }}>Vendor</th>
+                        <th style={{ width: '30%' }}>Category</th>
+                        <th style={{ width: '28%' }}>Set by</th>
+                        <th style={{ width: '12%' }} />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.vendorDefaults.map((d) => (
+                        <tr key={d.ruleId} style={{ cursor: 'default' }}>
+                          <td><div className="cell-vendor"><div className="v-name">{d.vendorName}</div></div></td>
+                          <td>{d.category}</td>
+                          <td><span style={{ color: 'var(--text-muted)' }}>{d.setBy ?? 'A person'} · {day(d.since)}</span></td>
+                          <td>
+                            {canManage ? (
+                              <div className="ac-foot" style={{ marginTop: 0, justifyContent: 'flex-end' }}>
+                                <button type="button" className="ib-tick" onClick={() => void removeDefault(d)}>Remove</button>
+                              </div>
+                            ) : null}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+              {canManage && data.choices ? (
+                <div className="tbl-card" style={{ padding: 18 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 12, alignItems: 'end' }}>
+                    <label className="field">
+                      <span className="field-label">Vendor</span>
+                      <select className="input" value={vendorId} onChange={(e) => setVendorId(e.target.value)}>
+                        <option value="">Choose a vendor</option>
+                        {data.choices.vendors.map((v) => <option key={v.counterpartyId} value={v.counterpartyId}>{v.name}</option>)}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span className="field-label">Category</span>
+                      <select className="input" value={category} onChange={(e) => setCategory(e.target.value)}>
+                        <option value="">Choose a category</option>
+                        {data.choices.categories.map((c) => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </label>
+                    <button type="button" className="btn btn-secondary" disabled={!vendorId || !category || setting} onClick={() => void setDefault()}>{setting ? 'Saving…' : 'Set default'}</button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </section>
+        ) : null}
+
         {data && data.forgotten.length > 0 ? (
           <section>
             <div className="sec-head">
               <div className="sh-titles">
                 <h2>Forgotten</h2>
-                <p className="sh-desc">I will not relearn these from the bills I learned them from. Three new bills coded the same way would teach me again.</p>
+                <p className="sh-desc">Lines settled before these were forgotten no longer count. Lines settled since can teach them again.</p>
               </div>
             </div>
             <div className="tick-list">
-              {data.forgotten.map((f) => (
-                <div key={f.counterpartyId} className="tick-item">
+              {data.forgotten.map((f, i) => (
+                <div key={i} className="tick-item">
                   <Ico.x w={14} />
-                  <span><strong>{f.vendorName}</strong>{f.category ? ` going to ${f.category}` : ''}: forgotten {day(f.at)}{f.by ? ` by ${f.by}` : ''}.</span>
+                  <span><strong>{f.description}</strong>{f.category ? ` going to ${f.category}` : ''}: forgotten {day(f.at)}{f.by ? ` by ${f.by}` : ''}.</span>
                 </div>
               ))}
             </div>

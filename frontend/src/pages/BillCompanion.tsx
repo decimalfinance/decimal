@@ -16,7 +16,7 @@
 
 import { useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { companionApi, type BillCompanionNote } from '../api';
+import { companionApi, type BillCompanionNote, type BillDraftLine } from '../api';
 import { Ico } from '../dec/icons';
 import { useToast } from '../ui/Toast';
 import { Answer, Composer } from './Chat';
@@ -34,10 +34,12 @@ function StepIcon({ status }: { status: BillCompanionNote['did'][number]['status
   return <Ico.checkSm w={14} />;
 }
 
-export function BillCompanion({ organizationId, billId, vendorName, flags, flagHeadline, filled, onOpenBill }: {
+export function BillCompanion({ organizationId, billId, lines, flags, flagHeadline, filled, onOpenBill }: {
   organizationId: string;
   billId: string;
   vendorName: string;
+  /** The bill's lines, with where each category came from. */
+  lines: BillDraftLine[];
   /** The bill's flag callouts, with their buttons. Rendered first. */
   flags: ReactNode;
   /** The most important flag in one line: its investigation's finding when there is one. */
@@ -91,6 +93,10 @@ export function BillCompanion({ organizationId, billId, vendorName, flags, flagH
 
   const n = note.data;
   if (!n) return null;
+  // Lines whose category comes from one the team settled before.
+  const remembered = lines.flatMap((l) => (l.categoryFrom?.kind === 'memory' && l.category
+    ? [{ description: l.description, category: l.category, from: l.categoryFrom }]
+    : []));
   // Links to the bill already on screen ("Open the bill", its card) go nowhere.
   const otherBills = Object.fromEntries(Object.entries(chat.data?.bills ?? {}).filter(([id]) => id !== billId));
   const running = chat.data?.running ?? false;
@@ -144,11 +150,22 @@ export function BillCompanion({ organizationId, billId, vendorName, flags, flagH
           <div className="bn-sec">
             <div className="bn-label">Categories</div>
             <div className="bn-text">
-              {n.habit
-                ? n.habit.source === 'manual'
-                  ? <>{vendorName} goes to <strong>{n.habit.category}</strong>: a habit a person set.</>
-                  : <>{vendorName} goes to <strong>{n.habit.category}</strong>: I learned it from {n.habit.fromBills} confirmed bills.</>
-                : <>I picked one for each line from what it's for.</>}
+              {remembered.length === 0
+                ? (lines.some((l) => l.categoryFrom) ? <>I picked one for each line from what it's for.</> : <>As saved on this bill.</>)
+                : (
+                  <div className="bn-steps">
+                    {remembered.map((l, i) => (
+                      <div key={i} className="bn-step">
+                        <Ico.checkSm w={14} />
+                        <span>
+                          {l.description}: <strong>{l.category}</strong>
+                          <span className="bn-detail"> · like {l.from.invoiceNumber ?? 'an earlier bill'}{l.from.by ? `, settled by ${l.from.by}` : ''}</span>
+                        </span>
+                      </div>
+                    ))}
+                    {remembered.length < lines.length ? <span className="bn-detail">I picked the rest from what each line is for.</span> : null}
+                  </div>
+                )}
             </div>
           </div>
 
