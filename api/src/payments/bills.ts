@@ -1038,6 +1038,25 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
     });
   }
 
+  // Any unanswered question on a bill, asked of anyone: the companion does not
+  // rate a bill ready while somebody is still being asked about it.
+  const anyOpenQuestion = new Map<string, string>();
+  if (orders.length > 0) {
+    const open = await prisma.billQuestion.findMany({
+      where: { organizationId, answeredAt: null, paymentOrderId: { in: orders.map((o) => o.paymentOrderId) } },
+      orderBy: { createdAt: 'asc' },
+      select: { paymentOrderId: true, askedOfUserId: true },
+    });
+    const people = open.length === 0 ? [] : await prisma.user.findMany({
+      where: { userId: { in: [...new Set(open.map((q) => q.askedOfUserId))] } },
+      select: { userId: true, displayName: true, email: true },
+    });
+    const nameOf = new Map(people.map((u) => [u.userId, u.displayName?.trim() || u.email]));
+    for (const q of open) {
+      if (!anyOpenQuestion.has(q.paymentOrderId)) anyOpenQuestion.set(q.paymentOrderId, nameOf.get(q.askedOfUserId) ?? 'a colleague');
+    }
+  }
+
   // Duplicate detection over rows we already hold. findDuplicateBills would be
   // one query per bill; matchDuplicates is the same rules against the same
   // candidate set, in memory. Grouped by vendor because that is how the query
@@ -1230,6 +1249,7 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
         fieldStatus: isRecord(extracted?.fieldStatus) ? extracted!.fieldStatus : null,
         ungrounded: Array.isArray(extracted?.ungrounded) ? (extracted!.ungrounded as unknown[]).filter((x): x is string => typeof x === 'string') : [],
         confirmedByPerson: isRecord(metadataRecord.verification) && Boolean(metadataRecord.verification.confirmedAt),
+        openQuestionTo: anyOpenQuestion.get(order.paymentOrderId) ?? null,
       }),
       // A cleared duplicate flag must stay VISIBLE on the row — the operator
       // scanning To-pay is the last human checkpoint (testbench 001 §5).

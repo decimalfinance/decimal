@@ -10,6 +10,7 @@ import { followUp, getChat, listChats, recordActionOutcome, startChat } from './
 import { getInbox, markAllInboxSeen, markInboxSeen, nudgeAboutBill, tickAsk } from './inbox.js';
 import { forgetHabit, getKnowledge, keepHabit, setHabit } from './knowledge.js';
 import { getBillNote } from './bill-note.js';
+import { getReadyBills } from './ready-pass.js';
 
 export const companionRouter = Router();
 
@@ -147,4 +148,11 @@ companionRouter.get('/organizations/:organizationId/bills/:paymentOrderId/compan
   const { organizationId, paymentOrderId } = billNoteParams.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
   res.json(await getBillNote(organizationId, req.auth!.userId, paymentOrderId));
+}));
+
+// The quick pass through ready bills: which ones, in what order.
+companionRouter.get('/organizations/:organizationId/companion/ready', asyncRoute(async (req, res) => {
+  const { organizationId } = orgParams.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  res.json(await getReadyBills(organizationId, req.auth!.userId));
 }));

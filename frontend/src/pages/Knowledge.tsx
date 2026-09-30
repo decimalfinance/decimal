@@ -36,13 +36,13 @@ export function KnowledgePage() {
     queryClient.invalidateQueries({ queryKey: ['inbox', organizationId] }),
   ]);
   const keep = async (h: Habit) => {
-    try { await knowledgeApi.keep(organizationId, h.ruleId); toast.success('Kept', `${h.vendorName} goes to ${h.category}.`); } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not keep it.'); }
+    try { await knowledgeApi.keep(organizationId, h.ruleId); toast.success(`${h.vendorName} goes to ${h.category}.`, 'Kept'); } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not keep it.'); }
     void refresh();
   };
   const forget = async (h: Habit) => {
     try {
       await knowledgeApi.forget(organizationId, h.counterpartyId);
-      toast.success('Forgotten', `New ${h.vendorName} bills stop being pre-filled with ${h.category}. Confirmed bills are unchanged.`);
+      toast.success(`New ${h.vendorName} bills stop being pre-filled with ${h.category}. Confirmed bills are unchanged.`, 'Forgotten');
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not forget it.'); }
     void refresh();
   };
@@ -55,7 +55,7 @@ export function KnowledgePage() {
     setTeaching(true);
     try {
       const r = await knowledgeApi.teach(organizationId, vendor.counterpartyId, category);
-      toast.success('Remembered', `New ${vendor.name} bills will be pre-filled with ${r.category}.`);
+      toast.success(`New ${vendor.name} bills will be pre-filled with ${r.category}.`, 'Remembered');
       setVendorId('');
       setCategory('');
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not save it.'); }

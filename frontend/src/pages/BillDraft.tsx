@@ -28,6 +28,7 @@ import { BillWorkLog } from '../dec/primitives';
 import { BillConversation } from '../dec/BillConversation';
 import { useToast } from '../ui/Toast';
 import { BillCompanion } from './BillCompanion';
+import { ReadyPassBar } from './ReadyPass';
 import { isCompanionOnBillEnabled } from '../public-config';
 
 function usd(amount: number): string {
@@ -1346,7 +1347,7 @@ activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
             </span>
           ) : null}
         </div>
-
+        <ReadyPassBar organizationId={organizationId} billId={billDraft.paymentOrderId} dirty={hasUnsavedChanges} />
       </div>
 
       {/* Split: read panel LEFT, document RIGHT (matches the approved mock). */}

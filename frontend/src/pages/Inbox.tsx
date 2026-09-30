@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { inboxApi, knowledgeApi, type InboxItem, type InboxLineKind } from '../api';
+import { ReadyPassButton } from './ReadyPass';
 import { Ico } from '../dec/icons';
 import { PageHead } from '../dec/primitives';
 
@@ -106,9 +107,14 @@ export function InboxPage() {
           eyebrow="Operations"
           title="Inbox"
           desc="Everything waiting on you, one item per bill. What the system needs clears itself when the bill moves; what people ask you has its own Done."
-          actions={q.data && q.data.newCount > 0 ? (
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => void markAll()}>Mark all as read</button>
-          ) : undefined}
+          actions={(
+            <>
+              <ReadyPassButton organizationId={organizationId} />
+              {q.data && q.data.newCount > 0 ? (
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => void markAll()}>Mark all as read</button>
+              ) : null}
+            </>
+          )}
         />
 
         <div className="filterbar">

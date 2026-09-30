@@ -1264,3 +1264,8 @@
 .dec .bn-chat { gap: 14px; padding-bottom: 0; }
 /* The bill's flags, as the companion's first finding. */
 .dec .bn-flags { display: flex; flex-direction: column; gap: 10px; }
+
+/* ─── The quick pass through ready bills (pages/ReadyPass.tsx), in a bill's top bar ─── */
+.dec .rp-count { font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
+.dec .rp-note { font-size: 12.5px; color: var(--warning); }
+.dec .topbar .tb-right .btn .kbd { margin-left: 4px; }

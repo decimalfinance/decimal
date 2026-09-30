@@ -1981,6 +1981,14 @@ export const companionApi = {
       body: JSON.stringify(billId ? { text, billId } : { text }),
     });
   },
+  /** The quick pass: ready drafts, in the order to work them. */
+  ready(organizationId: string) {
+    return request<{ bills: Array<{ billId: string; vendorName: string; invoiceNumber: string | null; amountUsd: number; dueAt: string | null }> }>(`/organizations/${organizationId}/companion/ready`);
+  },
+  /** Send a ready bill for approval exactly as read. The server re-checks it is ready. */
+  confirmAsRead(organizationId: string, billId: string) {
+    return request<unknown>(`/organizations/${organizationId}/bills/${billId}/confirm-as-read`, { method: 'POST', body: '{}' });
+  },
   /** The companion's note on one bill, for the bill's own screen. */
   billNote(organizationId: string, billId: string) {
     return request<BillCompanionNote>(`/organizations/${organizationId}/bills/${billId}/companion`);

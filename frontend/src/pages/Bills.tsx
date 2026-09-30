@@ -8,6 +8,7 @@ import { accessApi, billsApi, inboundEmailApi, invoiceIntakeApi, type BillBucket
 import { Ico } from '../dec/icons';
 import { PageHead } from '../dec/primitives';
 import { useToast } from '../ui/Toast';
+import { ReadyPassButton } from './ReadyPass';
 
 const TABS: Array<{ key: BillBucket; label: string }> = [
   { key: 'draft', label: 'Draft' },
@@ -167,6 +168,7 @@ export function BillsPage() {
           actions={
             canAddBills ? (
               <>
+                <ReadyPassButton organizationId={organizationId} />
                 <button type="button" className="btn btn-secondary" onClick={() => setForwardOpen(true)}>
                   <Ico.mail w={15} /> Forward by email
                 </button>
