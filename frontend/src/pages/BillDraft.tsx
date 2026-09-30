@@ -1282,6 +1282,52 @@ activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
                 ) : null
   );
 
+  // A flag states what is wrong AND what can be done about it. The
+  // rule the backend enforces: every blocking flag offers at least
+  // one way out, so this never renders a dead end. Rendered inside the
+  // companion's note when it is on (the flag is the companion's finding),
+  // and on its own otherwise.
+  const flagCallouts = (
+    billDraft.flags.map((flag) => {
+      const tone = flag.severity === 'danger' ? 'callout-danger' : flag.severity === 'warning' ? 'callout-warning' : 'callout-info';
+      // Once the exception agent has an answer, the answer IS the flag:
+      // it replaces the generic sentence rather than stacking under it,
+      // reads in body text rather than alarm colour (the border still
+      // says the bill is blocked), and puts the choice under the answer.
+      if (flag.brief?.status === 'ready') {
+        return (
+          <div key={flag.kind} className={`callout ${tone} has-brief`}>
+            <ExceptionBriefBlock
+              brief={flag.brief}
+              canShow={briefEvidenceShown}
+              onEvidence={(ev) => showBriefEvidence(flag.brief!, ev)}
+            >
+              {renderResolutionComposer(flag)}
+              {renderResolutionButtons(flag)}
+            </ExceptionBriefBlock>
+          </div>
+        );
+      }
+      return (
+        <div key={flag.kind} className={`callout ${tone}`}>
+          <Ico.shield w={16} />
+          <span style={{ flex: 1, minWidth: 0 }}>
+            {flag.message}
+            {flag.brief ? (
+              <ExceptionBriefBlock
+                brief={flag.brief}
+                canShow={briefEvidenceShown}
+                onEvidence={(ev) => showBriefEvidence(flag.brief!, ev)}
+              />
+            ) : null}
+            {renderResolutionComposer(flag)}
+          </span>
+          {renderResolutionButtons(flag)}
+        </div>
+      );
+    })
+  );
+
   return (
     <div className="rev-shell" ref={shellRef}>
       {/* Topbar */}
@@ -1342,6 +1388,15 @@ activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
               <BillCompanion
                 organizationId={organizationId}
                 billId={billDraft.paymentOrderId}
+                vendorName={vendorName}
+                flags={billDraft.flags.length > 0 ? flagCallouts : null}
+                flagHeadline={billDraft.flags[0] ? (billDraft.flags[0].brief?.status === 'ready' && billDraft.flags[0].brief.headline ? billDraft.flags[0].brief.headline : billDraft.flags[0].short) : null}
+                filled={{
+                  fields: [...billDraft.fields, ...billDraft.remitFields].filter((f) => f.state !== 'not_on_document' && !f.inferred).length,
+                  lines: billDraft.lines.length,
+                  toLook: [...billDraft.fields, ...billDraft.remitFields].filter((f) => f.state === 'needs_look').length,
+                  confirmed: [...billDraft.fields, ...billDraft.remitFields].some((f) => f.state === 'confirmed'),
+                }}
                 onOpenBill={(id, state) => navigateTo(`/organizations/${organizationId}/bills/${id}${state === 'draft' ? '/draft' : ''}`)}
               />
             ) : null}
@@ -1478,47 +1533,7 @@ activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
               </div>
             ) : null}
 
-            {/* A flag states what is wrong AND what can be done about it. The
-                rule the backend enforces: every blocking flag offers at least
-                one way out, so this never renders a dead end. */}
-            {billDraft.flags.map((flag) => {
-              const tone = flag.severity === 'danger' ? 'callout-danger' : flag.severity === 'warning' ? 'callout-warning' : 'callout-info';
-              // Once the exception agent has an answer, the answer IS the flag:
-              // it replaces the generic sentence rather than stacking under it,
-              // reads in body text rather than alarm colour (the border still
-              // says the bill is blocked), and puts the choice under the answer.
-              if (flag.brief?.status === 'ready') {
-                return (
-                  <div key={flag.kind} className={`callout ${tone} has-brief`}>
-                    <ExceptionBriefBlock
-                      brief={flag.brief}
-                      canShow={briefEvidenceShown}
-                      onEvidence={(ev) => showBriefEvidence(flag.brief!, ev)}
-                    >
-                      {renderResolutionComposer(flag)}
-                      {renderResolutionButtons(flag)}
-                    </ExceptionBriefBlock>
-                  </div>
-                );
-              }
-              return (
-                <div key={flag.kind} className={`callout ${tone}`}>
-                  <Ico.shield w={16} />
-                  <span style={{ flex: 1, minWidth: 0 }}>
-                    {flag.message}
-                    {flag.brief ? (
-                      <ExceptionBriefBlock
-                        brief={flag.brief}
-                        canShow={briefEvidenceShown}
-                        onEvidence={(ev) => showBriefEvidence(flag.brief!, ev)}
-                      />
-                    ) : null}
-                    {renderResolutionComposer(flag)}
-                  </span>
-                  {renderResolutionButtons(flag)}
-                </div>
-              );
-            })}
+            {isCompanionOnBillEnabled() ? null : flagCallouts}
 
             {/* A document that is not an invoice gets its own screen, not the
                 bill form with a warning on top. The flags above still show —

@@ -1,16 +1,20 @@
 // The companion on a bill's own screen — an experiment, behind a switch.
 //
-// One note under the bill's heading: whether the bill is ready or the one
-// reason it needs you, what your inbox wants of you on it, where its categories
-// came from, what the companion did reading it, and a chat where "this bill"
-// means this bill. Everything it shows exists elsewhere; this only puts it
-// where the bill is being worked.
+// One note under the bill's heading, in the companion's voice: the flags it
+// raised with the ways to settle them (the flag IS its finding, so it lives
+// here, not in a box of its own), what it filled in from the document, where
+// the categories came from and how confirming teaches it, what your inbox
+// wants of you on this bill, the steps it took, and a chat where "this bill"
+// means this bill.
+//
+// It never says it "needs" you. Everything here can be done without it: it
+// fills the bill in and says what it noticed; the person works the bill.
 //
 // To take it out: set "companionOnBill" to false in public-config.json, or
 // revert the commit that added this file (it touches BillDraft.tsx in one
 // place, the mount).
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { companionApi, type BillCompanionNote } from '../api';
 import { Ico } from '../dec/icons';
@@ -30,9 +34,16 @@ function StepIcon({ status }: { status: BillCompanionNote['did'][number]['status
   return <Ico.checkSm w={14} />;
 }
 
-export function BillCompanion({ organizationId, billId, onOpenBill }: {
+export function BillCompanion({ organizationId, billId, vendorName, flags, flagHeadline, filled, onOpenBill }: {
   organizationId: string;
   billId: string;
+  vendorName: string;
+  /** The bill's flag callouts, with their buttons. Rendered first. */
+  flags: ReactNode;
+  /** The most important flag in one line: its investigation's finding when there is one. */
+  flagHeadline: string | null;
+  /** What was read off the document into the form. */
+  filled: { fields: number; lines: number; toLook: number; confirmed: boolean };
   onOpenBill: (id: string, state: string) => void;
 }) {
   const queryClient = useQueryClient();
@@ -83,27 +94,39 @@ export function BillCompanion({ organizationId, billId, onOpenBill }: {
   // Links to the bill already on screen ("Open the bill", its card) go nowhere.
   const otherBills = Object.fromEntries(Object.entries(chat.data?.bills ?? {}).filter(([id]) => id !== billId));
   const running = chat.data?.running ?? false;
-  const verdict = n.verdict;
-  const pill = verdict
-    ? verdict.ready
-      ? <span className="pill pill-min pill-success">Ready</span>
-      : <span className="pill pill-min pill-warning">Needs you</span>
-    : null;
-  const headline = verdict
-    ? verdict.ready ? 'Nothing here needs a look. Confirm to send it for approval.' : verdict.reason
-    : n.standing;
+  const isDraft = n.verdict !== null;
+  const headline = flagHeadline
+    ?? (!isDraft ? n.standing
+      : filled.toLook > 0 ? `Filled in from the document. ${filled.toLook} ${filled.toLook === 1 ? 'field is' : 'fields are'} worth a second look.`
+        : 'Filled in from the document.');
+  const filledLine = `I read the document and filled in ${filled.fields} ${filled.fields === 1 ? 'field' : 'fields'}${filled.lines > 0 ? ` and ${filled.lines} ${filled.lines === 1 ? 'line' : 'lines'}` : ''}.`;
 
   return (
     <div className="bn">
       <button type="button" className="bn-head" onClick={toggle} aria-expanded={open}>
         <span className="bn-who"><Ico.sparkle w={14} /> Companion</span>
-        {pill}
         <span className="bn-line">{headline}</span>
         <span className="ch-chev"><Ico.chevDown w={13} /></span>
       </button>
 
       {open ? (
         <div className="bn-body">
+          {flags ? <div className="bn-flags">{flags}</div> : null}
+
+          {isDraft ? (
+            <div className="bn-sec">
+              <div className="bn-label">Filled in</div>
+              <div className="bn-text">
+                {filledLine}{' '}
+                {filled.confirmed
+                  ? 'A person has confirmed what I read.'
+                  : filled.toLook > 0
+                    ? `I'm less sure of ${filled.toLook === 1 ? 'one of them' : `${filled.toLook} of them`}: ${filled.toLook === 1 ? "it's" : "they're"} marked in amber below.`
+                    : 'Everything I filled in is on the page.'}
+              </div>
+            </div>
+          ) : null}
+
           {n.waiting.length > 0 ? (
             <div className="bn-sec">
               <div className="bn-label">Waiting on you</div>
@@ -123,9 +146,9 @@ export function BillCompanion({ organizationId, billId, onOpenBill }: {
             <div className="bn-text">
               {n.habit
                 ? n.habit.source === 'manual'
-                  ? <>From a habit a person set: <strong>{n.habit.category}</strong>.</>
-                  : <>From a habit I learned from {n.habit.fromBills} confirmed bills: <strong>{n.habit.category}</strong>.</>
-                : 'My best guess from the document. There is no habit for this vendor yet, so check them.'}
+                  ? <>{vendorName} goes to <strong>{n.habit.category}</strong>: a habit a person set.</>
+                  : <>{vendorName} goes to <strong>{n.habit.category}</strong>: I learned it from {n.habit.fromBills} confirmed bills.</>
+                : <>I picked one for each line from what it's for. There's nothing to teach me separately: when this bill is confirmed, with my categories or yours, I learn from it, and once three {vendorName} bills are coded the same way I'll fill it in from habit.</>}
             </div>
           </div>
 

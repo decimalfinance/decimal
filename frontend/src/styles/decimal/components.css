@@ -1262,3 +1262,5 @@
 .dec .bn-step .cc-live-dot { margin-top: 6px; }
 .dec .bn-detail { color: var(--text-muted); }
 .dec .bn-chat { gap: 14px; padding-bottom: 0; }
+/* The bill's flags, as the companion's first finding. */
+.dec .bn-flags { display: flex; flex-direction: column; gap: 10px; }
