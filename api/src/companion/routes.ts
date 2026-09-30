@@ -7,7 +7,7 @@ import { notFound } from '../infra/api-errors.js';
 import { asyncRoute } from '../infra/route-helpers.js';
 import { getCompanionConsole, getCompanionJob } from './today.js';
 import { followUp, getChat, listChats, recordActionOutcome, startChat } from './chat.js';
-import { getInbox, markInboxSeen, nudgeAboutBill, tickAsk } from './inbox.js';
+import { getInbox, markAllInboxSeen, markInboxSeen, nudgeAboutBill, tickAsk } from './inbox.js';
 
 export const companionRouter = Router();
 
@@ -84,6 +84,12 @@ companionRouter.post('/organizations/:organizationId/inbox/seen', asyncRoute(asy
   await assertOrganizationAccess(organizationId, req.auth!);
   const { billId } = seenBody.parse(req.body);
   res.json(await markInboxSeen(organizationId, req.auth!.userId, billId));
+}));
+
+companionRouter.post('/organizations/:organizationId/inbox/seen-all', asyncRoute(async (req, res) => {
+  const { organizationId } = orgParams.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  res.json(await markAllInboxSeen(organizationId, req.auth!.userId));
 }));
 
 companionRouter.post('/organizations/:organizationId/inbox/asks/:askId/done', asyncRoute(async (req, res) => {

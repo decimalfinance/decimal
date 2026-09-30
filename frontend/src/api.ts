@@ -2085,6 +2085,8 @@ export interface InboxItem {
   vendorName: string;
   invoiceNumber: string | null;
   amountUsd: number | null;
+  status: string | null;
+  dueAt: string | null;
   href: 'draft' | 'bill' | null;
   lines: Array<{ kind: InboxLineKind; text: string; at: string; from?: string | null; askId?: string }>;
   latestAt: string;
@@ -2097,6 +2099,9 @@ export const inboxApi = {
   },
   seen(organizationId: string, billId: string) {
     return request<{ ok: true }>(`/organizations/${organizationId}/inbox/seen`, { method: 'POST', body: JSON.stringify({ billId }) });
+  },
+  seenAll(organizationId: string) {
+    return request<{ ok: true; marked: number }>(`/organizations/${organizationId}/inbox/seen-all`, { method: 'POST', body: '{}' });
   },
   tick(organizationId: string, askId: string) {
     return request<{ ok: true }>(`/organizations/${organizationId}/inbox/asks/${askId}/done`, { method: 'POST', body: '{}' });

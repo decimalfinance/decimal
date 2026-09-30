@@ -99,7 +99,7 @@ export function AppSidebar({
   const { theme, setTheme } = useTheme();
 
   const base = activeOrganization ? `/organizations/${activeOrganization.organizationId}` : null;
-  // New items in the person's inbox, on Home: that is where the inbox lives.
+  // New items in the person's inbox, on the Inbox entry.
   const inboxQuery = useQuery({
     queryKey: ['inbox', activeOrganization?.organizationId ?? ''],
     queryFn: () => inboxApi.get(activeOrganization!.organizationId),
@@ -240,7 +240,8 @@ export function AppSidebar({
         {base ? (
           <>
             <div className="sb-group-label">Operations</div>
-            <NavItem to={base} end icon={<Ico.sparkle w={16} />} label="Home" badge={inboxNew} />
+            <NavItem to={base} end icon={<Ico.sparkle w={16} />} label="Home" />
+            <NavItem to={`${base}/inbox`} icon={<Ico.inbox w={16} />} label="Inbox" badge={inboxNew} />
             {can('bills.view') ? <NavItem to={`${base}/bills`} icon={<Ico.doc w={16} />} label="Bills" badge={paymentsIncompleteCount} /> : null}
             <RecentChats organizationId={activeOrganization!.organizationId} base={base} />
 

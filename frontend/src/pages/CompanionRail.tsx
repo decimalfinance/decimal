@@ -282,6 +282,7 @@ function InboxSection({ organizationId, onOpenJob }: { organizationId: string; o
       <div className="cw-sec-head">
         <h3>Inbox</h3>
         <span className="cc-col-count">{data ? (data.newCount ? `${data.newCount} new · ${data.count}` : data.count) : ''}</span>
+        <button type="button" className="btn btn-ghost btn-sm cw-sec-link" onClick={() => navigate(`/organizations/${organizationId}/inbox`)}>See all</button>
       </div>
       {q.isLoading ? <div className="skeleton" style={{ height: 120 }} /> : null}
       {data && data.items.length === 0 ? <div className="cc-empty">Nothing is waiting on you.</div> : null}

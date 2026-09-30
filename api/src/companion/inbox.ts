@@ -37,6 +37,9 @@ export type InboxItem = {
   vendorName: string;
   invoiceNumber: string | null;
   amountUsd: number | null;
+  /** Where the bill stands, in the bills list's words. */
+  status: string | null;
+  dueAt: string | null;
   /** Where to act: the review screen for drafts, the bill for everything else. */
   href: 'draft' | 'bill' | null;
   lines: InboxLine[];
@@ -112,6 +115,8 @@ export async function getInbox(organizationId: string, viewerUserId: string, opt
       vendorName: row?.vendorName ?? fallback!.vendor,
       invoiceNumber: row?.invoiceNumber ?? fallback!.invoice,
       amountUsd: row?.amountUsd ?? fallback!.amountUsd,
+      status: row?.subStatus.text ?? null,
+      dueAt: row?.dueAt ? row.dueAt.toISOString() : null,
       href: row?.state === 'draft' ? 'draft' : 'bill',
       lines: [],
       latestAt: new Date(0).toISOString(),
@@ -170,7 +175,7 @@ export async function getInbox(organizationId: string, viewerUserId: string, opt
   if (canReview) {
     for (const d of board.pending.filter((p) => p.status === 'failed')) {
       items.set(`doc:${d.invoiceDocumentId}`, {
-        key: `doc:${d.invoiceDocumentId}`, billId: null, jobId: d.invoiceDocumentId, vendorName: d.filename, invoiceNumber: null, amountUsd: null, href: null,
+        key: `doc:${d.invoiceDocumentId}`, billId: null, jobId: d.invoiceDocumentId, vendorName: d.filename, invoiceNumber: null, amountUsd: null, status: 'Could not be read', dueAt: null, href: null,
         lines: [{ kind: 'unreadable', text: d.error ?? 'Could not make a bill from this document', at: d.createdAt.toISOString() }],
         latestAt: d.createdAt.toISOString(), isNew: false,
       });
@@ -202,6 +207,21 @@ export async function markInboxSeen(organizationId: string, userId: string, bill
     update: { seenAt: new Date() },
   });
   return { ok: true };
+}
+
+/** Mark every item in this person's inbox as seen. */
+export async function markAllInboxSeen(organizationId: string, userId: string) {
+  const { items } = await getInbox(organizationId, userId, { settle: false });
+  const now = new Date();
+  for (const i of items) {
+    if (!i.billId) continue;
+    await prisma.inboxSeen.upsert({
+      where: { organizationId_userId_paymentOrderId: { organizationId, userId, paymentOrderId: i.billId } },
+      create: { organizationId, userId, paymentOrderId: i.billId, seenAt: now },
+      update: { seenAt: now },
+    });
+  }
+  return { ok: true, marked: items.filter((i) => i.billId).length };
 }
 
 /** The recipient ticks an ask off. Nobody else can. */

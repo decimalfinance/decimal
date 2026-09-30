@@ -208,3 +208,16 @@ test('inbox: a hostile model cannot aim an ask at the wrong person, bill or orga
   assert.ok(cards[0]!.call.body.text.length <= 500, 'the message is clamped');
   setAskClassifierForTests(null);
 });
+
+test('inbox: mark all as read clears every "new", and each item says where its bill stands', async () => {
+  const w = await makeWorld();
+  const box = await inboxOf(w.orgId, w.clerk.token);
+  assert.ok(box.newCount > 1, 'a fresh inbox is all new');
+  const lonely = itemFor(box, w.bills.lonely) as unknown as { status: string | null; dueAt: string | null };
+  assert.equal(typeof lonely.status, 'string');
+  assert.ok(lonely.dueAt, 'with its due date');
+  const r = await post(`/organizations/${w.orgId}/inbox/seen-all`, {}, w.clerk.token);
+  assert.equal(r.marked, box.items.filter((i) => i.billId).length);
+  assert.equal((await inboxOf(w.orgId, w.clerk.token)).newCount, 0);
+  assert.ok((await inboxOf(w.orgId, w.owner.token)).newCount > 0, 'only the clerk\'s, not everyone\'s');
+});
