@@ -19,7 +19,7 @@ import { getApprovalsInbox, getBillsWorkbench } from '../payments/bills.js';
 import { involvedBillIds } from '../payments/bill-visibility.js';
 import { getOrgAccess } from '../approvals/permissions.js';
 
-export type InboxLineKind = 'approval' | 'question' | 'review' | 'sign_off' | 'sent_back' | 'unreadable' | 'ask' | 'sync_failed';
+export type InboxLineKind = 'approval' | 'question' | 'review' | 'sign_off' | 'sent_back' | 'unreadable' | 'ask' | 'sync_failed' | 'learned';
 
 export type InboxLine = {
   kind: InboxLineKind;
@@ -40,6 +40,8 @@ export type InboxItem = {
   /** Where the bill stands, in the bills list's words. */
   status: string | null;
   dueAt: string | null;
+  /** A habit the companion learned, for an admin to keep or forget. */
+  habit?: { ruleId: string; counterpartyId: string } | null;
   /** Where to act: the review screen for drafts, the bill for everything else. */
   href: 'draft' | 'bill' | null;
   lines: InboxLine[];
@@ -47,7 +49,7 @@ export type InboxItem = {
   isNew: boolean;
 };
 
-const URGENCY: Record<InboxLineKind, number> = { question: 0, approval: 1, ask: 2, sync_failed: 3, sent_back: 3, review: 4, unreadable: 5, sign_off: 6 };
+const URGENCY: Record<InboxLineKind, number> = { question: 0, approval: 1, ask: 2, sync_failed: 3, sent_back: 3, review: 4, unreadable: 5, sign_off: 6, learned: 7 };
 
 /**
  * Close asks the recipient has already dealt with: they commented on the bill
@@ -191,6 +193,21 @@ export async function getInbox(organizationId: string, viewerUserId: string, opt
         key: `doc:${d.invoiceDocumentId}`, billId: null, jobId: d.invoiceDocumentId, vendorName: d.filename, invoiceNumber: null, amountUsd: null, status: 'Could not be read', dueAt: null, href: null,
         lines: [{ kind: 'unreadable', text: d.error ?? 'Could not make a bill from this document', at: d.createdAt.toISOString() }],
         latestAt: d.createdAt.toISOString(), isNew: false,
+      });
+    }
+  }
+
+  // Habits the companion learned and is announcing, for the admins who can
+  // keep or forget them. Not a bill, so an item of its own.
+  if (isAdmin) {
+    const { getKnowledge, announce } = await import('./knowledge.js');
+    const { habits } = await getKnowledge(organizationId, viewerUserId);
+    for (const h of habits.filter((x) => !x.acknowledged)) {
+      items.set(`habit:${h.ruleId}`, {
+        key: `habit:${h.ruleId}`, billId: null, jobId: null, vendorName: h.vendorName, invoiceNumber: null, amountUsd: null,
+        status: null, dueAt: null, href: null, habit: { ruleId: h.ruleId, counterpartyId: h.counterpartyId },
+        lines: [{ kind: 'learned', text: announce(h), at: h.since }],
+        latestAt: h.since, isNew: false,
       });
     }
   }

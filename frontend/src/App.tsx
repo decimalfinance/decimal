@@ -15,6 +15,7 @@ import { useLiveOrgEvents } from './lib/use-live-org-events';
 const HomePage = lazy(() => import('./pages/Home').then((m) => ({ default: m.HomePage })));
 const ChatPage = lazy(() => import('./pages/Chat').then((m) => ({ default: m.ChatPage })));
 const InboxPage = lazy(() => import('./pages/Inbox').then((m) => ({ default: m.InboxPage })));
+const KnowledgePage = lazy(() => import('./pages/Knowledge').then((m) => ({ default: m.KnowledgePage })));
 const ProposalRedirectPage = lazy(() => import('./pages/ProposalRedirect').then((m) => ({ default: m.ProposalRedirectPage })));
 const BillsPage = lazy(() => import('./pages/Bills').then((m) => ({ default: m.BillsPage })));
 const BillDraftPage = lazy(() => import('./pages/BillDraft').then((m) => ({ default: m.BillDraftPage })));
@@ -199,6 +200,7 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
               <Route path="/organizations/:organizationId" element={<HomePage />} />
               <Route path="/organizations/:organizationId/chat/:chatId" element={<ChatPage />} />
               <Route path="/organizations/:organizationId/inbox" element={<InboxPage />} />
+              <Route path="/organizations/:organizationId/knowledge" element={<KnowledgePage />} />
               <Route path="/organizations/:organizationId/wallets" element={<WalletsPage session={session} />} />
               <Route path="/organizations/:organizationId/wallets/:treasuryWalletId" element={<TreasuryWalletDetailPage session={session} />} />
               <Route path="/organizations/:organizationId/vaults/:treasuryWalletId" element={<VaultDetailPage />} />

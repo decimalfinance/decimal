@@ -8,6 +8,7 @@ import { asyncRoute } from '../infra/route-helpers.js';
 import { getCompanionConsole, getCompanionJob } from './today.js';
 import { followUp, getChat, listChats, recordActionOutcome, startChat } from './chat.js';
 import { getInbox, markAllInboxSeen, markInboxSeen, nudgeAboutBill, tickAsk } from './inbox.js';
+import { getKnowledge, keepHabit } from './knowledge.js';
 
 export const companionRouter = Router();
 
@@ -105,4 +106,20 @@ companionRouter.post('/organizations/:organizationId/inbox/nudge', asyncRoute(as
   await assertOrganizationAccess(organizationId, req.auth!);
   const input = nudgeBody.parse(req.body);
   res.status(201).json(await nudgeAboutBill({ organizationId, fromUserId: req.auth!.userId, toUserId: input.toUserId, billId: input.billId, text: input.text, via: req.get('x-decimal-via') === 'companion' ? 'companion' : 'person' }));
+}));
+
+// What the companion knows. Anyone on the team may read it; keeping (and,
+// through the Vendors routes, changing or forgetting) is for admins.
+const habitParams = orgParams.extend({ ruleId: z.string().uuid() });
+
+companionRouter.get('/organizations/:organizationId/knowledge', asyncRoute(async (req, res) => {
+  const { organizationId } = orgParams.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  res.json(await getKnowledge(organizationId, req.auth!.userId));
+}));
+
+companionRouter.post('/organizations/:organizationId/knowledge/:ruleId/keep', asyncRoute(async (req, res) => {
+  const { organizationId, ruleId } = habitParams.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  res.json(await keepHabit(organizationId, req.auth!.userId, ruleId));
 }));

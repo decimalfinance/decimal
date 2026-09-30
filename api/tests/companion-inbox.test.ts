@@ -168,7 +168,7 @@ test('inbox: a companion ask becomes a nudge, a question, or "already has it" â€
   const nudgeTurn = await ask(w.orgId, w.owner.token, 'Ask Adam to check the tax line.');
   const nudge = nudgeTurn.answer.actions[0];
   assert.equal(nudge.kind, 'nudge');
-  assert.deepEqual(nudge.call, { path: '/inbox/nudge', body: { billId: w.bills.submitted, toUserId: w.apprA.userId, text: 'While you are approving, check the tax line.' } });
+  assert.deepEqual(nudge.call, { method: 'POST', path: '/inbox/nudge', body: { billId: w.bills.submitted, toUserId: w.apprA.userId, text: 'While you are approving, check the tax line.' } });
   assert.equal(itemFor(await inboxOf(w.orgId, w.apprA.token), w.bills.submitted)!.lines.length, 1, 'nothing sent before the click');
   await post(`/organizations/${w.orgId}${nudge.call.path}`, nudge.call.body, w.owner.token);
   const adam = itemFor(await inboxOf(w.orgId, w.apprA.token), w.bills.submitted)!;

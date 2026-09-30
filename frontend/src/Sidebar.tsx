@@ -240,6 +240,7 @@ export function AppSidebar({
             <div className="sb-group-label">Operations</div>
             <NavItem to={base} end icon={<Ico.sparkle w={16} />} label="Home" />
             <NavItem to={`${base}/inbox`} icon={<Ico.inbox w={16} />} label="Inbox" badge={inboxNew} />
+            <NavItem to={`${base}/knowledge`} icon={<Ico.book w={16} />} label="What I know" />
             {can('bills.view') ? <NavItem to={`${base}/bills`} icon={<Ico.doc w={16} />} label="Bills" badge={paymentsIncompleteCount} /> : null}
             <RecentChats organizationId={activeOrganization!.organizationId} base={base} />
 

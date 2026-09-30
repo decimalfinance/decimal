@@ -159,7 +159,7 @@ counterpartyWalletsRouter.delete('/organizations/:organizationId/counterparties/
   const { organizationId, counterpartyId } = counterpartyParamsSchema.parse(req.params);
   await assertOrganizationAdmin(organizationId, req.auth!);
   const { clearVendorCodingRule } = await import('../accounting/gl-coding.js');
-  await clearVendorCodingRule(organizationId, counterpartyId);
+  await clearVendorCodingRule(organizationId, counterpartyId, req.auth!.userId);
   sendJson(res, { ok: true });
 }));
 

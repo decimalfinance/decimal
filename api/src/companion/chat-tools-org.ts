@@ -206,22 +206,24 @@ export function orgTools(args: {
     },
     {
       name: 'what_i_know',
-      description: 'The category habits the companion has learned or been told, vendor by vendor: which category, learned from how many bills or set by a person, and when.',
+      description: 'The category habits the companion has learned or been told, vendor by vendor: which category, learned from how many bills and taught by whom (the people whose confirmed bills agreed), or set by a person; whether an admin has kept it yet; and habits it was told to forget.',
       parameters: { type: 'object', additionalProperties: false, properties: {} },
       run: async () => {
-        const rules = await prisma.vendorCodingRule.findMany({
-          where: { organizationId: args.organizationId },
-          orderBy: { updatedAt: 'desc' },
-          select: { accountName: true, accountId: true, source: true, learnedFromCount: true, updatedAt: true, counterparty: { select: { displayName: true } } },
-        });
-        await args.onThought({ text: 'Checked what I have learned', detail: `${plural(rules.length, 'category habit')}.` });
+        const { getKnowledge } = await import('./knowledge.js');
+        const k = await getKnowledge(args.organizationId, args.viewerUserId);
+        await args.onThought({ text: 'Checked what I have learned', detail: `${plural(k.habits.length, 'category habit')}${k.forgotten.length ? `, ${k.forgotten.length} forgotten` : ''}.` });
         return {
-          habits: rules.map((r) => ({
-            vendor: r.counterparty.displayName,
-            category: r.accountName ?? r.accountId,
-            how: r.source === 'learned' ? `learned from ${plural(r.learnedFromCount, 'bill')}` : 'set by a person',
-            since: localDay(r.updatedAt),
+          habits: k.habits.map((h) => ({
+            vendor: h.vendorName,
+            category: h.category,
+            how: h.source === 'learned'
+              ? `learned from ${plural(h.fromBills, 'bill')}${h.taughtBy.length ? ` ${h.taughtBy.join(', ')} coded that way` : ''}`
+              : `set by ${h.setBy ?? 'a person'}`,
+            keptByAnAdmin: h.acknowledged,
+            since: localDay(new Date(h.since)),
+            billsSince: h.billsSince,
           })),
+          forgotten: k.forgotten.map((f) => ({ vendor: f.vendorName, category: f.category, forgottenBy: f.by, on: localDay(new Date(f.at)) })),
         };
       },
     },

@@ -15,11 +15,12 @@ import { getMembersAndRoles } from '../approvals/roles.js';
 import { involvedBillIds } from '../payments/bill-visibility.js';
 import { classifyAsk } from './ask-classifier.js';
 import { getInbox } from './inbox.js';
+import { prisma } from '../infra/prisma.js';
 
 /** Cards in one answer: enough to tidy a batch, few enough to read. */
 const MAX_CARDS = 12;
 
-export const ACTION_KINDS = ['send_for_approval', 'close_duplicate', 'clear_duplicate', 'approve', 'ask_person'] as const;
+export const ACTION_KINDS = ['send_for_approval', 'close_duplicate', 'clear_duplicate', 'approve', 'ask_person', 'save_habit', 'forget_habit'] as const;
 export type ActionKind = (typeof ACTION_KINDS)[number];
 /**
  * What a card turns out to be. ask_person becomes a nudge (does not hold the
@@ -28,7 +29,7 @@ export type ActionKind = (typeof ACTION_KINDS)[number];
  */
 export type CardKind = Exclude<ActionKind, 'ask_person'> | 'nudge' | 'question' | 'already_asked';
 
-export type ProposedAction = { kind: ActionKind; billId: string; reason: string; toPerson?: string | null; message?: string | null };
+export type ProposedAction = { kind: ActionKind; billId: string; reason: string; toPerson?: string | null; message?: string | null; category?: string | null };
 
 export type ActionCard = {
   actionId: string;
@@ -40,7 +41,7 @@ export type ActionCard = {
   reason: string | null;
   button: string;
   /** The request the button sends, relative to /organizations/:orgId. Built here, never by the model. */
-  call: { path: string; body: Record<string, unknown> };
+  call: { path: string; body: Record<string, unknown>; method?: 'POST' | 'PUT' | 'DELETE' };
   /** info: nothing to click (already_asked). */
   status: 'proposed' | 'done' | 'failed' | 'info';
   result: string | null;
@@ -55,6 +56,8 @@ const COPY: Record<CardKind, { verb: string; button: string; done: string }> = {
   nudge: { verb: 'Nudge', button: 'Send nudge', done: 'Nudge sent' },
   question: { verb: 'Ask', button: 'Ask (holds the bill)', done: 'Question sent' },
   already_asked: { verb: 'Already asked', button: '', done: '' },
+  save_habit: { verb: 'Remember', button: 'Remember this', done: 'Remembered' },
+  forget_habit: { verb: 'Forget', button: 'Forget it', done: 'Forgotten' },
 };
 
 export function doneText(kind: CardKind): string {
@@ -103,6 +106,32 @@ export async function buildActionCards(args: {
     let status: ActionCard['status'] = 'proposed';
 
     switch (p.kind) {
+      case 'save_habit':
+      case 'forget_habit': {
+        // Habits are admins' to set and forget, as on the Vendors page.
+        if (!isAdmin) break;
+        const vendor = await prisma.paymentOrder.findUnique({ where: { paymentOrderId: row.paymentOrderId }, select: { counterpartyId: true } });
+        if (!vendor?.counterpartyId) break;
+        const current = await prisma.vendorCodingRule.findFirst({ where: { organizationId: args.organizationId, counterpartyId: vendor.counterpartyId } });
+        key = `${p.kind}:${vendor.counterpartyId}`;
+        if (once.has(key)) break;
+        if (p.kind === 'forget_habit') {
+          if (!current) break;
+          title = `Forget: ${row.vendorName} goes to ${current.accountName ?? current.accountId}`;
+          detail = 'New bills from this vendor stop being pre-filled; drafts nobody saved are re-coded; confirmed bills keep what was confirmed.';
+          call = { method: 'DELETE', path: `/counterparties/${vendor.counterpartyId}/coding-rule`, body: {} };
+        } else {
+          const account = await resolveCategory(args.organizationId, p.category ?? '');
+          if (!account) break;
+          if (current && (current.accountName === account.name || current.accountId === account.id)) break;
+          title = `Remember: ${row.vendorName} goes to ${account.name}`;
+          detail = current
+            ? `Replaces ${current.accountName ?? current.accountId}. New bills from this vendor are pre-filled with it.`
+            : 'New bills from this vendor are pre-filled with it.';
+          call = { method: 'PUT', path: `/counterparties/${vendor.counterpartyId}/coding-rule`, body: { accountId: account.id, accountName: account.name } };
+        }
+        break;
+      }
       case 'ask_person': {
         // Who, whether they can see the bill, and how it lands in their inbox.
         const message = (p.message ?? '').replace(/\s+/g, ' ').trim().slice(0, 500);
@@ -206,4 +235,19 @@ async function resolvePerson(organizationId: string, query: string): Promise<{ u
   const email = members.filter((m) => m.email.toLowerCase() === q || m.email.toLowerCase().split('@')[0] === q);
   if (email.length === 1) return { userId: email[0]!.userId, name: email[0]!.name };
   return null;
+}
+
+/** A category name, matched to the chart the picker offers (QuickBooks when connected, else the standard list). */
+async function resolveCategory(organizationId: string, name: string): Promise<{ id: string; name: string } | null> {
+  const q = name.trim().toLowerCase();
+  if (!q) return null;
+  const { listChartOfAccounts } = await import('../accounting/ocr-coding.js');
+  const { DEFAULT_EXPENSE_ACCOUNTS } = await import('../accounting/default-chart.js');
+  const chart = await listChartOfAccounts(organizationId).catch(() => []);
+  if (chart.length > 0) {
+    const a = chart.find((x) => (x.fullyQualifiedName ?? x.name).toLowerCase() === q || x.name.toLowerCase() === q);
+    return a ? { id: a.id, name: a.fullyQualifiedName ?? a.name } : null;
+  }
+  const a = DEFAULT_EXPENSE_ACCOUNTS.find((x) => x.name.toLowerCase() === q);
+  return a ? { id: a.id, name: a.name } : null;
 }

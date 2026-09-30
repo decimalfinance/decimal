@@ -278,7 +278,11 @@ export async function setVendorCodingRule(args: {
     accountName: args.accountName,
     source: 'manual',
     setByUserId: args.actorUserId,
+    // A person set it: nothing to announce, and any forget is lifted.
+    acknowledgedAt: new Date(),
+    acknowledgedByUserId: args.actorUserId,
   };
+  await prisma.forgottenHabit.deleteMany({ where: { organizationId: args.organizationId, counterpartyId: args.counterpartyId } });
   return prisma.vendorCodingRule.upsert({
     where: { organizationId_counterpartyId_provider: { organizationId: args.organizationId, counterpartyId: args.counterpartyId, provider: PROVIDER } },
     create: { organizationId: args.organizationId, counterpartyId: args.counterpartyId, provider: PROVIDER, ...data },
@@ -286,8 +290,24 @@ export async function setVendorCodingRule(args: {
   });
 }
 
-export async function clearVendorCodingRule(organizationId: string, counterpartyId: string) {
+/**
+ * Forget a vendor's habit. It stops at once: drafts nobody has saved are
+ * re-coded without it the next time they are read (the habit is applied
+ * live), and confirmed bills keep what was confirmed. The forget is
+ * remembered, so the same history cannot teach it straight back.
+ */
+export async function clearVendorCodingRule(organizationId: string, counterpartyId: string, actorUserId: string | null = null) {
+  const existing = await prisma.vendorCodingRule.findFirst({ where: { organizationId, counterpartyId, provider: PROVIDER } });
   await prisma.vendorCodingRule.deleteMany({ where: { organizationId, counterpartyId, provider: PROVIDER } });
+  // Only a LEARNED habit is remembered as forgotten. Removing a default a
+  // person set is different: it stops overriding the history, and learning
+  // from that history resumes.
+  if (existing?.source !== 'learned') return;
+  await prisma.forgottenHabit.upsert({
+    where: { organizationId_counterpartyId: { organizationId, counterpartyId } },
+    create: { organizationId, counterpartyId, accountName: existing?.accountName ?? null, forgottenByUserId: actorUserId },
+    update: { accountName: existing?.accountName ?? null, forgottenAt: new Date(), forgottenByUserId: actorUserId },
+  });
 }
 
 /**
@@ -297,9 +317,12 @@ export async function clearVendorCodingRule(organizationId: string, counterparty
  * Manual rules are a person's word and are left alone.
  */
 export async function maybePromoteVendorCodingRule(organizationId: string, counterpartyId: string) {
+  // After a forget, only bills confirmed since can teach the habit again —
+  // otherwise the next confirm would relearn it from the same history.
+  const forgotten = await prisma.forgottenHabit.findUnique({ where: { organizationId_counterpartyId: { organizationId, counterpartyId } } });
   const recent = await prisma.paymentOrderGlCoding.findMany({
-    where: { organizationId, provider: PROVIDER, paymentOrder: { counterpartyId } },
-    select: { codedExpenseAccountId: true, codedExpenseAccountName: true },
+    where: { organizationId, provider: PROVIDER, paymentOrder: { counterpartyId }, ...(forgotten ? { updatedAt: { gt: forgotten.forgottenAt } } : {}) },
+    select: { codedExpenseAccountId: true, codedExpenseAccountName: true, acceptedByUserId: true },
     orderBy: { updatedAt: 'desc' },
     take: PROMOTE_WINDOW,
   });
@@ -310,8 +333,14 @@ export async function maybePromoteVendorCodingRule(organizationId: string, count
 
   const existing = await getVendorCodingRule(organizationId, counterpartyId);
   if (existing?.source === 'manual') return existing;
-  const agreeing = recent.filter((c) => c.codedExpenseAccountId === account.codedExpenseAccountId).length;
-  return prisma.vendorCodingRule.upsert({
+  const agreeingRows = recent.filter((c) => c.codedExpenseAccountId === account.codedExpenseAccountId);
+  const agreeing = agreeingRows.length;
+  // Who taught it: the people whose confirmed bills agree.
+  const taughtBy = [...new Set(agreeingRows.map((c) => c.acceptedByUserId).filter((id): id is string => Boolean(id)))];
+  // A new habit, or one that changed, is announced again; the same habit
+  // growing more certain is not news.
+  const changed = !existing || existing.accountId !== account.codedExpenseAccountId;
+  const rule = await prisma.vendorCodingRule.upsert({
     where: { organizationId_counterpartyId_provider: { organizationId, counterpartyId, provider: PROVIDER } },
     create: {
       organizationId, counterpartyId, provider: PROVIDER,
@@ -319,6 +348,7 @@ export async function maybePromoteVendorCodingRule(organizationId: string, count
       accountName: account.codedExpenseAccountName,
       source: 'learned',
       learnedFromCount: agreeing,
+      taughtBy,
     },
     update: {
       accountId: account.codedExpenseAccountId,
@@ -326,8 +356,19 @@ export async function maybePromoteVendorCodingRule(organizationId: string, count
       source: 'learned',
       learnedFromCount: agreeing,
       setByUserId: null,
+      taughtBy,
+      ...(changed ? { acknowledgedAt: null, acknowledgedByUserId: null } : {}),
     },
   });
+  if (forgotten) await prisma.forgottenHabit.deleteMany({ where: { organizationId, counterpartyId } });
+  return rule;
+}
+
+/** An admin keeps a habit the companion announced: it stops being news. */
+export async function acknowledgeHabit(organizationId: string, vendorCodingRuleId: string, actorUserId: string) {
+  const rule = await prisma.vendorCodingRule.findFirst({ where: { organizationId, vendorCodingRuleId } });
+  if (!rule) return null;
+  return prisma.vendorCodingRule.update({ where: { vendorCodingRuleId }, data: { acknowledgedAt: new Date(), acknowledgedByUserId: actorUserId } });
 }
 
 export interface GlCandidate {

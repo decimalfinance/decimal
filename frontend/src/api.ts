@@ -1986,9 +1986,10 @@ export const companionApi = {
   },
   /** Carry out a card: its own request, sent as the person clicking. */
   runAction(organizationId: string, card: CompanionActionCard) {
+    const method = card.call.method ?? 'POST';
     return request<unknown>(`/organizations/${organizationId}${card.call.path}`, {
-      method: 'POST',
-      body: JSON.stringify(card.call.body),
+      method,
+      ...(method === 'DELETE' ? {} : { body: JSON.stringify(card.call.body) }),
     });
   },
   recordOutcome(organizationId: string, chatId: string, actionId: string, outcome: { ok: boolean; message?: string | null }) {
@@ -2010,19 +2011,19 @@ export interface CompanionChatSummary { chatId: string; title: string; updatedAt
 /** An action the companion proposes. The request is built by the server; the person's click sends it. */
 export interface CompanionActionCard {
   actionId: string;
-  kind: 'send_for_approval' | 'close_duplicate' | 'clear_duplicate' | 'approve' | 'nudge' | 'question' | 'already_asked';
+  kind: 'send_for_approval' | 'close_duplicate' | 'clear_duplicate' | 'approve' | 'nudge' | 'question' | 'already_asked' | 'save_habit' | 'forget_habit';
   billId: string;
   title: string;
   detail: string;
   reason: string | null;
   button: string;
-  call: { path: string; body: Record<string, unknown> };
+  call: { path: string; body: Record<string, unknown>; method?: 'POST' | 'PUT' | 'DELETE' };
   /** info: nothing to click — e.g. the person already has it in their inbox. */
   status: 'proposed' | 'done' | 'failed' | 'info';
   result: string | null;
 }
 
-export type InboxLineKind = 'approval' | 'question' | 'review' | 'sign_off' | 'sent_back' | 'unreadable' | 'ask' | 'sync_failed';
+export type InboxLineKind = 'approval' | 'question' | 'review' | 'sign_off' | 'sent_back' | 'unreadable' | 'ask' | 'sync_failed' | 'learned';
 
 /** One bill in a person's inbox, with everything wanted of them on it. */
 export interface InboxItem {
@@ -2035,10 +2036,39 @@ export interface InboxItem {
   status: string | null;
   dueAt: string | null;
   href: 'draft' | 'bill' | null;
+  /** A habit the companion learned, for an admin to keep or forget. */
+  habit?: { ruleId: string; counterpartyId: string } | null;
   lines: Array<{ kind: InboxLineKind; text: string; at: string; from?: string | null; askId?: string }>;
   latestAt: string;
   isNew: boolean;
 }
+
+/** A category habit, and who taught it. */
+export interface Habit {
+  ruleId: string;
+  counterpartyId: string;
+  vendorName: string;
+  category: string;
+  source: 'learned' | 'manual';
+  fromBills: number;
+  taughtBy: string[];
+  setBy: string | null;
+  since: string;
+  billsSince: number;
+  acknowledged: boolean;
+}
+
+export const knowledgeApi = {
+  get(organizationId: string) {
+    return request<{ canManage: boolean; habits: Habit[]; forgotten: Array<{ counterpartyId: string; vendorName: string; category: string | null; at: string; by: string | null }> }>(`/organizations/${organizationId}/knowledge`);
+  },
+  keep(organizationId: string, ruleId: string) {
+    return request<{ ok: true }>(`/organizations/${organizationId}/knowledge/${ruleId}/keep`, { method: 'POST', body: '{}' });
+  },
+  forget(organizationId: string, counterpartyId: string) {
+    return request<{ ok: boolean }>(`/organizations/${organizationId}/counterparties/${counterpartyId}/coding-rule`, { method: 'DELETE' });
+  },
+};
 
 export const inboxApi = {
   get(organizationId: string) {

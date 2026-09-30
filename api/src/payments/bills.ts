@@ -1850,9 +1850,15 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     quantity: num(line.quantity),
     unitPrice: num(line.unitPrice),
     amount: num(line.total),
-    // The model's own reading of this line first; the document hint and the
-    // bill-level guess are the fallbacks they always were.
-    category: resolveModelLine(i) ?? resolveLineCategory(str(line.categoryHint)),
+    // With a vendor habit, the habit decides — unless the document itself
+    // labels this line (resolveLineCategory: a recognised hint wins, else the
+    // habit). A habit is what the team confirmed, bill after bill; the model's
+    // guess about a line is exactly what they kept correcting, and letting it
+    // win meant a learned habit never showed on a new bill. Without a habit,
+    // the model's own reading of the line comes first, as before.
+    category: ruleSuggestion
+      ? resolveLineCategory(str(line.categoryHint))
+      : resolveModelLine(i) ?? resolveLineCategory(str(line.categoryHint)),
     source: lineSource(line),
   }));
   const lines = verifiedLines ?? proposedLines;
