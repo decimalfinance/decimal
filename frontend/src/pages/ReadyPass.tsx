@@ -16,10 +16,16 @@ import { companionApi } from '../api';
 import { Ico } from '../dec/icons';
 import { useToast } from '../ui/Toast';
 
+// Always asked again when a page with the pass opens. The count is a promise
+// ("2 ready") and a stale one sends you into a pass that is already done —
+// bills leave it from many places (the pass, Confirm, closing, another
+// person), and going Back shows the page from cache.
 const useReadyBills = (organizationId: string) => useQuery({
   queryKey: ['ready-bills', organizationId],
   queryFn: () => companionApi.ready(organizationId),
   enabled: Boolean(organizationId),
+  staleTime: 0,
+  refetchOnMount: 'always',
 });
 
 const passUrl = (organizationId: string, billId: string, skipped: string[]) =>

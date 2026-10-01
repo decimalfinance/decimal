@@ -133,6 +133,12 @@ export function BillDraftPage() {
       onDone={() => {
         void queryClient.invalidateQueries({ queryKey: ['bills-workbench', organizationId] });
         void queryClient.invalidateQueries({ queryKey: ['bill-billDraft', organizationId, paymentOrderId] });
+        // A sent or closed bill leaves the quick pass, the inbox and home too;
+        // without these, going back to Bills showed the old "2 ready".
+        void queryClient.invalidateQueries({ queryKey: ['ready-bills', organizationId] });
+        void queryClient.invalidateQueries({ queryKey: ['inbox', organizationId] });
+        void queryClient.invalidateQueries({ queryKey: ['companion-console', organizationId] });
+        void queryClient.invalidateQueries({ queryKey: ['bill-companion', organizationId] });
         // Stay on the bill you just sent.
         //
         // This used to jump to the next unprepared bill, on the theory that a
