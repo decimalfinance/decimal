@@ -1764,7 +1764,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     if (stale && (categoryHint || lineDescriptions.length > 0)) {
       try {
         const { suggestOcrCodings } = await import('../accounting/ocr-coding.js');
-        const [fresh] = await suggestOcrCodings(organizationId, [{ categoryHint, lineItems: lineDescriptions }]);
+        const [fresh] = await suggestOcrCodings(organizationId, [{ categoryHint, lineItems: lineDescriptions }], { excludeBillId: order.paymentOrderId });
         if (fresh) ocrCoding = fresh as unknown as Record<string, unknown>;
         // Always leave a `lines` key behind, even when the model was
         // unavailable and there is nothing to put in it. Without one the
@@ -1855,7 +1855,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   // as a whole. Resolved against the picker's vocabulary like everything else,
   // because an account the picker cannot offer is not a suggestion.
   const modelLines = ocrCoding && Array.isArray(ocrCoding.lines)
-    ? (ocrCoding.lines as Array<{ index?: unknown; accountName?: unknown }>)
+    ? (ocrCoding.lines as Array<{ index?: unknown; accountName?: unknown; like?: unknown }>)
     : [];
   const resolveModelLine = (index: number): string | null => {
     const hit = modelLines.find((l) => Number(l.index) === index);
@@ -1899,6 +1899,15 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       precedentNames.set(u.userId, u.displayName?.trim() || u.email);
     }
   }
+  // The model followed a past line the team settled (similar, not the same):
+  // say which, as for an exact match, so a person can see what it leaned on.
+  const similarFrom = (index: number) => {
+    const like = str(modelLines.find((l) => Number(l.index) === index)?.like);
+    const p = like ? precedents.find((x) => x.description === like) : null;
+    return p
+      ? { kind: 'similar' as const, like: p.description, invoiceNumber: p.invoiceNumber, paymentOrderId: p.paymentOrderId, by: p.byUserId ? precedentNames.get(p.byUserId) ?? null : null }
+      : null;
+  };
   const proposedLines = extractedLines.filter(isRecord).map((line, i) => {
     const description = str(line.description) ?? '';
     const memory = matchLine(description, precedents);
@@ -1913,7 +1922,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       // Why this line has the category it has, so the screen can say so.
       categoryFrom: remembered && memory
         ? { kind: 'memory' as const, like: memory.like, invoiceNumber: memory.invoiceNumber, paymentOrderId: memory.paymentOrderId, by: memory.byUserId ? precedentNames.get(memory.byUserId) ?? null : null }
-        : modelGuess ? { kind: 'model' as const } : ruleSuggestion ? { kind: 'vendor' as const } : { kind: 'model' as const },
+        : modelGuess ? similarFrom(i) ?? { kind: 'model' as const } : ruleSuggestion ? { kind: 'vendor' as const } : { kind: 'model' as const },
       source: lineSource(line),
     };
   });

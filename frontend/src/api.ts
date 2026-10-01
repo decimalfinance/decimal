@@ -1203,7 +1203,7 @@ export interface BillDraftLine {
   amount: number | null;
   category: string | null;
   /** Why this line has its category (unsaved drafts only): a line the team settled before, the model's reading, or the vendor default. */
-  categoryFrom?: { kind: 'memory'; like: string; invoiceNumber: string | null; paymentOrderId: string; by: string | null } | { kind: 'model' } | { kind: 'vendor' };
+  categoryFrom?: { kind: 'memory' | 'similar'; like: string; invoiceNumber: string | null; paymentOrderId: string; by: string | null } | { kind: 'model' } | { kind: 'vendor' };
   source?: DocSource;
 }
 

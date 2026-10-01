@@ -44,6 +44,8 @@ export type OcrLineCoding = {
   accountName: string;
   weight: number;
   why: string | null;
+  /** The past line the team settled that the model judged the same kind of purchase, exactly as it was shown. */
+  like?: string | null;
 };
 
 export type OcrCoding = {
@@ -99,6 +101,8 @@ export async function matchExpenseAccounts(args: {
   categoryHint: string | null;
   lineItems: { description: string }[];
   accounts: ExpenseAccount[];
+  /** How the team coded similar lines before (line-memory.ts relevantPrecedents). */
+  precedents?: Array<{ description: string; category: string }>;
 }): Promise<{ rationale: string | null; suggestions: OcrSuggestion[]; lines: OcrLineCoding[] }> {
   const empty = { rationale: null, suggestions: [] as OcrSuggestion[], lines: [] as OcrLineCoding[] };
   if (!config.openAiApiKey || args.accounts.length === 0) return empty;
@@ -122,6 +126,13 @@ export async function matchExpenseAccounts(args: {
   const accountList = args.accounts
     .map((a) => (a.description ? `- ${a.name} — ${a.description}` : `- ${a.name}`))
     .join('\n');
+  // The team's own decisions about similar lines. Only ones whose category is
+  // on this list: a precedent the model could not answer with is noise.
+  const accountNames = new Set(args.accounts.map((a) => a.name.toLowerCase()));
+  const precedents = (args.precedents ?? []).filter((p) => accountNames.has(p.category.toLowerCase()));
+  const precedentBlock = precedents.length === 0 ? '' :
+    `\nHow this team coded similar lines before (each one a person's decision):\n` +
+    precedents.map((p) => `  - ${JSON.stringify(p.description)} → ${p.category}`).join('\n') + '\n';
   // Both questions in one call: what the invoice is for, and what each line is
   // for. They are genuinely different — an ocean-freight invoice can carry a
   // legal review and contract labour — and asking only the first meant every
@@ -131,11 +142,16 @@ export async function matchExpenseAccounts(args: {
     `Code a vendor invoice to general-ledger expense accounts.\n\n` +
     `Purchase: ${hint ?? items[0]}\n` +
     (items.length ? `Lines:\n${items.map((d, i) => `  ${i}. ${d}`).join('\n')}\n` : '') +
-    `\nExpense accounts (name — description):\n${accountList}\n\n` +
-    `Return JSON only:\n` +
+    `\nExpense accounts (name — description):\n${accountList}\n` +
+    precedentBlock +
+    `\nReturn JSON only:\n` +
     `{ "rationale": "one short sentence on why",\n` +
     `  "suggestions": [ { "account": "<exact name from the list>", "weight": <0.0-1.0> } ],\n` +
-    `  "lines": [ { "index": <line number>, "account": "<exact name from the list>", "weight": <0.0-1.0>, "why": "<a few words>" } ] }\n` +
+    `  "lines": [ { "index": <line number>, "account": "<exact name from the list>", "weight": <0.0-1.0>, "why": "<a few words>"${precedents.length ? ', "like": "<a past line quoted exactly, or null>"' : ''} } ] }\n` +
+    (precedents.length
+      ? `- When a line is the same kind of purchase as one of the team's past lines, use the account the team chose for it, even when the wording differs, and set "like" to that past line exactly as quoted above. The team's choices outrank your own reading of the account descriptions: they are how this company keeps its books.\n` +
+        `- Do not stretch a past line to a different kind of purchase just because words overlap. If no past line is the same kind of purchase, decide from the account descriptions and set "like" to null.\n`
+      : '') +
     `- suggestions: 1-3 accounts for the invoice as a whole, most likely first.\n` +
     `- lines: one entry per line above, in order. Judge each line ON ITS OWN.\n` +
     `- Lines on one invoice often belong to DIFFERENT accounts. Do not assume they match each other or the invoice as a whole.\n` +
@@ -185,7 +201,7 @@ export async function matchExpenseAccounts(args: {
     const raw = JSON.parse(body.choices?.[0]?.message?.content ?? '{}') as {
       rationale?: unknown;
       suggestions?: Array<{ account?: unknown; weight?: unknown }>;
-      lines?: Array<{ index?: unknown; account?: unknown; weight?: unknown; why?: unknown }>;
+      lines?: Array<{ index?: unknown; account?: unknown; weight?: unknown; why?: unknown; like?: unknown }>;
     };
     const byName = new Map<string, ExpenseAccount>();
     for (const a of args.accounts) byName.set(a.name.toLowerCase(), a);
@@ -214,6 +230,9 @@ export async function matchExpenseAccounts(args: {
         accountName: acct.name,
         weight: Math.max(0, Math.min(1, Number(l.weight) || 0)),
         why: typeof l.why === 'string' ? l.why.slice(0, 120) : null,
+        // Only a past line it was actually shown: a quoted line that is not on
+        // the list is an invented precedent.
+        like: typeof l.like === 'string' && precedents.some((p) => p.description === l.like) ? l.like : null,
       });
     }
     lines.sort((a, b) => a.index - b.index);
@@ -236,6 +255,7 @@ export async function matchExpenseAccounts(args: {
 export async function suggestOcrCodings(
   organizationId: string,
   items: Array<{ categoryHint: string | null; lineItems: { description: string }[] }>,
+  opts: { excludeBillId?: string } = {},
 ): Promise<Array<OcrCoding | null>> {
   const hasAnySignal = items.some((i) => i.categoryHint?.trim() || i.lineItems.length > 0);
   const qboAccounts = hasAnySignal ? await listExpenseAccounts(organizationId) : [];
@@ -243,12 +263,20 @@ export async function suggestOcrCodings(
   // coding works from day one (the real chart takes over once connected).
   const { DEFAULT_EXPENSE_ACCOUNTS } = await import('./default-chart.js');
   const accounts = qboAccounts.length > 0 ? qboAccounts : (hasAnySignal ? DEFAULT_EXPENSE_ACCOUNTS : []);
+  // What the team settled before, so the model can follow it on similar lines.
+  const { loadPrecedents, relevantPrecedents } = await import('./line-memory.js');
+  const memory = hasAnySignal ? await loadPrecedents(organizationId, opts).catch(() => []) : [];
   return Promise.all(
     items.map(async (item): Promise<OcrCoding | null> => {
       const categoryHint = item.categoryHint?.trim() || null;
       if (!categoryHint && item.lineItems.length === 0) return null;
       const { rationale, suggestions, lines } = accounts.length
-        ? await matchExpenseAccounts({ categoryHint, lineItems: item.lineItems, accounts })
+        ? await matchExpenseAccounts({
+          categoryHint,
+          lineItems: item.lineItems,
+          accounts,
+          precedents: relevantPrecedents(item.lineItems.map((l) => l.description), memory),
+        })
         : { rationale: null, suggestions: [], lines: [] };
       return { categoryHint, rationale, suggestions, lines };
     }),

@@ -94,7 +94,7 @@ export function BillCompanion({ organizationId, billId, lines, flags, flagHeadli
   const n = note.data;
   if (!n) return null;
   // Lines whose category comes from one the team settled before.
-  const remembered = lines.flatMap((l) => (l.categoryFrom?.kind === 'memory' && l.category
+  const remembered = lines.flatMap((l) => ((l.categoryFrom?.kind === 'memory' || l.categoryFrom?.kind === 'similar') && l.category
     ? [{ description: l.description, category: l.category, from: l.categoryFrom }]
     : []));
   // Links to the bill already on screen ("Open the bill", its card) go nowhere.
@@ -159,7 +159,12 @@ export function BillCompanion({ organizationId, billId, lines, flags, flagHeadli
                         <Ico.checkSm w={14} />
                         <span>
                           {l.description}: <strong>{l.category}</strong>
-                          <span className="bn-detail"> · like {l.from.invoiceNumber ?? 'an earlier bill'}{l.from.by ? `, settled by ${l.from.by}` : ''}</span>
+                          <span className="bn-detail">
+                            {l.from.kind === 'similar'
+                              ? ` · similar to "${l.from.like}" on ${l.from.invoiceNumber ?? 'an earlier bill'}`
+                              : ` · like ${l.from.invoiceNumber ?? 'an earlier bill'}`}
+                            {l.from.by ? `, settled by ${l.from.by}` : ''}
+                          </span>
                         </span>
                       </div>
                     ))}

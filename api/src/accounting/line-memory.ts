@@ -136,3 +136,35 @@ export function matchLine(description: string, precedents: Precedent[]): LineMat
     score: Math.round(best.score * 100) / 100,
   };
 }
+
+/**
+ * The precedents worth showing the model for a new bill's lines: one per kind
+ * of line (the decision in force). Those sharing words with a new line come
+ * first (most shared, then newest); the rest of the room goes to the newest
+ * others, because "Typeface licence" and "Font license" share no word and are
+ * the same purchase — word overlap finds candidates, the model judges them. These are for lines that
+ * are SIMILAR but not the same — the model judges whether a "Font license —
+ * web use" is the same kind of purchase as a "Font license — campaign use";
+ * lines that read the same are matched in code (matchLine) and never asked.
+ */
+export function relevantPrecedents(lines: string[], precedents: Precedent[], max = 25): Array<{ description: string; category: string }> {
+  const wanted = lines.map(lineTokens).filter((t) => t.size > 0);
+  if (wanted.length === 0) return [];
+  const seen = new Set<string>();
+  const scored: Array<{ p: Precedent; shared: number }> = [];
+  for (const p of precedents) {             // newest first
+    if (seen.has(p.key)) continue;
+    seen.add(p.key);
+    let shared = 0;
+    for (const t of wanted) {
+      let n = 0;
+      for (const w of p.tokens) if (t.has(w)) n += 1;
+      shared = Math.max(shared, n);
+    }
+    scored.push({ p, shared });
+  }
+  return scored
+    .sort((a, b) => b.shared - a.shared || b.p.at - a.p.at)
+    .slice(0, max)
+    .map(({ p }) => ({ description: p.description, category: p.category }));
+}
