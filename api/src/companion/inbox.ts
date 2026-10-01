@@ -112,9 +112,12 @@ export async function getInbox(organizationId: string, viewerUserId: string, opt
       key: billId,
       billId,
       jobId: row?.invoiceDocumentId ?? null,
-      vendorName: row?.vendorName ?? fallback!.vendor,
-      invoiceNumber: row?.invoiceNumber ?? fallback!.invoice,
-      amountUsd: row?.amountUsd ?? fallback!.amountUsd,
+      // The bill's own row when there is one, even where it is empty: a
+      // statement has no invoice number, and falling back to a fallback that
+      // was never given crashed the inbox (and every bill note) for it.
+      vendorName: row ? row.vendorName : fallback!.vendor,
+      invoiceNumber: row ? row.invoiceNumber : fallback!.invoice,
+      amountUsd: row ? row.amountUsd : fallback!.amountUsd,
       status: row?.subStatus.text ?? null,
       dueAt: row?.dueAt ? row.dueAt.toISOString() : null,
       href: row?.state === 'draft' ? 'draft' : 'bill',

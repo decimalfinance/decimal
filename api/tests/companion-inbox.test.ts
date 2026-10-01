@@ -221,3 +221,13 @@ test('inbox: mark all as read clears every "new", and each item says where its b
   assert.equal((await inboxOf(w.orgId, w.clerk.token)).newCount, 0);
   assert.ok((await inboxOf(w.orgId, w.owner.token)).newCount > 0, 'only the clerk\'s, not everyone\'s');
 });
+
+test('inbox: a bill with no invoice number (a statement) does not break the inbox or its bill note', async () => {
+  const w = await makeWorld();
+  await prisma.paymentOrder.update({ where: { paymentOrderId: w.bills.lonely }, data: { invoiceNumber: null } });
+  const box = await inboxOf(w.orgId, w.clerk.token);
+  const item = box.items.find((i) => i.billId === w.bills.lonely)!;
+  assert.equal(item.invoiceNumber, null);
+  assert.equal(item.vendorName, 'Lonely Ltd');
+  assert.ok((await get(`/organizations/${w.orgId}/bills/${w.bills.lonely}/companion`, w.clerk.token)).did);
+});
