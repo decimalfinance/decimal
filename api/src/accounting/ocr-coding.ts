@@ -149,8 +149,11 @@ export async function matchExpenseAccounts(args: {
     `  "suggestions": [ { "account": "<exact name from the list>", "weight": <0.0-1.0> } ],\n` +
     `  "lines": [ { "index": <line number>, "account": "<exact name from the list>", "weight": <0.0-1.0>, "why": "<a few words>"${precedents.length ? ', "like": "<a past line quoted exactly, or null>"' : ''} } ] }\n` +
     (precedents.length
-      ? `- When a line is the same kind of purchase as one of the team's past lines, use the account the team chose for it, even when the wording differs, and set "like" to that past line exactly as quoted above. The team's choices outrank your own reading of the account descriptions: they are how this company keeps its books.\n` +
-        `- Do not stretch a past line to a different kind of purchase just because words overlap. If no past line is the same kind of purchase, decide from the account descriptions and set "like" to null.\n`
+      ? `- A past line applies when the new line is the SAME PURCHASE: the same kind of thing, bought the same way. Then use the account the team chose, even when the wording differs, and set "like" to that past line exactly as quoted above. For the same purchase, the team's choice outranks your reading of the account descriptions.\n` +
+        `- What it is for does not change the purchase: a different project, use, month, quantity, size or brand is still the same purchase ("Font license — web use", "Font license — campaign use" and "Typeface licence for packaging" are all the same purchase: a font licence).\n` +
+        `- Shared words are not enough. Check what is bought and how it is bought: a subscription is not a licence, even for the same kind of content; a service is not the product it is about (photographing an event is not a photo licence); a rental is not a purchase; hardware is not software. If the new line differs in any of these, the past line does not apply: decide from the account descriptions and set "like" to null.\n` +
+        `- When you are not sure it is the same purchase, do not follow the past line.\n` +
+        `- Whenever you use a past line's account because of that line, "like" must quote it: the person checking the bill is shown which past line you followed.\n`
       : '') +
     `- suggestions: 1-3 accounts for the invoice as a whole, most likely first.\n` +
     `- lines: one entry per line above, in order. Judge each line ON ITS OWN.\n` +

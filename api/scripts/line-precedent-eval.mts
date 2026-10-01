@@ -24,15 +24,28 @@ const team = [
   { description: 'AWS EC2 compute — August', category: 'Cloud hosting & infrastructure' },
   { description: 'Night cleaning crew', category: 'Contractors' },
 ];
-const cases: Array<{ line: string; expect: 'follow' | 'own'; team?: string }> = [
+// "own" lines may carry the account they must land on: a subscription that
+// shares words with a licence the team settled goes to subscriptions (Zaid,
+// 2026-10-02: "Stock photo subscription, annual" was pulled to Taxes &
+// licenses by "Stock photography licenses" — this case used to say "follow").
+// "either": the account is what matters; whether it counts as the same
+// purchase is a judgement (an RDS database is not EC2 compute, but both are
+// cloud hosting).
+const cases: Array<{ line: string; expect: 'follow' | 'own' | 'either'; team?: string; account?: string }> = [
   { line: 'Font license — web use', expect: 'follow', team: 'Taxes & licenses' },
   { line: 'Typeface licence for packaging', expect: 'follow', team: 'Taxes & licenses' },
-  { line: 'Stock photo subscription, annual', expect: 'follow', team: 'Taxes & licenses' },
-  { line: 'AWS RDS database — September', expect: 'follow', team: 'Cloud hosting & infrastructure' },
+  { line: 'Extended license, stock image #4471', expect: 'follow', team: 'Taxes & licenses' },
+  { line: 'AWS RDS database — September', expect: 'either', account: 'Cloud hosting & infrastructure' },
+  { line: 'Stock photo subscription, annual', expect: 'own', account: 'Dues & subscriptions' },
+  { line: 'Adobe Fonts subscription — monthly', expect: 'own', account: 'Dues & subscriptions' },
   { line: 'Photography for product launch event', expect: 'own' },
   { line: 'Business class flight to Austin', expect: 'own' },
   { line: 'Office chairs (4)', expect: 'own' },
   { line: 'Stock market data feed — monthly', expect: 'own' },
+  // Held out: worded unlike any example in the prompt.
+  { line: 'Licensed stock footage clip (30s)', expect: 'follow', team: 'Taxes & licenses' },
+  { line: 'Display typeface — desktop licence (5 seats)', expect: 'follow', team: 'Taxes & licenses' },
+  { line: 'Getty Images annual subscription', expect: 'own', account: 'Dues & subscriptions' },
 ];
 
 const memory = team.map((t, i) => ({ ...t, key: [...lineTokens(t.description)].sort().join(' '), tokens: lineTokens(t.description), paymentOrderId: `p${i}`, invoiceNumber: null, byUserId: null, at: 100 - i, confirmed: true }));
@@ -46,7 +59,9 @@ for (const c of cases) {
   const got = withTeam.lines[0];
   const ok = c.expect === 'follow'
     ? got?.accountName === c.team && Boolean(got?.like)
-    : !got?.like;
+    : c.expect === 'either'
+      ? got?.accountName === c.account
+      : !got?.like && (!c.account || got?.accountName === c.account);
   if (ok) pass += 1;
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${c.line}`);
   console.log(`      shown ${precedents.length} past line(s); with team: ${got?.accountName ?? '—'}${got?.like ? ` (like "${got.like}")` : ''}; alone: ${alone.lines[0]?.accountName ?? '—'}`);
