@@ -1196,6 +1196,14 @@ export interface AskCandidate {
 
 export interface CategoryOption { value: string; label: string; num?: string | null; group: string }
 
+/** The exception agent's finding for a flag about one bill. A person still decides. */
+export interface FlagFinding {
+  status: 'ready' | 'running';
+  headline: string;
+  points: Array<{ text: string; tone: 'ok' | 'warn' | 'bad'; billId?: string | null; billState?: string | null }>;
+  recommended: { action: string; reason: string } | null;
+}
+
 export interface BillDraftLine {
   description: string;
   quantity: number | null;
@@ -1304,6 +1312,8 @@ export interface BillDraft {
     }>;
     /** The exception agent's investigation of this flag, when it has one. */
     brief?: ExceptionBrief;
+    /** What the exception agent found about a flag on this bill alone (statement, credit note, figures, bill-to name). */
+    finding?: FlagFinding;
   }>;
   verification: { confirmedAt: string | null; confirmedByUserId: string | null; noteForApprovers: string | null } | null;
 }

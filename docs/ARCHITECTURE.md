@@ -113,6 +113,12 @@ Frontend: `pages/Bills.tsx` (list), `pages/BillDraft.tsx` (review and coding, wi
 
 Frontend: the brief renders on its flag in `BillDraft.tsx`. The recommended resolution is the primary button with its reason prefilled, and a "Why" fold links each piece of evidence to where it was read. Evaluate with `api/scripts/exception-eval.mts` on the bench.
 
+Flags about ONE bill get a finding instead (`exceptions/findings.ts`), worked out on every draft read and attached as `flag.finding` { headline, points, recommended { action, reason } }. The screen shows it in the flag's box (inside the companion note) with the recommended resolution as the primary button and its reason prefilled; a person still clicks.
+- **looks_like_statement**: the statement's own rows joined to our bills (`document-reconcile.ts`): what is open and not in Decimal (chase it), what the vendor marks paid that we never saw. Without rows, its listed invoice numbers looked up instead.
+- **looks_like_credit_note**: the bill it credits — one of the vendor's real invoice numbers found in its text — or the vendor's open bills big enough to take it.
+- **lines_do_not_sum / total_does_not_reconcile**: arithmetic: a line whose quantity × price disagrees (misread), a gap equal to one line (missed or read twice) or to the tax, or the document disagreeing with itself (ask the vendor).
+- **addressed_elsewhere**: one model call — is the bill-to name us? — made in the background on first read and remembered on the bill (`metadata.addressedCheck`) for that name; same → This is us, different → Not ours, unsure → Ask. `setAddressedCheckForTests` replaces it in tests.
+
 ## Companion (Live)
 
 `api/src/companion/`. The companion does the work before a person looks and shows it happening. The landing page is its console.

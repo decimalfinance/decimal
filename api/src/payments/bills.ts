@@ -2021,6 +2021,51 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     documentType: documentTypeSignals(extracted, order.invoiceNumber),
   });
 
+  // The exception agent's findings for flags about this bill alone
+  // (exceptions/findings.ts): worked out in code on every read, except whether
+  // the bill-to name is us, which is a model call made once in the background
+  // and remembered on the bill. Best-effort: a failure leaves the flag as it was.
+  const findings = new Map<string, unknown>();
+  try {
+    const F = await import('../exceptions/findings.js');
+    const vendorName = order.counterparty?.displayName ?? order.counterpartyWallet.label;
+    const amounts = documentAmounts(extracted, verification);
+    const docType = documentTypeSignals(extracted, order.invoiceNumber);
+    const findingLines = (lines as Array<Record<string, unknown>>).map((l) => ({
+      description: str(l.description) ?? '', quantity: num(l.quantity), unitPrice: num(l.unitPrice), amount: num(l.amount),
+    }));
+    for (const f of flags) {
+      if (f.kind === 'looks_like_statement') {
+        findings.set(f.kind, await F.statementFinding({
+          organizationId, billId: order.paymentOrderId, counterpartyId: order.counterpartyId, vendorName, refs: docType.lineInvoiceRefs,
+          rows: reconciliation?.rows ?? null,
+        }));
+      } else if (f.kind === 'looks_like_credit_note') {
+        findings.set(f.kind, await F.creditNoteFinding({
+          organizationId, billId: order.paymentOrderId, counterpartyId: order.counterpartyId, vendorName,
+          invoiceNumber: order.invoiceNumber,
+          credit: amounts.total ?? Number(order.amountRaw) / 1_000_000,
+          texts: [...findingLines.map((l) => l.description), str(extracted.notes), str(extracted.poNumber), str(extracted.reference)].filter((t): t is string => Boolean(t)),
+        }));
+      } else if (f.kind === 'lines_do_not_sum' || f.kind === 'total_does_not_reconcile') {
+        const finding = F.arithmeticFinding({ kind: f.kind, vendorName, lines: findingLines, subtotal: amounts.subtotal, tax: amounts.tax, total: amounts.total });
+        if (finding) findings.set(f.kind, finding);
+      } else if (f.kind === 'addressed_elsewhere') {
+        const billToName = str(extracted.billToName);
+        if (billToName) {
+          const ours = [displayOrgName(flagOrg.organizationName), ...readTradingNames(flagOrg.tradingNames)];
+          const cached = isRecord(metadata.addressedCheck) ? metadata.addressedCheck as unknown as import('../exceptions/findings.js').AddressedVerdict : null;
+          if ((!cached || cached.billToName !== billToName) && !opts.readOnly) {
+            F.startAddressedCheck({ organizationId, billId: order.paymentOrderId, billToName, billToAddress: str(extracted.billToAddress), ours });
+          }
+          findings.set(f.kind, F.addressedFinding({ billToName, ours, cached }));
+        }
+      }
+    }
+  } catch (error) {
+    logger.warn('exception_findings.failed', { paymentOrderId: order.paymentOrderId, ...(error instanceof Error ? { message: error.message } : {}) });
+  }
+
   // The exception agent's investigation of the duplicate flag, started here if
   // none is current. ONLY here, and never inside flagsForOrder or the
   // workbench: those run for every row on the board and around every override.
@@ -2208,7 +2253,11 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       matchesVerified: order.counterpartyWallet.trustState === 'trusted'
         && !flags.some((f) => f.kind === 'payee_mismatch'),
     },
-    flags: flags.map((f) => (f.kind === 'possible_duplicate' && duplicateBrief ? { ...f, brief: duplicateBrief } : f)),
+    flags: flags.map((f) => {
+      const withBrief = f.kind === 'possible_duplicate' && duplicateBrief ? { ...f, brief: duplicateBrief } : f;
+      const finding = findings.get(f.kind);
+      return finding ? { ...withBrief, finding } : withBrief;
+    }),
     verification: verification
       ? {
           confirmedAt: str(verification.confirmedAt),

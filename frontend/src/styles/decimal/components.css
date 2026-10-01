@@ -1272,3 +1272,7 @@
 
 /* Auto-save state in the bill's commit bar: quiet, never a toast. */
 .dec .autosave-note { font-size: 12px; color: var(--text-muted); margin-right: 4px; }
+
+/* A finding's evidence line that opens the bill it names. Reads as text; underlines on hover. */
+.dec .link-btn { background: none; border: 0; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.dec .link-btn:hover { text-decoration: underline; color: var(--accent); }

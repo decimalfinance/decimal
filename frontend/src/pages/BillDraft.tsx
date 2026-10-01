@@ -78,7 +78,7 @@ export function BillDraftPage() {
     enabled: Boolean(organizationId && paymentOrderId),
     // Only while the exception agent is still investigating a flag: the screen
     // picks up its answer without a reload, and stops asking once it has one.
-    refetchInterval: (q) => (q.state.data?.flags.some((f) => f.brief?.status === 'running') ? 2000 : false),
+    refetchInterval: (q) => (q.state.data?.flags.some((f) => f.brief?.status === 'running' || f.finding?.status === 'running') ? 2000 : false),
   });
   // Admin tier decides who may clear a duplicate flag (policy override).
   const myAccess = useQuery({
@@ -612,7 +612,7 @@ function DraftScreen(props: {
     }
     if (action === 'ask_someone') {
       setActiveResolution({ flag: flagKind, action });
-      setResolutionValue('');
+      setResolutionValue(prefill ?? '');
       setAskOf('');
       setAskFields(null);
       setSuggestedFields([]);
@@ -1269,6 +1269,13 @@ activeResolution?.flag === flag.kind ? (() => {
                     );
                   })() : null
   );
+  // What the exception agent recommends for a flag: the duplicate
+  // investigation's answer, or a single-bill finding's.
+  const adviceFor = (flag: DraftFlag): { action: string; reason: string | null } | null => {
+    if (flag.brief?.status === 'ready' && flag.brief.recommendedAction) return { action: flag.brief.recommendedAction, reason: flag.brief.reason ?? null };
+    if (flag.finding?.status === 'ready' && flag.finding.recommended) return flag.finding.recommended;
+    return null;
+  };
   const renderResolutionButtons = (flag: DraftFlag) => (
 activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
                   <span style={{ display: 'flex', gap: 6, flex: 'none', flexWrap: 'wrap' }}>
@@ -1276,12 +1283,12 @@ activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
                         the primary button; the rest stay, as secondary, for
                         whoever disagrees. The person still clicks either way. */}
                     {(() => {
-                      const advised = flag.brief?.status === 'ready' ? flag.brief.recommendedAction : null;
+                      const advised = adviceFor(flag)?.action ?? null;
                       return advised
                         ? [...flag.resolutions].sort((a, b) => Number(b.action === advised) - Number(a.action === advised))
                         : flag.resolutions;
                     })().map((r) => {
-                      const recommended = flag.brief?.status === 'ready' && flag.brief.recommendedAction === r.action;
+                      const recommended = adviceFor(flag)?.action === r.action;
                       // An admin-only action stays visible to everyone, disabled,
                       // with the reason in the tooltip. Hiding it would leave a
                       // reviewer staring at a blocked bill wondering what the
@@ -1307,7 +1314,7 @@ activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
                             style={{ flex: 'none' }}
                             disabled={blocked}
                             aria-label={blocked ? `${r.label} — ${why}` : recommended ? `${r.label} (recommended)` : undefined}
-                            onClick={() => startResolution(flag.kind, r.action, recommended ? flag.brief?.reason ?? undefined : undefined)}
+                            onClick={() => startResolution(flag.kind, r.action, recommended ? adviceFor(flag)?.reason ?? undefined : undefined)}
                           >
                             {r.label}
                           </button>
@@ -1341,6 +1348,34 @@ activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
               {renderResolutionComposer(flag)}
               {renderResolutionButtons(flag)}
             </ExceptionBriefBlock>
+          </div>
+        );
+      }
+      // A single-bill finding (exceptions/findings.ts) replaces the generic
+      // sentence the same way: the headline, the evidence, then the choice.
+      if (flag.finding) {
+        const finding = flag.finding;
+        return (
+          <div key={flag.kind} className={`callout ${tone} has-brief`}>
+            <div className="brief-title">
+              {finding.status === 'running' ? <span className="cc-live-dot" /> : <Ico.sparkle w={15} />}
+              <span>{finding.headline}</span>
+            </div>
+            {finding.status === 'running' ? <div className="brief-body">{flag.message}</div> : null}
+            {finding.points.length > 0 ? (
+              <div className="bn-steps">
+                {finding.points.map((p, i) => (
+                  <div key={i} className={`bn-step ${p.tone === 'bad' ? 'is-failed' : p.tone === 'warn' ? 'is-noted' : ''}`}>
+                    {p.tone === 'bad' ? <Ico.x w={14} /> : p.tone === 'warn' ? <Ico.info w={14} /> : <Ico.checkSm w={14} />}
+                    {p.billId ? (
+                      <button type="button" className="link-btn" onClick={() => navigateTo(`/organizations/${organizationId}/bills/${p.billId}${p.billState === 'draft' ? '/draft' : ''}`)}>{p.text}</button>
+                    ) : <span>{p.text}</span>}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {renderResolutionComposer(flag)}
+            <div className="brief-actions">{renderResolutionButtons(flag)}</div>
           </div>
         );
       }
@@ -1427,7 +1462,8 @@ activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
                 vendorName={vendorName}
                 lines={billDraft.lines}
                 flags={billDraft.flags.length > 0 ? flagCallouts : null}
-                flagHeadline={billDraft.flags[0] ? (billDraft.flags[0].brief?.status === 'ready' && billDraft.flags[0].brief.headline ? billDraft.flags[0].brief.headline : billDraft.flags[0].short) : null}
+                flagHeadline={billDraft.flags[0] ? (billDraft.flags[0].brief?.status === 'ready' && billDraft.flags[0].brief.headline ? billDraft.flags[0].brief.headline
+                  : billDraft.flags[0].finding?.status === 'ready' ? billDraft.flags[0].finding.headline : billDraft.flags[0].short) : null}
                 filled={{
                   fields: [...billDraft.fields, ...billDraft.remitFields].filter((f) => f.state !== 'not_on_document' && !f.inferred).length,
                   lines: billDraft.lines.length,
