@@ -126,6 +126,12 @@ export const VENDORS = {
     bank: 'Barclays Bank UK (USD account) · SWIFT BUKBGB22', routing: null, acct: '4471',
     accent: '#20536c', template: 'letterhead',
   },
+  pixelfoundry: {
+    name: 'Pixel Foundry', addr: '88 Lowell St', city: 'Somerville, MA 02143',
+    email: 'billing@pixelfoundry.example', phone: '(617) 555-0193',
+    bank: 'Charles River Bank', routing: '011000138', acct: '3307',
+    accent: '#5a3e85', template: 'minimal',
+  },
 };
 
 const L = (desc, qty, unit) => ({ desc, qty, unit });
@@ -459,5 +465,50 @@ export const CASES = [
       L('Crane hire', 2, 7425),
     ],
     expect: '$419,000, far over the ceiling → over_ceiling blocks Confirm. Cleared by a per-bill ceiling exception, NOT by raising the ceiling.',
+  },
+
+  // ---- F. The companion: line memory and the exception agent's findings ----
+  // These lean on A4 being uploaded first and its two lines settled (confirmed,
+  // or their categories changed and saved): that is what the line memory
+  // learns from. Upload after A2, A4 and B4.
+  {
+    id: 'F1', file: 'F-companion/F1-remembered-lines-ready.pdf', format: 'pdf',
+    vendor: 'brightwave', invoiceNo: 'BW-2241', date: '2026-09-12', due: '2026-10-12',
+    terms: 'Net 30',
+    lines: [
+      L('Stock photography licenses (12)', 12, 28.30),
+      L('Font license — campaign use', 1, 86),
+    ],
+    expect: 'Both lines read the same as A4\'s settled lines → categories filled in from memory ("like BW-2219"), Brightwave has history, no flags → READY: the one bill in the Quick pass.',
+  },
+  {
+    id: 'F2', file: 'F-companion/F2-similar-lines-new-vendor.pdf', format: 'pdf',
+    vendor: 'pixelfoundry', invoiceNo: 'PF-118', date: '2026-09-15', due: '2026-10-15',
+    terms: 'Net 30',
+    lines: [
+      L('Typeface licence for packaging', 1, 140),
+      L('Stock photo subscription, annual', 1, 420),
+    ],
+    expect: 'Lines SIMILAR to A4\'s, worded differently, from a new vendor → the model follows the team: both to the category A4\'s lines were settled to, "similar to … on BW-2219". First bill from Pixel Foundry → not ready.',
+  },
+  {
+    id: 'F3', file: 'F-companion/F3-credit-note-names-its-bill.pdf', format: 'pdf',
+    template: 'creditnote',
+    vendor: 'brightwave', invoiceNo: 'CN-0451', date: '2026-09-16',
+    creditRef: 'BW-2219',
+    lines: [L('Credit — BW-2219 stock photography licenses returned (2)', 2, -28.30)],
+    expect: 'Credit note −$56.60 naming BW-2219 → looks_like_credit_note; the finding names BW-2219 and recommends closing it and taking $56.60 off BW-2219.',
+  },
+  {
+    id: 'F4', file: 'F-companion/F4-statement-against-our-books.pdf', format: 'pdf',
+    template: 'statement',
+    vendor: 'brightwave', invoiceNo: 'BWS-2026-09', date: '2026-09-18',
+    statementRows: [
+      { no: 'BW-2195', date: '2026-07-02', amount: 3200, status: 'Paid' },
+      { no: 'BW-2210', date: '2026-08-06', amount: 4500, status: 'Open' },
+      { no: 'BW-2219', date: '2026-08-11', amount: 312.40, status: 'Open' },
+      { no: 'BW-2245', date: '2026-09-03', amount: 1150, status: 'Open' },
+    ],
+    expect: 'Statement against our books → looks_like_statement; the finding: close it, BW-2245 ($1,150) is open and not in Decimal (get it), Brightwave marks BW-2195 paid but it is not in Decimal (check). BW-2210 and BW-2219 are already here.',
   },
 ];

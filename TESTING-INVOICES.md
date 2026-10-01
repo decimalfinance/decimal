@@ -111,6 +111,23 @@ thing that can block it.
 
 ---
 
+## F. The companion — line memory and findings (4 invoices)
+
+Upload after A2, A4 and B4, and after A4's two lines are settled (confirmed, or
+their categories changed and saved): line memory learns from settled lines.
+
+| # | Amount | Purpose |
+|---|---|---|
+| F1 | $425.60 | Brightwave, the same two lines as A4 → categories filled in from memory, no flags: ready, in the Quick pass |
+| F2 | $560.00 | new vendor, lines SIMILAR to A4's in other words → the model follows the team's categories ("similar to … on BW-2219") |
+| F3 | −$56.60 | Brightwave credit note naming BW-2219 → the finding names the bill it credits |
+| F4 | $5,962.40 | Brightwave statement against our books: two invoices here, one open and missing (BW-2245), one the vendor says is paid that we never saw (BW-2195) |
+
+(Added 2026-10-01 by the backend session while the invoice agent was offline;
+cases live in `scripts/invoice-gen/cases.mjs` like the rest.)
+
+---
+
 ## Format requirements
 
 - **PDF preferred**, one invoice per file. Images (PNG/JPEG/HEIC) welcome for
