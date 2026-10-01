@@ -1121,12 +1121,26 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
   );
   const { loadPrecedents, matchLine } = await import('../accounting/line-memory.js');
   const boardPrecedents = orders.some((o) => o.state === 'draft') ? await loadPrecedents(organizationId).catch(() => []) : [];
-  const categoriesKnown = (paymentOrderId: string, counterpartyId: string | null, lineItems: unknown[]): boolean => {
+  const categoriesKnown = (paymentOrderId: string, counterpartyId: string | null, lineItems: unknown[], meta: Record<string, unknown>): boolean => {
     if (counterpartyId && vendorsWithManualDefault.has(counterpartyId)) return true;
-    const descriptions = lineItems.filter(isRecord).map((l) => str(l.description)).filter((d): d is string => Boolean(d));
-    if (descriptions.length === 0) return false;
+    // A line a person settled ON THIS BILL is known too: confirmed, or its
+    // category changed from what was proposed and saved (A4, recoded by hand,
+    // read as "a first guess" because it only looked at other bills).
+    const verification = isRecord(meta.verification) ? meta.verification : null;
+    const saved = verification && Array.isArray(verification.lines) ? (verification.lines as unknown[]).filter(isRecord) : null;
+    const proposed = Array.isArray(meta.proposedLineCategories) ? (meta.proposedLineCategories as unknown[]).filter(isRecord) : [];
+    const settledHere = (i: number): boolean => {
+      const line = saved?.[i];
+      if (!line || !str(line.category)) return false;
+      if (verification?.confirmedAt) return true;
+      const was = proposed.find((p) => Number(p.index) === i);
+      return Boolean(was) && str(was!.category) !== str(line.category);
+    };
+    const lines = (saved ?? lineItems.filter(isRecord)) as Array<Record<string, unknown>>;
+    const descriptions = lines.map((l) => str(l.description));
+    if (descriptions.length === 0 || descriptions.some((d) => !d)) return false;
     const others = boardPrecedents.filter((p) => p.paymentOrderId !== paymentOrderId);
-    return descriptions.every((d) => matchLine(d, others) !== null);
+    return descriptions.every((d, i) => settledHere(i) || matchLine(d!, others) !== null);
   };
   const bills = orders.map((order) => {
     const invoice = engine.invoiceByOrder.get(order.paymentOrderId);
@@ -1257,7 +1271,7 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
         missing,
         priorBillsFromVendor: priorBillsIn(vendorDirectory, order.counterpartyId),
         categoriesKnown: order.state === 'draft'
-          ? categoriesKnown(order.paymentOrderId, order.counterpartyId, Array.isArray(extracted?.lineItems) ? (extracted!.lineItems as unknown[]) : [])
+          ? categoriesKnown(order.paymentOrderId, order.counterpartyId, Array.isArray(extracted?.lineItems) ? (extracted!.lineItems as unknown[]) : [], metadataRecord)
           : false,
         fieldStatus: isRecord(extracted?.fieldStatus) ? extracted!.fieldStatus : null,
         ungrounded: Array.isArray(extracted?.ungrounded) ? (extracted!.ungrounded as unknown[]).filter((x): x is string => typeof x === 'string') : [],

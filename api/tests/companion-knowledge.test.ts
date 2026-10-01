@@ -111,3 +111,18 @@ test('vendor defaults: set by hand only, the last resort for a line; the compani
   assert.ok((await raw(cards[1]!.call.method, `/organizations/${w.orgId}${cards[1]!.call.path}`, w.clerk.token, {})).status < 400);
   assert.equal(await prisma.vendorCodingRule.count({ where: { organizationId: w.orgId, counterparty: { displayName: 'Steady Supply' } } }), 0);
 });
+
+test('line memory: a bill whose categories a person changed and saved is not "a first guess"', async () => {
+  const w = await makeWorld();
+  const desc = 'Stock photography licenses (8)';
+  const a = await bill(w, 'Brightwave Media', 'BW-1', desc);
+  await bill(w, 'Brightwave Media', 'BW-0', 'Something else entirely');
+  const ready = async () => ((await get(`/organizations/${w.orgId}/companion/ready`, w.clerk.token)).bills as Array<{ billId: string }>).map((x) => x.billId);
+  assert.equal((await ready()).includes(a), false, 'proposed by the model: a first guess');
+  const proposed = (await draftOf(w, a)).lines[0];
+  const changed = proposed.category === 'Taxes & licenses' ? 'Travel' : 'Taxes & licenses';
+  await post(`/organizations/${w.orgId}/bills/${a}/save`, {
+    fields: FIELDS('BW-1', 400), lines: [{ description: desc, quantity: 1, unitPrice: 400, amount: 400, category: changed }], confirmedFieldKeys: [],
+  }, w.clerk.token);
+  assert.equal((await ready()).includes(a), true, 'recoded by a person and saved: known, so ready');
+});
