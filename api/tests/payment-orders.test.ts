@@ -353,9 +353,9 @@ test('bills workbench triages uploads; review confirm sends the bill onward', as
   assert.equal(row.vendorName, 'Acme Cloud Services');
   assert.equal(row.description, 'Cloud hosting — compute (July 2026)');
   assert.equal(row.amountUsd, 4820);
-  // Complete facts, nothing security-shaped open → ready for approval.
+  // Complete facts, nothing security-shaped open → checked.
   assert.equal(row.readiness, 'ready');
-  assert.equal(row.subStatus.text, 'Ready for approval');
+  assert.equal(row.subStatus.text, 'Checked');
 
   const review = await get(
     `/organizations/${setup.organization.organizationId}/bills/${billId}/draft`,

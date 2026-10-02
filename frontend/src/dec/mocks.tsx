@@ -27,7 +27,7 @@ export function BillList() {
           <div className="metric is-alert">
             <div className="m-label">Waiting on you</div>
             <div className="m-value">3</div>
-            <div className="m-sub">2 ready for approval · 1 missing info</div>
+            <div className="m-sub">2 checked · 1 missing info</div>
           </div>
           <div className="metric">
             <div className="m-label">In approval</div>

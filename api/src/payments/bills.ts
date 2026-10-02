@@ -1223,7 +1223,10 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
       } else if (r.missing.length > 0) {
         subStatus = { kind: 'plain', text: `Missing ${r.missing.join(', ')}`, tone: 'warning' };
       } else {
-        subStatus = { kind: 'plain', text: 'Ready for approval', tone: 'success' };
+        // "Checked", not "Ready for approval": every fact is in and nothing is
+        // flagged, and a person still gives it a final glance before sending.
+        // "Ready" belongs to the companion's stricter verdict (the quick pass).
+        subStatus = { kind: 'plain', text: 'Checked', tone: 'success' };
       }
     } else if (flagSummary.worst?.severity === 'danger' && bucket !== 'done' && order.state !== 'cancelled') {
       // (Not on a closed bill: once it is closed as a duplicate or not a bill,

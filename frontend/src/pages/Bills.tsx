@@ -200,7 +200,7 @@ export function BillsPage() {
                 <div className="m-value">{counts?.draft ?? 0}</div>
                 <div className="m-sub">
                   {(workbench.data?.draftCounts.ready ?? 0) > 0 || (workbench.data?.draftCounts.missingInfo ?? 0) > 0
-                    ? `${workbench.data?.draftCounts.ready ?? 0} ready for approval · ${workbench.data?.draftCounts.missingInfo ?? 0} missing info`
+                    ? `${workbench.data?.draftCounts.ready ?? 0} checked · ${workbench.data?.draftCounts.missingInfo ?? 0} missing info`
                     : 'bills to check before they route'}
                 </div>
               </button>

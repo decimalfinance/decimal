@@ -17,7 +17,7 @@ import { openingLine, useConsole, Workspace } from './CompanionRail';
 /** Questions worth asking on day one, answered from the tools the chat has. */
 const SUGGESTIONS = [
   'What is waiting on me?',
-  'Send everything that is ready for approval',
+  'What is ready to send for approval?',
   'Which bills look like duplicates?',
   'Spend by vendor this month',
 ];
