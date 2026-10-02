@@ -55,15 +55,17 @@ How to answer:
 - Put the bills your answer rests on in billIds, using billIds the tools returned. Never invent one.
 - Tables: a short title, a few columns, cells as short text. Put the amount column last, always with cents ($4,500.00). Never put a billId or any other internal id in a table or in the message: a person identifies a bill by vendor and invoice number, and billIds is where ids go.
 - Words to use: bill, approval, approvers, team members, category, vendor. Never "payment order", "GL code", "multisig", "wallet".
-- You never change anything yourself. You can PROPOSE actions in actions, and the person clicks to carry them out:
-  - send_for_approval: a draft that is ready (checked, nothing flagged).
-  - close_duplicate: the copy in a duplicate pair. Keep the older bill; close the newer copy. reason says why it is a copy. When get_bill has a duplicateInvestigation, that is what the team's duplicate check concluded and what the bill's screen shows: follow its verdict and which bill it says to keep, and say so, rather than working it out again.
-  - clear_duplicate: a duplicate flag on bills that are genuinely different. reason says why.
-  - ask_person: ask a teammate to do or answer something about a bill (toPerson: their name from the team tool; message: the ask, written to them, e.g. "While you're approving this, check the tax line."). You do not decide how it is sent: the system checks their inbox and makes it a nudge (does not hold the bill), a question (holds it until they answer), or tells the person it is already there. Use it when someone asks you to chase, remind, or ask a colleague.
-  - save_habit: set a vendor DEFAULT category (billId: any bill from that vendor; category: the name from the categories tool): the last resort for that vendor's lines when nothing else says what a line is. For whoever codes bills. Only when the person asks for a vendor-wide default: categories are learned per kind of line, in the background, from the lines people settle (confirming a bill, or changing a category on a saved draft), so there is usually nothing to set.
+- You never change anything yourself, and a card never changes a bill. Anything about a bill — its figures, its lines, its categories, approving it, sending it on, closing or clearing a duplicate — is done ON THE BILL, where the person sees the whole bill and its document. Your card for it OPENS THE BILL at the right place; say what to look at and why. Cards (in actions):
+  - look_at: a bill that needs a person's eyes on something (focus: where on the bill — "vendor", "invoice_number", "invoice_date", "due_date", "terms", "po_number", "total", "tax", "line 2" (lines numbered from 1, as get_bill lists them), or "flag:<kind>" for one of its flags; null for the top). Use it for anything to check or correct: a figure that looks wrong, a line's category, an answer the bill needs.
+  - approve: a bill waiting on this person's approval (whats_waiting lists it under kind "approval"). Opens the bill, where they approve it.
+  - send_for_approval: a draft that is ready (checked, nothing flagged). Opens it to look over and send.
+  - close_duplicate: the copy in a duplicate pair (keep the older bill; close the newer copy; reason says why it is a copy). Opens the bill at its duplicate check. When get_bill has a duplicateInvestigation, follow its verdict and which bill it says to keep, and say so.
+  - clear_duplicate: a duplicate flag on bills that are genuinely different (reason says why). Opens the bill at its duplicate check.
+  Cards that act here, because they are not judgements about a bill:
+  - ask_person: ask a teammate to do or answer something about a bill (toPerson: their name from the team tool; message: the ask, written to them, e.g. "While you're approving this, check the tax line."). The system checks their inbox and makes it a nudge (does not hold the bill), a question (holds it until they answer), or tells the person it is already there. Use it when someone asks you to chase, remind, or ask a colleague.
+  - save_habit: set a vendor DEFAULT category (billId: any bill from that vendor; category: the name from the categories tool): the last resort for that vendor's lines when nothing else says what a line is. For whoever codes bills. Only when the person asks for a vendor-wide default: categories are learned per kind of line, in the background, from the lines people settle, so there is usually nothing to set.
   - forget_habit: remove a vendor default (billId: any bill from that vendor). For whoever codes bills.
-  - approve: a bill waiting on this person's approval (whats_waiting lists it under kind "approval"). "In approval" is exactly when to propose it. Do not second-guess the approval rules or flags: they are checked when the person clicks, and the card will say if they stop it.
-  Propose when the person asks you to do something, or when one of these is plainly the next step. Propose only an action that IS what was asked: if none of the four fits (a category, an edit, a payment, a setting), propose nothing and say where it is done. Never offer a different action in its place. Say in the message what you are proposing and why; never say it is done. Anything you say you are proposing MUST be in actions: a proposal only in words is no use to anyone. Anything else (editing a bill, categories, paying) is done on the bill: say where.
+  Propose when the person asks you to do something, or when one of these is plainly the next step. Say in the message what the card is for, and never say it is done: a go-there card opens the bill, the person does it there. Anything you say you are proposing MUST be in actions. Payments, settings and policies are not on cards: say where they are done.
 - Payments are not live in Decimal: never say a bill was paid out unless its state says paid.`;
 }
 
@@ -93,7 +95,7 @@ const RESPOND_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['kind', 'billId', 'reason', 'toPerson', 'message', 'category'],
+        required: ['kind', 'billId', 'reason', 'toPerson', 'message', 'category', 'focus'],
         properties: {
           kind: { type: 'string', enum: [...ACTION_KINDS] },
           billId: { type: 'string' },
@@ -101,6 +103,7 @@ const RESPOND_SCHEMA = {
           toPerson: { type: ['string', 'null'], description: 'ask_person only: the teammate\'s name, as the team tool lists it. Null otherwise.' },
           message: { type: ['string', 'null'], description: 'ask_person only: what you are asking them, written to them. Null otherwise.' },
           category: { type: ['string', 'null'], description: 'save_habit only: the category name, exactly as the categories tool lists it. Null otherwise.' },
+          focus: { type: ['string', 'null'], description: 'look_at only: where on the bill to open it ("total", "line 2", "flag:lines_do_not_sum", ...). Null otherwise, or for the top of the bill.' },
         },
       },
     },
@@ -269,7 +272,7 @@ async function answerQuestion(args: {
     // request each button sends is built in code, never taken from the model.
     const proposals = (Array.isArray(a.actions) ? a.actions : [])
       .filter((x): x is ProposedAction => Boolean(x) && (ACTION_KINDS as readonly string[]).includes((x as ProposedAction).kind) && typeof (x as ProposedAction).billId === 'string')
-      .map((x) => ({ kind: x.kind, billId: x.billId, reason: String(x.reason ?? ''), toPerson: typeof x.toPerson === 'string' ? x.toPerson : null, message: typeof x.message === 'string' ? x.message : null, category: typeof x.category === 'string' ? x.category : null }));
+      .map((x) => ({ kind: x.kind, billId: x.billId, reason: String(x.reason ?? ''), toPerson: typeof x.toPerson === 'string' ? x.toPerson : null, message: typeof x.message === 'string' ? x.message : null, category: typeof x.category === 'string' ? x.category : null, focus: typeof x.focus === 'string' ? x.focus : null }));
     const actions = await buildActionCards({ organizationId: args.organizationId, viewerUserId: args.userId, proposals, seen });
     // Never promise a button that is not there: the model said it was
     // proposing something, but no card survived (it left it out, or the bill

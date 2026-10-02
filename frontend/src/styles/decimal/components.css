@@ -1276,3 +1276,8 @@
 /* A finding's evidence line that opens the bill it names. Reads as text; underlines on hover. */
 .dec .link-btn { background: none; border: 0; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 .dec .link-btn:hover { text-decoration: underline; color: var(--accent); }
+
+/* Where a go-there card lands on the bill: a brief accent outline that fades. */
+.dec .is-focus-target { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: var(--r-sm); }
+.dec tr.is-focus-target td { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.dec .bn-fromchat { align-items: center; }

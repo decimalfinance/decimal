@@ -140,9 +140,22 @@ function ActionCards({ organizationId, chatId, cards, bills, onOpenBill }: {
   onOpenBill: (id: string, state: string) => void;
 }) {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [busy, setBusy] = useState<string | null>(null);
   if (cards.length === 0) return null;
+  // A go-there card opens the bill at the spot, and leaves the reason for the
+  // bill's note to show ("From your chat: …"). It changes nothing itself.
+  const goThere = async (card: CompanionActionCard) => {
+    const target = card.open!;
+    try {
+      window.sessionStorage.setItem('decimal.goThere', JSON.stringify({ billId: card.billId, reason: card.reason, at: Date.now() }));
+    } catch { /* the note just won't say why */ }
+    await companionApi.recordOutcome(organizationId, chatId, card.actionId, { ok: true }).catch(() => null);
+    void queryClient.invalidateQueries({ queryKey: ['companion-chat', organizationId, chatId] });
+    navigate(`/organizations/${organizationId}${target.path}${target.focus ? `?focus=${encodeURIComponent(target.focus)}` : ''}`);
+  };
   const run = async (card: CompanionActionCard) => {
+    if (card.open) { await goThere(card); return; }
     setBusy(card.actionId);
     try {
       await companionApi.runAction(organizationId, card);
@@ -170,12 +183,13 @@ function ActionCards({ organizationId, chatId, cards, bills, onOpenBill }: {
       {cards.map((card) => {
         const bill = bills[card.billId];
         return (
-          <div key={card.actionId} className={`ac-card${card.status === 'done' ? ' is-done' : ''}`}>
+          <div key={card.actionId} className={`ac-card${card.status === 'done' && !card.open ? ' is-done' : ''}`}>
             <div className="ac-title">{card.title}</div>
             <div className="ac-detail">{card.detail}</div>
             {card.reason ? <div className="ac-reason">{card.reason}</div> : null}
             <div className="ac-foot">
-              {card.status === 'info' ? null : card.status === 'proposed' ? (
+              {/* A go-there card stays a way to the bill, however often it is used. */}
+              {card.status === 'info' ? null : card.status === 'proposed' || card.open ? (
                 <button type="button" className="btn btn-primary btn-sm" disabled={busy !== null} onClick={() => void run(card)}>
                   {busy === card.actionId ? 'Working…' : card.button}
                 </button>
@@ -185,7 +199,7 @@ function ActionCards({ organizationId, chatId, cards, bills, onOpenBill }: {
                   {card.result}
                 </span>
               )}
-              {bill ? (
+              {bill && !card.open ? (
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => onOpenBill(bill.paymentOrderId, bill.state)}>Open the bill</button>
               ) : null}
             </div>

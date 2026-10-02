@@ -3391,7 +3391,7 @@ test('companion chat: with no model, the answer says so instead of hanging', asy
 
 // ---- action cards --------------------------------------------------------------
 
-test('companion chat: proposals become cards only when they fit, and a card runs as the person who clicks', async () => {
+test('companion chat: proposals become cards only when they fit, and a card about a bill opens the bill instead of acting', async () => {
   const { orgId, owner, a2 } = await makeOrg();
   // A ready bill: a second from a known vendor with a category habit.
   await uploadAndConfirm(orgId, owner.token, { vendor: 'Steady Supply', amount: 300, invoiceNo: 'SS-1' });
@@ -3428,6 +3428,8 @@ test('companion chat: proposals become cards only when they fit, and a card runs
             { kind: 'close_duplicate', billId: copy.billId, reason: 'Same number, same figures, uploaded twice.' },
             { kind: 'clear_duplicate', billId: ready.billId, reason: 'There is no duplicate flag here.' },
             { kind: 'approve', billId: '00000000-0000-0000-0000-000000000000', reason: 'Invented.' },
+            { kind: 'look_at', billId: lonely.billId, reason: 'Check the total against the document.', focus: 'total' },
+            { kind: 'look_at', billId: copy.billId, reason: 'Somewhere unknown.', focus: 'the moon' },
           ],
         }) } },
       ] } };
@@ -3437,21 +3439,27 @@ test('companion chat: proposals become cards only when they fit, and a card runs
   const { chatId } = await post(`/organizations/${orgId}/companion/chats`, { text: 'Tidy up what you can.' }, owner.token);
   await drainAsyncIntake();
   let chat = await get(`/organizations/${orgId}/companion/chats/${chatId}`, owner.token);
-  const cards = chat.messages[1].actions as Array<{ actionId: string; kind: string; billId: string; title: string; button: string; call: { path: string; body: unknown }; status: string }>;
+  const cards = chat.messages[1].actions as Array<{ actionId: string; kind: string; billId: string; title: string; detail: string; button: string; call: { path: string; body: unknown }; open: { path: string; focus: string | null } | null; status: string }>;
   assert.deepEqual(
     cards.map((c) => [c.kind, c.billId]),
-    [['send_for_approval', ready.billId], ['close_duplicate', copy.billId]],
+    [['send_for_approval', ready.billId], ['close_duplicate', copy.billId], ['look_at', lonely.billId], ['look_at', copy.billId]],
     'only the proposals that fit the bills as they are now',
   );
+  // Every card about a bill opens the bill; none of them sends anything.
+  assert.deepEqual(cards.map((c) => c.call.path), ['', '', '', ''], 'no card about a bill carries a request');
+  assert.deepEqual(cards[0]!.open, { path: `/bills/${ready.billId}/draft`, focus: null });
   assert.equal(cards[0]!.title, 'Send for approval: Steady Supply SS-2');
-  assert.equal(cards[0]!.call.path, `/bills/${ready.billId}/confirm-as-read`, 'the request is built in code');
+  assert.equal(cards[0]!.button, 'Open it to send');
+  assert.deepEqual(cards[1]!.open, { path: `/bills/${copy.billId}/draft`, focus: 'flag:possible_duplicate' }, 'the duplicate check, on the bill');
+  assert.deepEqual(cards[2]!.open, { path: `/bills/${lonely.billId}/draft`, focus: 'field:total' }, 'lands on the total');
+  assert.equal(cards[2]!.detail, 'At the total');
+  assert.deepEqual(cards[3]!.open, { path: `/bills/${copy.billId}/draft`, focus: null }, 'an unknown spot opens the bill at the top');
 
-  // Carrying out the card: the same endpoint, as the person clicking.
-  await post(`/organizations/${orgId}${cards[0]!.call.path}`, cards[0]!.call.body, owner.token);
-  const sent = await prisma.paymentOrder.findUniqueOrThrow({ where: { paymentOrderId: ready.billId }, select: { state: true } });
-  assert.notEqual(sent.state, 'draft', 'the bill left review');
+  // Using a card opens the bill and is recorded; the bill is exactly as it was.
   const recorded = await post(`/organizations/${orgId}/companion/chats/${chatId}/actions/${cards[0]!.actionId}/outcome`, { ok: true }, owner.token);
-  assert.deepEqual(recorded, { status: 'done', result: 'Sent for approval' });
+  assert.deepEqual(recorded, { status: 'done', result: 'Opened' });
+  const still = await prisma.paymentOrder.findUniqueOrThrow({ where: { paymentOrderId: ready.billId }, select: { state: true } });
+  assert.equal(still.state, 'draft', 'opening the bill sent nothing');
   chat = await get(`/organizations/${orgId}/companion/chats/${chatId}`, owner.token);
   assert.equal(chat.messages[1].actions[0].status, 'done');
   const again = await post(`/organizations/${orgId}/companion/chats/${chatId}/actions/${cards[0]!.actionId}/outcome`, { ok: false, message: 'late' }, owner.token);

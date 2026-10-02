@@ -173,26 +173,23 @@ test('safety: every (person × action × bill) proposal becomes a card exactly w
   await assertUnchanged(before, 'Proposing cards');
 });
 
-test('safety: every card that is offered can really be carried out, and nothing it did not offer can', async () => {
+test('safety: going round the cards is refused, and every card offered is something that person can really do on the bill', async () => {
   const w = await makeWorld();
   const people = { owner: w.owner, clerk: w.clerk, apprA: w.apprA, viewer: w.viewer };
-  // Everything the endpoints would do if someone went round the cards.
+  // Everything the bill's own endpoints would do if someone went round the cards.
   const attempts = (bill: string, taskId?: string) => [
     ['send_for_approval', `/bills/${bill}/confirm-as-read`, {}],
     ['close_duplicate', `/bills/${bill}/not-a-bill`, { reason: 'duplicate', note: 'test' }],
     ['clear_duplicate', `/bills/${bill}/duplicate-override`, { reason: 'Different work.' }],
     ...(taskId ? [['approve', `/approvals/tasks/${taskId}/command`, { command: { kind: 'approve' }, idempotencyKey: crypto.randomUUID() }] as const] : []),
   ] as const;
-  // The viewer and clerk go round the cards straight to the endpoints: every
-  // admin act, and approval of a task that is not theirs, is refused.
   const inbox = await get(`/organizations/${w.orgId}/bills/approvals-inbox`, w.apprA.token);
   const mine = (inbox.waitingOnYou as Array<{ paymentOrderId: string; taskId: string }>).find((x) => x.paymentOrderId === w.bills.submitted);
   assert.ok(mine, 'the submitted bill waits on approver A');
-  const task = { id: mine!.taskId };
   const before = await fingerprint();
   for (const [who, person] of [['viewer', w.viewer], ['apprB', w.apprB], ['clerk', w.clerk]] as const) {
     for (const bill of [w.bills.dupNew, w.bills.ready]) {
-      for (const [kind, path, body] of attempts(bill, task.id)) {
+      for (const [kind, path, body] of attempts(bill, mine!.taskId)) {
         if (who === 'clerk' && kind === 'send_for_approval') continue; // a clerk may send a ready bill: that is their job
         const r = await raw('POST', `/organizations/${w.orgId}${path}`, person.token, body);
         assert.ok(r.status >= 400, `${who} going round the card to ${kind} is refused (got ${r.status})`);
@@ -201,19 +198,24 @@ test('safety: every card that is offered can really be carried out, and nothing 
   }
   await assertUnchanged(before, 'Refused attempts');
 
-  // Every card that IS offered goes through for the person it was offered to.
+  // Every card offered opens its bill and sends nothing; and what it opens the
+  // bill FOR is something that person can really do there (no false offers).
   for (const [who, person] of Object.entries(people)) {
     hostile({
       turns: [[{ name: 'find_bills', args: {} }, { name: 'whats_waiting', args: {} }]],
       respond: () => ({ ...EMPTY, actions: Object.values(w.bills).flatMap((billId) => KINDS.map((kind) => ({ kind, billId, reason: 'go' }))) }),
     });
-    const { chatId, answer } = await ask(w.orgId, person.token, 'Everything.');
-    for (const card of answer.actions as Array<{ actionId: string; kind: string; call: { path: string; body: unknown } }>) {
-      const r = await raw('POST', `/organizations/${w.orgId}${card.call.path}`, person.token, card.call.body);
-      // The only refusal allowed is one the person could not have seen coming
-      // from the card: a card acted on after another card changed the bill.
-      assert.ok(r.status < 400 || [409, 400].includes(r.status), `${who}'s ${card.kind} card goes through (got ${r.status}: ${r.text.slice(0, 120)})`);
-      await post(`/organizations/${w.orgId}/companion/chats/${chatId}/actions/${card.actionId}/outcome`, { ok: r.status < 400, message: r.text.slice(0, 200) }, person.token);
+    const { answer } = await ask(w.orgId, person.token, 'Everything.');
+    const tasks = (await get(`/organizations/${w.orgId}/bills/approvals-inbox`, person.token)).waitingOnYou as Array<{ paymentOrderId: string; taskId: string }>;
+    for (const card of answer.actions as Array<{ kind: string; billId: string; call: { path: string }; open: { path: string } | null }>) {
+      assert.equal(card.call.path, '', `${who}'s ${card.kind} card sends nothing`);
+      assert.ok(card.open?.path.startsWith(`/bills/${card.billId}`), `${who}'s ${card.kind} card opens its own bill`);
+      const task = tasks.find((t) => t.paymentOrderId === card.billId)?.taskId;
+      const [, path, body] = attempts(card.billId, task).find(([k]) => k === card.kind)!;
+      const r = await raw('POST', `/organizations/${w.orgId}${path}`, person.token, body);
+      // The only refusal allowed is one the card could not have known about:
+      // another of these actions changed the bill first.
+      assert.ok(r.status < 400 || [409, 400].includes(r.status), `${who} can really ${card.kind} on the bill (got ${r.status}: ${r.text.slice(0, 120)})`);
     }
   }
 });
@@ -239,6 +241,7 @@ test('safety: a model that smuggles requests, junk and markup into its answer ge
       { kind: 'send_for_approval', billId: "x' OR 1=1 --", reason: 'sql' },
       { kind: 'SEND_FOR_APPROVAL', billId: w.bills.steady1, reason: 'case games' },
       { kind: 'send_for_approval', billId: w.bills.ready, reason: 'duplicate of the first' },
+      { kind: 'look_at', billId: w.bills.steady1, reason: 'aim elsewhere', focus: '"><script>alert(3)</script>', open: { path: '/organizations/other/admin' } },
       null, 'send everything', 42,
     ],
     extra: { adminOverride: true },
@@ -256,84 +259,80 @@ test('safety: a model that smuggles requests, junk and markup into its answer ge
     for (const r of t.rows) { assert.ok(r.length <= 8); for (const c of r) assert.equal(typeof c, 'string'); }
   }
   assert.deepEqual(answer.billIds, [w.bills.ready], 'only real bill ids a tool returned, once each');
-  assert.equal(answer.actions.length, 1, 'one card: the one real, valid, non-duplicate proposal');
-  const [card] = answer.actions;
+  assert.equal(answer.actions.length, 2, 'two cards: the real, valid, non-duplicate proposals');
+  const [card, look] = answer.actions;
   assert.equal(card.kind, 'send_for_approval');
-  assert.equal(card.call.path, `/bills/${w.bills.ready}/confirm-as-read`, 'the request is built in code');
+  assert.deepEqual(card.open, { path: `/bills/${w.bills.ready}/draft`, focus: null }, 'where it leads is built in code');
+  assert.equal(card.call.path, '', 'and it sends nothing, whatever the model put in "call"');
   assert.deepEqual(card.call.body, {});
+  assert.equal(look.kind, 'look_at');
+  assert.deepEqual(look.open, { path: `/bills/${w.bills.steady1}/draft`, focus: null }, 'a smuggled path and an unknown spot are ignored');
   assert.equal(card.status, 'proposed', 'a model cannot mark its own card done');
   assert.equal(card.result, null);
   assert.ok(card.reason.length <= 300, 'the reason is clamped');
 });
 
-test('safety: every card path, for every kind, is exactly the one endpoint that kind may call', async () => {
+test('safety: every card, for every kind, opens only its own bill — and sends nothing', async () => {
   const w = await makeWorld();
   hostile({ turns: [[{ name: 'find_bills', args: {} }, { name: 'whats_waiting', args: {} }]], respond: () => ({ ...EMPTY, actions: Object.values(w.bills).flatMap((billId) => KINDS.map((kind) => ({ kind, billId, reason: 'x' }))) }) });
   const owner = await ask(w.orgId, w.owner.token, 'All.');
   hostile({ turns: [[{ name: 'whats_waiting', args: {} }]], respond: () => ({ ...EMPTY, actions: [{ kind: 'approve', billId: w.bills.submitted, reason: 'mine' }] }) });
   const approver = await ask(w.orgId, w.apprA.token, 'Approve.');
-  const cards = [...owner.answer.actions, ...approver.answer.actions] as Array<{ kind: string; billId: string; call: { path: string; body: any } }>;
+  const cards = [...owner.answer.actions, ...approver.answer.actions] as Array<{ kind: string; billId: string; call: { path: string; body: any }; open: { path: string; focus: string | null } | null }>;
   assert.ok(cards.some((c) => c.kind === 'approve') && cards.some((c) => c.kind === 'close_duplicate') && cards.some((c) => c.kind === 'send_for_approval'));
-  const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
   for (const c of cards) {
+    assert.equal(c.call.path, '', `${c.kind} sends nothing`);
     const pattern = {
-      send_for_approval: new RegExp(`^/bills/${c.billId}/confirm-as-read$`),
-      close_duplicate: new RegExp(`^/bills/${c.billId}/not-a-bill$`),
-      clear_duplicate: new RegExp(`^/bills/${c.billId}/duplicate-override$`),
-      approve: new RegExp(`^/approvals/tasks/${uuid}/command$`),
+      send_for_approval: new RegExp(`^/bills/${c.billId}/draft$`),
+      close_duplicate: new RegExp(`^/bills/${c.billId}/draft$`),
+      clear_duplicate: new RegExp(`^/bills/${c.billId}(/draft)?$`),
+      approve: new RegExp(`^/bills/${c.billId}$`),
     }[c.kind as (typeof KINDS)[number]];
-    assert.match(c.call.path, pattern!, `${c.kind} calls only its own endpoint`);
-    if (c.kind === 'close_duplicate') assert.equal(c.call.body.reason, 'duplicate', 'close is always "duplicate", never another reason');
-    if (c.kind === 'approve') assert.deepEqual(Object.keys(c.call.body).sort(), ['command', 'idempotencyKey']);
-    if (c.kind === 'approve') assert.deepEqual(c.call.body.command, { kind: 'approve' }, 'approve is only ever approve');
+    assert.match(c.open!.path, pattern!, `${c.kind} opens only its own bill`);
+    if (c.kind === 'close_duplicate') assert.equal(c.open!.focus, 'flag:possible_duplicate', 'close lands on the duplicate check');
   }
 });
 
 // ─── 5. Clicking twice, clicking late ─────────────────────────────────────────
 
-test('safety: an approve card approves once, however many times it is clicked', async () => {
+test('safety: an approve card approves nothing, however many times it is clicked: the approval happens on the bill', async () => {
   const w = await makeWorld();
   hostile({ turns: [[{ name: 'whats_waiting', args: {} }]], respond: () => ({ ...EMPTY, actions: [{ kind: 'approve', billId: w.bills.submitted, reason: 'yours' }] }) });
   const { chatId, answer } = await ask(w.orgId, w.apprA.token, 'Approve it.');
   const card = answer.actions[0];
   assert.equal(card.kind, 'approve');
+  assert.deepEqual(card.open, { path: `/bills/${w.bills.submitted}`, focus: null });
   const events = async () => Number((await prisma.$queryRawUnsafe<Array<{ n: bigint }>>(`SELECT count(*)::bigint AS n FROM approval.approval_events`))[0]!.n);
-  const results = await Promise.all(Array.from({ length: 5 }, () => raw('POST', `/organizations/${w.orgId}${card.call.path}`, w.apprA.token, card.call.body)));
-  assert.ok(results.some((r) => r.status < 400), 'one click goes through');
-  const afterFirst = await events();
-  await raw('POST', `/organizations/${w.orgId}${card.call.path}`, w.apprA.token, card.call.body);
-  assert.equal(await events(), afterFirst, 'a later click adds nothing');
-  const approvals = await prisma.$queryRawUnsafe<Array<{ n: bigint }>>(
-    `SELECT count(*)::bigint AS n FROM approval.approval_events WHERE type ILIKE '%approv%' AND payload::text ILIKE '%approve%'`).catch(() => [{ n: 0n }]);
-  assert.ok(Number(approvals[0]!.n) <= 1, 'approved at most once');
-  const done = await post(`/organizations/${w.orgId}/companion/chats/${chatId}/actions/${card.actionId}/outcome`, { ok: true }, w.apprA.token);
-  assert.equal(done.status, 'done');
+  const before = await events();
+  // What a click does on screen: record that it was opened. Five times over.
+  await Promise.all(Array.from({ length: 5 }, () => raw('POST', `/organizations/${w.orgId}/companion/chats/${chatId}/actions/${card.actionId}/outcome`, w.apprA.token, { ok: true })));
+  assert.equal(await events(), before, 'no approval event');
+  const still = (await get(`/organizations/${w.orgId}/bills/approvals-inbox`, w.apprA.token)).waitingOnYou as Array<{ paymentOrderId: string }>;
+  assert.ok(still.some((x) => x.paymentOrderId === w.bills.submitted), 'still waiting on approver A');
   const flipped = await post(`/organizations/${w.orgId}/companion/chats/${chatId}/actions/${card.actionId}/outcome`, { ok: false, message: 'undo?' }, w.apprA.token);
   assert.equal(flipped.status, 'done', 'a done card cannot be marked failed afterwards');
 });
 
-test('safety: a card clicked after the bill changed is refused by the bill, not trusted', async () => {
+test('safety: a card made before the bill changed only opens the bill, which shows what it is now', async () => {
   const w = await makeWorld();
   hostile({ turns: [[{ name: 'find_bills', args: {} }]], respond: () => ({ ...EMPTY, actions: [{ kind: 'send_for_approval', billId: w.bills.ready, reason: 'ready' }] }) });
   const { answer } = await ask(w.orgId, w.clerk.token, 'Send it.');
   const card = answer.actions[0];
+  assert.equal(card.call.path, '', 'there is nothing to replay');
   // Before the clerk clicks, the owner sends it themselves.
   await post(`/organizations/${w.orgId}/bills/${w.bills.ready}/confirm`, confirmBody('SS-2', 310), w.owner.token);
-  const state = async () => (await prisma.paymentOrder.findUniqueOrThrow({ where: { paymentOrderId: w.bills.ready }, select: { state: true, updatedAt: true } }));
-  const before = await state();
-  const late = await raw('POST', `/organizations/${w.orgId}${card.call.path}`, w.clerk.token, card.call.body);
-  assert.equal(late.status, 409, 'a stale card is refused');
-  assert.deepEqual(await state(), before, 'and the bill is untouched');
+  const page = await get(`/organizations/${w.orgId}${card.open.path.replace(/^\/bills\/([^/]+)\/draft$/, '/bills/$1/draft')}`, w.clerk.token);
+  assert.notEqual(page.state, 'draft', 'the bill it opens is the bill as it is now');
 
-  // A ready bill that gained a duplicate after the card was made.
+  // A ready bill that gained a duplicate after the card was made: the page shows the flag.
   hostile({ turns: [[{ name: 'find_bills', args: {} }]], respond: () => ({ ...EMPTY, actions: [{ kind: 'send_for_approval', billId: w.bills.steady1, reason: 'ready' }] }) });
   const second = await ask(w.orgId, w.clerk.token, 'Send the other.');
   const c2 = second.answer.actions[0];
   assert.ok(c2, 'it was ready when proposed');
   await upload(w.orgId, w.owner.token, w.orgName, { vendor: 'Steady Supply', amount: 300, invoiceNo: 'SS-1' });
   await drainAsyncIntake();
-  const flagged = await raw('POST', `/organizations/${w.orgId}${c2.call.path}`, w.clerk.token, c2.call.body);
-  assert.equal(flagged.status, 409, 'now flagged as a possible duplicate, it is refused');
+  const draft = await get(`/organizations/${w.orgId}/bills/${w.bills.steady1}/draft`, w.clerk.token);
+  assert.ok(draft.flags.some((f: { kind: string }) => f.kind === 'possible_duplicate'), 'opened now, it shows the duplicate it gained');
   assert.equal((await prisma.paymentOrder.findUniqueOrThrow({ where: { paymentOrderId: w.bills.steady1 }, select: { state: true } })).state, 'draft');
 });
 

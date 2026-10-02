@@ -2044,13 +2044,15 @@ export interface BillCompanionNote {
 /** An action the companion proposes. The request is built by the server; the person's click sends it. */
 export interface CompanionActionCard {
   actionId: string;
-  kind: 'send_for_approval' | 'close_duplicate' | 'clear_duplicate' | 'approve' | 'nudge' | 'question' | 'already_asked' | 'save_habit' | 'forget_habit';
+  kind: 'look_at' | 'send_for_approval' | 'close_duplicate' | 'clear_duplicate' | 'approve' | 'nudge' | 'question' | 'already_asked' | 'save_habit' | 'forget_habit';
   billId: string;
   title: string;
   detail: string;
   reason: string | null;
   button: string;
   call: { path: string; body: Record<string, unknown>; method?: 'POST' | 'PUT' | 'DELETE' };
+  /** Go-there cards: the bill page to open (relative to the organization) and where on it to land. */
+  open?: { path: string; focus: string | null } | null;
   /** info: nothing to click — e.g. the person already has it in their inbox. */
   status: 'proposed' | 'done' | 'failed' | 'info';
   result: string | null;

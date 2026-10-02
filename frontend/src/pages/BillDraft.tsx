@@ -5,7 +5,7 @@
 // Design rulings preserved: per-field read markers (no confidence sections),
 // resizable split (never fixed %), payment details read-only from this screen.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router';
+import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import {
@@ -755,6 +755,41 @@ function DraftScreen(props: {
   // Field ↔ document linking: focusing a field highlights where it was read.
   const [activeSource, setActiveSource] = useState<DocSource>(null);
 
+  // Arriving from a go-there card (?focus=…): land on the field, line, totals
+  // or flag it named, highlight it, and show the same spot on the document.
+  // Once: the param is dropped so a reload does not jump again.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [arrivedFocus] = useState(() => searchParams.get('focus'));
+  // On arrival, and again whenever a card on this same bill (its own chat)
+  // points somewhere else on it.
+  const focusParam = searchParams.get('focus');
+  useEffect(() => {
+    if (!focusParam) return;
+    const timer = window.setTimeout(() => {
+      const el = document.querySelector(`[data-focus="${CSS.escape(focusParam)}"]`);
+      if (el) {
+        el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        el.classList.add('is-focus-target');
+        window.setTimeout(() => el.classList.remove('is-focus-target'), 2600);
+      }
+      if (focusParam.startsWith('field:')) {
+        const key = focusParam.slice('field:'.length);
+        if (key === 'vendor.name') setActiveSource(billDraft.vendor.nameSource ?? null);
+        else if (key === 'vendor.email') setActiveSource(billDraft.vendor.emailSource ?? null);
+        else setActiveSource([...billDraft.fields, ...billDraft.remitFields].find((f) => f.key === key)?.source ?? null);
+      } else if (focusParam.startsWith('line:')) {
+        setActiveSource(lines[Number(focusParam.slice('line:'.length))]?.source ?? null);
+      } else if (focusParam === 'totals') {
+        setActiveSource(billDraft.totalsSources?.lineItems ?? null);
+      }
+      const next = new URLSearchParams(searchParams);
+      next.delete('focus');
+      setSearchParams(next, { replace: true });
+    }, 450);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusParam]);
+
   // Evidence the exception agent cited. On this bill it lights up where the
   // value was read, the same highlight a focused field gets; on the other bill
   // of the pair it opens that bill.
@@ -1345,7 +1380,7 @@ activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
       // says the bill is blocked), and puts the choice under the answer.
       if (flag.brief?.status === 'ready') {
         return (
-          <div key={flag.kind} className={`callout ${tone} has-brief`}>
+          <div key={flag.kind} data-focus={`flag:${flag.kind}`} className={`callout ${tone} has-brief`}>
             <ExceptionBriefBlock
               brief={flag.brief}
               canShow={briefEvidenceShown}
@@ -1362,7 +1397,7 @@ activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
       if (flag.finding) {
         const finding = flag.finding;
         return (
-          <div key={flag.kind} className={`callout ${tone} has-brief`}>
+          <div key={flag.kind} data-focus={`flag:${flag.kind}`} className={`callout ${tone} has-brief`}>
             <div className="brief-title">
               {finding.status === 'running' ? <span className="cc-live-dot" /> : <Ico.sparkle w={15} />}
               <span>{finding.headline}</span>
@@ -1386,7 +1421,7 @@ activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
         );
       }
       return (
-        <div key={flag.kind} className={`callout ${tone}`}>
+        <div key={flag.kind} data-focus={`flag:${flag.kind}`} className={`callout ${tone}`}>
           <Ico.shield w={16} />
           <span style={{ flex: 1, minWidth: 0 }}>
             {flag.message}
@@ -1463,6 +1498,7 @@ activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
                 (public-config.json "companionOnBill"); see BillCompanion.tsx. */}
             {isCompanionOnBillEnabled() ? (
               <BillCompanion
+                forceOpen={Boolean(arrivedFocus?.startsWith('flag:'))}
                 organizationId={organizationId}
                 billId={billDraft.paymentOrderId}
                 vendorName={vendorName}
@@ -1659,6 +1695,7 @@ activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
                     vendor details" pointed at six fields and visibly marked
                     four, missing the two it was most about. */}
                 <VendorField
+                  focusKey="field:vendor.name"
                   label="Vendor name"
                   value={vendorName}
                   state={fields['vendor.name']?.state ?? 'read'}
@@ -1669,6 +1706,7 @@ activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
                   onFocusField={() => setActiveSource(billDraft.vendor.nameSource ?? null)}
                 />
                 <VendorField
+                  focusKey="field:vendor.email"
                   label="Email"
                   value={vendorEmail}
                   state={fields['vendor.email']?.state ?? 'read'}
@@ -1788,7 +1826,7 @@ activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
                   </thead>
                   <tbody>
                     {lines.map((line, i) => (
-                      <tr key={i} onFocus={() => setActiveSource(line.source ?? null)}>
+                      <tr key={i} data-focus={`line:${i}`} onFocus={() => setActiveSource(line.source ?? null)}>
                         <td>
                           <DescriptionInput
                             value={line.description}
@@ -1833,6 +1871,7 @@ activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
                       beside them, not on its own row (per the design). */}
                   <tfoot>
                     <tr
+                      data-focus="totals"
                       onClick={() => setActiveSource(billDraft.totalsSources?.lineItems ?? null)}
                       style={billDraft.totalsSources?.lineItems ? { cursor: 'pointer' } : undefined}
                     >
@@ -2372,6 +2411,8 @@ function AccountPicker(props: {
 // wrong conclusion: the fix is to give them somewhere, not to give the person
 // looking at them a second vocabulary to learn.
 function VendorField(props: {
+  /** Where a go-there card lands (data-focus). */
+  focusKey?: string;
   label: string;
   value: string;
   state: BillDraftField['state'];
@@ -2385,7 +2426,7 @@ function VendorField(props: {
   const { label, value, state, readOnly, asked, onChange, onConfirm, onFocusField, placeholder } = props;
   const needsLook = state === 'needs_look';
   return (
-    <div className="rev-field">
+    <div className="rev-field" data-focus={props.focusKey}>
       <span className="field-label">{label}</span>
       <input
         className={`input${needsLook || asked ? ' is-look' : ''}`}
@@ -2443,7 +2484,7 @@ function DraftField(props: {
   // Reuse the amber "needs attention" state rather than inventing a second
   // visual language for the same idea: this field wants a human's eye.
   return (
-    <div className="rev-field">
+    <div className="rev-field" data-focus={`field:${def.key}`}>
       <span className="field-label">{def.label}</span>
       <input
         className={`input${needsLook || askedBy ? ' is-look' : ''}`}

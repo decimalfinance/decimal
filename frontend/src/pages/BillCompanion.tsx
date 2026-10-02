@@ -27,6 +27,22 @@ function readOpen(): boolean {
   try { return window.localStorage.getItem(OPEN_KEY) !== '0'; } catch { return true; }
 }
 
+const HANDOFF_KEY = 'decimal.goThere';
+
+/** What a go-there card left for this bill: read once, then cleared. */
+function takeHandoff(billId: string): string | null {
+  try {
+    const raw = window.sessionStorage.getItem(HANDOFF_KEY);
+    if (!raw) return null;
+    const h = JSON.parse(raw) as { billId?: string; reason?: string | null; at?: number };
+    if (h.billId !== billId || !h.at || Date.now() - h.at > 120_000) return null;
+    window.sessionStorage.removeItem(HANDOFF_KEY);
+    return h.reason?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 function StepIcon({ status }: { status: BillCompanionNote['did'][number]['status'] }) {
   if (status === 'running') return <span className="cc-live-dot" />;
   if (status === 'failed') return <Ico.x w={14} />;
@@ -34,7 +50,9 @@ function StepIcon({ status }: { status: BillCompanionNote['did'][number]['status
   return <Ico.checkSm w={14} />;
 }
 
-export function BillCompanion({ organizationId, billId, lines, flags, flagHeadline, filled, onOpenBill }: {
+export function BillCompanion({ organizationId, billId, lines, flags, flagHeadline, filled, onOpenBill, forceOpen }: {
+  /** Arriving from a go-there card aimed at a flag: the flag is inside this note, so open it. */
+  forceOpen?: boolean;
   organizationId: string;
   billId: string;
   vendorName: string;
@@ -50,7 +68,10 @@ export function BillCompanion({ organizationId, billId, lines, flags, flagHeadli
 }) {
   const queryClient = useQueryClient();
   const toast = useToast();
-  const [open, setOpen] = useState(readOpen);
+  const [open, setOpen] = useState(() => Boolean(forceOpen) || readOpen());
+  // Why the chat sent you here, handed over by the card (Chat.tsx) and shown
+  // once at the top of the note.
+  const [fromChat, setFromChat] = useState<string | null>(() => takeHandoff(billId));
   const [stepsOpen, setStepsOpen] = useState(false);
   const [startedChatId, setStartedChatId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -117,6 +138,13 @@ export function BillCompanion({ organizationId, billId, lines, flags, flagHeadli
 
       {open ? (
         <div className="bn-body">
+          {fromChat ? (
+            <div className="callout callout-info bn-fromchat">
+              <Ico.chat w={15} />
+              <span style={{ flex: 1, minWidth: 0 }}><strong>From your chat:</strong> {fromChat}</span>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFromChat(null)}>Dismiss</button>
+            </div>
+          ) : null}
           {flags ? <div className="bn-flags">{flags}</div> : null}
 
           {isDraft ? (
