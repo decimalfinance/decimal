@@ -6,7 +6,7 @@
 // you, a draft to review) clears itself when the bill moves; what people ask
 // you has its own Done.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { inboxApi, type InboxItem, type InboxLineKind } from '../api';
@@ -64,12 +64,31 @@ export function InboxPage() {
     refetchInterval: 15_000,
   });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['inbox', organizationId] });
-  const items = q.data?.items ?? [];
+  // The list keeps the order it had when the page opened. The server sorts
+  // unread first, so reading an item used to send it down the list the moment
+  // you clicked it — what you just looked at was somewhere else a second later.
+  // Now reading, ticking and the 15-second refresh never move what is already
+  // on screen; something new that arrives goes on top; what is dealt with drops
+  // out. The next visit sorts afresh.
+  const orderRef = useRef<string[] | null>(null);
+  const items = useMemo(() => {
+    const fresh = q.data?.items ?? [];
+    if (!q.data) return fresh;
+    if (!orderRef.current) {
+      orderRef.current = fresh.map((i) => i.key);
+      return fresh;
+    }
+    const pos = new Map(orderRef.current.map((k, i) => [k, i]));
+    const added = fresh.filter((i) => !pos.has(i.key));
+    const kept = fresh.filter((i) => pos.has(i.key)).sort((a, b) => pos.get(a.key)! - pos.get(b.key)!);
+    const next = [...added, ...kept];
+    orderRef.current = next.map((i) => i.key);
+    return next;
+  }, [q.data]);
   const shown = useMemo(() => items.filter(FILTERS.find((f) => f.key === filter)!.match), [items, filter]);
   const selected = shown.find((i) => i.key === selectedKey) ?? shown[0] ?? null;
 
-  // Keep the selection on the same bill while the list re-sorts (a seen item
-  // sorts below new ones; following position would jump to another bill).
+  // Keep the selection on the same bill as the list updates.
   useEffect(() => {
     if (!selectedKey && shown[0]) setSelectedKey(shown[0].key);
   }, [selectedKey, shown]);
