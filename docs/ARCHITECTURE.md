@@ -24,7 +24,6 @@ postgres/init/  Ordered, idempotent SQL. The source of truth for the database sc
 scripts/        Shell scripts behind the Makefile, plus the test-invoice generator.
 config/         Committed, non-secret runtime config.
 docs/           This file, open work, and frozen reference material.
-.design-sync/   Pipeline that publishes UI primitives to the external Claude Design project.
 ```
 
 Code comments that cite a `*-research` document refer to a research folder that was removed. `docs/OPEN-WORK.md` explains how to read it from git history.

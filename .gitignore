@@ -40,9 +40,6 @@ tmp/
 # Design-sync tool: generated bundles, caches and its own dependencies
 .ds-sync/
 ds-bundle/
-.design-sync/.cache/
-.design-sync/learnings/
-.design-sync/node_modules
 
 # Regenerable test data. Rebuild with scripts/invoice-gen (see TESTING-INVOICES.md).
 synthetic_data/
