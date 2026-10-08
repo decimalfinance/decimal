@@ -206,7 +206,9 @@ export function chatTools(args: {
             confidence: investigation.confidence,
             finding: investigation.headline,
             why: investigation.reason,
-            recommendedForThisBill: investigation.recommendedAction,
+            recommendedForThisBill: investigation.recommendedAction === 'close_other'
+              ? 'keep this bill; close the other one (otherBillId)'
+              : investigation.recommendedAction,
             thisBillIs: investigation.side === 'newer' ? 'the newer upload of the pair' : 'the older upload of the pair',
             otherBillId: investigation.otherBill.paymentOrderId,
           } : null,

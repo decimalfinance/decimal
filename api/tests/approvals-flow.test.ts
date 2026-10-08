@@ -3088,7 +3088,7 @@ test('exception agent: a flagged pair shares one brief, and each bill is told it
   const older = dupFlag(await get(`/organizations/${orgId}/bills/${first.billId}/draft`, owner.token))!;
   assert.equal(older.brief.briefId, newer.brief.briefId, 'both bills read the same brief');
   assert.equal(older.brief.side, 'older');
-  assert.equal(older.brief.recommendedAction, 'clear_duplicate', 'the original is the one to keep');
+  assert.equal(older.brief.recommendedAction, 'close_other', 'the original is kept: it points at the copy to close');
   // Evidence cited as "this" by the run resolves to the right bill from each side.
   const totalRef = (b: any) => b.findings.flatMap((f: any) => f.evidence).find((e: any) => e.key === 'total');
   assert.equal(totalRef(newer.brief).bill === 'this', totalRef(older.brief).bill === 'other');
@@ -3152,27 +3152,46 @@ test('exception agent: with no model, or a failed run, the flag is exactly what 
   assert.equal(afterFailure.brief, undefined, 'a recent failure is not retried on every read, and shows nothing');
 });
 
+test('exception agent: the bill to keep points at the copy, and closing the copy frees it', async () => {
+  scriptedInvestigator('duplicate');
+  const { orgId, owner } = await makeOrg();
+  const first = await uploadAndConfirm(orgId, owner.token, { vendor: 'Keep Co', amount: 640, invoiceNo: 'KC-7' });
+  const second = await uploadAndConfirm(orgId, owner.token, { vendor: 'Keep Co', amount: 640, invoiceNo: 'KC-7' });
+  await drainAsyncIntake();
+
+  // Clearing the original would settle the pair and let the copy through too
+  // (see the duplicate-gate test below), so it is never advised to clear.
+  const older = dupFlag(await get(`/organizations/${orgId}/bills/${first.billId}/draft`, owner.token))!;
+  assert.equal(older.brief.recommendedAction, 'close_other');
+  assert.equal(older.brief.otherBill.paymentOrderId, second.billId, 'it points at the copy');
+
+  await post(`/organizations/${orgId}/bills/${second.billId}/not-a-bill`, { reason: 'duplicate' }, owner.token);
+  const kept = await get(`/organizations/${orgId}/bills/${first.billId}/draft`, owner.token);
+  assert.equal(dupFlag(kept), undefined, 'a closed copy no longer matches, so the kept bill is free');
+});
+
 test('exception agent: what the admin did is logged against what the agent advised', async () => {
   scriptedInvestigator('duplicate');
   const { orgId, owner } = await makeOrg();
   const first = await uploadAndConfirm(orgId, owner.token, { vendor: 'Outcome Ltd', amount: 700, invoiceNo: 'OL-5' });
   const second = await uploadAndConfirm(orgId, owner.token, { vendor: 'Outcome Ltd', amount: 700, invoiceNo: 'OL-5' });
+  const third = await uploadAndConfirm(orgId, owner.token, { vendor: 'Outcome Ltd', amount: 900, invoiceNo: 'OL-6' });
+  await uploadAndConfirm(orgId, owner.token, { vendor: 'Outcome Ltd', amount: 900, invoiceNo: 'OL-6' });
   await drainAsyncIntake();
 
+  // The copy was advised "close", and the admin closes it with the brief's own
+  // words: agreement.
   const newer = dupFlag(await get(`/organizations/${orgId}/bills/${second.billId}/draft`, owner.token))!;
   assert.ok(newer.resolutions.some((r: { action: string }) => r.action === 'not_ours'), 'closing as a duplicate lives on the flag now');
-
-  // The older bill was advised "keep", and the admin keeps it with the brief's
-  // own words: agreement.
-  const olderBrief = dupFlag(await get(`/organizations/${orgId}/bills/${first.billId}/draft`, owner.token))!.brief;
-  await post(`/organizations/${orgId}/bills/${first.billId}/duplicate-override`, { reason: olderBrief.reason }, owner.token);
-  // The newer bill was advised "close", and the admin clears it instead:
-  // disagreement, and exactly the case worth reading later.
-  await post(`/organizations/${orgId}/bills/${second.billId}/duplicate-override`, { reason: 'Different job, checked with the vendor.' }, owner.token);
+  await post(`/organizations/${orgId}/bills/${second.billId}/not-a-bill`, { reason: 'duplicate', note: newer.brief.reason }, owner.token);
+  // Another pair's original was advised "keep it, close the copy", and the
+  // admin clears it instead, which settles the pair: disagreement, and exactly
+  // the case worth reading later.
+  await post(`/organizations/${orgId}/bills/${third.billId}/duplicate-override`, { reason: 'Different job, checked with the vendor.' }, owner.token);
 
   const outcomes = await prisma.aiSuggestionOutcome.findMany({ orderBy: { decidedAt: 'asc' } });
   assert.deepEqual(outcomes.map((o) => o.outcome), ['accepted', 'rejected']);
-  assert.equal((outcomes[1]!.finalValue as { recommended: string }).recommended, 'not_ours');
+  assert.equal((outcomes[1]!.finalValue as { recommended: string }).recommended, 'close_other');
 });
 
 test('duplicate gate: clearing one bill settles the pair, and a later copy is flagged afresh', async () => {

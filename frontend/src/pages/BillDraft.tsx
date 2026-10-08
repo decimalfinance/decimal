@@ -1106,23 +1106,27 @@ activeResolution?.flag === flag.kind ? (() => {
                     const ready = asking
                       ? Boolean(askOf) && resolutionValue.trim().length >= 3
                       : resolutionValue.trim().length >= 3;
-                    // Going against a clear-cut "close this one". Clearing a bill
-                    // the agent found to be a copy, or to be superseded, lets it be
-                    // approved and paid alongside the bill it copies, so that is
-                    // said plainly before the reason is written. Only this
-                    // direction: keeping a bill the agent would close is the one
-                    // that can pay twice. It warns, it never blocks — the person
+                    // Going against a clear-cut verdict that one of the pair is a
+                    // copy, or superseded. A clearance settles the PAIR, so
+                    // clearing either bill lets both be approved and posted: on
+                    // the copy it keeps a bill the agent would close; on the bill
+                    // to keep it clears the copy too. Said plainly before the
+                    // reason is written. It warns, it never blocks — the person
                     // decides.
                     const brief = flag.brief?.status === 'ready' ? flag.brief : null;
                     const otherNum = brief?.otherBill.invoiceNumber ?? 'the other bill';
-                    const payTwiceWarning = activeResolution.action === 'clear_duplicate'
-                      && brief?.recommendedAction === 'not_ours' && brief.confidence === 'high'
-                      ? (brief.verdict === 'replacement'
-                        ? `A later ${otherNum} corrects this bill. Clearing this means both versions can be approved and paid.`
-                        : brief.comparison?.identical
-                          ? 'Every figure on these two bills matches. Clearing this means both can be approved and paid.'
-                          : `This looks like a second copy of ${otherNum}. Clearing it means both can be approved and paid.`)
-                      : null;
+                    const goingAgainst = activeResolution.action === 'clear_duplicate' && brief?.confidence === 'high'
+                      && (brief.recommendedAction === 'not_ours' || brief.recommendedAction === 'close_other');
+                    const payTwiceWarning = !goingAgainst || !brief ? null
+                      : brief.recommendedAction === 'close_other'
+                        ? (brief.verdict === 'replacement'
+                          ? `Clearing this also clears the original ${otherNum}, so both versions can be approved and posted. Close the original instead.`
+                          : `Clearing this also clears the later copy of ${otherNum}, so both can be approved and posted. Close the copy instead.`)
+                        : brief.verdict === 'replacement'
+                          ? `A later ${otherNum} corrects this bill. Clearing this means both versions can be approved and posted.`
+                          : brief.comparison?.identical
+                            ? 'Every figure on these two bills matches. Clearing this means both can be approved and posted.'
+                            : `This looks like a second copy of ${otherNum}. Clearing it means both can be approved and posted.`;
                     return (
                       <span style={{ display: 'block', marginTop: 10 }}>
                         {/* State the question. A bare box under the flag's own
@@ -1320,6 +1324,24 @@ activeResolution?.flag === flag.kind ? (() => {
   const renderResolutionButtons = (flag: DraftFlag) => (
 activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
                   <span style={{ display: 'flex', gap: 6, flex: 'none', flexWrap: 'wrap' }}>
+                    {/* On the bill to keep, the advice is about the OTHER bill:
+                        close it there. Clearing here would settle the pair and
+                        let the copy through, so no button on this bill is the
+                        recommended one; this one goes to the other bill's
+                        duplicate check. */}
+                    {adviceFor(flag)?.action === 'close_other' && flag.brief ? (
+                      <span title="Opens the other bill at its duplicate check, where it is closed." style={{ display: 'inline-flex', flex: 'none' }}>
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          style={{ flex: 'none' }}
+                          aria-label={`Open the ${flag.brief.side === 'newer' ? 'original' : 'later copy'} (recommended)`}
+                          onClick={() => navigateTo(`/organizations/${organizationId}/bills/${flag.brief!.otherBill.paymentOrderId}/draft?focus=flag:possible_duplicate`)}
+                        >
+                          Open the {flag.brief.side === 'newer' ? 'original' : 'later copy'}
+                        </button>
+                      </span>
+                    ) : null}
                     {/* What the exception agent recommends goes first and is
                         the primary button; the rest stay, as secondary, for
                         whoever disagrees. The person still clicks either way. */}

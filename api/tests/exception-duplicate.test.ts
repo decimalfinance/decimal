@@ -133,19 +133,21 @@ test('older and newer by upload time, with a stable tie-break', () => {
 // ---- verdict → action ------------------------------------------------------
 
 test('a duplicate keeps the older bill and closes the copy', () => {
-  assert.equal(recommendationFor('duplicate', 'older'), 'clear_duplicate');
+  assert.equal(recommendationFor('duplicate', 'older'), 'close_other');
   assert.equal(recommendationFor('duplicate', 'newer'), 'not_ours');
 });
 
 test('a replacement keeps the corrected bill and closes the original', () => {
-  assert.equal(recommendationFor('replacement', 'newer'), 'clear_duplicate');
+  assert.equal(recommendationFor('replacement', 'newer'), 'close_other');
   assert.equal(recommendationFor('replacement', 'older'), 'not_ours');
 });
 
-test('never both sides closed, never both sides of a real duplicate cleared', () => {
+test('a real duplicate closes exactly one side and never advises clearing either', () => {
+  // A clearance settles the pair from either side, so advising the bill to
+  // keep to clear would let the copy through with it.
   for (const v of ['duplicate', 'replacement'] as const) {
     const pair = [recommendationFor(v, 'older'), recommendationFor(v, 'newer')].sort();
-    assert.deepEqual(pair, ['clear_duplicate', 'not_ours'], `${v} closes exactly one side`);
+    assert.deepEqual(pair, ['close_other', 'not_ours'], `${v} closes exactly one side, and clears neither`);
   }
   assert.equal(recommendationFor('not_duplicate', 'older'), 'clear_duplicate');
   assert.equal(recommendationFor('unsure', 'newer'), 'ask_someone');

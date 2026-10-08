@@ -1330,8 +1330,11 @@ export interface ExceptionBrief {
   headline: string | null;
   /** Prefilled as the reason when the person takes the recommended action. */
   reason: string | null;
-  /** What the verdict means for this bill — one of the flag's own resolutions. */
-  recommendedAction: 'clear_duplicate' | 'not_ours' | 'ask_someone' | null;
+  /**
+   * What the verdict means for this bill: one of the flag's own resolutions,
+   * or `close_other` on the bill to keep (nothing to do here; close the other).
+   */
+  recommendedAction: 'clear_duplicate' | 'not_ours' | 'ask_someone' | 'close_other' | null;
   side: 'older' | 'newer';
   otherBill: { paymentOrderId: string; invoiceNumber: string | null };
   findings: Array<{

@@ -213,23 +213,29 @@ export function sideOf(thisBill: { id: string; createdAt: Date }, other: { id: s
 
 export const VERDICTS = ['duplicate', 'replacement', 'not_duplicate', 'unsure'] as const;
 export type Verdict = (typeof VERDICTS)[number];
-export type RecommendedAction = 'clear_duplicate' | 'not_ours' | 'ask_someone';
+/**
+ * `close_other` is "keep this bill, close the other one": the bill to keep has
+ * nothing to do on itself, so its recommendation points across the pair.
+ */
+export type RecommendedAction = 'clear_duplicate' | 'not_ours' | 'ask_someone' | 'close_other';
 
 /**
  * What the verdict means for THIS bill. Decided here, never by the model.
  *
- *   duplicate    keep the older, close the newer copy
- *   replacement  keep the newer (it corrects the original), close the older
+ *   duplicate    keep the older (close_other), close the newer copy (not_ours)
+ *   replacement  keep the newer (close_other), close the older original (not_ours)
  *   not_duplicate  clear both
  *   unsure       ask on both
  *
- * Safe even if only one side is ever acted on: a clearance is per bill, so the
- * twin stays blocked until someone deals with it, and nothing is paid twice.
+ * The bill to keep is never told to clear. A clearance settles the PAIR, from
+ * either side (`settleDuplicatesWith`), so clearing the original also clears
+ * the copy and both can be approved and posted. Closing the copy is enough: a
+ * closed bill no longer matches, and the kept bill's flag goes by itself.
  */
 export function recommendationFor(verdict: Verdict, side: 'older' | 'newer'): RecommendedAction {
   switch (verdict) {
-    case 'duplicate': return side === 'older' ? 'clear_duplicate' : 'not_ours';
-    case 'replacement': return side === 'newer' ? 'clear_duplicate' : 'not_ours';
+    case 'duplicate': return side === 'older' ? 'close_other' : 'not_ours';
+    case 'replacement': return side === 'newer' ? 'close_other' : 'not_ours';
     case 'not_duplicate': return 'clear_duplicate';
     case 'unsure': return 'ask_someone';
   }
