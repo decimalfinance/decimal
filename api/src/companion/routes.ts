@@ -7,7 +7,7 @@ import { notFound } from '../infra/api-errors.js';
 import { asyncRoute } from '../infra/route-helpers.js';
 import { getCompanionConsole, getCompanionJob } from './today.js';
 import { followUp, getChat, listChats, recordActionOutcome, startChat } from './chat.js';
-import { getInbox, markAllInboxSeen, markInboxSeen, nudgeAboutBill, tickAsk } from './inbox.js';
+import { getInbox, markAllInboxSeen, markInboxSeen, nudgeAboutBill, tickAsk, tickReply } from './inbox.js';
 import { forgetHabit, forgetLine, getKnowledge, setHabit } from './knowledge.js';
 import { getBillNote } from './bill-note.js';
 import { getReadyBills } from './ready-pass.js';
@@ -75,6 +75,7 @@ companionRouter.post('/organizations/:organizationId/companion/chats/:chatId/act
 const seenBody = z.object({ billId: z.string().uuid() });
 const nudgeBody = z.object({ billId: z.string().uuid(), toUserId: z.string().uuid(), text: z.string().trim().min(3).max(500) });
 const askParams = orgParams.extend({ askId: z.string().uuid() });
+const replyParams = orgParams.extend({ billQuestionId: z.string().uuid() });
 
 companionRouter.get('/organizations/:organizationId/inbox', asyncRoute(async (req, res) => {
   const { organizationId } = orgParams.parse(req.params);
@@ -93,6 +94,13 @@ companionRouter.post('/organizations/:organizationId/inbox/seen-all', asyncRoute
   const { organizationId } = orgParams.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
   res.json(await markAllInboxSeen(organizationId, req.auth!.userId));
+}));
+
+// The asker ticks off a reply to their question.
+companionRouter.post('/organizations/:organizationId/inbox/replies/:billQuestionId/done', asyncRoute(async (req, res) => {
+  const { organizationId, billQuestionId } = replyParams.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  res.json(await tickReply(organizationId, req.auth!.userId, billQuestionId));
 }));
 
 companionRouter.post('/organizations/:organizationId/inbox/asks/:askId/done', asyncRoute(async (req, res) => {

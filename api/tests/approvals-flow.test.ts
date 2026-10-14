@@ -13,6 +13,7 @@ import { requireTestDatabase } from './helpers/require-test-database.js';
 import { setInvoiceIntakeRuntimeForTests } from '../src/payments/invoice-intake.js';
 import { setExceptionAgentRuntimeForTests, type ChatMessage } from '../src/exceptions/agent.js';
 import { config } from '../src/config.js';
+import { executeCommand } from '../src/approvals/lifecycle.js';
 
 let baseUrl = '';
 let close: (() => Promise<void>) | undefined;
@@ -628,7 +629,7 @@ test('confirm routes the bill; the chain, inbox signal, approve/reject all work'
   assert.match(done.approval.macroState, /approved/);
 });
 
-test('request-info blocks approval until answered; reject stops the route', async () => {
+test('nothing new can park a task on a question, an old parked one still releases, and reject stops the route', async () => {
   const { orgId, owner, a2, a3 } = await makeOrg();
   const flow = await get(`/organizations/${orgId}/approvals/flow`, owner.token);
   const byUser = new Map(flow.people.map((p: { user_id: string; id: string }) => [p.user_id, p.id]));
@@ -636,12 +637,17 @@ test('request-info blocks approval until answered; reject stops the route', asyn
   const ownerP = byUser.get(owner.userId) as string;
   await publishLadder(orgId, owner.token, [p2], byUser.get(a3.userId) as string);
 
-  // request-info thread
   const b1 = await uploadAndConfirm(orgId, owner.token, { vendor: 'Kepler Legal', amount: 6000, invoiceNo: 'KL-1' });
   await b1.confirm();
   const inbox = await get(`/organizations/${orgId}/bills/approvals-inbox`, a2.token);
   const r1 = inbox.waitingOnYou.find((r: { paymentOrderId: string }) => r.paymentOrderId === b1.billId);
-  await post(`/organizations/${orgId}/approvals/tasks/${r1.taskId}/command`, { command: { kind: 'request_info', question: 'Is this the annual renewal?', from: ownerP }, idempotencyKey: crypto.randomUUID() }, a2.token);
+  // A question holds nothing, so the route will not park a task on one.
+  await assert.rejects(
+    post(`/organizations/${orgId}/approvals/tasks/${r1.taskId}/command`, { command: { kind: 'request_info', question: 'Is this the annual renewal?', from: ownerP }, idempotencyKey: crypto.randomUUID() }, a2.token),
+    /Ask your question on the bill/,
+  );
+  // A task parked before 2026-10-14 is still parked, and still releases.
+  await executeCommand({ taskId: r1.taskId, actorId: p2, idempotencyKey: crypto.randomUUID(), command: { kind: 'request_info', question: 'Is this the annual renewal?', from: ownerP } as never });
   const withThread = await get(`/organizations/${orgId}/bills/${b1.billId}/detail`, a2.token);
   const threadNode = withThread.approval.steps.find((s: { thread: unknown }) => s.thread);
   assert.ok(threadNode?.thread?.open, 'open info request');
@@ -977,9 +983,8 @@ test('a bill clerk can ask a question on a bill nobody has confirmed yet', async
     data: { organizationId: orgId, userId: helper.userId, role: 'member', status: 'active' },
   });
 
-  // A draft has no approval task, so there is nothing to park — but asking is
-  // not an approval act, and a bill clerk spotting something wrong during
-  // preparation is exactly when a question is most useful.
+  // Asking is not an approval act, and a bill clerk spotting something wrong
+  // during preparation is exactly when a question is most useful.
   const asked = await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, {
     askedOfUserId: helper.userId, question: 'Is this bill actually ours?',
   }, owner.token);
@@ -1108,8 +1113,7 @@ test('anyone can ask a colleague about a bill, and the bill waits on the answer'
   assert.ok(!candidates.candidates.some((c: any) => c.userId === member.userId), 'you are not offered yourself');
 
   // A member who does not hold the task can still ASK — the question is
-  // recorded and routed. It does not park the bill, because request_info is
-  // task-scoped and parking is a state change on someone else's task.
+  // recorded and routed. It holds nothing; no question does.
   const asked = await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, {
     askedOfUserId: owner.userId,
     question: 'Is Halcyon Labs one of ours?',
@@ -1122,7 +1126,7 @@ test('anyone can ask a colleague about a bill, and the bill waits on the answer'
   assert.equal(recorded.aboutFlag, 'addressed_elsewhere', 'routing is learned per problem, not as one pile');
 });
 
-test('the person holding the task parks the bill when they ask', async () => {
+test('asking holds nothing: an approver who asks is not parked, and the route carries on', async () => {
   const owner = await register('askp-o');
   const org = await post('/organizations', { organizationName: 'Ask Park' }, owner.token);
   const orgId = org.organizationId as string;
@@ -1130,23 +1134,22 @@ test('the person holding the task parks the bill when they ask', async () => {
   await prisma.organizationMembership.create({
     data: { organizationId: orgId, userId: other.userId, role: 'admin', status: 'active' },
   });
-  // Addressed to us, so nothing blocks Confirm. Parking needs a live task, and
-  // a bill with a blocking flag never gets one — you fix the flag first. That
-  // ordering is the point of the draft stage, not an obstacle to it.
   const bill = await uploadAndConfirm(orgId, owner.token, {
     vendor: 'Park Vendor', amount: 640, invoiceNo: 'ASKP-1', billTo: 'Ask Park',
   });
   await bill.confirm();
 
-  // The owner submitted the bill, so R1 excludes them from approving it and the
-  // admin holds the task. The task holder is therefore the one who can park it.
+  // The admin holds the task and asks. Their own step still waits for them, as
+  // it always does; the bill is not parked on the question.
   await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, {
     askedOfUserId: owner.userId,
     question: 'Is this the right vendor for the freight work?',
   }, other.token);
 
   const detail = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
-  assert.equal(detail.approval.macroState, 'returned_for_info', 'the bill waits on the answer rather than moving');
+  assert.notEqual(detail.approval.macroState, 'returned_for_info', 'a question does not park the bill');
+  const q = await prisma.billQuestion.findFirstOrThrow({ where: { paymentOrderId: bill.billId } });
+  assert.equal(q.taskId, null, 'nothing in the engine waits on it');
 });
 
 test('ask candidates put whoever actually answers first', async () => {
@@ -1214,10 +1217,9 @@ test('a question is visible to both sides, and only the person asked can answer'
   assert.equal(after.questions[0].stillOpen, false);
 });
 
-test('"I don\'t know" is a reply, not a resolution', async () => {
-  // The failure this exists to stop: a non-answer closed the question, the
-  // fields the asker wanted checked went back to normal, and the record said
-  // it was resolved. Worse than never asking — it manufactures confidence.
+test('"I don\'t know" goes back to the asker as a reply, and settles nothing', async () => {
+  // A non-answer must not read as resolved: the fields the asker wanted checked
+  // stay unsettled, and the asker hears that it came back to them.
   const owner = await register('hb-owner');
   const org = await post('/organizations', { organizationName: 'HB Org' }, owner.token);
   const orgId = org.organizationId as string;
@@ -1230,6 +1232,7 @@ test('"I don\'t know" is a reply, not a resolution', async () => {
   });
   const asked = await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, {
     askedOfUserId: helper.userId, question: 'Can you confirm the vendor address?', aboutFlag: 'addressed_elsewhere',
+    highlightFields: ['remitTo.street'],
   }, owner.token);
 
   const after = await post(`/organizations/${orgId}/bills/${bill.billId}/questions/${asked.billQuestionId}/answer`,
@@ -1237,8 +1240,14 @@ test('"I don\'t know" is a reply, not a resolution', async () => {
 
   const q = after.questions[0];
   assert.equal(q.outcome, 'handed_back');
-  assert.equal(q.stillOpen, true, 'it comes back to the asker as unresolved, not settled');
-  assert.equal(q.answer, "I don't know man, it's all you.", 'the reply is still kept — it tells them who to ask next');
+  assert.deepEqual(q.resolvedFields, [], 'nothing it asked about counts as settled');
+  assert.equal(q.answer, "I don't know man, it's all you.", 'the reply is kept: it tells them who to ask next');
+
+  const asker = await get(`/organizations/${orgId}/inbox`, owner.token);
+  const line = asker.items.flatMap((i: { lines: Array<{ kind: string; text: string }> }) => i.lines).find((l: { kind: string }) => l.kind === 'reply');
+  assert.match(line.text, /couldn't answer/, 'the asker hears it came back to them');
+  const asked2 = await get(`/organizations/${orgId}/inbox`, helper.token);
+  assert.ok(!asked2.items.some((i: { lines: Array<{ kind: string }> }) => i.lines.some((l) => l.kind === 'question')), 'and it is off the helper\'s list');
 });
 
 test('the asker\'s confirmed fields are what get highlighted, not the suggestion', async () => {
@@ -1288,36 +1297,52 @@ test('a field the draft screen cannot render is never highlighted', async () => 
   assert.deepEqual(stored.highlightFields, ['remitTo.city'], 'invented keys are dropped, not stored');
 });
 
-test('a partial answer keeps only the unanswered fields open', async () => {
+test('anyone who works on bills can answer, and any answer closes the question', async () => {
   const owner = await register('pa-owner');
   const org = await post('/organizations', { organizationName: 'PA Org' }, owner.token);
   const orgId = org.organizationId as string;
   const helper = await register('pa-helper');
-  await prisma.organizationMembership.create({
-    data: { organizationId: orgId, userId: helper.userId, role: 'admin', status: 'active' },
-  });
+  const knower = await register('pa-knower');
+  for (const u of [helper, knower]) {
+    await prisma.organizationMembership.create({
+      data: { organizationId: orgId, userId: u.userId, role: 'admin', status: 'active' },
+    });
+  }
   const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'PA', amount: 120, invoiceNo: 'PA-1', billTo: 'PA Org' });
 
   const asked = await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, {
     askedOfUserId: helper.userId, question: 'Confirm the vendor address',
-    highlightFields: ['remitTo.street', 'remitTo.city', 'remitTo.state', 'remitTo.zip'],
+    highlightFields: ['remitTo.street', 'remitTo.city'],
   }, owner.token);
 
-  // Knows the street and city, not the rest. That must not be thrown away, and
-  // must not look like the whole thing was answered.
-  const after = await post(`/organizations/${orgId}/bills/${bill.billId}/questions/${asked.billQuestionId}/answer`, {
-    answer: 'Street and city are right, no idea on the rest.',
-    outcome: 'partial',
-    resolvedFields: ['remitTo.street', 'remitTo.city'],
-  }, helper.token);
+  // The asker cannot answer their own question: they close it instead.
+  await assert.rejects(
+    post(`/organizations/${orgId}/bills/${bill.billId}/questions/${asked.billQuestionId}/answer`, { answer: 'never mind', outcome: 'answered' }, owner.token),
+    /You asked this one/,
+  );
+  // There is no such thing as part of an answer any more.
+  await assert.rejects(
+    post(`/organizations/${orgId}/bills/${bill.billId}/questions/${asked.billQuestionId}/answer`, { answer: 'street only', outcome: 'partial' }, knower.token),
+  );
 
+  // Somebody other than the person asked knows, and answers.
+  const after = await post(`/organizations/${orgId}/bills/${bill.billId}/questions/${asked.billQuestionId}/answer`, {
+    answer: 'Both right, I set this vendor up.', outcome: 'answered',
+  }, knower.token);
   const q = after.questions[0];
-  assert.equal(q.outcome, 'partial');
-  assert.equal(q.stillOpen, true, 'the bill does not move on a half-answer');
-  assert.deepEqual(q.openFields, ['remitTo.state', 'remitTo.zip'], 'only what is left stays highlighted');
+  assert.equal(q.outcome, 'answered');
+  assert.equal(q.stillOpen, false, 'any answer closes it');
+  assert.equal(q.answeredByName, 'pa-knower', 'and the thread says who answered');
+  assert.deepEqual(q.resolvedFields, ['remitTo.street', 'remitTo.city']);
+
+  const helperInbox = await get(`/organizations/${orgId}/inbox`, helper.token);
+  assert.ok(!helperInbox.items.some((i: { lines: Array<{ kind: string }> }) => i.lines.some((l) => l.kind === 'question')), 'the person asked is off the hook');
+  const askerInbox = await get(`/organizations/${orgId}/inbox`, owner.token);
+  const reply = askerInbox.items.flatMap((i: { lines: Array<{ kind: string; text: string }> }) => i.lines).find((l: { kind: string }) => l.kind === 'reply');
+  assert.equal(reply.text, 'pa-knower answered: "Both right, I set this vendor up."', 'the asker hears the answer');
 });
 
-test('forwarding raises a linked question carrying only what is outstanding', async () => {
+test('passing it on raises a linked question, still asked by whoever wanted to know', async () => {
   const owner = await register('fw-owner');
   const org = await post('/organizations', { organizationName: 'FW Org' }, owner.token);
   const orgId = org.organizationId as string;
@@ -1332,23 +1357,85 @@ test('forwarding raises a linked question carrying only what is outstanding', as
 
   const asked = await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, {
     askedOfUserId: b.userId, question: 'Confirm the vendor address',
-    highlightFields: ['remitTo.street', 'remitTo.city', 'remitTo.state'],
+    highlightFields: ['remitTo.street', 'remitTo.city'],
   }, owner.token);
 
-  // B knows the street, and knows C knows the rest.
   await post(`/organizations/${orgId}/bills/${bill.billId}/questions/${asked.billQuestionId}/answer`, {
-    answer: 'Street is right. Procurement owns the rest — passing to them.',
+    answer: 'Procurement owns this, passing it to them.',
     outcome: 'forwarded',
-    resolvedFields: ['remitTo.street'],
-    forwardTo: { userId: c.userId, question: 'Can you confirm the city and state on this vendor?' },
+    forwardTo: { userId: c.userId, question: 'Can you confirm the vendor address?' },
   }, b.token);
 
   const asC = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, c.token);
   const mine = asC.questions.find((q: any) => q.youWereAsked);
   assert.ok(mine, 'C is now the one being asked');
-  assert.deepEqual(mine.openFields, ['remitTo.city', 'remitTo.state'],
-    'C is not asked to redo the street B already settled');
   assert.ok(mine.forwardedFromQuestionId, 'and the chain is linked, not orphaned');
+  assert.equal(mine.askedByUserId, owner.userId, 'still asked by whoever wanted to know');
+  assert.deepEqual(mine.openFields, ['remitTo.street', 'remitTo.city']);
+
+  // C's answer goes to the owner, not to B who passed it along.
+  await post(`/organizations/${orgId}/bills/${bill.billId}/questions/${mine.billQuestionId}/answer`, { answer: 'Confirmed with the vendor.', outcome: 'answered' }, c.token);
+  const ownerInbox = await get(`/organizations/${orgId}/inbox`, owner.token);
+  assert.ok(ownerInbox.items.some((i: { lines: Array<{ kind: string; text: string }> }) => i.lines.some((l) => l.kind === 'reply' && /fw-c answered/.test(l.text))));
+  const bInbox = await get(`/organizations/${orgId}/inbox`, b.token);
+  assert.ok(!bInbox.items.some((i: { lines: Array<{ kind: string }> }) => i.lines.some((l) => l.kind === 'reply')), 'B passed it on and hears nothing back');
+});
+
+test('the asker closes their own question, with a note; nobody else can', async () => {
+  const owner = await register('cl-owner');
+  const org = await post('/organizations', { organizationName: 'CL Org' }, owner.token);
+  const orgId = org.organizationId as string;
+  const helper = await register('cl-helper');
+  await prisma.organizationMembership.create({
+    data: { organizationId: orgId, userId: helper.userId, role: 'admin', status: 'active' },
+  });
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'CL', amount: 90, invoiceNo: 'CL-1', billTo: 'CL Org' });
+  const asked = await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, {
+    askedOfUserId: helper.userId, question: 'Is the total before tax?',
+  }, owner.token);
+
+  await assert.rejects(
+    post(`/organizations/${orgId}/bills/${bill.billId}/questions/${asked.billQuestionId}/close`, {}, helper.token),
+    /person who asked/,
+  );
+  const after = await post(`/organizations/${orgId}/bills/${bill.billId}/questions/${asked.billQuestionId}/close`,
+    { note: 'Remembered: it is the subtotal.' }, owner.token);
+  const q = after.questions[0];
+  assert.equal(q.outcome, 'closed');
+  assert.equal(q.stillOpen, false);
+  assert.equal(q.answer, 'Remembered: it is the subtotal.');
+
+  const helperInbox = await get(`/organizations/${orgId}/inbox`, helper.token);
+  assert.ok(!helperInbox.items.some((i: { lines: Array<{ kind: string }> }) => i.lines.some((l) => l.kind === 'question')), 'off the helper\'s list');
+  const ownerInbox = await get(`/organizations/${orgId}/inbox`, owner.token);
+  assert.ok(!ownerInbox.items.some((i: { lines: Array<{ kind: string }> }) => i.lines.some((l) => l.kind === 'reply')), 'closing your own question sends you nothing');
+});
+
+test('a reply waits in the asker\'s inbox until they tick it or act on the bill', async () => {
+  const owner = await register('rp-owner');
+  const org = await post('/organizations', { organizationName: 'RP Org' }, owner.token);
+  const orgId = org.organizationId as string;
+  const helper = await register('rp-helper');
+  await prisma.organizationMembership.create({
+    data: { organizationId: orgId, userId: helper.userId, role: 'admin', status: 'active' },
+  });
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'RP', amount: 75, invoiceNo: 'RP-1', billTo: 'RP Org' });
+  const replies = async () => (await get(`/organizations/${orgId}/inbox`, owner.token)).items
+    .flatMap((i: { lines: Array<{ kind: string; questionId?: string }> }) => i.lines).filter((l: { kind: string }) => l.kind === 'reply');
+
+  const first = await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, { askedOfUserId: helper.userId, question: 'Which project?' }, owner.token);
+  await post(`/organizations/${orgId}/bills/${bill.billId}/questions/${first.billQuestionId}/answer`, { answer: 'The warehouse fit-out.', outcome: 'answered' }, helper.token);
+  const [line] = await replies();
+  assert.equal(line.questionId, first.billQuestionId);
+  await assert.rejects(post(`/organizations/${orgId}/inbox/replies/${first.billQuestionId}/done`, {}, helper.token));
+  await post(`/organizations/${orgId}/inbox/replies/${first.billQuestionId}/done`, {}, owner.token);
+  assert.deepEqual(await replies(), [], 'Done ticks it off');
+
+  const second = await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, { askedOfUserId: helper.userId, question: 'And the cost centre?' }, owner.token);
+  await post(`/organizations/${orgId}/bills/${bill.billId}/questions/${second.billQuestionId}/answer`, { answer: 'CC-200.', outcome: 'answered' }, helper.token);
+  assert.equal((await replies()).length, 1);
+  await post(`/organizations/${orgId}/bills/${bill.billId}/comments`, { body: 'Thanks, coded to CC-200.' }, owner.token);
+  assert.deepEqual(await replies(), [], 'acting on the bill after the reply deals with it too');
 });
 
 test('a field edit is recorded with who, when, and what it was before', async () => {
@@ -1466,10 +1553,9 @@ test('a suggestion record cannot be rewritten after the fact', async () => {
 });
 
 test('a question asked of you shows up in your inbox', async () => {
-  // The gap this closes: request_info parks the ASKER's task and names the
-  // other person only inside the command payload, so nothing anywhere said
-  // "this is yours". The question was reachable only by opening that exact
-  // bill, which means it was reachable only if somebody told you to.
+  // The gap this closes: a question named the other person only on the bill
+  // itself, so nothing anywhere said "this is yours". It was reachable only by
+  // opening that exact bill, which means only if somebody told you to.
   const owner = await register('inb-owner');
   const org = await post('/organizations', { organizationName: 'Inbox Org' }, owner.token);
   const orgId = org.organizationId as string;
@@ -1694,9 +1780,9 @@ test('clearing a flag by deed is recorded, not just done', async () => {
 
 test('a deed settles the question that asked for it', async () => {
   // "Please resolve this flag" is answered by resolving the flag. It used to sit
-  // open anyway — parking the bill and demanding a typed sentence for something
-  // already done. Note who settles it: a THIRD person, not the one asked. The
-  // question existed to get the thing fixed, and it is fixed.
+  // open anyway, demanding a typed sentence for something already done. Note
+  // who settles it: a THIRD person, not the one asked. The question existed to
+  // get the thing fixed, and it is fixed.
   const { orgId, owner } = await makeOrg();
   const clerk = await register('deed-clerk');
   const other = await register('deed-admin');
@@ -1737,7 +1823,7 @@ test('a deed settles the question that asked for it', async () => {
   const q = after.questions.find((x: { billQuestionId: string }) => x.billQuestionId === asked.billQuestionId);
   assert.ok(q, 'the question is still on the bill');
   assert.equal(q.outcome, 'answered', 'and it is settled');
-  assert.equal(q.stillOpen, false, 'so it stops parking the bill');
+  assert.equal(q.stillOpen, false, 'so it is closed');
   assert.match(q.answer, /recorded/, 'the answer says what was done');
   assert.match(q.answer, /Northwind Trading Co\./);
 
@@ -1875,14 +1961,13 @@ test('checking the fields somebody asked about answers them', async () => {
   const done = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, clerk.token);
   const settled = done.questions.find((x: { billQuestionId: string }) => x.billQuestionId === asked.billQuestionId);
   assert.equal(settled.outcome, 'answered');
-  assert.equal(settled.stillOpen, false, 'it stops parking the bill');
+  assert.equal(settled.stillOpen, false, 'so it is closed');
   assert.match(settled.answer, /checked the fields/);
 });
 
-test('anyone can comment on a question they were not asked, and it settles nothing', async () => {
-  // The split this rests on: helping is open, releasing the bill is not. Omar
-  // knows the vendor and can say so on Zara's question; only Zara can answer it,
-  // because answering is what un-parks a payable.
+test('a comment on a question settles nothing, and anyone who works on bills may answer it', async () => {
+  // A comment helps; an answer closes the question. Omar knows the vendor: he
+  // can say so in a comment, and he can also simply answer it.
   const { orgId, owner } = await makeOrg();
   const clerk = await register('chat-clerk');
   const bystander = await register('chat-bystander');
@@ -1916,17 +2001,17 @@ test('anyone can comment on a question they were not asked, and it settles nothi
   assert.ok(after.comments[0].authorName, 'and says who said it');
 
   const q = after.questions.find((x: { billQuestionId: string }) => x.billQuestionId === asked.billQuestionId);
-  assert.equal(q.stillOpen, true, 'the hold is untouched — a comment is not an answer');
+  assert.equal(q.stillOpen, true, 'a comment is not an answer');
 
-  // And the bystander still cannot answer it.
-  await assert.rejects(
-    post(
-      `/organizations/${orgId}/bills/${bill.billId}/questions/${asked.billQuestionId}/answer`,
-      { answer: 'yes it is ours', outcome: 'answered' },
-      bystander.token,
-    ),
-    /person who was asked/,
+  // But the bystander may answer it: anyone who works on bills may.
+  const answered = await post(
+    `/organizations/${orgId}/bills/${bill.billId}/questions/${asked.billQuestionId}/answer`,
+    { answer: 'yes it is ours', outcome: 'answered' },
+    bystander.token,
   );
+  const closed = answered.questions.find((x: { billQuestionId: string }) => x.billQuestionId === asked.billQuestionId);
+  assert.equal(closed.stillOpen, false);
+  assert.equal(closed.answeredByName, 'chat-bystander');
 });
 
 test('a reply to a reply joins the same thread rather than starting a third rung', async () => {
@@ -2064,12 +2149,11 @@ test('a comment cannot be attached to a question on another bill', async () => {
   );
 });
 
-test('a viewer cannot be asked, because asking parks the bill', async () => {
-  // A viewer is an auditor's seat: read everything, change nothing. Asking is
-  // not a message — it moves the bill to request_info and it stops there until
-  // an answer comes. Listing a viewer therefore handed somebody with no job on
-  // the bill the ability to hold a payable still, and they could answer, since
-  // the answer route asks only for bills.view.
+test('a viewer cannot be asked, and cannot answer, because a viewer does not work on bills', async () => {
+  // A viewer is an auditor's seat: read everything, change nothing. An answer
+  // closes a question and can settle the fields it asked about, so it is work
+  // on the bill, and a viewer has no job on the bill. The answer route asks
+  // only for bills.view, so the refusal has to come from the server itself.
   const { orgId, owner } = await makeOrg();
   const watcher = await register('audit-watcher');
   await prisma.organizationMembership.create({
@@ -2094,8 +2178,8 @@ test('a viewer cannot be asked, because asking parks the bill', async () => {
     'a viewer is not offered',
   );
 
-  // And the server refuses it directly — a parked bill is too big a thing to
-  // hand out on the client's word about who it listed.
+  // And the server refuses it directly, not on the client's word about who it
+  // listed.
   await assert.rejects(
     post(
       `/organizations/${orgId}/bills/${bill.billId}/ask`,
@@ -2104,6 +2188,42 @@ test('a viewer cannot be asked, because asking parks the bill', async () => {
     ),
     /only view bills/,
   );
+
+  // Nor answer a question asked of somebody else, though they can see it.
+  const admin = await register('audit-admin');
+  await prisma.organizationMembership.create({
+    data: { organizationId: orgId, userId: admin.userId, role: 'admin', status: 'active' },
+  });
+  const asked = await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, {
+    askedOfUserId: admin.userId, question: 'Is this one ours?',
+  }, owner.token);
+  const seen = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, watcher.token);
+  assert.equal(seen.questions.find((q: { billQuestionId: string }) => q.billQuestionId === asked.billQuestionId).canAnswer, false, 'no Answer button for a viewer');
+  await assert.rejects(
+    post(`/organizations/${orgId}/bills/${bill.billId}/questions/${asked.billQuestionId}/answer`, { answer: 'Yes, ours.', outcome: 'answered' }, watcher.token),
+    /work on bills can answer/,
+  );
+});
+
+test('a member who cannot edit bills can close a question they asked', async () => {
+  // A member with no role yet cannot edit bills, and may still ask, so they
+  // must be able to close what they asked. The general bills rule asks for
+  // bills.edit; closing has to sit outside it, the way asking does.
+  const { orgId, owner } = await makeOrg();
+  const member = await register('close-member');
+  await prisma.organizationMembership.create({
+    data: { organizationId: orgId, userId: member.userId, role: 'member', status: 'active' },
+  });
+  const bill = await uploadAndConfirm(orgId, owner.token, {
+    vendor: 'Ironclad Security', amount: 6200, invoiceNo: 'IRN-894', billTo: 'Northwind Trading Co.',
+  });
+  // Being asked is what involves them in the bill.
+  await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, { askedOfUserId: member.userId, question: 'Was this delivered?' }, owner.token);
+  const theirs = await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, { askedOfUserId: owner.userId, question: 'Which site was it for?' }, member.token);
+  const after = await post(`/organizations/${orgId}/bills/${bill.billId}/questions/${theirs.billQuestionId}/close`, { note: 'Found it on the packing slip.' }, member.token);
+  const q = after.questions.find((x: { billQuestionId: string }) => x.billQuestionId === theirs.billQuestionId);
+  assert.equal(q.outcome, 'closed');
+  assert.equal(q.answeredByName, 'close-member');
 });
 
 test('a submitter cannot recall a bill that is already approved', async () => {
@@ -2337,13 +2457,15 @@ test('an alternative who asked a question stays on the route even once their sig
   const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'Asked First Co', amount: 312.4, invoiceNo: 'AF-1' });
   await bill.confirm();
 
-  // a3 asks something, then a2 approves — a3's signature is now moot, but the
+  // a3 asked something, then a2 approves — a3's signature is now moot, but the
   // exchange is part of what happened to this bill and must not vanish with it.
+  // Questions park nothing since 2026-10-14; this is a task an older one parked.
   const a3Inbox = await get(`/organizations/${orgId}/bills/approvals-inbox`, a3.token);
   const a3Task = a3Inbox.waitingOnYou.find((r: { paymentOrderId: string }) => r.paymentOrderId === bill.billId);
-  await post(`/organizations/${orgId}/approvals/tasks/${a3Task.taskId}/command`,
-    { command: { kind: 'request_info', question: 'is this the right cost centre?', from: byUser.get(owner.userId) },
-      idempotencyKey: `ask-${bill.billId}` }, a3.token);
+  await executeCommand({
+    taskId: a3Task.taskId, actorId: byUser.get(a3.userId) as string, idempotencyKey: `ask-${bill.billId}`,
+    command: { kind: 'request_info', question: 'is this the right cost centre?', from: byUser.get(owner.userId) as string } as never,
+  });
 
   const a2Inbox = await get(`/organizations/${orgId}/bills/approvals-inbox`, a2.token);
   const a2Task = a2Inbox.waitingOnYou.find((r: { paymentOrderId: string }) => r.paymentOrderId === bill.billId);

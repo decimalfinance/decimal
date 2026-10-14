@@ -10,6 +10,6 @@
 ALTER TABLE bill_questions
   ADD COLUMN IF NOT EXISTS outcome TEXT;
 
-ALTER TABLE bill_questions DROP CONSTRAINT IF EXISTS bill_questions_outcome_check;
-ALTER TABLE bill_questions ADD CONSTRAINT bill_questions_outcome_check
-  CHECK (outcome IS NULL OR outcome IN ('answered', 'handed_back'));
+-- The allowed outcomes are defined once, in 034-open-questions.sql. Every file
+-- re-runs on every startup, so a narrower list here would refuse rows the later
+-- files allow.

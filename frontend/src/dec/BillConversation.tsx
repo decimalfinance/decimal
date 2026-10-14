@@ -5,11 +5,11 @@
 // to it being sent to them. Same shape as every other bug in this area — one
 // thing, implemented on one screen, absent on the other.
 //
-// Two kinds of message share the stream. A QUESTION names one person and parks
-// the bill in request_info until they answer; a COMMENT names nobody and holds
-// nothing. That difference is the whole value of the feature — "waiting on
-// Zara" is a true statement about a payable rather than a status label — so the
-// two are drawn differently and only one of them can be answered.
+// Two kinds of message share the stream. A QUESTION names one person and is
+// owed an answer; a COMMENT names nobody and is owed nothing. Neither holds the
+// bill (2026-10-14). Anyone who works on bills may answer a question, and the
+// asker may close it, so the two are drawn differently and only one of them can
+// be answered.
 //
 // Threads, not a flat stream, and two levels rather than arbitrary depth: what
 // makes this readable is knowing which SUBJECT a remark belongs to. Depth is
@@ -92,7 +92,8 @@ export function BillConversation(props: {
   const [answerFor, setAnswerFor] = useState<string | null>(null);
   const [answerText, setAnswerText] = useState('');
   const [answering, setAnswering] = useState(false);
-  const [settledFields, setSettledFields] = useState<string[]>([]);
+  // 'answer' for anyone who may answer; 'close' for the asker closing their own.
+  const [boxMode, setBoxMode] = useState<'answer' | 'close'>('answer');
   const [forwardTo, setForwardTo] = useState('');
 
   const candidates = useQuery({
@@ -143,9 +144,11 @@ export function BillConversation(props: {
     }
   };
 
+  const closeBox = () => { setAnswerFor(null); setAnswerText(''); setForwardTo(''); };
+
   const sendAnswer = async (
     q: BillQuestion,
-    outcome: 'answered' | 'partial' | 'handed_back' | 'forwarded',
+    outcome: 'answered' | 'handed_back' | 'forwarded',
   ) => {
     if (answerText.trim().length < 1) return;
     if (outcome === 'forwarded' && !forwardTo) return;
@@ -154,16 +157,26 @@ export function BillConversation(props: {
       await billsApi.answerQuestion(organizationId, paymentOrderId, q.billQuestionId, {
         answer: answerText.trim(),
         outcome,
-        resolvedFields: outcome === 'answered' ? q.openFields : settledFields,
         forwardTo: outcome === 'forwarded' ? { userId: forwardTo, question: answerText.trim() } : null,
       });
       onChanged();
-      setAnswerFor(null);
-      setAnswerText('');
-      setSettledFields([]);
-      setForwardTo('');
+      closeBox();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Try again.', 'Could not send that');
+    } finally {
+      setAnswering(false);
+    }
+  };
+
+  // The asker closes their own question: they remembered, or found out.
+  const closeQuestion = async (q: BillQuestion) => {
+    setAnswering(true);
+    try {
+      await billsApi.closeQuestion(organizationId, paymentOrderId, q.billQuestionId, answerText.trim() || null);
+      onChanged();
+      closeBox();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Try again.', 'Could not close it');
     } finally {
       setAnswering(false);
     }
@@ -177,7 +190,7 @@ export function BillConversation(props: {
       {threads.map((t, i) => {
         const open = isOpen(t);
         const q = t.head.kind === 'question' ? t.head.question : null;
-        const answered = q?.outcome === 'answered';
+        const answered = q?.outcome === 'answered' || q?.outcome === 'partial' || q?.outcome === 'closed';
         const named = q ? (q.openFields.length ? q.openFields : q.highlightFields) : [];
         const author = q ? q.askedByName : t.head.kind === 'comment' ? t.head.comment.authorName : '';
         const prior = i === 0 ? null : threads[i - 1]!;
@@ -205,8 +218,8 @@ export function BillConversation(props: {
                         <strong>{q.askedOfName}</strong>
                         <span className={`pill pill-min ${answered ? 'pill-success' : 'pill-warning'}`}>
                           <span className="dot" />
-                          {answered ? `${q.askedOfName.split(' ')[0]} answered`
-                            : q.outcome === 'partial' ? 'Partly answered'
+                          {q.outcome === 'closed' ? `Closed by ${q.askedByName.split(' ')[0]}`
+                            : answered ? `${(q.answeredByName ?? q.askedOfName).split(' ')[0]} answered`
                             : q.outcome === 'forwarded' ? 'Passed on'
                             : q.outcome === 'handed_back' ? `${q.askedOfName.split(' ')[0]} could not answer`
                             : `Waiting on ${q.askedOfName.split(' ')[0]}`}
@@ -285,32 +298,37 @@ export function BillConversation(props: {
                         </div>
                       ) : null}
 
-                      {q && q.youWereAsked && answerFor === q.billQuestionId ? (
+                      {q && answerFor === q.billQuestionId && (q.canAnswer || q.canClose) ? (
                         <AnswerBox
                           question={q}
-                          named={named}
-                          fieldLabel={fieldLabel}
+                          mode={boxMode}
                           text={answerText}
                           setText={setAnswerText}
-                          settled={settledFields}
-                          setSettled={setSettledFields}
                           forwardTo={forwardTo}
                           setForwardTo={setForwardTo}
                           candidates={candidates.data?.candidates ?? []}
                           busy={answering}
                           onSend={(outcome) => void sendAnswer(q, outcome)}
-                          onCancel={() => { setAnswerFor(null); setAnswerText(''); setSettledFields([]); setForwardTo(''); }}
+                          onClose={() => void closeQuestion(q)}
+                          onCancel={closeBox}
                         />
                       ) : !readOnly ? (
                         <div className="bt-actions">
-                          {q?.youWereAsked ? (
+                          {/* Anyone who works on bills may answer, not only the
+                              person asked. A question holds nothing. */}
+                          {q?.canAnswer ? (
                             <button type="button" className="btn btn-secondary btn-sm"
-                              onClick={() => { setAnswerFor(q.billQuestionId); setAnswerText(''); setSettledFields([]); setForwardTo(''); }}>
+                              onClick={() => { setBoxMode('answer'); setAnswerFor(q.billQuestionId); setAnswerText(''); setForwardTo(''); }}>
                               Answer
                             </button>
                           ) : null}
-                          {/* Open to everybody, the asker included. Helping is
-                              not releasing the bill. */}
+                          {q?.canClose ? (
+                            <button type="button" className="btn btn-ghost btn-sm"
+                              onClick={() => { setBoxMode('close'); setAnswerFor(q.billQuestionId); setAnswerText(''); setForwardTo(''); }}>
+                              Close question
+                            </button>
+                          ) : null}
+                          {/* Open to everybody, the asker included. */}
                           <button type="button" className="btn btn-ghost btn-sm"
                             onClick={() => { setReplyTo(t); setCommentText(''); }}>
                             Reply
@@ -360,73 +378,71 @@ export function BillConversation(props: {
   );
 }
 
-// Answering: the one act in this thread that releases the bill.
+// Answering, or the asker closing their own question.
 function AnswerBox(props: {
   question: BillQuestion;
-  named: string[];
-  fieldLabel: (key: string) => string;
+  mode: 'answer' | 'close';
   text: string;
   setText: (v: string) => void;
-  settled: string[];
-  setSettled: (v: string[]) => void;
   forwardTo: string;
   setForwardTo: (v: string) => void;
   candidates: AskCandidate[];
   busy: boolean;
-  onSend: (outcome: 'answered' | 'partial' | 'handed_back' | 'forwarded') => void;
+  onSend: (outcome: 'answered' | 'handed_back' | 'forwarded') => void;
+  onClose: () => void;
   onCancel: () => void;
 }) {
-  const { question: q, named, fieldLabel, text, setText, settled, setSettled,
-    forwardTo, setForwardTo, candidates, busy, onSend, onCancel } = props;
+  const { question: q, mode, text, setText, forwardTo, setForwardTo, candidates, busy, onSend, onClose, onCancel } = props;
   const empty = text.trim().length < 1;
+  if (mode === 'close') {
+    return (
+      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <textarea className="input" autoFocus rows={2}
+          style={{ resize: 'vertical', minHeight: 56, lineHeight: 1.5 }}
+          placeholder="Anything to add? Optional, e.g. what you remembered."
+          value={text} onChange={(e) => setText(e.target.value)} />
+        <span className="bt-actions">
+          <span style={{ flex: 1 }} />
+          <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={onCancel}>Cancel</button>
+          <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={onClose}>
+            {busy ? 'Closing…' : 'Close question'}
+          </button>
+        </span>
+      </div>
+    );
+  }
   return (
     <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
       <textarea className="input" autoFocus rows={2}
         style={{ resize: 'vertical', minHeight: 56, lineHeight: 1.5 }}
         placeholder={`Answer ${q.askedByName.split(' ')[0]}…`}
         value={text} onChange={(e) => setText(e.target.value)} />
-
-      {named.length > 0 ? (
-        <span style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 12.5, color: 'var(--text-muted)' }}>
-          {named.map((f) => (
-            <label key={f} style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
-              <input type="checkbox" checked={settled.includes(f)}
-                onChange={() => setSettled(settled.includes(f) ? settled.filter((k) => k !== f) : [...settled, f])} />
-              {fieldLabel(f)}
-            </label>
-          ))}
-        </span>
-      ) : null}
-
       <span className="bt-actions">
-        <select className="input" value={forwardTo} onChange={(e) => setForwardTo(e.target.value)}
-          style={{ flex: '0 0 190px', height: 32 }}>
-          <option value="">Pass to…</option>
-          {candidates.filter((c) => c.userId !== q.askedByUserId).map((c) => (
-            <option key={c.userId} value={c.userId}>{c.name}</option>
-          ))}
-        </select>
+        {/* Passing it on and saying you can't answer are the person asked's. */}
+        {q.youWereAsked ? (
+          <select className="input" value={forwardTo} onChange={(e) => setForwardTo(e.target.value)}
+            style={{ flex: '0 0 190px', height: 32 }}>
+            <option value="">Pass to…</option>
+            {candidates.filter((c) => c.userId !== q.askedByUserId).map((c) => (
+              <option key={c.userId} value={c.userId}>{c.name}</option>
+            ))}
+          </select>
+        ) : null}
         <span style={{ flex: 1 }} />
         <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={onCancel}>Cancel</button>
-        <button type="button" className="btn btn-secondary btn-sm" disabled={busy || empty}
-          title="You could not answer it — it goes back to them, still open."
-          onClick={() => onSend('handed_back')}>
-          Can't answer
-        </button>
-        {forwardTo ? (
+        {q.youWereAsked ? (
+          <button type="button" className="btn btn-secondary btn-sm" disabled={busy || empty}
+            title="You can't answer it: it goes back to them."
+            onClick={() => onSend('handed_back')}>
+            Can't answer
+          </button>
+        ) : null}
+        {q.youWereAsked && forwardTo ? (
           <button type="button" className="btn btn-secondary btn-sm" disabled={busy || empty}
             onClick={() => onSend('forwarded')}>Pass it on</button>
         ) : null}
-        {/* Partial only when they named fields and this settles some but not all
-            of them — otherwise it is just an answer, and offering both would
-            make somebody choose between synonyms. */}
-        {named.length > 0 && settled.length > 0 && settled.length < named.length ? (
-          <button type="button" className="btn btn-primary btn-sm" disabled={busy || empty}
-            onClick={() => onSend('partial')}>{busy ? 'Sending…' : 'Answer what I can'}</button>
-        ) : (
-          <button type="button" className="btn btn-primary btn-sm" disabled={busy || empty}
-            onClick={() => onSend('answered')}>{busy ? 'Sending…' : 'Send answer'}</button>
-        )}
+        <button type="button" className="btn btn-primary btn-sm" disabled={busy || empty}
+          onClick={() => onSend('answered')}>{busy ? 'Sending…' : 'Send answer'}</button>
       </span>
     </div>
   );

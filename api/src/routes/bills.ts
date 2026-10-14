@@ -392,15 +392,12 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/ask', asy
   res.status(201).json({ billQuestionId: asked.billQuestionId, draft: await getBillDraft(organizationId, paymentOrderId, req.auth!.userId) });
 }));
 
-// Answer a question someone asked you about a bill. Visibility is enough to
-// answer, for the same reason it is enough to ask; the function itself refuses
-// anyone who was not the person asked.
+// Answer a question about a bill. Anyone who works on bills may answer, not
+// only the person asked; only the person asked may pass it on or say they
+// can't answer. The function refuses everyone else.
 const answerSchema = z.object({
   answer: z.string().trim().min(1).max(1000),
-  // The person answering says whether this resolves it. Inferring would be
-  // guessing at intent on something the asker is relying on.
-  outcome: z.enum(['answered', 'partial', 'handed_back', 'forwarded']).default('answered'),
-  resolvedFields: z.array(z.string()).max(20).nullable().optional(),
+  outcome: z.enum(['answered', 'handed_back', 'forwarded']).default('answered'),
   forwardTo: z.object({
     userId: z.string().uuid(),
     question: z.string().trim().min(3).max(500),
@@ -415,21 +412,29 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/questions
   // the person answering — it refuses everyone else.
   await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
   const input = answerSchema.parse(req.body);
-  try {
-    await answerBillQuestion({
-      organizationId,
-      billQuestionId,
-      answererUserId: req.auth!.userId,
-      answer: input.answer,
-      outcome: input.outcome,
-      resolvedFields: input.resolvedFields ?? null,
-      forwardTo: input.forwardTo ?? null,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Could not answer.';
-    if (/person who was asked/.test(message)) throw forbidden(message);
-    throw error;
-  }
+  await answerBillQuestion({
+    organizationId,
+    billQuestionId,
+    answererUserId: req.auth!.userId,
+    answer: input.answer,
+    outcome: input.outcome,
+    forwardTo: input.forwardTo ?? null,
+  });
+  res.json(await getBillDraft(organizationId, paymentOrderId, req.auth!.userId));
+}));
+
+// The asker closes their own question: they remembered, found out another way,
+// or no longer need it. An optional note reads as the answer.
+const closeQuestionSchema = z.object({ note: z.string().trim().max(500).nullable().optional() });
+
+billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/questions/:billQuestionId/close', asyncRoute(async (req, res) => {
+  const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
+  const billQuestionId = z.string().uuid().parse(req.params.billQuestionId);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
+  const input = closeQuestionSchema.parse(req.body ?? {});
+  const { closeBillQuestion } = await import('../payments/bills.js');
+  await closeBillQuestion({ organizationId, billQuestionId, userId: req.auth!.userId, note: input.note ?? null });
   res.json(await getBillDraft(organizationId, paymentOrderId, req.auth!.userId));
 }));
 

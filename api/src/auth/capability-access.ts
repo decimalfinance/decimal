@@ -30,16 +30,16 @@ const RULES: Array<{ pattern: RegExp; view: Need; act: Need }> = [
   // GL coding is bill clerk work even though it lives under payment-orders.
   { pattern: /^\/payment-orders\/[^/]+\/(gl-coding|accounting)(\/|$)/, view: 'bills.view', act: 'bills.edit' },
   // Asking a colleague about a bill needs bill VISIBILITY and nothing more.
-  // Asking is never the dangerous act — it changes no figure and commits no
-  // money, it only parks the bill and routes a question. Requiring bills.edit
-  // would mean the people most likely to spot something wrong, and least likely
-  // to hold edit rights, are the ones who cannot raise it. The reply itself is
-  // still governed by the engine.
+  // Asking is never the dangerous act — it changes no figure, commits no money
+  // and holds nothing; it only routes a question. Requiring bills.edit would
+  // mean the people most likely to spot something wrong, and least likely to
+  // hold edit rights, are the ones who cannot raise it.
   { pattern: /^\/bills\/[0-9a-f-]{36}\/(ask|ask-candidates|ask\/suggest-fields)$/, view: 'bills.view', act: null },
-  // Answering is the other half of asking. If someone can be asked, they can
-  // reply — the function itself refuses anyone who was not the person asked.
-  { pattern: /^\/bills\/[0-9a-f-]{36}\/questions\/[0-9a-f-]{36}\/answer$/, view: 'bills.view', act: null },
-  // Commenting is weaker than either: it names nobody and parks nothing. If it
+  // Answering and closing are the other half of asking, so they need no more
+  // than asking does. The functions decide who: anyone who works on bills may
+  // answer, only the asker may close.
+  { pattern: /^\/bills\/[0-9a-f-]{36}\/questions\/[0-9a-f-]{36}\/(answer|close)$/, view: 'bills.view', act: null },
+  // Commenting is weaker than either: it names nobody and closes nothing. If it
   // needed bills.edit then an approver, who cannot edit by design, could not
   // say a word on a bill they are being asked to approve.
   { pattern: /^\/bills\/[0-9a-f-]{36}\/comments$/, view: 'bills.view', act: null },

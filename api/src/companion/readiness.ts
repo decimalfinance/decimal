@@ -45,8 +45,6 @@ export function companionReadiness(args: {
   ungrounded: string[];
   /** A person has already confirmed the values, so the reader's doubts are settled. */
   confirmedByPerson: boolean;
-  /** Someone asked a question about this bill that is not answered yet: who was asked. */
-  openQuestionTo?: string | null;
 }): CompanionVerdict | null {
   if (args.state !== 'draft') return null;
 
@@ -56,8 +54,8 @@ export function companionReadiness(args: {
   if (args.missing.length > 0) return { ready: false, reason: `Missing ${args.missing.join(' and ')}` };
   const warning = args.flags.find((f) => f.severity === 'warning');
   if (warning) return { ready: false, reason: warning.short };
-  // A question is a judgement somebody is still making about this bill.
-  if (args.openQuestionTo) return { ready: false, reason: `Waiting on an answer from ${args.openQuestionTo}` };
+  // An open question is not a reason: a question holds nothing (2026-10-14).
+  // Whoever asked it decides whether to wait for the answer before sending.
 
   if (!args.confirmedByPerson) {
     const doubtful = Object.keys(KEY_FIELDS).find((k) => {

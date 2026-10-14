@@ -1284,8 +1284,14 @@ export interface BillDraft {
     askedByUserId: string; askedByName: string;
     askedOfUserId: string; askedOfName: string;
     answer: string | null; answeredAt: string | null; askedAt: string;
-    outcome: 'answered' | 'partial' | 'handed_back' | 'forwarded' | null;
+    outcome: 'answered' | 'partial' | 'handed_back' | 'forwarded' | 'closed' | null;
+    /** Who answered: anyone who works on bills may, not only the person asked. */
+    answeredByName: string | null;
     stillOpen: boolean; resolvedFields: string[]; openFields: string[];
+    /** This viewer may answer it (they work on bills and did not ask it). */
+    canAnswer: boolean;
+    /** This viewer asked it and it is still open, so they may close it. */
+    canClose: boolean;
     forwardedFromQuestionId: string | null;
     youWereAsked: boolean; youAsked: boolean;
     /** Draft-screen field keys this question is about. */
@@ -1468,13 +1474,19 @@ export const billsApi = {
   },
   answerQuestion(organizationId: string, paymentOrderId: string, billQuestionId: string, body: {
     answer: string;
-    outcome: 'answered' | 'partial' | 'handed_back' | 'forwarded';
-    resolvedFields?: string[] | null;
+    outcome: 'answered' | 'handed_back' | 'forwarded';
     forwardTo?: { userId: string; question: string } | null;
   }) {
     return request<unknown>(
       `/organizations/${organizationId}/bills/${paymentOrderId}/questions/${billQuestionId}/answer`,
       { method: 'POST', body: JSON.stringify(body) },
+    );
+  },
+  /** The asker closes their own question, with an optional note. */
+  closeQuestion(organizationId: string, paymentOrderId: string, billQuestionId: string, note?: string | null) {
+    return request<unknown>(
+      `/organizations/${organizationId}/bills/${paymentOrderId}/questions/${billQuestionId}/close`,
+      { method: 'POST', body: JSON.stringify({ note: note ?? null }) },
     );
   },
   askCandidates(organizationId: string, paymentOrderId: string, aboutFlag?: string | null) {
@@ -1485,8 +1497,8 @@ export const billsApi = {
   },
   // The flag goes IN so the scope can come out: judging whether a question asks
   // for more than its check covers is impossible without knowing the check.
-  // Anyone who can see the bill may say something about it. Unlike asking, this
-  // parks nothing — which is the whole difference between the two.
+  // Anyone who can see the bill may say something about it. Unlike asking, it
+  // names nobody and is owed no answer. Neither holds the bill.
   comment(organizationId: string, paymentOrderId: string, body: { body: string; inReplyToQuestionId?: string | null; inReplyToCommentId?: string | null }) {
     return request<{ billCommentId: string }>(
       `/organizations/${organizationId}/bills/${paymentOrderId}/comments`,
@@ -1666,7 +1678,7 @@ export interface BillDetail {
     openAskTaskId?: string | null;
     anyTaskId: string | null;
   };
-  requester: { personId: string; name: string; avatarUrl: string | null } | null;
+  requester: { personId: string; userId: string | null; name: string; avatarUrl: string | null } | null;
 }
 
 export type FlowSplit =
@@ -2061,7 +2073,7 @@ export interface CompanionActionCard {
   result: string | null;
 }
 
-export type InboxLineKind = 'approval' | 'question' | 'review' | 'sign_off' | 'sent_back' | 'unreadable' | 'ask' | 'sync_failed' | 'learned';
+export type InboxLineKind = 'approval' | 'question' | 'reply' | 'review' | 'sign_off' | 'sent_back' | 'unreadable' | 'ask' | 'sync_failed' | 'learned';
 
 /** One bill in a person's inbox, with everything wanted of them on it. */
 export interface InboxItem {
@@ -2074,7 +2086,7 @@ export interface InboxItem {
   status: string | null;
   dueAt: string | null;
   href: 'draft' | 'bill' | null;
-  lines: Array<{ kind: InboxLineKind; text: string; at: string; from?: string | null; askId?: string }>;
+  lines: Array<{ kind: InboxLineKind; text: string; at: string; from?: string | null; askId?: string; questionId?: string }>;
   latestAt: string;
   isNew: boolean;
 }
@@ -2134,6 +2146,10 @@ export const inboxApi = {
   },
   tick(organizationId: string, askId: string) {
     return request<{ ok: true }>(`/organizations/${organizationId}/inbox/asks/${askId}/done`, { method: 'POST', body: '{}' });
+  },
+  /** The asker ticks off a reply to their question. */
+  replyDone(organizationId: string, billQuestionId: string) {
+    return request<{ ok: true }>(`/organizations/${organizationId}/inbox/replies/${billQuestionId}/done`, { method: 'POST', body: '{}' });
   },
 };
 

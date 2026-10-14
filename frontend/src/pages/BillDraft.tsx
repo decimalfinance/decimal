@@ -51,8 +51,8 @@ type BillComment = BillDraft['comments'][number];
 /**
  * One subject on a bill, and everything said about it.
  *
- * The head is either a QUESTION — which names somebody and parks the bill until
- * they answer — or a remark raised on its own. Replies are flat underneath:
+ * The head is either a QUESTION — which names somebody and waits for an answer,
+ * holding nothing — or a remark raised on its own. Replies are flat underneath:
  * two levels, Slack's shape rather than Reddit's, because what makes this
  * readable is knowing which subject a remark belongs to, and nesting deeper
  * answers that no better in a pane this narrow.
@@ -169,7 +169,7 @@ function AnswerComposer(props: {
   setForwardTo: (v: string) => void;
   candidates: AskCandidate[];
   answering: boolean;
-  onSend: (billQuestionId: string, outcome: 'answered' | 'partial' | 'handed_back' | 'forwarded', openFields: string[]) => void;
+  onSend: (billQuestionId: string, outcome: 'answered' | 'handed_back' | 'forwarded', openFields: string[]) => void;
   onCancel: () => void;
 }) {
   const {
@@ -227,20 +227,10 @@ function AnswerComposer(props: {
             Pass it on
           </button>
         ) : null}
-        {/* Partial only when they named fields and this settles some but not
-            all of them — otherwise it is just an answer, and offering both would
-            make somebody choose between synonyms. */}
-        {namedFields.length > 0 && settled.length > 0 && settled.length < namedFields.length ? (
-          <button type="button" className="btn btn-primary btn-sm" disabled={answering || empty}
-            onClick={() => onSend(q.billQuestionId, 'partial', q.openFields)}>
-            {answering ? 'Sending…' : 'Answer what I can'}
-          </button>
-        ) : (
-          <button type="button" className="btn btn-primary btn-sm" disabled={answering || empty}
-            onClick={() => onSend(q.billQuestionId, 'answered', q.openFields)}>
-            {answering ? 'Sending…' : 'Send answer'}
-          </button>
-        )}
+        <button type="button" className="btn btn-primary btn-sm" disabled={answering || empty}
+          onClick={() => onSend(q.billQuestionId, 'answered', q.openFields)}>
+          {answering ? 'Sending…' : 'Send answer'}
+        </button>
       </span>
     </div>
   );
@@ -476,7 +466,7 @@ function DraftScreen(props: {
 
   const sendAnswer = async (
     billQuestionId: string,
-    outcome: 'answered' | 'partial' | 'handed_back' | 'forwarded',
+    outcome: 'answered' | 'handed_back' | 'forwarded',
     openFields: string[],
   ) => {
     if (answerText.trim().length < 1) return;
@@ -486,16 +476,14 @@ function DraftScreen(props: {
       await billsApi.answerQuestion(organizationId, billDraft.paymentOrderId, billQuestionId, {
         answer: answerText.trim(),
         outcome,
-        resolvedFields: outcome === 'answered' ? openFields : settled,
         forwardTo: outcome === 'forwarded' ? { userId: forwardTo, question: answerText.trim() } : null,
       });
       await queryClient.invalidateQueries({ queryKey: ['bill-billDraft', organizationId, billDraft.paymentOrderId] });
       toast.success(
-        outcome === 'answered' ? 'Answered — the bill moves on.'
-          : outcome === 'partial' ? 'Saved. What you could not answer stays open for them.'
-          : outcome === 'forwarded' ? 'Passed on. They will see what is still outstanding.'
-          : 'Sent back — they will see it is still open.',
-        outcome === 'answered' ? 'Thanks' : outcome === 'partial' ? 'Partly answered' : outcome === 'forwarded' ? 'Forwarded' : 'Handed back',
+        outcome === 'answered' ? 'Answered. They will see it in their inbox.'
+          : outcome === 'forwarded' ? 'Passed on. Their answer goes back to whoever asked.'
+          : 'Sent back to them: they will see you could not answer.',
+        outcome === 'answered' ? 'Thanks' : outcome === 'forwarded' ? 'Passed on' : 'Handed back',
       );
       setAnswerFor(null);
       setAnswerText('');
@@ -1636,18 +1624,17 @@ activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
 
                 {/* One conversation, in order, the way people already expect
                     a conversation to look. Two kinds of message share it: a
-                    QUESTION, which names somebody and parks the bill until they
-                    answer, and a COMMENT, which parks nothing.
+                    QUESTION, which names somebody and waits for an answer, and
+                    a COMMENT, which waits for nothing. Neither holds the bill.
 
-                    They are different shapes on purpose. The whole value of a
-                    question is that "waiting on Zara" is TRUE — a hold with a
-                    name on it — and if it looked like chatter that would stop
-                    being visible. So a question is bordered and amber while it
-                    is owed; a comment is a quiet bubble.
+                    They are different shapes on purpose. A question is owed an
+                    answer, and if it looked like chatter that would stop being
+                    visible. So a question is bordered while it is open; a
+                    comment is a quiet bubble.
 
-                    Anyone may reply to a question; only the person asked may
-                    answer it. That is the same split, drawn once more: helping
-                    is open, releasing the bill is not. */}
+                    Anyone who works on bills may answer a question, not only
+                    the person named; the asker may close it themselves. A
+                    comment in reply helps and closes nothing. */}
                 {showThread ? (
                   <BillConversation
                     organizationId={organizationId}

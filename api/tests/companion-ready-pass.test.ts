@@ -29,9 +29,15 @@ test('quick pass: sending one takes it off the list; a bill that stopped being r
   assert.deepEqual((await readyOf(w.orgId, w.clerk.token)).map((b) => b.billId), [w.bills.ready], 'sent: gone from the pass');
   assert.notEqual((await prisma.paymentOrder.findUniqueOrThrow({ where: { paymentOrderId: order[0]! } })).state, 'draft');
 
-  // Someone asks a question on the next one between the list and the click.
+  // A question holds nothing: the bill stays ready while one is open.
   await post(`/organizations/${w.orgId}/bills/${w.bills.ready}/ask`, { askedOfUserId: w.owner.userId, question: 'Is this the right amount?' }, w.clerk.token);
-  assert.deepEqual(await readyOf(w.orgId, w.clerk.token), [], 'a bill with an open question is not ready');
+  assert.deepEqual((await readyOf(w.orgId, w.clerk.token)).map((b) => b.billId), [w.bills.ready], 'an open question does not stop a bill being ready');
+
+  // Its vendor is put on hold between the list and the click.
+  const vendorId = (await prisma.paymentOrder.findUniqueOrThrow({ where: { paymentOrderId: w.bills.ready } })).counterpartyId!;
+  const held = await raw('PATCH', `/organizations/${w.orgId}/counterparties/${vendorId}/payable-status`, w.owner.token, { status: 'held', reason: 'Disputed delivery' });
+  assert.ok(held.status < 300, 'the hold went on');
+  assert.deepEqual(await readyOf(w.orgId, w.clerk.token), [], 'a bill whose vendor is on hold is not ready');
   const refused = await raw('POST', `/organizations/${w.orgId}/bills/${w.bills.ready}/confirm-as-read`, w.clerk.token, {});
   assert.ok(refused.status >= 400, 'the server re-checks at the click, not the list');
   assert.equal((await prisma.paymentOrder.findUniqueOrThrow({ where: { paymentOrderId: w.bills.ready } })).state, 'draft');

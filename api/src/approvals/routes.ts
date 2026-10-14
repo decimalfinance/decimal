@@ -57,6 +57,10 @@ approvalsRouter.post('/organizations/:organizationId/approvals/tasks/:taskId/com
   const idempotencyKey = req.get('idempotency-key') ?? z.object({ idempotencyKey: z.string().min(8) }).parse(req.body).idempotencyKey;
   const command = approverCommandSchema.parse(req.body.command);
   if (!idempotencyKey) throw badRequest('idempotency key required');
+  // A question holds nothing (2026-10-14), so nothing may park a task on one.
+  // Questions go through the bill's Ask. provide_info stays, to release tasks
+  // parked by questions asked before then.
+  if (command.kind === 'request_info') throw badRequest('Ask your question on the bill instead. A question no longer holds it.');
   const actorId = await personForUser(organizationId, req.auth!.userId);
   const result = await executeCommand({ taskId, actorId, command, idempotencyKey }).catch(mapEngineError);
   sendJson(res, result);

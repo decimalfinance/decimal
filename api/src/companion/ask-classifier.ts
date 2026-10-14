@@ -7,10 +7,11 @@
 //   covered       everything it asks is already there ("approve BW-2219" when
 //                 her approval is already waiting) — send nothing, tell the
 //                 sender she already has it
-//   adds          it asks her to do or check something new, and the bill need
-//                 not stop — a nudge, a new line on her item
-//   needs_answer  it asks for something only she can answer, and the bill
-//                 should not move until she does — a question, which holds it
+//   adds          it asks her to do or check something new — a nudge, a new
+//                 line on her item
+//   needs_answer  it asks her for information — a question. It holds nothing
+//                 either: anyone who works on bills may answer it, and the
+//                 answer goes back to whoever asked
 //
 // Luna decides; a plain rule decides when no model is set up or the call fails.
 import { config } from '../config.js';
@@ -28,7 +29,7 @@ export function setAskClassifierForTests(fn: ((input: AskInput) => Promise<AskDe
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
 
-/** The rule used when there is no model: exact repeats and approval asks are covered, questions hold. */
+/** The rule used when there is no model: exact repeats and approval asks are covered, questions are questions. */
 export function classifyAskByRule(input: AskInput): AskDecision {
   const msg = norm(input.message);
   const already = input.existing.map(norm);
@@ -40,7 +41,7 @@ export function classifyAskByRule(input: AskInput): AskDecision {
     return { decision: 'covered', note: `${input.recipientName}'s approval is already waiting on this bill.` };
   }
   if (/\?\s*$/.test(input.message.trim())) {
-    return { decision: 'needs_answer', note: `This asks ${input.recipientName} for an answer, so it holds the bill until they reply.` };
+    return { decision: 'needs_answer', note: `This asks ${input.recipientName} for an answer, so it goes to them as a question.` };
   }
   return { decision: 'adds', note: `Adds a new line to ${input.recipientName}'s item for this bill.` };
 }
@@ -59,7 +60,7 @@ export async function classifyAsk(input: AskInput): Promise<AskDecision> {
   if (override) return override(input);
   if (!config.openAiApiKey) return classifyAskByRule(input);
   const existing = input.existing.length ? input.existing.map((e) => `- ${e}`).join('\n') : '- (nothing yet)';
-  const prompt = `${input.recipientName}'s inbox item for ${input.billLabel} currently asks them to:\n${existing}\n\nA colleague wants to ask ${input.recipientName}: "${input.message}"\n\nDecide:\n- covered: everything this asks is already in the item (for example asking them to approve when their approval is already waiting). Nothing new would be sent.\n- adds: it asks them to do or check something new, and the bill can keep moving meanwhile.\n- needs_answer: it asks for information only they can give (which PO, was the work delivered, is this amount right), and the bill should wait for the answer.\nThen write a one-sentence note for the colleague sending it, in the third person about ${input.recipientName}. For covered, say what ${input.recipientName} already has, e.g. "${input.recipientName}'s approval on this bill is already waiting, so there is nothing new to send." For needs_answer, say it will hold the bill until they reply. For adds, say what is being added.`;
+  const prompt = `${input.recipientName}'s inbox item for ${input.billLabel} currently asks them to:\n${existing}\n\nA colleague wants to ask ${input.recipientName}: "${input.message}"\n\nDecide:\n- covered: everything this asks is already in the item (for example asking them to approve when their approval is already waiting). Nothing new would be sent.\n- adds: it asks them to do or check something new.\n- needs_answer: it asks them for information (which PO, was the work delivered, is this amount right). It becomes a question; the answer goes back to the colleague.\nThen write a one-sentence note for the colleague sending it, in the third person about ${input.recipientName}. For covered, say what ${input.recipientName} already has, e.g. "${input.recipientName}'s approval on this bill is already waiting, so there is nothing new to send." For needs_answer, say it goes to them as a question. Never say it holds or stops the bill: nothing does. For adds, say what is being added.`;
   try {
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',

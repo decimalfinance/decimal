@@ -13,9 +13,8 @@ ALTER TABLE bill_questions
   ADD COLUMN IF NOT EXISTS forwarded_to_question_id UUID REFERENCES bill_questions (bill_question_id),
   ADD COLUMN IF NOT EXISTS forwarded_from_question_id UUID REFERENCES bill_questions (bill_question_id);
 
-ALTER TABLE bill_questions DROP CONSTRAINT IF EXISTS bill_questions_outcome_check;
-ALTER TABLE bill_questions ADD CONSTRAINT bill_questions_outcome_check
-  CHECK (outcome IS NULL OR outcome IN ('answered', 'partial', 'handed_back', 'forwarded'));
+-- 'partial' and 'forwarded' join the allowed outcomes in 034-open-questions.sql,
+-- which defines the whole list once.
 
 CREATE INDEX IF NOT EXISTS idx_bill_questions_chain
   ON bill_questions (forwarded_from_question_id);

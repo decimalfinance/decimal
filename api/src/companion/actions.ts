@@ -35,9 +35,9 @@ const MAX_CARDS = 12;
 export const ACTION_KINDS = ['look_at', 'send_for_approval', 'close_duplicate', 'clear_duplicate', 'approve', 'ask_person', 'save_habit', 'forget_habit'] as const;
 export type ActionKind = (typeof ACTION_KINDS)[number];
 /**
- * What a card turns out to be. ask_person becomes a nudge (does not hold the
- * bill), a question (holds it until answered), or already_asked (nothing to
- * send: the person already has it in their inbox).
+ * What a card turns out to be. ask_person becomes a nudge (something to do),
+ * a question (something to answer; it holds nothing either), or already_asked
+ * (nothing to send: the person already has it in their inbox).
  */
 export type CardKind = Exclude<ActionKind, 'ask_person'> | 'nudge' | 'question' | 'already_asked';
 
@@ -69,7 +69,7 @@ const COPY: Record<CardKind, { verb: string; button: string; done: string }> = {
   clear_duplicate: { verb: 'Not a duplicate', button: 'Open the duplicate check', done: 'Opened' },
   approve: { verb: 'Approve', button: 'Open it to approve', done: 'Opened' },
   nudge: { verb: 'Nudge', button: 'Send nudge', done: 'Nudge sent' },
-  question: { verb: 'Ask', button: 'Ask (holds the bill)', done: 'Question sent' },
+  question: { verb: 'Ask', button: 'Send question', done: 'Question sent' },
   already_asked: { verb: 'Already asked', button: '', done: '' },
   save_habit: { verb: 'Set a default', button: 'Set the default', done: 'Default set' },
   forget_habit: { verb: 'Remove the default', button: 'Remove it', done: 'Default removed' },
@@ -178,7 +178,7 @@ export async function buildActionCards(args: {
         } else {
           cardKind = 'nudge';
           title = `Nudge ${person.name}: ${name}`;
-          detail = `"${message}" · doesn't hold the bill`;
+          detail = `"${message}" · they tick it off when it's done`;
           call = { path: '/inbox/nudge', body: { billId: row.paymentOrderId, toUserId: person.userId, text: message } };
         }
         break;

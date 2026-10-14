@@ -20,7 +20,7 @@ test('inbox: each person sees their own work, one item per bill', async () => {
   const clerk = await inboxOf(w.orgId, w.clerk.token);
   // The clerk was asked about Lonely Ltd AND reviews it: one item, two lines.
   const lonely = itemFor(clerk, w.bills.lonely)!;
-  assert.deepEqual(lonely.lines.map((l) => l.kind), ['question', 'review'], 'the question first: it holds the bill');
+  assert.deepEqual(lonely.lines.map((l) => l.kind), ['question', 'review'], 'the question first: somebody is waiting on the answer');
   assert.match(lonely.lines[0]!.text, /asked: "Which category is this\?"/);
   assert.equal(clerk.items.filter((i) => i.billId === w.bills.lonely).length, 1, 'never the same bill twice');
   assert.equal(itemFor(clerk, w.bills.ready)!.lines[0]!.kind, 'sign_off');
@@ -174,7 +174,7 @@ test('inbox: a companion ask becomes a nudge, a question, or "already has it" â€
   const adam = itemFor(await inboxOf(w.orgId, w.apprA.token), w.bills.submitted)!;
   assert.deepEqual(adam.lines.map((l) => l.kind), ['approval', 'ask']);
 
-  // A question, clicked: it holds the bill.
+  // A question, clicked: somebody is waiting on the answer.
   propose([a('Adam', 'Which PO is this for?')]);
   const qTurn = await ask(w.orgId, w.owner.token, 'Ask Adam which PO it is.');
   const q = qTurn.answer.actions[0];
@@ -182,7 +182,7 @@ test('inbox: a companion ask becomes a nudge, a question, or "already has it" â€
   assert.equal(q.call.path, `/bills/${w.bills.submitted}/ask`);
   await post(`/organizations/${w.orgId}${q.call.path}`, q.call.body, w.owner.token);
   const held = itemFor(await inboxOf(w.orgId, w.apprA.token), w.bills.submitted)!;
-  assert.equal(held.lines[0]!.kind, 'question', 'the question leads: it holds the bill');
+  assert.equal(held.lines[0]!.kind, 'question', 'the question leads: somebody is waiting on the answer');
   assert.equal(held.lines.length, 3, 'still one item: question, approval, ask');
   setAskClassifierForTests(null);
 });

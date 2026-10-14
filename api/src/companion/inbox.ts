@@ -19,15 +19,17 @@ import { getApprovalsInbox, getBillsWorkbench } from '../payments/bills.js';
 import { involvedBillIds } from '../payments/bill-visibility.js';
 import { getOrgAccess } from '../approvals/permissions.js';
 
-export type InboxLineKind = 'approval' | 'question' | 'review' | 'sign_off' | 'sent_back' | 'unreadable' | 'ask' | 'sync_failed' | 'learned';
+export type InboxLineKind = 'approval' | 'question' | 'reply' | 'review' | 'sign_off' | 'sent_back' | 'unreadable' | 'ask' | 'sync_failed' | 'learned';
 
 export type InboxLine = {
   kind: InboxLineKind;
   text: string;
   at: string;
-  /** For an ask: who asked, and the id to tick it off. */
+  /** For an ask: who asked, and the id to tick it off. For a reply: who answered. */
   from?: string | null;
   askId?: string;
+  /** For a reply to your question: the question, to tick the reply off. */
+  questionId?: string;
 };
 
 export type InboxItem = {
@@ -47,7 +49,7 @@ export type InboxItem = {
   isNew: boolean;
 };
 
-const URGENCY: Record<InboxLineKind, number> = { question: 0, approval: 1, ask: 2, sync_failed: 3, sent_back: 3, review: 4, unreadable: 5, sign_off: 6, learned: 7 };
+const URGENCY: Record<InboxLineKind, number> = { question: 0, reply: 0, approval: 1, ask: 2, sync_failed: 3, sent_back: 3, review: 4, unreadable: 5, sign_off: 6, learned: 7 };
 
 /**
  * Close asks the recipient has already dealt with: they commented on the bill
@@ -81,10 +83,44 @@ async function settleAsks(organizationId: string, userId: string): Promise<void>
   }
 }
 
+/**
+ * Mark replies to this person's questions as dealt with once they act on the
+ * bill after the reply (a comment or anything they do to it), or the bill is
+ * closed. Done does the same by hand.
+ */
+async function settleReplies(organizationId: string, userId: string): Promise<void> {
+  const open = await prisma.billQuestion.findMany({
+    where: { organizationId, askedByUserId: userId, answeredAt: { not: null }, askerDoneAt: null },
+    select: { billQuestionId: true, paymentOrderId: true, answeredAt: true },
+  });
+  if (open.length === 0) return;
+  const billIds = [...new Set(open.map((q) => q.paymentOrderId))];
+  const [bills, comments, events] = await Promise.all([
+    prisma.paymentOrder.findMany({ where: { paymentOrderId: { in: billIds } }, select: { paymentOrderId: true, state: true } }),
+    prisma.billComment.findMany({ where: { paymentOrderId: { in: billIds }, authorUserId: userId }, select: { paymentOrderId: true, createdAt: true } }),
+    prisma.paymentOrderEvent.findMany({ where: { paymentOrderId: { in: billIds }, actorId: userId }, select: { paymentOrderId: true, createdAt: true } }),
+  ]);
+  const closedBills = new Set(bills.filter((b) => b.state === 'cancelled' || b.state === 'executed' || b.state === 'settled').map((b) => b.paymentOrderId));
+  const lastAct = new Map<string, Date>();
+  for (const x of [...comments, ...events]) {
+    const was = lastAct.get(x.paymentOrderId);
+    if (!was || x.createdAt > was) lastAct.set(x.paymentOrderId, x.createdAt);
+  }
+  const now = new Date();
+  for (const q of open) {
+    if (closedBills.has(q.paymentOrderId) || (lastAct.get(q.paymentOrderId) ?? new Date(0)) > q.answeredAt!) {
+      await prisma.billQuestion.updateMany({ where: { billQuestionId: q.billQuestionId, askerDoneAt: null }, data: { askerDoneAt: now } });
+    }
+  }
+}
+
 export async function getInbox(organizationId: string, viewerUserId: string, opts: { settle?: boolean } = {}) {
   // Tidying closes asks the person already dealt with. A read on someone
   // else's behalf (the companion deciding how an ask would land) must not.
-  if (opts.settle !== false) await settleAsks(organizationId, viewerUserId);
+  if (opts.settle !== false) {
+    await settleAsks(organizationId, viewerUserId);
+    await settleReplies(organizationId, viewerUserId);
+  }
   const access = await getOrgAccess(organizationId, viewerUserId);
   const isAdmin = access?.isPrimaryOrAdmin ?? false;
   const canReview = isAdmin || (access?.capabilities.includes('bills.edit') ?? false);
@@ -142,7 +178,8 @@ export async function getInbox(organizationId: string, viewerUserId: string, opt
       at: (row?.createdAt ?? new Date()).toISOString(),
     });
   }
-  // Questions asked of this person, which hold the bill until answered.
+  // Questions asked of this person, until anyone answers them. A question
+  // holds nothing; it waits on them only in the sense that they were asked.
   for (const q of (approvals.questionsForYou ?? []) as Array<{ paymentOrderId: string; question: string; askedByName: string | null; askedAt: string | Date; vendorName: string; invoiceNumber: string | null; amountUsd: number }>) {
     add(itemFor(q.paymentOrderId, { vendor: q.vendorName, invoice: q.invoiceNumber, amountUsd: q.amountUsd }), {
       kind: 'question',
@@ -186,6 +223,28 @@ export async function getInbox(organizationId: string, viewerUserId: string, opt
     if (!row) continue; // a bill this person can no longer see
     const from = names.get(a.fromUserId) ?? 'Someone';
     add(itemFor(a.paymentOrderId), { kind: 'ask', text: a.text, at: a.createdAt.toISOString(), from, askId: a.askId });
+  }
+  // Replies to what this person asked, until they deal with them. A reply
+  // closes the question; this is how the asker hears it.
+  const replies = await prisma.billQuestion.findMany({
+    where: { organizationId, askedByUserId: viewerUserId, answeredAt: { not: null }, askerDoneAt: null, outcome: { in: ['answered', 'handed_back', 'partial'] } },
+    orderBy: { answeredAt: 'asc' },
+  });
+  if (replies.length > 0) {
+    const who = new Map((await prisma.user.findMany({
+      where: { userId: { in: [...new Set(replies.map((r) => r.answeredByUserId ?? r.askedOfUserId))] } },
+      select: { userId: true, displayName: true, email: true },
+    })).map((u) => [u.userId, u.displayName?.trim() || u.email]));
+    for (const r of replies) {
+      if (!rows.get(r.paymentOrderId)) continue; // a bill this person can no longer see
+      const by = who.get(r.answeredByUserId ?? r.askedOfUserId) ?? 'Someone';
+      const answer = (r.answer ?? '').trim();
+      // A question settled by something someone did already says who did it.
+      const text = r.outcome === 'handed_back' ? `${by} couldn't answer: "${answer}"`
+        : answer.startsWith(by) ? answer
+        : `${by} answered: "${answer}"`;
+      add(itemFor(r.paymentOrderId), { kind: 'reply', text, at: r.answeredAt!.toISOString(), from: by, questionId: r.billQuestionId });
+    }
   }
   // Documents that could not be read have no bill, and still need someone.
   if (canReview) {
@@ -240,6 +299,16 @@ export async function markAllInboxSeen(organizationId: string, userId: string) {
   return { ok: true, marked: items.filter((i) => i.billId).length };
 }
 
+/** The asker ticks a reply to their question off. Nobody else can. */
+export async function tickReply(organizationId: string, userId: string, billQuestionId: string) {
+  const question = await prisma.billQuestion.findFirst({ where: { billQuestionId, organizationId, askedByUserId: userId } });
+  if (!question) throw notFound('No such reply.');
+  if (!question.askerDoneAt) {
+    await prisma.billQuestion.update({ where: { billQuestionId }, data: { askerDoneAt: new Date() } });
+  }
+  return { ok: true };
+}
+
 /** The recipient ticks an ask off. Nobody else can. */
 export async function tickAsk(organizationId: string, userId: string, askId: string) {
   const ask = await prisma.inboxAsk.findFirst({ where: { askId, organizationId, toUserId: userId } });
@@ -251,9 +320,9 @@ export async function tickAsk(organizationId: string, userId: string, askId: str
 }
 
 /**
- * Ask a colleague to do something on a bill, without holding it (a question
- * holds it; this does not). Lands as a line on their item for the bill. The
- * same open ask twice is one ask.
+ * Ask a colleague to do something on a bill. Like a question, it holds
+ * nothing. Lands as a line on their item for the bill. The same open ask twice
+ * is one ask.
  */
 export async function nudgeAboutBill(args: {
   organizationId: string;

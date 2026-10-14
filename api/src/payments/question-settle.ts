@@ -125,13 +125,15 @@ export async function settleQuestionsFromDeed(deed: Deed): Promise<void> {
         data: {
           answer,
           answeredAt: deed.at,
+          answeredByUserId: deed.actorUserId ?? null,
           outcome: 'answered',
           resolvedFields: s.resolvedFields as Prisma.InputJsonValue,
         },
       });
 
-      // Un-park the bill through the same command a typed answer uses, so the
-      // engine and the record cannot drift apart.
+      // A question asked before 2026-10-14 may still hold its approval step.
+      // Release it through the same command a typed answer uses, so the engine
+      // and the record cannot drift apart. Questions asked since hold nothing.
       if (s.taskId && deed.actorUserId) {
         try {
           const { executeCommand } = await import('../approvals/lifecycle.js');

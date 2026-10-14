@@ -909,7 +909,7 @@ model BillQuestion {
   /// Review-screen field keys this question concerns, for highlighting.
   highlightFields Json     @default("[]") @map("highlight_fields")
   answer         String?
-  /// 'answered' | 'partial' | 'handed_back' | 'forwarded'.
+  /// 'answered' | 'handed_back' | 'forwarded' | 'closed' (by the asker). 'partial' only on rows from before 2026-10-14.
   outcome        String?
   /// Which of the asked fields this reply actually settled.
   resolvedFields Json      @default("[]") @map("resolved_fields")
@@ -917,6 +917,10 @@ model BillQuestion {
   forwardedToQuestionId   String? @map("forwarded_to_question_id") @db.Uuid
   forwardedFromQuestionId String? @map("forwarded_from_question_id") @db.Uuid
   answeredAt     DateTime? @map("answered_at") @db.Timestamptz(6)
+  /// Who answered. Anyone who works on bills may answer, not only the person asked.
+  answeredByUserId String?  @map("answered_by_user_id") @db.Uuid
+  /// When the asker dealt with the reply: ticked Done, acted on the bill, or closed it themselves.
+  askerDoneAt    DateTime? @map("asker_done_at") @db.Timestamptz(6)
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@index([organizationId, askedOfUserId, answeredAt])

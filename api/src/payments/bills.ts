@@ -33,7 +33,7 @@ import type { BillFlag } from './bill-flags.js';
 import { getBillCeilingMinor } from '../approvals/store.js';
 import { involvedBillIds } from './bill-visibility.js';
 import type { ExtractedInvoice } from './document-extract.js';
-import { conflict, forbidden, notFound } from '../infra/api-errors.js';
+import { badRequest, conflict, forbidden, notFound } from '../infra/api-errors.js';
 
 // Exact field→document boxes for ANY bill, whenever it is opened: if this
 // order's extraction predates the provenance pass (or the matcher improved),
@@ -1038,25 +1038,6 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
     });
   }
 
-  // Any unanswered question on a bill, asked of anyone: the companion does not
-  // rate a bill ready while somebody is still being asked about it.
-  const anyOpenQuestion = new Map<string, string>();
-  if (orders.length > 0) {
-    const open = await prisma.billQuestion.findMany({
-      where: { organizationId, answeredAt: null, paymentOrderId: { in: orders.map((o) => o.paymentOrderId) } },
-      orderBy: { createdAt: 'asc' },
-      select: { paymentOrderId: true, askedOfUserId: true },
-    });
-    const people = open.length === 0 ? [] : await prisma.user.findMany({
-      where: { userId: { in: [...new Set(open.map((q) => q.askedOfUserId))] } },
-      select: { userId: true, displayName: true, email: true },
-    });
-    const nameOf = new Map(people.map((u) => [u.userId, u.displayName?.trim() || u.email]));
-    for (const q of open) {
-      if (!anyOpenQuestion.has(q.paymentOrderId)) anyOpenQuestion.set(q.paymentOrderId, nameOf.get(q.askedOfUserId) ?? 'a colleague');
-    }
-  }
-
   // Duplicate detection over rows we already hold. findDuplicateBills would be
   // one query per bill; matchDuplicates is the same rules against the same
   // candidate set, in memory. Grouped by vendor because that is how the query
@@ -1279,7 +1260,6 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
         fieldStatus: isRecord(extracted?.fieldStatus) ? extracted!.fieldStatus : null,
         ungrounded: Array.isArray(extracted?.ungrounded) ? (extracted!.ungrounded as unknown[]).filter((x): x is string => typeof x === 'string') : [],
         confirmedByPerson: isRecord(metadataRecord.verification) && Boolean(metadataRecord.verification.confirmedAt),
-        openQuestionTo: anyOpenQuestion.get(order.paymentOrderId) ?? null,
       }),
       // A cleared duplicate flag must stay VISIBLE on the row — the operator
       // scanning To-pay is the last human checkpoint (testbench 001 §5).
@@ -2128,19 +2108,27 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     // questions, which is what makes the bill's own screen the place the work
     // is discussed rather than the place it is recorded after the fact.
     comments: await listBillComments(organizationId, order.paymentOrderId),
-    questions: (await listBillQuestions(organizationId, order.paymentOrderId)).map((q) => ({
-      ...q,
-      // Whose move it is, decided here rather than by the client comparing ids.
-      youWereAsked: Boolean(viewerUserId && q.askedOfUserId === viewerUserId && !q.answeredAt),
-      // A handed-back question is still open work for the ASKER — it came back
-      // unresolved, so it must not look settled on their screen.
-      stillOpen: q.outcome !== 'answered' && q.outcome !== 'forwarded',
-      // What is still wanted: the asked fields minus anything already settled.
-      // A partial answer must stop highlighting what it DID resolve, or the
-      // next person cannot tell which half is left.
-      openFields: q.highlightFields.filter((f) => !q.resolvedFields.includes(f)),
-      youAsked: Boolean(viewerUserId && q.askedByUserId === viewerUserId),
-    })),
+    questions: await (async () => {
+      const rows = await listBillQuestions(organizationId, order.paymentOrderId);
+      // Anyone who works on bills may answer a question, not only the person
+      // asked; people who can only view bills may not.
+      const { getOrgAccess, canBeAskedAboutBills } = await import('../approvals/permissions.js');
+      const viewerAnswers = Boolean(viewerUserId && rows.some((q) => !q.answeredAt))
+        && canBeAskedAboutBills(await getOrgAccess(organizationId, viewerUserId!));
+      return rows.map((q) => ({
+        ...q,
+        // Whose move it is, decided here rather than by the client comparing ids.
+        youWereAsked: Boolean(viewerUserId && q.askedOfUserId === viewerUserId && !q.answeredAt),
+        // Open until anyone answers it, it is passed on or handed back, or the
+        // asker closes it. A question holds nothing either way.
+        stillOpen: !q.answeredAt,
+        canAnswer: !q.answeredAt && viewerAnswers && q.askedByUserId !== viewerUserId,
+        canClose: !q.answeredAt && Boolean(viewerUserId && q.askedByUserId === viewerUserId),
+        // What is still wanted: the asked fields minus anything already settled.
+        openFields: q.highlightFields.filter((f) => !q.resolvedFields.includes(f)),
+        youAsked: Boolean(viewerUserId && q.askedByUserId === viewerUserId),
+      }));
+    })(),
     state: order.state,
     // Two different reasons a bill cannot be edited, and the screen needs both.
     //
@@ -3141,7 +3129,7 @@ export async function listBillQuestions(organizationId: string, paymentOrderId: 
     take: 50,
   });
   if (rows.length === 0) return [];
-  const userIds = [...new Set(rows.flatMap((r) => [r.askedByUserId, r.askedOfUserId]))];
+  const userIds = [...new Set(rows.flatMap((r) => [r.askedByUserId, r.askedOfUserId, ...(r.answeredByUserId ? [r.answeredByUserId] : [])]))];
   const users = await prisma.user.findMany({
     where: { userId: { in: userIds } },
     select: { userId: true, displayName: true },
@@ -3157,7 +3145,10 @@ export async function listBillQuestions(organizationId: string, paymentOrderId: 
     askedOfUserId: r.askedOfUserId,
     askedOfName: nameOf.get(r.askedOfUserId) ?? 'Someone',
     answer: r.answer,
-    outcome: r.outcome as 'answered' | 'partial' | 'handed_back' | 'forwarded' | null,
+    outcome: r.outcome as 'answered' | 'partial' | 'handed_back' | 'forwarded' | 'closed' | null,
+    // Anyone who works on bills may answer. Rows from before 2026-10-14 have no
+    // answerer recorded, and were answered by the person asked.
+    answeredByName: r.answeredAt ? (nameOf.get(r.answeredByUserId ?? r.askedOfUserId) ?? 'Someone') : null,
     resolvedFields: Array.isArray(r.resolvedFields) ? (r.resolvedFields as string[]) : [],
     forwardedFromQuestionId: r.forwardedFromQuestionId,
     answeredAt: r.answeredAt?.toISOString() ?? null,
@@ -3166,11 +3157,15 @@ export async function listBillQuestions(organizationId: string, paymentOrderId: 
 }
 
 /**
- * Answer a question someone asked you about a bill.
+ * Answer a question asked about a bill.
  *
- * Only the person asked may answer — an answer from anyone else is not the
- * thing the asker is waiting on. Un-parks the engine task when one is attached,
- * so the bill resumes instead of sitting answered-but-still-waiting.
+ * Anyone who works on bills may answer, not only the person asked: someone else
+ * often knows, and the answer is what the asker wanted, whoever gives it. The
+ * person asked has two more replies of their own: they cannot answer (it goes
+ * back to the asker) or they pass it on (a new question to someone else, still
+ * the asker's). Any reply closes the question; there is no "part of it", and
+ * whoever is not satisfied asks again. The asker closes their own question with
+ * closeBillQuestion, not here.
  */
 export async function answerBillQuestion(args: {
   organizationId: string;
@@ -3178,75 +3173,53 @@ export async function answerBillQuestion(args: {
   answererUserId: string;
   answer: string;
   /**
-   * Did this actually resolve what was asked?
-   *
-   * 'answered' means the person confirmed or corrected what the asker wanted.
-   * 'handed_back' is a real and useful reply that does NOT resolve it — "I
-   * don't know", "ask procurement". Both are legitimate; conflating them is
-   * not. Treating a hand-back as an answer closes the asker's concern without
-   * touching it, which manufactures confidence nobody earned.
+   * 'answered': what the asker wanted, from anyone who works on bills.
+   * 'handed_back': the person asked cannot answer; it goes back to the asker.
+   * 'forwarded': the person asked passes it to someone else.
    */
-  outcome: 'answered' | 'partial' | 'handed_back' | 'forwarded';
-  /** Which of the asked fields this reply settled. Empty for a hand-back. */
-  resolvedFields?: string[] | null;
+  outcome: 'answered' | 'handed_back' | 'forwarded';
   /** When forwarding: who now gets asked, and what. */
   forwardTo?: { userId: string; question: string } | null;
 }) {
   const answer = args.answer.trim();
-  if (answer.length < 1) throw new Error('Write an answer.');
+  if (answer.length < 1) throw badRequest('Write an answer.');
   const question = await prisma.billQuestion.findFirst({
     where: { billQuestionId: args.billQuestionId, organizationId: args.organizationId },
   });
-  if (!question) throw new Error('Question not found');
-  if (question.askedOfUserId !== args.answererUserId) {
-    throw new Error('Only the person who was asked can answer this.');
+  if (!question) throw notFound('No such question.');
+  if (question.answeredAt) throw conflict('That question is already closed.');
+  if (question.askedByUserId === args.answererUserId) {
+    throw forbidden('You asked this one. Close it instead of answering it.');
   }
-  if (question.answeredAt) throw new Error('That question has already been answered.');
+  if (args.outcome !== 'answered' && question.askedOfUserId !== args.answererUserId) {
+    throw forbidden('Only the person who was asked can pass it on or say they cannot answer.');
+  }
+  const { getOrgAccess, canBeAskedAboutBills } = await import('../approvals/permissions.js');
+  if (!canBeAskedAboutBills(await getOrgAccess(args.organizationId, args.answererUserId))) {
+    throw forbidden('Only people who work on bills can answer questions about them.');
+  }
 
-  // Only a COMPLETE answer un-parks the bill. Partial, handed back and
-  // forwarded all leave it waiting, because some of what the asker wanted is
-  // still outstanding — and a bill that resumes on a half-answer is exactly the
-  // false confidence this whole distinction exists to prevent.
+  // A question asked before 2026-10-14 may still have its approval step
+  // parked. An answer releases it; questions asked since park nothing.
   if (question.taskId && args.outcome === 'answered') {
-    try {
-      const { executeCommand } = await import('../approvals/lifecycle.js');
-      const person = await prisma.$queryRaw<{ id: string }[]>`
-        SELECT id FROM approval.people
-        WHERE organization_id = ${args.organizationId}::uuid AND user_id = ${args.answererUserId}::uuid LIMIT 1`;
-      if (person[0]) {
-        await executeCommand({
-          taskId: question.taskId,
-          actorId: person[0].id,
-          idempotencyKey: `answer:${args.billQuestionId}`,
-          command: { kind: 'provide_info', answer } as never,
-        });
-      }
-    } catch (error) {
-      logger.warn('bill_answer.resume_failed', {
-        organizationId: args.organizationId,
-        billQuestionId: args.billQuestionId,
-        ...(error instanceof Error ? { message: error.message } : {}),
-      });
-    }
+    await releaseParkedQuestion(args.organizationId, question.taskId, args.answererUserId, args.billQuestionId, answer);
   }
 
-  // Forwarding raises a NEW question to the next person, linked both ways so a
-  // chain reads end to end. It carries the fields still outstanding, not the
-  // original list — passing along what someone already settled would have the
-  // next person redo it.
+  // Passing it on raises a new question to the next person, linked both ways
+  // and still asked by the original asker, so the answer comes back to whoever
+  // wanted it rather than to whoever passed it along.
   let forwardedToQuestionId: string | null = null;
-  if (args.outcome === 'forwarded' && args.forwardTo) {
-    const settled = new Set(args.resolvedFields ?? []);
-    const stillOpen = (Array.isArray(question.highlightFields) ? (question.highlightFields as string[]) : [])
-      .filter((f) => !settled.has(f));
+  if (args.outcome === 'forwarded') {
+    if (!args.forwardTo) throw badRequest('Say who to pass it to.');
     const next = await askAboutBill({
       organizationId: args.organizationId,
       paymentOrderId: question.paymentOrderId,
-      askedByUserId: args.answererUserId,
+      askedByUserId: question.askedByUserId,
       askedOfUserId: args.forwardTo.userId,
       question: args.forwardTo.question,
       aboutFlag: question.aboutFlag,
-      highlightFields: stillOpen,
+      highlightFields: Array.isArray(question.highlightFields) ? (question.highlightFields as string[]) : [],
+      questionScope: (question.questionScope as 'covered_by_flag' | 'asks_more' | null) ?? null,
     });
     forwardedToQuestionId = next.billQuestionId;
     await prisma.billQuestion.update({
@@ -3255,15 +3228,73 @@ export async function answerBillQuestion(args: {
     });
   }
 
+  const at = new Date();
   return prisma.billQuestion.update({
     where: { billQuestionId: args.billQuestionId },
     data: {
       answer,
-      answeredAt: new Date(),
+      answeredAt: at,
+      answeredByUserId: args.answererUserId,
       outcome: args.outcome,
-      resolvedFields: args.resolvedFields ?? [],
+      // Passed on: nothing for the asker to hear about yet. The new question
+      // carries on, and its answer is what reaches them.
+      ...(args.outcome === 'forwarded' ? { askerDoneAt: at } : {}),
+      resolvedFields: (args.outcome === 'answered' && Array.isArray(question.highlightFields)
+        ? question.highlightFields
+        : []) as Prisma.InputJsonValue,
       ...(forwardedToQuestionId ? { forwardedToQuestionId } : {}),
     },
+  });
+}
+
+/** A question asked before 2026-10-14 may still hold its approval step. Release it. */
+async function releaseParkedQuestion(organizationId: string, taskId: string, userId: string, billQuestionId: string, answer: string) {
+  try {
+    const { executeCommand } = await import('../approvals/lifecycle.js');
+    const person = await prisma.$queryRaw<{ id: string }[]>`
+      SELECT id FROM approval.people
+      WHERE organization_id = ${organizationId}::uuid AND user_id = ${userId}::uuid LIMIT 1`;
+    if (person[0]) {
+      await executeCommand({
+        taskId,
+        actorId: person[0].id,
+        idempotencyKey: `answer:${billQuestionId}`,
+        command: { kind: 'provide_info', answer } as never,
+      });
+    }
+  } catch (error) {
+    logger.warn('bill_answer.resume_failed', {
+      organizationId,
+      billQuestionId,
+      ...(error instanceof Error ? { message: error.message } : {}),
+    });
+  }
+}
+
+/**
+ * The asker closes their own question: they remembered, found out another way,
+ * or no longer need it. An optional note reads as the answer.
+ */
+export async function closeBillQuestion(args: {
+  organizationId: string;
+  billQuestionId: string;
+  userId: string;
+  note?: string | null;
+}) {
+  const question = await prisma.billQuestion.findFirst({
+    where: { billQuestionId: args.billQuestionId, organizationId: args.organizationId },
+  });
+  if (!question) throw notFound('No such question.');
+  if (question.askedByUserId !== args.userId) throw forbidden('Only the person who asked can close this question.');
+  if (question.answeredAt) throw conflict('That question is already closed.');
+  const note = args.note?.trim() || null;
+  if (question.taskId) {
+    await releaseParkedQuestion(args.organizationId, question.taskId, args.userId, args.billQuestionId, note ?? 'Closed by the person who asked');
+  }
+  const at = new Date();
+  return prisma.billQuestion.update({
+    where: { billQuestionId: args.billQuestionId },
+    data: { answer: note, answeredAt: at, answeredByUserId: args.userId, outcome: 'closed', askerDoneAt: at },
   });
 }
 
@@ -3365,9 +3396,12 @@ export async function listAskCandidates(
 /**
  * Ask a colleague about a bill.
  *
- * Two things happen together and must not drift apart: the engine parks the
- * bill on the question (request_info), and we record who was asked about what.
- * The park is what stops the bill moving; the record is what teaches routing.
+ * A question holds nothing (2026-10-14). It is recorded and shown to the person
+ * asked, and anyone who works on bills may answer it, but the bill is not
+ * parked: a clerk who wants the answer first simply waits to send it, and an
+ * approver's own step already waits for them. Holding a bill on one named
+ * person's reply is what every workflow tool that tried it has had to soften
+ * (outputs/reports/Holding bills on questions.md).
  *
  * Available to anyone. Asking is never the dangerous act, so it must never be
  * the thing an approver lacks the standing to do.
@@ -3399,51 +3433,13 @@ export async function askAboutBill(args: {
   const { getOrgAccess, canBeAskedAboutBills } = await import('../approvals/permissions.js');
   const askedOf = await getOrgAccess(args.organizationId, args.askedOfUserId);
   if (!canBeAskedAboutBills(askedOf)) {
-    throw new Error('That person can only view bills, and asking one parks it until they answer. Ask somebody who works on it.');
+    throw new Error('That person can only view bills, so they cannot answer questions about them. Ask somebody who works on it.');
   }
 
   const target = await prisma.organizationMembership.findFirst({
     where: { organizationId: args.organizationId, userId: args.askedOfUserId, status: 'active' },
   });
   if (!target) throw new Error('That person is not an active member of this organization.');
-
-  // Park the bill via the engine when it has a live task, so the question
-  // behaves like every other pause: it reminds, it escalates, it never
-  // auto-denies. Best-effort — a recorded question with no park is still far
-  // better than a park with no record of who was asked.
-  let taskId: string | null = null;
-  try {
-    const [{ id }] = await prisma.$queryRaw<{ id: string }[]>`
-      SELECT t.id FROM approval.tasks t
-      JOIN approval.approval_plans p ON p.id = t.plan_id
-      JOIN approval.approvables a ON a.id = p.approvable_id
-      WHERE a.organization_id = ${args.organizationId}::uuid
-        AND a.attributes->>'paymentOrderId' = ${args.paymentOrderId}
-        AND t.state IN ('open', 'info_requested')
-      ORDER BY t.step_index LIMIT 1`;
-    const { executeCommand } = await import('../approvals/lifecycle.js');
-    const asker = await prisma.$queryRaw<{ id: string }[]>`
-      SELECT id FROM approval.people
-      WHERE organization_id = ${args.organizationId}::uuid AND user_id = ${args.askedByUserId}::uuid LIMIT 1`;
-    const askedOf = await prisma.$queryRaw<{ id: string }[]>`
-      SELECT id FROM approval.people
-      WHERE organization_id = ${args.organizationId}::uuid AND user_id = ${args.askedOfUserId}::uuid LIMIT 1`;
-    if (id && asker[0] && askedOf[0]) {
-      await executeCommand({
-        taskId: id,
-        actorId: asker[0].id,
-        idempotencyKey: `ask:${args.paymentOrderId}:${Date.now()}`,
-        command: { kind: 'request_info', question, from: askedOf[0].id } as never,
-      });
-      taskId = id;
-    }
-  } catch (error) {
-    logger.warn('bill_ask.park_failed', {
-      organizationId: args.organizationId,
-      paymentOrderId: args.paymentOrderId,
-      ...(error instanceof Error ? { message: error.message } : {}),
-    });
-  }
 
   // Prefer what the asker confirmed; fall back to the suggestion only when a
   // caller did not go through the confirm step. Either way the closed
@@ -3467,7 +3463,6 @@ export async function askAboutBill(args: {
     data: {
       organizationId: args.organizationId,
       paymentOrderId: args.paymentOrderId,
-      taskId,
       askedByUserId: args.askedByUserId,
       askedOfUserId: args.askedOfUserId,
       question,
@@ -4055,7 +4050,7 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
   const personOf = new Map(people.map((p) => [p.id, p]));
   const personView = (id: string | null | undefined) => {
     const p = id ? personOf.get(id) : null;
-    return p ? { personId: p.id, name: p.name, avatarUrl: p.avatar_url } : null;
+    return p ? { personId: p.id, userId: p.user_id, name: p.name, avatarUrl: p.avatar_url } : null;
   };
 
   // Command events grouped per task.
@@ -4586,7 +4581,9 @@ async function questionsAskedOf(organizationId: string, viewerUserId: string) {
     where: {
       organizationId,
       askedOfUserId: viewerUserId,
-      OR: [{ answeredAt: null }, { outcome: { notIn: ['answered'] } }],
+      // Waiting on you only until somebody answers, you pass it on or say you
+      // can't, or the asker closes it. Anyone who works on bills may answer.
+      answeredAt: null,
     },
     orderBy: { createdAt: 'asc' },
   });

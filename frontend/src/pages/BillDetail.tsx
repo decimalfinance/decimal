@@ -178,7 +178,7 @@ export function BillDetailPage() {
 
   const composerMeta: Record<ComposerKind, { title: string; desc: string; placeholder: string; btn: string; btnClass: string }> = {
     reject: { title: 'Reject this bill', desc: `A reason is required — ${requester?.name ?? 'the submitter'} and the route will see it.`, placeholder: 'Why is this being rejected?', btn: 'Reject bill', btnClass: 'btn-danger' },
-    info: { title: 'Request more info', desc: `Send it back to ${requester?.name ?? 'the submitter'} for a detail — the bill stays with you, not reset.`, placeholder: 'What do you need to see before approving?', btn: 'Send request', btnClass: 'btn-primary' },
+    info: { title: `Ask ${requester?.name ?? 'the submitter'}`, desc: 'Anyone who works on bills can answer, and the answer comes back to you. Nothing waits on it: you can still approve or reject.', placeholder: 'What do you need to know?', btn: 'Send question', btnClass: 'btn-primary' },
     reply: { title: 'Reply', desc: 'Your answer goes to the approver who asked, and the route keeps moving.', placeholder: 'Answer the question…', btn: 'Send answer', btnClass: 'btn-primary' },
     sendback: { title: 'Send back to draft', desc: 'Unwinds the approval: the bill returns to draft, and re-confirming starts a fresh approval run under current rules.', placeholder: 'Why is it going back? Goes on the record.', btn: 'Send back', btnClass: 'btn-danger' },
     recall: {
@@ -196,7 +196,21 @@ export function BillDetailPage() {
     const text = composerText.trim();
     if (!text || !composer) return;
     if (composer === 'reject') void act(viewer.openTaskId, { kind: 'reject', reason: text }, 'Rejected — the route stopped.');
-    if (composer === 'info' && requester) void act(viewer.openTaskId, { kind: 'request_info', question: text, from: requester.personId }, 'Question sent.');
+    if (composer === 'info' && requester?.userId) {
+      // A question, not a hold: it goes on the bill's conversation and the
+      // approval stays where it is.
+      const askedOfUserId = requester.userId;
+      setActing(true);
+      billsApi.ask(organizationId, paymentOrderId, { askedOfUserId, question: text })
+        .then(() => {
+          toast.success('Question sent.');
+          setComposer(null);
+          setComposerText('');
+          refresh();
+        })
+        .catch((err) => toast.error('That didn\'t go through', approvalActErrorMessage(err)))
+        .finally(() => setActing(false));
+    }
     if (composer === 'reply') void act(viewer.openAskTaskId, { kind: 'provide_info', answer: text }, 'Answer sent.');
     if (composer === 'sendback') {
       setActing(true);
@@ -644,7 +658,9 @@ export function BillDetailPage() {
               </span>
             ) : null}
             <span className="commit-spacer" />
-            <button type="button" className="btn btn-ghost" onClick={() => setComposer('info')} disabled={acting}>Request info</button>
+            {requester?.userId && !viewer.isRequester ? (
+              <button type="button" className="btn btn-ghost" onClick={() => setComposer('info')} disabled={acting}>Ask a question</button>
+            ) : null}
             <button type="button" className="btn btn-secondary" disabled={acting}
               onClick={() => void act(viewer.openTaskId, { kind: 'push_back' }, 'Pushed back — the route was flagged.')}>Push back</button>
             <button type="button" className="btn btn-danger-ghost" onClick={() => setComposer('reject')} disabled={acting}>Reject</button>
