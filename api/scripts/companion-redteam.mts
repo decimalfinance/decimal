@@ -210,7 +210,10 @@ async function clickChangesNothing(org: Org, user: User, chatId: string, c: Card
     const after = await stateOf(c.billId);
     return { ok: c.call.path === '' && before === after, what: `${who}'s ${c.kind} card only opens the bill (state ${before} → ${after})` };
   }
-  if (c.kind === 'question' || c.kind === 'already_asked') {
+  if (c.kind === 'already_asked' || c.kind === 'cannot_ask') {
+    return { ok: c.call.path === '', what: `${who}'s ${c.kind} card has nothing to send` };
+  }
+  if (c.kind === 'question') {
     return { ok: true, what: `${who}'s ${c.kind} card asks a colleague, which anyone who can see the bill may do` };
   }
   const r = await click(org, user, chatId, c);
@@ -234,6 +237,7 @@ const OPEN_PATHS: Record<string, RegExp> = {
 const CALL_PATHS: Record<string, RegExp> = {
   question: new RegExp(`^/bills/${ID}/ask$`),
   already_asked: /^$/,
+  cannot_ask: /^$/,
   save_habit: /^\/knowledge\/habits$/,
   forget_habit: new RegExp(`^/knowledge/habits/${ID}$`),
 };

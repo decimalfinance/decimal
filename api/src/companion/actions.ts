@@ -35,10 +35,11 @@ const MAX_CARDS = 12;
 export const ACTION_KINDS = ['look_at', 'send_for_approval', 'close_duplicate', 'clear_duplicate', 'approve', 'ask_person', 'save_habit', 'forget_habit'] as const;
 export type ActionKind = (typeof ACTION_KINDS)[number];
 /**
- * What a card turns out to be. ask_person becomes a question on the bill, or
- * already_asked (nothing to send: the person already has it in their inbox).
+ * What a card turns out to be. ask_person becomes a question on the bill,
+ * already_asked (nothing to send: the person already has it in their inbox),
+ * or cannot_ask (nothing to send: the person only views bills).
  */
-export type CardKind = Exclude<ActionKind, 'ask_person'> | 'question' | 'already_asked';
+export type CardKind = Exclude<ActionKind, 'ask_person'> | 'question' | 'already_asked' | 'cannot_ask';
 
 export type ProposedAction = { kind: ActionKind; billId: string; reason: string; toPerson?: string | null; message?: string | null; category?: string | null; focus?: string | null };
 
@@ -55,7 +56,7 @@ export type ActionCard = {
   call: { path: string; body: Record<string, unknown>; method?: 'POST' | 'PUT' | 'DELETE' };
   /** Go-there cards: the bill page to open, relative to /organizations/:orgId, and where on it to land (data-focus on the page). */
   open?: { path: string; focus: string | null } | null;
-  /** info: nothing to click (already_asked). */
+  /** info: nothing to click (already_asked, cannot_ask). */
   status: 'proposed' | 'done' | 'failed' | 'info';
   result: string | null;
 };
@@ -69,6 +70,7 @@ const COPY: Record<CardKind, { verb: string; button: string; done: string }> = {
   approve: { verb: 'Approve', button: 'Open it to approve', done: 'Opened' },
   question: { verb: 'Ask', button: 'Send question', done: 'Question sent' },
   already_asked: { verb: 'Already asked', button: '', done: '' },
+  cannot_ask: { verb: "Can't ask", button: '', done: '' },
   save_habit: { verb: 'Set a default', button: 'Set the default', done: 'Default set' },
   forget_habit: { verb: 'Remove the default', button: 'Remove it', done: 'Default removed' },
 };
@@ -159,8 +161,15 @@ export async function buildActionCards(args: {
         const visible = await involvedBillIds(args.organizationId, person.userId);
         if (visible !== null && !visible.has(row.paymentOrderId)) break;
         // Every ask is a question, and somebody who only views bills cannot
-        // be asked one; the click would only be refused.
-        if (!canBeAskedAboutBills(await getOrgAccess(args.organizationId, person.userId))) break;
+        // be asked one. Say so, rather than offer a click that would be refused.
+        if (!canBeAskedAboutBills(await getOrgAccess(args.organizationId, person.userId))) {
+          cardKind = 'cannot_ask';
+          title = `Can't ask ${person.name}: ${name}`;
+          detail = `${person.name} only views bills, so they can't be asked about one. Ask someone who works on bills.`;
+          status = 'info';
+          call = { path: '', body: {} };
+          break;
+        }
         // Read-only: deciding how an ask would land must not tidy their inbox.
         const theirs = (await getInbox(args.organizationId, person.userId, { settle: false })).items.find((i) => i.billId === row.paymentOrderId);
         const existing = (theirs?.lines ?? []).map((l) => l.text);

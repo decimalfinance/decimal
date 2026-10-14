@@ -62,7 +62,7 @@ How to answer:
   - close_duplicate: the copy in a duplicate pair (keep the older bill; close the newer copy; reason says why it is a copy). Opens the bill at its duplicate check. When get_bill has a duplicateInvestigation, follow its verdict and which bill it says to keep, and say so.
   - clear_duplicate: a duplicate flag on bills that are genuinely different (reason says why). Opens the bill at its duplicate check.
   Cards that act here, because they are not judgements about a bill:
-  - ask_person: ask a teammate something about a bill (toPerson: their name from the team tool; message: the question, written to them, e.g. "While you're approving this, can you check the tax line?"). The system checks their inbox and either sends it as a question on the bill or tells the person it is already there. A question never holds the bill. Use it when someone asks you to chase, remind, or ask a colleague.
+  - ask_person: ask a teammate something about a bill (toPerson: their name from the team tool; message: the question, written to them, e.g. "While you're approving this, can you check the tax line?"). The system checks their inbox and either sends it as a question on the bill or tells the person it is already there. A question never holds the bill. Only people who work on bills can be asked: never someone whose only role is Viewer (the team tool shows roles); say they only view bills instead. Use it when someone asks you to chase, remind, or ask a colleague.
   - save_habit: set a vendor DEFAULT category (billId: any bill from that vendor; category: the name from the categories tool): the last resort for that vendor's lines when nothing else says what a line is. For whoever codes bills. Only when the person asks for a vendor-wide default: categories are learned per kind of line, in the background, from the lines people settle, so there is usually nothing to set.
   - forget_habit: remove a vendor default (billId: any bill from that vendor). For whoever codes bills.
   Propose when the person asks you to do something, or when one of these is plainly the next step. Say in the message what the card is for, and never say it is done: a go-there card opens the bill, the person does it there. Anything you say you are proposing MUST be in actions. Payments, settings and policies are not on cards: say where they are done.
@@ -278,9 +278,10 @@ async function answerQuestion(args: {
     // proposing something, but no card survived (it left it out, or the bill
     // does not allow it for this person).
     const promisesACard = /\b(i'?m proposing|i propose|proposing to|here(?:'s| is) (?:a|the) card|click (?:the|to))\b/i.test(message);
-    // An ask the system found already covered sends nothing; say so, so the
-    // answer never reads as if a question is on its way when none is.
-    const covered = actions.filter((c) => c.kind === 'already_asked');
+    // An ask the system found already covered, or aimed at someone who only
+    // views bills, sends nothing; say so, so the answer never reads as if a
+    // question is on its way when none is.
+    const covered = actions.filter((c) => c.status === 'info');
     const actionable = actions.filter((c) => c.status === 'proposed');
     let answerText = promisesACard && actionable.length === 0 && covered.length === 0
       ? `${message}\n\nI could not turn that into something you can click here, so do it on the bill itself.`

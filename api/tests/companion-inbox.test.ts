@@ -120,9 +120,13 @@ test('inbox: a companion ask becomes a question or "already has it" — and only
   const adam = itemFor(await inboxOf(w.orgId, w.apprA.token), w.bills.submitted)!;
   assert.deepEqual(adam.lines.map((l) => l.kind), ['question', 'approval'], 'still one item: the question leads');
 
-  // Somebody who only views bills cannot be asked, so is never offered.
+  // Somebody who only views bills cannot be asked: the card says so and
+  // sends nothing, and so does the answer.
   propose([a(w.viewer.name, 'Can you look at the tax line?')]);
-  assert.deepEqual((await ask(w.orgId, w.owner.token, 'Ask Victor about it.')).answer.actions, [], 'no card for a viewer');
+  const vTurn = await ask(w.orgId, w.owner.token, 'Ask Victor about it.');
+  assert.deepEqual(vTurn.answer.actions.map((c: { kind: string; status: string; call: { path: string } }) => [c.kind, c.status, c.call.path]), [['cannot_ask', 'info', '']], 'nothing to send to a viewer');
+  assert.match(vTurn.answer.text, /Nothing to send: Victor Viewer only views bills/);
+  assert.equal(itemFor(await inboxOf(w.orgId, w.viewer.token), w.bills.submitted), undefined, 'nothing reached the viewer');
   setAskClassifierForTests(null);
 });
 

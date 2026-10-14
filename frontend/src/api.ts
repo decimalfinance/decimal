@@ -2062,7 +2062,7 @@ export interface BillCompanionNote {
 /** An action the companion proposes. The request is built by the server; the person's click sends it. */
 export interface CompanionActionCard {
   actionId: string;
-  kind: 'look_at' | 'send_for_approval' | 'close_duplicate' | 'clear_duplicate' | 'approve' | 'question' | 'already_asked' | 'save_habit' | 'forget_habit';
+  kind: 'look_at' | 'send_for_approval' | 'close_duplicate' | 'clear_duplicate' | 'approve' | 'question' | 'already_asked' | 'cannot_ask' | 'save_habit' | 'forget_habit';
   billId: string;
   title: string;
   detail: string;
