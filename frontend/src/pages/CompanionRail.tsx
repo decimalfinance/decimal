@@ -243,13 +243,13 @@ function JobDrawer({ organizationId, selection, onClose, onOpenBill }: {
 
 /** What each kind of inbox line is called, in a word. */
 const LINE_LABEL: Record<InboxItem['lines'][number]['kind'], string> = {
-  question: 'Question', reply: 'Reply', approval: 'Approve', ask: 'Ask', sent_back: 'Sent back', review: 'Review', sign_off: 'Sign off', unreadable: "Can't read", sync_failed: 'QuickBooks', learned: 'Learned',
+  question: 'Question', reply: 'Reply', approval: 'Approve', sent_back: 'Sent back', review: 'Review', sign_off: 'Sign off', unreadable: "Can't read", sync_failed: 'QuickBooks', learned: 'Learned',
 };
 
 /**
  * The inbox: one card per bill, every line of what is wanted of this person on
- * it. Opening a card marks it seen and goes to where the work is done; an ask
- * can be ticked off without opening anything.
+ * it. Opening a card marks it seen and goes to where the work is done; a reply
+ * to your question can be ticked off without opening anything.
  */
 function InboxSection({ organizationId, onOpenJob }: { organizationId: string; onOpenJob: (jobId: string, title: string) => void }) {
   const navigate = useNavigate();
@@ -272,8 +272,8 @@ function InboxSection({ organizationId, onOpenJob }: { organizationId: string; o
       onOpenJob(item.jobId, item.vendorName);
     }
   };
-  const tick = async (askId: string) => {
-    await inboxApi.tick(organizationId, askId).catch(() => null);
+  const tickReply = async (billQuestionId: string) => {
+    await inboxApi.replyDone(organizationId, billQuestionId).catch(() => null);
     void refresh();
   };
   const data = q.data;
@@ -302,11 +302,11 @@ function InboxSection({ organizationId, onOpenJob }: { organizationId: string; o
           </div>
           <div className="ib-lines">
             {item.lines.map((l, i) => (
-              <div key={l.askId ?? `${l.kind}:${i}`} className={`ib-line is-${l.kind}`}>
+              <div key={l.questionId ?? `${l.kind}:${i}`} className={`ib-line is-${l.kind}`}>
                 <span className="ib-kind">{LINE_LABEL[l.kind]}</span>
-                <span className="ib-text">{l.kind === 'ask' ? <><strong>{l.from ?? 'Someone'}:</strong> {l.text}</> : l.text}</span>
-                {l.askId ? (
-                  <button type="button" className="ib-tick" onClick={(e) => { e.stopPropagation(); void tick(l.askId!); }}>Done</button>
+                <span className="ib-text">{l.text}</span>
+                {l.questionId ? (
+                  <button type="button" className="ib-tick" onClick={(e) => { e.stopPropagation(); void tickReply(l.questionId!); }}>Done</button>
                 ) : null}
               </div>
             ))}

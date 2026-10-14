@@ -307,7 +307,7 @@ export function ApprovalsPage() {
                           {row.nowWith ? `Waiting on ${row.nowWith.split(' ')[0]}` : 'Moving to payment'}
                         </span>
                         {row.stalledDays ? (
-                          <span className="chip-disc chip-over" style={{ marginLeft: 6 }}>stuck {row.stalledDays}d · may need a nudge</span>
+                          <span className="chip-disc chip-over" style={{ marginLeft: 6 }}>stuck {row.stalledDays}d</span>
                         ) : null}
                       </div>
                       <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 3, paddingLeft: 13 }}>You approved this</div>

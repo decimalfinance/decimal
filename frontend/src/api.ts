@@ -2062,7 +2062,7 @@ export interface BillCompanionNote {
 /** An action the companion proposes. The request is built by the server; the person's click sends it. */
 export interface CompanionActionCard {
   actionId: string;
-  kind: 'look_at' | 'send_for_approval' | 'close_duplicate' | 'clear_duplicate' | 'approve' | 'nudge' | 'question' | 'already_asked' | 'save_habit' | 'forget_habit';
+  kind: 'look_at' | 'send_for_approval' | 'close_duplicate' | 'clear_duplicate' | 'approve' | 'question' | 'already_asked' | 'save_habit' | 'forget_habit';
   billId: string;
   title: string;
   detail: string;
@@ -2076,7 +2076,7 @@ export interface CompanionActionCard {
   result: string | null;
 }
 
-export type InboxLineKind = 'approval' | 'question' | 'reply' | 'review' | 'sign_off' | 'sent_back' | 'unreadable' | 'ask' | 'sync_failed' | 'learned';
+export type InboxLineKind = 'approval' | 'question' | 'reply' | 'review' | 'sign_off' | 'sent_back' | 'unreadable' | 'sync_failed' | 'learned';
 
 /** One bill in a person's inbox, with everything wanted of them on it. */
 export interface InboxItem {
@@ -2089,7 +2089,7 @@ export interface InboxItem {
   status: string | null;
   dueAt: string | null;
   href: 'draft' | 'bill' | null;
-  lines: Array<{ kind: InboxLineKind; text: string; at: string; from?: string | null; askId?: string; questionId?: string }>;
+  lines: Array<{ kind: InboxLineKind; text: string; at: string; from?: string | null; questionId?: string }>;
   latestAt: string;
   isNew: boolean;
 }
@@ -2146,9 +2146,6 @@ export const inboxApi = {
   },
   seenAll(organizationId: string) {
     return request<{ ok: true; marked: number }>(`/organizations/${organizationId}/inbox/seen-all`, { method: 'POST', body: '{}' });
-  },
-  tick(organizationId: string, askId: string) {
-    return request<{ ok: true }>(`/organizations/${organizationId}/inbox/asks/${askId}/done`, { method: 'POST', body: '{}' });
   },
   /** The asker ticks off a reply to their question. */
   replyDone(organizationId: string, billQuestionId: string) {

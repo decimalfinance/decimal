@@ -70,8 +70,7 @@ const RULES: Array<{ pattern: RegExp; view: Need; act: Need }> = [
   // The companion's briefing is every member's: what it shows is filtered to the
   // viewer's own work inside the briefing, so any active member may read it.
   { pattern: /^\/companion(\/|$)/, view: null, act: null },
-  // The inbox is every member's own; nudging checks bill visibility inside,
-  // because approvers (who cannot edit bills) must be able to nudge too.
+  // The inbox is every member's own; what is in it is filtered inside.
   { pattern: /^\/inbox(\/|$)/, view: null, act: null },
   // What the companion knows: readable by the team; changing it checks inside
   // that the person codes bills (bill clerks, admins).

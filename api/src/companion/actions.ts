@@ -8,8 +8,8 @@
 //     A card never changes a bill: deciding about a bill from a narrowed
 //     summary is how the wrong answer gets through, and the bill page is where
 //     the whole picture is.
-//   - DO IT HERE: what is not a judgement about a bill's contents — asking or
-//     nudging a colleague, setting or removing a vendor default. The button
+//   - DO IT HERE: what is not a judgement about a bill's contents — asking a
+//     colleague a question, setting or removing a vendor default. The button
 //     sends a request, built here, to the same endpoint a person would use,
 //     as the person who clicks, so every permission and gate runs at the click.
 //
@@ -18,7 +18,7 @@
 // says, and where it goes or what it sends. A proposal that does not fit is
 // dropped.
 import { randomUUID } from 'node:crypto';
-import { getOrgAccess } from '../approvals/permissions.js';
+import { canBeAskedAboutBills, getOrgAccess } from '../approvals/permissions.js';
 import { getApprovalsInbox, getBillsWorkbench } from '../payments/bills.js';
 import { logger } from '../infra/logger.js';
 import { usd } from './chat-tools.js';
@@ -35,11 +35,10 @@ const MAX_CARDS = 12;
 export const ACTION_KINDS = ['look_at', 'send_for_approval', 'close_duplicate', 'clear_duplicate', 'approve', 'ask_person', 'save_habit', 'forget_habit'] as const;
 export type ActionKind = (typeof ACTION_KINDS)[number];
 /**
- * What a card turns out to be. ask_person becomes a nudge (something to do),
- * a question (something to answer; it holds nothing either), or already_asked
- * (nothing to send: the person already has it in their inbox).
+ * What a card turns out to be. ask_person becomes a question on the bill, or
+ * already_asked (nothing to send: the person already has it in their inbox).
  */
-export type CardKind = Exclude<ActionKind, 'ask_person'> | 'nudge' | 'question' | 'already_asked';
+export type CardKind = Exclude<ActionKind, 'ask_person'> | 'question' | 'already_asked';
 
 export type ProposedAction = { kind: ActionKind; billId: string; reason: string; toPerson?: string | null; message?: string | null; category?: string | null; focus?: string | null };
 
@@ -68,7 +67,6 @@ const COPY: Record<CardKind, { verb: string; button: string; done: string }> = {
   close_duplicate: { verb: 'Close as a duplicate', button: 'Open the duplicate check', done: 'Opened' },
   clear_duplicate: { verb: 'Not a duplicate', button: 'Open the duplicate check', done: 'Opened' },
   approve: { verb: 'Approve', button: 'Open it to approve', done: 'Opened' },
-  nudge: { verb: 'Nudge', button: 'Send nudge', done: 'Nudge sent' },
   question: { verb: 'Ask', button: 'Send question', done: 'Question sent' },
   already_asked: { verb: 'Already asked', button: '', done: '' },
   save_habit: { verb: 'Set a default', button: 'Set the default', done: 'Default set' },
@@ -119,7 +117,7 @@ export async function buildActionCards(args: {
     // The bill's own page: the draft screen while it is in review, the bill otherwise.
     const page = row.state === 'draft' ? `/bills/${row.paymentOrderId}/draft` : `/bills/${row.paymentOrderId}`;
     let detail = `${usd(row.amountUsd)} · ${row.subStatus.text}`;
-    let cardKind: CardKind = p.kind === 'ask_person' ? 'nudge' : p.kind;
+    let cardKind: CardKind = p.kind === 'ask_person' ? 'question' : p.kind;
     let title = `${COPY[cardKind].verb}: ${name}`;
     let status: ActionCard['status'] = 'proposed';
 
@@ -160,9 +158,12 @@ export async function buildActionCards(args: {
         if (once.has(key)) break;
         const visible = await involvedBillIds(args.organizationId, person.userId);
         if (visible !== null && !visible.has(row.paymentOrderId)) break;
+        // Every ask is a question, and somebody who only views bills cannot
+        // be asked one; the click would only be refused.
+        if (!canBeAskedAboutBills(await getOrgAccess(args.organizationId, person.userId))) break;
         // Read-only: deciding how an ask would land must not tidy their inbox.
         const theirs = (await getInbox(args.organizationId, person.userId, { settle: false })).items.find((i) => i.billId === row.paymentOrderId);
-        const existing = (theirs?.lines ?? []).map((l) => (l.kind === 'ask' ? `${l.from ?? 'Someone'} asked: ${l.text}` : l.text));
+        const existing = (theirs?.lines ?? []).map((l) => l.text);
         const decision = await classifyAsk({ recipientName: person.name, billLabel: name, existing, message });
         if (decision.decision === 'covered') {
           cardKind = 'already_asked';
@@ -170,16 +171,11 @@ export async function buildActionCards(args: {
           detail = decision.note;
           status = 'info';
           call = { path: '', body: {} };
-        } else if (decision.decision === 'needs_answer') {
+        } else {
           cardKind = 'question';
           title = `Ask ${person.name}: ${name}`;
           detail = `"${message}" · ${decision.note}`;
           call = { path: `/bills/${row.paymentOrderId}/ask`, body: { askedOfUserId: person.userId, question: message } };
-        } else {
-          cardKind = 'nudge';
-          title = `Nudge ${person.name}: ${name}`;
-          detail = `"${message}" · they tick it off when it's done`;
-          call = { path: '/inbox/nudge', body: { billId: row.paymentOrderId, toUserId: person.userId, text: message } };
         }
         break;
       }

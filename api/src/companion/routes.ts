@@ -7,7 +7,7 @@ import { notFound } from '../infra/api-errors.js';
 import { asyncRoute } from '../infra/route-helpers.js';
 import { getCompanionConsole, getCompanionJob } from './today.js';
 import { followUp, getChat, listChats, recordActionOutcome, startChat } from './chat.js';
-import { getInbox, markAllInboxSeen, markInboxSeen, nudgeAboutBill, tickAsk, tickReply } from './inbox.js';
+import { getInbox, markAllInboxSeen, markInboxSeen, tickReply } from './inbox.js';
 import { forgetHabit, forgetLine, getKnowledge, setHabit } from './knowledge.js';
 import { getBillNote } from './bill-note.js';
 import { getReadyBills } from './ready-pass.js';
@@ -73,8 +73,6 @@ companionRouter.post('/organizations/:organizationId/companion/chats/:chatId/act
 
 // The inbox. Anyone on the team has one; what is in it is filtered inside.
 const seenBody = z.object({ billId: z.string().uuid() });
-const nudgeBody = z.object({ billId: z.string().uuid(), toUserId: z.string().uuid(), text: z.string().trim().min(3).max(500) });
-const askParams = orgParams.extend({ askId: z.string().uuid() });
 const replyParams = orgParams.extend({ billQuestionId: z.string().uuid() });
 
 companionRouter.get('/organizations/:organizationId/inbox', asyncRoute(async (req, res) => {
@@ -101,21 +99,6 @@ companionRouter.post('/organizations/:organizationId/inbox/replies/:billQuestion
   const { organizationId, billQuestionId } = replyParams.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
   res.json(await tickReply(organizationId, req.auth!.userId, billQuestionId));
-}));
-
-companionRouter.post('/organizations/:organizationId/inbox/asks/:askId/done', asyncRoute(async (req, res) => {
-  const { organizationId, askId } = askParams.parse(req.params);
-  await assertOrganizationAccess(organizationId, req.auth!);
-  res.json(await tickAsk(organizationId, req.auth!.userId, askId));
-}));
-
-// Ask a colleague to do something on a bill without holding it. Anyone who can
-// see the bill may ask anyone else who can: asking is never the dangerous act.
-companionRouter.post('/organizations/:organizationId/inbox/nudge', asyncRoute(async (req, res) => {
-  const { organizationId } = orgParams.parse(req.params);
-  await assertOrganizationAccess(organizationId, req.auth!);
-  const input = nudgeBody.parse(req.body);
-  res.status(201).json(await nudgeAboutBill({ organizationId, fromUserId: req.auth!.userId, toUserId: input.toUserId, billId: input.billId, text: input.text, via: req.get('x-decimal-via') === 'companion' ? 'companion' : 'person' }));
 }));
 
 // What the companion knows. Anyone on the team may read it; forgetting a line

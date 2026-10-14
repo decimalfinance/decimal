@@ -1204,11 +1204,10 @@
 
 /* ---- Inbox (the rail's first section) ----
    One card per bill; inside it, every line of what is wanted of this person,
-   the system's first, then what people asked. A dot marks a card with
-   something new since they last opened it. */
+   the most urgent first. A dot marks a card with something new since they
+   last opened it. */
 .dec .ib-lines { display: flex; flex-direction: column; gap: 5px; margin-top: 2px; }
 .dec .ib-line { display: flex; align-items: baseline; gap: 7px; font-size: 12.5px; color: var(--text-muted); line-height: 1.4; }
-.dec .ib-line.is-ask { color: var(--text-primary); }
 .dec .ib-kind { flex: 0 0 auto; font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-faint); }
 .dec .ib-line.is-question .ib-kind, .dec .ib-line.is-approval .ib-kind { color: var(--accent); }
 .dec .ib-text { flex: 1; min-width: 0; }

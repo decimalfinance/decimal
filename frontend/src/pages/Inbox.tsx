@@ -2,9 +2,9 @@
 //
 // Mail-style, because that is the shape people already know: the list on the
 // left, the selected bill on the right with every line in full. Selecting an
-// item marks it seen. What the system needs (your approval, a question for
-// you, a draft to review) clears itself when the bill moves; what people ask
-// you has its own Done.
+// item marks it seen. Everything in it (your approval, a question for you, a
+// draft to review) clears itself when the bill moves; a reply to a question
+// you asked has its own Done.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
@@ -28,22 +28,21 @@ function when(iso: string): string {
 }
 
 const LINE_LABEL: Record<InboxLineKind, string> = {
-  question: 'Question', reply: 'Reply', approval: 'Approve', ask: 'Ask', sent_back: 'Sent back', review: 'Review', sign_off: 'Sign off', unreadable: "Can't read", sync_failed: 'QuickBooks', learned: 'Learned',
+  question: 'Question', reply: 'Reply', approval: 'Approve', sent_back: 'Sent back', review: 'Review', sign_off: 'Sign off', unreadable: "Can't read", sync_failed: 'QuickBooks', learned: 'Learned',
 };
 
-type Filter = 'all' | 'new' | 'approval' | 'question' | 'ask' | 'review';
+type Filter = 'all' | 'new' | 'approval' | 'question' | 'review';
 const FILTERS: Array<{ key: Filter; label: string; match: (i: InboxItem) => boolean }> = [
   { key: 'all', label: 'All', match: () => true },
   { key: 'new', label: 'New', match: (i) => i.isNew },
   { key: 'approval', label: 'Approvals', match: (i) => i.lines.some((l) => l.kind === 'approval') },
   { key: 'question', label: 'Questions', match: (i) => i.lines.some((l) => l.kind === 'question' || l.kind === 'reply') },
-  { key: 'ask', label: 'Asks', match: (i) => i.lines.some((l) => l.kind === 'ask') },
   { key: 'review', label: 'To review', match: (i) => i.lines.some((l) => ['review', 'sign_off', 'sent_back', 'unreadable'].includes(l.kind)) },
 ];
 
-/** What the main button says, from the most urgent line of the bill's own work (not an ask or a reply). */
+/** What the main button says, from the most urgent line of the bill's own work (not a reply). */
 function actionFor(item: InboxItem): string {
-  const first = item.lines.find((l) => l.kind !== 'ask' && l.kind !== 'reply')?.kind;
+  const first = item.lines.find((l) => l.kind !== 'reply')?.kind;
   if (first === 'question') return 'Answer on the bill';
   if (first === 'approval') return 'Open to approve';
   if (first === 'sign_off') return 'Confirm and send';
@@ -105,10 +104,6 @@ export function InboxPage() {
     if (item.billId) navigate(`/organizations/${organizationId}/bills/${item.billId}${item.href === 'draft' ? '/draft' : ''}`);
     else navigate(`/organizations/${organizationId}/bills`);
   };
-  const tick = async (askId: string) => {
-    await inboxApi.tick(organizationId, askId).catch(() => null);
-    void refresh();
-  };
   const tickReply = async (billQuestionId: string) => {
     await inboxApi.replyDone(organizationId, billQuestionId).catch(() => null);
     void refresh();
@@ -124,7 +119,7 @@ export function InboxPage() {
         <PageHead
           eyebrow="Operations"
           title="Inbox"
-          desc="Everything waiting on you, one item per bill. What the system needs clears itself when the bill moves; what people ask you has its own Done."
+          desc="Everything waiting on you, one item per bill. It clears itself when the bill moves; a reply to your question has its own Done."
           actions={(
             <>
               <ReadyPassButton organizationId={organizationId} />
@@ -173,9 +168,9 @@ export function InboxPage() {
                   </div>
                   <div className="ib-lines">
                     {item.lines.slice(0, 2).map((l, i) => (
-                      <div key={l.askId ?? l.questionId ?? `${l.kind}:${i}`} className={`ib-line is-${l.kind}`}>
+                      <div key={l.questionId ?? `${l.kind}:${i}`} className={`ib-line is-${l.kind}`}>
                         <span className="ib-kind">{LINE_LABEL[l.kind]}</span>
-                        <span className="ib-text">{l.kind === 'ask' ? `${l.from ?? 'Someone'}: ${l.text}` : l.text}</span>
+                        <span className="ib-text">{l.text}</span>
                       </div>
                     ))}
                     {item.lines.length > 2 ? <div className="cc-card-meta">+ {item.lines.length - 2} more</div> : null}
@@ -195,14 +190,13 @@ export function InboxPage() {
               </div>
               <div className="ib-detail-lines">
                 {selected.lines.map((l, i) => (
-                  <div key={l.askId ?? l.questionId ?? `${l.kind}:${i}`} className={`ib-detail-line ib-line is-${l.kind}`}>
+                  <div key={l.questionId ?? `${l.kind}:${i}`} className={`ib-detail-line ib-line is-${l.kind}`}>
                     <span className="ib-kind">{LINE_LABEL[l.kind]}</span>
                     <div className="ib-detail-body">
-                      <div className="ib-detail-text">{l.kind === 'ask' ? <><strong>{l.from ?? 'Someone'}:</strong> {l.text}</> : l.text}</div>
-                      <div className="ib-detail-when">{l.kind === 'ask' || l.kind === 'question' ? 'Asked' : l.kind === 'reply' ? 'Answered' : 'Since'} {when(l.at)}</div>
+                      <div className="ib-detail-text">{l.text}</div>
+                      <div className="ib-detail-when">{l.kind === 'question' ? 'Asked' : l.kind === 'reply' ? 'Answered' : 'Since'} {when(l.at)}</div>
                     </div>
-                    {l.askId ? <button type="button" className="ib-tick" onClick={() => void tick(l.askId!)}>Done</button>
-                      : l.questionId ? <button type="button" className="ib-tick" onClick={() => void tickReply(l.questionId!)}>Done</button> : null}
+                    {l.questionId ? <button type="button" className="ib-tick" onClick={() => void tickReply(l.questionId!)}>Done</button> : null}
                   </div>
                 ))}
               </div>

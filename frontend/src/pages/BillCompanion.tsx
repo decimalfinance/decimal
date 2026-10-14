@@ -168,7 +168,7 @@ export function BillCompanion({ organizationId, billId, lines, flags, flagHeadli
                 {n.waiting.map((l, i) => (
                   <div key={i} className="tick-item bn-waiting">
                     <Ico.info w={14} />
-                    <span>{l.kind === 'ask' && l.from ? `${l.from} asked: ` : ''}{l.text}</span>
+                    <span>{l.text}</span>
                   </div>
                 ))}
               </div>
