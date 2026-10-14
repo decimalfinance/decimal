@@ -2199,6 +2199,7 @@ test('a viewer cannot be asked, and cannot answer, because a viewer does not wor
   }, owner.token);
   const seen = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, watcher.token);
   assert.equal(seen.questions.find((q: { billQuestionId: string }) => q.billQuestionId === asked.billQuestionId).canAnswer, false, 'no Answer button for a viewer');
+  assert.equal(seen.canJoinConversation, false, 'a viewer reads the conversation without joining in');
   await assert.rejects(
     post(`/organizations/${orgId}/bills/${bill.billId}/questions/${asked.billQuestionId}/answer`, { answer: 'Yes, ours.', outcome: 'answered' }, watcher.token),
     /work on bills can answer/,
@@ -2219,6 +2220,11 @@ test('a member who cannot edit bills can close a question they asked', async () 
   });
   // Being asked is what involves them in the bill.
   await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, { askedOfUserId: member.userId, question: 'Was this delivered?' }, owner.token);
+  // They cannot edit the draft, and can still take part in its conversation:
+  // the draft page used to hide Answer and Reply from anyone who could not edit.
+  const draft = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, member.token);
+  assert.equal(draft.readOnly, true, 'the fields are not theirs to change');
+  assert.equal(draft.canJoinConversation, true, 'the conversation is theirs to join');
   const theirs = await post(`/organizations/${orgId}/bills/${bill.billId}/ask`, { askedOfUserId: owner.userId, question: 'Which site was it for?' }, member.token);
   const after = await post(`/organizations/${orgId}/bills/${bill.billId}/questions/${theirs.billQuestionId}/close`, { note: 'Found it on the packing slip.' }, member.token);
   const q = after.questions.find((x: { billQuestionId: string }) => x.billQuestionId === theirs.billQuestionId);

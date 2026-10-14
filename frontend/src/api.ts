@@ -1244,6 +1244,9 @@ export interface BillDraft {
   /** Why, when it is read-only: the bill has left draft, or preparing it
    *  is not this reader's job. Null when the form is editable. */
   readOnlyReason?: 'settled' | 'not_your_job' | null;
+  /** Whether this reader may answer, reply and comment here. Wider than
+   *  editing: approvers asked about a draft take part too. */
+  canJoinConversation: boolean;
   // How the bill arrived; sourceLabel names who forwarded it.
   source: 'email' | 'upload';
   sourceLabel: string | null;

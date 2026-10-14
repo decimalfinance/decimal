@@ -1583,10 +1583,14 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   // so there is no one to mislead — treat it as editable and let the route
   // enforce.
   let viewerCanEdit = true;
+  // Wider than editing: anyone who works on bills may answer questions and
+  // talk on a draft, approvers included. Not people who only view bills.
+  let viewerWorksOnBills = false;
   if (viewerUserId) {
-    const { getOrgAccess } = await import('../approvals/permissions.js');
+    const { getOrgAccess, canBeAskedAboutBills } = await import('../approvals/permissions.js');
     const access = await getOrgAccess(organizationId, viewerUserId);
     viewerCanEdit = Boolean(access?.capabilities.includes('bills.edit'));
+    viewerWorksOnBills = canBeAskedAboutBills(access);
   }
 
   // Compute (and cache) exact document boxes on demand, so highlighting works
@@ -2108,13 +2112,16 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     // questions, which is what makes the bill's own screen the place the work
     // is discussed rather than the place it is recorded after the fact.
     comments: await listBillComments(organizationId, order.paymentOrderId),
+    // Who may take part in the conversation is wider than who may edit the
+    // bill: an approver asked about a draft must be able to answer and reply.
+    // Only people who just view bills, and bills that have left draft, read it
+    // without joining in.
+    canJoinConversation: order.state === 'draft' && viewerWorksOnBills,
     questions: await (async () => {
       const rows = await listBillQuestions(organizationId, order.paymentOrderId);
       // Anyone who works on bills may answer a question, not only the person
       // asked; people who can only view bills may not.
-      const { getOrgAccess, canBeAskedAboutBills } = await import('../approvals/permissions.js');
-      const viewerAnswers = Boolean(viewerUserId && rows.some((q) => !q.answeredAt))
-        && canBeAskedAboutBills(await getOrgAccess(organizationId, viewerUserId!));
+      const viewerAnswers = viewerWorksOnBills;
       return rows.map((q) => ({
         ...q,
         // Whose move it is, decided here rather than by the client comparing ids.

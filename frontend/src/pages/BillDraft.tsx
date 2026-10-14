@@ -1649,7 +1649,7 @@ activeResolution?.flag !== flag.kind && flag.resolutions.length > 0 ? (
                         ? `${flagSettledBy(billDraft.workLog, q.aboutFlag) ?? 'That check has been settled.'} Your question asked more than that — write the rest to close it.`
                         : null
                     )}
-                    readOnly={readOnly}
+                    readOnly={!billDraft.canJoinConversation}
                     onHoverQuestion={setHoveredQuestion}
                     onChanged={() => { void queryClient.invalidateQueries({ queryKey: ['bill-billDraft', organizationId, billDraft.paymentOrderId] }); }}
                   />
