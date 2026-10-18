@@ -6,8 +6,8 @@
 // finished without me. Each person sees their own work — a bill clerk the
 // review piles, an approver what waits on them, an admin also who is holding
 // approvals up. Nothing here decides anything; it reads what the bills list,
-// the approvals inbox, the learned habits and the companion's own steps
-// already know, and sorts it.
+// the approvals inbox and the companion's own steps already know, and sorts
+// it.
 import { prisma } from '../infra/prisma.js';
 import { getOrgAccess } from '../approvals/permissions.js';
 import { openTasksByPerson } from '../approvals/store.js';
@@ -17,7 +17,7 @@ import { closeAbandonedSteps } from './steps.js';
 
 /** A gap longer than this starts a new visit; a refresh within it does not. */
 const NEW_VISIT_MS = 30 * 60_000;
-/** With no "since" (a first visit), Done and learned habits go back this far. */
+/** With no "since" (a first visit), Done goes back this far. */
 const FIRST_VISIT_LOOKBACK_MS = 7 * 24 * 60 * 60_000;
 /** A document still "processing" after this long is not running; it is stuck. */
 const RUNNING_WINDOW_MS = 15 * 60_000;
@@ -76,7 +76,7 @@ export type WaitingCard = {
 
 export type DoneCard = {
   key: string;
-  kind: 'bill' | 'learned';
+  kind: 'bill';
   jobId: string | null;
   paymentOrderId: string | null;
   title: string;

@@ -191,33 +191,6 @@ export interface QuickBooksAccount {
   classification: string;
 }
 
-export interface GlCodingPrediction {
-  codedExpenseAccountId: string | null;
-  codedExpenseAccountName: string | null;
-  predictionSource: 'vendor_history' | 'default' | 'none';
-  confidenceScore: number | null;
-  supportCount: number;
-}
-
-export interface VendorCodingRule {
-  vendorCodingRuleId: string;
-  counterpartyId: string;
-  accountId: string;
-  accountName: string | null;
-  source: 'learned' | 'manual';
-  learnedFromCount: number;
-  updatedAt: string;
-}
-
-export interface GlCandidate {
-  accountId: string;
-  accountName: string | null;
-  reason: 'rule' | 'vendor_history' | 'ocr' | 'frequent' | 'default';
-  count?: number;
-  weight?: number;
-  rationale?: string | null;
-}
-
 export interface FailedSync {
   paymentOrderId: string;
   vendor: string;
@@ -357,15 +330,6 @@ export const api = {
       `/organizations/${organizationId}/payment-orders/${paymentOrderId}/accounting/sync`,
       { method: 'POST' },
     );
-  },
-  // Vendor coding rules: the vendor's default expense account (learned or manual).
-  listVendorCodingRules(organizationId: string) {
-    return request<{ items: VendorCodingRule[] }>(`/organizations/${organizationId}/vendor-coding-rules`);
-  },
-  clearVendorCodingRule(organizationId: string, counterpartyId: string) {
-    return request<{ ok: boolean }>(`/organizations/${organizationId}/counterparties/${counterpartyId}/coding-rule`, {
-      method: 'DELETE',
-    });
   },
   listOrganizationMembers(organizationId: string) {
     return request<{ items: OrganizationMember[] }>(
@@ -1214,12 +1178,11 @@ export interface BillDraftLine {
    * Why this line has its category (unsaved drafts only). memory: a line the
    * team settled before from this vendor, so known. similar: the model followed
    * a past line it judged the same purchase (vendorName set when that line was
-   * another vendor's), still a guess. model: its own reading. vendor: the
-   * vendor default.
+   * another vendor's), still a guess. model: its own reading.
    */
   categoryFrom?: { kind: 'memory'; like: string; invoiceNumber: string | null; paymentOrderId: string; by: string | null }
     | { kind: 'similar'; like: string; invoiceNumber: string | null; paymentOrderId: string; by: string | null; vendorName?: string | null }
-    | { kind: 'model' } | { kind: 'vendor' };
+    | { kind: 'model' };
   source?: DocSource;
 }
 
@@ -1270,8 +1233,8 @@ export interface BillDraft {
   suggestedReference?: string | null;
   lines: BillDraftLine[];
   categoryOptions: CategoryOption[];
-  // Why the pre-filled category was suggested (vendor rule vs the document).
-  codingSuggestionSource: { kind: 'rule' | 'ocr'; detail: string } | null;
+  // Why the bill-level category was suggested: what the document says it is for.
+  codingSuggestionSource: { kind: 'ocr'; detail: string } | null;
   totalsSources: { lineItems: DocSource; tax: DocSource; total: DocSource };
   taxAmount: number | null;
   totalUsd: number;
@@ -1957,10 +1920,10 @@ export interface ConsoleWaiting {
   reason: string;
 }
 
-/** Something finished in this window: a bill that moved on, or a habit learned. */
+/** Something finished in this window: a bill that moved on. */
 export interface ConsoleDone {
   key: string;
-  kind: 'bill' | 'learned';
+  kind: 'bill';
   jobId: string | null;
   paymentOrderId: string | null;
   title: string;
@@ -2063,14 +2026,13 @@ export interface BillCompanionNote {
   standing: string | null;
   waiting: Array<{ kind: InboxLineKind; text: string; from: string | null }>;
   did: Array<{ id: string; status: 'running' | 'done' | 'noted' | 'failed'; text: string; detail: string | null }>;
-  vendorDefault: { category: string } | null;
   chatId: string | null;
 }
 
 /** An action the companion proposes. The request is built by the server; the person's click sends it. */
 export interface CompanionActionCard {
   actionId: string;
-  kind: 'look_at' | 'send_for_approval' | 'close_duplicate' | 'clear_duplicate' | 'approve' | 'question' | 'already_asked' | 'cannot_ask' | 'save_habit' | 'forget_habit';
+  kind: 'look_at' | 'send_for_approval' | 'close_duplicate' | 'clear_duplicate' | 'approve' | 'question' | 'already_asked' | 'cannot_ask';
   billId: string;
   title: string;
   detail: string;
@@ -2084,7 +2046,7 @@ export interface CompanionActionCard {
   result: string | null;
 }
 
-export type InboxLineKind = 'approval' | 'question' | 'reply' | 'review' | 'sign_off' | 'sent_back' | 'unreadable' | 'sync_failed' | 'learned';
+export type InboxLineKind = 'approval' | 'question' | 'reply' | 'review' | 'sign_off' | 'sent_back' | 'unreadable' | 'sync_failed';
 
 /** One bill in a person's inbox, with everything wanted of them on it. */
 export interface InboxItem {
@@ -2116,34 +2078,16 @@ export interface RememberedLine {
   fromLines: number;
 }
 
-/** A default category for a vendor, set by a person: the last resort for a line. */
-export interface VendorDefault {
-  ruleId: string;
-  counterpartyId: string;
-  vendorName: string;
-  category: string;
-  setBy: string | null;
-  since: string;
-}
-
 export const knowledgeApi = {
   get(organizationId: string) {
     return request<{
       canManage: boolean;
-      choices: { vendors: Array<{ counterpartyId: string; name: string }>; categories: string[] } | null;
       lines: RememberedLine[];
-      vendorDefaults: VendorDefault[];
       forgotten: Array<{ counterpartyId: string; vendorName: string; description: string; category: string | null; at: string; by: string | null }>;
     }>(`/organizations/${organizationId}/knowledge`);
   },
   forgetLine(organizationId: string, counterpartyId: string, description: string) {
     return request<{ ok: boolean }>(`/organizations/${organizationId}/knowledge/lines/forget`, { method: 'POST', body: JSON.stringify({ counterpartyId, description }) });
-  },
-  forget(organizationId: string, counterpartyId: string) {
-    return request<{ ok: boolean }>(`/organizations/${organizationId}/knowledge/habits/${counterpartyId}`, { method: 'DELETE' });
-  },
-  teach(organizationId: string, counterpartyId: string, category: string) {
-    return request<{ ok: boolean; category: string }>(`/organizations/${organizationId}/knowledge/habits`, { method: 'PUT', body: JSON.stringify({ counterpartyId, category }) });
   },
 };
 

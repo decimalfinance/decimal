@@ -18,7 +18,7 @@ const clean = {
   confirmedByPerson: false,
 };
 
-test('a bill with a known vendor, a category habit and nothing doubtful is ready', () => {
+test('a bill with a known vendor, known categories and nothing doubtful is ready', () => {
   assert.deepEqual(companionReadiness(clean), { ready: true, reason: null });
 });
 
@@ -53,7 +53,7 @@ test('a doubtful read of a key field needs a look, unless a person already confi
   assert.equal(companionReadiness({ ...clean, ungrounded: ['invoiceNumber'] })!.reason, 'Worth a second look at the invoice number');
 });
 
-test('a first bill from a vendor, or one with no category habit, is not ready', () => {
+test('a first bill from a vendor, or one whose categories are a guess, is not ready', () => {
   assert.equal(companionReadiness({ ...clean, priorBillsFromVendor: 0 })!.reason, 'First bill from Brightwave Media');
   assert.equal(companionReadiness({ ...clean, categoriesKnown: false })!.reason, 'Some categories are a first guess');
 });

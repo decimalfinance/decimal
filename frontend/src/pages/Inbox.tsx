@@ -28,7 +28,7 @@ function when(iso: string): string {
 }
 
 const LINE_LABEL: Record<InboxLineKind, string> = {
-  question: 'Question', reply: 'Reply', approval: 'Approve', sent_back: 'Sent back', review: 'Review', sign_off: 'Sign off', unreadable: "Can't read", sync_failed: 'QuickBooks', learned: 'Learned',
+  question: 'Question', reply: 'Reply', approval: 'Approve', sent_back: 'Sent back', review: 'Review', sign_off: 'Sign off', unreadable: "Can't read", sync_failed: 'QuickBooks',
 };
 
 type Filter = 'all' | 'new' | 'approval' | 'question' | 'review';

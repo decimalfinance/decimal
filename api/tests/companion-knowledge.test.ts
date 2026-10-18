@@ -49,7 +49,6 @@ test("line memory: a line a clerk confirmed fills in the vendor's next line like
   const other = (await draftOf(w, await bill(w, 'Brightwave Media', 'BW-2', 'Social media management — August'))).lines[0];
   assert.notEqual(other.categoryFrom?.kind, 'memory', 'a different thing from the same vendor is not coded like the licenses');
 
-  assert.equal(await prisma.vendorCodingRule.count({ where: { organizationId: w.orgId, source: 'learned' } }), 0, 'nothing about a vendor was learned');
 });
 
 test('line memory: a category changed on a saved draft teaches too; one left as proposed does not', async () => {
@@ -97,29 +96,18 @@ test('line memory: readiness needs every line to be one the team settled from th
   assert.deepEqual((await remembered(w, desc)).map((l) => l.vendorName), ['Brightwave Media', 'Pixel Foundry'], 'settled again after the forget: it teaches again');
 });
 
-test('vendor defaults: set by hand only, the last resort for a line; the companion proposes them for whoever codes bills', async () => {
+test('vendor defaults are gone: nothing sets a category for a whole vendor, and the companion cannot propose one', async () => {
   const w = await makeWorld();
-  const proposals = [
-    { kind: 'save_habit', billId: w.bills.lonely, reason: 'Lonely Ltd is always travel.', toPerson: null, message: null, category: 'travel' },
-    { kind: 'save_habit', billId: w.bills.held, reason: 'Made up.', toPerson: null, message: null, category: 'Not A Real Category' },
-    { kind: 'forget_habit', billId: w.bills.ready, reason: 'Steady changed what they sell.', toPerson: null, message: null, category: null },
-    { kind: 'forget_habit', billId: w.bills.lonely, reason: 'No default to remove.', toPerson: null, message: null, category: null },
-  ];
-  hostile({ turns: [[{ name: 'find_bills', args: {} }]], respond: () => ({ ...EMPTY, actions: proposals }) });
-  assert.deepEqual((await ask(w.orgId, w.apprA.token, 'Tidy up the defaults.')).answer.actions, [], 'not for an approver');
-
-  hostile({ turns: [[{ name: 'find_bills', args: {} }]], respond: () => ({ ...EMPTY, actions: proposals }) });
-  const cards = (await ask(w.orgId, w.clerk.token, 'Tidy up the defaults.')).answer.actions as Array<{ kind: string; title: string; call: { method: string; path: string; body: any } }>;
-  assert.deepEqual(cards.map((c) => c.kind), ['save_habit', 'forget_habit']);
-  const lonelyVendor = (await prisma.paymentOrder.findUniqueOrThrow({ where: { paymentOrderId: w.bills.lonely }, select: { counterpartyId: true } })).counterpartyId;
-  assert.deepEqual(cards[0]!.call, { method: 'PUT', path: '/knowledge/habits', body: { counterpartyId: lonelyVendor, category: 'Travel' } });
-  assert.equal(cards[0]!.title, 'Set a default: Lonely Ltd → Travel');
-  assert.ok((await raw(cards[0]!.call.method, `/organizations/${w.orgId}${cards[0]!.call.path}`, w.clerk.token, cards[0]!.call.body)).status < 400);
-  const k = await get(`/organizations/${w.orgId}/knowledge`, w.viewer.token);
-  assert.ok(k.vendorDefaults.some((d: { vendorName: string; category: string; setBy: string }) => d.vendorName === 'Lonely Ltd' && d.category === 'Travel' && d.setBy === 'Clara Clerk'));
-  assert.equal(k.choices, null, 'a viewer gets no choices to set one');
-  assert.ok((await raw(cards[1]!.call.method, `/organizations/${w.orgId}${cards[1]!.call.path}`, w.clerk.token, {})).status < 400);
-  assert.equal(await prisma.vendorCodingRule.count({ where: { organizationId: w.orgId, counterparty: { displayName: 'Steady Supply' } } }), 0);
+  const lonelyVendor = await vendorOf(w.bills.lonely);
+  hostile({ turns: [[{ name: 'find_bills', args: {} }]], respond: () => ({ ...EMPTY, actions: [
+    { kind: 'save_habit', billId: w.bills.lonely, reason: 'Lonely Ltd is always travel.', toPerson: null, message: null, focus: null },
+    { kind: 'forget_habit', billId: w.bills.ready, reason: 'Steady changed what they sell.', toPerson: null, message: null, focus: null },
+  ] }) });
+  assert.deepEqual((await ask(w.orgId, w.clerk.token, 'Make Lonely Ltd always travel.')).answer.actions, [], 'no such card');
+  assert.equal((await raw('PUT', `/organizations/${w.orgId}/knowledge/habits`, w.clerk.token, { counterpartyId: lonelyVendor, category: 'Travel' })).status, 404);
+  assert.equal((await raw('PUT', `/organizations/${w.orgId}/counterparties/${lonelyVendor}/coding-rule`, w.owner.token, { accountId: 'Travel' })).status, 404);
+  const k = await get(`/organizations/${w.orgId}/knowledge`, w.clerk.token);
+  assert.deepEqual(Object.keys(k).sort(), ['canManage', 'forgotten', 'lines'], 'What I know is lines, and lines forgotten');
 });
 
 test('line memory: a bill whose categories a person changed and saved is not "a first guess"', async () => {

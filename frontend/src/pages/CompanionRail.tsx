@@ -125,21 +125,14 @@ function ConsoleRail() {
             {c.done.length === 0 ? (
               <div className="cc-empty">Nothing finished {c.since ? 'since you last looked' : 'this week'}.</div>
             ) : c.done.map((d) => (
-              d.kind === 'learned' ? (
-                <div key={d.key} className="cc-card is-static">
-                  <div className="cc-card-live"><Ico.sparkle w={13} />{d.outcome}</div>
-                  <div className="cc-card-meta">{ago(d.at, now)}</div>
+              <button key={d.key} type="button" className="cc-card" onClick={() => open(d.jobId, d.title, hrefFor('done', d.paymentOrderId))}>
+                <div className="cc-card-top">
+                  <span className="cc-card-title">{d.title}</span>
+                  {d.amountUsd != null ? <span className="cc-card-amt">{usd(d.amountUsd)}</span> : null}
                 </div>
-              ) : (
-                <button key={d.key} type="button" className="cc-card" onClick={() => open(d.jobId, d.title, hrefFor('done', d.paymentOrderId))}>
-                  <div className="cc-card-top">
-                    <span className="cc-card-title">{d.title}</span>
-                    {d.amountUsd != null ? <span className="cc-card-amt">{usd(d.amountUsd)}</span> : null}
-                  </div>
-                  <div className="cc-card-sub">{d.outcome}</div>
-                  <div className="cc-card-meta">{d.invoiceNumber ? `${d.invoiceNumber} · ` : ''}{ago(d.at, now)}</div>
-                </button>
-              )
+                <div className="cc-card-sub">{d.outcome}</div>
+                <div className="cc-card-meta">{d.invoiceNumber ? `${d.invoiceNumber} · ` : ''}{ago(d.at, now)}</div>
+              </button>
             ))}
           </section>
 
@@ -243,7 +236,7 @@ function JobDrawer({ organizationId, selection, onClose, onOpenBill }: {
 
 /** What each kind of inbox line is called, in a word. */
 const LINE_LABEL: Record<InboxItem['lines'][number]['kind'], string> = {
-  question: 'Question', reply: 'Reply', approval: 'Approve', sent_back: 'Sent back', review: 'Review', sign_off: 'Sign off', unreadable: "Can't read", sync_failed: 'QuickBooks', learned: 'Learned',
+  question: 'Question', reply: 'Reply', approval: 'Approve', sent_back: 'Sent back', review: 'Review', sign_off: 'Sign off', unreadable: "Can't read", sync_failed: 'QuickBooks',
 };
 
 /**

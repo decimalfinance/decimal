@@ -5,9 +5,9 @@
 // and surfaced as candidates in the coding inbox — the document's signal for cold-start
 // vendors with no coding history yet.
 //
-// Deliberately document-only: vendor history is a SEPARATE, deterministic signal that
-// the candidate ranker already places above these (memory/rules beat the model), so we
-// don't feed history in here and double-count it.
+// The team's settled lines, from any vendor, are shown to the model as a hint for lines
+// that are the same purchase (line-memory.ts relevantPrecedents). A line already settled
+// for the same vendor never gets here as a question: line memory fills it first.
 
 import { config } from '../config.js';
 import { logger } from '../infra/logger.js';

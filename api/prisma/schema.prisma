@@ -42,7 +42,6 @@ model Organization {
   accountingAccountMaps AccountingAccountMap[]
   accountingSyncs AccountingSync[]
   paymentOrderGlCodings PaymentOrderGlCoding[]
-  vendorCodingRules     VendorCodingRule[]
   invoiceDocuments InvoiceDocument[]
   inboundEmailMessages InboundEmailMessage[]
 
@@ -116,33 +115,6 @@ model AccountingSync {
   @@index([organizationId, status, createdAt(sort: Desc)])
   @@index([paymentOrderId])
   @@map("accounting_syncs")
-}
-
-// Vendor coding default: the inspectable form of vendor memory. 'learned'
-// rules are auto-promoted from agreeing history and retrain on drift;
-// 'manual' rules are set by a person and never auto-changed.
-model VendorCodingRule {
-  vendorCodingRuleId String       @id @default(dbgenerated("gen_random_uuid()")) @map("vendor_coding_rule_id") @db.Uuid
-  organizationId     String       @map("organization_id") @db.Uuid
-  counterpartyId     String       @map("counterparty_id") @db.Uuid
-  provider           String       @default("quickbooks")
-  accountId          String       @map("account_id")
-  accountName        String?      @map("account_name")
-  source             String       @default("learned")
-  learnedFromCount   Int          @default(0) @map("learned_from_count")
-  setByUserId        String?      @map("set_by_user_id") @db.Uuid
-  /// User ids whose confirmed bills taught this habit.
-  taughtBy           Json         @default("[]") @map("taught_by")
-  /// When an admin kept (or set) it; null while it is still being announced.
-  acknowledgedAt     DateTime?    @map("acknowledged_at") @db.Timestamptz(6)
-  acknowledgedByUserId String?    @map("acknowledged_by_user_id") @db.Uuid
-  createdAt          DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization       Organization @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
-  counterparty       Counterparty @relation(fields: [counterpartyId], references: [counterpartyId], onDelete: Cascade)
-
-  @@unique([organizationId, counterpartyId, provider])
-  @@map("vendor_coding_rules")
 }
 
 model PaymentOrderGlCoding {
@@ -433,7 +405,6 @@ model Counterparty {
   organization      Organization     @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
   wallets           CounterpartyWallet[]
   paymentOrders     PaymentOrder[]
-  vendorCodingRules VendorCodingRule[]
 
   @@index([organizationId, createdAt(sort: Desc)])
   @@map("counterparties")
@@ -1092,18 +1063,7 @@ model InboxSeen {
   @@map("inbox_seen")
 }
 
-model ForgottenHabit {
-  organizationId    String   @map("organization_id") @db.Uuid
-  counterpartyId    String   @map("counterparty_id") @db.Uuid
-  accountName       String?  @map("account_name")
-  forgottenAt       DateTime @default(now()) @map("forgotten_at") @db.Timestamptz(6)
-  forgottenByUserId String?  @map("forgotten_by_user_id") @db.Uuid
-
-  @@id([organizationId, counterpartyId])
-  @@map("forgotten_habits")
-}
-
-/// Line memory: a kind of line the companion was told to forget (033-forgotten-lines.sql).
+/// Line memory: a vendor's kind of line the companion was told to forget (033-forgotten-lines.sql).
 model ForgottenLine {
   organizationId    String   @map("organization_id") @db.Uuid
   counterpartyId    String   @map("counterparty_id") @db.Uuid

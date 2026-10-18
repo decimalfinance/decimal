@@ -9,9 +9,9 @@
 //     summary is how the wrong answer gets through, and the bill page is where
 //     the whole picture is.
 //   - DO IT HERE: what is not a judgement about a bill's contents — asking a
-//     colleague a question, setting or removing a vendor default. The button
-//     sends a request, built here, to the same endpoint a person would use,
-//     as the person who clicks, so every permission and gate runs at the click.
+//     colleague a question. The button sends a request, built here, to the
+//     same endpoint a person would use, as the person who clicks, so every
+//     permission and gate runs at the click.
 //
 // The model names a kind and a bill. Everything else is decided here, in code,
 // against the bill as it is right now: whether the card fits at all, what it
@@ -26,13 +26,12 @@ import { getMembersAndRoles } from '../approvals/roles.js';
 import { involvedBillIds } from '../payments/bill-visibility.js';
 import { classifyAsk } from './ask-classifier.js';
 import { getInbox } from './inbox.js';
-import { resolveCategory } from './knowledge.js';
 import { prisma } from '../infra/prisma.js';
 
 /** Cards in one answer: enough to tidy a batch, few enough to read. */
 const MAX_CARDS = 12;
 
-export const ACTION_KINDS = ['look_at', 'send_for_approval', 'close_duplicate', 'clear_duplicate', 'approve', 'ask_person', 'save_habit', 'forget_habit'] as const;
+export const ACTION_KINDS = ['look_at', 'send_for_approval', 'close_duplicate', 'clear_duplicate', 'approve', 'ask_person'] as const;
 export type ActionKind = (typeof ACTION_KINDS)[number];
 /**
  * What a card turns out to be. ask_person becomes a question on the bill,
@@ -41,7 +40,7 @@ export type ActionKind = (typeof ACTION_KINDS)[number];
  */
 export type CardKind = Exclude<ActionKind, 'ask_person'> | 'question' | 'already_asked' | 'cannot_ask';
 
-export type ProposedAction = { kind: ActionKind; billId: string; reason: string; toPerson?: string | null; message?: string | null; category?: string | null; focus?: string | null };
+export type ProposedAction = { kind: ActionKind; billId: string; reason: string; toPerson?: string | null; message?: string | null; focus?: string | null };
 
 export type ActionCard = {
   actionId: string;
@@ -71,8 +70,6 @@ const COPY: Record<CardKind, { verb: string; button: string; done: string }> = {
   question: { verb: 'Ask', button: 'Send question', done: 'Question sent' },
   already_asked: { verb: 'Already asked', button: '', done: '' },
   cannot_ask: { verb: "Can't ask", button: '', done: '' },
-  save_habit: { verb: 'Set a default', button: 'Set the default', done: 'Default set' },
-  forget_habit: { verb: 'Remove the default', button: 'Remove it', done: 'Default removed' },
 };
 
 export function doneText(kind: CardKind): string {
@@ -124,32 +121,6 @@ export async function buildActionCards(args: {
     let status: ActionCard['status'] = 'proposed';
 
     switch (p.kind) {
-      case 'save_habit':
-      case 'forget_habit': {
-        // Habits belong to whoever codes bills: bill clerks and admins.
-        if (!canEdit) break;
-        const vendor = await prisma.paymentOrder.findUnique({ where: { paymentOrderId: row.paymentOrderId }, select: { counterpartyId: true } });
-        if (!vendor?.counterpartyId) break;
-        const current = await prisma.vendorCodingRule.findFirst({ where: { organizationId: args.organizationId, counterpartyId: vendor.counterpartyId } });
-        key = `${p.kind}:${vendor.counterpartyId}`;
-        if (once.has(key)) break;
-        if (p.kind === 'forget_habit') {
-          if (!current) break;
-          title = `Remove the default: ${row.vendorName} → ${current.accountName ?? current.accountId}`;
-          detail = "This vendor's lines stop falling back to it. Lines like ones your team settled keep their categories; confirmed bills keep what was confirmed.";
-          call = { method: 'DELETE', path: `/knowledge/habits/${vendor.counterpartyId}`, body: {} };
-        } else {
-          const account = await resolveCategory(args.organizationId, p.category ?? '');
-          if (!account) break;
-          if (current && (current.accountName === account.name || current.accountId === account.id)) break;
-          title = `Set a default: ${row.vendorName} → ${account.name}`;
-          detail = current
-            ? `Replaces ${current.accountName ?? current.accountId}. Used for this vendor's lines when nothing else says what they are.`
-            : "Used for this vendor's lines when nothing else says what they are.";
-          call = { method: 'PUT', path: '/knowledge/habits', body: { counterpartyId: vendor.counterpartyId, category: account.name } };
-        }
-        break;
-      }
       case 'ask_person': {
         // Who, whether they can see the bill, and how it lands in their inbox.
         const message = (p.message ?? '').replace(/\s+/g, ' ').trim().slice(0, 500);

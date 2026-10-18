@@ -166,8 +166,14 @@ export async function makeWorld(orgName = 'Halcyon Labs, Inc.') {
   const billTo = orgName;
   const steady1 = await upload(orgId, owner.token, billTo, { vendor: 'Steady Supply', amount: 300, invoiceNo: 'SS-1' });
   const ready = await upload(orgId, owner.token, billTo, { vendor: 'Steady Supply', amount: 310, invoiceNo: 'SS-2' });
-  const { counterpartyId: steadyId } = await prisma.paymentOrder.findUniqueOrThrow({ where: { paymentOrderId: ready }, select: { counterpartyId: true } });
-  await prisma.vendorCodingRule.create({ data: { organizationId: orgId, counterpartyId: steadyId!, accountId: 'Cloud hosting & infrastructure', accountName: 'Cloud hosting & infrastructure', source: 'manual', learnedFromCount: 0 } });
+  // Steady Supply's line is one the team settled: someone recoded it on the
+  // first bill and the draft saved, so the same line on the second is known.
+  await drainAsyncIntake();
+  await get(`/organizations/${orgId}/bills/${steady1}/draft`, owner.token);
+  await post(`/organizations/${orgId}/bills/${steady1}/save`, {
+    ...confirmBody('SS-1', 300),
+    lines: [{ description: 'Services', quantity: 1, unitPrice: 300, amount: 300, category: 'Office supplies & software' }],
+  }, owner.token);
   const dupOld = await upload(orgId, owner.token, billTo, { vendor: 'Twin Supply', amount: 1200, invoiceNo: 'TS-100' });
   const dupNew = await upload(orgId, owner.token, billTo, { vendor: 'Twin Supply', amount: 1200, invoiceNo: 'TS-100' });
   const lonely = await upload(orgId, owner.token, billTo, { vendor: 'Lonely Ltd', amount: 90, invoiceNo: 'LL-1' });

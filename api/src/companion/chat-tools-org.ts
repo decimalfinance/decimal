@@ -30,7 +30,7 @@ const JOBS: Array<{ job: string; who: 'capability' | 'admin' | 'primary_admin' |
   { job: 'Send a bill for approval', who: 'capability', capability: 'bills.edit', note: 'Whoever reviews it: bill clerks and admins.' },
   { job: 'Approve a bill', who: 'flow', note: 'The approval flow decides who, bill by bill (by amount, vendor or category). People with the Approver role can be placed in it. Separation-of-duties rules may stop someone approving a bill they submitted.' },
   { job: 'Clear a duplicate flag, or close a bill as not a bill', who: 'admin', note: 'Admins only: it overrides a check or removes a payable.' },
-  { job: 'Teach, keep or forget a category habit for a vendor', who: 'capability', capability: 'bills.edit', note: 'Whoever codes bills: bill clerks and admins. New habits are announced to them in the Inbox.' },
+  { job: "Forget a category learned for a vendor's line", who: 'capability', capability: 'bills.edit', note: 'Whoever codes bills: bill clerks and admins. Nobody teaches categories on purpose: they are learned from the lines people settle, and there is no default for a whole vendor.' },
   { job: 'Let one bill past the bill ceiling', who: 'primary_admin', note: 'The primary admin only.' },
   { job: 'Change the approval flow, the ceiling or the separation-of-duties rules', who: 'primary_admin', note: 'The primary admin only.' },
   { job: 'Invite people and assign roles', who: 'admin', note: 'Admins.' },
@@ -206,12 +206,12 @@ export function orgTools(args: {
     },
     {
       name: 'what_i_know',
-      description: 'What the companion has learned about categories. Mostly lines, learned per vendor: a vendor, a line description, the category the team settled on for that vendor\'s lines like it (from confirmed bills, and categories people changed on saved drafts), the bill and person it was last settled by, and how many of the vendor\'s lines agree. The same words from another vendor are a different line. Also vendor defaults a person set by hand (the last resort for a line), and lines it was told to forget.',
+      description: 'What the companion has learned about categories: lines, learned per vendor. Each is a vendor, a line description, the category the team settled on for that vendor\'s lines like it (from confirmed bills, and categories people changed on saved drafts), the bill and person it was last settled by, and how many of the vendor\'s lines agree. The same words from another vendor are a different line. There is no category for a whole vendor. Also lines it was told to forget, per vendor.',
       parameters: { type: 'object', additionalProperties: false, properties: {} },
       run: async () => {
         const { getKnowledge } = await import('./knowledge.js');
         const k = await getKnowledge(args.organizationId, args.viewerUserId);
-        await args.onThought({ text: 'Checked what I have learned', detail: `${plural(k.lines.length, 'kind of line')}${k.vendorDefaults.length ? `, ${plural(k.vendorDefaults.length, 'vendor default')}` : ''}${k.forgotten.length ? `, ${k.forgotten.length} forgotten` : ''}.` });
+        await args.onThought({ text: 'Checked what I have learned', detail: `${plural(k.lines.length, 'kind of line')}${k.forgotten.length ? `, ${k.forgotten.length} forgotten` : ''}.` });
         return {
           lines: k.lines.slice(0, 100).map((l) => ({
             vendor: l.vendorName,
@@ -222,7 +222,6 @@ export function orgTools(args: {
             on: localDay(new Date(l.at)),
             agreeingLines: l.fromLines,
           })),
-          vendorDefaults: k.vendorDefaults.map((d) => ({ vendor: d.vendorName, category: d.category, setBy: d.setBy, since: localDay(new Date(d.since)) })),
           forgotten: k.forgotten.map((f) => ({ vendor: f.vendorName, line: f.description, category: f.category, forgottenBy: f.by, on: localDay(new Date(f.at)) })),
         };
       },

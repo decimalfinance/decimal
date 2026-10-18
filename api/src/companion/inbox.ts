@@ -21,7 +21,7 @@ import { getApprovalsInbox, getBillsWorkbench } from '../payments/bills.js';
 import { involvedBillIds } from '../payments/bill-visibility.js';
 import { getOrgAccess } from '../approvals/permissions.js';
 
-export type InboxLineKind = 'approval' | 'question' | 'reply' | 'review' | 'sign_off' | 'sent_back' | 'unreadable' | 'sync_failed' | 'learned';
+export type InboxLineKind = 'approval' | 'question' | 'reply' | 'review' | 'sign_off' | 'sent_back' | 'unreadable' | 'sync_failed';
 
 export type InboxLine = {
   kind: InboxLineKind;
@@ -50,7 +50,7 @@ export type InboxItem = {
   isNew: boolean;
 };
 
-const URGENCY: Record<InboxLineKind, number> = { question: 0, reply: 0, approval: 1, sync_failed: 3, sent_back: 3, review: 4, unreadable: 5, sign_off: 6, learned: 7 };
+const URGENCY: Record<InboxLineKind, number> = { question: 0, reply: 0, approval: 1, sync_failed: 3, sent_back: 3, review: 4, unreadable: 5, sign_off: 6 };
 
 /**
  * Mark replies to this person's questions as dealt with once they act on the

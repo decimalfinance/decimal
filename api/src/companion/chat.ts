@@ -61,10 +61,8 @@ How to answer:
   - send_for_approval: a draft that is ready (checked, nothing flagged). Opens it to look over and send.
   - close_duplicate: the copy in a duplicate pair (keep the older bill; close the newer copy; reason says why it is a copy). Opens the bill at its duplicate check. When get_bill has a duplicateInvestigation, follow its verdict and which bill it says to keep, and say so.
   - clear_duplicate: a duplicate flag on bills that are genuinely different (reason says why). Opens the bill at its duplicate check.
-  Cards that act here, because they are not judgements about a bill:
+  A card that acts here, because it is not a judgement about a bill:
   - ask_person: ask a teammate something about a bill (toPerson: their name from the team tool; message: the question, written to them, e.g. "While you're approving this, can you check the tax line?"). The system checks their inbox and either sends it as a question on the bill or tells the person it is already there. A question never holds the bill. Only people who work on bills can be asked: never someone whose only role is Viewer (the team tool shows roles); say they only view bills instead. Use it when someone asks you to chase, remind, or ask a colleague.
-  - save_habit: set a vendor DEFAULT category (billId: any bill from that vendor; category: the name from the categories tool): the last resort for that vendor's lines when nothing else says what a line is. For whoever codes bills. Only when the person asks for a vendor-wide default: categories are learned per kind of line, in the background, from the lines people settle, so there is usually nothing to set.
-  - forget_habit: remove a vendor default (billId: any bill from that vendor). For whoever codes bills.
   Propose when the person asks you to do something, or when one of these is plainly the next step. Say in the message what the card is for, and never say it is done: a go-there card opens the bill, the person does it there. Anything you say you are proposing MUST be in actions. Payments, settings and policies are not on cards: say where they are done.
 - Payments are not live in Decimal: never say a bill was paid out unless its state says paid.`;
 }
@@ -95,14 +93,13 @@ const RESPOND_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['kind', 'billId', 'reason', 'toPerson', 'message', 'category', 'focus'],
+        required: ['kind', 'billId', 'reason', 'toPerson', 'message', 'focus'],
         properties: {
           kind: { type: 'string', enum: [...ACTION_KINDS] },
           billId: { type: 'string' },
           reason: { type: 'string', description: 'One sentence: why this action, for this bill.' },
           toPerson: { type: ['string', 'null'], description: 'ask_person only: the teammate\'s name, as the team tool lists it. Null otherwise.' },
           message: { type: ['string', 'null'], description: 'ask_person only: what you are asking them, written to them. Null otherwise.' },
-          category: { type: ['string', 'null'], description: 'save_habit only: the category name, exactly as the categories tool lists it. Null otherwise.' },
           focus: { type: ['string', 'null'], description: 'look_at only: where on the bill to open it ("total", "line 2", "flag:lines_do_not_sum", ...). Null otherwise, or for the top of the bill.' },
         },
       },
@@ -272,7 +269,7 @@ async function answerQuestion(args: {
     // request each button sends is built in code, never taken from the model.
     const proposals = (Array.isArray(a.actions) ? a.actions : [])
       .filter((x): x is ProposedAction => Boolean(x) && (ACTION_KINDS as readonly string[]).includes((x as ProposedAction).kind) && typeof (x as ProposedAction).billId === 'string')
-      .map((x) => ({ kind: x.kind, billId: x.billId, reason: String(x.reason ?? ''), toPerson: typeof x.toPerson === 'string' ? x.toPerson : null, message: typeof x.message === 'string' ? x.message : null, category: typeof x.category === 'string' ? x.category : null, focus: typeof x.focus === 'string' ? x.focus : null }));
+      .map((x) => ({ kind: x.kind, billId: x.billId, reason: String(x.reason ?? ''), toPerson: typeof x.toPerson === 'string' ? x.toPerson : null, message: typeof x.message === 'string' ? x.message : null, focus: typeof x.focus === 'string' ? x.focus : null }));
     const actions = await buildActionCards({ organizationId: args.organizationId, viewerUserId: args.userId, proposals, seen });
     // Never promise a button that is not there: the model said it was
     // proposing something, but no card survived (it left it out, or the bill

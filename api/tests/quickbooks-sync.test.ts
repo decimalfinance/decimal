@@ -152,7 +152,7 @@ test('quickbooks: when QuickBooks refuses, it retries in the background — and 
   assert.equal((await post(`/organizations/${w.orgId}/payment-orders/${w.bills.submitted}/accounting/sync`, {}, w.owner.token)).outcome, 'synced');
 });
 
-test('quickbooks: confirming a bill records its categories as the bill\'s coding, which vendor habits learn from', async () => {
+test('quickbooks: confirming a bill records its categories as the bill\'s coding', async () => {
   const w = await makeWorld();
   fakeQuickBooks();
   await post(`/organizations/${w.orgId}/bills/${w.bills.ready}/confirm`, confirmBody('SS-2', 310), w.owner.token);

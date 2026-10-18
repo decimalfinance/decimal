@@ -8,7 +8,7 @@ import { asyncRoute } from '../infra/route-helpers.js';
 import { getCompanionConsole, getCompanionJob } from './today.js';
 import { followUp, getChat, listChats, recordActionOutcome, startChat } from './chat.js';
 import { getInbox, markAllInboxSeen, markInboxSeen, tickReply } from './inbox.js';
-import { forgetHabit, forgetLine, getKnowledge, setHabit } from './knowledge.js';
+import { forgetLine, getKnowledge } from './knowledge.js';
 import { getBillNote } from './bill-note.js';
 import { getReadyBills } from './ready-pass.js';
 
@@ -102,7 +102,7 @@ companionRouter.post('/organizations/:organizationId/inbox/replies/:billQuestion
 }));
 
 // What the companion knows. Anyone on the team may read it; forgetting a line
-// and setting vendor defaults is for whoever codes bills (checked inside).
+// is for whoever codes bills (checked inside).
 
 companionRouter.get('/organizations/:organizationId/knowledge', asyncRoute(async (req, res) => {
   const { organizationId } = orgParams.parse(req.params);
@@ -116,22 +116,6 @@ companionRouter.post('/organizations/:organizationId/knowledge/lines/forget', as
   await assertOrganizationAccess(organizationId, req.auth!);
   const { counterpartyId, description } = forgetLineBody.parse(req.body);
   res.json(await forgetLine(organizationId, req.auth!.userId, counterpartyId, description));
-}));
-
-const setHabitBody = z.object({ counterpartyId: z.string().uuid(), category: z.string().trim().min(1).max(200) });
-const vendorParams = orgParams.extend({ counterpartyId: z.string().uuid() });
-
-companionRouter.put('/organizations/:organizationId/knowledge/habits', asyncRoute(async (req, res) => {
-  const { organizationId } = orgParams.parse(req.params);
-  await assertOrganizationAccess(organizationId, req.auth!);
-  const { counterpartyId, category } = setHabitBody.parse(req.body);
-  res.json(await setHabit(organizationId, req.auth!.userId, counterpartyId, category));
-}));
-
-companionRouter.delete('/organizations/:organizationId/knowledge/habits/:counterpartyId', asyncRoute(async (req, res) => {
-  const { organizationId, counterpartyId } = vendorParams.parse(req.params);
-  await assertOrganizationAccess(organizationId, req.auth!);
-  res.json(await forgetHabit(organizationId, req.auth!.userId, counterpartyId));
 }));
 
 // The companion's note on one bill, for the bill's own screen.

@@ -1131,6 +1131,13 @@ BEFORE UPDATE ON payment_order_gl_codings
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- coding_rules was a stub for promoted per-vendor rules that was never wired up.
--- Vendor coding memory lives in vendor_coding_rules (010-coding-rules.sql).
 -- Removed 2026-09-17. The drop keeps existing databases in step.
 DROP TABLE IF EXISTS coding_rules;
+
+-- Vendor defaults (vendor_coding_rules, and forgotten_habits for the learned
+-- ones) were removed on 2026-10-19: a line's category is learned per vendor +
+-- line (line-memory.ts) and nothing else. A category for a whole vendor said
+-- nothing true about any one line, and it made a vendor's bills look checked
+-- when every line was a guess. The drops keep existing databases in step.
+DROP TABLE IF EXISTS forgotten_habits;
+DROP TABLE IF EXISTS vendor_coding_rules;

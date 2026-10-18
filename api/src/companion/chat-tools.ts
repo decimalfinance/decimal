@@ -268,7 +268,7 @@ export function chatTools(args: {
     },
     {
       name: 'vendor_profile',
-      description: 'Everything about one vendor from this person\'s bills: how many, total and average amount, first and latest bill, what is open, and the category habit if one has been learned or set.',
+      description: 'Everything about one vendor from this person\'s bills: how many, total and average amount, first and latest bill, what is open, and any payment hold. The categories learned for its lines are in what_i_know.',
       parameters: { type: 'object', additionalProperties: false, properties: { vendor: { type: 'string' } }, required: ['vendor'] },
       run: async (a) => {
         const rows = (await bills()).filter((r) => vendorMatches(r, a.vendor));
@@ -282,9 +282,6 @@ export function chatTools(args: {
           select: { counterpartyId: true, displayName: true, metadataJson: true },
         });
         const hold = counterparty ? readPayableHold(counterparty.metadataJson) : null;
-        const habit = counterparty
-          ? await prisma.vendorCodingRule.findFirst({ where: { organizationId: args.organizationId, counterpartyId: counterparty.counterpartyId }, select: { accountName: true, accountId: true, source: true, learnedFromCount: true } })
-          : null;
         const total = rows.reduce((s, r) => s + r.amountUsd, 0);
         const sorted = [...rows].sort((x, y) => x.createdAt.getTime() - y.createdAt.getTime());
         const open = rows.filter((r) => r.bucket === 'draft' || r.bucket === 'in_approval' || r.bucket === 'needs_attention');
@@ -299,7 +296,6 @@ export function chatTools(args: {
           firstBill: day(sorted[0]!.createdAt),
           latestBill: day(sorted[sorted.length - 1]!.createdAt),
           open: open.map(brief),
-          categoryHabit: habit ? { category: habit.accountName ?? habit.accountId, learned: habit.source === 'learned', fromBills: habit.learnedFromCount } : null,
           paymentHold: hold ? { status: hold.status, reason: hold.reason, by: hold.byName, at: hold.at } : null,
         };
       },

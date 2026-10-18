@@ -2,7 +2,7 @@
 //
 // Everything here already exists elsewhere — the steps it took reading the
 // document, its ready-or-not verdict, what the viewer's Inbox wants of them on
-// this bill, the vendor's category habit. This gathers them for one bill so
+// this bill. This gathers them for one bill so
 // the screen can say, in one place: what I did, what I need from you, and
 // where the bill stands. Read-only, and only for a bill the viewer can see.
 import { prisma } from '../infra/prisma.js';
@@ -21,13 +21,10 @@ export async function getBillNote(organizationId: string, viewerUserId: string, 
   });
   if (!order) throw notFound('No such bill.');
 
-  const [board, inbox, rule, steps, chatId] = await Promise.all([
+  const [board, inbox, steps, chatId] = await Promise.all([
     getBillsWorkbench(organizationId, viewerUserId),
     // Read-only: opening a bill must not tidy the person's inbox.
     getInbox(organizationId, viewerUserId, { settle: false }),
-    order.counterpartyId
-      ? prisma.vendorCodingRule.findFirst({ where: { organizationId, counterpartyId: order.counterpartyId } })
-      : null,
     // The document's steps, and this bill's: a document can hold several
     // bills, and steps before the bill existed belong to all of them.
     order.invoiceDocumentId
@@ -51,9 +48,6 @@ export async function getBillNote(organizationId: string, viewerUserId: string, 
     standing: row?.subStatus.text ?? null,
     waiting: waiting.map((l) => ({ kind: l.kind, text: l.text, from: l.from ?? null })),
     did: steps.map((s) => ({ id: s.stepId, status: s.status, text: s.text, detail: s.detail })),
-    // A vendor default a person set: the last resort for a line. Where each
-    // line's category came from is on the draft's own lines (categoryFrom).
-    vendorDefault: rule ? { category: rule.accountName ?? rule.accountId } : null,
     chatId,
   };
 }

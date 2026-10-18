@@ -1094,16 +1094,11 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
 
   // Are a draft's categories known, or a guess? Known when every line reads
   // like one a person settled on ANOTHER bill from the same vendor (line
-  // memory), or when someone set a default for the vendor by hand. Once for
-  // the board, for the companion's readiness.
-  const vendorsWithManualDefault = new Set(
-    (await prisma.vendorCodingRule.findMany({ where: { organizationId, source: 'manual' }, select: { counterpartyId: true } }))
-      .map((r) => r.counterpartyId),
-  );
+  // memory), or on this one. Once for the board, for the companion's
+  // readiness.
   const { loadPrecedents, matchLine } = await import('../accounting/line-memory.js');
   const boardPrecedents = orders.some((o) => o.state === 'draft') ? await loadPrecedents(organizationId).catch(() => []) : [];
   const categoriesKnown = (paymentOrderId: string, counterpartyId: string | null, lineItems: unknown[], meta: Record<string, unknown>): boolean => {
-    if (counterpartyId && vendorsWithManualDefault.has(counterpartyId)) return true;
     // A line a person settled ON THIS BILL is known too: confirmed, or its
     // category changed from what was proposed and saved (A4, recoded by hand,
     // read as "a first guess" because it only looked at other bills).
@@ -1791,35 +1786,9 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       }
     }
   }
-  // Coding waterfall (GL synthesis D1): the vendor's RULE outranks the
-  // document's own signal — resolved against the chart so the picker
-  // recognizes it. The source rides along so the UI can say WHY.
-  let codingSuggestionSource: { kind: 'rule' | 'ocr'; detail: string } | null = null;
-  let ruleSuggestion: string | null = null;
-  if (order.counterpartyId) {
-    const { getVendorCodingRule } = await import('../accounting/gl-coding.js');
-    const rule = await getVendorCodingRule(organizationId, order.counterpartyId).catch(() => null);
-    if (rule?.accountName) {
-      // Validate against the SAME vocabulary the picker offers — the QBO chart
-      // when connected, the builtin categories otherwise. Checking the QBO
-      // chart alone made every pre-QBO rule silently fall through to OCR
-      // (testbench 007: the Vendors page promised a default the draft
-      // screen never applied).
-      const ruleAccount = chart.find((a) => a.name === rule.accountName || a.fullyQualifiedName === rule.accountName);
-      const pickerHasIt = chart.length > 0
-        ? (Boolean(ruleAccount) || chartNames.has(rule.accountName))
-        : categoryOptions.some((o) => o.value === rule.accountName);
-      if (pickerHasIt) {
-        ruleSuggestion = ruleAccount?.fullyQualifiedName ?? rule.accountName;
-        codingSuggestionSource = {
-          kind: 'rule',
-          detail: rule.source === 'manual'
-            ? 'your team set a coding default for this vendor'
-            : `learned from ${rule.learnedFromCount} agreeing bill${rule.learnedFromCount === 1 ? '' : 's'}`,
-        };
-      }
-    }
-  }
+  // The bill-level guess: what the model says the invoice as a whole is for,
+  // resolved against the chart so the picker recognizes it. The source rides
+  // along so the UI can say WHY.
   const topSuggestion = ocrCoding && Array.isArray(ocrCoding.suggestions) && isRecord(ocrCoding.suggestions[0])
     ? str((ocrCoding.suggestions[0] as Record<string, unknown>).accountName)
     : null;
@@ -1834,10 +1803,8 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     : topSuggestion
       ?? (ocrCoding ? str(ocrCoding.categoryHint) : null)
       ?? str(extracted.categoryHint);
-  const codingSuggestion = ruleSuggestion ?? ocrSuggestionResolved;
-  if (!codingSuggestionSource && codingSuggestion) {
-    codingSuggestionSource = { kind: 'ocr', detail: 'read from the invoice' };
-  }
+  const codingSuggestion = ocrSuggestionResolved;
+  const codingSuggestionSource: { kind: 'ocr'; detail: string } | null = codingSuggestion ? { kind: 'ocr', detail: 'read from the invoice' } : null;
   const lineSource = (line: Record<string, unknown>) => toDocSource(line.source);
   // Each line carries its own category when the document supports one.
   //
@@ -1847,9 +1814,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   // explicitly "what this INVOICE is for", which is the wrong question to ask
   // of a line.
   //
-  // The bill-level suggestion is still the fallback, and a vendor RULE still
-  // outranks everything: a rule is somebody's stated decision about this
-  // vendor, and a per-line guess must not quietly overturn it.
+  // The bill-level suggestion is still the last fallback.
   // What the model said about THIS line, by position. This is the only signal
   // here that was actually formed by looking at the line; the hint below is
   // prose off the document, and the bill-level suggestion is about the invoice
@@ -1868,11 +1833,9 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   };
 
   const resolveLineCategory = (hint: string | null): string | null => {
-    // A vendor rule is the DEFAULT, not an override. It says "bills from this
-    // vendor usually code to X", which is true of the bill and not necessarily
-    // of every line on it — the travel line of a security-audit invoice is
-    // still travel. A hint the picker recognises is specific evidence about
-    // THIS line and wins; anything else falls back to the rule.
+    // A label the document prints on the line, if the picker recognises it,
+    // is specific evidence about THIS line; anything else falls back to the
+    // bill-level guess.
     if (!hint) return codingSuggestion;
     const match = categoryOptions.find((o) => o.value.toLowerCase() === hint.toLowerCase())
       ?? categoryOptions.find((o) => o.value.toLowerCase().includes(hint.toLowerCase()))
@@ -1884,9 +1847,10 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   // vendor's "stock photography licenses" is better evidence about the next
   // such line than anything else here.
   // Then the model's reading of the line, then a label the document prints on
-  // it, and only then the vendor default: a vendor sells different things, so
-  // "this vendor goes to X" is the weakest signal about any one line
-  // (Zaid, 2026-10-01). Only for lines nobody has saved yet.
+  // it, then the model's guess for the bill as a whole. There is no vendor
+  // default (removed 2026-10-19): a vendor sells different things, so "this
+  // vendor goes to X" says nothing true about any one line. Only for lines
+  // nobody has saved yet.
   const { loadPrecedents, matchLine } = await import('../accounting/line-memory.js');
   const precedents = verifiedLines ? [] : await loadPrecedents(organizationId, { excludeBillId: order.paymentOrderId }).catch(() => []);
   const pickerName = (name: string): string | null => {
@@ -1931,7 +1895,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       // Why this line has the category it has, so the screen can say so.
       categoryFrom: remembered && memory
         ? { kind: 'memory' as const, like: memory.like, invoiceNumber: memory.invoiceNumber, paymentOrderId: memory.paymentOrderId, by: memory.byUserId ? precedentNames.get(memory.byUserId) ?? null : null }
-        : modelGuess ? similarFrom(i) ?? { kind: 'model' as const } : ruleSuggestion ? { kind: 'vendor' as const } : { kind: 'model' as const },
+        : (modelGuess ? similarFrom(i) : null) ?? { kind: 'model' as const },
       source: lineSource(line),
     };
   });
@@ -2862,8 +2826,8 @@ export async function submitBillForApproval(input: SubmitBillInput) {
   });
 
   // The categories just confirmed become the bill's coding: what QuickBooks
-  // receives at approval, and what vendor habits learn from. Best-effort — a
-  // chart lookup failing must never undo a confirmed bill.
+  // receives at approval. Best-effort — a chart lookup failing must never undo
+  // a confirmed bill.
   try {
     const { recordReviewCoding } = await import('../accounting/gl-coding.js');
     await recordReviewCoding(input.organizationId, input.paymentOrderId, input.actorUserId);

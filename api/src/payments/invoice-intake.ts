@@ -18,6 +18,7 @@ import {
   PROVENANCE_VERSION,
 } from './doc-provenance.js';
 import { suggestOcrCodings, type OcrCoding } from '../accounting/ocr-coding.js';
+import { loadPrecedents, matchLine, type Precedent } from '../accounting/line-memory.js';
 import { listWords, plural, recordStep, startStep, type JobRef } from '../companion/steps.js';
 import { INVOICE_IMPORT_REVIEW_NOTE } from '../counterparty-wallets.js';
 
@@ -340,6 +341,8 @@ export async function processInvoiceDocument(args: {
       lineItems: r.source_invoice?.lineItems ?? [],
     })),
   );
+  // What the team settled before, to say which lines are known (vendor + line).
+  const precedents = await loadPrecedents(args.organizationId).catch(() => [] as Precedent[]);
 
   const created = [];
   const skipped: InvoiceIntakeSkippedRow[] = [];
@@ -457,7 +460,13 @@ export async function processInvoiceDocument(args: {
       const billJob: JobRef = { ...job, paymentOrderId: paymentOrder.paymentOrderId };
       const vendorName = counterpartyWallet.counterparty?.displayName ?? row.counterparty;
       await recordStep(billJob, 'vendor', ...(await describeVendor(args.organizationId, counterpartyWallet, paymentOrder.paymentOrderId, vendorName)));
-      categoryOutcomes.push(await describeCategories(args.organizationId, counterpartyWallet.counterpartyId, vendorName, ocrCodings[index] ?? null));
+      categoryOutcomes.push(describeCategories(
+        vendorName,
+        counterpartyWallet.counterpartyId,
+        (row.source_invoice?.lineItems ?? []).map((l) => l.description).filter(Boolean),
+        ocrCodings[index] ?? null,
+        precedents,
+      ));
 
       {
         const { recordOpeningFlags } = await import('./bills.js');
@@ -1272,34 +1281,39 @@ async function describeVendor(
     : ['noted', `${vendorName} is a new vendor`, 'This is their first bill, so there is nothing to compare it with yet.'];
 }
 
-async function describeCategories(
-  organizationId: string,
-  counterpartyId: string | null,
+/**
+ * What the categories step says. A line's category is known only when the team
+ * settled the same line from this vendor before (line memory); anything else
+ * is a suggestion for a person to check.
+ */
+function describeCategories(
   vendorName: string,
+  counterpartyId: string | null,
+  descriptions: string[],
   coding: OcrCoding | null,
-): Promise<[string, string | null, boolean]> {
-  const rule = counterpartyId
-    ? await prisma.vendorCodingRule.findFirst({ where: { organizationId, counterpartyId } }).catch(() => null)
-    : null;
-  if (rule) {
+  precedents: Precedent[],
+): [string, string | null, boolean] {
+  const known = descriptions.filter((d) => matchLine(d, precedents, counterpartyId) !== null).length;
+  if (descriptions.length > 0 && known === descriptions.length) {
     return [
-      `Coded to ${rule.accountName ?? rule.accountId}`,
-      rule.source === 'learned'
-        ? `The habit I learned for ${vendorName}, from ${plural(rule.learnedFromCount, 'bill')} your team coded that way.`
-        : `The category your team set for ${vendorName}.`,
+      `Categories from earlier ${vendorName} bills`,
+      known === 1 ? 'The line is one your team settled before.' : `All ${known} lines are ones your team settled before.`,
       false,
     ];
   }
+  const fromBefore = known > 0
+    ? ` ${known} of ${descriptions.length} lines ${known === 1 ? 'is one' : 'are ones'} your team settled before.`
+    : '';
   const lineAccounts = [...new Set((coding?.lines ?? []).map((l) => l.accountName))];
   if (lineAccounts.length > 0) {
     return [
       `Suggested ${lineAccounts.length === 1 ? lineAccounts[0] : `${lineAccounts.length} categories`} from what the lines are for`,
-      `${lineAccounts.length > 1 ? `${listWords(lineAccounts)}. ` : ''}No habit for ${vendorName} yet, so these are suggestions for you to check.`,
+      `${lineAccounts.length > 1 ? `${listWords(lineAccounts)}. ` : ''}Suggestions for you to check.${fromBefore}`,
       true,
     ];
   }
   const top = coding?.suggestions[0];
-  if (top) return [`Suggested ${top.accountName}`, `From what the bill says it is for. No habit for ${vendorName} yet.`, true];
+  if (top) return [`Suggested ${top.accountName}`, `From what the bill says it is for. A suggestion for you to check.${fromBefore}`, true];
   return ['Could not suggest a category', 'Nothing on the bill says what it is for.', true];
 }
 

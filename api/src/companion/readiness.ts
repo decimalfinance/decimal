@@ -37,7 +37,7 @@ export function companionReadiness(args: {
   /** Facts the bill cannot leave draft without (amount, line items). */
   missing: string[];
   priorBillsFromVendor: number;
-  /** Every line's category comes from what the team did before (or a vendor default a person set). */
+  /** Every line's category comes from what the team settled before for this vendor, or on this bill. */
   categoriesKnown: boolean;
   /** How sure the reader was of each field, as extracted. */
   fieldStatus: Record<string, unknown> | null;

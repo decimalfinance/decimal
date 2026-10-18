@@ -133,25 +133,6 @@ export function CounterpartiesPage({ session: _session }: { session: Authenticat
     [counterpartiesQuery.data],
   );
 
-  // Vendor coding defaults — vendor memory made visible (GL synthesis D2).
-  const codingRulesQuery = useQuery({
-    queryKey: ['vendor-coding-rules', organizationId] as const,
-    queryFn: () => api.listVendorCodingRules(organizationId!),
-    enabled: Boolean(organizationId),
-  });
-  const codingRuleByVendor = useMemo(
-    () => new Map((codingRulesQuery.data?.items ?? []).map((r) => [r.counterpartyId, r])),
-    [codingRulesQuery.data],
-  );
-  const clearCodingRule = useMutation({
-    mutationFn: (counterpartyId: string) => api.clearVendorCodingRule(organizationId!, counterpartyId),
-    onSuccess: async () => {
-      success('Coding default removed — it will re-learn from future bills.');
-      await queryClient.invalidateQueries({ queryKey: ['vendor-coding-rules', organizationId] });
-    },
-    onError: (err) => toastError(err instanceof Error ? err.message : 'Could not remove the default.'),
-  });
-
   const payableMutation = useMutation({
     mutationFn: (input: { counterpartyId: string; status: 'payable' | 'held' | 'blocked'; reason?: string | null }) =>
       api.setVendorPayableStatus(organizationId!, input.counterpartyId, { status: input.status, reason: input.reason ?? null }),
@@ -519,28 +500,6 @@ export function CounterpartiesPage({ session: _session }: { session: Authenticat
                                 isAdminTier={isAdminTier}
                                 onSet={(counterpartyId, status, reason) => payableMutation.mutate({ counterpartyId, status, reason })}
                               />
-                              {(() => {
-                                const cpId = g.addresses[0]?.wallet.counterpartyId;
-                                const rule = cpId ? codingRuleByVendor.get(cpId) : null;
-                                if (!rule) return null;
-                                return (
-                                  <div onClick={(e) => e.stopPropagation()}
-                                    style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 0', borderBottom: '1px solid var(--border-strong)' }}>
-                                    <Ico.book w={14} />
-                                    <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: 'var(--text-muted)' }}>
-                                      Bills from this vendor code to <b style={{ color: 'var(--text-primary)' }}>{rule.accountName ?? rule.accountId}</b>
-                                      {' — '}
-                                      {rule.source === 'manual' ? 'set by your team' : `learned from ${rule.learnedFromCount} agreeing bill${rule.learnedFromCount === 1 ? '' : 's'}`}.
-                                    </span>
-                                    {isAdminTier ? (
-                                      <button type="button" className="btn btn-secondary btn-sm" disabled={clearCodingRule.isPending}
-                                        onClick={() => clearCodingRule.mutate(cpId!)}>
-                                        Remove default
-                                      </button>
-                                    ) : null}
-                                  </div>
-                                );
-                              })()}
                               {g.addresses.map((r, i) => {
                                 const w = r.wallet;
                                 return (

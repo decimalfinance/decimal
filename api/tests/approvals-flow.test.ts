@@ -267,37 +267,6 @@ test('agent preconditions: autonomy is earned per vendor and vetoed by holds/dup
   assert.match(third.reason ?? '', /never pays a held or blocked vendor/i);
 });
 
-test('vendor defaults: agreeing history never makes one (learning is per line); a default a person sets is kept and pre-fills', async () => {
-  const { orgId, owner } = await makeOrg();
-  const mk = async (n: number) => (await uploadAndConfirm(orgId, owner.token, { vendor: 'Rule Vendor', amount: 100 + n, invoiceNo: `RV-${n}` })).billId;
-  const gl = await import('../src/accounting/gl-coding.js');
-  const code = (paymentOrderId: string, account: string) =>
-    gl.setPaymentOrderGlCoding(orgId, paymentOrderId, { codedExpenseAccountId: account, codedExpenseAccountName: account }, owner.userId);
-  const vendorOf = async () => (await prisma.counterparty.findFirstOrThrow({ where: { organizationId: orgId, displayName: 'Rule Vendor' } })).counterpartyId;
-
-  // Three agreeing codings used to promote a vendor rule. They no longer do:
-  // a vendor sells different things, so what is learned is per kind of line.
-  const b1 = await mk(1); const b2 = await mk(2); const b3 = await mk(3);
-  await code(b1, 'ACC-CLOUD'); await code(b2, 'ACC-CLOUD'); await code(b3, 'ACC-CLOUD');
-  const counterpartyId = await vendorOf();
-  assert.equal(await gl.getVendorCodingRule(orgId, counterpartyId), null, 'no vendor rule is learned from history');
-
-  // A default a person sets is their word: later codings never change it.
-  await gl.setVendorCodingRule({ organizationId: orgId, counterpartyId, accountId: 'ACC-MANUAL', accountName: 'Manual pick', actorUserId: owner.userId });
-  const b4 = await mk(4); const b5 = await mk(5); const b6 = await mk(6);
-  await code(b4, 'ACC-CLOUD'); await code(b5, 'ACC-CLOUD'); await code(b6, 'ACC-CLOUD');
-  const rule = await gl.getVendorCodingRule(orgId, counterpartyId);
-  assert.equal(rule?.accountId, 'ACC-MANUAL');
-  assert.equal(rule?.source, 'manual');
-
-  // Pre-QBO review pre-fill (testbench 007): the default must validate against
-  // the PICKER's vocabulary — with no QBO chart, that's the builtin categories.
-  await gl.setVendorCodingRule({ organizationId: orgId, counterpartyId, accountId: 'builtin:cloud-hosting', accountName: 'Cloud hosting & infrastructure', actorUserId: owner.userId });
-  const review = await get(`/organizations/${orgId}/bills/${await mk(7)}/draft`, owner.token);
-  assert.equal(review.codingSuggestionSource?.kind, 'rule', 'builtin-account default pre-fills without QuickBooks');
-  assert.match(review.codingSuggestionSource?.detail ?? '', /coding default/);
-});
-
 test('2-person org: the default flow routes to the approver, never the vetoed submitter', async () => {
   // BUG-default-flow-deadlock: owner + one approver, NO published flow. The
   // owner submits — the bill must wait on the APPROVER (quorum clamped to the
@@ -1589,28 +1558,6 @@ test('a question asked of you shows up in your inbox', async () => {
     { answer: 'Yes, confirmed.', outcome: 'answered' }, helper.token);
   const done = await get(`/organizations/${orgId}/bills/approvals-inbox`, helper.token);
   assert.equal(done.questionsForYou.length, 0, 'answered questions leave the inbox');
-});
-
-test('a GL coding suggestion is recorded, and so is overriding it', async () => {
-  // The biggest source of suggestions in the product recorded none of them.
-  // Storing only the code that ends up on the bill makes "we suggested it",
-  // "we were overridden" and "nobody asked us" the same row.
-  const owner = await register('gl-owner');
-  const org = await post('/organizations', { organizationName: 'GL Org' }, owner.token);
-  const orgId = org.organizationId as string;
-  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'GL Vendor', amount: 800, invoiceNo: 'GL-1', billTo: 'GL Org' });
-
-  const { predictGlExpenseAccount } = await import('../src/accounting/gl-coding.js');
-  await predictGlExpenseAccount(orgId, bill.billId);
-
-  const logged = await prisma.aiSuggestion.findMany({
-    where: { organizationId: orgId, stage: 'gl_coding', subjectId: bill.billId },
-  });
-  // A prediction with nothing to suggest logs nothing — there is no suggestion
-  // to be right or wrong about, and a row saying "we had no idea" is noise.
-  if (logged.length > 0) {
-    assert.match(logged[0]!.producer, /^gl-coding\//, 'says which arm of the waterfall produced it');
-  }
 });
 
 test('per-line categories are recorded, and so is changing one', async () => {
@@ -3377,12 +3324,10 @@ test('companion: the console sorts work into waiting on you and done, and says w
   assert.equal(lone.reason, 'First bill from Steady Supply');
   assert.ok(lone.jobId, 'the card links to the job behind it');
 
-  // A second bill from the vendor, and a vendor default a person set.
+  // The first bill is sent, settling its line; then a second bill from the
+  // vendor with the same line.
+  await first.confirm();
   const second = await uploadAndConfirm(orgId, owner.token, { vendor: 'Steady Supply', amount: 310, invoiceNo: 'SS-2' });
-  const { counterpartyId } = await prisma.paymentOrder.findUniqueOrThrow({ where: { paymentOrderId: second.billId }, select: { counterpartyId: true } });
-  await prisma.vendorCodingRule.create({
-    data: { organizationId: orgId, counterpartyId: counterpartyId!, accountId: 'Cloud hosting & infrastructure', accountName: 'Cloud hosting & infrastructure', source: 'manual' },
-  });
 
   board = await get(`/organizations/${orgId}/companion/console`, owner.token);
   assert.equal(board.waiting.find((c: Card) => c.paymentOrderId === second.billId)?.kind, 'sign_off', 'known vendor, categories known, nothing doubtful: ready to sign off');
@@ -3540,15 +3485,11 @@ test('companion chat: with no model, the answer says so instead of hanging', asy
 
 test('companion chat: proposals become cards only when they fit, and a card about a bill opens the bill instead of acting', async () => {
   const { orgId, owner, a2 } = await makeOrg();
-  // A ready bill: a second from a known vendor with a category habit.
-  await uploadAndConfirm(orgId, owner.token, { vendor: 'Steady Supply', amount: 300, invoiceNo: 'SS-1' });
+  // A ready bill: a second from a known vendor, whose line the first settled.
+  await (await uploadAndConfirm(orgId, owner.token, { vendor: 'Steady Supply', amount: 300, invoiceNo: 'SS-1' })).confirm();
   // Not ready: a first bill from a vendor nobody has seen.
   const lonely = await uploadAndConfirm(orgId, owner.token, { vendor: 'Lonely Ltd', amount: 90, invoiceNo: 'LL-1' });
   const ready = await uploadAndConfirm(orgId, owner.token, { vendor: 'Steady Supply', amount: 310, invoiceNo: 'SS-2' });
-  const { counterpartyId } = await prisma.paymentOrder.findUniqueOrThrow({ where: { paymentOrderId: ready.billId }, select: { counterpartyId: true } });
-  await prisma.vendorCodingRule.create({
-    data: { organizationId: orgId, counterpartyId: counterpartyId!, accountId: 'Cloud hosting & infrastructure', accountName: 'Cloud hosting & infrastructure', source: 'manual' },
-  });
   // A duplicate pair.
   await uploadAndConfirm(orgId, owner.token, { vendor: 'Twin Supply', amount: 1200, invoiceNo: 'TS-100' });
   const copy = await uploadAndConfirm(orgId, owner.token, { vendor: 'Twin Supply', amount: 1200, invoiceNo: 'TS-100' });
