@@ -1,19 +1,25 @@
-// Line memory: a line's category comes from what the team did with lines like
-// it, not from who sent the bill.
+// Line memory: a line's category comes from what the team did with the same
+// line from the same vendor.
 //
-// A vendor can sell you stock photography and an analytics retainer on the
-// same invoice; "this vendor goes to Marketing" is wrong about one of them. So
-// the unit of learning is the LINE: its description, and the category a person
-// settled on for it. Nobody teaches anything explicitly (Zaid, 2026-10-01):
+// The unit of learning is the VENDOR + LINE: a line's description, on a bill
+// from that vendor, and the category a person settled on for it (Zaid,
+// 2026-10-19). Per line, because a vendor sells different things: stock
+// photography and an analytics retainer on one invoice go to different
+// categories. Per vendor, because the same words are different purchases from
+// different vendors: an "Annual license" from a software company is a
+// subscription, from the city a permit. Nobody teaches anything explicitly
+// (Zaid, 2026-10-01):
 //
 //   - every line on a CONFIRMED bill is a precedent (confirming is agreeing);
 //   - on a SAVED draft, a line whose category a person CHANGED from what the
 //     screen proposed is a precedent too (a deliberate correction, before the
 //     bill is finished).
 //
-// A new line takes the category of the closest precedent when the two read as
-// the same thing (same words once quantities, dates and months are dropped).
-// Deterministic and explainable: the screen can say which bill it is like.
+// A new line takes the category of the closest precedent from the same vendor
+// when the two read as the same thing (same words once quantities, dates and
+// months are dropped). Deterministic and explainable: the screen can say which
+// bill it is like. Other vendors' lines are only ever shown to the model, as a
+// hint for its guess (relevantPrecedents), and a guess stays a guess.
 import { prisma } from '../infra/prisma.js';
 
 export type Precedent = {
@@ -21,6 +27,9 @@ export type Precedent = {
   description: string;
   tokens: Set<string>;
   category: string;
+  /** The vendor of the bill it was settled on. A line is learned per vendor. */
+  counterpartyId: string | null;
+  vendorName: string | null;
   paymentOrderId: string;
   invoiceNumber: string | null;
   byUserId: string | null;
@@ -72,15 +81,21 @@ export function lineSimilarity(a: Set<string>, b: Set<string>): number {
 const rec = (v: unknown): Record<string, unknown> | null => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null);
 const text = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
 
+/** A forget is per vendor + kind of line, like the lesson it stops. */
+const forgetKey = (counterpartyId: string | null, key: string) => `${counterpartyId ?? ''}|${key}`;
+
 /** Every line a person settled in this organisation, newest first. */
 export async function loadPrecedents(organizationId: string, opts: { excludeBillId?: string } = {}): Promise<Precedent[]> {
-  const forgotten = new Map((await prisma.forgottenLine.findMany({ where: { organizationId }, select: { lineKey: true, forgottenAt: true } }))
-    .map((f) => [f.lineKey, f.forgottenAt.getTime()]));
+  const forgotten = new Map((await prisma.forgottenLine.findMany({ where: { organizationId }, select: { counterpartyId: true, lineKey: true, forgottenAt: true } }))
+    .map((f) => [forgetKey(f.counterpartyId, f.lineKey), f.forgottenAt.getTime()]));
   const orders = await prisma.paymentOrder.findMany({
     where: { organizationId, state: { not: 'cancelled' }, ...(opts.excludeBillId ? { paymentOrderId: { not: opts.excludeBillId } } : {}) },
     orderBy: { updatedAt: 'desc' },
     take: PRECEDENT_BILLS,
-    select: { paymentOrderId: true, invoiceNumber: true, metadataJson: true, updatedAt: true },
+    select: {
+      paymentOrderId: true, invoiceNumber: true, metadataJson: true, updatedAt: true,
+      counterpartyId: true, counterparty: { select: { displayName: true } },
+    },
   });
   const out: Precedent[] = [];
   for (const o of orders) {
@@ -104,24 +119,33 @@ export async function loadPrecedents(organizationId: string, opts: { excludeBill
       const tokens = lineTokens(description);
       if (tokens.size === 0) continue;
       const key = [...tokens].sort().join(' ');
-      // Told to forget this kind of line: only what was settled after counts.
-      const forgottenAt = forgotten.get(key);
+      // Told to forget this vendor's kind of line: only what was settled after counts.
+      const forgottenAt = forgotten.get(forgetKey(o.counterpartyId, key));
       if (forgottenAt !== undefined && at <= forgottenAt) continue;
-      out.push({ key, description, tokens, category, paymentOrderId: o.paymentOrderId, invoiceNumber: o.invoiceNumber, byUserId: by, at, confirmed });
+      out.push({
+        key, description, tokens, category,
+        counterpartyId: o.counterpartyId, vendorName: o.counterparty?.displayName ?? null,
+        paymentOrderId: o.paymentOrderId, invoiceNumber: o.invoiceNumber, byUserId: by, at, confirmed,
+      });
     }
   }
   return out.sort((a, b) => b.at - a.at);
 }
 
 /**
- * The precedent for a line, if one reads as the same thing. The closest wins;
- * among equally close ones, the most recent — the team's latest decision.
+ * The precedent for a line on a bill from this vendor, if one of the vendor's
+ * settled lines reads as the same thing. Never another vendor's: the same
+ * words can be a different purchase. The closest wins; among equally close
+ * ones, the most recent — the team's latest decision. A bill with no vendor
+ * has nothing to match.
  */
-export function matchLine(description: string, precedents: Precedent[]): LineMatch | null {
+export function matchLine(description: string, precedents: Precedent[], counterpartyId: string | null): LineMatch | null {
+  if (!counterpartyId) return null;
   const tokens = lineTokens(description);
   if (tokens.size === 0) return null;
   let best: { p: Precedent; score: number } | null = null;
   for (const p of precedents) {
+    if (p.counterpartyId !== counterpartyId) continue;
     const score = lineSimilarity(tokens, p.tokens);
     if (score < SAME_LINE) continue;
     if (!best || score > best.score) best = { p, score }; // newest first, so ties keep the newer
@@ -138,8 +162,9 @@ export function matchLine(description: string, precedents: Precedent[]): LineMat
 }
 
 /**
- * The precedents worth showing the model for a new bill's lines: one per kind
- * of line (the decision in force). Those sharing words with a new line come
+ * The precedents worth showing the model for a new bill's lines, from any
+ * vendor: a hint for its guess, never a known category (that is matchLine,
+ * within one vendor). One per kind of line (the newest decision). Those sharing words with a new line come
  * first (most shared, then newest); the rest of the room goes to the newest
  * others, because "Typeface licence" and "Font license" share no word and are
  * the same purchase — word overlap finds candidates, the model judges them. These are for lines that

@@ -110,12 +110,12 @@ companionRouter.get('/organizations/:organizationId/knowledge', asyncRoute(async
   res.json(await getKnowledge(organizationId, req.auth!.userId));
 }));
 
-const forgetLineBody = z.object({ description: z.string().trim().min(1).max(500) });
+const forgetLineBody = z.object({ counterpartyId: z.string().uuid(), description: z.string().trim().min(1).max(500) });
 companionRouter.post('/organizations/:organizationId/knowledge/lines/forget', asyncRoute(async (req, res) => {
   const { organizationId } = orgParams.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
-  const { description } = forgetLineBody.parse(req.body);
-  res.json(await forgetLine(organizationId, req.auth!.userId, description));
+  const { counterpartyId, description } = forgetLineBody.parse(req.body);
+  res.json(await forgetLine(organizationId, req.auth!.userId, counterpartyId, description));
 }));
 
 const setHabitBody = z.object({ counterpartyId: z.string().uuid(), category: z.string().trim().min(1).max(200) });

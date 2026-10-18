@@ -1,8 +1,8 @@
 // What the companion knows, for "What I know".
 //
-// Mostly LINE MEMORY (accounting/line-memory.ts): the kinds of line the team
-// has settled a category for, learned in the background from confirmed bills
-// and from categories people changed on saved drafts. Nobody teaches it on
+// Mostly LINE MEMORY (accounting/line-memory.ts): each vendor's kinds of line
+// the team has settled a category for, learned in the background from
+// confirmed bills and from categories people changed on saved drafts. Nobody teaches it on
 // purpose (Zaid, 2026-10-01); this page is where you can see it, and forget a
 // line it got wrong. Vendor defaults a person set by hand are listed too: they
 // are the last resort for a line nothing else speaks to.
@@ -17,6 +17,9 @@ import { lineKey, loadPrecedents } from '../accounting/line-memory.js';
 
 export type RememberedLine = {
   key: string;
+  /** Lines are learned per vendor: the same words from another vendor are another line. */
+  counterpartyId: string;
+  vendorName: string;
   /** The line as a person last saw it. */
   description: string;
   category: string;
@@ -25,7 +28,7 @@ export type RememberedLine = {
   billId: string;
   by: string | null;
   at: string;
-  /** How many settled lines read like this one. */
+  /** How many of this vendor's settled lines read like this one. */
   fromLines: number;
 };
 
@@ -49,14 +52,21 @@ export async function getKnowledge(organizationId: string, viewerUserId: string)
     }),
     prisma.forgottenLine.findMany({ where: { organizationId }, orderBy: { forgottenAt: 'desc' }, take: 20 }),
   ]);
-  // One entry per kind of line; precedents are newest first, so the first
-  // seen is the decision in force.
-  const byKey = new Map<string, { latest: (typeof precedents)[number]; count: number }>();
+  // One entry per vendor and kind of line; precedents are newest first, so
+  // the first seen is the decision in force. A line on a bill with no vendor
+  // teaches nothing, so it is not listed.
+  const byKey = new Map<string, { latest: (typeof precedents)[number] & { counterpartyId: string }; count: number }>();
   for (const p of precedents) {
-    const had = byKey.get(p.key);
+    if (!p.counterpartyId) continue;
+    const k = `${p.counterpartyId}|${p.key}`;
+    const had = byKey.get(k);
     if (had) had.count += 1;
-    else byKey.set(p.key, { latest: p, count: 1 });
+    else byKey.set(k, { latest: { ...p, counterpartyId: p.counterpartyId }, count: 1 });
   }
+  const forgottenVendors = new Map((await prisma.counterparty.findMany({
+    where: { organizationId, counterpartyId: { in: [...new Set(forgotten.map((f) => f.counterpartyId))] } },
+    select: { counterpartyId: true, displayName: true },
+  })).map((c) => [c.counterpartyId, c.displayName]));
   const userIds = new Set<string>();
   for (const { latest } of byKey.values()) if (latest.byUserId) userIds.add(latest.byUserId);
   for (const d of defaults) if (d.setByUserId) userIds.add(d.setByUserId);
@@ -64,8 +74,11 @@ export async function getKnowledge(organizationId: string, viewerUserId: string)
   const users = await prisma.user.findMany({ where: { userId: { in: [...userIds] } }, select: { userId: true, displayName: true, email: true } });
   const name = new Map(users.map((u) => [u.userId, u.displayName?.trim() || u.email]));
 
+  // By vendor, then by line: read like a list of what each vendor sells you.
   const lines: RememberedLine[] = [...byKey.values()].map(({ latest, count }) => ({
     key: latest.key,
+    counterpartyId: latest.counterpartyId,
+    vendorName: latest.vendorName ?? 'A vendor',
     description: latest.description,
     category: latest.category,
     invoiceNumber: latest.invoiceNumber,
@@ -73,7 +86,7 @@ export async function getKnowledge(organizationId: string, viewerUserId: string)
     by: latest.byUserId ? name.get(latest.byUserId) ?? null : null,
     at: new Date(latest.at).toISOString(),
     fromLines: count,
-  }));
+  })).sort((a, b) => a.vendorName.localeCompare(b.vendorName) || a.description.localeCompare(b.description));
   const canManage = canCode(access);
   return {
     canManage,
@@ -90,6 +103,8 @@ export async function getKnowledge(organizationId: string, viewerUserId: string)
       since: r.updatedAt.toISOString(),
     })),
     forgotten: forgotten.map((f) => ({
+      counterpartyId: f.counterpartyId,
+      vendorName: forgottenVendors.get(f.counterpartyId) ?? 'A vendor',
       description: f.description,
       category: f.category,
       at: f.forgottenAt.toISOString(),
@@ -158,18 +173,19 @@ export async function resolveCategory(organizationId: string, name: string): Pro
 }
 
 /**
- * Forget a kind of line: lines settled before now stop teaching its category.
- * Lines people settle from now on teach it again, so a forget is never a ban.
+ * Forget a vendor's kind of line: that vendor's lines settled before now stop
+ * teaching its category. Lines people settle from now on teach it again, so a
+ * forget is never a ban. Other vendors' lines are untouched.
  */
-export async function forgetLine(organizationId: string, viewerUserId: string, description: string) {
+export async function forgetLine(organizationId: string, viewerUserId: string, counterpartyId: string, description: string) {
   await assertCanCode(organizationId, viewerUserId);
   const key = lineKey(description);
   if (!key) throw badRequest('That line has nothing to remember it by.');
-  const current = (await loadPrecedents(organizationId)).find((p) => p.key === key);
-  if (!current) throw notFound('I do not remember a line like that.');
+  const current = (await loadPrecedents(organizationId)).find((p) => p.counterpartyId === counterpartyId && p.key === key);
+  if (!current) throw notFound('I do not remember a line like that from this vendor.');
   await prisma.forgottenLine.upsert({
-    where: { organizationId_lineKey: { organizationId, lineKey: key } },
-    create: { organizationId, lineKey: key, description: current.description, category: current.category, forgottenByUserId: viewerUserId },
+    where: { organizationId_counterpartyId_lineKey: { organizationId, counterpartyId, lineKey: key } },
+    create: { organizationId, counterpartyId, lineKey: key, description: current.description, category: current.category, forgottenByUserId: viewerUserId },
     update: { description: current.description, category: current.category, forgottenAt: new Date(), forgottenByUserId: viewerUserId },
   });
   return { ok: true };

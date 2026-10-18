@@ -189,7 +189,7 @@ export function BillCompanion({ organizationId, billId, lines, flags, flagHeadli
                           {l.description}: <strong>{l.category}</strong>
                           <span className="bn-detail">
                             {l.from.kind === 'similar'
-                              ? ` · similar to "${l.from.like}" on ${l.from.invoiceNumber ?? 'an earlier bill'}`
+                              ? ` · similar to "${l.from.like}" on ${l.from.vendorName ? `${l.from.vendorName} ` : ''}${l.from.invoiceNumber ?? 'an earlier bill'}`
                               : ` · like ${l.from.invoiceNumber ?? 'an earlier bill'}`}
                             {l.from.by ? `, settled by ${l.from.by}` : ''}
                           </span>

@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { lineSimilarity, lineTokens, matchLine, type Precedent } from '../src/accounting/line-memory.js';
 
-const p = (description: string, category: string, at: number): Precedent => ({
-  key: [...lineTokens(description)].sort().join(' '), description, tokens: lineTokens(description), category, paymentOrderId: `bill-${at}`, invoiceNumber: `INV-${at}`, byUserId: null, at, confirmed: true,
+const p = (description: string, category: string, at: number, vendor = 'brightwave'): Precedent => ({
+  key: [...lineTokens(description)].sort().join(' '), description, tokens: lineTokens(description), category,
+  counterpartyId: vendor, vendorName: vendor, paymentOrderId: `bill-${at}`, invoiceNumber: `INV-${at}`, byUserId: null, at, confirmed: true,
 });
 
 test('line memory: quantities, months and plurals do not make a line different', () => {
@@ -15,16 +16,24 @@ test('line memory: quantities, months and plurals do not make a line different',
 
 test('line memory: the same kind of line matches; a different thing from the same vendor does not', () => {
   const memory = [p('Stock photography licenses (8)', 'Taxes & licenses', 2), p('Social media management — August', 'Advertising & marketing', 1)];
-  assert.equal(matchLine('Stock photography licenses (20)', memory)?.category, 'Taxes & licenses');
-  assert.equal(matchLine('Social media management — October', memory)?.category, 'Advertising & marketing');
-  assert.equal(matchLine('Content production (4 assets)', memory), null, 'nothing like it yet: no guess from memory');
-  assert.equal(matchLine('Photography for the launch event', memory), null, 'one shared word is not the same line');
+  assert.equal(matchLine('Stock photography licenses (20)', memory, 'brightwave')?.category, 'Taxes & licenses');
+  assert.equal(matchLine('Social media management — October', memory, 'brightwave')?.category, 'Advertising & marketing');
+  assert.equal(matchLine('Content production (4 assets)', memory, 'brightwave'), null, 'nothing like it yet: no guess from memory');
+  assert.equal(matchLine('Photography for the launch event', memory, 'brightwave'), null, 'one shared word is not the same line');
+});
+
+test('line memory: a line is learned per vendor; the same words from another vendor are another line', () => {
+  const memory = [p('Annual license', 'Taxes & licenses', 3, 'city'), p('Annual license', 'Dues & subscriptions', 2, 'software')];
+  assert.equal(matchLine('Annual license', memory, 'software')?.category, 'Dues & subscriptions', "the vendor's own decision, though the city's is newer");
+  assert.equal(matchLine('Annual license', memory, 'city')?.category, 'Taxes & licenses');
+  assert.equal(matchLine('Annual license', memory, 'newcomer'), null, 'a vendor with no history of its own knows nothing yet');
+  assert.equal(matchLine('Annual license', memory, null), null, 'nor does a bill with no vendor');
 });
 
 test('line memory: when two precedents are equally close, the newest decision wins', () => {
   const memory = [p('Font license — campaign use', 'Taxes & licenses', 5), p('Font license — campaign use', 'Dues & subscriptions', 1)]
     .sort((a, b) => b.at - a.at);
-  const m = matchLine('Font license - campaign use', memory)!;
+  const m = matchLine('Font license - campaign use', memory, 'brightwave')!;
   assert.equal(m.category, 'Taxes & licenses');
   assert.equal(m.invoiceNumber, 'INV-5');
 });

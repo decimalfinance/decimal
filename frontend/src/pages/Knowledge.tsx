@@ -1,9 +1,10 @@
 // What I know — the categories the companion fills in, and why.
 //
-// Mostly kinds of line: "Stock photography licenses" goes to Taxes & licenses,
-// because that is what the team settled on for lines like it. Learned in the
-// background from confirmed bills and from categories people changed; nobody
-// teaches it on purpose. This page is where you can see it and forget a line it
+// Mostly lines, learned per vendor: Brightwave's "Stock photography licenses"
+// goes to Advertising & marketing, because that is what the team settled on
+// for Brightwave's lines like it. The same words from another vendor are
+// another line. Learned in the background from confirmed bills and from
+// categories people changed; nobody teaches it on purpose. This page is where you can see it and forget a line it
 // got wrong. Vendor defaults a person set are the last resort for a line.
 //
 // Anyone on the team can read it. Whoever codes bills — bill clerks, and
@@ -34,8 +35,8 @@ export function KnowledgePage() {
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['knowledge', organizationId] });
   const forgetLine = async (l: RememberedLine) => {
     try {
-      await knowledgeApi.forgetLine(organizationId, l.description);
-      toast.success(`New lines like "${l.description}" stop being filled in with ${l.category}. Bills already saved keep what they have.`, 'Forgotten');
+      await knowledgeApi.forgetLine(organizationId, l.counterpartyId, l.description);
+      toast.success(`New lines like "${l.description}" from ${l.vendorName} stop being filled in with ${l.category}. Bills already saved keep what they have.`, 'Forgotten');
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not forget it.'); }
     void refresh();
   };
@@ -51,6 +52,7 @@ export function KnowledgePage() {
   const [setting, setSetting] = useState(false);
   const data = q.data;
   const canManage = data?.canManage ?? false;
+  const vendorCount = new Set((data?.lines ?? []).map((l) => l.counterpartyId)).size;
   const setDefault = async () => {
     const vendor = data?.choices?.vendors.find((v) => v.counterpartyId === vendorId);
     if (!vendor || !category) return;
@@ -71,7 +73,7 @@ export function KnowledgePage() {
         <PageHead
           eyebrow="Operations"
           title="What I know"
-          desc="The categories I fill in on new bills, learned from the lines your team settles: when a bill is confirmed, or a category is changed on a saved draft, lines like it get that category next time."
+          desc="The categories I fill in on new bills, learned from the lines your team settles: when a bill is confirmed, or a category is changed on a saved draft, the same line from the same vendor gets that category next time."
         />
         {q.isLoading ? <div className="skeleton" style={{ height: 240 }} /> : null}
 
@@ -79,7 +81,7 @@ export function KnowledgePage() {
           <div className="empty">
             <div className="empty-icon"><Ico.sparkle w={22} /></div>
             <h4>Nothing learned yet</h4>
-            <p>As your team confirms bills, I remember the category for each kind of line and fill it in on the next bill with a line like it.</p>
+            <p>As your team confirms bills, I remember the category for each vendor's lines and fill it in when that vendor's next bill has a line like it.</p>
           </div>
         ) : null}
 
@@ -88,23 +90,25 @@ export function KnowledgePage() {
             <div className="sec-head">
               <div className="sh-titles">
                 <h2>Lines I've learned</h2>
-                <p className="sh-desc">{data.lines.length} {data.lines.length === 1 ? 'kind of line' : 'kinds of line'}.{canManage ? '' : ' Only someone who codes bills can forget one.'}</p>
+                <p className="sh-desc">{data.lines.length} {data.lines.length === 1 ? 'kind of line' : 'kinds of line'} from {vendorCount} {vendorCount === 1 ? 'vendor' : 'vendors'}.{canManage ? '' : ' Only someone who codes bills can forget one.'}</p>
               </div>
             </div>
             <div className="tbl-card">
               <table className="tbl" style={{ tableLayout: 'fixed' }}>
                 <thead>
                   <tr>
-                    <th style={{ width: '32%' }}>Line</th>
-                    <th style={{ width: '22%' }}>Category</th>
-                    <th style={{ width: '26%' }}>Last settled</th>
-                    <th className="num" style={{ width: '8%' }}>Lines</th>
-                    <th style={{ width: '12%' }} />
+                    <th style={{ width: '20%' }}>Vendor</th>
+                    <th style={{ width: '27%' }}>Line</th>
+                    <th style={{ width: '19%' }}>Category</th>
+                    <th style={{ width: '20%' }}>Last settled</th>
+                    <th className="num" style={{ width: '6%' }}>Lines</th>
+                    <th style={{ width: '8%' }} />
                   </tr>
                 </thead>
                 <tbody>
                   {data.lines.map((l) => (
-                    <tr key={l.key} style={{ cursor: 'default' }}>
+                    <tr key={`${l.counterpartyId}|${l.key}`} style={{ cursor: 'default' }}>
+                      <td><div className="cell-vendor"><div className="v-name">{l.vendorName}</div></div></td>
                       <td>{l.description}</td>
                       <td>{l.category}</td>
                       <td>
@@ -196,14 +200,14 @@ export function KnowledgePage() {
             <div className="sec-head">
               <div className="sh-titles">
                 <h2>Forgotten</h2>
-                <p className="sh-desc">Lines settled before these were forgotten no longer count. Lines settled since can teach them again.</p>
+                <p className="sh-desc">That vendor's lines settled before these were forgotten no longer count. Lines settled since can teach them again.</p>
               </div>
             </div>
             <div className="tick-list">
               {data.forgotten.map((f, i) => (
                 <div key={i} className="tick-item">
                   <Ico.x w={14} />
-                  <span><strong>{f.description}</strong>{f.category ? ` going to ${f.category}` : ''}: forgotten {day(f.at)}{f.by ? ` by ${f.by}` : ''}.</span>
+                  <span><strong>{f.description}</strong> from {f.vendorName}{f.category ? ` going to ${f.category}` : ''}: forgotten {day(f.at)}{f.by ? ` by ${f.by}` : ''}.</span>
                 </div>
               ))}
             </div>

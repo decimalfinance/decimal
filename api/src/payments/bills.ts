@@ -1093,9 +1093,9 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
   }));
 
   // Are a draft's categories known, or a guess? Known when every line reads
-  // like one a person settled on ANOTHER bill (line memory), or when someone
-  // set a default for the vendor by hand. Once for the board, for the
-  // companion's readiness.
+  // like one a person settled on ANOTHER bill from the same vendor (line
+  // memory), or when someone set a default for the vendor by hand. Once for
+  // the board, for the companion's readiness.
   const vendorsWithManualDefault = new Set(
     (await prisma.vendorCodingRule.findMany({ where: { organizationId, source: 'manual' }, select: { counterpartyId: true } }))
       .map((r) => r.counterpartyId),
@@ -1121,7 +1121,7 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
     const descriptions = lines.map((l) => str(l.description));
     if (descriptions.length === 0 || descriptions.some((d) => !d)) return false;
     const others = boardPrecedents.filter((p) => p.paymentOrderId !== paymentOrderId);
-    return descriptions.every((d, i) => settledHere(i) || matchLine(d!, others) !== null);
+    return descriptions.every((d, i) => settledHere(i) || matchLine(d!, others, counterpartyId) !== null);
   };
   const bills = orders.map((order) => {
     const invoice = engine.invoiceByOrder.get(order.paymentOrderId);
@@ -1879,9 +1879,10 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       ?? categoryOptions.find((o) => hint.toLowerCase().includes(o.value.toLowerCase()));
     return match?.value ?? codingSuggestion;
   };
-  // Line memory: what the team did with lines like this one (line-memory.ts).
-  // It comes first — a person's decision about "stock photography licenses"
-  // is better evidence about the next such line than anything else here.
+  // Line memory: what the team did with this vendor's lines like this one
+  // (line-memory.ts). It comes first — a person's decision about this
+  // vendor's "stock photography licenses" is better evidence about the next
+  // such line than anything else here.
   // Then the model's reading of the line, then a label the document prints on
   // it, and only then the vendor default: a vendor sells different things, so
   // "this vendor goes to X" is the weakest signal about any one line
@@ -1900,18 +1901,25 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       precedentNames.set(u.userId, u.displayName?.trim() || u.email);
     }
   }
-  // The model followed a past line the team settled (similar, not the same):
-  // say which, as for an exact match, so a person can see what it leaned on.
+  // The model followed a past line the team settled (similar, not the same,
+  // or another vendor's): say which, as for an exact match, so a person can
+  // see what it leaned on. Still a guess. The vendor is named when it is not
+  // this bill's.
   const similarFrom = (index: number) => {
     const like = str(modelLines.find((l) => Number(l.index) === index)?.like);
-    const p = like ? precedents.find((x) => x.description === like) : null;
+    const p = like
+      ? precedents.find((x) => x.description === like && x.counterpartyId === order.counterpartyId) ?? precedents.find((x) => x.description === like)
+      : null;
     return p
-      ? { kind: 'similar' as const, like: p.description, invoiceNumber: p.invoiceNumber, paymentOrderId: p.paymentOrderId, by: p.byUserId ? precedentNames.get(p.byUserId) ?? null : null }
+      ? {
+        kind: 'similar' as const, like: p.description, invoiceNumber: p.invoiceNumber, paymentOrderId: p.paymentOrderId, by: p.byUserId ? precedentNames.get(p.byUserId) ?? null : null,
+        vendorName: p.counterpartyId !== order.counterpartyId ? p.vendorName : null,
+      }
       : null;
   };
   const proposedLines = extractedLines.filter(isRecord).map((line, i) => {
     const description = str(line.description) ?? '';
-    const memory = matchLine(description, precedents);
+    const memory = matchLine(description, precedents, order.counterpartyId);
     const remembered = memory ? pickerName(memory.category) : null;
     const modelGuess = remembered ? null : resolveModelLine(i);
     return {

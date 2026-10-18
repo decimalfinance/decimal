@@ -1210,8 +1210,16 @@ export interface BillDraftLine {
   unitPrice: number | null;
   amount: number | null;
   category: string | null;
-  /** Why this line has its category (unsaved drafts only): a line the team settled before, the model's reading, or the vendor default. */
-  categoryFrom?: { kind: 'memory' | 'similar'; like: string; invoiceNumber: string | null; paymentOrderId: string; by: string | null } | { kind: 'model' } | { kind: 'vendor' };
+  /**
+   * Why this line has its category (unsaved drafts only). memory: a line the
+   * team settled before from this vendor, so known. similar: the model followed
+   * a past line it judged the same purchase (vendorName set when that line was
+   * another vendor's), still a guess. model: its own reading. vendor: the
+   * vendor default.
+   */
+  categoryFrom?: { kind: 'memory'; like: string; invoiceNumber: string | null; paymentOrderId: string; by: string | null }
+    | { kind: 'similar'; like: string; invoiceNumber: string | null; paymentOrderId: string; by: string | null; vendorName?: string | null }
+    | { kind: 'model' } | { kind: 'vendor' };
   source?: DocSource;
 }
 
@@ -2094,9 +2102,11 @@ export interface InboxItem {
   isNew: boolean;
 }
 
-/** A kind of line the companion remembers a category for, learned from lines people settled. */
+/** A vendor's kind of line the companion remembers a category for, learned from lines people settled. */
 export interface RememberedLine {
   key: string;
+  counterpartyId: string;
+  vendorName: string;
   description: string;
   category: string;
   invoiceNumber: string | null;
@@ -2123,11 +2133,11 @@ export const knowledgeApi = {
       choices: { vendors: Array<{ counterpartyId: string; name: string }>; categories: string[] } | null;
       lines: RememberedLine[];
       vendorDefaults: VendorDefault[];
-      forgotten: Array<{ description: string; category: string | null; at: string; by: string | null }>;
+      forgotten: Array<{ counterpartyId: string; vendorName: string; description: string; category: string | null; at: string; by: string | null }>;
     }>(`/organizations/${organizationId}/knowledge`);
   },
-  forgetLine(organizationId: string, description: string) {
-    return request<{ ok: boolean }>(`/organizations/${organizationId}/knowledge/lines/forget`, { method: 'POST', body: JSON.stringify({ description }) });
+  forgetLine(organizationId: string, counterpartyId: string, description: string) {
+    return request<{ ok: boolean }>(`/organizations/${organizationId}/knowledge/lines/forget`, { method: 'POST', body: JSON.stringify({ counterpartyId, description }) });
   },
   forget(organizationId: string, counterpartyId: string) {
     return request<{ ok: boolean }>(`/organizations/${organizationId}/knowledge/habits/${counterpartyId}`, { method: 'DELETE' });

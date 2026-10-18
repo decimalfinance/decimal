@@ -206,7 +206,7 @@ export function orgTools(args: {
     },
     {
       name: 'what_i_know',
-      description: 'What the companion has learned about categories. Mostly kinds of line: a line description, the category the team settled on for lines like it (from confirmed bills, and categories people changed on saved drafts), the bill and person it was last settled by, and how many lines agree. Also vendor defaults a person set by hand (the last resort for a line), and lines it was told to forget.',
+      description: 'What the companion has learned about categories. Mostly lines, learned per vendor: a vendor, a line description, the category the team settled on for that vendor\'s lines like it (from confirmed bills, and categories people changed on saved drafts), the bill and person it was last settled by, and how many of the vendor\'s lines agree. The same words from another vendor are a different line. Also vendor defaults a person set by hand (the last resort for a line), and lines it was told to forget.',
       parameters: { type: 'object', additionalProperties: false, properties: {} },
       run: async () => {
         const { getKnowledge } = await import('./knowledge.js');
@@ -214,6 +214,7 @@ export function orgTools(args: {
         await args.onThought({ text: 'Checked what I have learned', detail: `${plural(k.lines.length, 'kind of line')}${k.vendorDefaults.length ? `, ${plural(k.vendorDefaults.length, 'vendor default')}` : ''}${k.forgotten.length ? `, ${k.forgotten.length} forgotten` : ''}.` });
         return {
           lines: k.lines.slice(0, 100).map((l) => ({
+            vendor: l.vendorName,
             line: l.description,
             category: l.category,
             lastSettledOn: l.invoiceNumber,
@@ -222,7 +223,7 @@ export function orgTools(args: {
             agreeingLines: l.fromLines,
           })),
           vendorDefaults: k.vendorDefaults.map((d) => ({ vendor: d.vendorName, category: d.category, setBy: d.setBy, since: localDay(new Date(d.since)) })),
-          forgotten: k.forgotten.map((f) => ({ line: f.description, category: f.category, forgottenBy: f.by, on: localDay(new Date(f.at)) })),
+          forgotten: k.forgotten.map((f) => ({ vendor: f.vendorName, line: f.description, category: f.category, forgottenBy: f.by, on: localDay(new Date(f.at)) })),
         };
       },
     },

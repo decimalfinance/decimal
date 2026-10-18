@@ -3,9 +3,9 @@
 // The companion's briefing sorts every draft into those two piles, and the
 // briefing is only worth reading if "ready" can be trusted. So this is strict:
 // a bill is ready only when nothing about it calls for judgement — no flag, no
-// doubtful read, a vendor seen before, and categories that come from a habit
-// rather than a guess (line memory: every line reads like one the team already
-// settled). Everything else needs a person, with the single most
+// doubtful read, a vendor seen before, and categories that are known rather
+// than a guess (line memory: every line reads like one the team already
+// settled from the same vendor). Everything else needs a person, with the single most
 // important reason in one line.
 //
 // Starting strict is deliberate. A too-generous "ready" is the fastest way to
