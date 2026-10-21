@@ -3,6 +3,8 @@ export type User = {
   email: string;
   displayName: string;
   avatarUrl?: string | null;
+  /** Only on GET /auth/session. */
+  signInMethod?: 'google' | 'password';
   emailVerifiedAt: string | null;
 };
 

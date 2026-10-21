@@ -1,0 +1,284 @@
+/* Shared pieces used on every page. Page layouts live in pages/*.css. */
+
+/* ── Menus ──────────────────────────────────────────────── */
+.ui .menu {
+  padding: 4px;
+  background: var(--white);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: var(--shadow-menu);
+  font-family: var(--font);
+  text-align: left;
+}
+.ui .menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  font: 500 11px var(--font);
+  color: var(--ink);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ui .menu-item:hover { background: var(--grey); }
+.ui .menu-item:focus-visible { box-shadow: var(--focus-inset); }
+.ui .menu-item.is-remove { color: var(--red); }
+.ui .menu-item.is-remove:hover { background: var(--red-tint); }
+
+/* ── Dark tooltip, with a key hint ──────────────────────── */
+.ui .tip {
+  position: absolute;
+  z-index: 9;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 5px;
+  background: var(--dark);
+  color: #FFFFFF;
+  font: 500 11px/1 var(--font);
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: var(--shadow-tip);
+}
+.ui .tip.is-right { left: calc(100% + 8px); top: 50%; transform: translateY(-50%); }
+.ui .kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, .14);
+  font: 500 10px/1 var(--mono);
+  color: rgba(255, 255, 255, .88);
+}
+
+/* ── Buttons: 28px pills ────────────────────────────────── */
+.ui .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 14px;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  background: var(--white);
+  color: var(--ink);
+  font: 500 12px var(--font);
+  letter-spacing: -.005em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ui .btn:hover { background: var(--grey); }
+.ui .btn:disabled { cursor: default; opacity: .5; }
+.ui .btn.is-primary { border-color: var(--maroon); background: var(--maroon); color: #FFFFFF; }
+.ui .btn.is-primary:hover { border-color: var(--maroon-hover); background: var(--maroon-hover); }
+.ui .btn.is-primary:active { border-color: var(--maroon-active); background: var(--maroon-active); }
+.ui .btn.is-primary:disabled { border-color: var(--line); background: var(--grey); color: var(--ink-4); opacity: 1; cursor: not-allowed; }
+.ui .btn.is-remove { border-color: var(--red-edge); background: var(--red-tint); color: var(--red); }
+.ui .btn.is-remove:hover { border-color: var(--red-edge-hover); background: var(--red-tint-2); }
+.ui .btn > svg { flex: none; }
+
+/* A maroon underlined text action: "Add", "Show all". */
+.ui .link-action {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: 500 11px var(--font);
+  color: var(--maroon);
+  text-decoration: underline;
+  text-decoration-color: var(--pink-300);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.ui .link-action:hover { color: var(--maroon-active); text-decoration-color: var(--pink-400); }
+
+/* ── Dialogs: one design everywhere (4b) ────────────────── */
+.ui.dlg-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(27, 25, 22, .28);
+  animation: ui-fade-in .12s ease-out;
+}
+.ui .dlg {
+  width: 400px;
+  max-width: 100%;
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 20px;
+  background: var(--white);
+  border-radius: 8px;
+  box-shadow: var(--shadow-dialog);
+  text-align: left;
+}
+.ui .dlg.is-wide { width: 560px; }
+.ui .dlg-title {
+  font: 600 15px/1.3 var(--font);
+  letter-spacing: -.01em;
+  color: var(--ink);
+  text-wrap: pretty;
+}
+.ui .dlg-line {
+  margin-top: 6px;
+  font: 400 11.5px/1.55 var(--font);
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+.ui .dlg-body { margin-top: 16px; display: grid; gap: 12px; }
+.ui .dlg-actions {
+  margin-top: 20px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+/* No focus ring when a dialog opens by mouse; keyboard focus still shows. */
+.ui [data-dlg] :focus:not(:focus-visible) { box-shadow: none !important; outline: none !important; }
+
+/* ── Fields ─────────────────────────────────────────────── */
+.ui .field { display: grid; gap: 6px; }
+.ui .field-label { font: 500 10.5px/1.3 var(--font); color: var(--ink-2); }
+.ui .input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: var(--white);
+  font: 400 12px var(--font);
+  color: var(--ink);
+}
+.ui input.input::placeholder { color: var(--ink-4); }
+.ui .input:focus,
+.ui .input:focus-within { border-color: var(--ink-3); }
+.ui .input.is-error { border-color: var(--red-error-edge); }
+.ui .input > input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+}
+.ui .field-error { font: 400 11px/1.4 var(--font); color: var(--red); }
+
+/* ── The dark toast, with Undo ──────────────────────────── */
+.ui.toast {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  padding: 9px 16px;
+  border-radius: 999px;
+  background: var(--dark);
+  color: #FFFFFF;
+  font: 400 11.5px/1.4 var(--font);
+  white-space: nowrap;
+  box-shadow: var(--shadow-toast);
+  animation: ui-fade-in .15s ease-out;
+}
+.ui .toast-undo {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: 500 11.5px var(--font);
+  color: var(--pink-300);
+  cursor: pointer;
+}
+
+/* ── Status chips: no radius, caps ──────────────────────── */
+.ui .chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  font: 500 9px/1.2 var(--font);
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: #1A1A1A;
+  white-space: nowrap;
+  background: var(--chip-finished);
+}
+.ui .chip.is-yours { background: var(--chip-yours); }
+.ui .chip.is-checked { background: var(--chip-checked); }
+.ui .chip.is-blocking { background: var(--chip-blocking); }
+.ui .chip.is-warning { background: var(--chip-warning); }
+.ui .chip.is-waiting { background: var(--chip-waiting); }
+.ui .chip.is-finished { background: var(--chip-finished); }
+
+/* ── Pages ──────────────────────────────────────────────── */
+.ui.page {
+  height: 100%;
+  overflow-y: auto;
+  padding: 18px 30px 30px;
+  background: var(--white);
+}
+.ui .page-title {
+  font: 600 20px/24px var(--font);
+  letter-spacing: -.02em;
+  color: var(--ink);
+}
+.ui .page-sub {
+  margin-top: 5px;
+  font: 400 12px/18px var(--font);
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+.ui .section-title {
+  font: 600 13px/1.2 var(--font);
+  letter-spacing: -.01em;
+  color: var(--ink);
+}
+
+/* ── Decimal's pink cloudy surface ──────────────────────── */
+.ui .cloud {
+  background-color: var(--pink-50);
+  background-image: var(--cloud-layers);
+  background-size: 160px 160px, 400px 400px;
+}
+
+/* ── People ─────────────────────────────────────────────── */
+.ui .avatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  overflow: hidden;
+  color: #FFFFFF;
+  font-weight: 600;
+  letter-spacing: .02em;
+  line-height: 1;
+}
+.ui .avatar > img { width: 100%; height: 100%; object-fit: cover; }
+
+/* ── Loading ────────────────────────────────────────────── */
+.ui .breathe { animation: ui-breathe 1.6s ease-in-out infinite; }
+.ui .placeholder-bar {
+  display: inline-block;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--grey);
+}

@@ -1,11 +1,12 @@
-import { Suspense, lazy, useMemo } from 'react';
+import { Suspense, lazy, useMemo, type ReactNode } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AppSidebar } from './Sidebar';
+import { Shell } from './kit/Shell';
+import { ToasterProvider } from './kit/Toast';
 import { api, ApiError } from './api';
 import type { AuthenticatedSession } from './api';
 import { ScreenState } from './ui-primitives';
-import { getOrganizations, queryKeys } from './lib/app-helpers';
+import { queryKeys } from './lib/app-helpers';
 import { useLiveOrgEvents } from './lib/use-live-org-events';
 
 // Lazy-loaded route pages. Each becomes its own chunk, so the main bundle
@@ -108,6 +109,11 @@ function OrgRedirect({ to }: { to: string }) {
   return <Navigate to={`/organizations/${organizationId}/${to}`} replace />;
 }
 
+/** A page not yet redesigned: the old .dec system, scrolling in the new frame. */
+function Legacy({ children }: { children: ReactNode }) {
+  return <div className="dec shell-legacy">{children}</div>;
+}
+
 function RequireSession({
   sessionQuery,
 }: {
@@ -141,7 +147,6 @@ function RequireSession({
 }
 
 function AppShell({ session }: { session: AuthenticatedSession }) {
-  const organizations = useMemo(() => getOrganizations(session), [session]);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const location = useLocation();
@@ -152,20 +157,6 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
   // Live updates: stream this org's changes over SSE and invalidate queries so
   // a co-signer's screen reflects a new signature/execution the instant it lands.
   useLiveOrgEvents(activeOrganizationId);
-  const organizationSummaryQuery = useQuery({
-    queryKey: ['organization-summary', activeOrganizationId] as const,
-    queryFn: () => api.getOrganizationSummary(activeOrganizationId!),
-    enabled: Boolean(activeOrganizationId),
-    refetchInterval: () =>
-      typeof document !== 'undefined' && document.hidden ? false : 15_000,
-  });
-  const paymentsIncompleteCount = organizationSummaryQuery.data?.paymentsIncompleteCount ?? 0;
-  const unreviewedWalletsCount = organizationSummaryQuery.data?.unreviewedWalletsCount ?? 0;
-
-  // Treasury gate removed — per the design handoff, Overview itself shows
-  // a "Finish setting up" checklist when the org has no treasury yet, instead
-  // of a full-page interruption. Other pages render their own empty states.
-
   async function logout() {
     await queryClient.cancelQueries();
     await api.logout().catch(() => undefined);
@@ -175,68 +166,60 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
     navigate('/', { replace: true });
   }
 
-  // Shell follows the design handoff: .dec namespace → .app flex container →
-  // sidebar + .app-main → .app-scroll for page content. All .dec * styles
-  // (from frontend/src/styles/decimal/) only activate inside this wrapper.
+  // The frame is the redesign's (kit/Shell). A page that hasn't been
+  // redesigned yet renders inside <Legacy>, which turns the old .dec system
+  // back on for it alone; the two never nest.
   return (
-    <div className="dec" style={{ height: '100vh' }}>
-      <div className="app">
-        <AppSidebar
-          session={session}
-          organizationContexts={organizations}
-          activeOrganizationId={activeOrganizationId}
-          paymentsIncompleteCount={paymentsIncompleteCount}
-          unreviewedWalletsCount={unreviewedWalletsCount}
-          onOrganizationSwitch={(organizationId) => navigate(`/organizations/${organizationId}`)}
-          onLogout={logout}
-        />
-        <div className="app-main">
-          <div className="app-scroll" style={{ overflowY: 'auto' }}>
-          <Suspense fallback={<RouteFallback />}>
+    <ToasterProvider>
+      <Shell
+        session={session}
+        organizations={session.organizations}
+        activeOrganizationId={activeOrganizationId}
+        onLogout={logout}
+      >
+          <Suspense fallback={<Legacy><RouteFallback /></Legacy>}>
             <Routes>
               <Route path="/" element={<HomeRedirect session={session} />} />
-              <Route path="/setup" element={<SetupPage />} />
-              <Route path="/profile" element={<ProfilePage session={session} />} />
-              <Route path="/organizations/:organizationId" element={<HomePage />} />
-              <Route path="/organizations/:organizationId/chat/:chatId" element={<ChatPage />} />
-              <Route path="/organizations/:organizationId/inbox" element={<InboxPage />} />
-              <Route path="/organizations/:organizationId/knowledge" element={<KnowledgePage />} />
-              <Route path="/organizations/:organizationId/wallets" element={<WalletsPage session={session} />} />
-              <Route path="/organizations/:organizationId/wallets/:treasuryWalletId" element={<TreasuryWalletDetailPage session={session} />} />
-              <Route path="/organizations/:organizationId/vaults/:treasuryWalletId" element={<VaultDetailPage />} />
-              <Route path="/organizations/:organizationId/proposals" element={<OrganizationProposalsPage session={session} />} />
-              <Route path="/organizations/:organizationId/approvals" element={<ApprovalsPage />} />
-              <Route path="/organizations/:organizationId/approval-flow" element={<FlowBuilderPage session={session} />} />
-              <Route path="/organizations/:organizationId/policies" element={<ProtectionsPage />} />
+              <Route path="/setup" element={<Legacy><SetupPage /></Legacy>} />
+              <Route path="/profile" element={<Legacy><ProfilePage session={session} /></Legacy>} />
+              <Route path="/organizations/:organizationId" element={<Legacy><HomePage /></Legacy>} />
+              <Route path="/organizations/:organizationId/chat/:chatId" element={<Legacy><ChatPage /></Legacy>} />
+              <Route path="/organizations/:organizationId/inbox" element={<Legacy><InboxPage /></Legacy>} />
+              <Route path="/organizations/:organizationId/knowledge" element={<Legacy><KnowledgePage /></Legacy>} />
+              <Route path="/organizations/:organizationId/wallets" element={<Legacy><WalletsPage session={session} /></Legacy>} />
+              <Route path="/organizations/:organizationId/wallets/:treasuryWalletId" element={<Legacy><TreasuryWalletDetailPage session={session} /></Legacy>} />
+              <Route path="/organizations/:organizationId/vaults/:treasuryWalletId" element={<Legacy><VaultDetailPage /></Legacy>} />
+              <Route path="/organizations/:organizationId/proposals" element={<Legacy><OrganizationProposalsPage session={session} /></Legacy>} />
+              <Route path="/organizations/:organizationId/approvals" element={<Legacy><ApprovalsPage /></Legacy>} />
+              <Route path="/organizations/:organizationId/approval-flow" element={<Legacy><FlowBuilderPage session={session} /></Legacy>} />
+              <Route path="/organizations/:organizationId/policies" element={<Legacy><ProtectionsPage /></Legacy>} />
               {/* Protections grew into Policies (P1) — old links land there. */}
               <Route path="/organizations/:organizationId/protections" element={<OrgRedirect to="policies" />} />
-              <Route path="/organizations/:organizationId/spending-limits" element={<SpendingLimitsPage />} />
-              <Route path="/organizations/:organizationId/spending-limits/:spendingLimitPolicyId" element={<SpendingLimitDetailPage />} />
-              <Route path="/organizations/:organizationId/proposals/:decimalProposalId" element={<ProposalRedirectPage />} />
-              <Route path="/organizations/:organizationId/proposals/:decimalProposalId/legacy" element={<OrganizationProposalDetailPage session={session} />} />
-              <Route path="/organizations/:organizationId/members" element={<MembersPage session={session} />} />
-              <Route path="/organizations/:organizationId/accounting" element={<AccountingPage session={session} />} />
+              <Route path="/organizations/:organizationId/spending-limits" element={<Legacy><SpendingLimitsPage /></Legacy>} />
+              <Route path="/organizations/:organizationId/spending-limits/:spendingLimitPolicyId" element={<Legacy><SpendingLimitDetailPage /></Legacy>} />
+              <Route path="/organizations/:organizationId/proposals/:decimalProposalId" element={<Legacy><ProposalRedirectPage /></Legacy>} />
+              <Route path="/organizations/:organizationId/proposals/:decimalProposalId/legacy" element={<Legacy><OrganizationProposalDetailPage session={session} /></Legacy>} />
+              <Route path="/organizations/:organizationId/members" element={<Legacy><MembersPage session={session} /></Legacy>} />
+              <Route path="/organizations/:organizationId/accounting" element={<Legacy><AccountingPage session={session} /></Legacy>} />
               {/* The Coding inbox is gone: categories are chosen in review, and approved bills post to QuickBooks. */}
               <Route path="/organizations/:organizationId/accounting/coding" element={<OrgRedirect to="inbox" />} />
-              <Route path="/organizations/:organizationId/counterparties" element={<CounterpartiesPage session={session} />} />
+              <Route path="/organizations/:organizationId/counterparties" element={<Legacy><CounterpartiesPage session={session} /></Legacy>} />
               <Route path="/organizations/:organizationId/destinations" element={<OrgRedirect to="counterparties" />} />
               <Route path="/organizations/:organizationId/bills" element={<BillsPage />} />
-              <Route path="/organizations/:organizationId/bills/:paymentOrderId" element={<BillDetailPage />} />
-              <Route path="/organizations/:organizationId/bills/:paymentOrderId/draft" element={<BillDraftPage />} />
-              <Route path="/organizations/:organizationId/bills/documents/:invoiceDocumentId/draft" element={<DocumentDraftPage />} />
+              <Route path="/organizations/:organizationId/bills/:paymentOrderId" element={<Legacy><BillDetailPage /></Legacy>} />
+              <Route path="/organizations/:organizationId/bills/:paymentOrderId/draft" element={<Legacy><BillDraftPage /></Legacy>} />
+              <Route path="/organizations/:organizationId/bills/documents/:invoiceDocumentId/draft" element={<Legacy><DocumentDraftPage /></Legacy>} />
               {/* The Payments list is retired — Bills IS the payments surface. Old links land on Bills. */}
               <Route path="/organizations/:organizationId/payments" element={<OrgRedirect to="bills" />} />
-              <Route path="/organizations/:organizationId/payments/:paymentOrderId" element={<PaymentDetailPageV2 />} />
+              <Route path="/organizations/:organizationId/payments/:paymentOrderId" element={<Legacy><PaymentDetailPageV2 /></Legacy>} />
               <Route path="/organizations/:organizationId/payers" element={<OrgRedirect to="counterparties" />} />
               {/* Unknown paths (e.g. an org-less /approval-flow) rendered a
                   blank content pane — land on home instead. */}
               <Route path="*" element={<HomeRedirect session={session} />} />
             </Routes>
           </Suspense>
-          </div>
-        </div>
-      </div>
-    </div>
+      </Shell>
+    </ToasterProvider>
   );
 }
 

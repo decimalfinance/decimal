@@ -1108,6 +1108,17 @@ export interface WorkbenchBill {
   duplicateCleared: { byName: string; reason: string } | null;
   /** Somebody is waiting on YOU for an answer about this bill. */
   questionForYou: { billQuestionId: string; question: string; askedByName: string | null } | null;
+  /** What is flagged on it, worst first. */
+  flags: Array<{ kind: string; severity: 'danger' | 'warning' | 'info'; blocking: boolean; short: string }>;
+  blocking: boolean;
+  /** An approver sent it back to review. */
+  sentBack: boolean;
+  /** Everyone who could act on it now: "Tom or Ines" when either may. */
+  waitingOn: Array<{ userId: string | null; name: string }>;
+  /** Where QuickBooks has got to with it, once approved. */
+  posting: { status: 'posted' | 'failed' | 'pending'; at: string } | null;
+  /** Why a closed bill was closed. */
+  closedReason: 'duplicate' | 'statement' | 'credit_note' | 'not_ours' | 'unreadable' | 'other' | null;
 }
 
 export type DocSource = {

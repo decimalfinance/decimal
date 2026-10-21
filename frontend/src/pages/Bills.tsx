@@ -1,738 +1,151 @@
-// Bills workbench — the operator's home.
-// A triage surface: five lifecycle tabs over one bills query, urgency-sorted,
-// rows routing to the draft screen or detail (everything else).
-import { useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router';
+// Bills (Bills.dc.html 6c; 21a while there is nothing yet). Every bill in one
+// table: three tiles whose parts filter it, the stages along the top, and the
+// files still being read at the head of it.
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Link, useNavigate, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { accessApi, billsApi, inboundEmailApi, invoiceIntakeApi, type BillBucket, type WorkbenchBill } from '../api';
-import { Ico } from '../dec/icons';
-import { PageHead } from '../dec/primitives';
-import { useToast } from '../ui/Toast';
-import { ReadyPassButton } from './ReadyPass';
+import {
+  accessApi,
+  api,
+  billsApi,
+  inboundEmailApi,
+  invoiceIntakeApi,
+  type PendingDocument,
+  type WorkbenchBill,
+} from '../api';
+import { Avatar } from '../kit/Avatar';
+import { Dialog } from '../kit/Dialog';
+import { Icon } from '../kit/icons';
+import { Orb } from '../kit/Orb';
+import { useToaster } from '../kit/Toast';
+import { ago, calendarDay, daysPast, fileSize, firstName, usd, when } from '../kit/format';
 
-const TABS: Array<{ key: BillBucket; label: string }> = [
-  { key: 'draft', label: 'Draft' },
-  { key: 'in_approval', label: 'In approval' },
-  { key: 'to_pay', label: 'To pay' },
+type Stage = 'review' | 'approval' | 'done';
+type TileKey = 'you' | 'approvers' | 'done';
+type Tone = 'blocking' | 'warning' | 'yours' | 'checked' | 'waiting' | 'finished';
+type SortKey = 'due' | 'newest' | 'amount';
+
+/** One row of a tile: every bill is in exactly one, and it names the bill's chip. */
+type Part = {
+  key: string;
+  tile: TileKey | null;
+  label: string;
+  /** Who an approval waits on, drawn as faces after the names. */
+  people?: string[];
+  tone: Tone;
+  order: number;
+};
+
+type Row = { bill: WorkbenchBill; stage: Stage; part: Part; chip: string; late: number };
+
+/** A file on its way up, before the server has it. */
+type Sending = { key: string; name: string; size: number; documentId: string | null };
+
+const STAGES: Array<{ key: Stage | 'all'; label: string }> = [
+  { key: 'all', label: 'All' },
+  { key: 'review', label: 'In review' },
+  { key: 'approval', label: 'In approval' },
   { key: 'done', label: 'Done' },
-  { key: 'needs_attention', label: 'Needs attention' },
 ];
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+const SORTS: Array<{ key: SortKey; label: string }> = [
+  { key: 'due', label: 'Due date' },
+  { key: 'newest', label: 'Newest' },
+  { key: 'amount', label: 'Amount' },
+];
 
-function usd(amount: number): string {
-  return amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+const CLOSED_WHY: Record<string, string> = {
+  duplicate: 'duplicate',
+  not_ours: 'not ours',
+  credit_note: 'credit note',
+  statement: 'statement',
+  unreadable: 'unreadable',
+};
+
+const EMPTY: Record<Stage | 'all', string> = {
+  all: 'No bills yet.',
+  review: 'Nothing in review.',
+  approval: 'Nothing with the approvers.',
+  done: 'Nothing done yet.',
+};
+
+const ACCEPT = '.pdf,.png,.jpg,.jpeg,.heic,.webp,image/*,application/pdf';
+
+function stageOf(bill: WorkbenchBill): Stage {
+  if (bill.bucket === 'draft') return 'review';
+  if (bill.state === 'cancelled') return 'done';
+  if (bill.bucket === 'in_approval' || bill.bucket === 'needs_attention') return 'approval';
+  // Approved, with someone still to act on the release.
+  return bill.waitingOn.length > 0 ? 'approval' : 'done';
 }
 
-function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  if (parts.length >= 2) return (parts[0]![0]! + parts[1]![0]!).toUpperCase();
-  return name.slice(0, 2).toUpperCase();
-}
-
-function ageDays(createdAt: string): number {
-  return Math.floor((Date.now() - new Date(createdAt).getTime()) / DAY_MS);
-}
-
-function dueInfo(bill: WorkbenchBill): { label: string; overdue: boolean; overdueDays: number } {
-  if (!bill.dueAt) return { label: '—', overdue: false, overdueDays: 0 };
-  const due = new Date(bill.dueAt);
-  const label = due.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-  const stillOpen = bill.bucket !== 'done' && bill.bucket !== 'needs_attention';
-  const overdueDays = Math.floor((Date.now() - due.getTime()) / DAY_MS);
-  return { label, overdue: stillOpen && overdueDays > 0, overdueDays };
-}
-
-// Default sort: computed urgency — expiring discounts and overdue climb,
-// then due date, then age (spec: surfaced honestly, overridable).
-function urgencyScore(bill: WorkbenchBill): number {
-  let score = 0;
-  const { overdue, overdueDays } = dueInfo(bill);
-  if (overdue) score -= 4000 + overdueDays;
-  if (bill.discountLabel) score -= 2000;
-  if (bill.dueAt) score += Math.floor(new Date(bill.dueAt).getTime() / DAY_MS);
-  else score += 1e6 - ageDays(bill.createdAt);
-  return score;
-}
-
-export function BillsPage() {
-  const { organizationId = '' } = useParams();
-  const navigate = useNavigate();
-  // A Viewer may read every bill and bring none in — so the two buttons that
-  // create one are hidden rather than offered and refused.
-  const myAccess = useQuery({
-    queryKey: ['my-access', organizationId],
-    queryFn: () => accessApi.get(organizationId),
-    enabled: Boolean(organizationId),
-    staleTime: 60_000,
-  });
-  const canAddBills = myAccess.data ? myAccess.data.capabilities.includes('bills.create') : true;
-  const toast = useToast();
-  const queryClient = useQueryClient();
-  const [tab, setTab] = useState<BillBucket>('draft');
-  const [search, setSearch] = useState('');
-  const [sort, setSort] = useState<'urgent' | 'due' | 'newest'>('urgent');
-  const [uploadOpen, setUploadOpen] = useState(false);
-  const [forwardOpen, setForwardOpen] = useState(false);
-
-  const workbench = useQuery({
-    queryKey: ['bills-workbench', organizationId],
-    queryFn: () => billsApi.workbench(organizationId),
-    enabled: Boolean(organizationId),
-    // A document being read turns into a bill in seconds, not half a minute.
-    // Waiting 30s to notice makes the row look stuck at exactly the moment
-    // somebody is watching it.
-    refetchInterval: (q) => ((q.state.data?.pending.length ?? 0) > 0 ? 2_000 : 30_000),
-  });
-
-  const counts = workbench.data?.counts;
-  const allBills = workbench.data?.bills ?? [];
-  const totalBills = allBills.length;
-
-  const rows = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const filtered = allBills.filter((bill) => {
-      if (bill.bucket !== tab) return false;
-      if (!q) return true;
-      return (
-        bill.vendorName.toLowerCase().includes(q)
-        || (bill.invoiceNumber ?? '').toLowerCase().includes(q)
-      );
-    });
-    const sorted = [...filtered];
-    if (sort === 'urgent') sorted.sort((a, b) => urgencyScore(a) - urgencyScore(b));
-    if (sort === 'due') {
-      sorted.sort((a, b) => (a.dueAt ? new Date(a.dueAt).getTime() : Infinity) - (b.dueAt ? new Date(b.dueAt).getTime() : Infinity));
-    }
-    if (sort === 'newest') sorted.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    return sorted;
-  }, [allBills, tab, search, sort]);
-
-  // Documents still being read, on the tab they will land in.
-  //
-  // Held as one value because the table's empty-state test and its body both
-  // have to agree about whether there is anything to show. They did not: the
-  // rows were written into the tbody while the empty state still asked only
-  // about bills, so six uploads showed "Draft 6" above "Nothing waiting on a
-  // check" — the count came from the server and the table from somewhere else.
-  const pendingRows = tab === 'draft' ? (workbench.data?.pending ?? []) : [];
-
-  const openBill = (bill: WorkbenchBill) => {
-    if (bill.bucket === 'draft') {
-      navigate(`/organizations/${organizationId}/bills/${bill.paymentOrderId}/draft`);
-    } else {
-      navigate(`/organizations/${organizationId}/bills/${bill.paymentOrderId}`);
-    }
-  };
-
-  // The moment the file is stored, the operator is looking at it — the draft
-  // screen opens immediately and fills in as the document is read.
-  // Several at once: they are all on this list now, and opening one of six
-  // would be an odd thing to do with the other five. Reading runs behind the
-  // upload, so the rows fill in as the extractions land.
-  const onUploadedMany = (uploaded: number, failed: number) => {
-    setUploadOpen(false);
-    void queryClient.invalidateQueries({ queryKey: ['bills-workbench', organizationId] });
-    setTab('draft');
-    if (failed > 0) {
-      toast.error(`${failed} of ${uploaded + failed} could not be uploaded`, `${uploaded} went through and ${uploaded === 1 ? 'is' : 'are'} being read.`);
-    } else {
-      toast.success(`${uploaded} bills uploaded`, 'Reading them now — the rows fill in as each one is read.');
-    }
-  };
-
-  const onUploaded = (invoiceDocumentId: string, reused: boolean) => {
-    setUploadOpen(false);
-    void queryClient.invalidateQueries({ queryKey: ['bills-workbench', organizationId] });
-    // Same file again: SAY so — silently opening the old bill reads as the
-    // upload having vanished (testbench 001).
-    if (reused) toast.info('This exact file is already in Decimal — opening it.', 'Already uploaded');
-    navigate(`/organizations/${organizationId}/bills/documents/${invoiceDocumentId}/draft`);
-  };
-
-  const emptyCopy: Record<BillBucket, string> = {
-    draft: 'Nothing waiting on a check.',
-    in_approval: 'Nothing with the approvers right now.',
-    to_pay: 'Nothing cleared and queued to go out.',
-    done: 'No paid bills yet.',
-    needs_attention: "Nothing stuck — you're clear.",
-  };
-
-  return (
-    <div className="page page-wide">
-      <div className="stack stack-24">
-        <PageHead
-          eyebrow="Operations"
-          title="Bills"
-          desc="Everything you've received, from first look to paid."
-          actions={
-            canAddBills ? (
-              <>
-                <ReadyPassButton organizationId={organizationId} />
-                <button type="button" className="btn btn-secondary" onClick={() => setForwardOpen(true)}>
-                  <Ico.mail w={15} /> Forward by email
-                </button>
-                <button type="button" className="btn btn-primary" onClick={() => setUploadOpen(true)}>
-                  <Ico.upload w={15} /> Upload a bill
-                </button>
-              </>
-            ) : null
-          }
-        />
-
-        {workbench.isLoading ? (
-          <>
-            <div className="skeleton" style={{ height: 84 }} />
-            <div className="skeleton" style={{ height: 320 }} />
-          </>
-        ) : totalBills === 0 ? (
-          <FirstRun onUpload={() => setUploadOpen(true)} organizationId={organizationId} />
-        ) : (
-          <>
-            <div className="metrics" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
-              <button
-                type="button"
-                className={`metric${(counts?.draft ?? 0) > 0 ? ' is-alert' : ''}`}
-                onClick={() => setTab('draft')}
-                style={{ cursor: 'pointer', textAlign: 'left' }}
-              >
-                <div className="m-label">Waiting on you</div>
-                <div className="m-value">{counts?.draft ?? 0}</div>
-                <div className="m-sub">
-                  {(workbench.data?.draftCounts.ready ?? 0) > 0 || (workbench.data?.draftCounts.missingInfo ?? 0) > 0
-                    ? `${workbench.data?.draftCounts.ready ?? 0} checked · ${workbench.data?.draftCounts.missingInfo ?? 0} missing info`
-                    : 'bills to check before they route'}
-                </div>
-              </button>
-              <div className="metric">
-                <div className="m-label">In approval</div>
-                <div className="m-value">{counts?.in_approval ?? 0}</div>
-                <div className="m-sub">with the approvers</div>
-              </div>
-              <div className="metric">
-                <div className="m-label">To pay</div>
-                <div className="m-value">{counts?.to_pay ?? 0}</div>
-                <div className="m-sub">cleared and queued</div>
-              </div>
-              <div className="metric">
-                <div className="m-label">Needs attention</div>
-                <div className="m-value">{counts?.needs_attention ?? 0}</div>
-                <div className="m-sub">stuck or wrong</div>
-              </div>
-            </div>
-
-            <div className="filterbar">
-              <div className="tabs">
-                {TABS.map((t) => (
-                  <button
-                    key={t.key}
-                    type="button"
-                    className={`tab${tab === t.key ? ' on' : ''}`}
-                    onClick={() => setTab(t.key)}
-                  >
-                    {t.label}
-                    <span className="tab-count">{counts?.[t.key] ?? 0}</span>
-                  </button>
-                ))}
-              </div>
-              <div className="filter-right">
-                <input
-                  className="input input-search"
-                  placeholder="Search vendor or invoice #"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  style={{ width: 220 }}
-                />
-                <div className="select">
-                  <select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} aria-label="Sort">
-                    <option value="urgent">Most urgent</option>
-                    <option value="due">Due date</option>
-                    <option value="newest">Newest</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            <div className="tbl-card">
-              {rows.length === 0 && pendingRows.length === 0 ? (
-                <div className="empty">
-                  <span className="empty-icon"><Ico.inbox w={22} /></span>
-                  <h4>{emptyCopy[tab]}</h4>
-                  <p>Bills move here on their own as they progress.</p>
-                </div>
-              ) : (
-                <table className="tbl">
-                  <thead>
-                    <tr>
-                      <th>Vendor</th>
-                      <th>Invoice</th>
-                      <th>Description</th>
-                      <th className="num">Amount</th>
-                      <th>Due</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {/* Being read. Shown first because they are the newest
-                        thing in the pile and the thing somebody just did. */}
-                    {pendingRows.map((doc) => (
-                      <tr
-                        key={doc.invoiceDocumentId}
-                        onClick={() => navigate(`/organizations/${organizationId}/bills/documents/${doc.invoiceDocumentId}/draft`)}
-                        style={{ cursor: 'pointer' }}
-                      >
-                        <td>
-                          <div className="cell-vendor">
-                            <span className="v-name" style={{ color: 'var(--text-muted)' }}>
-                              {doc.status === 'failed' ? 'Could not be read' : 'Reading…'}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="cell-mono" style={{ color: 'var(--text-faint)' }}>—</td>
-                        <td style={{ color: 'var(--text-muted)', maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {doc.filename}
-                        </td>
-                        <td className="td-num" style={{ color: 'var(--text-faint)' }}>—</td>
-                        <td style={{ color: 'var(--text-faint)' }}>—</td>
-                        <td>
-                          <span className={`pill pill-min ${doc.status === 'failed' ? 'pill-danger' : 'pill-info'}`}
-                            title={doc.error ?? undefined}>
-                            <span className="dot" />
-                            {doc.status === 'failed' ? 'Read failed' : 'Reading'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                    {rows.map((bill) => {
-                      const due = dueInfo(bill);
-                      return (
-                        <tr key={bill.paymentOrderId} onClick={() => openBill(bill)} style={{ cursor: 'pointer' }}>
-                          <td>
-                            {/* cell-vendor is the name+sub stack; v-name/v-sub
-                                are scoped to it and render unstyled without it. */}
-                            <div className="cell-vendor">
-                              <span className="v-name">{bill.vendorName}</span>
-                              {/* Who brought the bill in is deliberately NOT
-                                  here. The queue is for picking what to open
-                                  next — vendor and amount decide that. The
-                                  attribution lives on the bill itself, where
-                                  the question actually gets asked. */}
-                            </div>
-                          </td>
-                          <td className="cell-mono">
-                            {bill.invoiceNumber ?? '—'}
-                            {bill.duplicateCleared ? (
-                              <span className="pill pill-min pill-warning" style={{ marginLeft: 8, verticalAlign: 'middle' }}
-                                title={`Flagged as a possible duplicate — cleared by ${bill.duplicateCleared.byName}: “${bill.duplicateCleared.reason}”`}>
-                                <span className="dot" />Duplicate cleared
-                              </span>
-                            ) : null}
-                            {/* A question routed to this reader. It used to appear
-                                only under Approvals, so one asked while the bill
-                                was still a draft reached nobody. */}
-                            {bill.questionForYou ? (
-                              <span className="pill pill-min pill-info" style={{ marginLeft: 8, verticalAlign: 'middle' }}
-                                title={`${bill.questionForYou.askedByName ?? 'Someone'} asked you: “${bill.questionForYou.question}”`}>
-                                <span className="dot" />Asked of you
-                              </span>
-                            ) : null}
-                          </td>
-                          <td style={{ color: 'var(--text-muted)', maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {bill.description ?? '—'}
-                          </td>
-                          <td className="td-num">
-                            {usd(bill.amountUsd)}
-                            {bill.amountOriginal ? (
-                              <div style={{ color: 'var(--text-faint)', fontSize: 11.5 }}>
-                                {bill.amountOriginal.amount.toLocaleString()} {bill.amountOriginal.currency}
-                              </div>
-                            ) : null}
-                          </td>
-                          <td style={{ whiteSpace: 'nowrap' }}>
-                            <span className={due.overdue ? 'due-overdue' : undefined} style={{ fontSize: 13 }}>
-                              {due.label}
-                            </span>
-                            {due.overdue ? (
-                              <span className="due-overdue" style={{ fontSize: 12, marginLeft: 8 }}>
-                                · {due.overdueDays} day{due.overdueDays === 1 ? '' : 's'} overdue
-                              </span>
-                            ) : bill.discountLabel ? (
-                              <span className="due-chip" style={{ marginLeft: 8 }}>{bill.discountLabel}</span>
-                            ) : null}
-                          </td>
-                          <td>
-                            <span className={`dot-status tone-${bill.subStatus.tone}`}>
-                              <span className="ds-dot" />
-                              {bill.subStatus.blockedBy ? (
-                                <span className="ds-avatar">{initialsOf(bill.subStatus.blockedBy.name)}</span>
-                              ) : null}
-                              {bill.subStatus.text}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-
-      {uploadOpen ? (
-        <UploadBillDialog
-          organizationId={organizationId}
-          onClose={() => setUploadOpen(false)}
-          onSuccess={onUploaded}
-          onManySuccess={onUploadedMany}
-        />
-      ) : null}
-
-      {forwardOpen ? (
-        <ForwardByEmailDialog organizationId={organizationId} onClose={() => setForwardOpen(false)} />
-      ) : null}
-    </div>
-  );
-}
-
-// True zero (new org): the empty state IS intake setup — the workbench and
-// intake onboarding are the same screen when there's nothing in it.
-function FirstRun(props: { onUpload: () => void; organizationId: string }) {
-  const address = useQuery({
-    queryKey: ['inbound-email-address', props.organizationId],
-    queryFn: () => inboundEmailApi.address(props.organizationId),
-  });
-
-  return (
-    <section>
-      <div
-        className="dropzone"
-        role="button"
-        tabIndex={0}
-        onClick={props.onUpload}
-        style={{ cursor: 'pointer', minHeight: 220 }}
-      >
-        <Ico.upload w={34} />
-        <span className="dz-main">Drop your first bill here, or click to browse</span>
-        <span className="dz-sub">PDF or image · we read it, you confirm it, approvers take it from there</span>
-      </div>
-      {address.data?.enabled && address.data.address ? (
-        <div className="field" style={{ marginTop: 18 }}>
-          <span className="field-label">Or forward bills to</span>
-          <AddressCopyRow address={address.data.address} />
-          <p className="input-help" style={{ marginTop: 8 }}>
-            Anyone on your team can forward a bill here. We read it and it lands in this list.
-          </p>
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-// The address plus a Copy button — the Members invite-link pattern.
-function AddressCopyRow(props: { address: string }) {
-  const [copied, setCopied] = useState(false);
-  const toast = useToast();
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(props.address);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    } catch {
-      toast.error('Copy failed', 'Select the address and copy it manually.');
-    }
-  };
-  return (
-    <div style={{ display: 'flex', gap: 8 }}>
-      <input
-        className="input"
-        readOnly
-        value={props.address}
-        onFocus={(e) => e.currentTarget.select()}
-        style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: 12 }}
-      />
-      <button type="button" className="btn btn-primary" onClick={copy} style={{ flex: 'none' }}>
-        {copied ? 'Copied' : 'Copy'}
-      </button>
-    </div>
-  );
-}
-
-// Always-available affordance, so the address stays findable once the workbench
-// has bills in it. A dialog, not a panel — the playbook is explicit that
-// reveals overlay rather than reflow.
-function ForwardByEmailDialog(props: { organizationId: string; onClose: () => void }) {
-  const address = useQuery({
-    queryKey: ['inbound-email-address', props.organizationId],
-    queryFn: () => inboundEmailApi.address(props.organizationId),
-  });
-  const ignored = useQuery({
-    queryKey: ['inbound-email-messages', props.organizationId],
-    queryFn: () => inboundEmailApi.messages(props.organizationId),
-    // Admin-only endpoint; members simply don't get the list.
-    retry: false,
-  });
-
-  const ignoredItems = (ignored.data?.items ?? []).filter((m) => m.disposition === 'rejected').slice(0, 10);
-
-  return (
-    <div
-      className="overlay"
-      style={{ position: 'fixed', inset: 0, zIndex: 61 }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) props.onClose();
-      }}
-    >
-      <div className="dialog" role="dialog" aria-modal="true" style={{ maxWidth: 560 }}>
-        <div className="dialog-head">
-          <div>
-            <h2>Forward bills by email</h2>
-            <p>Send invoices straight into your drafts.</p>
-          </div>
-          <button type="button" className="drawer-x" onClick={props.onClose} aria-label="Close">
-            ×
-          </button>
-        </div>
-        <div className="dialog-body">
-          {address.data?.enabled && address.data.address ? (
-            <>
-              <div className="field">
-                <span className="field-label">Your address</span>
-                <AddressCopyRow address={address.data.address} />
-                <p className="input-help" style={{ marginTop: 8 }}>
-                  Only people on your team can send here. Mail from anyone else is ignored.
-                </p>
-              </div>
-              {ignoredItems.length > 0 ? (
-                <div className="field" style={{ marginTop: 18 }}>
-                  <span className="field-label">Recently ignored</span>
-                  <div className="tbl-card">
-                    <table className="tbl tbl-slim">
-                      <thead>
-                        <tr>
-                          <th>From</th>
-                          <th>Subject</th>
-                          <th>Why</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {ignoredItems.map((m) => (
-                          <tr key={m.inboundEmailMessageId}>
-                            <td>{m.from}</td>
-                            <td style={{ color: 'var(--text-muted)' }}>{m.subject ?? '—'}</td>
-                            <td style={{ color: 'var(--text-muted)' }}>{m.reason ?? '—'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ) : null}
-            </>
-          ) : (
-            <div className="empty">
-              <h4>Not set up yet</h4>
-              <p>Email intake isn't switched on for this workspace.</p>
-            </div>
-          )}
-        </div>
-        <div className="dialog-foot" style={{ justifyContent: 'flex-end' }}>
-          <button type="button" className="btn btn-secondary" onClick={props.onClose}>
-            Done
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+function part(key: string, tile: TileKey | null, label: string, tone: Tone, order: number, people?: string[]): Part {
+  return { key, tile, label, tone, order, people };
 }
 
 /**
- * Bills arrive in a stack, not one at a time.
- *
- * The dialog took a single file, so putting six invoices in meant six trips
- * through open-drag-upload-wait-navigate-back. Nothing about the intake path
- * required that: uploadAsync stores one document and returns immediately, with
- * extraction running behind it, so N files is N calls and the reading overlaps
- * with the next upload.
- *
- * Sequential rather than parallel. Each file is base64 in memory and up to
- * 10MB, and six at once is six copies plus six extractions competing for the
- * same model — slower in practice, and a queue that reports "3 of 6" is easier
- * to trust than six spinners.
+ * Which part of which tile a bill belongs to, and the words on its chip. One
+ * each, so the parts of a tile add up to the tile.
  */
-type UploadState = 'waiting' | 'uploading' | 'done' | 'failed';
+function classify(bill: WorkbenchBill, viewer: { userId: string; canReview: boolean }) {
+  const stage = stageOf(bill);
+  const yours = viewer.canReview ? 'you' : null;
+  const question = { stage, part: part('q', 'you', 'Question for you', 'yours', 4), chip: 'Question for you' };
 
-function UploadBillDialog(props: {
-  organizationId: string;
-  onClose: () => void;
-  /** One file: open it, as before. */
-  onSuccess: (invoiceDocumentId: string, reused: boolean) => void;
-  /** Several: stay on the list, which is where they now all are. */
-  onManySuccess: (uploaded: number, failed: number) => void;
-}) {
-  const [files, setFiles] = useState<File[]>([]);
-  const [isDragging, setIsDragging] = useState(false);
-  const [running, setRunning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<Record<string, UploadState>>({});
+  if (stage === 'review') {
+    const blocking = bill.flags.find((f) => f.blocking);
+    const warning = bill.flags.find((f) => !f.blocking && f.severity !== 'info');
+    if (blocking) return { stage, part: part('blocks', yours, 'Blocks the bill', 'blocking', 0), chip: blocking.short };
+    if (bill.questionForYou) return question;
+    if (bill.sentBack) return { stage, part: part('back', yours, 'Sent back', 'yours', 3), chip: 'Sent back' };
+    if (warning) return { stage, part: part('warn', yours, 'Warning', 'warning', 1), chip: warning.short };
+    if (bill.readiness === 'ready') return { stage, part: part('checked', yours, 'Checked', 'checked', 6), chip: 'Checked' };
+    return { stage, part: part('check', yours, 'Needs a check', 'yours', 2), chip: 'Needs a check' };
+  }
 
-  const key = (f: File) => `${f.name}:${f.size}`;
-  const add = (incoming: FileList | null) => {
-    if (!incoming) return;
-    const next = [...incoming];
-    setFiles((prev) => {
-      const seen = new Set(prev.map(key));
-      // The same file picked twice is a slip, not a request for two bills.
-      return [...prev, ...next.filter((f) => !seen.has(key(f)))];
-    });
-  };
-
-  const start = async () => {
-    if (files.length === 0) return;
-    setRunning(true);
-    setError(null);
-    let uploaded = 0;
-    let failed = 0;
-    let lastId: string | null = null;
-    let lastReused = false;
-
-    for (const file of files) {
-      setStatus((p) => ({ ...p, [key(file)]: 'uploading' }));
-      try {
-        const dataBase64 = await fileToBase64(file);
-        const res = await invoiceIntakeApi.uploadAsync(props.organizationId, {
-          filename: file.name,
-          mimeType: file.type || 'application/pdf',
-          dataBase64,
-        });
-        lastId = res.invoiceDocumentId;
-        lastReused = res.reused;
-        uploaded += 1;
-        setStatus((p) => ({ ...p, [key(file)]: 'done' }));
-      } catch {
-        // One bad file must not strand the other five. It is marked and the
-        // queue carries on; the count at the end says what happened.
-        failed += 1;
-        setStatus((p) => ({ ...p, [key(file)]: 'failed' }));
-      }
+  if (stage === 'approval') {
+    if (bill.questionForYou) return question;
+    const people = bill.waitingOn;
+    if (people.some((p) => p.userId === viewer.userId)) {
+      return { stage, part: part('mine', 'you', 'Your approval', 'yours', 5), chip: 'Your approval' };
     }
-
-    setRunning(false);
-    if (failed > 0 && uploaded === 0) {
-      setError(files.length === 1 ? 'Upload failed.' : 'None of those could be uploaded.');
-      return;
+    if (people.length > 0) {
+      const names = people.map((p) => p.name);
+      return {
+        stage,
+        part: part(`w:${names.join('|')}`, 'approvers', names.join(' or '), 'waiting', 10, names),
+        chip: `Waiting on ${names.map(firstName).join(' or ')}`,
+      };
     }
-    if (uploaded === 1 && failed === 0 && lastId) {
-      props.onSuccess(lastId, lastReused);
-      return;
-    }
-    props.onManySuccess(uploaded, failed);
-  };
+    // Nobody to act: held, or a route with no one on it.
+    return bill.subStatus.tone === 'danger'
+      ? { stage, part: part('nobody', 'approvers', 'No one to approve', 'blocking', 20), chip: 'No one to approve' }
+      : { stage, part: part('held', 'approvers', bill.subStatus.text, 'finished', 21), chip: bill.subStatus.text };
+  }
 
-  const many = files.length > 1;
-  const doneCount = Object.values(status).filter((v) => v === 'done').length;
+  if (bill.state === 'cancelled') {
+    const why = CLOSED_WHY[bill.closedReason ?? ''];
+    return { stage, part: part('closed', 'done', 'Closed', 'finished', 5), chip: why ? `Closed · ${why}` : 'Closed' };
+  }
+  if (bill.posting?.status === 'failed') return { stage, part: part('failed', 'done', 'Couldn’t post', 'blocking', 0), chip: 'Couldn’t post' };
+  if (bill.posting?.status === 'posted') {
+    return { stage, part: part('posted', 'done', 'Synced to QuickBooks', 'finished', 1), chip: `Posted ${when(bill.posting.at)}` };
+  }
+  if (bill.posting?.status === 'pending') return { stage, part: part('posting', 'done', 'Posting to QuickBooks', 'finished', 2), chip: 'Posting' };
+  if (bill.state === 'executed' || bill.state === 'settled') return { stage, part: part('paid', 'done', 'Paid', 'finished', 4), chip: 'Paid' };
+  return { stage, part: part('approved', 'done', 'Approved', 'finished', 3), chip: 'Approved' };
+}
 
-  return (
-    <div
-      className="overlay"
-      style={{ position: 'fixed', inset: 0, zIndex: 60 }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget && !running) props.onClose();
-      }}
-    >
-      <div className="dialog" role="dialog" aria-modal="true" style={{ maxWidth: 520 }}>
-        <div className="dialog-head">
-          <div>
-            <h2>{many ? `Upload ${files.length} bills` : 'Upload a bill'}</h2>
-            <p>
-              {running
-                ? many ? `Uploading ${doneCount} of ${files.length}…` : 'Reading the document…'
-                : 'PDFs or images. We read them; you confirm what we read.'}
-            </p>
-          </div>
-          <button type="button" className="drawer-x" onClick={props.onClose} disabled={running} aria-label="Close">×</button>
-        </div>
-        <div className="dialog-body">
-          <div
-            className="dropzone"
-            data-dragging={isDragging || undefined}
-            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-            onDragLeave={() => setIsDragging(false)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setIsDragging(false);
-              add(e.dataTransfer?.files ?? null);
-            }}
-            onClick={() => document.getElementById('dec-bill-upload-input')?.click()}
-            role="button"
-            tabIndex={0}
-            style={{ cursor: 'pointer' }}
-          >
-            <input
-              id="dec-bill-upload-input"
-              type="file"
-              multiple
-              accept=".pdf,application/pdf,image/*"
-              onChange={(e) => { add(e.target.files); e.currentTarget.value = ''; }}
-              style={{ display: 'none' }}
-            />
-            <Ico.upload w={34} />
-            {files.length > 0 ? (
-              <>
-                <span className="dz-main">{files.length === 1 ? files[0]!.name : `${files.length} documents`}</span>
-                <span className="dz-sub">
-                  {(files.reduce((n, f) => n + f.size, 0) / 1024).toFixed(0)} KB total · click to add more
-                </span>
-              </>
-            ) : (
-              <>
-                <span className="dz-main">Drag PDFs here, or click to browse</span>
-                <span className="dz-sub">Up to 10 MB each · PDF or image · several at once</span>
-              </>
-            )}
-          </div>
-
-          {files.length > 0 ? (
-            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {files.map((f) => {
-                const st = status[key(f)] ?? 'waiting';
-                return (
-                  <div key={key(f)} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 }}>
-                      {f.name}
-                    </span>
-                    {st === 'done' ? (
-                      <span className="pill pill-min pill-success"><span className="dot" />uploaded</span>
-                    ) : st === 'failed' ? (
-                      <span className="pill pill-min pill-danger"><span className="dot" />failed</span>
-                    ) : st === 'uploading' ? (
-                      <span className="pill pill-min pill-info"><span className="dot" />uploading</span>
-                    ) : (
-                      <button type="button" className="btn btn-ghost btn-sm" disabled={running}
-                        onClick={() => setFiles((prev) => prev.filter((x) => key(x) !== key(f)))}>
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          ) : null}
-
-          {error ? <p className="input-error" style={{ marginTop: 10 }}>{error}</p> : null}
-        </div>
-        <div className="dialog-foot">
-          <button type="button" className="btn btn-secondary" onClick={props.onClose} disabled={running}>Cancel</button>
-          <button type="button" className="btn btn-primary" onClick={start} disabled={files.length === 0 || running}>
-            {running
-              ? many ? `Uploading ${doneCount} of ${files.length}…` : 'Uploading…'
-              : many ? `Upload ${files.length} bills` : 'Upload'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+function sortRows(rows: Row[], sort: SortKey) {
+  const out = [...rows];
+  const created = (r: Row) => new Date(r.bill.createdAt).getTime();
+  if (sort === 'newest') out.sort((a, b) => created(b) - created(a));
+  if (sort === 'amount') out.sort((a, b) => b.bill.amountUsd - a.bill.amountUsd);
+  if (sort === 'due') {
+    const due = (r: Row) => (r.bill.dueAt ? new Date(r.bill.dueAt).getTime() : Infinity);
+    out.sort((a, b) => due(a) - due(b) || created(b) - created(a));
+  }
+  return out;
 }
 
 function fileToBase64(file: File): Promise<string> {
@@ -740,13 +153,844 @@ function fileToBase64(file: File): Promise<string> {
     const reader = new FileReader();
     reader.onload = () => {
       const result = reader.result;
-      if (typeof result !== 'string') {
-        reject(new Error('FileReader returned non-string result'));
-        return;
-      }
-      resolve(result.slice(result.indexOf(',') + 1));
+      if (typeof result !== 'string') reject(new Error('The file could not be read.'));
+      else resolve(result.slice(result.indexOf(',') + 1));
     };
-    reader.onerror = () => reject(reader.error ?? new Error('FileReader failed'));
+    reader.onerror = () => reject(reader.error ?? new Error('The file could not be read.'));
     reader.readAsDataURL(file);
   });
+}
+
+/** Closes a menu on a click outside it, or on Esc. */
+function useDismiss(open: boolean, ref: React.RefObject<HTMLElement | null>, close: () => void) {
+  const closeRef = useRef(close);
+  closeRef.current = close;
+  useEffect(() => {
+    if (!open) return;
+    function onDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) closeRef.current();
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        closeRef.current();
+      }
+    }
+    document.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey, true);
+    };
+  }, [open, ref]);
+}
+
+/** "Copy" that reads "Copied" for two seconds. */
+function useCopy(text: string | null) {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const copy = () => {
+    if (!text) return;
+    void navigator.clipboard?.writeText(text).catch(() => {});
+    setCopied(true);
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setCopied(false), 2000);
+  };
+  return { copied, copy };
+}
+
+export function BillsPage() {
+  const { organizationId = '' } = useParams();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const toaster = useToaster();
+
+  const session = useQuery({ queryKey: ['session'], queryFn: () => api.getSession(), staleTime: Infinity });
+  const access = useQuery({
+    queryKey: ['my-access', organizationId],
+    queryFn: () => accessApi.get(organizationId),
+    enabled: Boolean(organizationId),
+    staleTime: 60_000,
+  });
+  const address = useQuery({
+    queryKey: ['inbound-email-address', organizationId],
+    queryFn: () => inboundEmailApi.address(organizationId),
+    enabled: Boolean(organizationId),
+    staleTime: 5 * 60_000,
+  });
+  const workbench = useQuery({
+    queryKey: ['bills-workbench', organizationId],
+    queryFn: () => billsApi.workbench(organizationId),
+    enabled: Boolean(organizationId),
+    // A file being read becomes a bill in seconds, so look often while one is.
+    refetchInterval: (q) => ((q.state.data?.pending.length ?? 0) > 0 ? 2_000 : 30_000),
+  });
+
+  const me = session.data?.user;
+  const capabilities = access.data?.capabilities;
+  // A Viewer reads every bill and brings none in, so the ways in are hidden.
+  const canAdd = capabilities ? capabilities.includes('bills.create') : false;
+  const canReview = capabilities ? capabilities.includes('bills.edit') : false;
+  const inboundAddress = address.data?.enabled ? address.data.address : null;
+
+  const [selected, setSelected] = useState<string[]>([]);
+  const [stage, setStage] = useState<Stage | 'all'>('all');
+  const [search, setSearch] = useState('');
+  const [sort, setSort] = useState<SortKey>('due');
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [dropped, setDropped] = useState<File[]>([]);
+  const [sending, setSending] = useState<Sending[]>([]);
+  const sizes = useRef(new Map<string, number>());
+  const mounted = useRef(true);
+  useEffect(() => () => {
+    mounted.current = false;
+  }, []);
+
+  const bills = workbench.data?.bills ?? [];
+  const pending = workbench.data?.pending ?? [];
+
+  const rows = useMemo<Row[]>(() => {
+    const viewer = { userId: me?.userId ?? '', canReview };
+    return bills.map((bill) => {
+      const c = classify(bill, viewer);
+      const late = c.stage !== 'done' && bill.dueAt ? Math.max(0, daysPast(bill.dueAt)) : 0;
+      return { bill, ...c, late };
+    });
+  }, [bills, me?.userId, canReview]);
+
+  const tiles = useMemo(() => {
+    const byKey = new Map<string, { part: Part; count: number; late: number }>();
+    for (const row of rows) {
+      if (!row.part.tile) continue;
+      const entry = byKey.get(row.part.key) ?? { part: row.part, count: 0, late: 0 };
+      entry.count += 1;
+      if (row.late > 0) entry.late += 1;
+      byKey.set(row.part.key, entry);
+    }
+    const parts = (tile: TileKey) =>
+      [...byKey.values()]
+        .filter((x) => x.part.tile === tile)
+        .sort((a, b) => a.part.order - b.part.order || b.count - a.count || a.part.label.localeCompare(b.part.label));
+    return { you: parts('you'), approvers: parts('approvers'), done: parts('done') };
+  }, [rows]);
+
+  // Uploads the server now knows about are its rows, not ours.
+  const known = useMemo(() => {
+    const ids = new Set<string>(pending.map((d) => d.invoiceDocumentId));
+    for (const bill of bills) if (bill.invoiceDocumentId) ids.add(bill.invoiceDocumentId);
+    return ids;
+  }, [pending, bills]);
+  const stillSending = sending.filter((s) => !s.documentId || !known.has(s.documentId));
+
+  const query = search.trim().toLowerCase();
+  const matches = (bill: WorkbenchBill) =>
+    !query
+    || bill.vendorName.toLowerCase().includes(query)
+    || (bill.invoiceNumber ?? '').toLowerCase().includes(query)
+    || (bill.description ?? '').toLowerCase().includes(query);
+
+  const stageCounts = useMemo(() => {
+    const counts: Record<Stage | 'all', number> = { all: rows.length, review: 0, approval: 0, done: 0 };
+    for (const row of rows) counts[row.stage] += 1;
+    return counts;
+  }, [rows]);
+
+  const filtering = selected.length > 0;
+  const shown = sortRows(
+    rows.filter((r) => (stage === 'all' || r.stage === stage) && (!filtering || selected.includes(r.part.key)) && matches(r.bill)),
+    sort,
+  );
+  // Files being read sit at the head of the table, until a filter is on.
+  const showUploads = !filtering && (stage === 'all' || stage === 'review');
+  const uploadRows = showUploads
+    ? pending.filter((d) => !query || d.filename.toLowerCase().includes(query))
+    : [];
+  const sendingRows = showUploads ? stillSending.filter((s) => !query || s.name.toLowerCase().includes(query)) : [];
+
+  // Esc lets go of the tile filters.
+  useEffect(() => {
+    if (!filtering || uploadOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape' && !e.defaultPrevented) setSelected([]);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [filtering, uploadOpen]);
+
+  const toggle = (key: string) =>
+    setSelected((cur) => (cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]));
+
+  const upload = async (files: File[]) => {
+    if (files.length === 0) return;
+    const stamp = Date.now();
+    const items = files.map((f, i) => ({ key: `${stamp}-${i}-${f.name}`, name: f.name, size: f.size, documentId: null }));
+    setSending((cur) => [...items, ...cur]);
+    let failed = 0;
+    let reused = 0;
+    let last: { id: string; reused: boolean } | null = null;
+    for (const [i, file] of files.entries()) {
+      const key = items[i]!.key;
+      try {
+        const res = await invoiceIntakeApi.uploadAsync(organizationId, {
+          filename: file.name,
+          mimeType: file.type || 'application/pdf',
+          dataBase64: await fileToBase64(file),
+        });
+        sizes.current.set(res.invoiceDocumentId, file.size);
+        setSending((cur) => cur.map((s) => (s.key === key ? { ...s, documentId: res.invoiceDocumentId } : s)));
+        if (res.reused) reused += 1;
+        last = { id: res.invoiceDocumentId, reused: res.reused };
+      } catch {
+        // One bad file must not strand the rest.
+        failed += 1;
+        setSending((cur) => cur.filter((s) => s.key !== key));
+      }
+      void queryClient.invalidateQueries({ queryKey: ['bills-workbench', organizationId] });
+    }
+    if (files.length === 1) {
+      if (!last) {
+        toaster.show(`${files[0]!.name} couldn’t be uploaded. Try it again.`);
+        return;
+      }
+      // One file: open it, and watch it fill in as it is read.
+      toaster.show(last.reused ? 'This file is already in Decimal. Opening it.' : `Opening ${files[0]!.name} while it’s read…`);
+      if (mounted.current) navigate(`/organizations/${organizationId}/bills/documents/${last.id}/draft`);
+      return;
+    }
+    if (failed > 0) toaster.show(`${failed} of ${files.length} files couldn’t be uploaded. Try ${failed === 1 ? 'it' : 'them'} again.`);
+    else if (reused > 0) toaster.show(`${reused} of these ${reused === 1 ? 'was' : 'were'} already in Decimal.`);
+  };
+
+  const openUpload = (files: File[] = []) => {
+    setDropped(files);
+    setUploadOpen(true);
+  };
+
+  const loaded = workbench.isSuccess && access.isSuccess;
+  const firstScreen = loaded && bills.length === 0 && pending.length === 0 && stillSending.length === 0;
+
+  return (
+    <div
+      className="ui list-page"
+      // A file dropped anywhere on the page goes to the upload dialog, rather
+      // than the browser opening it in place of the app.
+      onDragOver={(e) => {
+        if (canAdd && e.dataTransfer.types.includes('Files')) e.preventDefault();
+      }}
+      onDrop={(e) => {
+        if (!canAdd || !e.dataTransfer.files.length || uploadOpen) return;
+        e.preventDefault();
+        if (firstScreen) void upload([...e.dataTransfer.files]);
+        else openUpload([...e.dataTransfer.files]);
+      }}
+    >
+      <div className="list-head">
+        <div style={{ minWidth: 0 }}>
+          <h1 className="list-title">Bills</h1>
+          <div className="list-sub">Every incoming bill, from inbox to QuickBooks. You review and approve.</div>
+        </div>
+        {canAdd ? <AddBill address={inboundAddress} onUpload={() => openUpload()} /> : null}
+      </div>
+
+      {!loaded ? null : firstScreen ? (
+        canAdd ? (
+          <FirstScreen address={inboundAddress} onFiles={(files) => void upload(files)} />
+        ) : (
+          <div className="bl-table">
+            <div className="bl-empty">No bills yet.</div>
+          </div>
+        )
+      ) : (
+        <>
+          <div className="bl-tiles">
+            <Tile
+              name="Waiting on you"
+              parts={tiles.you}
+              late={tiles.you.reduce((n, p) => n + p.late, 0)}
+              selected={selected}
+              onToggle={toggle}
+            />
+            <Tile name="With approvers" parts={tiles.approvers} selected={selected} onToggle={toggle} />
+            <Tile name="Done" parts={tiles.done} selected={selected} onToggle={toggle} />
+          </div>
+
+          <div className="bl-bar">
+            <div className="bl-stages" role="tablist" aria-label="Stages">
+              {STAGES.map((s) => (
+                <button
+                  key={s.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={stage === s.key}
+                  className={`bl-stage${stage === s.key ? ' is-on' : ''}`}
+                  onClick={() => setStage(s.key)}
+                >
+                  {s.label}
+                  <span className="bl-stage-n">{stageCounts[s.key]}</span>
+                </button>
+              ))}
+            </div>
+            <div className="bl-tools">
+              {filtering ? (
+                <span className="bl-showing">
+                  <span>
+                    Showing <span className="num">{shown.length}</span> of {rows.length} bills
+                  </span>
+                  <button type="button" className="bl-showall" onClick={() => setSelected([])}>
+                    Show all
+                  </button>
+                </span>
+              ) : null}
+              <label className="bl-search">
+                <Icon.search size={11} />
+                <input
+                  type="search"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search vendor or invoice"
+                  aria-label="Search vendor or invoice"
+                />
+              </label>
+              <SortMenu value={sort} onChange={setSort} />
+            </div>
+          </div>
+
+          <div className="bl-table">
+            <div className="bl-grid">
+              <div className="bl-head">
+                <Cells>
+                  <span className="bl-th">VENDOR</span>
+                  <span className="bl-th">DESCRIPTION</span>
+                  <span className="bl-th">INVOICE</span>
+                  <span className="bl-th is-end">AMOUNT</span>
+                  <span className="bl-th">DUE</span>
+                  <span className="bl-th">STATUS</span>
+                </Cells>
+              </div>
+              {sendingRows.map((s) => (
+                <ReadingRow key={s.key} name={s.name} line={`Dropped just now by you · ${fileSize(s.size)}`} />
+              ))}
+              {uploadRows.map((doc) => (
+                <UploadRow
+                  key={doc.invoiceDocumentId}
+                  doc={doc}
+                  to={`/organizations/${organizationId}/bills/documents/${doc.invoiceDocumentId}/draft`}
+                  by={doc.uploadedByName && doc.uploadedByName !== me?.displayName ? doc.uploadedByName : 'you'}
+                  size={sizes.current.get(doc.invoiceDocumentId) ?? null}
+                />
+              ))}
+              {shown.map((row) => (
+                <BillRow key={row.bill.paymentOrderId} row={row} organizationId={organizationId} />
+              ))}
+            </div>
+            {shown.length === 0 && uploadRows.length === 0 && sendingRows.length === 0 ? (
+              <div className="bl-empty">{filtering || query ? 'No bills match.' : EMPTY[stage]}</div>
+            ) : null}
+          </div>
+        </>
+      )}
+
+      {uploadOpen ? (
+        <UploadDialog
+          initial={dropped}
+          address={inboundAddress}
+          onCancel={() => setUploadOpen(false)}
+          onUpload={(files) => {
+            setUploadOpen(false);
+            void upload(files);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/** The six cells of a row with the five gaps between them, for the subgrid. */
+function Cells({ children }: { children: ReactNode[] }) {
+  return (
+    <>
+      {children.map((cell, i) => (
+        <Fragment key={i}>
+          {i > 0 ? <span aria-hidden /> : null}
+          {cell}
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
+function BillRow({ row, organizationId }: { row: Row; organizationId: string }) {
+  const { bill } = row;
+  const to = bill.bucket === 'draft'
+    ? `/organizations/${organizationId}/bills/${bill.paymentOrderId}/draft`
+    : `/organizations/${organizationId}/bills/${bill.paymentOrderId}`;
+  return (
+    <Link to={to} className="bl-row" title={`Opens ${bill.invoiceNumber ?? 'the bill'}`}>
+      <Cells>
+        <span className="bl-td bl-vendor">{bill.vendorName}</span>
+        <span className="bl-td bl-desc">
+          <span>{bill.description ?? ''}</span>
+        </span>
+        <span className="bl-td bl-inv num">{bill.invoiceNumber ?? '—'}</span>
+        <span className="bl-td is-end bl-amt num">{usd(bill.amountUsd)}</span>
+        <span
+          className={`bl-td bl-due num${row.late > 0 ? ' is-late' : ''}`}
+          title={row.late > 0 ? `${row.late} ${row.late === 1 ? 'day' : 'days'} overdue` : undefined}
+        >
+          {bill.dueAt ? calendarDay(bill.dueAt) : '—'}
+        </span>
+        <span className="bl-td">
+          <span className={`chip is-${row.part.tone}`}>{row.chip}</span>
+        </span>
+      </Cells>
+    </Link>
+  );
+}
+
+/** A file on its way up: no document yet, so nothing to open. */
+function ReadingRow({ name, line }: { name: string; line: string }) {
+  return (
+    <div className="bl-row" title="Being uploaded" style={{ cursor: 'default' }}>
+      <ReadingCells name={name} line={line} />
+    </div>
+  );
+}
+
+function ReadingCells({ name, line }: { name: string; line: string }) {
+  return (
+    <Cells>
+      <span className="bl-td bl-file num">{name}</span>
+      <span className="bl-td bl-desc">
+        <span>{line}</span>
+      </span>
+      <span className="bl-td">
+        <span className="bl-reading" style={{ width: 54 }} />
+      </span>
+      <span className="bl-td is-end">
+        <span className="bl-reading" style={{ width: 62 }} />
+      </span>
+      <span className="bl-td">
+        <span className="bl-reading" style={{ width: 66 }} />
+      </span>
+      <span className="bl-td">
+        <span className="bl-being-read">
+          <span className="orb-slot">
+            <Orb size={14} state="work" />
+          </span>
+          Being read
+        </span>
+      </span>
+    </Cells>
+  );
+}
+
+function UploadRow({ doc, to, by, size }: { doc: PendingDocument; to: string; by: string; size: number | null }) {
+  if (doc.status === 'failed') {
+    return (
+      <Link to={to} className="bl-row" title="Opens the file: upload a clearer copy, enter the details by hand, or remove it">
+        <Cells>
+          <span className="bl-td bl-vendor">{doc.filename}</span>
+          <span className="bl-td bl-desc">
+            <span>Couldn’t be read. Upload a clearer copy, or enter the details by hand.</span>
+          </span>
+          <span className="bl-td bl-inv num">—</span>
+          <span className="bl-td is-end bl-amt num">—</span>
+          <span className="bl-td bl-due num">—</span>
+          <span className="bl-td">
+            <span className="chip is-blocking">Couldn’t be read</span>
+          </span>
+        </Cells>
+      </Link>
+    );
+  }
+  return (
+    <Link to={to} className="bl-row" title="Opens the bill while it is read">
+      <ReadingCells name={doc.filename} line={`Dropped ${ago(doc.createdAt)} by ${by}${size ? ` · ${fileSize(size)}` : ''}`} />
+    </Link>
+  );
+}
+
+function Tile({
+  name,
+  parts,
+  late = 0,
+  selected,
+  onToggle,
+}: {
+  name: string;
+  parts: Array<{ part: Part; count: number }>;
+  late?: number;
+  selected: string[];
+  onToggle: (key: string) => void;
+}) {
+  const total = parts.reduce((n, p) => n + p.count, 0);
+  return (
+    <div className="bl-tile">
+      <div className="bl-tile-head">
+        <span className="bl-tile-n">{total}</span>
+        <span className="bl-tile-name">{name}</span>
+        {late > 0 ? <span className="bl-tile-late">{late} overdue</span> : null}
+      </div>
+      {parts.length > 0 ? (
+        <div className="bl-parts">
+          {parts.map(({ part: p, count }) => {
+            const on = selected.includes(p.key);
+            return (
+              <div key={p.key} className="bl-part">
+                <button
+                  type="button"
+                  className={`bl-part-btn t-${p.tone}${on ? ' is-on' : ''}`}
+                  aria-pressed={on}
+                  onClick={() => onToggle(p.key)}
+                >
+                  <span className="bl-box">
+                    <Icon.tick size={9} strokeWidth={3.4} style={{ color: '#FFFFFF' }} />
+                  </span>
+                  <span className="bl-part-label">
+                    {p.people ? (
+                      <>
+                        {p.people.map((person, i) => (
+                          <Fragment key={person}>
+                            {i > 0 ? <span className="bl-part-or">or</span> : null}
+                            <span className={i === p.people!.length - 1 ? 'clip' : undefined} style={i < p.people!.length - 1 ? { flex: 'none' } : undefined}>
+                              {person}
+                            </span>
+                          </Fragment>
+                        ))}
+                        {p.people.map((person) => (
+                          <Avatar key={`face-${person}`} name={person} />
+                        ))}
+                      </>
+                    ) : (
+                      <span className="clip">{p.label}</span>
+                    )}
+                  </span>
+                  <span className="bl-part-n num">{count}</span>
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SortMenu({ value, onChange }: { value: SortKey; onChange: (v: SortKey) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  useDismiss(open, ref, () => setOpen(false));
+  const label = SORTS.find((s) => s.key === value)?.label ?? 'Due date';
+  return (
+    <div className="bl-sort" ref={ref}>
+      <button
+        type="button"
+        className={`bl-sort-btn${open ? ' is-open' : ''}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        Sort: {label}
+        <Icon.caret size={9} />
+      </button>
+      {open ? (
+        <div className="menu bl-sort-menu" role="menu">
+          {SORTS.map((s) => (
+            <button
+              key={s.key}
+              type="button"
+              role="menuitemradio"
+              aria-checked={s.key === value}
+              className={`menu-item${s.key === value ? ' is-on' : ''}`}
+              onClick={() => {
+                onChange(s.key);
+                setOpen(false);
+              }}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Upload a bill, with a menu of the other way in: forwarding the email. */
+function AddBill({ address, onUpload }: { address: string | null; onUpload: () => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  const { copied, copy } = useCopy(address);
+  useDismiss(open, ref, () => setOpen(false));
+  return (
+    <div className="split" ref={ref}>
+      <button type="button" className={`split-main${address ? '' : ' is-alone'}`} onClick={onUpload}>
+        <Icon.upload size={13} />
+        Upload a bill
+      </button>
+      {address ? (
+        <>
+          <button
+            type="button"
+            className={`split-arrow${open ? ' is-open' : ''}`}
+            aria-label="More ways to add a bill"
+            aria-haspopup="menu"
+            aria-expanded={open}
+            onClick={() => setOpen((o) => !o)}
+          >
+            <Icon.chevDown size={12} />
+          </button>
+          {open ? (
+            <div className="menu split-menu" role="menu">
+              <button
+                type="button"
+                role="menuitem"
+                className="split-item"
+                onClick={() => {
+                  setOpen(false);
+                  onUpload();
+                }}
+              >
+                <Icon.upload size={13} />
+                <span className="split-item-title">Upload a file</span>
+                <span />
+                <span className="split-item-line">PDF, photo or scan. One file can hold several bills.</span>
+              </button>
+              <div className="split-item" style={{ cursor: 'default' }}>
+                <Icon.mail size={13} />
+                <span className="split-item-title">Forward by email</span>
+                <span />
+                <span className="split-item-addr">
+                  <span className="num">{address}</span>
+                  <button type="button" className="text-action" onClick={copy}>
+                    {copied ? 'Copied' : 'Copy'}
+                  </button>
+                </span>
+              </div>
+            </div>
+          ) : null}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/** 21a: nothing yet, so one large place to drop the first bill. */
+function FirstScreen({ address, onFiles }: { address: string | null; onFiles: (files: File[]) => void }) {
+  const input = useRef<HTMLInputElement | null>(null);
+  const [over, setOver] = useState(false);
+  const { copied, copy } = useCopy(address);
+  return (
+    <div className="first">
+      <input
+        ref={input}
+        type="file"
+        multiple
+        accept={ACCEPT}
+        className="sr-only"
+        tabIndex={-1}
+        onChange={(e) => {
+          const files = [...(e.target.files ?? [])];
+          e.target.value = '';
+          if (files.length) onFiles(files);
+        }}
+      />
+      <div
+        className={`drop is-first${over ? ' is-over' : ''}`}
+        role="button"
+        tabIndex={0}
+        onClick={() => input.current?.click()}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            input.current?.click();
+          }
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setOver(true);
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setOver(false);
+          const files = [...e.dataTransfer.files];
+          if (files.length) onFiles(files);
+        }}
+      >
+        <span className="drop-icon">
+          <Icon.upload size={22} />
+        </span>
+        <div className="drop-title">
+          Drop your first bill here, or <span className="drop-link">choose a file</span>
+        </div>
+        <div className="drop-line">A PDF, a photo or a scan. One file can hold several bills.</div>
+      </div>
+      {address ? (
+        <>
+          <div className="first-fwd">
+            <span>Or forward the email it came in to</span>
+            <span className="addr-pill">
+              <span className="num">{address}</span>
+              <button type="button" className="text-action" onClick={copy}>
+                {copied ? 'Copied' : 'Copy'}
+              </button>
+            </span>
+          </div>
+          <div className="first-note">Only bills forwarded by your team are read; vendors can’t send to it directly.</div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function UploadDialog({
+  initial,
+  address,
+  onCancel,
+  onUpload,
+}: {
+  initial: File[];
+  address: string | null;
+  onCancel: () => void;
+  onUpload: (files: File[]) => void;
+}) {
+  const [files, setFiles] = useState<File[]>(initial);
+  const [over, setOver] = useState(false);
+  const input = useRef<HTMLInputElement | null>(null);
+  const { copied, copy } = useCopy(address);
+
+  const add = (incoming: File[]) =>
+    setFiles((cur) => {
+      // The same file picked twice is a slip, not a request for two bills.
+      const seen = new Set(cur.map((f) => `${f.name}:${f.size}`));
+      return [...cur, ...incoming.filter((f) => !seen.has(`${f.name}:${f.size}`))];
+    });
+
+  // A drop anywhere while the dialog is open is for the dialog.
+  useEffect(() => {
+    function onOver(e: DragEvent) {
+      if (!e.dataTransfer?.types.includes('Files')) return;
+      e.preventDefault();
+      setOver(true);
+    }
+    function onLeave(e: DragEvent) {
+      if (!e.relatedTarget) setOver(false);
+    }
+    function onDrop(e: DragEvent) {
+      if (!e.dataTransfer?.files.length) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setOver(false);
+      add([...e.dataTransfer.files]);
+    }
+    window.addEventListener('dragover', onOver);
+    window.addEventListener('dragleave', onLeave);
+    window.addEventListener('drop', onDrop, true);
+    return () => {
+      window.removeEventListener('dragover', onOver);
+      window.removeEventListener('dragleave', onLeave);
+      window.removeEventListener('drop', onDrop, true);
+    };
+  }, []);
+
+  const go = () => {
+    if (files.length) onUpload(files);
+  };
+
+  return (
+    <Dialog
+      wide
+      title="Upload bills"
+      line="One file or several. Each is read as it arrives."
+      onCancel={onCancel}
+      onConfirm={files.length ? go : undefined}
+      actions={
+        <>
+          <button type="button" className="btn" onClick={onCancel}>
+            Cancel
+          </button>
+          <button type="button" className="btn is-primary" disabled={!files.length} onClick={go}>
+            {files.length === 0 ? 'Upload' : files.length === 1 ? 'Upload 1 file' : `Upload ${files.length} files`}
+          </button>
+        </>
+      }
+    >
+      <div style={{ marginTop: -2 }}>
+        <input
+          ref={input}
+          type="file"
+          multiple
+          accept={ACCEPT}
+          className="sr-only"
+          tabIndex={-1}
+          onChange={(e) => {
+            const picked = [...(e.target.files ?? [])];
+            e.target.value = '';
+            add(picked);
+          }}
+        />
+        <div
+          className={`drop${over ? ' is-over' : ''}`}
+          style={{ height: files.length ? 120 : 180 }}
+          role="button"
+          tabIndex={0}
+          data-autofocus
+          onClick={() => input.current?.click()}
+          onKeyDown={(e) => {
+            if (e.key === ' ') {
+              e.preventDefault();
+              input.current?.click();
+            }
+          }}
+        >
+          <span className="drop-icon">
+            <Icon.upload size={22} />
+          </span>
+          <div className="drop-title">
+            Drop bills here, or <span className="drop-link">choose files</span>
+          </div>
+          <div className="drop-line">PDFs, photos or scans. One file can hold several bills.</div>
+        </div>
+        {files.length ? (
+          <div className="up-files">
+            {files.map((f) => (
+              <div key={`${f.name}:${f.size}`} className="up-file">
+                <Icon.bills size={13} />
+                <span className="up-file-name">{f.name}</span>
+                <span className="up-file-size num">{fileSize(f.size)}</span>
+                <button
+                  type="button"
+                  className="x-btn"
+                  aria-label={`Remove ${f.name}`}
+                  onClick={() => setFiles((cur) => cur.filter((x) => x !== f))}
+                >
+                  <Icon.x size={10} />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {address ? (
+          <div className="fwd">
+            <span className="fwd-label">Or forward the invoice to</span>
+            <span className="addr-pill has-icon">
+              <span className="num">{address}</span>
+              <button
+                type="button"
+                className={`copy-icon${copied ? ' is-done' : ''}`}
+                title={copied ? 'Copied' : 'Copy'}
+                aria-label="Copy the address"
+                onClick={copy}
+              >
+                {copied ? <Icon.tick size={12} /> : <Icon.copy size={12} />}
+              </button>
+            </span>
+          </div>
+        ) : null}
+      </div>
+    </Dialog>
+  );
 }

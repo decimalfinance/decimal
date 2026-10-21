@@ -214,6 +214,11 @@ authRouter.get('/auth/session', requireAuth(), async (req, res, next) => {
   try {
     const auth = req.auth!;
     const organizations = await listUserOrganizations(auth.userId);
+    // The picture and how they sign in, for the sidebar's signed-in person.
+    const profile = await prisma.user.findUnique({
+      where: { userId: auth.userId },
+      select: { avatarUrl: true, googleSubject: true },
+    });
 
     res.json({
       authenticated: true,
@@ -222,6 +227,8 @@ authRouter.get('/auth/session', requireAuth(), async (req, res, next) => {
         userId: auth.userId,
         email: auth.userEmail,
         displayName: auth.userDisplayName,
+        avatarUrl: profile?.avatarUrl ?? null,
+        signInMethod: profile?.googleSubject ? 'google' : 'password',
         emailVerifiedAt: auth.userEmailVerifiedAt,
       },
       organizations,

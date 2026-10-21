@@ -1,0 +1,361 @@
+/*
+ * The app frame and the one sidebar (Sidebar.dc.html). A 200px column that
+ * folds to a 52px rail; resting on the rail for 220ms slides the full sidebar
+ * out over the page. The grey under the rail is painted on the frame itself,
+ * so the column can animate without a white gap.
+ */
+.shell {
+  position: relative;
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  height: 100vh;
+  overflow: hidden;
+  background: linear-gradient(90deg, var(--grey) 51px, var(--line) 51px, var(--line) 52px, var(--white) 52px);
+  transition: grid-template-columns .18s ease;
+}
+.shell.is-folded { grid-template-columns: 52px minmax(0, 1fr); }
+
+.shell-main {
+  grid-column: 2;
+  grid-row: 1;
+  position: relative;
+  min-width: 0;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--white);
+}
+/* A page that hasn't been redesigned yet scrolls in here, in the old system. */
+.shell-legacy { height: 100%; overflow-y: auto; }
+.shell-legacy.dec { background: var(--bg-canvas); }
+
+/* ── The column ─────────────────────────────────────────── */
+.ui.sb-col {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--grey);
+  border-right: 1px solid var(--line);
+}
+.ui .sb-body {
+  flex: none;
+  width: 199px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 12px 10px;
+}
+
+/* The organisation strip bleeds to the column's edges. */
+.ui .sb-org { position: relative; margin: -12px -10px 10px; }
+.ui .sb-org-strip {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 52px;
+  padding: 10px 18px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  text-align: left;
+  color: inherit;
+}
+.ui button.sb-org-strip { cursor: pointer; }
+.ui button.sb-org-strip:hover,
+.ui button.sb-org-strip.is-open { background: var(--grey-hover); }
+.ui button.sb-org-strip:focus-visible { box-shadow: var(--focus-inset); }
+.ui .sb-org-name {
+  flex: 1;
+  min-width: 0;
+  font: 600 12.5px/1.25 var(--font);
+  letter-spacing: -.01em;
+  color: var(--ink);
+}
+.ui .sb-org-chev { flex: none; color: var(--ink-4); }
+
+/* An organisation's mark: its colour, white initials. */
+.ui .org-mark {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #FFFFFF;
+  font: 600 9.5px var(--font);
+  letter-spacing: .02em;
+}
+.ui .org-mark.is-sm { width: 20px; height: 20px; border-radius: 4px; font-size: 8px; }
+
+/* Places */
+.ui .sb-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font: 500 11px var(--font);
+  color: var(--ink-2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ui .sb-row > svg { flex: none; color: var(--ink-4); }
+.ui .sb-row:hover { background: var(--grey-hover); color: var(--ink); }
+.ui .sb-row:focus-visible { box-shadow: var(--focus-inset); }
+.ui .sb-row.is-on { background: var(--white); font-weight: 600; color: var(--maroon); }
+.ui .sb-row.is-on > svg { color: var(--maroon); }
+.ui .sb-row-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ui .sb-label {
+  display: block;
+  padding: 18px 8px 6px;
+  font: 600 8px var(--mono);
+  letter-spacing: .08em;
+  color: var(--ink-4);
+}
+
+/* The Inbox count: always maroon, nothing at zero. */
+.ui .sb-count {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--maroon);
+  color: #FFFFFF;
+  font: 600 10px/1 var(--mono);
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -.01em;
+}
+
+/* The signed-in person, under a full-width line at the bottom. */
+.ui .sb-me { margin: auto -10px -12px; border-top: 1px solid var(--line); }
+.ui .sb-me-wrap { position: relative; }
+.ui .sb-me-wrap.is-open { background: var(--grey-hover); }
+.ui .sb-me-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 18px 13px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.ui .sb-me-btn:hover { background: var(--grey-hover); }
+.ui .sb-me-btn:focus-visible { box-shadow: var(--focus-inset); }
+.ui .sb-me-text { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.ui .sb-me-name {
+  flex: 1;
+  min-width: 0;
+  font: 500 11px/1.3 var(--font);
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ui .sb-me-role { flex: none; font: 400 10px/1.3 var(--font); color: var(--ink-2); white-space: nowrap; }
+.ui .sb-pic { width: 16px; height: 16px; flex: none; border-radius: 50%; object-fit: cover; }
+
+/* Menus that open from the sidebar */
+.ui .sb-org-menu { position: absolute; left: 10px; right: 10px; top: calc(100% + 4px); z-index: 5; }
+.ui .sb-me-menu { position: absolute; left: 8px; right: 8px; bottom: calc(100% + 6px); z-index: 5; }
+.ui .sb-org-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.ui .sb-org-item:hover { background: var(--grey); }
+.ui .sb-org-item:focus-visible { box-shadow: var(--focus-inset); }
+.ui .sb-org-item-text { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.ui .sb-org-item-name {
+  font: 500 11px/1.3 var(--font);
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ui .sb-org-item-role { font: 400 10px/1.3 var(--font); color: var(--ink-2); }
+.ui .sb-org-item-tick { flex: none; font: 600 11px/1 var(--font); color: var(--maroon); }
+.ui .sb-me-head { display: grid; gap: 2px; padding: 7px 10px 8px; }
+.ui .sb-me-email {
+  min-width: 0;
+  font: 500 11px/1.3 var(--font);
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ui .sb-me-how { font: 400 10px/1.4 var(--font); color: var(--ink-2); }
+.ui .sb-me-items { margin: 3px -4px 0; padding: 4px 4px 0; border-top: 1px solid var(--line); }
+
+/* ── The rail ───────────────────────────────────────────── */
+.ui.sb-rail {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: start;
+  position: relative;
+  z-index: 3;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 12px 10px;
+  background: var(--grey);
+  border-right: 1px solid var(--line);
+}
+.ui .sb-rail-org { width: 51px; flex: none; margin: -12px -10px 10px; }
+.ui .sb-rail-org-strip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 51px;
+  min-height: 52px;
+  border-bottom: 1px solid var(--line);
+}
+.ui .sb-rail-cell { position: relative; width: 31px; flex: none; }
+.ui .sb-rail-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.ui .sb-rail-row > svg { flex: none; color: var(--ink-4); }
+.ui .sb-rail-row:hover { background: var(--grey-hover); }
+.ui .sb-rail-row:focus-visible { box-shadow: var(--focus-inset); }
+.ui .sb-rail-row.is-on { background: var(--white); }
+.ui .sb-rail-row.is-on > svg { color: var(--maroon); }
+/* SETTINGS becomes a hairline on the rail. */
+.ui .sb-rail-label {
+  position: relative;
+  width: 31px;
+  flex: none;
+  display: block;
+  padding: 18px 8px 6px;
+  font: 600 8px var(--mono);
+  letter-spacing: .08em;
+  color: transparent;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.ui .sb-rail-label::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: calc(18px + .55em);
+  height: 1px;
+  background: #DEDBD5;
+}
+.ui .sb-rail-count {
+  position: absolute;
+  top: 2px;
+  left: calc(50% + 1px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--maroon);
+  color: #FFFFFF;
+  font: 600 8.5px/1 var(--mono);
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -.01em;
+  box-shadow: 0 0 0 1.5px var(--grey);
+}
+.ui .sb-rail-me {
+  position: relative;
+  width: 51px;
+  flex: none;
+  margin: auto -10px -12px;
+  border-top: 1px solid var(--line);
+}
+.ui .sb-rail-me-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 12px 0 13px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.ui .sb-rail-me-btn:hover { background: var(--grey-hover); }
+.ui .sb-rail-me-btn:focus-visible { box-shadow: var(--focus-inset); }
+.ui .sb-ini {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #FFFFFF;
+  font: 600 7px/1 var(--font);
+  letter-spacing: .02em;
+}
+
+/* The full sidebar, peeking out over the page from the rail. */
+.ui .sb-peek {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 200px;
+  z-index: 5;
+  box-shadow: 12px 0 32px rgba(10, 10, 10, .12);
+}
+.ui .sb-peek > .sb-body {
+  width: 200px;
+  background: var(--grey);
+  border-right: 1px solid var(--line);
+  overflow: hidden;
+}
+
+/* ── The handle on the column's edge ────────────────────── */
+.ui.sb-handle,
+.ui .sb-handle {
+  position: absolute;
+  top: 16px;
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--edge-handle);
+  border-radius: 50%;
+  background: var(--white);
+  color: var(--ink-3);
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(10, 10, 10, .06);
+}
+.ui.sb-handle { left: 189px; transition: left .18s ease; }
+.shell.is-folded > .ui.sb-handle { left: 41px; }
+.ui .sb-peek .sb-handle { right: -11px; }
+.ui.sb-handle:hover,
+.ui .sb-handle:hover { color: var(--ink); border-color: var(--edge); }
+.ui.sb-handle:focus-visible,
+.ui .sb-handle:focus-visible { box-shadow: var(--focus); }
+.ui .sb-handle-chev { transition: transform .18s ease; }
+.ui .sb-handle-chev.is-flipped { transform: rotate(180deg); }

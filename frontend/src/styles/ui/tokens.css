@@ -1,0 +1,90 @@
+/*
+ * Decimal's design system, from the Claude Design handoff of 21 Oct 2026
+ * (design_handoff_decimal/). Every value here is the handoff's, exact.
+ *
+ * Everything lives under .ui (and the app frame, .shell): the new sidebar and
+ * every redesigned page put .ui on their root. Pages not yet redesigned keep
+ * the old .dec system, and the two never nest. Light only: the design has no
+ * dark theme.
+ */
+.ui,
+.shell {
+  /* Text */
+  --ink: #0A0A0A;
+  --ink-2: #5E5B57;          /* secondary */
+  --ink-3: #736F69;          /* tertiary */
+  --ink-4: #9A9690;          /* quiet */
+
+  /* Lines */
+  --line: #EAE8E4;
+  --line-row: #E6E3DE;
+  --line-soft: #F0EEEA;
+  --edge: #D8D5CF;           /* field edges */
+  --edge-handle: #E2DFDA;
+
+  /* Greys */
+  --grey: #F5F4F2;           /* tiles, rows, the sidebar */
+  --grey-hover: #ECEAE6;
+  --grey-faint: #FAFAF8;
+  --white: #FFFFFF;
+
+  /* Maroon and pinks */
+  --maroon: #5C1F33;
+  --maroon-hover: #481627;
+  --maroon-active: #350E1B;
+  --pink-50: #FFF2F5;
+  --pink-200: #FCCCD7;
+  --pink-300: #F0B0BF;
+  --pink-400: #DC8DA2;
+  --pink-600: #A5516A;
+
+  /* Red and green */
+  --red: #8B2A22;
+  --red-2: #A63A2F;
+  --red-tint: #FBEAE7;
+  --red-tint-2: #F6DAD5;
+  --red-edge: #EFC9C2;
+  --red-edge-hover: #E6ADA3;
+  --red-error-edge: #C9776D;
+  --green: #2B6339;
+  --green-2: #3D7A4B;
+
+  /* Status chips */
+  --chip-yours: #EFE9DD;     /* your move */
+  --chip-checked: #D9EAD9;
+  --chip-blocking: #F6DAD5;
+  --chip-warning: #F4E6C6;
+  --chip-waiting: #DCE5EE;
+  --chip-finished: #E9E9E4;
+
+  /* A field that needs a look */
+  --look-bg: #FCEFE6;
+  --look-edge: #E0A98A;
+  --look-label: #8A5A3C;
+
+  /* Dark surfaces: toasts, tooltips */
+  --dark: #1B1916;
+
+  /* Type */
+  --font: 'Geist Variable', 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'Geist Mono Variable', 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* Shadows */
+  --shadow-dialog: 0 24px 64px rgba(10, 10, 10, .22), 0 0 0 1px rgba(10, 10, 10, .06);
+  --shadow-menu: 0 12px 32px rgba(10, 10, 10, .12);
+  --shadow-toast: 0 8px 24px rgba(10, 10, 10, .2);
+  --shadow-tip: 0 4px 14px rgba(10, 10, 10, .18);
+
+  /* Focus */
+  --focus: 0 0 0 2px #FFFFFF, 0 0 0 4px rgba(92, 31, 51, .45);
+  --focus-inset: inset 0 0 0 2px rgba(92, 31, 51, .45);
+
+  /* Motion */
+  --ease: cubic-bezier(.4, 0, .2, 1);
+
+  /* Decimal's pink cloudy surface: #FFF2F5 under two feTurbulence layers
+     (grain at 160px, clouds at 400px). People never get it; it marks what
+     Decimal did. */
+  --cloud-layers: url('data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20width=%22160%22%20height=%22160%22%3E%3Cfilter%20id=%22g%22%20x=%220%22%20y=%220%22%20width=%22100%%22%20height=%22100%%22%3E%3CfeTurbulence%20type=%22fractalNoise%22%20baseFrequency=%220.9%22%20numOctaves=%221%22%20seed=%220%22%20stitchTiles=%22stitch%22/%3E%3CfeColorMatrix%20values=%220%200%200%200%200.757%200%200%200%200%200.427%200%200%200%200%200.518%200%200%200%201.1%20-0.52%22/%3E%3C/filter%3E%3Crect%20width=%22160%22%20height=%22160%22%20filter=%22url(%23g)%22/%3E%3C/svg%3E'),
+    url('data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20width=%22400%22%20height=%22400%22%3E%3Cfilter%20id=%22g%22%20x=%220%22%20y=%220%22%20width=%22100%%22%20height=%22100%%22%3E%3CfeTurbulence%20type=%22fractalNoise%22%20baseFrequency=%220.01%22%20numOctaves=%224%22%20seed=%220%22%20stitchTiles=%22stitch%22/%3E%3CfeColorMatrix%20values=%220%200%200%200%200.941%200%200%200%200%200.690%200%200%200%200%200.749%200%200%200%201.6%20-0.72%22/%3E%3C/filter%3E%3Crect%20width=%22400%22%20height=%22400%22%20filter=%22url(%23g)%22/%3E%3C/svg%3E');
+}

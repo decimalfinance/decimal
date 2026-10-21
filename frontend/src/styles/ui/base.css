@@ -1,0 +1,59 @@
+/* Base type and resets for everything under .ui. */
+.ui {
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--ink);
+  text-rendering: optimizeLegibility;
+  font-feature-settings: 'cv01', 'ss01';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+.ui *,
+.ui *::before,
+.ui *::after { box-sizing: border-box; }
+.ui :where(h1, h2, h3, h4, p, ul, ol, figure) { margin: 0; }
+.ui :where(ul, ol) { padding: 0; list-style: none; }
+.ui :where(button) { font: inherit; color: inherit; }
+.ui :where(a) { color: inherit; text-decoration: none; }
+.ui :where(img, svg, canvas) { display: block; }
+.ui :where(button, a, input, textarea, select, [tabindex]):focus { outline: none; }
+.ui :where(button, a, [tabindex]):focus-visible { box-shadow: var(--focus); }
+
+/* Every figure, date, time, amount and invoice number is in Geist Mono. */
+.ui .num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -.01em;
+}
+
+/* Labels in caps: column heads, SETTINGS, DECIMAL AGENT. */
+.ui .caps {
+  font: 600 8px var(--mono);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.ui .clip {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Hidden but read aloud. */
+.ui .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@keyframes ui-breathe { 0%, 100% { opacity: 1 } 50% { opacity: .5 } }
+@keyframes ui-fade-in { from { opacity: 0 } to { opacity: 1 } }

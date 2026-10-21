@@ -137,7 +137,12 @@ type EngineRow = {
 type OpenTaskRow = {
   approvable_id: string;
   person_name: string;
+  user_id: string | null;
+  step_index: number;
 };
+
+/** Someone an approval is waiting on: everyone open at its first open step. */
+export type WaitingPerson = { userId: string | null; name: string };
 
 async function loadEngineState(organizationId: string) {
   const approvables = await prisma.$queryRaw<EngineRow[]>`
@@ -149,7 +154,7 @@ async function loadEngineState(organizationId: string) {
       AND type IN ('invoice', 'payment_run')`;
 
   const openTasks = await prisma.$queryRaw<OpenTaskRow[]>`
-    SELECT plan.approvable_id, p.name AS person_name
+    SELECT plan.approvable_id, p.name AS person_name, p.user_id::text AS user_id, t.step_index
     FROM approval.tasks t
     JOIN approval.approval_plans plan ON plan.id = t.plan_id AND plan.superseded_by IS NULL
     JOIN approval.people p ON p.id = t.person_id
@@ -165,10 +170,19 @@ async function loadEngineState(organizationId: string) {
     if (row.type === 'payment_run' && row.source_approvable_id) releaseBySource.set(row.source_approvable_id, row);
   }
   const firstOpenPerson = new Map<string, string>();
+  // Everyone open at the first open step: "Tom or Ines" when either may act.
+  const openPeople = new Map<string, WaitingPerson[]>();
+  const firstStep = new Map<string, number>();
   for (const task of openTasks) {
     if (!firstOpenPerson.has(task.approvable_id)) firstOpenPerson.set(task.approvable_id, task.person_name);
+    const step = firstStep.get(task.approvable_id);
+    if (step === undefined) firstStep.set(task.approvable_id, task.step_index);
+    else if (step !== task.step_index) continue;
+    const people = openPeople.get(task.approvable_id) ?? [];
+    if (!people.some((p) => p.name === task.person_name)) people.push({ userId: task.user_id, name: task.person_name });
+    openPeople.set(task.approvable_id, people);
   }
-  return { invoiceByOrder, releaseBySource, firstOpenPerson };
+  return { invoiceByOrder, releaseBySource, firstOpenPerson, openPeople };
 }
 
 type SubStatus = {
@@ -252,6 +266,13 @@ function bucketAndStatus(args: {
   return state === 'proposed'
     ? { bucket: 'to_pay', subStatus: { kind: 'plain', text: 'Payment on its way', tone: 'success' } }
     : { bucket: 'to_pay', subStatus: { kind: 'plain', text: 'Ready to pay', tone: 'neutral' } };
+}
+
+/** The reason picked when a bill was closed as not a bill to pay. */
+function closedReasonOf(metadataJson: unknown): string | null {
+  const meta = isRecord(metadataJson) ? metadataJson : null;
+  const notABill = meta && isRecord(meta.notABill) ? meta.notABill : null;
+  return notABill ? str(notABill.reason) : null;
 }
 
 /**
@@ -1038,6 +1059,22 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
     });
   }
 
+  // What QuickBooks has done with each approved bill. Read only: the posting
+  // itself happens elsewhere, and this says where it got to.
+  const syncs = orders.length === 0 ? [] : await prisma.accountingSync.findMany({
+    where: { organizationId, paymentOrderId: { in: orders.map((o) => o.paymentOrderId) } },
+    select: { paymentOrderId: true, status: true, externalBillId: true, syncedAt: true, updatedAt: true },
+  });
+  const postingByOrder = new Map<string, { status: 'posted' | 'failed' | 'pending'; at: Date }>();
+  for (const sync of syncs) {
+    postingByOrder.set(
+      sync.paymentOrderId,
+      sync.externalBillId
+        ? { status: 'posted', at: sync.syncedAt ?? sync.updatedAt }
+        : { status: sync.status === 'error' ? 'failed' : 'pending', at: sync.updatedAt },
+    );
+  }
+
   // Duplicate detection over rows we already hold. findDuplicateBills would be
   // one query per bill; matchDuplicates is the same rules against the same
   // candidate set, in memory. Grouped by vendor because that is how the query
@@ -1128,6 +1165,14 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
       firstOpenPerson: engine.firstOpenPerson,
     });
     counts[bucket] += 1;
+    // Everyone who could act on it now, so the list can say "Tom or Ines" and
+    // can tell when it is waiting on the reader.
+    const awaiting = invoice?.macro_state === 'pending_approval'
+      ? invoice
+      : release?.macro_state === 'pending_approval' ? release : undefined;
+    const waitingOn = awaiting && order.state !== 'draft' && order.state !== 'cancelled'
+      ? engine.openPeople.get(awaiting.id) ?? []
+      : [];
 
     const extracted = extractedOf(order.metadataJson);
     const metadataRecord = isRecord(order.metadataJson) ? order.metadataJson : {};
@@ -1265,6 +1310,13 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
       })(),
       // Somebody is waiting on this reader for an answer about THIS bill.
       questionForYou: questionByOrder.get(order.paymentOrderId) ?? null,
+      // An approver sent it back. Said here because the line above is
+      // rewritten for every draft, and "sent back" would be lost in it.
+      sentBack: order.state === 'draft' && invoice?.macro_state === 'rejected',
+      waitingOn,
+      posting: postingByOrder.get(order.paymentOrderId) ?? null,
+      // Why a closed bill was closed: duplicate, not ours, credit note...
+      closedReason: order.state === 'cancelled' ? closedReasonOf(order.metadataJson) : null,
     };
   });
 
