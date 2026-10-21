@@ -171,7 +171,6 @@ test('payer role opens payment surface without granting bill entry', async () =>
     403,
     'payer still cannot prepare a bill',
   );
-  assert.equal(await status('POST', `/organizations/${orgId}/approvals/separation`, member.token, { clerkCanApprove: true, submitterCanApprove: true, approverCanRelease: true }), 403, 'payer cannot edit governance');
 });
 
 test('primary-admin tier: only the seat holder manages admins, and the seat transfers atomically', async () => {

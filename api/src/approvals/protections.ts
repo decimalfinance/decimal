@@ -1,7 +1,7 @@
 // Protections — the SoD rule pack as data, plus relaxation mechanics.
 // Design: protections-surface-design.md · review: protections-feasibility-review.md.
 // One set of constraint_rules rows serves three masters: the relaxation FK target,
-// the Protections page cards, and the veto lookup. R7 is non-relaxable in CODE.
+// the policy rows on Organisation, and the veto lookup. R7 is non-relaxable in CODE.
 import crypto from 'node:crypto';
 import { prisma } from '../infra/prisma.js';
 import { appendEvent, type Tx } from './store.js';

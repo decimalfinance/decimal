@@ -3,7 +3,7 @@
 // it is waiting on, the categories, and what it has learned.
 //
 // People and roles are not sensitive (Zaid, 2026-09-30): anyone on the team
-// can see the Members page, and knowing who does what is what lets the
+// can see Team members, and knowing who does what is what lets the
 // companion say who to ask. Everything else reads through the same functions
 // the screens use, so it sees what the asker could see and no further.
 import { prisma } from '../infra/prisma.js';

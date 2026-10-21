@@ -85,7 +85,7 @@ export function canBeAskedAboutBills(access: {
   return access.roles.some((r) => r !== 'viewer');
 }
 
-// Shown on the Members page and used as the role's explanation everywhere.
+// Shown in Team members and used as the role's explanation everywhere.
 export const ROLE_DEFINITIONS: Array<{ key: RoleKey; name: string; summary: string }> = [
   { key: 'bill_clerk', name: 'Bill Clerk', summary: "Enters and confirms a bill's details and coding. Cannot approve bills or see payments." },
   { key: 'approver', name: 'Approver', summary: 'Signs off on bills assigned to them. Cannot edit bills, send payments, or see bank details.' },

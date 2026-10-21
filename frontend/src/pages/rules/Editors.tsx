@@ -163,7 +163,7 @@ export function StepEditor({
             </div>
           ) : (
             <button type="button" className="ar-add-who" onClick={() => setPicking(true)}>
-              <span className="ar-ring is-plus"><Icon.plus size={9} strokeWidth={2.8} /></span>
+              <span className="ar-ring"><Icon.plus size={9} strokeWidth={2.8} /></span>
               Add someone
             </button>
           )}
@@ -361,7 +361,7 @@ const ITEMS: Array<{ kind: InsertKind; label: string; line: string; icon: ReactN
 /** The menu under a "+": a step or a split; at a path's end, ending it too. */
 export function InsertMenu({ tail, onPick }: { tail: boolean; onPick: (kind: InsertKind) => void }) {
   return (
-    <div className="menu ar-menu" role="menu">
+    <div className="menu" role="menu">
       {ITEMS.filter((i) => tail || i.kind !== 'end').map((i) => (
         <button key={i.kind} type="button" role="menuitem" className="ar-menu-item" onClick={() => onPick(i.kind)}>
           <span className="ar-menu-icon">{i.icon}</span>

@@ -89,16 +89,6 @@ textarea {
   border-color: var(--ax-border-strong);
 }
 
-.button-full {
-  width: 100%;
-}
-
-.button-small {
-  min-height: 30px;
-  padding: 5px 10px;
-  font-size: 12px;
-}
-
 /* ── Form field (label + input/select/textarea) ────────── */
 
 /* Old pages' fields; the redesign's .field is in styles/ui. */
@@ -113,9 +103,7 @@ textarea {
 
 .field:where(:not(.ui *)) input:not([type='checkbox']):not([type='radio']),
 .field:where(:not(.ui *)) select,
-.field:where(:not(.ui *)) textarea,
-.login-form input,
-.sidebar-switcher-select {
+.field:where(:not(.ui *)) textarea {
   min-height: 40px;
   width: 100%;
   border: 1px solid var(--ax-border);
@@ -133,8 +121,7 @@ textarea {
 /* Proper institutional checkbox — 16×16, accent when checked.
    Applied globally (not just inside .field) so no legacy rule can pin it to
    "width: auto" and let the label stretch it into a giant pill. */
-input[type='checkbox'],
-input[type='checkbox'].ax-checkbox {
+input[type='checkbox'] {
   appearance: none !important;
   -webkit-appearance: none !important;
   width: 16px !important;
@@ -175,18 +162,7 @@ input[type='checkbox']:checked::after {
   transform: rotate(45deg);
 }
 
-.checkbox-field {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
-  font-weight: 400;
-  color: var(--ax-text);
-}
-
-.field:where(:not(.ui *)) select,
-.sidebar-switcher-select {
+.field:where(:not(.ui *)) select {
   appearance: none;
   -webkit-appearance: none;
   padding-right: 34px;
@@ -197,8 +173,7 @@ input[type='checkbox']:checked::after {
 }
 
 .field:where(:not(.ui *)) input::placeholder,
-.field:where(:not(.ui *)) textarea::placeholder,
-.login-form input::placeholder {
+.field:where(:not(.ui *)) textarea::placeholder {
   color: var(--ax-text-faint);
 }
 
@@ -217,30 +192,9 @@ input[type='checkbox']:checked::after {
   line-height: 1.5;
 }
 
-.form-stack,
-.form-grid {
-  display: grid;
-  gap: 14px;
-}
-
-.form-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.form-error {
-  color: var(--ax-danger);
-  font-size: 12px;
-}
-
 /* ── Card containers (panel, hero, info-section, side-panel) ── */
 
-.panel,
-.payment-hero,
-.workflow-rail,
-.info-section,
-.side-panel,
-.allocation-panel,
-.packet-box {
+.panel {
   border: 1px solid var(--ax-border);
   border-radius: var(--ax-r-md);
   background: var(--ax-surface-1);
@@ -251,174 +205,9 @@ input[type='checkbox']:checked::after {
   padding: 24px;
 }
 
-.packet-box {
-  padding: 16px;
-  background: var(--ax-surface-2);
-}
-
-.panel-spaced {
-  margin-top: 24px;
-}
-
-/* ── Managed wallet provider cards ─────────────────────── */
-
-.provider-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 12px;
-}
-
-.provider-card {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 14px;
-  align-items: center;
-  padding: 16px;
-  border: 1px solid var(--ax-border);
-  border-radius: var(--ax-r-sm);
-  background: var(--ax-surface-0);
-  color: var(--ax-text);
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
-}
-
-.provider-card:hover:not(:disabled) {
-  border-color: var(--ax-border-strong);
-  background: var(--ax-surface-2);
-  transform: translateY(-1px);
-}
-
-.provider-card:disabled {
-  cursor: not-allowed;
-  opacity: 0.56;
-}
-
-.provider-icon {
-  width: 36px;
-  height: 36px;
-  display: inline-grid;
-  place-items: center;
-  border-radius: 12px;
-  background: var(--ax-accent-dim);
-  color: var(--ax-accent);
-  font-weight: 700;
-}
-
-.provider-icon-large {
-  width: 48px;
-  height: 48px;
-  border-radius: 16px;
-}
-
-/* Provider logo variant — image instead of letter placeholder. */
-.provider-icon-logo {
-  background: transparent;
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
-}
-
-.provider-icon-logo[data-provider='privy'] {
-  background-image: url('/privy.svg');
-}
-
-.provider-card-main {
-  min-width: 0;
-  display: grid;
-  gap: 8px;
-}
-
-.provider-card-main strong,
-.provider-modal-summary strong {
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-}
-
-.provider-card-main small,
-.provider-modal-summary p {
-  margin: 0;
-  color: var(--ax-text-muted);
-  font-size: 13px;
-  line-height: 1.45;
-}
-
-.provider-chip-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.provider-chip,
-.provider-status {
-  display: inline-flex;
-  align-items: center;
-  min-height: 24px;
-  padding: 0 8px;
-  border: 1px solid var(--ax-border);
-  border-radius: 999px;
-  color: var(--ax-text-muted);
-  background: var(--ax-surface-1);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.provider-status {
-  align-self: start;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.provider-modal-summary {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 14px;
-  align-items: start;
-  padding: 16px;
-  border: 1px solid var(--ax-border);
-  border-radius: var(--ax-r-sm);
-  background: var(--ax-surface-0);
-}
-
-.provider-modal-summary > div {
-  display: grid;
-  gap: 8px;
-}
-
-.modal-footer-inline {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-}
-
 /* ── Metric strip ──────────────────────────────────────── */
 
-.metric-strip {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 24px;
-  border: none;
-  border-radius: 0;
-  background: transparent;
-  overflow: visible;
-}
-
-.metric-strip-four {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.metric-strip-three {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.metric-strip-five {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-}
-
-.metric,
-.metric-institutional {
+.metric {
   padding: 18px 20px;
   background: var(--ax-surface-1);
   border: 1px solid var(--ax-border);
@@ -426,8 +215,7 @@ input[type='checkbox']:checked::after {
   border-left-width: 1px;
 }
 
-.metric span,
-.metric-institutional span {
+.metric span {
   display: block;
   font-size: 11px;
   font-weight: 500;
@@ -436,8 +224,7 @@ input[type='checkbox']:checked::after {
   color: var(--ax-text-muted);
 }
 
-.metric strong,
-.metric-institutional strong {
+.metric strong {
   display: block;
   margin-top: 6px;
   font-size: 26px;
@@ -448,44 +235,9 @@ input[type='checkbox']:checked::after {
   letter-spacing: -0.01em;
 }
 
-/* ── Section headers ───────────────────────────────────── */
-
-.section-header {
-  margin-bottom: 14px;
-}
-
-.section-header-institutional {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-  padding-bottom: 0;
-  border-bottom: none;
-}
-
-.section-header h2,
-.info-section h2,
-.side-panel h2 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--ax-text);
-  letter-spacing: -0.005em;
-}
-
-.section-header p,
-.section-copy,
-.info-section p,
-.side-panel p {
-  margin: 4px 0 0;
-  font-size: 13px;
-  color: var(--ax-text-muted);
-}
-
 /* ── Empty state / screen state ────────────────────────── */
 
-.empty-state,
-.screen-state {
+.empty-state {
   display: grid;
   place-items: center;
   text-align: center;
@@ -514,100 +266,6 @@ input[type='checkbox']:checked::after {
   line-height: 1.5;
 }
 
-.empty-state-institutional {
-  padding-top: 40px;
-  padding-bottom: 40px;
-}
-
-.empty-state-actions {
-  margin-top: 14px;
-  display: flex;
-  justify-content: center;
-  gap: 8px;
-}
-
-.screen-state {
-  min-height: 100vh;
-  padding: 32px;
-  background: var(--ax-surface-0);
-}
-
-/* ── Data tables ───────────────────────────────────────── */
-
-.data-table {
-  border: 1px solid var(--ax-border);
-  border-radius: var(--ax-r-md);
-  overflow: hidden;
-  background: var(--ax-surface-1);
-}
-
-.data-table-row {
-  border-bottom: 1px solid var(--ax-border);
-}
-
-.data-table-head {
-  background: var(--ax-surface-2);
-  color: var(--ax-text-muted);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.data-table-row-clickable {
-  cursor: pointer;
-  transition: background var(--ax-dur-micro) var(--ax-ease-out);
-}
-.data-table-row-clickable:hover,
-.data-table-link:hover {
-  background: var(--ax-surface-2);
-}
-
-.data-table strong {
-  color: var(--ax-text);
-  font-weight: 500;
-}
-.data-table small {
-  color: var(--ax-text-muted);
-}
-
-/* ── CSV preview table ─────────────────────────────────── */
-
-.csv-preview-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-family: var(--ax-font-mono);
-  font-size: 12px;
-  background: var(--ax-surface-1);
-  border: 1px solid var(--ax-border);
-  border-radius: var(--ax-r-sm);
-  overflow: hidden;
-}
-
-.csv-preview-table th,
-.csv-preview-table td {
-  padding: 8px 12px;
-  text-align: left;
-  border-bottom: 1px solid var(--ax-border);
-  color: var(--ax-text);
-}
-.csv-preview-table th {
-  background: var(--ax-surface-2);
-  color: var(--ax-text-muted);
-  font-weight: 500;
-}
-
-/* ── Notice (info / warning / danger banner) ───────────── */
-
-.notice {
-  padding: 10px 14px;
-  background: var(--ax-info-dim);
-  color: var(--ax-info);
-  border: 1px solid transparent;
-  border-radius: var(--ax-r-sm);
-  font-size: 13px;
-}
-
 /* ── Tabs ──────────────────────────────────────────────── */
 
 .tabs {
@@ -619,185 +277,19 @@ input[type='checkbox']:checked::after {
   gap: 2px;
 }
 
-.tabs-tab {
-  padding: 6px 12px;
-  font-size: 13px;
-  color: var(--ax-text-secondary);
-  background: transparent;
-  border: none;
-  border-radius: calc(var(--ax-r-sm) - 3px);
-  cursor: pointer;
-  font-family: inherit;
-  transition: background var(--ax-dur-micro) var(--ax-ease-out),
-    color var(--ax-dur-micro) var(--ax-ease-out);
-}
-.tabs-tab:hover {
-  color: var(--ax-text);
-}
-.tabs-tab-active {
-  background: var(--ax-surface-3);
-  color: var(--ax-text);
-}
-
-/* ── Modal ─────────────────────────────────────────────── */
-
-.modal-root {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-}
-.modal-backdrop {
-  position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(4px);
-  border: none;
-  cursor: default;
-}
-.modal-dialog {
-  position: relative;
-  width: 100%;
-  max-width: 520px;
-  background: var(--ax-surface-1);
-  border: 1px solid var(--ax-border-strong);
-  border-radius: var(--ax-r-md);
-  box-shadow: var(--ax-shadow-lg);
-  padding: 24px;
-  color: var(--ax-text);
-}
-.modal-dialog-wide {
-  max-width: 760px;
-}
-.modal-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 14px;
-}
-.modal-header h2 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--ax-text);
-}
-.modal-close {
-  background: transparent;
-  border: none;
-  color: var(--ax-text-muted);
-  font-size: 22px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 4px;
-  border-radius: var(--ax-r-xs);
-  transition: color var(--ax-dur-micro) var(--ax-ease-out),
-    background var(--ax-dur-micro) var(--ax-ease-out);
-}
-.modal-close:hover {
-  background: var(--ax-surface-2);
-  color: var(--ax-text);
-}
-.modal-body {
-  color: var(--ax-text);
-  font-size: 13px;
-  line-height: 1.5;
-}
-.modal-footer {
-  margin-top: 20px;
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-}
-
 /* Vertical rhythm inside dialog/modal forms — consecutive fields stack
    cleanly instead of jamming against each other. Applies to the short
    dialogs we use for add-wallet / add-destination / policy edit etc. */
-.rd-dialog form,
-.modal-body form,
-.modal-body .form-stack {
+.rd-dialog form {
   display: flex;
   flex-direction: column;
   gap: 14px;
 }
-.rd-dialog form .rd-dialog-actions,
-.rd-dialog form .modal-footer,
-.modal-body form .modal-footer {
+.rd-dialog form .rd-dialog-actions {
   margin-top: 8px;
 }
 .rd-dialog-body {
   margin-bottom: 4px;
-}
-
-/* Modal-friendly form section — no nested panel backgrounds, just a quiet
-   divider line between groups. Used in the Policy edit modal. */
-.rd-form-section {
-  padding-top: 16px;
-  border-top: 1px solid var(--ax-border);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.rd-form-section:first-of-type {
-  padding-top: 0;
-  border-top: 0;
-}
-.rd-form-section-head {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.rd-form-section-head h3 {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  color: var(--ax-text);
-}
-.rd-form-section-head p {
-  margin: 0;
-  font-size: 12px;
-  color: var(--ax-text-muted);
-  line-height: 1.4;
-}
-
-/* ── Drawer ────────────────────────────────────────────── */
-
-.drawer-panel {
-  background: var(--ax-surface-1);
-  border-left: 1px solid var(--ax-border-strong);
-  color: var(--ax-text);
-}
-.drawer-backdrop {
-  background: rgba(0, 0, 0, 0.5);
-}
-
-/* ── Info grid (details key/value pairs) ───────────────── */
-
-.info-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 18px;
-}
-.info-grid div {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.info-grid dt {
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--ax-text-muted);
-}
-.info-grid dd {
-  margin: 0;
-  font-size: 13px;
-  color: var(--ax-text);
 }
 
 /* ── Page frame ────────────────────────────────────────── */
@@ -832,8 +324,7 @@ input[type='checkbox']:checked::after {
   color: var(--ax-text-muted);
   line-height: 1.5;
 }
-.eyebrow,
-.page-eyebrow {
+.eyebrow {
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.08em;
@@ -842,139 +333,10 @@ input[type='checkbox']:checked::after {
   margin: 0 0 4px;
 }
 
-/* ── Vertical timeline (legacy payment detail) ─────────── */
-
-.vertical-timeline-marker {
-  background: var(--ax-surface-2);
-  border: 1px solid var(--ax-border-strong);
-}
-.vertical-timeline-item-complete .vertical-timeline-marker {
-  background: var(--ax-accent);
-  border-color: var(--ax-accent);
-}
-.vertical-timeline-item-current .vertical-timeline-marker {
-  background: var(--ax-surface-1);
-  border-color: var(--ax-accent);
-}
-.vertical-timeline-item-blocked .vertical-timeline-marker {
-  background: var(--ax-danger);
-  border-color: var(--ax-danger);
-}
-.vertical-timeline-item-pending .vertical-timeline-marker {
-  background: var(--ax-surface-2);
-  border-color: var(--ax-border);
-}
-
-/* ── Run progress dots (legacy run tracker) ────────────── */
-
-.run-progress-dot {
-  background: var(--ax-surface-1);
-  border: 1px solid var(--ax-border-strong);
-}
-.run-progress-dot-complete {
-  background: var(--ax-accent);
-  border-color: var(--ax-accent);
-}
-.run-progress-dot-current {
-  background: var(--ax-surface-1);
-  border-color: var(--ax-accent);
-  box-shadow: 0 0 0 3px var(--ax-accent-dim);
-}
-.run-progress-dot-blocked {
-  background: var(--ax-danger);
-  border-color: var(--ax-danger);
-}
-.run-progress-line {
-  background: var(--ax-border);
-}
-.run-progress-line-complete,
-.run-progress-line-current {
-  background: var(--ax-accent);
-}
-.run-progress-line-blocked {
-  background: var(--ax-danger);
-}
-
-/* ── Wallet picker ─────────────────────────────────────── */
-
-.wallet-picker-row {
-  border: 1px solid var(--ax-border);
-  border-radius: var(--ax-r-sm);
-  background: var(--ax-surface-1);
-  padding: 12px 14px;
-}
-.wallet-picker-row:hover:not(:disabled) {
-  background: var(--ax-surface-2);
-  border-color: var(--ax-border-strong);
-}
-.wallet-picker-row-active {
-  border-color: var(--ax-accent);
-  box-shadow: inset 0 0 0 1px var(--ax-accent);
-  background: var(--ax-accent-dim);
-}
-.wallet-picker-icon {
-  background: var(--ax-surface-2);
-  border: 1px solid var(--ax-border);
-  color: var(--ax-text-muted);
-}
-.wallet-picker-copy strong {
-  color: var(--ax-text);
-}
-.wallet-picker-copy small {
-  color: var(--ax-text-muted);
-}
-.wallet-picker-badge {
-  border-radius: 999px;
-  padding: 3px 8px;
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  background: var(--ax-accent-dim);
-  color: var(--ax-accent);
-}
-
-/* ── Sidebar-switcher-create-link (unused in new sidebar, safety) ── */
-
-.sidebar-switcher-create-link {
-  color: var(--ax-accent);
-}
-
-/* ── Brand mark (legacy, if still referenced) ──────────── */
-
-.brand-mark {
-  background: var(--ax-accent);
-  box-shadow: none;
-}
-
-/* ── Legacy section "allocation-panel" ─────────────────── */
-
-.allocation-summary {
-  color: var(--ax-text-secondary);
-}
-.allocation-summary strong {
-  color: var(--ax-text);
-}
-.allocation-bar-track {
-  background: var(--ax-surface-2);
-  border-radius: 999px;
-  overflow: hidden;
-}
-.allocation-bar-fill {
-  background: var(--ax-accent);
-  display: block;
-  height: 100%;
-}
-
 /* ── Table heads and cells when used outside .data-table ── */
 
 th,
 td {
-  color: var(--ax-text);
-}
-
-/* ── Legacy csv-preview-table compatibility ────────────── */
-
-table.csv-preview-table {
   color: var(--ax-text);
 }
 
@@ -1087,20 +449,3 @@ table.csv-preview-table {
   background: rgba(255, 255, 255, 0.08);
 }
 
-@media (max-width: 720px) {
-  .provider-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .provider-card {
-    min-height: auto;
-  }
-
-  .modal-footer-inline {
-    flex-direction: column-reverse;
-  }
-
-  .modal-footer-inline .button {
-    width: 100%;
-  }
-}

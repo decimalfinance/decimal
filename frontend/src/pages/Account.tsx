@@ -10,7 +10,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api';
 import { Avatar } from '../kit/Avatar';
 import { useSignOut } from '../kit/Shell';
-import { personTone } from '../kit/people';
 import { useToaster } from '../kit/Toast';
 import { PasswordDialog } from './settings/PasswordDialog';
 import { Heading, NameRow, messageOf } from './settings/parts';
@@ -61,7 +60,7 @@ export function AccountPage() {
           <h1 className="page-title">Your account</h1>
           <p className="page-sub">How you appear to your team and how you sign in. Only you can change these.</p>
         </div>
-        <Avatar name={me.displayName} src={me.avatarUrl} size={48} fontSize={15} tone={personTone(me.userId)} />
+        <Avatar name={me.displayName} src={me.avatarUrl} size={48} fontSize={15} />
       </div>
 
       <div className="st-blocks">

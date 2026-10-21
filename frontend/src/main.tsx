@@ -11,7 +11,6 @@ import { ToastProvider } from './ui/Toast';
 import './styles.css';
 import './styles/design-tokens.css';
 import './styles/canonical.css';
-import './styles/sidebar.css';
 import './styles/run-detail.css';
 // Decimal design system (Mercury-clean institutional bank look). All classes
 // live under the .dec namespace — wrap the app surface in <div className="dec">

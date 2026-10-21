@@ -558,7 +558,7 @@ function Bar({
             ) : null}
             <button type="button" className="btn" disabled={busy} onClick={() => setMode('back')}>Send back</button>
             {blocked ? (
-              <span className="bp-tipwrap" onMouseEnter={() => setTip(true)} onMouseLeave={() => setTip(false)} onFocus={() => setTip(true)} onBlur={() => setTip(false)}>
+              <span className="tip-wrap" onMouseEnter={() => setTip(true)} onMouseLeave={() => setTip(false)} onFocus={() => setTip(true)} onBlur={() => setTip(false)}>
                 <button type="button" className="btn is-primary" aria-disabled onClick={() => setTip(true)}>Approve</button>
                 {tip ? <span className="tip">{cannotApproveWords(blocked.rule, !others, access.isPrimary)}</span> : null}
               </span>

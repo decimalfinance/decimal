@@ -36,7 +36,7 @@
   justify-content: center;
   width: 28px;
   padding: 0 2px 0 0;
-  border-left: 1px solid rgba(255, 255, 255, .22);
+  border-left: 1px solid var(--split-rule);
   border-radius: 0 999px 999px 0;
 }
 .ui .split-main:hover,
@@ -93,7 +93,7 @@
 .ui .bl-tiles { display: flex; gap: 8px; padding: 2px 30px 6px; }
 .ui .bl-tile { flex: 1 1 0%; min-width: 0; padding: 11px 13px 12px; background: var(--grey); }
 .ui .bl-tile-head { display: flex; align-items: baseline; gap: 8px; }
-.ui .bl-tile-n { font: 400 25px/1 var(--font); color: #1A1A1A; font-variant-numeric: tabular-nums; }
+.ui .bl-tile-n { font: 400 25px/1 var(--font); color: var(--chip-ink); font-variant-numeric: tabular-nums; }
 .ui .bl-tile-name { font-size: 10px; color: var(--ink-2); white-space: nowrap; }
 .ui .bl-tile-late { margin-left: auto; font: 500 10px var(--font); color: var(--red); white-space: nowrap; }
 .ui .bl-parts { margin-top: 11px; }
@@ -118,12 +118,12 @@
 }
 .ui .bl-part-btn:hover { background: var(--grey-hover); }
 .ui .bl-part-btn:focus-visible { box-shadow: var(--focus-inset); }
-.ui .bl-part-btn.t-blocking { --box-bg: var(--chip-blocking); --box-ring: #E6ADA3; --box-on: var(--red); }
-.ui .bl-part-btn.t-warning { --box-bg: var(--chip-warning); --box-ring: #E2C98C; --box-on: #755411; }
-.ui .bl-part-btn.t-yours { --box-bg: var(--chip-yours); --box-ring: #D6C9AE; --box-on: #6B5B3E; }
-.ui .bl-part-btn.t-checked { --box-bg: var(--chip-checked); --box-ring: #A9CBA9; --box-on: var(--green); }
-.ui .bl-part-btn.t-waiting { --box-bg: var(--chip-waiting); --box-ring: #AFC1D3; --box-on: #3F5A75; }
-.ui .bl-part-btn.t-finished { --box-bg: var(--chip-finished); --box-ring: #CDCAC2; --box-on: var(--ink-2); }
+.ui .bl-part-btn.t-blocking { --box-bg: var(--chip-blocking); --box-ring: var(--red-edge-hover); --box-on: var(--red); }
+.ui .bl-part-btn.t-warning { --box-bg: var(--chip-warning); --box-ring: var(--yellow-edge-hover); --box-on: var(--yellow-ink); }
+.ui .bl-part-btn.t-yours { --box-bg: var(--chip-yours); --box-ring: var(--tile-ring-yours); --box-on: var(--beige-ink); }
+.ui .bl-part-btn.t-checked { --box-bg: var(--chip-checked); --box-ring: var(--tile-ring-checked); --box-on: var(--green); }
+.ui .bl-part-btn.t-waiting { --box-bg: var(--chip-waiting); --box-ring: var(--tile-ring-waiting); --box-on: var(--tile-ink-waiting); }
+.ui .bl-part-btn.t-finished { --box-bg: var(--chip-finished); --box-ring: var(--tile-ring-finished); --box-on: var(--ink-2); }
 .ui .bl-box {
   width: 12px;
   height: 12px;

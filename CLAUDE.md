@@ -48,7 +48,7 @@ Run from the repo root. These are the whole surface. Check `make help` if in dou
 - **Money is bigint minor units.** USDC raw is dollars × 10^6. Never floats.
 - **Validate JSON payloads with Zod** at the boundary.
 - **ESM imports use `.js` extensions** even in `.ts` source.
-- **Frontend:** the redesign is under way. A redesigned page is a `.ui` root styled only from `frontend/src/styles/ui/` and built from `frontend/src/kit/`; see the Frontend section of `docs/ARCHITECTURE.md`. A page still in the old system: copy the `Members.tsx` skeleton, use only the classes in `frontend/src/styles/decimal/`. Either way, grep before typing a class name and never hardcode colours, spacing or fonts. Text fills its container, so no `max-width` on prose. The look is a clean institutional bank, never crypto neon.
+- **Frontend:** the redesign is under way. A redesigned page is a `.ui` root styled only from `frontend/src/styles/ui/` and built from `frontend/src/kit/`; see the Frontend section of `docs/ARCHITECTURE.md`. Copy the closest page's shape from `PAGE-PLAYBOOK.md`. A page still in the old system keeps `frontend/src/styles/decimal/`: don't extend it, redesign it. Either way, grep before typing a class name and never hardcode colours, spacing or fonts. Text fills its container, so no `max-width` on prose. The look is a clean institutional bank, never crypto neon.
 - **Product vocabulary:** "bill", "approval", "approvers", "team members", "Category". Never "multisig", "vote", "wallet" or "GL code" in operator-facing copy. A bill is a `PaymentOrder` only in code.
 - **Approvals never auto-deny.** Overdue tasks escalate. A rejected bill goes back to review and is never terminal.
 

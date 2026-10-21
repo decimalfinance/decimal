@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { orbAccountUrl, orbTransactionUrl, shortenAddress } from './lib/app';
 
@@ -102,37 +101,5 @@ function CheckIcon({ size }: { size: number }) {
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <polyline points="20 6 9 17 4 12" />
     </svg>
-  );
-}
-
-// Dashed institutional empty-state card.
-function EmptyPanel({
-  title,
-  description,
-  action,
-}: {
-  title: string;
-  description: string;
-  action?: ReactNode;
-}) {
-  return (
-    <div className="empty-state empty-state-institutional">
-      <strong>{title}</strong>
-      <p>{description}</p>
-      {action ? <div className="empty-state-actions">{action}</div> : null}
-    </div>
-  );
-}
-
-function EmptyState({ title, description }: { title: string; description: string }) {
-  return <EmptyPanel title={title} description={description} />;
-}
-
-// Full-screen loading/error state (centered empty panel).
-export function ScreenState({ title, description }: { title: string; description: string }) {
-  return (
-    <main className="screen-state">
-      <EmptyState title={title} description={description} />
-    </main>
   );
 }

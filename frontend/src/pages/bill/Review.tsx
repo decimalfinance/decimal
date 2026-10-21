@@ -413,7 +413,7 @@ export function Review({
           <span className="bp-foot-gap" />
           {editable ? (
             <>
-              <span className="bp-tipwrap" onMouseEnter={() => setCloseTip(true)} onMouseLeave={() => setCloseTip(false)}>
+              <span className="tip-wrap" onMouseEnter={() => setCloseTip(true)} onMouseLeave={() => setCloseTip(false)}>
                 <button type="button" className="btn is-quiet-red" aria-disabled={!access.isAdmin} onClick={closeBill}>
                   Not a bill? Remove this file
                 </button>
@@ -440,7 +440,7 @@ export function Review({
         <span className="bp-foot-gap" />
         {editable ? (
           <>
-            <span className="bp-tipwrap" onMouseEnter={() => setCloseTip(true)} onMouseLeave={() => setCloseTip(false)}>
+            <span className="tip-wrap" onMouseEnter={() => setCloseTip(true)} onMouseLeave={() => setCloseTip(false)}>
               <button type="button" className="btn is-quiet" aria-disabled={!access.isAdmin} onClick={closeBill}>
                 Close this bill
               </button>

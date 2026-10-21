@@ -28,8 +28,6 @@
 }
 .ui .menu-item:hover { background: var(--grey); }
 .ui .menu-item:focus-visible { box-shadow: var(--focus-inset); }
-.ui .menu-item.is-remove { color: var(--red); }
-.ui .menu-item.is-remove:hover { background: var(--red-tint); }
 
 /* ── Dark tooltip, with a key hint ──────────────────────── */
 .ui .tip {
@@ -49,6 +47,9 @@
   box-shadow: var(--shadow-tip);
 }
 .ui .tip.is-right { left: calc(100% + 8px); top: 50%; transform: translateY(-50%); }
+/* A control with its reason above it on hover: the gated .btn's wrapper. */
+.ui .tip-wrap { position: relative; display: inline-flex; }
+.ui .tip-wrap .tip { bottom: calc(100% + 6px); right: 0; }
 .ui .kbd {
   display: inline-flex;
   align-items: center;
@@ -57,9 +58,9 @@
   height: 16px;
   padding: 0 4px;
   border-radius: 3px;
-  background: rgba(255, 255, 255, .14);
+  background: var(--kbd-bg);
   font: 500 10px/1 var(--mono);
-  color: rgba(255, 255, 255, .88);
+  color: var(--kbd-ink);
 }
 
 /* ── Buttons: 28px pills ────────────────────────────────── */
@@ -90,21 +91,17 @@
 .ui .btn.is-primary.is-busy:disabled { border-color: var(--maroon-hover); background: var(--maroon-hover); color: var(--white); cursor: default; }
 .ui .btn.is-remove { border-color: var(--red-edge); background: var(--red-tint); color: var(--red); }
 .ui .btn.is-remove:hover { border-color: var(--red-edge-hover); background: var(--red-tint-2); }
+/* Quiet: no edge until the pointer is on it ("Cancel", "Close the bill"). */
+.ui .btn.is-quiet { border-color: transparent; background: transparent; color: var(--ink-2); }
+.ui .btn.is-quiet:hover { background: var(--grey); color: var(--ink); }
+.ui .btn.is-quiet-red { border-color: transparent; background: transparent; color: var(--red); }
+.ui .btn.is-quiet-red:hover { background: var(--red-tint); }
+/* Someone may not use it: it stays, greyed, and says why in a .tip (see .tip-wrap). */
+.ui .btn[aria-disabled='true'],
+.ui .btn[aria-disabled='true']:hover { background: transparent; color: var(--ink-4); cursor: not-allowed; }
+.ui .btn.is-primary[aria-disabled='true'],
+.ui .btn.is-primary[aria-disabled='true']:hover { border-color: var(--line); background: var(--grey); }
 .ui .btn > svg { flex: none; }
-
-/* A maroon underlined text action: "Add", "Show all". */
-.ui .link-action {
-  padding: 0;
-  border: 0;
-  background: none;
-  font: 500 11px var(--font);
-  color: var(--maroon);
-  text-decoration: underline;
-  text-decoration-color: var(--pink-300);
-  text-underline-offset: 3px;
-  cursor: pointer;
-}
-.ui .link-action:hover { color: var(--maroon-active); text-decoration-color: var(--pink-400); }
 
 /* ── Dialogs: one design everywhere (4b) ────────────────── */
 .ui.dlg-scrim {
@@ -114,7 +111,7 @@
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(27, 25, 22, .28);
+  background: var(--scrim-dialog);
   animation: ui-fade-in .12s ease-out;
 }
 .ui .dlg {
@@ -228,7 +225,7 @@
   font: 500 9px/1.2 var(--font);
   letter-spacing: .05em;
   text-transform: uppercase;
-  color: #1A1A1A;
+  color: var(--chip-ink);
   white-space: nowrap;
   background: var(--chip-finished);
 }
@@ -258,17 +255,11 @@
   color: var(--ink-2);
   text-wrap: pretty;
 }
+.ui .page-actions { display: flex; gap: 8px; margin-top: 16px; }
 .ui .section-title {
   font: 600 13px/1.2 var(--font);
   letter-spacing: -.01em;
   color: var(--ink);
-}
-
-/* ── Decimal's pink cloudy surface ──────────────────────── */
-.ui .cloud {
-  background-color: var(--pink-50);
-  background-image: var(--cloud-layers);
-  background-size: 160px 160px, 400px 400px;
 }
 
 /* ── People ─────────────────────────────────────────────── */
@@ -288,9 +279,3 @@
 
 /* ── Loading ────────────────────────────────────────────── */
 .ui .breathe { animation: ui-breathe 1.6s ease-in-out infinite; }
-.ui .placeholder-bar {
-  display: inline-block;
-  height: 10px;
-  border-radius: 3px;
-  background: var(--grey);
-}

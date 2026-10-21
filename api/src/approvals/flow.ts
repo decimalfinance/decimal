@@ -2,7 +2,7 @@
 // a real dry-run simulator (people + protections, no fake logic), and publish
 // (translate to an engine policy, bump the version, repoint the default).
 import { prisma } from '../infra/prisma.js';
-import { getPolicySet, getPolicy, createPolicy, upsertPolicySet, getSodFlags, setSodFlags, type SodFlags } from './store.js';
+import { getPolicySet, getPolicy, createPolicy, upsertPolicySet, getSodFlags, type SodFlags } from './store.js';
 import { isRelaxed } from './protections.js';
 
 // Builder-side flow JSON — maps 1:1 onto the engine's policy nodes.
@@ -293,10 +293,6 @@ export async function getSodSettings(organizationId: string) {
   const { ensureEngineSetup } = await import('./wiring.js');
   await ensureEngineSetup(organizationId);
   return getSodFlags(prisma, organizationId);
-}
-
-export async function setSodSettings(organizationId: string, flags: SodFlags) {
-  await prisma.$transaction((tx) => setSodFlags(tx, organizationId, flags));
 }
 
 // The org owner's person id — the standing fallback approver/releaser.

@@ -22,6 +22,8 @@
   --edge: #D8D5CF;           /* field edges */
   --edge-handle: #E2DFDA;
   --edge-hover: #C4C0B9;     /* edges under the pointer, dashed empties */
+  --edge-focus: #A39E96;     /* a resize handle with keyboard focus */
+  --line-rail: #DEDBD5;      /* the folded sidebar's group divider */
 
   /* Greys */
   --grey: #F5F4F2;           /* tiles, rows, the sidebar */
@@ -37,6 +39,8 @@
   --maroon: #5C1F33;
   --maroon-hover: #481627;
   --maroon-active: #350E1B;
+  --split-rule: rgba(255, 255, 255, .22);   /* between a split button's halves */
+  --pink-25: #FFF8FA;        /* a line item lit from its document */
   --pink-50: #FFF2F5;
   --pink-100: #FDE6EC;
   --pink-200: #FCCCD7;
@@ -46,6 +50,8 @@
   --pink-dot: #C16D84;       /* Decimal at work: the reading pill's dot */
   /* White over Decimal's pink: a pill, a round button under the pointer */
   --wash: rgba(255, 255, 255, .82);
+  --wash-panel: rgba(255, 255, 255, .6);    /* white over a tinted panel: a card in it, a control hovered */
+  --wash-compare: rgba(255, 255, 255, .55); /* a duplicate side by side with its bill */
   --wash-hover: rgba(255, 255, 255, .7);
   /* A scrollbar on Decimal's pink: a maroon thumb */
   --thumb-pink: rgba(92, 31, 51, .18);
@@ -74,6 +80,7 @@
   --yellow-dash: #D2B670;    /* a dashed edge: something not set yet (Approval rules) */
 
   /* Status chips */
+  --chip-ink: #1A1A1A;       /* the words on a chip, and the tiles' counts */
   --chip-yours: #EFE9DD;     /* your move */
   --chip-checked: #D9EAD9;
   --chip-blocking: #F6DAD5;
@@ -117,9 +124,26 @@
   --look-bg: #FCEFE6;
   --look-edge: #E0A98A;
   --look-label: #8A5A3C;
+  --look-ring: #C98B64;      /* the tick that confirms it, a guessed category */
+  --look-hover: #FAE3D5;
+  --doc-mark: rgba(250, 204, 21, .28);       /* where a value was read, marked on the document */
+  --doc-mark-ring: rgba(201, 139, 100, .55);
+
+  /* A field that is wrong */
+  --wrong-edge: #C9655A;
+  --wrong-bg: #FBECE9;
+
+  /* The Bills tiles: a status's ring, and its tick when ticked */
+  --tile-ring-yours: #D6C9AE;
+  --tile-ring-checked: #A9CBA9;
+  --tile-ring-waiting: #AFC1D3;
+  --tile-ink-waiting: #3F5A75;
+  --tile-ring-finished: #CDCAC2;
 
   /* Dark surfaces: toasts, tooltips */
   --dark: #1B1916;
+  --kbd-bg: rgba(255, 255, 255, .14);        /* a key hint inside a dark tip */
+  --kbd-ink: rgba(255, 255, 255, .88);
 
   /* Type */
   --font: 'Geist Variable', 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -135,9 +159,14 @@
   --shadow-field: 0 1px 2px rgba(10, 10, 10, .04);
   --shadow-card-hover: 0 3px 12px rgba(10, 10, 10, .08);
   --shadow-float: 0 2px 8px rgba(10, 10, 10, .06);   /* a control resting on a canvas */
+  --shadow-handle: 0 1px 2px rgba(10, 10, 10, .06);  /* the sidebar's round handle */
+  --shadow-peek: 12px 0 32px rgba(10, 10, 10, .12);  /* the sidebar peeking out over the page */
+  --shadow-page: rgba(10, 10, 10, .12) 0 1px 8px;    /* a bill's page on its canvas */
   /* Home's box, full screen: it lifts, and the page under it softens */
   --shadow-lifted: 0 24px 64px rgba(92, 31, 51, .12);
   --scrim: rgba(250, 250, 248, .55);
+  --scrim-dialog: rgba(27, 25, 22, .28);     /* behind a dialog */
+  --scrim-sheet: rgba(255, 255, 255, .35);   /* beside a sheet open over the bill */
 
   /* Focus */
   --focus: 0 0 0 2px #FFFFFF, 0 0 0 4px rgba(92, 31, 51, .45);

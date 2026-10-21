@@ -1,194 +1,110 @@
-# Page Playbook — read BEFORE creating or editing any page
+# Page playbook: read before creating or editing a page
 
-The recurring failure this doc kills: a new page written from memory, with invented
-class names and inline spacing, that looks nothing like the rest of the app. The fix
-is a process, not taste:
+A page written from memory, with invented class names and its own spacing, looks like nothing else in the app. The fix is a process:
 
 1. **Read this file.**
-2. **Open `Members.tsx`** — the canonical page — and copy its skeleton.
-3. **Use only classes that exist** in `styles/decimal/{components,pages,tokens}.css`.
-   If you're about to type a class name you haven't seen in those files, stop and grep.
-4. Inline `style={{}}` is allowed ONLY for one-offs the system can't express:
-   grid column counts (`gridTemplateColumns`), fixed column widths (`style={{ width: 160 }}`),
-   skeleton heights. Never for colors, fonts, spacing rhythm, or alignment that a class covers.
+2. **Open the closest existing page and copy its shape** (below). Copy line by line rather than from memory.
+3. **Use only classes that exist.** Grep `frontend/src/styles/ui/` before typing a class name. Shared vocabulary lives in `components.css` and `base.css`; each page family has its own file with its own prefix.
+4. **Colours, shadows and scrims only from `tokens.css`.** A value the tokens don't have goes into `tokens.css` first, named for what it is for. Grep the name before adding it: a second definition of a token silently wins. Inline `style` only for layout one-offs (a grid's columns, `minWidth: 0` on a flex child, a canvas position).
 
-## Page skeleton (copy this shape)
+## The two systems
+
+Every redesigned page has a `.ui` root, is styled only from `styles/ui/`, and is built from `kit/`. All new work is in this system.
+
+Pages the redesign hasn't reached render inside `<Legacy>` in `App.tsx` (`div.dec.shell-legacy`) and keep the old look: Chat, Knowledge, Accounting, the approvals and proposals screens, and the frozen payment screens (treasury, vaults, spending limits, payment detail). Their styles are `styles/decimal/` and the old global sheets (`styles.css`, `styles/canonical.css`, `styles/run-detail.css`, `styles/design-tokens.css`), cut down to the rules those pages can still match. Don't extend them or add to those sheets: a page that needs real work gets redesigned instead. The two systems never nest, and the old toast (`useToast` from `ui/Toast`) never appears on a `.ui` page.
+
+`main.tsx` imports the `styles/ui/` files in a fixed order (tokens, base, shell, components, then the families). A later file wins at equal specificity, so a shared rule belongs in `components.css`, never in a family file that happens to load late.
+
+## Page shapes
+
+**List page** (`Vendors.tsx` is the cleanest; also Bills and Team members). Root `.ui.list-page`; each block carries its own 30px side gutter.
 
 ```tsx
-<div className="page">                        {/* 28px 32px 40px padding, max-width 1180 centered */}
-  <div className="stack stack-24">            {/* vertical rhythm between page sections — 24px */}
-    <PageHead title="…" desc="…" actions={<button className="btn btn-primary">…</button>} />
-
-    <div className="metrics" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
-      <div className="metric">
-        <div className="m-label">LABEL</div>       {/* uppercase 11px handled by class */}
-        <div className="m-value">7</div>            {/* mono 26px */}
-        <div className="m-sub">context line</div>
-      </div>
+<div className="ui list-page">
+  <div className="list-head">
+    <div style={{ minWidth: 0 }}>
+      <h1 className="list-title">Vendors</h1>
+      <div className="list-sub">One line saying what this is.</div>
     </div>
-
-    <section>
-      <div className="sec-head">
-        <div className="sh-titles">
-          <h2>Section title</h2>
-          <p className="sh-desc">One-line description.</p>
-        </div>
-        {/* optional right-side actions */}
-      </div>
-      <div className="tbl-card">
-        <table className="tbl"> … </table>
-      </div>
-    </section>
+    {/* an action goes here, pushed right: .split, or .split-main.is-alone */}
   </div>
+  {failed ? (
+    <div className="bl-table"><div className="bl-empty">Your vendors couldn’t be loaded.<button type="button" className="bl-showall" onClick={retry}>Try again</button></div></div>
+  ) : !loaded ? null : (
+    <>
+      <div className="bl-bar">
+        <div className="bl-stages" role="tablist" aria-label="Vendors">
+          <button type="button" role="tab" aria-selected={on} className={`bl-stage${on ? ' is-on' : ''}`}>All<span className="bl-stage-n">{n}</span></button>
+        </div>
+        <div className="bl-tools">{/* .bl-search */}</div>
+      </div>
+      <div className="bl-table">
+        <div className="bl-grid">
+          <div className="bl-head">
+            <Cells>
+              <span className="bl-th">VENDOR</span>
+              {/* …one .bl-th per column… */}
+              <span className="bl-th is-end">BILLS</span>
+            </Cells>
+          </div>
+          {/* each row: <Link className="bl-row" to={…}><Cells>…one .bl-td per column…</Cells></Link> */}
+        </div>
+        {shown.length === 0 ? <div className="bl-empty">No vendors match.</div> : null}
+      </div>
+    </>
+  )}
 </div>
 ```
 
-## Class vocabulary (the whole approved set for pages)
+`.bl-grid` has six columns with a stretchy gap between each pair; `.bl-head` and every `.bl-row` are subgrids of it, and `Cells` puts the gap cells in. A table with another number of columns declares its own grid in its family file (a vendor's page's `vd-grid`, the Inbox's `ib-grid`).
 
-| Need | Classes |
+**The Inbox** (`Inbox.tsx`) is a list page on its own root, `.ui.inbox-page`, with `ib-` rows. **Home** (`Home.tsx`, `.ui.home-page`) is one of a kind.
+
+**Settings page** (`Organisation.tsx`, `Account.tsx`). Root `.ui.page`, then `h1.page-title`, `p.page-sub` and `div.st-blocks` of `<section>`s, each a `Heading` (`pages/settings/parts.tsx`) over `div.st-rows` of `div.st-row`.
+
+**Full-height workspace** (the bill page `pages/bill/BillPage.tsx`, `ApprovalRules.tsx`). The root fills the pane and never scrolls; its parts scroll inside themselves. The bill page is `.ui.bp` with `.bp-crumb` on top and `.bp-foot` along the bottom; Approval rules is `.ui.ar-page`.
+
+**Screens before the app** (`pages/signin/`). `Frame` from `signin/parts.tsx` with `Title`, `Body`, `Field`, `Pill` and `Links`: their own `si-` system, with no sidebar and no toaster.
+
+## Shared vocabulary
+
+| Need | Use |
 |---|---|
-| Page shell | `page`, `page-wide`, `stack stack-16/20/24/32` |
-| Page header | `<PageHead>` from `dec/primitives` (props: `eyebrow, title, desc, actions, greet`) — NOT `subtitle` |
-| Section header | `sec-head` > `sh-titles` > `h2` + `p.sh-desc` |
-| Metric tiles | `metrics` > `metric` > `m-label` / `m-value` / `m-sub`; alert variant `metric is-alert` |
-| Card around a table | `tbl-card` (border+radius, no padding); footer `tbl-foot` > `tf-count` + `pager` |
-| Table | `tbl`; right-aligned header `th.num`; mono numeric cell `td.td-num`; slim rows `tbl-slim` |
-| Table cells | `cell-vendor` (`v-name`/`v-sub`), `cell-mono`, `cell-source`, `status-cell`, hover arrow `row-arrow` |
-| Buttons | `btn` + one of `btn-primary / btn-secondary / btn-ghost / btn-danger / btn-danger-ghost / btn-dark / btn-icon`; size `btn-sm`. Pill-shaped by default — never restyle |
-| Status pills | `pill` + `pill-success / pill-warning / pill-danger / pill-info / pill-neutral`; minimal variant add `pill-min` (+ auto dot) or `<Pill>` primitive |
-| Forms | `field` > `field-label` + `input`; helpers `input-help` / `input-error`; `select` wrapper; search `input-search` |
-| Empty state | `empty` > `empty-icon` (svg 22px) + `h4` + `p` — never a bare "no data" div |
-| Loading | `skeleton` divs (inline height ok), one per expected row |
-| Filters/tabs | `filterbar`, `tabs` > `tab` (+`on`), `filter-right` |
-| Detail pages | `detail-layout` (main + 320px rail), `surface` for generic bordered boxes |
+| Button | `.btn`; `.is-primary` (one per view), `.is-remove` (takes something away), `.is-quiet` / `.is-quiet-red` (no edge until hovered); `.is-busy` keeps the primary colour while working ("Publishing…") |
+| A control someone may not use | keep it visible with `aria-disabled` (not `disabled`), ignore the click, and show the reason in a `.tip` inside a `.tip-wrap` |
+| Text button | `.bl-showall` ("Show all", "Try again") |
+| Chip | `.chip` + `is-yours / is-checked / is-blocking / is-warning / is-waiting / is-finished / is-hold`; `.caps` for a small capitals label |
+| Field | `.field` > `.field-label` + `.input` (an `<input>` or a wrapper around one; `.is-error` when wrong) + `.field-error` under it |
+| Table and tabs | `.bl-*` from `bills.css`: `bl-bar`, `bl-stages`, `bl-stage`, `bl-search`, `bl-table`, `bl-grid`, `bl-head`, `bl-row`, `bl-th`, `bl-td` (`.is-end` right-aligns) |
+| Empty or failed | `.bl-empty` in a table; `st-empty` in settings rows (`Failed` in `settings/parts.tsx`) |
+| Menu | `.menu` > `.menu-item`, closed by `useDismiss` |
+| Figures | `.num` on every amount, date, count and invoice number; `.clip` (plus a `title`) on text that may not fit |
+| Page title | `.page-title` + `.page-sub` (settings, workspaces); `.list-title` + `.list-sub` (list pages); `.section-title` for a block's heading; `.page-actions` for buttons under a title |
+| Waiting on Decimal | `.breathe` (a pulse), only where Decimal is producing something |
 
-## Rules that keep pages consistent
+## Kit
 
-- **Spacing rhythm comes from `stack stack-24` + `sec-head`'s built-in margin.** Never add
-  `marginTop` to space sections; wrap the page body in one stack.
-- **Colors/fonts only via tokens** (`var(--text-muted)`, `var(--font-mono)`, …). Zero hex codes
-  in pages — dark mode depends on it.
-- **Amounts** render in `td-num` (mono, tabular, right-aligned). Dates/muted metadata in
-  `cell-mono` or `var(--text-muted)`.
-- **Icons** from `dec/icons` (`<Ico.name w={16} />`) — never emoji, never new svg inline.
-- **Copy voice**: plain human sentences (SESSION-NOTES §2 / plain-voice memory). No jargon:
-  "approval", "signing key", "payment method" — never policy/quorum/multisig.
-- **Full-width**: never cap text content with your own max-width — `page` handles width.
-- Rows that navigate get the `row-arrow` affordance; rows that don't shouldn't have hover-pointer
-  (override `cursor` only via existing patterns).
-- Data fetching: `useQuery` from @tanstack/react-query keyed `[thing, organizationId]`;
-  mutations invalidate their query keys; toasts via `useToast()` (`success` / `error`).
+- `Dialog({ title, line, children, actions, wide, onCancel, onConfirm })` (`kit/Dialog.tsx`): mount it when open. Esc and a click on the scrim cancel; Enter confirms unless focus is in a textarea or on a button; the element with `data-autofocus` takes focus. `wide` is 560px for lists and drop zones.
+- `ConfirmDialog({ title, line, confirmLabel, cancelLabel, tone: 'primary' | 'remove', busy, onConfirm, onCancel })`, in the same file.
+- `useToaster().show(text, { undo, wide })` (`kit/Toast.tsx`): one toast at a time; `undo` adds an Undo button.
+- `Avatar({ name, src, size })`: people only. Its colour comes from the name (`personTone`), so a face looks the same everywhere; pass `tone` only to draw someone differently (pale, not yet reached). Vendors never get an avatar.
+- `Cells` (gap cells for grid rows), `Icon.<name>` (`kit/icons.tsx`), `Orb`, and `useSignOut()` (`kit/Shell.tsx`; asks before signing out).
+- `format.ts`: `usd`, `calendarDay` (due and invoice dates), `shortDay`, `when`, `fullDay`, `stamp`, `ago`, `daysPast`, `monthOf`, `fileSize`, `firstName`. Money arrives in minor units; never do arithmetic on floats.
+- `hooks.ts`: `useCopy(text)` (a tick for two seconds), `useDismiss(open, ref, close)`.
+- `people.ts`: `initialsOf`, `orgInitials`, `personTone`, `orgTone`, `roleLabel`.
+- Shared page helpers that aren't in the kit: `pages/bill/parts.tsx` (chat rows, badges, `Markdown`) and `pages/settings/parts.tsx` (`messageOf`, `Heading`, `Failed`, `ChangedBy`, `NameRow`).
 
-When a page needs something this vocabulary can't express, extend
-`styles/decimal/components.css` with a properly-tokened class — do not inline it.
+## Rules
 
-## Additions from the multi-page survey (2026-07-06 — Accounting, CodingInbox, Collections, Members, Sidebar)
+- **Loading is blank.** The header renders and the body stays empty until the data is in; no spinners, no skeleton rows. The app frame waits the same way (`RouteFallback` in `App.tsx`).
+- **A failed load** says so in one sentence with a "Try again" that refetches: "Your vendors couldn’t be loaded."
+- **A field's problem goes under that field** (`.field-error`), including a server refusal that names it (a `code` such as `wrong_password`). Anything else goes at the end of the dialog.
+- **Confirm or Undo.** Ask first (`ConfirmDialog`) for what is easy to hit by mistake or hard to reverse: removing, cancelling an invitation, signing out. Apply a reversible change at once and toast it with Undo. A policy change asks for the password, goes on the record, and gets a toast without Undo.
+- **Data.** Org pages read `organizationId` from `useParams()` and key queries `['<thing>', organizationId, …]`. The session is `['session']`. A change invalidates every key that caches what changed (a rename touches the session and every list that shows the name).
+- **Copy.** Sentence case for titles, buttons, tabs and menu items; column heads in capitals. "Organisation" in copy, while identifiers and the API keep `organization`. Typographic apostrophes and quotes. No em dashes. The product's words: bill, approval, approvers, team members, Category. A question on a bill is a plain chat message, never a card.
+- **Text fills its container.** No `max-width` on prose.
+- **Light only.** There is no dark theme.
 
-- **Every page carries its subsystem as the PageHead `eyebrow`** — the same group label the
-  sidebar shows: `Operations` (Overview, Payments…), `Registry` (Treasury accounts, Members,
-  Address book), `Governance` (Approvals, Proposals, Auto-pay), `Accounting`, `Integrations`.
-  A page without an eyebrow reads as unanchored — check `Sidebar.tsx`'s `sb-group-label`s for
-  the current list before choosing.
-- **People are shown as avatars, not names-in-prose.** Pattern from Members.tsx: `member-cell`
-  > `m-avatar` (30px circle; img with `onError` fallback to initials; `referrerPolicy="no-referrer"`)
-  + `col` > `m-name` / `m-sub`. Overlap avatar stacks with `marginLeft: -8` on subsequent items.
-  Placeholder/unknown person: `m-avatar invited` (dashed) with an icon.
-- **Detail pages** reuse `eyebrow` for state labels (CollectionDetail: "Awaiting payment", …) and
-  `detail-layout` for main+rail.
-- **Show, don't write:** if a section is a wall of sentences, re-express it as pills, avatars,
-  metric tiles, or step rows — text stays as the caption/help line (`input-help`, `m-sub`),
-  never the primary rendering.
-- **Playbook maintenance rule:** this doc was first written from ONE page and it showed. When
-  adding a new pattern, survey at least three existing pages first; when a page needs something
-  unlisted, add the pattern here in the same commit.
+## Keeping this true
 
-## Additions 2026-07-06 (second recurrence — patterns that already existed and were missed)
-
-- **Toggle switch**: `.switch` (+`.on`) > `.knob` — pages.css:338. Locked variant `.switch.is-locked`.
-  Use for any on/off setting. Never a text button for a binary state.
-- **Confirm modal**: `.overlay` (add `style={{position:'fixed',inset:0,zIndex:60}}`, click-outside closes)
-  > `.dialog` > `.dialog-head` (h2+p) / `.dialog-body` / `.dialog-foot`. Used by Members/Payments/
-  Counterparties/CodingInbox. Confirmation NEVER reflows the page — it overlays it.
-- **Settings surface**: `.setting-row` > `.sr-text` (`.sr-name`/`.sr-desc`) + `.sr-controls` — for
-  rows of switches/preferences (added for Protections; reuse, don't reinvent).
-- **Lesson, again**: grep components.css AND pages.css for the interaction pattern (switch, dialog,
-  drawer, tabs) before concluding it doesn't exist. Both misses so far were patterns already shipped.
-
-## 2026-07-06, third collision — the rule is now absolute
-
-`.check-list` already existed (pages.css:361: bordered person-picker with `.check-item` [+`.on`],
-`.check-box`, `.ci-av` avatar, `.ci-name`/`.ci-sub`) and a duplicate class was appended blind,
-causing a cascade fight. ALSO: `--danger` in dark mode was terracotta (#D9785F) and `.btn-danger`
-used `--solid` (white in dark) — both now fixed (danger = true red #E5484D everywhere; btn-danger
-uses --danger). Additions this round: `.tick-list`/`.tick-item` (borderless green-check bullet list).
-
-**Absolute pre-flight, no exceptions: before writing ANY class name, run
-`grep -rn "classname" src/styles/` — and before building any dialog, open the closest real one
-(Payments.tsx New-payment dialog is canonical: dialog-head h2+p+drawer-x, dialog-body of .field
-blocks, dialog-foot) and copy its skeleton line by line.**
-
-## Additions 2026-07-07 (AP workbench redesign — Bills.tsx, InvoiceReview.tsx)
-
-- **Quiet row status**: `.dot-status` (+`tone-info/success/warning/danger`) > `.ds-dot` [+optional
-  `.ds-avatar` initials for "Waiting on Priya"]. For table-row lifecycle status. Pills stay for
-  LOUD states only; dot+text is the default row status treatment.
-- **Amber deadline chip**: `.due-chip` ("2% off — 4 days left"); overdue text uses `.due-overdue`.
-- **Full-height split screens** (review): `.rev-shell` > `.topbar` + `.rev-split` (`.rev-panel` |
-  `.rev-divider` drag handle | `.rev-doc`) + `.commit-bar` (sticky footer with primary action).
-  Split is user-resizable via mouse events on `.rev-divider` — never fixed %.
-- **Flat field list with read markers**: `.rev-grid` > `.rev-field` (`.field-label` + `.input`
-  [+`.is-look` for double-check styling] + `.ftag` marker: `is-read` "Read by AI" / `is-confirmed`
-  green / `is-look` blue with inline `.ftag-btn` Confirm / bare = "Not on document").
-- **Editable table cells**: `.tbl-input` (bare input inside `.tbl` td; `.td-num` variant for
-  amounts); totals stack under the amount column via `.line-totals` > `.line-total-row` (+`.grand`);
-  live arithmetic check line: `.arith-note` (+`.bad`).
-- **Sealed read-only block**: `.seal-card` (payment details "from the document" — no edit affordance).
-- **Callout variants**: `.callout-warning`, `.callout-info` now exist alongside `.callout-danger`.
-- **Voice rulings from the design handoff**: never "extraction/OCR/confidence/model" in UI — say
-  "Read by AI", "needs a look", "read from the document". Amounts always base currency ($4,820.00).
-
-## Additions 2026-07-07, round 2 (user feedback pass)
-
-- **`.pagehead` separator is full-bleed**: it carries `margin: 0 -32px` to escape the page's
-  horizontal padding — the line meets the sidebar and the screen edge. Don't wrap PageHead in
-  anything with its own horizontal padding.
-- **Field marker semantics (updated)**: `is-read` = GREEN + `Ico.sparkle` "Read by AI" (we flex the
-  AI's work); `is-look` = AMBER (not blue) with inline Confirm; `is-confirmed` = green check. Empty
-  fields carry only the "Not on document" placeholder, no tag.
-- **No vendor avatars**: vendors are plain names (`.v-name`), never initial circles — those are for
-  PEOPLE (members/approvers) only. Bills table carries a dedicated mono `Invoice` column.
-- **Destructive row edits confirm first**: removing a line item (or anything not re-creatable)
-  goes through the standard `.overlay > .dialog` confirm with `.btn-danger`.
-- **Document provenance**: `.doc-page` (relative wrapper per page image) + `.doc-hl` (accent
-  highlight box, % positioned from a normalized `{page, box:[x,y,w,h]}` source). Focusing a field
-  scrolls to and highlights where it was read.
-- **Long-list dropdowns use the design-system picker, never a native `<select>`**:
-  `.picker-trigger` (select-look button) opening a fixed-positioned `.picker-pop` with
-  `.picker-search` + scrollable `.picker-list` of `.picker-group` headers and `.picker-item`
-  rows (`.pi-name` + small mono `.pi-num` beneath — the Ramp account-picker pattern).
-  Canonical implementation: AccountPicker in InvoiceReview.tsx. Native `<select>` stays fine
-  for short static lists (sort orders, roles).
-
-## Additions 2026-08-28 (bill thread as a chat)
-
-- **Conversation on a record**: `.bthread` > `.bt-msg` > `.bt-av` (28px initials circle,
-  hue derived from the name so a face keeps its colour) + `.bt-col` > `.bt-who` (name,
-  relationship, `.pill pill-min` state, `.bt-when`) + `.bt-bubble`. Variants: bare bubble
-  for a comment, `.bt-bubble.is-question` (bordered) for a message that carries an
-  obligation, `+ .is-waiting` (amber) while it is owed. Quoted context in `.bt-quote`,
-  supporting lines in `.bt-note`, row of buttons in `.bt-actions`, input row in
-  `.bt-composer`.
-- **The rule it encodes**: two message kinds that differ in POWER must differ in SHAPE.
-  A question parks the bill and names a person; a comment does neither. Rendering them
-  alike would have made "waiting on Zara" read as chatter, which is the one thing that
-  must stay legible.
-- **Threads, not a stream**: `.bt-thread` is one subject and folds; `.bt-replies` holds
-  its replies, indented once by a left rule, with `.bt-av.is-sm` for the smaller avatar.
-  Collapsed, a thread must still report what is under it — `.bt-more` ("3 replies") —
-  or folding hides that anyone answered at all. Two levels only: a reply to a reply
-  joins the same root, flattened server-side so every surface inherits it.
-- **What folds by default**: whatever is finished. An answered question collapses itself
-  and leaves the live conversation on screen; anything still owed stays open, because
-  that is the part somebody has to act on.
-- **Timestamps in a conversation**: time of day for today, `27 Aug` before that. A full
-  date on every line is noise when they all happened this afternoon.
+When a page needs a pattern this file doesn't list, look at three existing pages first: it probably exists. If it doesn't, add it to `components.css` when more than one family will use it (or to the family's own file when not), and add it here in the same commit.

@@ -260,7 +260,7 @@ function Gated({
   const [tip, setTip] = useState(false);
   return (
     <span
-      className={`bp-tipwrap${className ? ` ${className}` : ''}`}
+      className={`tip-wrap${className ? ` ${className}` : ''}`}
       onMouseEnter={allowed ? undefined : () => setTip(true)}
       onMouseLeave={allowed ? undefined : () => setTip(false)}
     >

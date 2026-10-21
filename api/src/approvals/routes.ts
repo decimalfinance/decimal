@@ -416,22 +416,6 @@ approvalsRouter.get('/organizations/:organizationId/approvals/separation', async
   sendJson(res, await getSodSettings(organizationId));
 }));
 
-approvalsRouter.post('/organizations/:organizationId/approvals/separation', asyncRoute(async (req, res) => {
-  const { organizationId } = orgParams.parse(req.params);
-  await assertOrganizationAccess(organizationId, req.auth!);
-  const { isPrimaryAdminRole, getOrganizationMembership } = await import('../auth/organization-access.js');
-  const m = await getOrganizationMembership(req.auth!.userId, organizationId);
-  if (!isPrimaryAdminRole(m?.role)) throw forbidden('Only the primary admin can change separation of duties.');
-  const body = z.object({
-    clerkCanApprove: z.boolean(),
-    submitterCanApprove: z.boolean(),
-    approverCanRelease: z.boolean(),
-  }).parse(req.body);
-  const { setSodSettings } = await import('./flow.js');
-  await setSodSettings(organizationId, body);
-  sendJson(res, { ok: true });
-}));
-
 // --- Whole-pipeline dry run for the Test rail: resolve a sample bill through
 // Review → Approve → Release with the org's separation switches applied. --------
 approvalsRouter.post('/organizations/:organizationId/approvals/pipeline/simulate', asyncRoute(async (req, res) => {
@@ -511,7 +495,7 @@ const relaxSchema = z.object({
   scopedPersonIds: z.array(z.string().uuid()).max(50).nullish(), // null/absent = everyone
 });
 
-// --- Policies page (P1) — the single home: R-pack + gates + ceiling -----------
+// --- Organisation's policies (P1): the rule pack, the gates and the ceiling -----
 // GET aggregates everything the page renders; the gates are always-on, so
 // their cards carry live counts rather than switches.
 approvalsRouter.get('/organizations/:organizationId/policies', asyncRoute(async (req, res) => {

@@ -5,7 +5,6 @@ import { Shell } from './kit/Shell';
 import { ToasterProvider } from './kit/Toast';
 import { api, ApiError } from './api';
 import type { AuthenticatedSession } from './api';
-import { ScreenState } from './ui-primitives';
 import { queryKeys } from './lib/app-helpers';
 import { useLiveOrgEvents } from './lib/use-live-org-events';
 import { rememberOrganization, rememberedOrganization, withReturn } from './pages/signin/landing';
@@ -51,9 +50,9 @@ const OnwardRedirect = lazy(() => import('./pages/signin/Organizations').then((m
 const SignInFrame = lazy(() => import('./pages/signin/parts').then((m) => ({ default: m.Frame })));
 const AccountPage = lazy(() => import('./pages/Account').then((m) => ({ default: m.AccountPage })));
 
-const RouteFallback = () => (
-  <ScreenState title="Loading" description="Fetching the next page." />
-);
+// While a page's code loads, the page area waits blank, as a redesigned page
+// waits for its data.
+const RouteFallback = () => <div className="ui page" />;
 
 export function App() {
   const location = useLocation();
@@ -134,18 +133,32 @@ function RequireSession({
   if (sessionQuery.isLoading) {
     // A page outside the app waits in its own frame, as Sign in does.
     if (page) return <SignInFrame />;
-    return <ScreenState title="Loading organization" description="Checking your session." />;
+    return <div className="ui page" />;
   }
 
   // A failure that is NOT a 401 means we could not ask, not that the answer was
   // no. Sending someone to the sign-in page in that case tells them something
   // untrue about their own account, and loses whatever they were doing.
   if (sessionQuery.isError && !(sessionQuery.error instanceof ApiError && sessionQuery.error.status === 401)) {
+    // From what the first load already has, so it shows when nothing more will load.
+    // The query has stopped retrying by now, so the person gets the next go.
+    const trying = sessionQuery.isFetching;
     return (
-      <ScreenState
-        title="Can't reach Decimal"
-        description="Your session is fine — we just couldn't reach the server. Retrying automatically."
-      />
+      <div className="ui page">
+        <h1 className="page-title">Can’t reach Decimal</h1>
+        <p className="page-sub">You’re still signed in. Decimal didn’t answer, so check your connection and try again.</p>
+        <div className="page-actions">
+          <button
+            type="button"
+            className={`btn is-primary${trying ? ' is-busy' : ''}`}
+            aria-busy={trying || undefined}
+            disabled={trying}
+            onClick={() => void sessionQuery.refetch()}
+          >
+            {trying ? 'Trying…' : 'Try again'}
+          </button>
+        </div>
+      </div>
     );
   }
 
@@ -198,7 +211,7 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
         activeOrganizationId={activeOrganizationId}
         onLogout={logout}
       >
-          <Suspense fallback={<Legacy><RouteFallback /></Legacy>}>
+          <Suspense fallback={<RouteFallback />}>
             <Routes>
               <Route path="/" element={<HomeRedirect session={session} />} />
               <Route path="/profile" element={<AccountPage />} />

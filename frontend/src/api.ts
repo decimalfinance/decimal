@@ -974,28 +974,6 @@ export type * from './types';
 
 // --- Approvals engine ---------------------------------------------------------
 
-export interface ApprovalTask {
-  task_id: string;
-  state: string;
-  step_index: number;
-  sla_deadline: string | null;
-  approvable_id: string;
-  type: string;
-  total_minor_base: string;
-  macro_state: string;
-}
-
-export interface ApprovalFlowPerson { name: string; email: string }
-export type ApprovalFlowItem =
-  | { kind: 'step'; depth: number; purpose: string; mode: string; m: number | null; people: ApprovalFlowPerson[] }
-  | { kind: 'auto' | 'reject' | 'condition' | 'otherwise'; depth: number; text: string };
-
-export interface ApprovalFlowSummary {
-  approvableType: string;
-  name: string;
-  items: ApprovalFlowItem[];
-}
-
 export const approvalsApi = {
   actOnTask(organizationId: string, taskId: string, command: Record<string, unknown>) {
     return request<{ replay: boolean; taskState: string; macroState: string }>(
@@ -1120,17 +1098,6 @@ export const protectionsApi = {
     });
   },
 };
-
-export interface InvoiceDocumentMeta {
-  invoiceDocumentId: string;
-  filename: string;
-  mimeType: string;
-  byteSize: number;
-  sha256: string;
-  pageCount: number | null;
-  uploadedByUserId: string | null;
-  createdAt: string;
-}
 
 
 export type BillBucket = 'draft' | 'in_approval' | 'to_pay' | 'done' | 'needs_attention';
@@ -1478,24 +1445,9 @@ export type InboundEmailAddress = {
   enabled: boolean;
 };
 
-export type InboundEmailMessage = {
-  inboundEmailMessageId: string;
-  from: string;
-  fromAddress: string;
-  subject: string | null;
-  receivedAt: string;
-  disposition: string;
-  attachmentCount: number;
-  reason: string | null;
-  reasonCode: string | null;
-};
-
 export const inboundEmailApi = {
   address(organizationId: string) {
     return request<InboundEmailAddress>(`/organizations/${organizationId}/inbound-email/address`);
-  },
-  messages(organizationId: string) {
-    return request<{ items: InboundEmailMessage[] }>(`/organizations/${organizationId}/inbound-email/messages`);
   },
 };
 
@@ -1509,9 +1461,6 @@ export const billsApi = {
       bills: WorkbenchBill[];
       questionsForYou: number;
     }>(`/organizations/${organizationId}/bills/workbench`);
-  },
-  draft(organizationId: string, paymentOrderId: string) {
-    return request<BillDraft>(`/organizations/${organizationId}/bills/${paymentOrderId}/draft`);
   },
   detail(organizationId: string, paymentOrderId: string) {
     return request<BillDetail>(`/organizations/${organizationId}/bills/${paymentOrderId}/detail`);
@@ -1543,12 +1492,6 @@ export const billsApi = {
       { method: 'POST' },
     );
   },
-  updateFacts(organizationId: string, paymentOrderId: string, facts: Record<string, unknown>) {
-    return request<{ changed: number }>(`/organizations/${organizationId}/bills/${paymentOrderId}/facts`, {
-      method: 'PATCH',
-      body: JSON.stringify(facts),
-    });
-  },
   // Keep the draft as it stands. Same body as confirm, but nothing is sent for
   // approval — the half-finished bill is the point.
   saveDraft(organizationId: string, paymentOrderId: string, body: ConfirmBillBody) {
@@ -1563,37 +1506,10 @@ export const billsApi = {
       body: JSON.stringify(body),
     });
   },
-  answerQuestion(organizationId: string, paymentOrderId: string, billQuestionId: string, body: {
-    answer: string;
-    outcome: 'answered' | 'handed_back' | 'forwarded';
-    forwardTo?: { userId: string; question: string } | null;
-  }) {
-    return request<unknown>(
-      `/organizations/${organizationId}/bills/${paymentOrderId}/questions/${billQuestionId}/answer`,
-      { method: 'POST', body: JSON.stringify(body) },
-    );
-  },
-  /** The asker closes their own question, with an optional note. */
-  closeQuestion(organizationId: string, paymentOrderId: string, billQuestionId: string, note?: string | null) {
-    return request<unknown>(
-      `/organizations/${organizationId}/bills/${paymentOrderId}/questions/${billQuestionId}/close`,
-      { method: 'POST', body: JSON.stringify({ note: note ?? null }) },
-    );
-  },
   askCandidates(organizationId: string, paymentOrderId: string, aboutFlag?: string | null) {
     return request<{ candidates: AskCandidate[] }>(
       `/organizations/${organizationId}/bills/${paymentOrderId}/ask-candidates`
       + (aboutFlag ? `?flag=${encodeURIComponent(aboutFlag)}` : ''),
-    );
-  },
-  // The flag goes IN so the scope can come out: judging whether a question asks
-  // for more than its check covers is impossible without knowing the check.
-  // Anyone who can see the bill may say something about it. Unlike asking, it
-  // names nobody and is owed no answer. Neither holds the bill.
-  comment(organizationId: string, paymentOrderId: string, body: { body: string; inReplyToQuestionId?: string | null; inReplyToCommentId?: string | null }) {
-    return request<{ billCommentId: string }>(
-      `/organizations/${organizationId}/bills/${paymentOrderId}/comments`,
-      { method: 'POST', body: JSON.stringify(body) },
     );
   },
   /**
@@ -1608,12 +1524,6 @@ export const billsApi = {
     >(
       `/organizations/${organizationId}/bills/${paymentOrderId}/messages`,
       { method: 'POST', body: JSON.stringify({ body }) },
-    );
-  },
-  suggestAskFields(organizationId: string, paymentOrderId: string, question: string, aboutFlag?: string | null) {
-    return request<{ fields: string[]; scope: 'covered_by_flag' | 'asks_more'; suggestionId: string | null }>(
-      `/organizations/${organizationId}/bills/${paymentOrderId}/ask/suggest-fields`,
-      { method: 'POST', body: JSON.stringify({ question, aboutFlag: aboutFlag ?? null }) },
     );
   },
   ask(organizationId: string, paymentOrderId: string, body: { askedOfUserId: string; question: string; aboutFlag?: string | null; highlightFields?: string[] | null; suggestionId?: string | null; questionScope?: 'covered_by_flag' | 'asks_more' | null }) {
@@ -1846,13 +1756,6 @@ export interface FlowTest {
   sendersMayApprove: boolean;
 }
 
-export interface FlowSimResult {
-  stuck: string | null;
-  chain: Array<{ personId: string; name: string; step: string; why: string; kind: 'always' | 'added' | 'standin' }>;
-  notes: string[];
-  summary: string | null;
-}
-
 export const flowApi = {
   get(organizationId: string) {
     return request<{ flow: FlowNode[] | null; draft?: FlowNode[] | null; people: FlowPerson[]; vendors?: Array<{ id: string; name: string }>; categoryOptions?: string[]; version: number | null; publishedAt?: string | null }>(`/organizations/${organizationId}/approvals/flow`);
@@ -1860,11 +1763,6 @@ export const flowApi = {
   /** Test a bill: who a made-up bill would reach under `flow`, published or not. */
   test(organizationId: string, flow: FlowNode[], sample: { amountUsd: number; senderPersonId: string | null; firstBill?: boolean | null; vendorId?: string | null; category?: string | null }) {
     return request<FlowTest>(`/organizations/${organizationId}/approvals/flow/test`, {
-      method: 'POST', body: JSON.stringify({ flow, sample }),
-    });
-  },
-  simulate(organizationId: string, flow: FlowNode[], sample: { amountUsd: number; requesterPersonId: string | null; vendorId?: string | null; category?: string | null }) {
-    return request<FlowSimResult>(`/organizations/${organizationId}/approvals/flow/simulate`, {
       method: 'POST', body: JSON.stringify({ flow, sample }),
     });
   },
@@ -1984,17 +1882,11 @@ export const approvalsInboxApi = {
 
 export interface ReleaseConfig { approvers: string[]; quorum: 'all' | 'any' | number; configured: boolean; people: FlowPerson[] }
 
-// draft stage (control point #1) — same shape as the approval flow, on its own
-// endpoint. A bill must clear this before it enters approval.
-
 // Separation-of-duties switches — the org's own choice, not ours.
 export interface SeparationSettings { clerkCanApprove: boolean; submitterCanApprove: boolean; approverCanRelease: boolean }
 export const separationApi = {
   get(organizationId: string) {
     return request<SeparationSettings>(`/organizations/${organizationId}/approvals/separation`);
-  },
-  set(organizationId: string, settings: SeparationSettings) {
-    return request<{ ok: boolean }>(`/organizations/${organizationId}/approvals/separation`, { method: 'POST', body: JSON.stringify(settings) });
   },
 };
 
@@ -2028,15 +1920,6 @@ export const paymentFlowApi = {
   },
   publish(organizationId: string, flow: FlowNode[]) {
     return request<{ policyId: string; version: number }>(`/organizations/${organizationId}/approvals/payment-flow/publish`, { method: 'POST', body: JSON.stringify({ flow }) });
-  },
-};
-
-// Whole-pipeline dry run for the Test rail.
-export interface PipelineStage { chain: FlowSimResult['chain']; notes: string[]; stuck: string | null; resolvedIds: string[] }
-export interface PipelineSimResult { approve: PipelineStage; release: PipelineStage; stuck: string | null; flags: SeparationSettings }
-export const pipelineApi = {
-  simulate(organizationId: string, input: { approveFlow: FlowNode[]; releaseFlow: FlowNode[]; amountUsd: number; submitterPersonId: string | null; vendorId?: string | null; category?: string | null; firstBill?: boolean | null; separation?: SeparationSettings | null }) {
-    return request<PipelineSimResult>(`/organizations/${organizationId}/approvals/pipeline/simulate`, { method: 'POST', body: JSON.stringify(input) });
   },
 };
 
@@ -2153,22 +2036,11 @@ export const companionApi = {
   job(organizationId: string, jobId: string) {
     return request<CompanionJob>(`/organizations/${organizationId}/companion/jobs/${jobId}`);
   },
-  chats(organizationId: string) {
-    return request<{ chats: CompanionChatSummary[] }>(`/organizations/${organizationId}/companion/chats`);
-  },
   startChat(organizationId: string, text: string, billId?: string) {
     return request<{ chatId: string }>(`/organizations/${organizationId}/companion/chats`, {
       method: 'POST',
       body: JSON.stringify(billId ? { text, billId } : { text }),
     });
-  },
-  /** The quick pass: ready drafts, in the order to work them. */
-  ready(organizationId: string) {
-    return request<{ bills: Array<{ billId: string; vendorName: string; invoiceNumber: string | null; amountUsd: number; dueAt: string | null }> }>(`/organizations/${organizationId}/companion/ready`);
-  },
-  /** Send a ready bill for approval exactly as read. The server re-checks it is ready. */
-  confirmAsRead(organizationId: string, billId: string) {
-    return request<unknown>(`/organizations/${organizationId}/bills/${billId}/confirm-as-read`, { method: 'POST', body: '{}' });
   },
   /** The companion's note on one bill, for the bill's own screen. */
   billNote(organizationId: string, billId: string) {
@@ -2198,8 +2070,6 @@ export const companionApi = {
     });
   },
 };
-
-export interface CompanionChatSummary { chatId: string; title: string; updatedAt: string }
 
 export interface BillCompanionNote {
   verdict: { ready: boolean; reason: string | null } | null;
@@ -2297,9 +2167,6 @@ export const inboxApi = {
   },
   seen(organizationId: string, billId: string) {
     return request<{ ok: true }>(`/organizations/${organizationId}/inbox/seen`, { method: 'POST', body: JSON.stringify({ billId }) });
-  },
-  seenAll(organizationId: string) {
-    return request<{ ok: true; marked: number }>(`/organizations/${organizationId}/inbox/seen-all`, { method: 'POST', body: '{}' });
   },
   /** The asker ticks off a reply to their question. */
   replyDone(organizationId: string, billQuestionId: string) {

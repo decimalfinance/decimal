@@ -106,7 +106,7 @@ export function capabilityAccessMiddleware() {
       // with its established message.
       if (!access) return next();
       if (access.isPrimaryOrAdmin || options.some((c) => access.capabilities.includes(c))) return next();
-      throw forbidden("Your role doesn't include this. Ask an admin on the Members page if you need it.", { needed: options });
+      throw forbidden("Your role doesn't include this. An admin can change your role in Team members.", { needed: options });
     } catch (error) {
       next(error);
     }

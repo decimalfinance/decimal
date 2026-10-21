@@ -8,6 +8,7 @@ import { after, before, beforeEach, test } from 'node:test';
 import { AddressInfo } from 'node:net';
 import { createApp } from '../src/app.js';
 import { config } from '../src/config.js';
+import { setSodFlags } from '../src/approvals/store.js';
 import { prisma } from '../src/infra/prisma.js';
 import { drainAsyncIntake, setInvoiceIntakeRuntimeForTests } from '../src/payments/invoice-intake.js';
 import { requireTestDatabase } from './helpers/require-test-database.js';
@@ -164,8 +165,16 @@ test('No self-approval: back on asks for the password, ends the old flow page’
   assert.equal(r1.lastChange.name, 'Nadia Haddad');
   assert.equal(r1.lastChange.personId, await personOf(owner.userId));
 
-  // The old Approval flow page's switch, set on as that page used to.
-  await ok('POST', `/organizations/${orgId}/approvals/separation`, owner.token, { clerkCanApprove: false, submitterCanApprove: true, approverCanRelease: false });
+  // The old Approval flow page's switch, left on by an organisation that used that page.
+  // It has no route any more: a policy changes only behind the password, on the record.
+  const flags = { clerkCanApprove: false, submitterCanApprove: true, approverCanRelease: false };
+  const gone = await fetch(`${baseUrl}/organizations/${orgId}/approvals/separation`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${owner.token}` },
+    body: JSON.stringify(flags),
+  });
+  assert.equal(gone.status, 404, 'the old switch cannot be set through the API');
+  await prisma.$transaction((tx) => setSodFlags(tx, orgId, flags));
 
   const adminTry = await call('POST', `/organizations/${orgId}/protections/R1/retighten`, admin.token, { password: PASSWORD });
   assert.equal(adminTry.status, 403, 'only the primary admin changes policies');
