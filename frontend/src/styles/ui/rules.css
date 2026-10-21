@@ -1,0 +1,526 @@
+/* Approval rules (Approval rules.dc.html 1a–1c): a header, then the rules on a
+   canvas that pans and zooms, with Test a bill in a panel on the right. The
+   page never scrolls; the canvas and the panel do, inside themselves. */
+.ui.ar-page { height: 100%; display: flex; flex-direction: column; background: var(--white); }
+
+/* ── Header ─────────────────────────────────────────────── */
+.ui .ar-head { flex: none; display: flex; align-items: flex-start; gap: 16px; padding: 15px 30px 13px; }
+.ui .ar-head-main { min-width: 0; }
+.ui .ar-title-row { display: flex; align-items: center; gap: 10px; margin-top: 3px; }
+.ui .ar-saved { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--ink-3); white-space: nowrap; }
+.ui .ar-saved-tick { font-weight: 600; color: var(--green); }
+.ui .ar-sub { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; margin-top: 3px; font-size: 11px; color: var(--ink-2); }
+.ui .ar-sub-dot { color: var(--edge-hover); }
+.ui .ar-sub-pub { color: var(--ink-3); }
+.ui .ar-tools { flex: none; display: flex; align-items: center; gap: 8px; margin: 2px 0 0 auto; }
+.ui .ar-viewer { display: inline-flex; align-items: center; gap: 6px; margin-right: 6px; font: 400 11px var(--font); color: var(--ink-2); white-space: nowrap; }
+.ui .ar-viewer > svg { color: var(--ink-4); }
+.ui .ar-toggle { padding: 0 14px 0 12px; }
+.ui .ar-toggle:hover { border-color: var(--edge-hover); }
+.ui .ar-toggle.is-on { border-color: var(--pink-200); background: var(--pink-50); color: var(--maroon); }
+.ui .ar-toggle.is-on:hover { border-color: var(--pink-300); }
+.ui .ar-round {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--edge);
+  border-radius: 50%;
+  background: var(--white);
+  color: var(--ink);
+  cursor: pointer;
+}
+.ui .ar-round:hover { border-color: var(--edge-hover); background: var(--grey); }
+.ui .ar-round:disabled { border-color: var(--line); background: var(--white); color: var(--edge-hover); cursor: default; }
+.ui .ar-problems { display: grid; gap: 2px; }
+.ui .ar-problems > b { font-weight: 600; }
+
+/* ── Body: the canvas, and the panel beside it ──────────── */
+.ui .ar-body { flex: 1; min-height: 0; display: flex; border-top: 1px solid var(--line); }
+.ui .ar-canvas { position: relative; flex: 1; min-width: 0; }
+.ui .ar-loading { position: absolute; inset: 0; background: var(--grey-faint); }
+.ui .ar-failed {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--grey-faint);
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+/* ── The canvas: a dot grid that moves and scales with the rules ── */
+.ui .ar-ground {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  cursor: grab;
+  user-select: none;
+  background-color: var(--grey-faint);
+  background-image: radial-gradient(circle, var(--dot) 1px, transparent 1.3px);
+}
+.ui .ar-layer { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.ui .ar-wires { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.ui .ar-wire { fill: none; stroke: var(--edge-hover); stroke-width: 1; }
+.ui .ar-wire.is-dotted { stroke-width: 1.5; stroke-dasharray: .5 5; stroke-linecap: round; }
+.ui .ar-wire.is-route { stroke: var(--maroon); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* Pills: Sent for approval, a split, Finish this path, a notification, Approved. */
+.ui .ar-pill {
+  position: absolute;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  font: 500 11px var(--font);
+  color: var(--ink);
+  white-space: nowrap;
+}
+.ui .ar-start,
+.ui .ar-approved { gap: 7px; height: 28px; padding: 0 12px 0 5px; border: 1px solid var(--edge); background: var(--white); }
+.ui .ar-disc { width: 18px; height: 18px; flex: none; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; }
+.ui .ar-start .ar-disc { background: var(--bead-off); color: var(--ink-2); }
+.ui .ar-approved .ar-disc { background: var(--green-2); color: var(--white); }
+.ui .ar-approved > b { font-weight: 600; }
+.ui .ar-approved.is-dead { border-style: dashed; }
+.ui .ar-approved.is-dead .ar-disc { background: var(--edge-hover); }
+.ui .ar-approved.is-on { border-color: var(--maroon); }
+
+.ui .ar-split { gap: 6px; height: 26px; padding: 0 12px 0 10px; border: 1px solid var(--edge); background: var(--white); }
+.ui .ar-split > svg { color: var(--ink-4); }
+.ui .ar-split.is-unset { border-style: dashed; border-color: var(--yellow-dash); background: var(--yellow-tint); color: var(--yellow-ink); }
+.ui .ar-split.is-unset > svg { color: var(--yellow-ink); }
+
+/* A step: a white card of who approves. */
+.ui .ar-card {
+  position: absolute;
+  display: block;
+  width: 232px;
+  padding: 9px 12px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--white);
+  box-shadow: var(--shadow-field);
+  font: inherit;
+  color: var(--ink);
+  text-align: left;
+}
+.ui .ar-card.is-empty { border-style: dashed; border-color: var(--yellow-dash); }
+.ui .ar-card-head { display: flex; align-items: center; gap: 8px; height: 12px; line-height: 12px; }
+.ui .ar-card-head > .caps:first-child { flex: 1; }
+.ui .ar-card-body { display: block; margin-top: 7px; }
+.ui .ar-card-row { display: flex; align-items: center; gap: 8px; height: 20px; min-width: 0; font: 500 11.5px/1.3 var(--font); color: var(--ink); }
+.ui .ar-card-row.is-empty { color: var(--yellow-ink); }
+.ui .ar-ring { width: 16px; height: 16px; flex: none; border: 1px dashed var(--yellow-dash); border-radius: 50%; background: var(--white); }
+
+button.ar-card,
+button.ar-split { cursor: pointer; }
+.ui .ar-card:hover,
+.ui .ar-split:hover { box-shadow: var(--shadow-card-hover); }
+.ui .ar-card.is-on,
+.ui .ar-split.is-on { border-color: var(--maroon); outline: 3px solid var(--ring-picked); }
+
+.ui .ar-yesno {
+  position: absolute;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--white);
+  font: 600 8px/1 var(--mono);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.ui .ar-yesno.is-on { border-color: var(--maroon); background: var(--maroon); color: var(--white); }
+
+.ui .ar-plus {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--edge);
+  border-radius: 50%;
+  background: var(--white);
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.ui .ar-plus:hover,
+.ui .ar-plus.is-on { border-color: var(--pink-300); background: var(--pink-50); color: var(--maroon); }
+
+.ui .ar-fin { gap: 5px; height: 22px; padding: 0 10px 0 8px; border: 1px dashed var(--yellow-dash); background: var(--yellow-tint); font-size: 10.5px; color: var(--yellow-ink); cursor: pointer; }
+.ui .ar-fin:hover { background: var(--yellow-tint-2); }
+.ui .ar-nothing { position: absolute; transform: translateX(-50%); font: 400 10.5px/16px var(--font); color: var(--ink-4); white-space: nowrap; }
+
+.ui .ar-note { gap: 6px; height: 22px; padding: 0 6px 0 10px; border: 1px solid var(--line); background: var(--grey); font: 400 10.5px var(--font); color: var(--ink-2); }
+.ui .ar-note-x {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.ui .ar-note-x:hover { background: var(--grey-hover); color: var(--ink); }
+
+/* Where a path ends: a green tick, which an admin clicks to open the path again. */
+.ui .ar-end {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--green-2);
+  color: var(--white);
+}
+button.ar-end { cursor: pointer; }
+.ui .ar-end.is-on { box-shadow: 0 0 0 2px var(--white), 0 0 0 3.5px var(--maroon); }
+
+/* No rules yet: a dashed card in their place. */
+.ui .ar-ghost {
+  position: absolute;
+  width: 300px;
+  height: 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px dashed var(--edge);
+  border-radius: 8px;
+  background: var(--white);
+  text-align: left;
+  cursor: default;
+}
+.ui .ar-ghost-title { font: 600 12px/16px var(--font); color: var(--ink); }
+.ui .ar-ghost-text { font: 400 11px/1.5 var(--font); color: var(--ink-2); text-wrap: pretty; }
+.ui .ar-ghost-add { align-self: flex-start; height: 26px; margin-top: auto; padding: 0 12px 0 10px; font-size: 11px; }
+
+.ui .ar-zoom {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 3px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--white);
+  box-shadow: var(--shadow-float);
+  cursor: default;
+}
+.ui .ar-zoom > button {
+  min-width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.ui .ar-zoom > button:hover { background: var(--grey); color: var(--ink); }
+.ui .ar-zoom > .ar-zoom-pct { min-width: 46px; padding: 0 6px; font-size: 10.5px; color: var(--ink); }
+.ui .ar-zoom-rule { width: 1px; height: 14px; margin: 0 3px; background: var(--line); }
+
+/* ── Over the canvas: an editor beside its node, the menu under a "+" ── */
+.ui .ar-float { position: absolute; left: 0; top: 0; z-index: 20; cursor: default; }
+.ui .ar-float.is-editor { width: 300px; overflow: auto; border-radius: 8px; background: var(--white); box-shadow: var(--shadow-pop); }
+.ui .ar-float.is-menu { z-index: 22; width: 264px; }
+.ui .ar-ed { font-family: var(--font); color: var(--ink); text-align: left; }
+.ui .ar-ed-top { display: grid; gap: 6px; padding: 12px 10px 0 16px; }
+.ui .ar-ed-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ui .ar-ed-head > .field-label { line-height: 1.2; }
+.ui .ar-ed-top > .ar-input { width: calc(100% - 6px); }
+.ui .ar-ed-sec { display: grid; gap: 6px; padding: 14px 16px 0; }
+.ui .ar-ed-sec > .field-label { line-height: 1.2; }
+.ui .ar-ed-text { font: 400 11px/1.55 var(--font); color: var(--ink-2); text-wrap: pretty; }
+.ui .ar-hint { font: 400 10px/1.45 var(--font); color: var(--ink-3); }
+.ui .ar-x {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.ui .ar-x:hover { background: var(--grey); color: var(--ink); }
+.ui .ar-x.is-round { width: 22px; height: 22px; border-radius: 50%; }
+
+/* The editors' fields: square-cornered, with a maroon glow when typing. */
+.ui .ar-input { border-radius: 4px; }
+.ui .ar-input:focus { border-color: var(--maroon); box-shadow: 0 0 0 3px var(--field-glow); }
+.ui select.ar-input { padding: 0 8px; }
+.ui .ar-money { position: relative; display: block; }
+.ui .ar-money-sign { position: absolute; left: 10px; top: 0; bottom: 0; display: flex; align-items: center; pointer-events: none; font-size: 12px; color: var(--ink-3); }
+.ui .ar-money > .ar-input { padding-left: 22px; }
+
+/* Who approves: the people on the step, then everyone else to add. */
+.ui .ar-box { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.ui .ar-who { display: flex; align-items: center; gap: 9px; padding: 7px 6px 7px 10px; border-bottom: 1px solid var(--line); }
+.ui .ar-who-text { flex: 1; min-width: 0; display: grid; gap: 1px; text-align: left; }
+.ui .ar-who-name { font: 500 11.5px/1.3 var(--font); color: var(--ink); }
+.ui .ar-who-role { font: 400 10px/1.3 var(--font); color: var(--ink-3); }
+.ui .ar-add-who {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 0;
+  background: var(--grey-faint);
+  font: 500 11px var(--font);
+  color: var(--ink-2);
+  text-align: left;
+  cursor: pointer;
+}
+.ui .ar-add-who:hover { background: var(--grey); }
+.ui .ar-add-who > .ar-ring { width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border-color: var(--edge-hover); background: transparent; color: var(--ink-3); }
+.ui .ar-pick { padding: 4px; background: var(--grey-faint); }
+.ui .ar-pick-alone { padding: 6px 6px 4px; font: 400 10px/1.45 var(--font); color: var(--ink-3); }
+.ui .ar-pick-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.ui button.ar-pick-row:hover { background: var(--white); }
+.ui .ar-pick-row .ar-who-name { font-size: 11px; }
+.ui .ar-pick-row.is-off { cursor: not-allowed; }
+.ui .ar-pick-row.is-off .ar-who-name,
+.ui .ar-pick-row.is-off .ar-who-role { color: var(--ink-4); }
+.ui .avatar.is-pale { color: var(--edge-hover); }
+.ui .avatar.is-pale > img { filter: grayscale(1); opacity: .6; }
+.ui .ar-pick-add { flex: none; padding-right: 4px; font: 500 10.5px var(--font); color: var(--maroon); }
+.ui .ar-pick-close {
+  width: 100%;
+  padding: 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  font: 500 10.5px var(--font);
+  color: var(--ink-2);
+  text-align: left;
+  cursor: pointer;
+}
+.ui .ar-pick-close:hover { background: var(--white); color: var(--ink); }
+
+/* How many must approve: one radio row per count. */
+.ui .ar-choice {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  align-items: start;
+  column-gap: 10px;
+  row-gap: 2px;
+  padding: 9px 12px 10px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: var(--white);
+  text-align: left;
+  cursor: pointer;
+}
+.ui .ar-choice:first-child { border-top: 0; }
+.ui .ar-choice:hover { background: var(--grey-faint); }
+.ui .ar-radio { width: 12px; height: 12px; margin-top: 1px; flex: none; border: 1px solid var(--edge-hover); border-radius: 50%; background: var(--white); }
+.ui .ar-choice.is-on .ar-radio { border-color: var(--maroon); background: radial-gradient(circle, var(--maroon) 3px, var(--white) 3.5px); }
+.ui .ar-choice-label { font: 500 11px/1.3 var(--font); color: var(--ink); }
+.ui .ar-choice-line { grid-column: 2; font: 400 10px/1.45 var(--font); color: var(--ink-2); text-wrap: pretty; }
+
+.ui .ar-ed-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 16px; padding: 10px 12px; border-top: 1px solid var(--line); }
+.ui .ar-ed-actions > .btn.is-primary { padding: 0 16px; }
+.ui .ar-remove { padding: 0 12px; border-color: transparent; background: transparent; color: var(--red); }
+.ui .ar-remove:hover { border-color: var(--red-edge); background: var(--red-tint); }
+
+/* Split bills by: the four kinds, as tabs. */
+.ui .ar-tabs { display: flex; align-items: flex-end; gap: 16px; margin: 10px 16px 0; border-bottom: 1px solid var(--line); }
+.ui .ar-tab {
+  display: inline-flex;
+  align-items: baseline;
+  margin-bottom: -1px;
+  padding: 0 0 8px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  font: 600 9.5px var(--mono);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ui .ar-tab:hover { border-bottom-color: var(--edge); color: var(--ink); }
+.ui .ar-tab:focus-visible { box-shadow: var(--focus-inset); }
+.ui .ar-tab.is-on { border-bottom-color: var(--maroon); color: var(--maroon); }
+
+.ui .ar-checks { max-height: 200px; overflow: auto; padding: 4px; border: 1px solid var(--line); border-radius: 6px; }
+.ui .ar-check {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  font: 400 11px/1.3 var(--font);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.ui .ar-check:hover { background: var(--grey); }
+.ui .ar-check:disabled { color: var(--ink-4); cursor: not-allowed; }
+.ui .ar-check:disabled:hover { background: transparent; }
+.ui .ar-check.is-plain { padding: 0; font-size: 11.5px; user-select: none; }
+.ui .ar-check.is-plain:hover { background: none; }
+.ui .ar-box-tick {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--edge-hover);
+  border-radius: 3px;
+  background: var(--white);
+  color: var(--white);
+}
+.ui .ar-check.is-on .ar-box-tick { border-color: var(--maroon); background: var(--maroon); }
+
+/* The insert menu: two lines an item, the icon in maroon. */
+.ui .ar-menu-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 13px minmax(0, 1fr);
+  align-items: center;
+  gap: 3px 10px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.ui .ar-menu-item:hover { background: var(--grey); }
+.ui .ar-menu-item:focus-visible { box-shadow: var(--focus-inset); }
+.ui .ar-menu-icon { display: inline-flex; color: var(--maroon); }
+.ui .ar-menu-label { font: 500 11px/1.3 var(--font); color: var(--ink); }
+.ui .ar-menu-line { grid-column: 2; font: 400 10px/1.4 var(--font); color: var(--ink-2); }
+
+/* ── Test a bill ────────────────────────────────────────── */
+.ui .ar-panel {
+  position: relative;
+  flex: none;
+  width: 340px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--line);
+  background: var(--white);
+  text-align: left;
+}
+.ui .ar-panel-head { flex: none; display: flex; align-items: flex-end; gap: 10px; padding: 12px 10px 0 18px; border-bottom: 1px solid var(--line); }
+.ui .ar-panel-title { padding-bottom: 10px; font: 600 13px/1.3 var(--font); letter-spacing: -.01em; color: var(--ink); }
+.ui .ar-panel-head > .ar-x { margin: 0 0 5px auto; }
+.ui .ar-panel-head > .ar-x:hover { background: var(--press); }
+.ui .ar-panel-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 16px; padding: 14px 18px 22px; }
+.ui .ar-panel-body .field-label { line-height: 1.2; }
+.ui .ar-intro { margin-bottom: -4px; font: 400 11px/1.5 var(--font); color: var(--ink-2); text-wrap: pretty; }
+.ui .ar-slider { width: 100%; margin: 4px 0 0; accent-color: var(--maroon); cursor: pointer; }
+.ui .ar-slider-ends { display: flex; justify-content: space-between; font-size: 10px; color: var(--ink-4); }
+
+.ui .ar-senders { display: grid; gap: 1px; margin: 0 -6px; }
+.ui .ar-sender {
+  width: 100%;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+}
+.ui .ar-sender:hover { background: var(--grey); }
+.ui .ar-sender.is-only { cursor: default; }
+.ui .ar-sender > .ar-radio { margin-top: 0; transition: border-width .12s var(--ease); }
+.ui .ar-sender.is-on > .ar-radio { border: 4px solid var(--maroon); }
+.ui .ar-sender-name { font: 400 11.5px/1.2 var(--font); color: var(--ink); }
+.ui .ar-sender-role { margin-left: auto; font: 400 10.5px/1.2 var(--font); color: var(--ink-3); white-space: nowrap; }
+
+.ui .ar-result { display: grid; gap: 12px; padding-top: 16px; border-top: 1px solid var(--line); transition: opacity .15s var(--ease); }
+.ui .ar-result.is-stale { opacity: .6; }
+.ui .ar-result > .caps { line-height: 1.2; }
+.ui .ar-say { display: grid; gap: 2px; padding: 9px 12px 10px; border: 1px solid; border-radius: 8px; }
+.ui .ar-say > b { font: 600 11.5px/1.35 var(--font); }
+.ui .ar-say > span { font: 400 11px/1.5 var(--font); text-wrap: pretty; }
+.ui .ar-say.is-stuck { border-color: var(--red-edge); background: var(--red-tint); color: var(--red); }
+.ui .ar-say.is-open { border-color: var(--yellow-edge); background: var(--yellow-tint); color: var(--yellow-ink); }
+
+/* The chain: one row a step, joined by the route's maroon line. */
+.ui .ar-chain { display: flex; flex-direction: column; --faces: 44px; }
+.ui .ar-chain.is-wide { --faces: 58px; }
+.ui .ar-link { position: relative; display: grid; grid-template-columns: var(--faces) minmax(0, 1fr); column-gap: 6px; padding-bottom: 14px; }
+.ui .ar-link::before { content: ''; position: absolute; left: 11px; top: 12px; bottom: -12px; width: 2px; background: var(--maroon); }
+.ui .ar-link:last-child { padding-bottom: 0; }
+.ui .ar-link:last-child::before { display: none; }
+.ui .ar-chain-disc { position: relative; z-index: 1; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--bead-off); color: var(--ink-2); }
+.ui .ar-chain-disc.is-done { background: var(--green-2); color: var(--white); }
+.ui .ar-faces { position: relative; z-index: 1; display: inline-flex; align-items: center; height: 24px; }
+.ui .ar-faces > .avatar { position: relative; }
+.ui .ar-faces > .avatar + .avatar { margin-left: -7px; }
+.ui .ar-faces > .avatar:nth-child(2) { z-index: 1; }
+.ui .ar-faces > .avatar:nth-child(3) { z-index: 2; }
+.ui .ar-faces > .avatar:not(:last-child) {
+  -webkit-mask-image: radial-gradient(circle at 29px 12px, transparent 12.6px, black 13.4px);
+  mask-image: radial-gradient(circle at 29px 12px, transparent 12.6px, black 13.4px);
+}
+.ui .ar-faces > .ar-ring { width: 24px; height: 24px; }
+.ui .ar-chain-text { min-width: 0; display: grid; gap: 2px; padding-top: 4px; }
+.ui .ar-chain-text > b { font: 600 11.5px/1.3 var(--font); color: var(--ink); }
+.ui .ar-chain-text > span { font: 400 10.5px/1.45 var(--font); color: var(--ink-3); }
+.ui .ar-chain-text > .ar-chain-note { margin-top: 2px; color: var(--ink); }
+.ui .ar-joiner { font-weight: 400; color: var(--ink-3); }
+.ui .ar-foot { font: 400 10.5px/1.5 var(--font); color: var(--ink-3); text-wrap: pretty; }
+.ui .ar-foot > a { font-weight: 500; color: var(--maroon); text-decoration: underline; text-decoration-color: var(--pink-300); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.ui .ar-foot > a:hover { text-decoration-color: var(--maroon); }

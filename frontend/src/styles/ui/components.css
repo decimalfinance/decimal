@@ -85,6 +85,9 @@
 .ui .btn.is-primary:hover { border-color: var(--maroon-hover); background: var(--maroon-hover); }
 .ui .btn.is-primary:active { border-color: var(--maroon-active); background: var(--maroon-active); }
 .ui .btn.is-primary:disabled { border-color: var(--line); background: var(--grey); color: var(--ink-4); opacity: 1; cursor: not-allowed; }
+/* At work ("Publishing…"): it keeps its colour rather than greying out. */
+.ui .btn.is-primary.is-busy,
+.ui .btn.is-primary.is-busy:disabled { border-color: var(--maroon-hover); background: var(--maroon-hover); color: var(--white); cursor: default; }
 .ui .btn.is-remove { border-color: var(--red-edge); background: var(--red-tint); color: var(--red); }
 .ui .btn.is-remove:hover { border-color: var(--red-edge-hover); background: var(--red-tint-2); }
 .ui .btn > svg { flex: none; }
@@ -199,6 +202,14 @@
   white-space: nowrap;
   box-shadow: var(--shadow-toast);
   animation: ui-fade-in .15s ease-out;
+}
+/* A sentence that needs two lines. */
+.ui.toast.is-wide {
+  width: max-content;
+  max-width: min(620px, calc(100% - 48px));
+  border-radius: 12px;
+  white-space: normal;
+  text-wrap: balance;
 }
 .ui .toast-undo {
   padding: 0;

@@ -1669,6 +1669,23 @@ function buildChartOptions(chart: Awaited<ReturnType<typeof listChartOfAccounts>
 }
 
 /**
+ * The categories a bill line can be coded to, by name: the chart of accounts
+ * when QuickBooks is connected, the built-in one otherwise (as the bill page
+ * offers them). Nothing when the chart can't be read just now.
+ */
+export async function categoryNamesFor(organizationId: string): Promise<string[]> {
+  let chart: Awaited<ReturnType<typeof listChartOfAccounts>>;
+  try {
+    chart = await listChartOfAccounts(organizationId);
+  } catch {
+    return [];
+  }
+  if (chart.length > 0) return buildChartOptions(chart).map((o) => o.value);
+  const { DEFAULT_EXPENSE_ACCOUNTS } = await import('../accounting/default-chart.js');
+  return DEFAULT_EXPENSE_ACCOUNTS.map((a) => a.name);
+}
+
+/**
  * `readOnly`: look without touching anything. The bill screen's loader also
  * keeps the bill's derived data fresh as a person opens it — provenance boxes,
  * category suggestions, the proposed-categories baseline — and starts a

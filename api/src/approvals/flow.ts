@@ -71,9 +71,10 @@ export async function getFlow(organizationId: string, kind: FlowKind = 'invoice'
     orderBy: { displayName: 'asc' },
     take: 500,
   }).then((rows) => rows.map((r) => ({ id: r.counterpartyId, name: r.displayName })));
-  const { listChartOfAccounts } = await import('../accounting/ocr-coding.js');
-  const categoryOptions = (await listChartOfAccounts(organizationId).catch(() => [])).map((a) => a.name);
-  if (!set) return { flow: [], draft, people, vendors, categoryOptions, version: null };
+  // The same names a bill line is coded to, since a category split compares them exactly.
+  const { categoryNamesFor } = await import('../payments/bills.js');
+  const categoryOptions = await categoryNamesFor(organizationId);
+  if (!set) return { flow: [], draft, people, vendors, categoryOptions, version: null, publishedAt: null };
   const policy = await getPolicy(prisma, set.default_policy_id, set.default_policy_version);
   const body: unknown[] = policy && Array.isArray(policy.body) ? (policy.body as unknown[]) : [];
   // ensureEngineSetup seeds a "default approval" policy so the engine can route
@@ -89,6 +90,8 @@ export async function getFlow(organizationId: string, kind: FlowKind = 'invoice'
     categoryOptions,
     policyId: set.default_policy_id,
     version: set.default_policy_version,
+    // When the rules in force were published; nothing until someone has published some.
+    publishedAt: authored ? policy.effective_from : null,
   };
 }
 
@@ -159,7 +162,9 @@ function engineNodeToFlow(node: unknown, index = 0): FlowNode | null {
   return null;
 }
 
-function flowNodeToEngine(node: FlowNode): unknown | null {
+// `slaHours`: how long a step's task waits before it escalates. Approvals never
+// deny themselves; an overdue one goes to the primary admin (lifecycle.ts).
+function flowNodeToEngine(node: FlowNode, slaHours?: number): unknown | null {
   if (node.type === 'step') {
     return {
       type: 'step',
@@ -167,12 +172,13 @@ function flowNodeToEngine(node: FlowNode): unknown | null {
       step: node.quorum === 'all' ? { mode: 'all' } : node.quorum === 'any' ? { mode: 'any' } : { mode: 'quorum', m: node.quorum },
       onUnresolvable: { kind: 'person', personId: node.approvers[0] ?? '' },
       ...(node.purpose || node.title ? { purpose: node.purpose ?? node.title } : {}),
+      ...(slaHours ? { slaHours } : {}),
     };
   }
   if (node.type === 'if') {
     const branches = {
-      then: node.then.map(flowNodeToEngine).filter((n) => n !== null),
-      else: node.otherwise.map(flowNodeToEngine).filter((n) => n !== null),
+      then: node.then.map((n) => flowNodeToEngine(n, slaHours)).filter((n) => n !== null),
+      else: node.otherwise.map((n) => flowNodeToEngine(n, slaHours)).filter((n) => n !== null),
     };
     if (node.split?.kind === 'vendor') {
       return { type: 'condition', if: { op: 'vendor_in', vendorIds: node.split.vendorIds }, meta: { vendorNames: node.split.vendorNames }, ...branches };
@@ -198,8 +204,13 @@ function flowNodeToEngine(node: FlowNode): unknown | null {
   return null;
 }
 
+/** How long an approval waits before it escalates: the same three days the built-in route gives it. */
+const APPROVAL_SLA_HOURS = 72;
+
 export async function publishFlow(organizationId: string, flow: FlowNode[], kind: FlowKind = 'invoice') {
-  const body = flow.map(flowNodeToEngine).filter((n) => n !== null);
+  // The payment stage is frozen as it was; only approvals gain a deadline.
+  const sla = kind === 'invoice' ? APPROVAL_SLA_HOURS : undefined;
+  const body = flow.map((n) => flowNodeToEngine(n, sla)).filter((n) => n !== null);
   const set = await getPolicySet(prisma, organizationId, kind);
   const result = await prisma.$transaction(async (tx) => {
     const version = set ? set.default_policy_version + 1 : 1;
@@ -209,6 +220,62 @@ export async function publishFlow(organizationId: string, flow: FlowNode[], kind
   });
   await clearFlowDraft(organizationId, kind); // the draft is now the published flow
   return result;
+}
+
+/** An amount split with no amount, or a vendor or category split with nothing picked. */
+function unsetSplit(node: FlowNode & { type: 'if' }): boolean {
+  if (node.split?.kind === 'vendor') return node.split.vendorIds.length === 0;
+  if (node.split?.kind === 'category') return node.split.categories.length === 0;
+  if (node.split?.kind === 'firstBill') return false;
+  return !(node.amountGteUsd > 0);
+}
+
+/**
+ * Does every way a bill can take through `list` meet a step? What follows a
+ * split runs on both of its paths, so a path is covered by a step on it or by
+ * one after the split (either covers every path through the other).
+ */
+function everyPathHasStep(list: FlowNode[]): boolean {
+  for (let i = 0; i < list.length; i++) {
+    const n = list[i]!;
+    if (n.type === 'step') return true;
+    if (n.type === 'if') return everyPathHasStep(list.slice(i + 1)) || (everyPathHasStep(n.then) && everyPathHasStep(n.otherwise));
+  }
+  return false;
+}
+
+/**
+ * Why these approval rules can't be published, as sentences; nothing when
+ * they can. Each would hold or misroute bills: a step with nobody on it fails
+ * to compile, so no bill that met it would ever reach approval; a split with
+ * no amount sends every bill down Yes; a path with no step leaves its bills
+ * waiting on nobody; someone no longer on the team can't approve anything.
+ */
+export async function flowProblems(organizationId: string, flow: FlowNode[]): Promise<string[]> {
+  const active = new Set((await prisma.$queryRaw<{ id: string }[]>`
+    SELECT id FROM approval.people WHERE organization_id = ${organizationId}::uuid AND status = 'active'`).map((r) => r.id));
+  const out = new Set<string>();
+  const check = (list: FlowNode[]) => {
+    for (const n of list) {
+      if (n.type === 'step') {
+        const name = `“${n.title.trim() || 'Approval step'}”`;
+        if (n.approvers.length === 0) out.add(`Pick who approves ${name}.`);
+        else if (n.approvers.some((id) => !active.has(id))) out.add(`${name} names someone who is no longer on the team.`);
+      } else if (n.type === 'notify') {
+        if (n.people.some((id) => !active.has(id))) out.add('A notification names someone who is no longer on the team.');
+      } else if (n.type === 'if') {
+        if (unsetSplit(n)) {
+          const kind = n.split?.kind;
+          out.add(kind === 'vendor' ? 'Pick the vendors on every vendor split.' : kind === 'category' ? 'Pick the categories on every category split.' : 'Pick an amount on every amount split.');
+        }
+        check(n.then);
+        check(n.otherwise);
+      }
+    }
+  };
+  check(flow);
+  if (!everyPathHasStep(flow)) out.add('Every path needs at least one approval step.');
+  return [...out];
 }
 
 // The draft stage: who must fill/confirm a bill's details before it can enter
@@ -713,4 +780,131 @@ function sanitizeFlow(raw: unknown, validIds: Set<string>, depth = 0): FlowNode[
     }
   }
   return out;
+}
+
+// ─── Test a bill (Approval rules) ───────────────────────────────────────────
+// Who a made-up bill would go to under a flow that may not be published yet,
+// by the engine's own rules for a flow of named people (compile.ts, sod.ts):
+// once anyone holds the Approver role, people whose role can't approve are
+// left out; whoever sends the bill (and so entered it) is left out of their
+// own approval unless the organisation allows it; a step left with nobody goes
+// to the Approver role holders, then the admins, then the primary admin; a
+// step that needs more people than it has left needs only those left. The
+// page writes every sentence; this says who and why.
+export type TestedStep = {
+  /** The builder node, or "built-in" for the route an organisation has before it publishes. */
+  stepId: string;
+  people: Array<{ personId: string; name: string }>;
+  /** How many of them must approve. */
+  needed: number;
+  /** Named on the step but not given it: they sent the bill, or their role can't approve. */
+  dropped: Array<{ personId: string; name: string; why: 'sent' | 'role' }>;
+  /** Who it goes to when nobody named is left. */
+  filledBy: 'approvers' | 'admins' | 'primary_admin' | null;
+  /** Nobody could approve it, so the bill would wait here. */
+  waits: boolean;
+};
+
+export async function testFlow(organizationId: string, flow: FlowNode[], sample: {
+  amountUsd: number; senderPersonId: string | null; vendorId?: string | null; category?: string | null; firstBill?: boolean | null;
+}): Promise<{ steps: TestedStep[]; builtIn: boolean; sendersMayApprove: boolean }> {
+  const people = await prisma.$queryRaw<{ id: string; name: string }[]>`
+    SELECT id, name FROM approval.people WHERE organization_id = ${organizationId}::uuid AND status = 'active'`;
+  const nameOf = new Map(people.map((p) => [p.id, p.name]));
+  const named = (personId: string) => ({ personId, name: nameOf.get(personId) ?? 'Someone' });
+  const approverHolders = (await prisma.$queryRaw<{ id: string }[]>`
+    SELECT DISTINCT p.id FROM approval.people p
+    JOIN approval.person_roles pr ON pr.person_id = p.id AND pr.role = 'approver'
+    WHERE p.organization_id = ${organizationId}::uuid AND p.status = 'active'`).map((r) => r.id);
+  const admins = await prisma.$queryRaw<{ id: string; role: string }[]>`
+    SELECT p.id, om.role FROM approval.people p
+    JOIN organization_memberships om ON om.user_id = p.user_id AND om.organization_id = p.organization_id
+    WHERE p.organization_id = ${organizationId}::uuid AND om.role IN ('primary_admin', 'admin')
+      AND om.status = 'active' AND p.status = 'active'`;
+  // compile.ts eligibleIds: nobody is held to the role until someone holds it.
+  const eligible = approverHolders.length ? new Set([...approverHolders, ...admins.map((a) => a.id)]) : null;
+
+  // sod.ts vetoRule: the sender is the requester (R1) and, here, the one who
+  // entered the bill (R2). The first rule that applies decides, and a
+  // relaxation for that person lets them through.
+  const flags = await getSodFlags(prisma, organizationId);
+  const sender = sample.senderPersonId;
+  const rule = !flags.submitterCanApprove ? 'R1' : !flags.clerkCanApprove ? 'R2' : null;
+  const senderVetoed = Boolean(sender && rule && !(await isRelaxed(prisma, organizationId, rule, sender)));
+  // The organisation's rule, for the page's footnote: can whoever sends a bill approve it?
+  const sendersMayApprove = rule === null;
+
+  // `fillEmpty`: the engine refills any step left with nobody. A step on the
+  // canvas with nobody picked is shown as such instead, since it can't be
+  // published; the built-in route's step is refilled as the engine would.
+  const resolve = (stepId: string, approvers: string[], quorum: 'all' | 'any' | number, fillEmpty = false): TestedStep => {
+    const dropped: TestedStep['dropped'] = [];
+    const kept = [...new Set(approvers)].filter((id) => {
+      if (eligible && !eligible.has(id)) dropped.push({ ...named(id), why: 'role' });
+      else if (id === sender && senderVetoed) dropped.push({ ...named(id), why: 'sent' });
+      else return true;
+      return false;
+    });
+    let filledBy: TestedStep['filledBy'] = null;
+    let acting = kept;
+    if (kept.length === 0 && (approvers.length > 0 || fillEmpty)) {
+      const notSender = (id: string) => id !== sender;
+      acting = approverHolders.filter(notSender);
+      filledBy = 'approvers';
+      if (!acting.length) {
+        acting = admins.map((a) => a.id).filter(notSender);
+        filledBy = 'admins';
+      }
+      if (!acting.length) {
+        // The engine gives the primary admin the task even when they sent the bill.
+        acting = admins.filter((a) => a.role === 'primary_admin').slice(0, 1).map((a) => a.id);
+        filledBy = 'primary_admin';
+      }
+    }
+    // Approving your own bill is refused at the moment of approving, too.
+    const able = acting.filter((id) => !(id === sender && senderVetoed));
+    const needed = acting.length === 0 ? 0 : quorum === 'all' ? acting.length : quorum === 'any' ? 1 : Math.min(quorum, acting.length);
+    return { stepId, people: acting.map(named), needed, dropped, filledBy, waits: able.length < needed || acting.length === 0 };
+  };
+
+  const steps: TestedStep[] = [];
+  if (flow.length === 0) {
+    // Nothing authored yet: the route the organisation was set up with, if it is still the one in force.
+    const set = await getPolicySet(prisma, organizationId, 'invoice');
+    const policy = set ? await getPolicy(prisma, set.default_policy_id, set.default_policy_version) : null;
+    if (!policy || policy.name !== SEED_NAME.invoice || !Array.isArray(policy.body)) {
+      return { steps, builtIn: false, sendersMayApprove };
+    }
+    const { holders, resolveSeat } = await import('./l1.js');
+    const at = new Date();
+    for (const node of policy.body as Array<Record<string, any>>) {
+      if (node?.type !== 'step') continue;
+      const targetIds = async (t: Record<string, any> | undefined): Promise<string[]> => {
+        if (t?.kind === 'person') return [String(t.personId)];
+        const seats = t?.kind === 'holders' ? await holders(prisma, t.authority, t.scope, at) : t?.kind === 'seat' ? [String(t.seatId)] : [];
+        const out: string[] = [];
+        for (const s of seats) for (const p of await resolveSeat(prisma, s, at)) out.push(p.personId);
+        return out;
+      };
+      const ids: string[] = [];
+      for (const t of Array.isArray(node.targets) ? node.targets : []) ids.push(...await targetIds(t));
+      if (ids.length === 0) ids.push(...await targetIds(node.onUnresolvable));
+      const mode = node.step?.mode === 'all' ? 'all' : node.step?.mode === 'any' ? 'any' : Number(node.step?.m ?? 1);
+      steps.push(resolve('built-in', ids, mode, true));
+    }
+    return { steps, builtIn: true, sendersMayApprove };
+  }
+
+  // The engine's walk: a split sends the bill down one path, and whatever
+  // follows the split applies after it. A split not set yet can't send it
+  // anywhere, so the walk stops there, as Test a bill does.
+  const walk = (nodes: FlowNode[]): boolean => {
+    for (const n of nodes) {
+      if (n.type === 'step') steps.push(resolve(n.id, n.approvers, n.quorum));
+      else if (n.type === 'if' && (unsetSplit(n) || !walk(splitMatches(n, sample) ? n.then : n.otherwise))) return false;
+    }
+    return true;
+  };
+  walk(flow);
+  return { steps, builtIn: false, sendersMayApprove };
 }

@@ -200,21 +200,29 @@ approvalsRouter.get('/organizations/:organizationId/my-access', asyncRoute(async
 
 // --- Approval flow builder ------------------------------------------------------
 
-const flowNodeSchema: z.ZodType<unknown> = z.lazy(() => z.discriminatedUnion('type', [
-  z.object({ id: z.string(), type: z.literal('step'), title: z.string().min(1).max(120), approvers: z.array(z.string().uuid()), quorum: z.union([z.literal('all'), z.literal('any'), z.number().int().min(1).max(20)]), purpose: z.string().max(200).nullable().optional() }),
-  z.object({
-    id: z.string(), type: z.literal('if'), amountGteUsd: z.number().min(0),
-    split: z.union([
-      z.object({ kind: z.literal('vendor'), vendorIds: z.array(z.string().uuid()).min(1).max(30), vendorNames: z.array(z.string()).max(30) }),
-      z.object({ kind: z.literal('category'), categories: z.array(z.string().min(1)).min(1).max(30) }),
-      z.object({ kind: z.literal('firstBill') }),
-    ]).nullable().optional(),
-    then: z.array(flowNodeSchema), otherwise: z.array(flowNodeSchema),
-  }),
-  z.object({ id: z.string(), type: z.literal('auto') }),
-  z.object({ id: z.string(), type: z.literal('notify'), people: z.array(z.string().uuid()) }),
-]));
-const flowSchema = z.array(flowNodeSchema).max(40);
+// The builder's rules. A draft may hold a split whose vendors or categories
+// aren't picked yet (Approval rules saves every change as it's made); what is
+// published or simulated never may.
+function flowNodeSchemaOf(draft: boolean): z.ZodType<unknown> {
+  const picked = draft ? 0 : 1;
+  const node: z.ZodType<unknown> = z.lazy(() => z.discriminatedUnion('type', [
+    z.object({ id: z.string(), type: z.literal('step'), title: z.string().min(1).max(120), approvers: z.array(z.string().uuid()), quorum: z.union([z.literal('all'), z.literal('any'), z.number().int().min(1).max(20)]), purpose: z.string().max(200).nullable().optional() }),
+    z.object({
+      id: z.string(), type: z.literal('if'), amountGteUsd: z.number().min(0),
+      split: z.union([
+        z.object({ kind: z.literal('vendor'), vendorIds: z.array(z.string().uuid()).min(picked).max(30), vendorNames: z.array(z.string()).max(30) }),
+        z.object({ kind: z.literal('category'), categories: z.array(z.string().min(1)).min(picked).max(30) }),
+        z.object({ kind: z.literal('firstBill') }),
+      ]).nullable().optional(),
+      then: z.array(node), otherwise: z.array(node),
+    }),
+    z.object({ id: z.string(), type: z.literal('auto') }),
+    z.object({ id: z.string(), type: z.literal('notify'), people: z.array(z.string().uuid()) }),
+  ]));
+  return node;
+}
+const flowSchema = z.array(flowNodeSchemaOf(false)).max(40);
+const draftFlowSchema = z.array(flowNodeSchemaOf(true)).max(40);
 
 approvalsRouter.get('/organizations/:organizationId/approvals/flow', asyncRoute(async (req, res) => {
   const { organizationId } = orgParams.parse(req.params);
@@ -238,6 +246,26 @@ approvalsRouter.post('/organizations/:organizationId/approvals/flow/simulate', a
   }).parse(req.body);
   const { simulateFlow } = await import('./flow.js');
   sendJson(res, await simulateFlow(organizationId, body.flow as never, body.sample));
+}));
+
+// Test a bill (Approval rules): who a made-up bill would go to under the rules
+// on the canvas, published or not, with the organisation's own rules applied.
+// Open to everyone who can see the rules; it changes nothing.
+approvalsRouter.post('/organizations/:organizationId/approvals/flow/test', asyncRoute(async (req, res) => {
+  const { organizationId } = orgParams.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  const body = z.object({
+    flow: draftFlowSchema,
+    sample: z.object({
+      amountUsd: z.number().min(0),
+      senderPersonId: z.string().uuid().nullable(),
+      vendorId: z.string().uuid().nullable().optional(),
+      category: z.string().max(300).nullable().optional(),
+      firstBill: z.boolean().nullable().optional(),
+    }),
+  }).parse(req.body);
+  const { testFlow } = await import('./flow.js');
+  sendJson(res, await testFlow(organizationId, body.flow as never, body.sample));
 }));
 
 approvalsRouter.post('/organizations/:organizationId/approvals/flow/assist', asyncRoute(async (req, res) => {
@@ -287,7 +315,7 @@ approvalsRouter.post('/organizations/:organizationId/approvals/flow/assist/strea
 approvalsRouter.put('/organizations/:organizationId/approvals/flow/draft', asyncRoute(async (req, res) => {
   const { organizationId } = orgParams.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
-  const body = z.object({ flow: flowSchema }).parse(req.body);
+  const body = z.object({ flow: draftFlowSchema }).parse(req.body);
   const { saveFlowDraft } = await import('./flow.js');
   await saveFlowDraft(organizationId, body.flow as never);
   sendJson(res, { ok: true });
@@ -325,14 +353,16 @@ approvalsRouter.post('/organizations/:organizationId/approvals/release/publish',
   sendJson(res, await publishReleaseConfig(organizationId, body));
 }));
 
+// Admins publish the approval rules as well as the primary admin (the
+// capability table holds this route to governance.edit). Rules that would hold
+// or misroute bills are refused with what to fix.
 approvalsRouter.post('/organizations/:organizationId/approvals/flow/publish', asyncRoute(async (req, res) => {
   const { organizationId } = orgParams.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
-  const { isPrimaryAdminRole, getOrganizationMembership } = await import('../auth/organization-access.js');
-  const membership = await getOrganizationMembership(req.auth!.userId, organizationId);
-  if (!isPrimaryAdminRole(membership?.role)) throw forbidden('Only the primary admin can publish the approval flow.');
   const body = z.object({ flow: flowSchema.min(1) }).parse(req.body);
-  const { publishFlow } = await import('./flow.js');
+  const { flowProblems, publishFlow } = await import('./flow.js');
+  const problems = await flowProblems(organizationId, body.flow as never);
+  if (problems.length) throw badRequest(problems.join(' '));
   sendJson(res, await publishFlow(organizationId, body.flow as never));
 }));
 

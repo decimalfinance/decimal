@@ -31,6 +31,7 @@ import './styles/ui/inbox.css';
 import './styles/ui/home.css';
 import './styles/ui/team.css';
 import './styles/ui/vendors.css';
+import './styles/ui/rules.css';
 
 const queryClient = new QueryClient({
   defaultOptions: {

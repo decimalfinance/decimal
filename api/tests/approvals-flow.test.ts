@@ -901,6 +901,164 @@ test('vendor and category splits route real bills, and the simulator honors samp
   assert.equal(simMiss.chain.length, 1);
 });
 
+// ---- Approval rules: who publishes, what can't be published, Test a bill -----
+
+async function send(method: string, path: string, body: unknown, token: string) {
+  const res = await fetch(`${baseUrl}${path}`, {
+    method,
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  return { status: res.status, body: await res.json().catch(() => null) as { message?: string } | null };
+}
+
+test('an admin publishes the approval rules, a member cannot, and the page learns when', async () => {
+  const { orgId, owner, a2, a3 } = await makeOrg();
+  await prisma.organizationMembership.updateMany({ where: { organizationId: orgId, userId: a2.userId }, data: { role: 'admin' } });
+  const before = await get(`/organizations/${orgId}/approvals/flow`, owner.token);
+  assert.equal(before.publishedAt, null, 'nobody has published rules, so there is no date to show');
+  assert.ok(before.categoryOptions.includes('Cloud hosting & infrastructure'), 'a category split offers what a bill line can be coded to');
+  const byUser = new Map(before.people.map((p: { user_id: string; id: string }) => [p.user_id, p.id]));
+  const flow = [{ id: 'n1', type: 'step', title: 'Finance review', approvers: [byUser.get(a3.userId)], quorum: 'any' }];
+
+  const member = await send('POST', `/organizations/${orgId}/approvals/flow/publish`, { flow }, a3.token);
+  assert.equal(member.status, 403, 'a member sees the rules but cannot change them');
+  const published = await post(`/organizations/${orgId}/approvals/flow/publish`, { flow }, a2.token);
+  assert.ok(published.version >= 1, 'an admin publishes, not only the primary admin');
+
+  const after = await get(`/organizations/${orgId}/approvals/flow`, a3.token);
+  assert.ok(after.publishedAt, 'the page says when the rules in force were published');
+  assert.ok(Math.abs(Date.now() - new Date(after.publishedAt).getTime()) < 60_000);
+});
+
+test('rules that would hold or misroute a bill are refused with what to fix, though a draft may hold them', async () => {
+  const { orgId, owner, a2, a3 } = await makeOrg();
+  const flow0 = await get(`/organizations/${orgId}/approvals/flow`, owner.token);
+  const byUser = new Map(flow0.people.map((p: { user_id: string; id: string }) => [p.user_id, p.id]));
+  const p2 = byUser.get(a2.userId) as string;
+  const p3 = byUser.get(a3.userId) as string;
+  const publish = (flow: unknown[]) => send('POST', `/organizations/${orgId}/approvals/flow/publish`, { flow }, owner.token);
+  const owners = (id: string) => ({ id, type: 'step', title: 'Owner sign-off', approvers: [p3], quorum: 'any' });
+
+  const nobody = await publish([{ id: 'n1', type: 'step', title: 'Finance review', approvers: [], quorum: 'any' }]);
+  assert.equal(nobody.status, 400);
+  assert.match(nobody.body?.message ?? '', /Pick who approves “Finance review”/);
+
+  const noAmount = await publish([
+    { id: 'n1', type: 'step', title: 'Finance review', approvers: [p2], quorum: 'any' },
+    { id: 'n2', type: 'if', amountGteUsd: 0, then: [owners('n3')], otherwise: [] },
+  ]);
+  assert.equal(noAmount.status, 400, 'a split at $0 would send every bill down Yes');
+  assert.match(noAmount.body?.message ?? '', /Pick an amount/);
+
+  const bare = await publish([{ id: 'n2', type: 'if', amountGteUsd: 5000, then: [owners('n3')], otherwise: [{ id: 'n4', type: 'auto' }] }]);
+  assert.equal(bare.status, 400, 'a bill under $5,000 would meet nobody');
+  assert.match(bare.body?.message ?? '', /Every path needs at least one approval step/);
+
+  // A step after the split stands on both of its paths.
+  const covered = await publish([
+    { id: 'n2', type: 'if', amountGteUsd: 5000, then: [owners('n3')], otherwise: [] },
+    { id: 'n5', type: 'step', title: 'Finance review', approvers: [p2], quorum: 'any' },
+  ]);
+  assert.equal(covered.status, 200);
+
+  // A draft keeps a vendor split nobody has filled in yet; publishing it is refused.
+  const unset = [
+    { id: 'n1', type: 'step', title: 'Finance review', approvers: [p2], quorum: 'any' },
+    { id: 'n2', type: 'if', amountGteUsd: 0, split: { kind: 'vendor', vendorIds: [], vendorNames: [] }, then: [owners('n3')], otherwise: [] },
+  ];
+  await put(`/organizations/${orgId}/approvals/flow/draft`, { flow: unset }, owner.token);
+  const drafted = await get(`/organizations/${orgId}/approvals/flow`, owner.token);
+  assert.equal(drafted.draft.length, 2, 'the half-made split survives a reload');
+  assert.equal((await publish(unset)).status, 400);
+
+  // Someone who has left can't approve anything.
+  await prisma.$executeRaw`UPDATE approval.people SET status = 'deactivated' WHERE id = ${p3}::uuid`;
+  const gone = await publish([owners('n1')]);
+  assert.equal(gone.status, 400);
+  assert.match(gone.body?.message ?? '', /no longer on the team/);
+});
+
+test('a published step escalates after three days, like the built-in route', async () => {
+  const { orgId, owner, a2 } = await makeOrg();
+  const flow0 = await get(`/organizations/${orgId}/approvals/flow`, owner.token);
+  const byUser = new Map(flow0.people.map((p: { user_id: string; id: string }) => [p.user_id, p.id]));
+  const p2 = byUser.get(a2.userId) as string;
+  await post(`/organizations/${orgId}/approvals/flow/publish`, { flow: [
+    { id: 'n1', type: 'step', title: 'Finance review', approvers: [p2], quorum: 'any' },
+  ] }, owner.token);
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'Tessera Labs', amount: 700, invoiceNo: 'TL-1' });
+  await bill.confirm();
+
+  const open = await prisma.$queryRaw<{ sla_deadline: Date | null }[]>`
+    SELECT t.sla_deadline FROM approval.tasks t
+    JOIN approval.approval_plans pl ON pl.id = t.plan_id
+    JOIN approval.approvables a ON a.id = pl.approvable_id
+    WHERE a.organization_id = ${orgId}::uuid AND a.type = 'invoice' AND t.state = 'open' AND t.person_id = ${p2}::uuid`;
+  assert.equal(open.length, 1);
+  const hours = (open[0]!.sla_deadline!.getTime() - Date.now()) / 3_600_000;
+  assert.ok(hours > 71 && hours <= 72, `the task is due in three days, got ${hours.toFixed(1)}h`);
+});
+
+test('Test a bill shows who a made-up bill reaches, with the organisation\'s own rules applied', async () => {
+  const { orgId, owner, a2, a3 } = await makeOrg();
+  const { assignRole } = await import('../src/approvals/roles.js');
+  await assignRole(orgId, 'approver', a2.userId);
+  const flow0 = await get(`/organizations/${orgId}/approvals/flow`, owner.token);
+  const byUser = new Map(flow0.people.map((p: { user_id: string; id: string }) => [p.user_id, p.id]));
+  const ownerP = byUser.get(owner.userId) as string;
+  const p2 = byUser.get(a2.userId) as string;
+  const p3 = byUser.get(a3.userId) as string;
+  type Tested = { stepId: string; people: Array<{ personId: string }>; needed: number; dropped: Array<{ personId: string; why: string }>; filledBy: string | null; waits: boolean };
+  const tryIt = async (flow: unknown[], sample: Record<string, unknown>, token = owner.token) =>
+    (await post(`/organizations/${orgId}/approvals/flow/test`, { flow, sample: { amountUsd: 1000, senderPersonId: ownerP, ...sample } }, token)) as
+      { steps: Tested[]; builtIn: boolean; sendersMayApprove: boolean };
+
+  // Nothing published: the built-in route, without whoever sent the bill.
+  const builtIn = await tryIt([], {});
+  assert.equal(builtIn.builtIn, true);
+  assert.equal(builtIn.sendersMayApprove, false, 'by default whoever sends a bill cannot approve it');
+  assert.equal(builtIn.steps.length, 1);
+  assert.deepEqual(builtIn.steps[0]!.people.map((p) => p.personId), [p2]);
+  assert.equal(builtIn.steps[0]!.waits, false);
+
+  const ladder = [
+    { id: 'n1', type: 'step', title: 'Finance review', approvers: [p2, p3], quorum: 'any' },
+    { id: 'n2', type: 'if', amountGteUsd: 10000, then: [{ id: 'n3', type: 'step', title: 'Owner sign-off', approvers: [ownerP], quorum: 'any' }], otherwise: [] },
+  ];
+  const small = await tryIt(ladder, { amountUsd: 5000, senderPersonId: null }, a3.token);
+  assert.deepEqual(small.steps.map((s) => s.stepId), ['n1'], 'a member can test, and a small bill skips the owner');
+  // a3 holds no approver role while someone does, so the engine leaves them out.
+  assert.deepEqual(small.steps[0]!.dropped.map((d) => [d.personId, d.why]), [[p3, 'role']]);
+  assert.deepEqual(small.steps[0]!.people.map((p) => p.personId), [p2]);
+  const big = await tryIt(ladder, { amountUsd: 15000, senderPersonId: null });
+  assert.deepEqual(big.steps.map((s) => s.stepId), ['n1', 'n3']);
+
+  // a2 sends it: they can't approve their own bill, so an admin stands in.
+  const sent = await tryIt(ladder, { amountUsd: 5000, senderPersonId: p2 });
+  assert.deepEqual(sent.steps[0]!.people.map((p) => p.personId), [ownerP]);
+  assert.equal(sent.steps[0]!.filledBy, 'admins');
+  assert.ok(sent.steps[0]!.dropped.some((d) => d.personId === p2 && d.why === 'sent'));
+
+  // The owner sends a big one: they can't sign off their own bill, so the approver stands in.
+  const own = await tryIt(ladder, { amountUsd: 15000 });
+  assert.deepEqual(own.steps[1]!.people.map((p) => p.personId), [p2]);
+  assert.equal(own.steps[1]!.filledBy, 'approvers');
+
+  // A step with nobody picked holds the bill there; it can't be published like that.
+  const empty = await tryIt([{ id: 'n1', type: 'step', title: 'Finance review', approvers: [], quorum: 'any' }], {});
+  assert.equal(empty.steps[0]!.waits, true);
+  assert.equal(empty.steps[0]!.people.length, 0);
+
+  // A split nobody has set yet can't send a bill anywhere, so the route stops there.
+  const unset = [
+    { id: 'n1', type: 'step', title: 'Finance review', approvers: [p2], quorum: 'any' },
+    { id: 'n2', type: 'if', amountGteUsd: 0, split: { kind: 'vendor', vendorIds: [], vendorNames: [] }, then: [{ id: 'n3', type: 'step', title: 'Owner sign-off', approvers: [ownerP], quorum: 'any' }], otherwise: [] },
+    { id: 'n4', type: 'step', title: 'After', approvers: [ownerP], quorum: 'any' },
+  ];
+  assert.deepEqual((await tryIt(unset, {})).steps.map((s) => s.stepId), ['n1']);
+});
+
 test('approvals signal flags a bill well above the vendor history', async () => {
   const { orgId, owner, a2, a3 } = await makeOrg();
   const flow = await get(`/organizations/${orgId}/approvals/flow`, owner.token);

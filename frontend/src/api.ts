@@ -1758,6 +1758,26 @@ export interface FlowPerson {
   can_approve: boolean;
 }
 
+/** Test a bill on Approval rules: the steps a made-up bill meets, in order. */
+export interface FlowTest {
+  steps: Array<{
+    /** The step on the canvas, or 'built-in' for the route used until rules are published. */
+    stepId: string;
+    people: Array<{ personId: string; name: string }>;
+    /** How many of `people` must approve. */
+    needed: number;
+    /** Picked for the step, but the organisation's own rules leave them out. */
+    dropped: Array<{ personId: string; name: string; why: 'sent' | 'role' }>;
+    /** Who stood in because nobody picked could approve; null when the picked people do. */
+    filledBy: 'approvers' | 'admins' | 'primary_admin' | null;
+    /** The bill would wait here: nobody picked, or nobody but the sender. */
+    waits: boolean;
+  }>;
+  builtIn: boolean;
+  /** False when whoever sends a bill can't approve it (Organisation's setting). */
+  sendersMayApprove: boolean;
+}
+
 export interface FlowSimResult {
   stuck: string | null;
   chain: Array<{ personId: string; name: string; step: string; why: string; kind: 'always' | 'added' | 'standin' }>;
@@ -1767,7 +1787,13 @@ export interface FlowSimResult {
 
 export const flowApi = {
   get(organizationId: string) {
-    return request<{ flow: FlowNode[] | null; draft?: FlowNode[] | null; people: FlowPerson[]; vendors?: Array<{ id: string; name: string }>; categoryOptions?: string[]; version: number | null }>(`/organizations/${organizationId}/approvals/flow`);
+    return request<{ flow: FlowNode[] | null; draft?: FlowNode[] | null; people: FlowPerson[]; vendors?: Array<{ id: string; name: string }>; categoryOptions?: string[]; version: number | null; publishedAt?: string | null }>(`/organizations/${organizationId}/approvals/flow`);
+  },
+  /** Test a bill: who a made-up bill would reach under `flow`, published or not. */
+  test(organizationId: string, flow: FlowNode[], sample: { amountUsd: number; senderPersonId: string | null; firstBill?: boolean | null; vendorId?: string | null; category?: string | null }) {
+    return request<FlowTest>(`/organizations/${organizationId}/approvals/flow/test`, {
+      method: 'POST', body: JSON.stringify({ flow, sample }),
+    });
   },
   simulate(organizationId: string, flow: FlowNode[], sample: { amountUsd: number; requesterPersonId: string | null; vendorId?: string | null; category?: string | null }) {
     return request<FlowSimResult>(`/organizations/${organizationId}/approvals/flow/simulate`, {

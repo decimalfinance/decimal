@@ -21,7 +21,7 @@ const ProposalRedirectPage = lazy(() => import('./pages/ProposalRedirect').then(
 const BillsPage = lazy(() => import('./pages/Bills').then((m) => ({ default: m.BillsPage })));
 const BillPage = lazy(() => import('./pages/bill/BillPage').then((m) => ({ default: m.BillPage })));
 const DocumentPage = lazy(() => import('./pages/bill/Reading').then((m) => ({ default: m.DocumentPage })));
-const FlowBuilderPage = lazy(() => import('./pages/FlowBuilder').then((m) => ({ default: m.FlowBuilderPage })));
+const ApprovalRulesPage = lazy(() => import('./pages/ApprovalRules').then((m) => ({ default: m.ApprovalRulesPage })));
 const PaymentDetailPageV2 = lazy(() => import('./pages/PaymentDetail').then((m) => ({ default: m.PaymentDetailPage })));
 const WalletsPage = lazy(() => import('./pages/Wallets').then((m) => ({ default: m.WalletsPage })));
 const VendorsPage = lazy(() => import('./pages/Vendors').then((m) => ({ default: m.VendorsPage })));
@@ -191,7 +191,7 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
               <Route path="/organizations/:organizationId/vaults/:treasuryWalletId" element={<Legacy><VaultDetailPage /></Legacy>} />
               <Route path="/organizations/:organizationId/proposals" element={<Legacy><OrganizationProposalsPage session={session} /></Legacy>} />
               <Route path="/organizations/:organizationId/approvals" element={<Legacy><ApprovalsPage /></Legacy>} />
-              <Route path="/organizations/:organizationId/approval-flow" element={<Legacy><FlowBuilderPage session={session} /></Legacy>} />
+              <Route path="/organizations/:organizationId/approval-flow" element={<ApprovalRulesPage />} />
               <Route path="/organizations/:organizationId/policies" element={<Legacy><ProtectionsPage /></Legacy>} />
               {/* Protections grew into Policies (P1) — old links land there. */}
               <Route path="/organizations/:organizationId/protections" element={<OrgRedirect to="policies" />} />

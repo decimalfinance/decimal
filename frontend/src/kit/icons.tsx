@@ -141,4 +141,70 @@ export const Icon = {
       <path d="M13.5 3.5V8H18" />
     </Stroked>
   ),
+  // Approval rules
+  plus: (p: IconProps) => (
+    <Stroked strokeWidth={3} {...p}>
+      <path d="M12 5v14M5 12h14" />
+    </Stroked>
+  ),
+  minus: (p: IconProps) => (
+    <Stroked strokeWidth={2.4} {...p}>
+      <path d="M5 12h14" />
+    </Stroked>
+  ),
+  /** A frame's corners: fit to the window. */
+  fit: (p: IconProps) => (
+    <Stroked {...p}>
+      <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+    </Stroked>
+  ),
+  /** One path becoming two: a split. */
+  fork: (p: IconProps) => (
+    <Stroked strokeWidth={2.2} {...p}>
+      <path d="M12 3v7M12 10l-6 6v5M12 10l6 6v5" />
+    </Stroked>
+  ),
+  arrowDown: (p: IconProps) => (
+    <Stroked strokeWidth={3} {...p}>
+      <path d="M12 5v14M5.5 12.5 12 19l6.5-6.5" />
+    </Stroked>
+  ),
+  person: (p: IconProps) => (
+    <Stroked {...p}>
+      <circle cx="12" cy="8" r="3.6" />
+      <path d="M4.5 20c.7-3.7 3.6-6 7.5-6s6.8 2.3 7.5 6" />
+    </Stroked>
+  ),
+  /** A tick in a ring: where a path ends. */
+  ringTick: (p: IconProps) => (
+    <Stroked strokeWidth={2.2} {...p}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="m8 12.3 2.8 2.8 5.4-5.6" />
+    </Stroked>
+  ),
+  undo: (p: IconProps) => (
+    <Stroked {...p}>
+      <path d="M9 14 4 9l5-5" />
+      <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+    </Stroked>
+  ),
+  redo: (p: IconProps) => (
+    <Stroked {...p}>
+      <path d="m15 14 5-5-5-5" />
+      <path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13" />
+    </Stroked>
+  ),
+  /** A flask: trying a bill out. */
+  flask: (p: IconProps) => (
+    <Stroked strokeWidth={1.9} {...p}>
+      <path d="M9 3h6M10 3v6.5L5.2 18a2 2 0 0 0 1.8 3h10a2 2 0 0 0 1.8-3L14 9.5V3" />
+      <path d="M7.4 15h9.2" />
+    </Stroked>
+  ),
+  lock: (p: IconProps) => (
+    <Stroked {...p}>
+      <rect x="5" y="11" width="14" height="10" rx="2" />
+      <path d="M8 11V7.5a4 4 0 0 1 8 0V11" />
+    </Stroked>
+  ),
 };

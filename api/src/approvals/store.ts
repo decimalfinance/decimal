@@ -79,8 +79,8 @@ export async function getLines(tx: Tx, approvableId: string) {
 // --- policies / plans / tasks ---------------------------------------------------
 
 export async function getPolicy(tx: Tx, id: string, version: number) {
-  const rows = await tx.$queryRaw<{ id: string; version: number; name: string; body: unknown }[]>`
-    SELECT id, version, name, body FROM approval.policies WHERE id = ${id}::uuid AND version = ${version}`;
+  const rows = await tx.$queryRaw<{ id: string; version: number; name: string; body: unknown; effective_from: Date }[]>`
+    SELECT id, version, name, body, effective_from FROM approval.policies WHERE id = ${id}::uuid AND version = ${version}`;
   return rows[0] ?? null;
 }
 

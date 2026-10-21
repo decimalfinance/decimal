@@ -15,7 +15,7 @@ import { getOrgAccess, type Capability } from '../approvals/permissions.js';
 type Need = Capability | Capability[] | null;
 const RULES: Array<{ pattern: RegExp; view: Need; act: Need }> = [
   // Pipeline configuration (simulates are POST but read-only dry runs).
-  { pattern: /^\/approvals\/(flow\/simulate|pipeline\/simulate)$/, view: 'governance.view', act: 'governance.view' },
+  { pattern: /^\/approvals\/(flow\/simulate|flow\/test|pipeline\/simulate)$/, view: 'governance.view', act: 'governance.view' },
   { pattern: /^\/approvals\/(flow|review|release|payment-flow|separation|policy)(\/|$)/, view: 'governance.view', act: 'governance.edit' },
   // Release signing sits under approvals but moves money.
   { pattern: /^\/approvals\/[0-9a-f-]{36}\/release$/, view: 'payments.sign', act: 'payments.sign' },

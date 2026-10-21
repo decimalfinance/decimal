@@ -30,6 +30,8 @@
   --scroll-thumb: #E0DDD7;
   --grey-faint: #FAFAF8;
   --white: #FFFFFF;
+  --press: rgba(10, 10, 10, .05);   /* a small control under the pointer, on any surface */
+  --dot: #D3CFC8;                    /* the dot grid under Approval rules */
 
   /* Maroon and pinks */
   --maroon: #5C1F33;
@@ -69,6 +71,7 @@
   --yellow-edge: #EBD7A6;
   --yellow-edge-hover: #E2C98C;
   --yellow-ink: #755411;
+  --yellow-dash: #D2B670;    /* a dashed edge: something not set yet (Approval rules) */
 
   /* Status chips */
   --chip-yours: #EFE9DD;     /* your move */
@@ -130,6 +133,8 @@
   --shadow-pop: 0 18px 48px rgba(10, 10, 10, .18), 0 0 0 1px rgba(10, 10, 10, .06);
   --shadow-sheet: -16px 0 40px rgba(10, 10, 10, .12);
   --shadow-field: 0 1px 2px rgba(10, 10, 10, .04);
+  --shadow-card-hover: 0 3px 12px rgba(10, 10, 10, .08);
+  --shadow-float: 0 2px 8px rgba(10, 10, 10, .06);   /* a control resting on a canvas */
   /* Home's box, full screen: it lifts, and the page under it softens */
   --shadow-lifted: 0 24px 64px rgba(92, 31, 51, .12);
   --scrim: rgba(250, 250, 248, .55);
@@ -137,6 +142,8 @@
   /* Focus */
   --focus: 0 0 0 2px #FFFFFF, 0 0 0 4px rgba(92, 31, 51, .45);
   --focus-inset: inset 0 0 0 2px rgba(92, 31, 51, .45);
+  --ring-picked: rgba(92, 31, 51, .14);   /* round the node being edited */
+  --field-glow: rgba(92, 31, 51, .12);    /* round a field being typed in */
 
   /* Motion */
   --ease: cubic-bezier(.4, 0, .2, 1);

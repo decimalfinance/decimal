@@ -3,9 +3,11 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 /**
  * The dark toast: what just happened, in one line, with Undo when it can be
  * taken back. Five seconds, one at a time, at the bottom of the page area.
+ * `wide` is for the odd sentence that needs two lines; it stays eight.
  */
-type Toast = { id: number; text: ReactNode; undo?: () => void };
-type Toaster = { show: (text: ReactNode, options?: { undo?: () => void }) => void };
+type ToastOptions = { undo?: () => void; wide?: boolean };
+type Toast = { id: number; text: ReactNode } & ToastOptions;
+type Toaster = { show: (text: ReactNode, options?: ToastOptions) => void };
 
 const ToasterContext = createContext<{ toaster: Toaster; current: Toast | null; dismiss: () => void } | null>(null);
 
@@ -24,8 +26,8 @@ export function ToasterProvider({ children }: { children: ReactNode }) {
       show(text, options) {
         window.clearTimeout(timer.current);
         seq.current += 1;
-        setCurrent({ id: seq.current, text, undo: options?.undo });
-        timer.current = window.setTimeout(() => setCurrent(null), 5000);
+        setCurrent({ id: seq.current, text, undo: options?.undo, wide: options?.wide });
+        timer.current = window.setTimeout(() => setCurrent(null), options?.wide ? 8000 : 5000);
       },
     }),
     [],
@@ -49,7 +51,7 @@ export function ToastHost() {
   const toast = ctx?.current;
   if (!toast) return null;
   return (
-    <div key={toast.id} className="ui toast" role="status" aria-live="polite">
+    <div key={toast.id} className={`ui toast${toast.wide ? ' is-wide' : ''}`} role="status" aria-live="polite">
       <span>{toast.text}</span>
       {toast.undo ? (
         <button
