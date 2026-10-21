@@ -1,4 +1,4 @@
-import { Suspense, lazy, useMemo, type ReactNode } from 'react';
+import { Suspense, lazy, useEffect, useMemo, type ReactNode } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Shell } from './kit/Shell';
@@ -8,6 +8,7 @@ import type { AuthenticatedSession } from './api';
 import { ScreenState } from './ui-primitives';
 import { queryKeys } from './lib/app-helpers';
 import { useLiveOrgEvents } from './lib/use-live-org-events';
+import { rememberOrganization, withReturn } from './pages/signin/landing';
 
 // Lazy-loaded route pages. Each becomes its own chunk, so the main bundle
 // only ships the shell + the first matched page. Notably keeps Solana web3
@@ -37,14 +38,17 @@ const OrganizationProposalsPage = lazy(() => import('./pages/OrganizationProposa
 const SpendingLimitsPage = lazy(() => import('./pages/SpendingLimits').then((m) => ({ default: m.SpendingLimitsPage })));
 const SpendingLimitDetailPage = lazy(() => import('./pages/SpendingLimitDetail').then((m) => ({ default: m.SpendingLimitDetailPage })));
 const OrganizationProposalDetailPage = lazy(() => import('./pages/OrganizationProposalDetail').then((m) => ({ default: m.OrganizationProposalDetailPage })));
-const InviteAcceptPage = lazy(() => import('./pages/InviteAccept').then((m) => ({ default: m.InviteAcceptPage })));
-const LoginPage = lazy(() => import('./pages/auth').then((m) => ({ default: m.LoginPage })));
-const DevLoginPage = lazy(() => import('./pages/auth').then((m) => ({ default: m.DevLoginPage })));
-const RegisterPage = lazy(() => import('./pages/auth').then((m) => ({ default: m.RegisterPage })));
-const OAuthCallbackPage = lazy(() => import('./pages/auth').then((m) => ({ default: m.OAuthCallbackPage })));
-const VerifyEmailPage = lazy(() => import('./pages/auth').then((m) => ({ default: m.VerifyEmailPage })));
-const HomeRedirect = lazy(() => import('./pages/Setup').then((m) => ({ default: m.HomeRedirect })));
-const SetupPage = lazy(() => import('./pages/Setup').then((m) => ({ default: m.SetupPage })));
+const InviteAcceptPage = lazy(() => import('./pages/signin/Invite').then((m) => ({ default: m.InviteAcceptPage })));
+const LoginPage = lazy(() => import('./pages/signin/SignIn').then((m) => ({ default: m.LoginPage })));
+const DevLoginPage = lazy(() => import('./pages/signin/SignIn').then((m) => ({ default: m.DevLoginPage })));
+const RegisterPage = lazy(() => import('./pages/signin/SignIn').then((m) => ({ default: m.RegisterPage })));
+const OAuthCallbackPage = lazy(() => import('./pages/signin/SignIn').then((m) => ({ default: m.OAuthCallbackPage })));
+const VerifyEmailPage = lazy(() => import('./pages/signin/SignIn').then((m) => ({ default: m.VerifyEmailPage })));
+const HomeRedirect = lazy(() => import('./pages/signin/Organizations').then((m) => ({ default: m.HomeRedirect })));
+const CreateOrganizationPage = lazy(() => import('./pages/signin/Organizations').then((m) => ({ default: m.CreateOrganizationPage })));
+const ChooseOrganizationPage = lazy(() => import('./pages/signin/Organizations').then((m) => ({ default: m.ChooseOrganizationPage })));
+const OnwardRedirect = lazy(() => import('./pages/signin/Organizations').then((m) => ({ default: m.OnwardRedirect })));
+const SignInFrame = lazy(() => import('./pages/signin/parts').then((m) => ({ default: m.Frame })));
 const ProfilePage = lazy(() => import('./pages/Profile').then((m) => ({ default: m.ProfilePage })));
 
 const RouteFallback = () => (
@@ -93,7 +97,11 @@ export function App() {
         <Route path="/dev-login" element={<DevLoginPage />} />
         <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
         <Route path="/invites/:inviteToken" element={<InviteAcceptPage />} />
-        <Route path="/verify-email" element={<RequireSession sessionQuery={sessionQuery} />} />
+        <Route path="/verify-email" element={<RequireSession sessionQuery={sessionQuery} page={(s) => <OnwardRedirect session={s} />} />} />
+        {/* Signed in but outside the app, like Sign in: no sidebar until there
+            is an organisation to open. */}
+        <Route path="/setup" element={<RequireSession sessionQuery={sessionQuery} page={(s) => <CreateOrganizationPage session={s} />} />} />
+        <Route path="/choose-organization" element={<RequireSession sessionQuery={sessionQuery} page={(s) => <ChooseOrganizationPage session={s} />} />} />
         <Route path="/*" element={<RequireSession sessionQuery={sessionQuery} />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
@@ -116,10 +124,16 @@ function Legacy({ children }: { children: ReactNode }) {
 
 function RequireSession({
   sessionQuery,
+  page,
 }: {
   sessionQuery: ReturnType<typeof useQuery<AuthenticatedSession>>;
+  /** A signed-in page that stands outside the app frame. */
+  page?: (session: AuthenticatedSession) => ReactNode;
 }) {
+  const location = useLocation();
   if (sessionQuery.isLoading) {
+    // A page outside the app waits in its own frame, as Sign in does.
+    if (page) return <SignInFrame />;
     return <ScreenState title="Loading organization" description="Checking your session." />;
   }
 
@@ -136,14 +150,16 @@ function RequireSession({
   }
 
   if (!sessionQuery.data) {
-    return <Navigate to="/login" replace />;
+    // Signed out on the way somewhere: signing in comes back here.
+    const here = `${location.pathname}${location.search}`;
+    return <Navigate to={here === '/' || location.pathname === '/verify-email' ? '/login' : withReturn('/login', here)} replace />;
   }
 
   if (!sessionQuery.data.user.emailVerifiedAt) {
     return <VerifyEmailPage session={sessionQuery.data} />;
   }
 
-  return <AppShell session={sessionQuery.data} />;
+  return page ? <>{page(sessionQuery.data)}</> : <AppShell session={sessionQuery.data} />;
 }
 
 function AppShell({ session }: { session: AuthenticatedSession }) {
@@ -157,6 +173,10 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
   // Live updates: stream this org's changes over SSE and invalidate queries so
   // a co-signer's screen reflects a new signature/execution the instant it lands.
   useLiveOrgEvents(activeOrganizationId);
+  // Signing in again opens the organisation this browser had open last.
+  useEffect(() => {
+    if (activeOrganizationId) rememberOrganization(activeOrganizationId);
+  }, [activeOrganizationId]);
   async function logout() {
     await queryClient.cancelQueries();
     await api.logout().catch(() => undefined);
@@ -180,7 +200,6 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
           <Suspense fallback={<Legacy><RouteFallback /></Legacy>}>
             <Routes>
               <Route path="/" element={<HomeRedirect session={session} />} />
-              <Route path="/setup" element={<Legacy><SetupPage /></Legacy>} />
               <Route path="/profile" element={<Legacy><ProfilePage session={session} /></Legacy>} />
               <Route path="/organizations/:organizationId" element={<HomePage />} />
               <Route path="/organizations/:organizationId/chat/:chatId" element={<Legacy><ChatPage /></Legacy>} />

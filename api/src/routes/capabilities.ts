@@ -25,6 +25,9 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
       // False in production, where DEV_AUTH_SECRET is unset.
       developerSignIn: Boolean(config.devAuthSecret),
       developerEmailDomain: config.devAuthSecret ? 'dev.decimal.test' : null,
+      // Whether "Continue with Google" can work here. Sign in hides the
+      // button without it, rather than sending the browser to a JSON 501.
+      googleSignIn: Boolean(config.googleOAuthClientId && config.googleOAuthClientSecret),
     },
     onboarding: {
       autoProvisionWallets: config.autoProvisionWallets,

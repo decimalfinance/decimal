@@ -602,8 +602,15 @@ async function deliverVerificationCode({
     return { emailDelivered: false, devEmailVerificationCode: null };
   }
 
-  if (config.nodeEnv === 'test' || !isEmailDeliveryConfigured()) {
+  // With no email service the code comes back to the page, so a test bench
+  // can confirm an address. Never in production, where that would confirm
+  // any address for anyone: there the account waits for a working service.
+  if (config.nodeEnv === 'test' || (!isEmailDeliveryConfigured() && !config.isProduction)) {
     return { emailDelivered: false, devEmailVerificationCode: code };
+  }
+  if (!isEmailDeliveryConfigured()) {
+    logger.error('auth.verification_email_not_configured', { toEmail });
+    return { emailDelivered: false, devEmailVerificationCode: null };
   }
 
   try {

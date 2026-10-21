@@ -3,7 +3,7 @@ import { config } from '../config.js';
 const RESEND_API_URL = 'https://api.resend.com/emails';
 
 export function isEmailDeliveryConfigured() {
-  return Boolean(config.resendApiKey && config.resendFromEmail);
+  return Boolean(config.sendEmail && config.resendApiKey && config.resendFromEmail);
 }
 
 export async function sendVerificationEmail({

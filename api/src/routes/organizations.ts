@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { forbidden } from '../infra/api-errors.js';
+import { ApiError, forbidden } from '../infra/api-errors.js';
 import { assertOrganizationAccess } from '../auth/organization-access.js';
 import { ensureDefaultAutomationAgentWithWallet } from '../agents/automation.js';
 import { prisma } from '../infra/prisma.js';
@@ -29,7 +29,8 @@ async function assertOrganizationNameAvailable(organizationName: string) {
   });
 
   if (existing) {
-    throw new Error(`Organization name "${organizationName}" already exists`);
+    // Coded, so the page can say it in its own words beside the field.
+    throw new ApiError(409, 'organization_name_taken', `An organisation called "${organizationName}" already exists.`);
   }
 }
 

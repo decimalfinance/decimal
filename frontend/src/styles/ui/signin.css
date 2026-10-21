@@ -1,0 +1,260 @@
+/*
+ * Sign in and the screens around it (designs 4c and turn 7). The art takes
+ * three fifths: the orb at work with DECIMAL under it. The form is one 360px
+ * column whose title sits level with the top of the orb on every screen, so
+ * nothing jumps from one screen to the next. Everything on the form is Geist
+ * Mono. The cloudy pill is always the one thing to do; anything else is a
+ * link. Buttons have no edges: the border stays, transparent.
+ */
+.ui.si-page {
+  min-height: 100vh;
+  display: grid;
+  /* The form keeps its 360px and its margins; the art gives way. */
+  grid-template-columns: 3fr minmax(456px, 2fr);
+  background: var(--white);
+  color: var(--ink);
+  /* The boards set no alternates on Geist Mono. */
+  font-feature-settings: normal;
+}
+
+/* The art: the orb 90px above the middle, the name 150px below it. It stays
+   where it is while a long form scrolls. */
+.ui .si-art {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-bottom: 180px;
+  overflow: hidden;
+  background: var(--si-ground);
+}
+.ui .si-name {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(50% + 150px);
+  text-align: center;
+  font: 500 47px/1 var(--mono);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--maroon);
+  pointer-events: none;
+}
+
+/* The column. Its title line is 190px above the middle: the orb's top. */
+.ui .si-col {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: max(48px, calc(50vh - 190px)) 48px 48px;
+  background: var(--white);
+}
+.ui .si-form { width: 360px; max-width: 100%; }
+
+/* Too narrow for both: the form alone. */
+@media (max-width: 760px) {
+  .ui.si-page { grid-template-columns: 1fr; }
+  .ui .si-art { display: none; }
+  .ui .si-col { padding-right: 16px; padding-left: 16px; }
+}
+
+.ui .si-title {
+  text-align: center;
+  font: 500 22px/1.2 var(--mono);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.ui .si-body {
+  margin-top: 10px;
+  text-align: center;
+  font: 400 11px/1.6 var(--mono);
+  color: var(--ink-2);
+  text-wrap: balance;
+}
+/* An address or a name inside a line. */
+.ui .si-ink { color: var(--ink); }
+
+/* Who is signed in (7j): their picture and address. */
+.ui .si-who {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font: 400 11px/1.6 var(--mono);
+  color: var(--ink-2);
+}
+.ui .si-who img { width: 16px; height: 16px; flex: none; border-radius: 50%; object-fit: cover; }
+
+/* Continue with Google, in Google's colours. */
+.ui .si-google {
+  margin-top: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--si-google);
+  color: var(--ink);
+  font: 500 11.5px var(--mono);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ui .si-google svg { flex: none; }
+.ui .si-google:hover { background: var(--si-google-hover); }
+.ui .si-google[aria-busy='true'] { cursor: progress; }
+
+/* OR: two short rules, nothing below it but the first label. */
+.ui .si-or {
+  margin-top: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font: 500 9.5px/1 var(--mono);
+  letter-spacing: .08em;
+  color: var(--ink-4);
+}
+.ui .si-or::before,
+.ui .si-or::after { content: ''; width: 56px; height: 1px; flex: none; background: var(--line); }
+/* The word's last letter-space would push it off centre. */
+.ui .si-or span { margin-right: -.08em; }
+
+/* Fields: a label in caps lined up with the text inside, over a pill. */
+.ui .si-fields { margin-top: 24px; display: grid; gap: 14px; }
+.ui .si-or + .si-fields { margin-top: 0; }
+.ui .si-field { display: grid; gap: 6px; }
+.ui .si-label {
+  padding: 0 16px;
+  font: 500 9.5px/1.2 var(--mono);
+  letter-spacing: .08em;
+  color: var(--ink-2);
+}
+.ui .si-input {
+  width: 100%;
+  height: 36px;
+  padding: 0 16px;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  background: var(--white);
+  color: var(--ink);
+  font: 400 11.5px var(--mono);
+}
+.ui .si-input::placeholder { color: var(--ink-4); }
+.ui .si-input:focus { border-color: var(--maroon); box-shadow: 0 0 0 3px var(--field-glow); }
+.ui .si-input.is-error { border-color: var(--red-error-edge); }
+/* What's wrong, under the field it's about. */
+.ui .si-error {
+  padding: 0 16px;
+  font: 400 10.5px/1.45 var(--mono);
+  color: var(--red);
+  text-wrap: pretty;
+}
+/* An address the invitation fixed. */
+.ui .si-fixed {
+  height: 36px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--grey);
+  font: 400 11.5px/34px var(--mono);
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The one thing to do. */
+.ui .si-pill {
+  margin-top: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--si-pill);
+  color: var(--maroon);
+  font: 600 11.5px var(--mono);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ui .si-pill:hover { background: var(--si-pill-hover); }
+.ui .si-pill[aria-busy='true'] { cursor: progress; }
+/* Straight under a line of text rather than a field. */
+.ui .si-pill.is-far { margin-top: 24px; }
+
+/* Everything else is a link. */
+.ui .si-link {
+  padding: 0;
+  border: none;
+  background: none;
+  font: 500 10.5px/1.5 var(--mono);
+  color: var(--maroon);
+  text-decoration: underline;
+  text-decoration-color: var(--pink-300);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.ui .si-link:hover { text-decoration-color: var(--maroon); }
+.ui .si-links {
+  margin-top: 18px;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 16px;
+  font: 400 10.5px/1.5 var(--mono);
+  color: var(--ink-3);
+}
+/* Two links, one at each end. */
+.ui .si-links.is-pair { justify-content: space-between; }
+.ui .si-note {
+  margin-top: 14px;
+  text-align: center;
+  font: 400 10px/1.5 var(--mono);
+  color: var(--ink-4);
+  text-wrap: balance;
+}
+
+/* The organisation's mark over an invitation's title, above the title line. */
+.ui .si-mark { display: flex; justify-content: center; margin: -42px 0 14px; }
+.ui .org-mark.is-lg { width: 28px; height: 28px; font-size: 12px; }
+
+/* Choosing an organisation (7j): each its own capsule. */
+.ui .si-orgs { margin-top: 24px; display: grid; gap: 8px; }
+.ui .si-org {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 50px;
+  padding: 0 20px 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--white);
+  color: var(--ink-4);
+  text-align: left;
+  cursor: pointer;
+}
+.ui .si-org:hover { border-color: var(--edge); background: var(--grey); }
+.ui .si-org-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.ui .si-org-name {
+  font: 500 11.5px/1.25 var(--mono);
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ui .si-org-role { font: 400 10px/1.25 var(--mono); color: var(--ink-3); }

@@ -32,6 +32,7 @@ import './styles/ui/home.css';
 import './styles/ui/team.css';
 import './styles/ui/vendors.css';
 import './styles/ui/rules.css';
+import './styles/ui/signin.css';
 
 const queryClient = new QueryClient({
   defaultOptions: {

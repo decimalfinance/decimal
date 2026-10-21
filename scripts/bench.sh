@@ -71,6 +71,9 @@ start_api() {
     # no real RPC and no real USDC, so release-time policy is testable.
     # In-memory: re-create bench treasuries after an API restart.
     export SQUADS_FAKE_CHAIN=true
+    # The bench emails nobody. Testers make accounts for addresses no one
+    # reads, so Check your email shows the code on the page instead.
+    export SEND_EMAIL=false
     nohup npm run dev >"$RUN/api.log" 2>&1 &
     echo $! >"$RUN/api.pid"
   )

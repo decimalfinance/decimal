@@ -78,6 +78,11 @@ type DecimalConfig = {
   resendFromEmail: string;
   resendFromName: string;
   /**
+   * False on the test bench (SEND_EMAIL=false): nothing is emailed, and Check
+   * your email shows the code on the page instead. Refused in production.
+   */
+  sendEmail: boolean;
+  /**
    * OpenAI configuration for the doc-to-proposal pipeline (invoice PDFs/
    * images → structured payment rows). If the key is unset, document
    * intake returns a clear configuration error instead of failing later.
@@ -186,6 +191,7 @@ function buildConfig(): DecimalConfig {
     resendApiKey: (process.env.RESEND_API_KEY ?? '').trim(),
     resendFromEmail: (process.env.RESEND_FROM_EMAIL ?? '').trim(),
     resendFromName: (process.env.RESEND_FROM_NAME ?? 'Decimal').trim(),
+    sendEmail: (process.env.SEND_EMAIL ?? '').trim().toLowerCase() !== 'false',
     openAiApiKey: (process.env.OPENAI_API_KEY ?? '').trim(),
     openAiModel: (process.env.OPENAI_MODEL ?? fileConfig.openAiModel ?? 'gpt-6-luna').trim(),
     openAiTextModel: (process.env.OPENAI_TEXT_MODEL ?? '').trim(),
@@ -307,6 +313,15 @@ function validateConfig(nextConfig: DecimalConfig) {
 
   if (nextConfig.squadsFakeChain && nextConfig.isProduction) {
     throw new Error('SQUADS_FAKE_CHAIN is a test-bench flag and can never be enabled in production.');
+  }
+
+  if (!nextConfig.sendEmail && nextConfig.isProduction) {
+    throw new Error('SEND_EMAIL=false is a test-bench flag and can never be set in production.');
+  }
+
+  // Developer sign-in makes accounts on the testing domain already confirmed.
+  if (nextConfig.devAuthSecret && nextConfig.isProduction) {
+    throw new Error('DEV_AUTH_SECRET is a test-bench flag and can never be set in production.');
   }
 
   // Devnet-only, enforced rather than assumed. Every RPC URL is checked, so a

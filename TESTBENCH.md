@@ -59,6 +59,11 @@ org creation, invites — behaves exactly as it does for a customer.
 - **API**: registration and login are the ordinary `POST /auth/register` and
   `POST /auth/login` — a dev-domain address just comes back with
   `emailVerifiedAt` already set.
+- **Any other address** goes through Check your email, as a customer's does.
+  The bench sends no email (`SEND_EMAIL=false`, set by `scripts/bench.sh`), so
+  the page shows the six-digit code in a note and `POST /auth/register` returns
+  it as `devEmailVerificationCode`. Use `@example.test` addresses for these:
+  nobody receives mail there.
 - **Fixtures**: `POST /auth/dev/seed` `{secret, organizationName, owner, members[]}`
   builds users + org + active memberships + role bundles in one call and returns
   a session token per persona — worth it because assembling that through real

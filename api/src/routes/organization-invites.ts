@@ -320,6 +320,9 @@ function serializePublicInvite(invite: Parameters<typeof serializeInvite>[0]) {
     organizationInviteId: invite.organizationInviteId,
     invitedEmail: invite.invitedEmail,
     role: invite.role,
+    // The job a member is invited to do, which the invitation page names
+    // ("invited you to join as an approver").
+    jobRole: invite.jobRole,
     status: deriveInviteStatus(invite),
     expiresAt: invite.expiresAt.toISOString(),
     organization: invite.organization,

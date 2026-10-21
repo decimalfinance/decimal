@@ -104,6 +104,8 @@ export type PublicInvite = {
   organizationInviteId: string;
   invitedEmail: string;
   role: OrganizationInviteRole;
+  /** The job a member is invited to do (approver, bill_clerk…); null for an admin. */
+  jobRole?: string | null;
   status: OrganizationInviteStatus;
   expiresAt: string;
   organization: {
@@ -159,6 +161,8 @@ export type CapabilitiesResponse = {
     // True only on deployments that allow throwaway testing accounts.
     developerSignIn?: boolean;
     developerEmailDomain?: string | null;
+    // Whether "Continue with Google" works on this deployment.
+    googleSignIn?: boolean;
   } & Record<string, unknown>;
   apiSurface: Record<string, unknown>;
   workflows: Array<Record<string, unknown>>;
