@@ -6,7 +6,7 @@
 import { Fragment, useState, type ReactNode } from 'react';
 import type { BillCompanionNote, BillDetail } from '../../api';
 import { when } from '../../kit/format';
-import { CLOSE_REASONS, DETAIL_FIELDS, FIELD_LABELS, VENDOR_FIELDS, fieldsFrom, type Face } from './model';
+import { CLOSE_REASONS, DETAIL_FIELDS, FIELD_LABELS, VENDOR_FIELDS, duplicateOf, fieldsFrom, syncProblem, type Face } from './model';
 import { Badge, Chevron, FaceOf, Figures, dayAndTime } from './parts';
 
 type Step = { text: string; status: string };
@@ -21,7 +21,7 @@ type Item = {
   steps?: Step[];
 };
 
-const lowerFirst = (s: string) => (/^[A-Z][a-z]/.test(s) ? s[0]!.toLowerCase() + s.slice(1) : s);
+const lowerFirst = (s: string) => (/^[A-Z](?:[a-z]|\s)/.test(s) ? s[0]!.toLowerCase() + s.slice(1) : s);
 const faceOf = (name: string | null | undefined): Face | 'decimal' =>
   !name || name === 'Decimal' ? 'decimal' : { name, avatarUrl: null };
 
@@ -129,6 +129,8 @@ export function historyItems(detail: BillDetail, note: BillCompanionNote | null 
 
   const steps = detail.approval?.steps ?? [];
   const declined = steps.some((s) => s.state === 'declined');
+  const takeBacks = [...detail.recall.history, ...(detail.recall.open ? [detail.recall.open] : [])];
+  const takenBack = takeBacks.some((r) => r.state === 'granted');
   let arrived: Date | null = null;
   for (const h of [...detail.history.before, ...detail.history.after]) {
     if (!h.at) continue;
@@ -147,14 +149,19 @@ export function historyItems(detail: BillDetail, note: BillCompanionNote | null 
     } else if (h.kind === 'sent_back' && !declined) {
       push({ id: `h-back-${h.at}`, at, who, badge: 'bad', line: <><b>{name}</b> sent it back</>, plain: `${name} sent it back` });
     } else if (h.kind === 'recalled') {
+      // A take-back that was asked for is told below, with who asked and who gave it back.
+      if (takenBack || !h.person) continue;
       push({ id: `h-rec-${h.at}`, at, who, line: <><b>{name}</b> took it back to review</>, plain: `${name} took it back to review` });
     } else if (h.kind === 'cancelled') {
       // Closing settles every finding on the bill; those go into this line.
       settles({ at: h.at, byName: h.person?.name ?? null });
       const reason = CLOSE_REASONS.find((r) => r.key === detail.closed?.reason);
+      const original = reason?.key === 'duplicate' ? duplicateOf(detail)?.invoiceNumber ?? null : null;
       const what = reason && reason.key !== 'other' ? `closed it: ${lowerFirst(reason.label)}` : 'closed it';
       const said = detail.closed?.note ?? null;
-      push({ id: `h-can-${h.at}`, at, who, line: <><b>{name}</b> {what}{said ? <> {q(said)}</> : null}</>, plain: `${name} ${what}` });
+      push(original
+        ? { id: `h-can-${h.at}`, at, who, line: <><b>{name}</b> closed it: a duplicate of <span className="num">{original}</span>{said ? <> {q(said)}</> : null}</>, plain: `${name} closed it: a duplicate of ${original}` }
+        : { id: `h-can-${h.at}`, at, who, line: <><b>{name}</b> {what}{said ? <> {q(said)}</> : null}</>, plain: `${name} ${what}` });
     }
   }
 
@@ -271,12 +278,66 @@ export function historyItems(detail: BillDetail, note: BillCompanionNote | null 
     }
   }
 
+  // Taking it back: the ask, then what came of it. An admin who takes a bill
+  // back decides their own ask, and that is one line.
+  for (const r of takeBacks) {
+    const asker = faceOf(r.requestedBy);
+    const askerName = nameOf(asker);
+    const why = r.reason ? <>: {q(r.reason)}</> : null;
+    if (r.state === 'granted' && r.selfDecided) {
+      push({ id: `tb-${r.recallRequestId}`, at: new Date(r.decidedAt ?? r.requestedAt), who: asker, line: <><b>{askerName}</b> took it back to review{why}</>, plain: `${askerName} took it back to review` });
+      continue;
+    }
+    push({
+      id: `tb-${r.recallRequestId}`, at: new Date(r.requestedAt), who: asker,
+      line: <><b>{askerName}</b> asked to take it back{why}</>,
+      plain: `${askerName} asked to take it back`,
+      sub: r.state === 'pending' ? 'An admin decides' : undefined,
+    });
+    if (!r.decidedAt || r.state === 'pending') continue;
+    const at = new Date(r.decidedAt);
+    const id = `tbd-${r.recallRequestId}`;
+    if (r.state === 'withdrawn') {
+      push({ id, at, who: asker, line: <><b>{askerName}</b> withdrew the ask</>, plain: `${askerName} withdrew the ask` });
+    } else {
+      const decider = faceOf(r.decidedBy);
+      const name = nameOf(decider);
+      const note = r.decisionNote ? <>: {q(r.decisionNote)}</> : null;
+      push(r.state === 'granted'
+        ? { id, at, who: decider, line: <><b>{name}</b> gave it back to review{note}</>, plain: `${name} gave it back to review` }
+        : { id, at, who: decider, line: <><b>{name}</b> kept it in approval{note}</>, plain: `${name} kept it in approval` });
+    }
+  }
+
+  // QuickBooks, once the bill is approved: Decimal posts it, or says why it couldn't.
+  const posting = detail.posting;
+  if (posting?.status === 'posted') {
+    push({ id: 'h-qb', at: new Date(posting.at), who: 'decimal', badge: 'good', line: <><b>Decimal agent</b> synced it to QuickBooks</>, plain: 'Decimal agent synced it to QuickBooks' });
+  } else if (posting?.status === 'failed') {
+    const why = syncProblem(posting.error);
+    push({
+      id: 'h-qb', at: new Date(posting.at), who: 'decimal', badge: 'bad',
+      line: <><b>Decimal agent</b> couldn’t sync it to QuickBooks{why ? `: ${why}` : null}</>,
+      plain: 'Decimal agent couldn’t sync it to QuickBooks',
+      sub: posting.retrying ? 'Tries again by itself' : undefined,
+    });
+  }
+
   return items.sort((a, b) => a.at.getTime() - b.at.getTime());
 }
 
-export function History({ detail, note }: { detail: BillDetail; note: BillCompanionNote | null | undefined }) {
+export function History({
+  detail,
+  note,
+  startOpen = false,
+}: {
+  detail: BillDetail;
+  note: BillCompanionNote | null | undefined;
+  /** Open from the start: on a bill past review, where it is half the story. */
+  startOpen?: boolean;
+}) {
   const items = historyItems(detail, note);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(startOpen);
   const [stepsOpen, setStepsOpen] = useState<Record<string, boolean>>({});
   if (items.length === 0) return null;
   const latest = items[items.length - 1]!;

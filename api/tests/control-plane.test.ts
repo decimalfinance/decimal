@@ -527,6 +527,11 @@ test('dev seed builds a whole org — users, memberships, roles, sessions — in
     assert.equal(asOwner.status, 200);
     assert.equal((await asOwner.json()).user.email, 'zaid@dev.decimal.test');
 
+    // A seeded person later signs up through the ordinary page, which claims
+    // the account. The page sends no name, and the seeded one stays.
+    const claimed = await post('/auth/register', { email: 'ana@dev.decimal.test', password: 'claimed-by-ana' });
+    assert.equal(claimed.user.displayName, 'Ana Admin', 'claiming keeps the seeded name');
+
     // Same name twice → clear conflict, not a half-seeded org.
     const dupe = await fetch(`${baseUrl}/auth/dev/seed`, {
       method: 'POST',

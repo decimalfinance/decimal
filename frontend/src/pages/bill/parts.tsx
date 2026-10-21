@@ -10,16 +10,16 @@ import { figureParts, type Face } from './model';
 export function Mark({ tone, size = 14 }: { tone: 'ok' | 'bad' | 'warn'; size?: number }) {
   if (tone === 'warn') {
     return (
-      <svg width={size} height={size} viewBox="2 2 20 20" aria-hidden style={{ display: 'block', flex: 'none' }}>
-        <circle cx="12" cy="12" r="10" fill="#FACC15" />
-        <rect x="11" y="7" width="2" height="6" fill="#1A1A1A" />
-        <rect x="11" y="15" width="2" height="2" fill="#1A1A1A" />
+      <svg className="bp-warn-mark" width={size} height={size} viewBox="2 2 20 20" aria-hidden>
+        <circle cx="12" cy="12" r="10" />
+        <rect x="11" y="7" width="2" height="6" />
+        <rect x="11" y="15" width="2" height="2" />
       </svg>
     );
   }
   return (
     <span className={`bp-point-mark ${tone === 'ok' ? 'is-ok' : 'is-bad'}`} style={{ width: size, height: size }}>
-      <svg width={Math.round(size * 0.64)} height={Math.round(size * 0.64)} viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth={3.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <svg width={Math.round(size * 0.64)} height={Math.round(size * 0.64)} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         {tone === 'ok' ? <path d="m5 12.5 4.5 4.5L19 7.5" /> : <path d="M7 7l10 10M17 7 7 17" />}
       </svg>
     </span>
@@ -30,7 +30,7 @@ export function Mark({ tone, size = 14 }: { tone: 'ok' | 'bad' | 'warn'; size?: 
 export function Badge({ good }: { good: boolean }) {
   return (
     <span className={`bp-badge ${good ? 'is-good' : 'is-bad'}`}>
-      <svg width="6" height="6" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth={4} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <svg width="6" height="6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={4} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         {good ? <path d="m5.5 12.5 4 4 9-9" /> : <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />}
       </svg>
     </span>

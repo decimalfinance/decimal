@@ -640,7 +640,7 @@ function Tile({
                   onClick={() => onToggle(p.key)}
                 >
                   <span className="bl-box">
-                    <Icon.tick size={9} strokeWidth={3.4} style={{ color: '#FFFFFF' }} />
+                    <Icon.tick size={9} strokeWidth={3.4} />
                   </span>
                   <span className="bl-part-label">
                     {p.people ? (

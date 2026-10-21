@@ -1704,7 +1704,8 @@ export interface BillDetail {
     at: string | null;
   } | null;
   /** How far QuickBooks got with an approved bill. */
-  posting: { status: 'posted' | 'failed' | 'pending'; at: string; error: string | null } | null;
+  /** `retrying`: a failed post the sweep will still try again by itself. */
+  posting: { status: 'posted' | 'failed' | 'pending'; at: string; error: string | null; retrying: boolean } | null;
   approval: {
     approvableId: string;
     macroState: string;

@@ -1,7 +1,7 @@
 // What a bill's page works from, with no React in it: the fields and lines as
 // the person edits them, the body that saving and sending carry, what still
 // stands between the bill and approval, and the words the header uses.
-import type { BillDetail, BillDraft, BillDraftField, BillDraftLine, ConfirmBillBody, DocSource } from '../../api';
+import type { BillDetail, BillDetailStepNode, BillDraft, BillDraftField, BillDraftLine, ConfirmBillBody, DocSource } from '../../api';
 import { calendarDay, firstName, usd } from '../../kit/format';
 
 export type Flag = BillDraft['flags'][number];
@@ -330,6 +330,55 @@ export function waitingOn(detail: BillDetail): Face[] {
   return now.map((s) => ({ name: s.person!.name, avatarUrl: s.person!.avatarUrl }));
 }
 
+/** The approval's steps in order, each with the people on it. */
+export function stepGroups(detail: BillDetail): Array<{ index: number; steps: BillDetailStepNode[] }> {
+  const groups = new Map<number, BillDetailStepNode[]>();
+  for (const s of detail.approval?.steps ?? []) {
+    if (!s.person) continue;
+    const g = groups.get(s.stepIndex);
+    if (g) g.push(s);
+    else groups.set(s.stepIndex, [s]);
+  }
+  return [...groups.entries()].sort((a, b) => a[0] - b[0]).map(([index, steps]) => ({ index, steps }));
+}
+
+/**
+ * What QuickBooks objected to, as one clause: the first sentence of the
+ * sync's error, names in curly quotes. The rest is the old screens' remedy,
+ * which this page gives in its own words.
+ */
+export function syncProblem(error: string | null): string | null {
+  if (!error?.trim()) return null;
+  return firstSentence(error).replace(/[.!]\s*$/, '').replace(/"([^"]*)"/g, '“$1”');
+}
+
+/** A message's first sentence: what was found, without the advice that follows it. */
+export function firstSentence(text: string): string {
+  return text.trim().split(/(?<=[.!?])\s+(?=[A-Z"“])/)[0]!;
+}
+
+/** The bill a duplicate copies: from the exception agent's brief, else from the flag. */
+export function duplicateOf(detail: BillDetail): { paymentOrderId: string | null; invoiceNumber: string | null } | null {
+  const flag = detail.draft.flags.find((f) => f.kind === 'possible_duplicate');
+  if (!flag) return null;
+  const other = flag.brief?.otherBill ?? null;
+  const paymentOrderId = other?.paymentOrderId ?? flag.resolutions.find((r) => r.targetId)?.targetId ?? null;
+  const invoiceNumber = other?.invoiceNumber ?? /duplicate of (?:invoice )?([A-Z0-9][\w-]*)/i.exec(flag.message)?.[1] ?? null;
+  return paymentOrderId || invoiceNumber ? { paymentOrderId, invoiceNumber } : null;
+}
+
+/** The approval states a bill is still in approval for. */
+const OPEN_APPROVAL = ['pending_approval', 'returned_for_info', 'on_hold'];
+
+/** Still with its approvers: someone's step is open, or the approval hasn't finished. */
+export function inApproval(detail: BillDetail): boolean {
+  if (detail.draft.state === 'draft' || detail.draft.state === 'cancelled') return false;
+  return waitingOn(detail).length > 0 || OPEN_APPROVAL.includes(detail.approval?.macroState ?? '');
+}
+
+/** The sender asked to take it back and an admin hasn't answered. */
+export const takeBackAsked = (detail: BillDetail) => (detail.recall.open?.state === 'pending' ? detail.recall.open : null);
+
 /** The stage word and the chip after it, as the Bills list would show this bill. */
 export function headerOf(detail: BillDetail, fields: Fields): { stage: Stage; stageText: string; chip: { text: string; tone: ChipTone } | null } {
   const draft = detail.draft;
@@ -345,22 +394,19 @@ export function headerOf(detail: BillDetail, fields: Fields): { stage: Stage; st
       : { text: 'Checked', tone: 'checked' as const };
     return { stage: 'review', stageText: 'In review', chip };
   }
-  if (draft.state === 'cancelled') {
-    const why = CLOSE_REASONS.find((r) => r.key === detail.closed?.reason);
-    return { stage: 'done', stageText: 'Closed', chip: { text: why && why.key !== 'other' ? `Closed · ${why.short}` : 'Closed', tone: 'finished' } };
+  // Closed is finished: the reason is in the closed box, not the chip.
+  if (draft.state === 'cancelled') return { stage: 'done', stageText: 'Done', chip: { text: 'Closed', tone: 'finished' } };
+  if (inApproval(detail)) {
+    const people = waitingOn(detail);
+    const approval = (text: string, tone: ChipTone) => ({ stage: 'approval' as const, stageText: 'In approval', chip: { text, tone } });
+    if (takeBackAsked(detail)) return approval('On hold', 'waiting');
+    if (detail.viewer.openTaskId) return approval('Waiting on you', 'yours');
+    if (draft.questions.some((q) => q.youWereAsked && q.stillOpen)) return approval('Question for you', 'yours');
+    if (people.length > 0) return approval(`Waiting on ${people.map((p) => (people.length > 1 ? firstName(p.name) : p.name)).join(' or ')}`, 'waiting');
+    return approval(detail.status.subStatus.text, 'finished');
   }
-  const people = waitingOn(detail);
-  if (people.length > 0 || detail.approval?.macroState === 'pending') {
-    const forYou = draft.questions.some((q) => q.youWereAsked && q.stillOpen);
-    if (forYou) return { stage: 'approval', stageText: 'In approval', chip: { text: 'Question for you', tone: 'yours' } };
-    if (detail.viewer.openTaskId) return { stage: 'approval', stageText: 'In approval', chip: { text: 'Your approval', tone: 'yours' } };
-    if (people.length > 0) {
-      return { stage: 'approval', stageText: 'In approval', chip: { text: `Waiting on ${people.map((p) => (people.length > 1 ? firstName(p.name) : p.name)).join(' or ')}`, tone: 'waiting' } };
-    }
-    return { stage: 'approval', stageText: 'In approval', chip: { text: detail.status.subStatus.text, tone: 'finished' } };
-  }
-  if (detail.posting?.status === 'failed') return { stage: 'done', stageText: 'Done', chip: { text: 'Couldn’t sync', tone: 'blocking' } };
-  if (detail.posting?.status === 'posted') return { stage: 'done', stageText: 'Done', chip: null };
+  // QuickBooks says how far it got in a tag of its own, not a chip.
+  if (detail.posting) return { stage: 'done', stageText: 'Done', chip: null };
   if (draft.state === 'executed' || draft.state === 'settled') return { stage: 'done', stageText: 'Done', chip: { text: 'Paid', tone: 'finished' } };
   return { stage: 'done', stageText: 'Done', chip: { text: 'Approved', tone: 'finished' } };
 }

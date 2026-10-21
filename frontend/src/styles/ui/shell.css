@@ -84,7 +84,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #FFFFFF;
+  color: var(--white);
   font: 600 9.5px var(--font);
   letter-spacing: .02em;
 }
@@ -128,7 +128,7 @@
   padding: 0 5px;
   border-radius: 999px;
   background: var(--maroon);
-  color: #FFFFFF;
+  color: var(--white);
   font: 600 10px/1 var(--mono);
   font-variant-numeric: tabular-nums lining-nums;
   letter-spacing: -.01em;
@@ -276,7 +276,7 @@
   padding: 0 4px;
   border-radius: 999px;
   background: var(--maroon);
-  color: #FFFFFF;
+  color: var(--white);
   font: 600 8.5px/1 var(--mono);
   font-variant-numeric: tabular-nums lining-nums;
   letter-spacing: -.01em;
@@ -309,7 +309,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #FFFFFF;
+  color: var(--white);
   font: 600 7px/1 var(--font);
   letter-spacing: .02em;
 }

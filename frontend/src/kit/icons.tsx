@@ -127,4 +127,10 @@ export const Icon = {
       <path d="M6 6l12 12M18 6 6 18" />
     </Stroked>
   ),
+  file: (p: IconProps) => (
+    <Stroked strokeWidth={1.9} {...p}>
+      <path d="M7 3.5h6.5L18 8v11.5a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1z" />
+      <path d="M13.5 3.5V8H18" />
+    </Stroked>
+  ),
 };

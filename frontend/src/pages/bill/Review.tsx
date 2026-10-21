@@ -6,19 +6,23 @@
 // The same page while Decimal reads the bill (5r): its parts land in order as
 // the reading arrives, and nothing can be changed or sent until it's done. And
 // a bill nothing could be read from (5u): every box says "Not read", the file
-// sits faded, and the person removes it or enters the details by hand.
+// sits faded, and the person removes it or enters the details by hand. And a
+// bill sent back (5e): the route it came back by, and why, above Decimal's box.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router';
 import { billsApi, type BillCompanionNote, type BillDetail, type ConfirmBillBody, type DocSource } from '../../api';
+import { Avatar } from '../../kit/Avatar';
 import { useToaster } from '../../kit/Toast';
 import { ago, calendarDay, daysPast, fileSize, stamp, usd } from '../../kit/format';
 import { AgentBox } from './AgentBox';
+import { Chain, chainOf } from './Chain';
 import { DocPane, Separator, useDocWidth } from './DocPane';
 import { FieldBox, lookOf } from './Fields';
 import type { Access, OpenCard } from './Findings';
 import { History } from './History';
 import { LineItems } from './Lines';
+import { Figures } from './parts';
 import {
   DETAIL_FIELDS,
   DISCOUNT_FIELD,
@@ -173,7 +177,29 @@ export function Review({
   const chip: { text: string; tone: ChipTone } | null = couldntRead ? { text: 'Couldn’t be read', tone: 'blocking' }
     // Typed in by hand, nothing about it is "checked" yet.
     : unreadable && header.chip?.tone === 'checked' ? { text: 'Needs a check', tone: 'yours' }
+    // Sent back is the reviewer's to act on; for anyone else it only waits.
+    : header.chip?.text === 'Sent back' && !editable ? { text: 'Sent back', tone: 'waiting' }
     : header.chip;
+
+  // Sent back (5e): the route it came back by, and the reason, above Decimal's box.
+  const sentBack = draft.sentBack;
+  const backStep = detail.approval?.steps.find((s) => s.state === 'declined' && s.person) ?? null;
+  const backNodes = useMemo(() => (sentBack && backStep ? chainOf(detail, { sentBack: true }) : []), [detail, sentBack, backStep]);
+  const backBy: Face | null = !sentBack ? null
+    : backStep?.person && (!sentBack.byName || backStep.person.name === sentBack.byName) ? { name: backStep.person.name, avatarUrl: backStep.person.avatarUrl }
+    : sentBack.byName ? { name: sentBack.byName, avatarUrl: null }
+    : null;
+  const youSentItBack = Boolean(sentBack && (backStep?.person?.personId === detail.viewer.personId || sentBack.byName === detail.viewer.name));
+  const sentBefore = [...detail.history.before, ...detail.history.after].some((h) => h.kind === 'submitted');
+  const routeBack = sentBack && backBy ? (
+    <div className="bp-route is-back">
+      {backNodes.length > 0 ? <Chain nodes={backNodes} /> : null}
+      <div className="bp-route-said">
+        <Avatar name={backBy.name} src={backBy.avatarUrl} size={14} />
+        {sentBack.reason ? <><b>{backBy.name}:</b> <Figures text={sentBack.reason} /></> : <><b>{backBy.name}</b> sent it back.</>}
+      </div>
+    </div>
+  ) : null;
   const findings = findingsOf(draft);
   const tax = parseMoney(fields.taxAmount?.value) ?? 0;
   const total = parseMoney(fields.total?.value);
@@ -325,6 +351,7 @@ export function Review({
             onSaveNow={() => save(body)}
             onChanged={refreshAround}
             lead={lead}
+            above={isReading || couldntRead ? null : routeBack}
           />
 
           <div className="bp-sec is-first">
@@ -404,9 +431,10 @@ export function Review({
           </span>
         ) : (
           <span className="bp-foot-note">
-            {draft.state === 'draft' && draft.readOnlyReason === 'not_your_job'
-              ? 'Only the people who check bills can change it.'
-              : detail.status.subStatus.text}
+            {youSentItBack ? 'You sent it back for review'
+              : draft.state === 'draft' && draft.readOnlyReason === 'not_your_job'
+                ? 'Only the people who check bills can change it.'
+                : detail.status.subStatus.text}
           </span>
         )}
         <span className="bp-foot-gap" />
@@ -420,7 +448,7 @@ export function Review({
             </span>
             {gap ? <span className="bp-foot-note">{gap}</span> : null}
             <button type="button" className="btn is-primary" disabled={Boolean(gap) || sending} onClick={() => void send()}>
-              Send for approval
+              {sentBefore ? 'Send for approval again' : 'Send for approval'}
             </button>
           </>
         ) : null}

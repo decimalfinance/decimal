@@ -103,7 +103,10 @@ authRouter.post('/auth/register', async (req, res, next) => {
         where: { userId: existing.userId },
         data: {
           passwordHash,
-          displayName,
+          // A seeded or invited account keeps the name it was given, unless
+          // the person typed one: the dev sign-in page sends none, and its
+          // people became "leah.morgan" on every screen.
+          displayName: normalizeOptionalDisplayName(input.displayName) ?? (existing.displayName || displayName),
         },
       });
     } else if (isDeveloperEmail(email)) {

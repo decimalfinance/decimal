@@ -135,7 +135,7 @@
 .ui .bp-row + .bp-row,
 .ui .bp-thread > .bp-row { margin-top: 12px; }
 .ui .bp-face { position: relative; display: flex; padding-top: 1px; }
-.ui .bp-face .avatar { box-shadow: 0 0 0 1px #FFFFFF; }
+.ui .bp-face .avatar { box-shadow: 0 0 0 1px var(--white); }
 .ui .bp-said { display: grid; gap: 2px; min-width: 0; }
 .ui .bp-agent > .bp-row > .bp-said { padding-right: 22px; }
 .ui .bp-who { display: flex; align-items: baseline; gap: 8px; line-height: 1.3; }
@@ -159,9 +159,13 @@
   align-items: center;
   justify-content: center;
   transform: translateY(.5px);
+  color: var(--white);
 }
 .ui .bp-point-mark.is-ok { background: var(--green-2); }
 .ui .bp-point-mark.is-bad { background: var(--red-2); }
+.ui .bp-warn-mark { display: block; flex: none; }
+.ui .bp-warn-mark circle { fill: var(--yellow); }
+.ui .bp-warn-mark rect { fill: var(--ink); }
 .ui .bp-point-text { font: 400 11px/1.45 var(--font); color: var(--ink); text-wrap: pretty; }
 .ui .bp-point-text a { color: var(--maroon); text-decoration: underline; text-decoration-color: var(--pink-300); text-underline-offset: 3px; }
 .ui .bp-reason { margin-top: 8px; font: 400 11px/1.45 var(--font); color: var(--pink-600); text-wrap: pretty; }
@@ -196,8 +200,8 @@
   align-items: center;
   justify-content: center;
   font: 600 9px/1 var(--mono);
-  color: #FFFFFF;
-  box-shadow: 0 0 0 1px #FFFFFF;
+  color: var(--white);
+  box-shadow: 0 0 0 1px var(--white);
 }
 .ui .bp-fcard-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; font: 400 11.5px/16px var(--font); color: var(--ink); }
 .ui .bp-fcard-title b { flex: none; font-weight: 600; }
@@ -233,7 +237,7 @@
 }
 .ui .bp-act:hover { background: var(--grey); border-color: var(--edge); }
 .ui .bp-act.is-open { border-color: var(--maroon); font-weight: 600; }
-.ui .bp-act.is-primary { border-color: var(--maroon); background: var(--maroon); color: #FFFFFF; }
+.ui .bp-act.is-primary { border-color: var(--maroon); background: var(--maroon); color: var(--white); }
 .ui .bp-act.is-primary:hover { border-color: var(--maroon-hover); background: var(--maroon-hover); }
 .ui .bp-act.is-off,
 .ui .bp-act.is-off:hover { border-color: var(--line); background: var(--grey); color: var(--ink-4); cursor: not-allowed; }
@@ -271,7 +275,7 @@
   cursor: pointer;
 }
 .ui .bp-pill:hover { background: var(--grey); color: var(--ink); }
-.ui .bp-pill.is-primary { border-color: var(--maroon); background: var(--maroon); color: #FFFFFF; }
+.ui .bp-pill.is-primary { border-color: var(--maroon); background: var(--maroon); color: var(--white); }
 .ui .bp-pill.is-primary:hover { border-color: var(--maroon-hover); background: var(--maroon-hover); }
 .ui .bp-pill.is-white { border-color: var(--edge); background: var(--white); color: var(--ink); }
 .ui .bp-pill.is-white:hover { background: var(--grey); }
@@ -344,7 +348,7 @@
 .ui .bp-reply { position: relative; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .ui .bp-reply.has-acts { margin-top: 14px; }
 .ui .bp-reply-me { flex: 1 1 260px; min-width: 0; display: flex; align-items: center; gap: 8px; }
-.ui .bp-reply-me .avatar { box-shadow: 0 0 0 1px #FFFFFF; }
+.ui .bp-reply-me .avatar { box-shadow: 0 0 0 1px var(--white); }
 .ui .bp-reply-field {
   flex: 1;
   min-width: 0;
@@ -380,7 +384,7 @@
   border: 0;
   border-radius: 50%;
   background: var(--maroon);
-  color: #FFFFFF;
+  color: var(--white);
   cursor: pointer;
 }
 .ui .bp-send:hover { background: var(--maroon-hover); }
@@ -395,7 +399,7 @@
   border: 0;
   border-radius: 999px;
   background: var(--maroon);
-  color: #FFFFFF;
+  color: var(--white);
   font: 500 10.5px var(--font);
   white-space: nowrap;
   cursor: pointer;
@@ -646,7 +650,7 @@
   padding: 5px 9px;
   border-radius: 6px;
   background: var(--dark);
-  color: #FFFFFF;
+  color: var(--white);
   font: 400 10.5px/1.35 var(--font);
   white-space: nowrap;
   box-shadow: var(--shadow-tip);
@@ -722,7 +726,7 @@
 .ui .bp-hist-list { margin-top: 10px; display: grid; gap: 12px; }
 .ui .bp-hist-item { display: grid; grid-template-columns: 16px minmax(0, 1fr) max-content; column-gap: 10px; align-items: start; }
 .ui .bp-hist-face { position: relative; display: flex; width: 16px; height: 16px; }
-.ui .bp-hist-face .avatar { box-shadow: 0 0 0 1px #FFFFFF; }
+.ui .bp-hist-face .avatar { box-shadow: 0 0 0 1px var(--white); }
 .ui .bp-badge {
   position: absolute;
   right: -3px;
@@ -730,10 +734,11 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  box-shadow: 0 0 0 1.5px #FFFFFF;
+  box-shadow: 0 0 0 1.5px var(--white);
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  color: var(--white);
 }
 .ui .bp-badge.is-good { background: var(--green-2); }
 .ui .bp-badge.is-bad { background: var(--red-2); }
@@ -828,7 +833,22 @@
 .ui .bp-zoom-btn:disabled { opacity: .45; cursor: default; }
 .ui .bp-zoom-btn.is-on { background: var(--grey); }
 .ui .bp-zoom-pct { min-width: 32px; text-align: center; }
-.ui .bp-doc-close { margin-left: 4px; }
+.ui .bp-doc-close {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin-left: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.ui .bp-doc-close:hover { background: var(--grey); color: var(--ink); }
 .ui .bp-ground { flex: 1 1 0%; min-height: 0; overflow: auto; background: var(--grey); padding: 8px; display: grid; align-content: start; justify-items: center; gap: 8px; }
 .ui .bp-page { position: relative; background: var(--white); box-shadow: rgba(10, 10, 10, .12) 0 1px 8px; }
 .ui .bp-page img { display: block; width: 100%; height: auto; }
@@ -879,6 +899,8 @@
 .ui .bp-tipwrap .tip { bottom: calc(100% + 6px); right: 0; }
 .ui .btn[aria-disabled='true'],
 .ui .btn[aria-disabled='true']:hover { background: transparent; color: var(--ink-4); cursor: not-allowed; }
+.ui .btn.is-primary[aria-disabled='true'],
+.ui .btn.is-primary[aria-disabled='true']:hover { border-color: var(--line); background: var(--grey); }
 .ui .bp-loading { width: 160px; height: 18px; border-radius: 4px; background: var(--grey); animation: ui-breathe 1.6s ease-in-out infinite; }
 
 /* A question put to you and still open (5c, 58a): the asker's message on the
@@ -917,3 +939,238 @@
 .ui .bp-askcard-sent { display: inline-flex; align-items: center; gap: 6px; font: 500 11px var(--font); color: var(--green); }
 .ui .bp-askcard-tick { width: 14px; height: 14px; flex: none; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--green-2); color: var(--white); }
 .ui .bp-askcard-time { font: 400 10px var(--font); color: var(--ink-4); }
+
+/* ── A bill past review (5d to 5h): read, not edited ─────── */
+/* Two columns: the route and the facts on the left, Decimal and History on
+   the right. The document opens over the page from the breadcrumb. */
+.ui.bp { position: relative; }
+.ui .bp-rec { margin-top: 14px; padding-bottom: 16px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 24px; align-items: start; }
+.ui .bp-rec-col { min-width: 0; display: flex; flex-direction: column; }
+.ui .bp-rec-col > .bp-hist { margin-top: 18px; }
+.ui .bp-rec-col > .bp-agentwrap { margin-top: 0; padding-bottom: 0; }
+/* The route back to review sits above Decimal's box, in the same block (5e). */
+.ui .bp-agentwrap > .bp-above { margin-bottom: 8px; min-width: 0; }
+/* What can be done about Decimal's message, under it (5g). */
+.ui .bp-acts.is-lead { margin-top: 8px; justify-content: flex-start; gap: 6px; }
+.ui .bp-ro { margin-top: 26px; min-width: 0; }
+.ui .bp-ro.is-first { margin-top: 18px; }
+.ui .bp-rec-col > .bp-ro:first-child { margin-top: 0; }
+.ui .bp-ro-title { margin-bottom: 10px; font: 600 13px/1.3 var(--font); letter-spacing: -.01em; color: var(--ink); }
+
+/* From and Details: labels and values, two pairs a row, no boxes. */
+.ui .bp-kv { display: inline-grid; grid-template-columns: max-content max-content 24px max-content max-content; column-gap: 20px; row-gap: 2px; align-items: baseline; }
+.ui .bp-kv-k { font: 400 10.5px/20px var(--font); color: var(--ink-3); white-space: nowrap; }
+.ui .bp-kv-v { font: 400 11.5px/20px var(--font); color: var(--ink); white-space: nowrap; }
+.ui .bp-kv-v.is-none { color: var(--ink-4); }
+.ui .bp-kv-now { font-weight: 600; }
+.ui .bp-kv-was { margin-left: 6px; font: 10.5px var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -.01em; color: var(--ink-4); text-decoration: line-through; text-decoration-color: var(--edge-hover); }
+.ui .bp-kv-v .avatar { margin-left: 6px; vertical-align: -2px; }
+/* A note over a read-only value while the pointer rests on it. */
+.ui .bp-hover { position: relative; display: inline-block; white-space: nowrap; cursor: default; }
+.ui .bp-note-tip.is-above { top: auto; bottom: calc(100% + 7px); z-index: 3; padding: 5px 9px 5px 6px; }
+.ui .bp-note-tip.is-above::before { bottom: auto; top: 100%; border-bottom-color: transparent; border-top-color: var(--dark); }
+.ui .bp-note-tip.is-mid { right: auto; left: 50%; transform: translateX(-50%); }
+.ui .bp-note-tip.is-mid::before { right: auto; left: 50%; margin-left: -4px; }
+.ui .bp-note-tip.is-end { right: -4px; }
+.ui .bp-note-tip .avatar { flex: none; }
+
+/* Line items, read: banded rows, no box, no rules between rows. */
+.ui .bp-lines-grid.is-banded .bp-lc { min-height: 28px; border-top: 0; }
+.ui .bp-lines-grid.is-banded .bp-lrow.is-head .bp-lc { min-height: 24px; }
+.ui .bp-lines-grid.is-banded .bp-lc.is-first { padding-left: 4px; }
+.ui .bp-lines-grid.is-banded .bp-lc.is-last { padding-right: 4px; }
+.ui .bp-lines-grid.is-banded .bp-lrow.is-band .bp-lc { background: var(--grey-band); }
+.ui .bp-lines-grid.is-banded .bp-lrow.is-band .bp-lc.is-first { border-radius: 4px 0 0 4px; }
+.ui .bp-lines-grid.is-banded .bp-lrow.is-band .bp-lc.is-last { border-radius: 0 4px 4px 0; }
+.ui .bp-lines-grid.is-banded .bp-ldesc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui .bp-lines-grid.is-banded .bp-lsum { font-size: 11px; color: var(--ink-3); }
+.ui .bp-lines-grid.is-banded .bp-lsum-amt { padding-right: 4px; font-size: 11px; }
+.ui .bp-lines-grid.is-banded .bp-lsum.is-top,
+.ui .bp-lines-grid.is-banded .bp-lsum-gap.is-top,
+.ui .bp-lines-grid.is-banded .bp-lsum-amt.is-top { margin-top: 6px; }
+.ui .bp-lines-grid.is-banded .bp-lsum.is-end { color: var(--ink); }
+.ui .bp-lines-grid.is-banded .bp-lsum.is-end,
+.ui .bp-lines-grid.is-banded .bp-lsum-amt.is-end { padding-bottom: 0; }
+
+/* The route: who brought the bill in, who sent it, who approves it. Beads on
+   a line; solid where it has been, dotted where it hasn't reached yet. */
+.ui .bp-route {
+  min-width: 0;
+  padding: 10px 14px 12px;
+  border: 1px solid var(--pink-200);
+  border-radius: 8px;
+  background-color: var(--pink-50);
+  background-image: var(--cloud-layers);
+  background-size: 160px 160px, 400px 400px;
+}
+.ui .bp-route.is-back { border-color: var(--beige-edge); background-color: var(--beige); background-image: var(--tex-beige); }
+/* Labels that would run into each other drop their times; History has them. */
+.ui .bp-chain.is-tight .bp-chain-time { display: none; }
+.ui .bp-chain { display: grid; grid-template-rows: 32px auto; }
+.ui .bp-chain-bead { grid-row: 1; align-self: center; position: relative; z-index: 1; display: inline-flex; }
+.ui .bp-chain-bead > span, .ui .bp-chain-pair > span { position: relative; display: inline-flex; flex: none; border-radius: 50%; }
+.ui .bp-chain-bead .avatar { box-shadow: 0 0 0 1px var(--white); }
+.ui .bp-chain-bead .is-ahead .avatar { color: var(--ink-4); }
+.ui .bp-chain-bead .is-spare .avatar { color: var(--edge-hover); }
+.ui .bp-chain-bead .bp-badge { width: 11px; height: 11px; z-index: 2; }
+.ui .bp-badge.is-back { background: var(--beige-mark); }
+/* Either of two people: two beads, the first cut where the second sits on it. */
+.ui .bp-chain-pair { display: inline-flex; align-items: center; }
+.ui .bp-chain-pair > span:first-child { background: var(--white); box-shadow: 0 0 0 1px var(--white); }
+.ui .bp-chain-pair > span:first-child .avatar { box-shadow: none; -webkit-mask-image: radial-gradient(circle at 29px 12px, transparent 12.6px, #000 13.4px); mask-image: radial-gradient(circle at 29px 12px, transparent 12.6px, #000 13.4px); }
+.ui .bp-chain-pair > span + span { margin-left: -7px; }
+.ui .bp-chain-leg { grid-row: 1; align-self: center; height: 0; border-top: 2px solid var(--maroon); }
+.ui .bp-chain-leg.is-ahead { border-top-style: dotted; border-top-color: var(--edge-hover); }
+.ui .bp-chain-label { grid-row: 2; width: 0; display: flex; justify-self: center; justify-content: center; }
+.ui .bp-chain-label > div { flex: none; text-align: center; }
+.ui .bp-chain-label.is-first { justify-self: start; justify-content: flex-start; }
+.ui .bp-chain-label.is-first > div { text-align: left; }
+.ui .bp-chain-label.is-last { justify-self: end; justify-content: flex-end; }
+.ui .bp-chain-label.is-last > div { text-align: right; }
+.ui .bp-chain-name { margin-top: 6px; display: flex; justify-content: center; align-items: baseline; gap: 5px; white-space: nowrap; font: 600 11px/1.3 var(--font); color: var(--ink); }
+.ui .bp-chain-label.is-first .bp-chain-name { justify-content: flex-start; }
+.ui .bp-chain-label.is-last .bp-chain-name { justify-content: flex-end; }
+.ui .bp-chain-name.is-ahead { color: var(--ink-4); }
+.ui .bp-chain-or,
+.ui .bp-chain-you { font-weight: 400; color: var(--ink-3); }
+.ui .bp-chain-name.is-ahead .bp-chain-or { color: var(--ink-4); }
+.ui .bp-chain-time { font: 400 10px var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -.01em; color: var(--ink-3); }
+.ui .bp-chain-cap { margin-top: 3px; line-height: 1; }
+.ui .bp-chain-cap > span { font: 600 8px/1.2 var(--mono); letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; color: var(--ink-3); }
+.ui .bp-chain-cap > span.is-turn { color: var(--maroon); }
+.ui .bp-chain-cap > span.is-ahead { color: var(--ink-4); }
+.ui .bp-chain-cap > span.is-back { color: var(--beige-ink); }
+/* What the route came to, in words under it: who sent it back and why (5e),
+   or who approved a bill they sent (62b). */
+.ui .bp-route-said:first-child { margin-top: 0; }
+.ui .bp-route-said { margin-top: 14px; font: 400 13px/1.5 var(--font); color: var(--ink); text-wrap: pretty; overflow-wrap: anywhere; }
+.ui .bp-route-said .avatar { vertical-align: middle; position: relative; top: -1px; margin-right: 6px; box-shadow: 0 0 0 1px var(--white); }
+.ui .bp-route-said b { font-weight: 600; }
+.ui .bp-route-note { margin-top: 12px; display: flex; align-items: flex-start; gap: 8px; font: 400 11px/16px var(--font); color: var(--ink); text-wrap: pretty; }
+.ui .bp-route-note .bp-point-mark { margin-top: 1px; }
+
+/* A closed bill (5h): who closed it and why, in the route's place. */
+.ui .bp-closed {
+  min-width: 0;
+  padding: 10px 14px 11px 12px;
+  border: 1px solid var(--grey-band-edge);
+  border-radius: 8px;
+  background-color: var(--grey-band);
+  background-image: var(--tex-grey);
+  background-size: 160px 160px, 400px 400px;
+}
+.ui .bp-closed-text { font: 400 13px/1.5 var(--font); color: var(--ink); text-wrap: pretty; overflow-wrap: anywhere; }
+.ui .bp-closed-text .avatar { vertical-align: middle; position: relative; top: -1px; margin-right: 6px; box-shadow: 0 0 0 1px var(--white); }
+.ui .bp-closed-text b { font-weight: 600; }
+.ui .bp-closed-text a { font-family: var(--mono); color: var(--maroon); text-decoration: underline; text-decoration-color: var(--pink-300); text-underline-offset: 3px; }
+.ui .bp-closed-said { color: var(--ink-2); }
+.ui .bp-closed-meta { display: flex; align-items: center; gap: 12px; margin-top: 4px; min-height: 22px; padding-left: 20px; }
+.ui .bp-closed-meta.is-flush { padding-left: 0; }
+.ui .bp-closed-time { flex: 1; min-width: 0; font: 400 10px/1.3 var(--font); color: var(--ink-3); white-space: nowrap; }
+.ui .bp-reopen {
+  flex: none;
+  height: 22px;
+  padding: 0 11px;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  background: var(--white);
+  font: 500 11px var(--font);
+  color: var(--ink);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ui .bp-reopen:hover { background: var(--grey); border-color: var(--edge-hover); }
+.ui .bp-reopen[aria-disabled='true'],
+.ui .bp-reopen[aria-disabled='true']:hover { border-color: var(--line); background: var(--grey); color: var(--ink-4); cursor: not-allowed; }
+.ui .bp-closed .bp-card { margin-top: 10px; gap: 8px; }
+.ui .bp-card-title { font: 600 12px/1.35 var(--font); color: var(--ink); }
+
+/* The document, opened over the page from the breadcrumb. */
+.ui .bp-docpill {
+  margin: -4px 0 -4px auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px 0 8px;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  background: var(--white);
+  font: 500 11px var(--font);
+  color: var(--ink);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ui .bp-docpill:hover { background: var(--grey); border-color: var(--edge-hover); }
+.ui .bp-sheet { position: absolute; inset: 0; z-index: 30; display: flex; }
+.ui .bp-sheet-scrim { flex: 1; min-width: 0; background: rgba(255, 255, 255, .35); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); cursor: pointer; }
+.ui .bp-sheet-panel { flex: none; width: 50%; min-width: 420px; display: flex; flex-direction: column; background: var(--white); border-left: 1px solid var(--line); box-shadow: var(--shadow-sheet); }
+.ui .bp-sheet-panel .bp-doc { flex: 1 1 0%; min-height: 0; }
+
+/* The approval bar: where the bill stands, then what the viewer can do. */
+.ui .bp-foot { position: relative; }
+.ui .bp-foot-group { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.ui .btn.is-ask { border-color: transparent; background: transparent; color: var(--maroon); }
+.ui .btn.is-ask:hover,
+.ui .btn.is-ask.is-open { background: var(--pink-50); }
+.ui .bp-foot-input {
+  width: 280px;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  outline: none;
+  background: var(--grey);
+  font: 400 11px var(--font);
+  color: var(--ink);
+}
+.ui .bp-foot-input::placeholder { color: var(--ink-4); }
+.ui .bp-foot-input.is-needed { box-shadow: 0 0 0 1px var(--red-edge-hover); }
+/* Asking the sender a question from the bar (61t). It holds nothing. */
+.ui .bp-askwrap { position: relative; display: inline-flex; }
+.ui .bp-askbox {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 17px);
+  z-index: 3;
+  width: 340px;
+  padding: 14px 16px 12px;
+  border-radius: 8px;
+  background: var(--white);
+  box-shadow: var(--shadow-pop);
+  display: grid;
+  gap: 10px;
+  text-align: left;
+}
+.ui .bp-askbox-head { display: flex; align-items: center; gap: 9px; }
+.ui .bp-askbox-who { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.ui .bp-askbox-title { font: 600 13px/1.3 var(--font); letter-spacing: -.01em; color: var(--ink); }
+.ui .bp-askbox-sub { font: 400 10.5px/1.3 var(--font); color: var(--ink-3); }
+.ui .bp-askbox-x {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.ui .bp-askbox-x:hover { background: var(--grey); color: var(--ink); }
+.ui .bp-askbox-field { min-height: 64px; padding: 7px 10px; border: 1px solid var(--maroon); border-radius: 8px; background: var(--white); box-shadow: 0 0 0 3px rgba(92, 31, 51, .12); display: flex; }
+.ui .bp-askbox-field textarea { flex: 1; min-width: 0; min-height: 48px; padding: 0; border: 0; outline: none; resize: none; background: transparent; font: 400 11.5px/1.5 var(--font); color: var(--ink); }
+.ui .bp-askbox-field textarea::placeholder { color: var(--ink-4); }
+.ui .bp-askbox-hint { font: 400 10.5px/1.45 var(--font); color: var(--ink-2); text-wrap: pretty; }
+.ui .bp-askbox-foot { display: flex; justify-content: flex-end; gap: 6px; }
+
+/* QuickBooks, after the stage word on a bill that's done. */
+.ui .bp-qb { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.ui .bp-qb img { display: block; flex: none; width: 12px; height: 12px; }
+.ui .bp-qb-word { font: 600 9.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--green); white-space: nowrap; }
+.ui .bp-qb-word.is-failed { color: var(--red); }
+.ui .bp-qb-word.is-pending { color: var(--ink-3); }
+.ui .bp-qb-time { white-space: nowrap; }

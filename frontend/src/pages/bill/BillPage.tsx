@@ -1,12 +1,16 @@
 // A bill's page: the breadcrumb, then the bill as its stage shows it. It reads
 // the bill as the viewer sees it, with Decimal's note on it, and reads again
 // while Decimal is still working something out. Arriving from the file being
-// read, the bill lands part by part (5r) before it settles into review.
-import { useEffect, useState, type ReactNode } from 'react';
+// read, the bill lands part by part (5r) before it settles into review. Past
+// review it is read rather than edited, and its document opens over the page.
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
 import { accessApi, api, billsApi, companionApi, type BillDetail } from '../../api';
+import { Icon } from '../../kit/icons';
+import { DocPane } from './DocPane';
 import { READ_DONE, READ_TICK_MS, headerOf, fieldsFrom, landsAt, type Face } from './model';
+import { Record } from './Record';
 import { Review } from './Review';
 import type { Access } from './Findings';
 
@@ -82,6 +86,18 @@ export function BillPage() {
     if (landing && data && !isReading) navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
   }, [landing, data, isReading, navigate, location.pathname, location.search]);
 
+  // Past review the document isn't beside the bill; it opens over the page.
+  const past = Boolean(data && data.draft.state !== 'draft');
+  const [sheet, setSheet] = useState(false);
+  useEffect(() => {
+    if (!sheet) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSheet(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [sheet]);
+
   const number = data?.draft.fields.find((f) => f.key === 'invoiceNumber')?.value?.toString() || null;
   // A bill still being read, or one nothing could be read from, is a new bill until it has a number.
   const fresh = isReading || Boolean(data?.draft.unreadable);
@@ -106,6 +122,12 @@ export function BillPage() {
             <span className={reference === 'New bill' ? undefined : 'bp-crumb-inv'}>{reference}</span>
           </>
         ) : null}
+        {past && data?.draft.document ? (
+          <button type="button" className="bp-docpill" onClick={() => setSheet(true)}>
+            <Icon.file size={12} />
+            View the document
+          </button>
+        ) : null}
       </div>
       {detail.isError ? (
         <div className="bp-body">
@@ -120,6 +142,16 @@ export function BillPage() {
             <div className="bp-loading" />
           </div>
         </div>
+      ) : past ? (
+        <Record
+          key={paymentOrderId}
+          organizationId={organizationId}
+          detail={data}
+          note={note.data}
+          viewer={viewer}
+          access={my}
+          onRefetch={() => detail.refetch()}
+        />
       ) : (
         <Review
           key={paymentOrderId}
@@ -132,21 +164,15 @@ export function BillPage() {
           onRefetch={() => detail.refetch()}
         />
       )}
+      {sheet && past && data ? (
+        <div className="bp-sheet">
+          <div className="bp-sheet-scrim" onClick={() => setSheet(false)} />
+          <div className="bp-sheet-panel" role="dialog" aria-label="The document">
+            <DocPane organizationId={organizationId} document={data.draft.document} source={null} width="100%" onClose={() => setSheet(false)} />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
 
-/**
- * A bill's own address. A bill in review opens on this page; one in approval
- * or done still opens on the old one until those stages are built here.
- */
-export function BillRoute({ legacy }: { legacy: ReactNode }) {
-  const { organizationId = '', paymentOrderId = '' } = useParams();
-  const detail = useQuery({
-    queryKey: ['bill', organizationId, paymentOrderId],
-    queryFn: () => billsApi.detail(organizationId, paymentOrderId),
-    enabled: Boolean(organizationId && paymentOrderId),
-  });
-  if (detail.data && detail.data.draft.state !== 'draft') return <>{legacy}</>;
-  return <BillPage />;
-}

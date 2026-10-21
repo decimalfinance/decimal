@@ -42,7 +42,7 @@
   padding: 0 8px;
   border-radius: 5px;
   background: var(--dark);
-  color: #FFFFFF;
+  color: var(--white);
   font: 500 11px/1 var(--font);
   white-space: nowrap;
   pointer-events: none;
@@ -81,7 +81,7 @@
 }
 .ui .btn:hover { background: var(--grey); }
 .ui .btn:disabled { cursor: default; opacity: .5; }
-.ui .btn.is-primary { border-color: var(--maroon); background: var(--maroon); color: #FFFFFF; }
+.ui .btn.is-primary { border-color: var(--maroon); background: var(--maroon); color: var(--white); }
 .ui .btn.is-primary:hover { border-color: var(--maroon-hover); background: var(--maroon-hover); }
 .ui .btn.is-primary:active { border-color: var(--maroon-active); background: var(--maroon-active); }
 .ui .btn.is-primary:disabled { border-color: var(--line); background: var(--grey); color: var(--ink-4); opacity: 1; cursor: not-allowed; }
@@ -194,7 +194,7 @@
   padding: 9px 16px;
   border-radius: 999px;
   background: var(--dark);
-  color: #FFFFFF;
+  color: var(--white);
   font: 400 11.5px/1.4 var(--font);
   white-space: nowrap;
   box-shadow: var(--shadow-toast);
@@ -267,7 +267,7 @@
   justify-content: center;
   border-radius: 50%;
   overflow: hidden;
-  color: #FFFFFF;
+  color: var(--white);
   font-weight: 600;
   letter-spacing: .02em;
   line-height: 1;

@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, 
 import { invoiceIntakeApi, type BillDraft, type DocSource } from '../../api';
 import { Icon } from '../../kit/icons';
 
-const ZOOM_STEPS = [50, 67, 75, 90, 100, 110, 125, 150, 175, 200];
+const ZOOM_STEPS = [50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200];
 export const DOC_DEFAULT_WIDTH = 366;
 const DOC_MIN_WIDTH = 300;
 /** The facts keep at least this much of the row. */
@@ -86,8 +86,8 @@ export function DocPane({
           <button type="button" className="bp-zoom-btn" title="Zoom in" aria-label="Zoom in" disabled={zoom >= ZOOM_STEPS[ZOOM_STEPS.length - 1]!} onClick={() => step(1)}>+</button>
           <button type="button" className={`bp-zoom-btn${zoom === 100 ? ' is-on' : ''}`} title="Fit to width" aria-label="Fit to width" onClick={() => setZoom(100)}>⤢</button>
           {onClose ? (
-            <button type="button" className="bp-zoom-btn bp-doc-close" title="Close" aria-label="Close the document" onClick={onClose}>
-              <Icon.x size={9} />
+            <button type="button" className="bp-doc-close" title="Close" aria-label="Close the document" onClick={onClose}>
+              <Icon.x size={11} />
             </button>
           ) : null}
         </span>

@@ -30,7 +30,7 @@ import { useToaster } from '../../kit/Toast';
 import { firstName } from '../../kit/format';
 import { ActionPills, ConfirmCard, FindingText, pillsFor, type Access, type CardResult, type OpenCard, type Pill } from './Findings';
 import { closeReasonFor, findingsOf, linesSum, notesOf, parseMoney, restingMessage, type Face, type Fields, type Flag, type LineEntry } from './model';
-import { Chevron, FaceOf, Figures, WaitBadge, chatTime } from './parts';
+import { Chevron, FaceOf, Figures, Mark, WaitBadge, chatTime } from './parts';
 import { AskCard, isAskCard } from './AskCard';
 
 type Said = {
@@ -417,6 +417,7 @@ export function AgentBox({
   onSaveNow,
   onChanged,
   lead = null,
+  above = null,
 }: {
   organizationId: string;
   detail: BillDetail;
@@ -437,9 +438,19 @@ export function AgentBox({
   onChanged: () => Promise<void>;
   /**
    * What Decimal says in place of its findings: while it reads the bill
-   * (5r), or when it couldn't read the document (5u).
+   * (5r), when it couldn't read the document (5u), and once the bill is past
+   * review (5d to 5h), with the points that bear it out and when it said so.
    */
-  lead?: { text: string; working: boolean } | null;
+  lead?: {
+    text: string;
+    working: boolean;
+    points?: Array<{ tone: 'ok' | 'bad'; text: string }>;
+    at?: string | null;
+    /** What can be done about it, under the message. */
+    actions?: ReactNode;
+  } | null;
+  /** Above the box, in the same block: the route a bill took back to review (5e). */
+  above?: ReactNode;
 }) {
   const draft = detail.draft;
   const billId = draft.paymentOrderId;
@@ -504,7 +515,7 @@ export function AgentBox({
   // When Decimal said it: when it raised what it found, or when it read the bill.
   const raisedAt = draft.workLog.find((e) => e.kind === 'flag_raised')?.at;
   const arrivedAt = [...detail.history.before].find((h) => (h.kind === 'uploaded' || h.kind === 'forwarded') && h.at)?.at;
-  const saidAt = (findings.length > 0 ? raisedAt : null) ?? arrivedAt ?? raisedAt ?? null;
+  const saidAt = lead?.at ?? (findings.length > 0 ? raisedAt : null) ?? arrivedAt ?? raisedAt ?? null;
 
   const refresh = async () => {
     await Promise.all([
@@ -661,7 +672,22 @@ export function AgentBox({
   let message: ReactNode;
   let foldedLine: ReactNode;
   if (lead) {
-    message = <div className="bp-msg"><Figures text={lead.text} /></div>;
+    message = (
+      <>
+        <div className="bp-msg"><Figures text={lead.text} /></div>
+        {lead.points && lead.points.length > 0 ? (
+          <div className="bp-points">
+            {lead.points.map((p, i) => (
+              <div key={i} className="bp-point">
+                <Mark tone={p.tone} />
+                <span className="bp-point-text"><Figures text={p.text} /></span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {lead.actions ? <div className="bp-acts is-lead">{lead.actions}</div> : null}
+      </>
+    );
     foldedLine = <Figures text={lead.text} />;
   } else if (findings.length === 0) {
     const resting = draft.state === 'draft' ? restingMessage(draft, fields, lines) : 'Nothing to flag.';
@@ -734,6 +760,7 @@ export function AgentBox({
 
   return (
     <div className="bp-agentwrap">
+      {above ? <div className="bp-above">{above}</div> : null}
       <div className="bp-agent">
         <button
           type="button"

@@ -17,7 +17,7 @@ import { postBillToQuickBooks, recordBillPaymentInQuickBooks, syncPaymentToQuick
 import { BUILTIN_ACCOUNT_PREFIX } from './default-chart.js';
 
 const PROVIDER = 'quickbooks';
-const MAX_ATTEMPTS = 5;
+export const MAX_ATTEMPTS = 5;
 const SWEEP_BATCH = 20;
 const USDC_DECIMALS = 6;
 

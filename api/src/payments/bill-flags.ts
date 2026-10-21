@@ -362,8 +362,9 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
       // the exception agent, which recommends one of these, had nowhere to
       // point when that was its answer.
       resolutions: [
-        { action: 'clear_duplicate', label: 'Not a duplicate', requires: 'admin', detail: 'Clear the flag with a reason. It clears the other bill too, and the clearance itself becomes the audit record.' },
-        { action: 'not_ours', label: 'Close as duplicate', requires: 'admin', detail: 'Close this bill as a duplicate so it is never paid. The other bill is unaffected.' },
+        // Both answers are about the bill this one copies, which a closed copy's page links to.
+        { action: 'clear_duplicate', label: 'Not a duplicate', requires: 'admin', targetId: facts.duplicates[0]!.paymentOrderId, detail: 'Clear the flag with a reason. It clears the other bill too, and the clearance itself becomes the audit record.' },
+        { action: 'not_ours', label: 'Close as duplicate', requires: 'admin', targetId: facts.duplicates[0]!.paymentOrderId, detail: 'Close this bill as a duplicate so it is never paid. The other bill is unaffected.' },
         ASK,
       ],
       message: `${describeDuplicate(facts.duplicates[0]!)} If it's genuinely a new bill, an admin can clear this flag.`,

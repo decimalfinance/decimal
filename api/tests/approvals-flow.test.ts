@@ -591,6 +591,8 @@ test('confirm routes the bill; the chain, inbox signal, approve/reject all work'
   const afterA2 = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, a3.token);
   const a3Node = afterA2.approval.steps.find((s: { person: { personId: string } | null }) => s.person?.personId === p3);
   assert.equal(a3Node.state, 'current');
+  // The one deciding it can ask before they do: the conversation stays open past review.
+  assert.equal(afterA2.draft.canJoinConversation, true, 'an approver joins the conversation on a bill in approval');
 
   // a3 approves → fully approved.
   const inboxA3 = await get(`/organizations/${orgId}/bills/approvals-inbox`, a3.token);
@@ -2550,14 +2552,14 @@ test('an any-of-two step reports one approval needed, and the runner-up is not n
 
   detail = await get(`/organizations/${orgId}/bills/${bill.billId}/detail`, owner.token);
   assert.equal(detail.status.macroState, 'approved', 'one approval finished the step');
-  // The runner-up did nothing and is needed for nothing, so the route stops
-  // mentioning them: a row saying only "Sam Okonkwo — not needed", under a
-  // repeat of the same routing reason, is noise on a settled bill.
-  assert.equal(detail.approval.steps.length, 1, 'only the person who actually approved remains');
-  assert.equal(detail.approval.steps[0].state, 'done');
-  assert.equal(detail.approval.steps[0].person.personId, byUser.get(a2.userId));
-  // Dropped from the SCREEN, never from the record — the compiled plan still
-  // names every candidate the rule picked out.
+  // The runner-up did nothing and wasn't needed. They stay on the route as
+  // that, so the bill's page can draw them pale behind whoever approved.
+  type Node = { state: string; person: { personId: string } };
+  const steps = detail.approval.steps as Node[];
+  assert.equal(steps.length, 2, 'both stay on the route');
+  assert.equal(steps.find((n) => n.person.personId === byUser.get(a2.userId))?.state, 'done');
+  assert.equal(steps.find((n) => n.person.personId === byUser.get(a3.userId))?.state, 'skipped', 'the runner-up was not needed');
+  // The compiled plan names every candidate the rule picked out.
   const plan = await prisma.$queryRaw<Array<{ steps: unknown }>>`
     SELECT steps FROM approval.approval_plans p
     JOIN approval.approvables a ON a.id = p.approvable_id

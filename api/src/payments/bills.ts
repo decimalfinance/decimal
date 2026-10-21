@@ -2201,10 +2201,11 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     // is discussed rather than the place it is recorded after the fact.
     comments: await listBillComments(organizationId, order.paymentOrderId),
     // Who may take part in the conversation is wider than who may edit the
-    // bill: an approver asked about a draft must be able to answer and reply.
-    // Only people who just view bills, and bills that have left draft, read it
-    // without joining in.
-    canJoinConversation: order.state === 'draft' && viewerWorksOnBills,
+    // bill: an approver asked about a draft must be able to answer and reply,
+    // and one deciding it must be able to ask before they do. It stays open
+    // past review, as the bill's page draws it. Only people who just view
+    // bills read it without joining in.
+    canJoinConversation: viewerWorksOnBills,
     questions: await (async () => {
       const rows = await listBillQuestions(organizationId, order.paymentOrderId);
       // Anyone who works on bills may answer a question, not only the person
@@ -4255,12 +4256,17 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
     : null;
   const sync = await prisma.accountingSync.findFirst({
     where: { organizationId, paymentOrderId },
-    select: { status: true, externalBillId: true, error: true, syncedAt: true, updatedAt: true },
+    select: { status: true, externalBillId: true, error: true, attempts: true, syncedAt: true, updatedAt: true },
   });
+  // Whether the sweep will still try a failed bill again by itself, so the
+  // page only promises a retry that is coming.
+  const { MAX_ATTEMPTS } = await import('../accounting/account-sync.js');
   const posting = sync
     ? sync.externalBillId
-      ? { status: 'posted' as const, at: (sync.syncedAt ?? sync.updatedAt).toISOString(), error: null }
-      : { status: sync.status === 'error' ? 'failed' as const : 'pending' as const, at: sync.updatedAt.toISOString(), error: sync.error }
+      ? { status: 'posted' as const, at: (sync.syncedAt ?? sync.updatedAt).toISOString(), error: null, retrying: false }
+      : sync.status === 'error'
+        ? { status: 'failed' as const, at: sync.updatedAt.toISOString(), error: sync.error, retrying: sync.attempts < MAX_ATTEMPTS }
+        : { status: 'pending' as const, at: sync.updatedAt.toISOString(), error: sync.error, retrying: false }
     : null;
 
   // The order's invoice approvable — prefer the live one over dead history
@@ -4408,18 +4414,9 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
       const openQuestion = questions.length > answers.length;
       const waitingOnId = openQuestion ? str(questions[questions.length - 1]!.command.from) : null;
 
-      // An alternative who was never called on drops off the route entirely.
-      //
-      // On a satisfied "any" step the runner-up did nothing and is needed for
-      // nothing, so a row for them says only that they exist — under a repeat
-      // of the same routing reason, which is the noisiest way possible to say
-      // it. The record does not depend on the row: the compiled plan keeps
-      // every candidate forever, and the flow page says who was eligible.
-      //
-      // Unless they actually did something. Someone who asked a question
-      // before the step settled is part of what happened to this bill, and
-      // their thread stays whether or not their signature ended up mattering.
-      if (state === 'skipped' && messages.length === 0) continue;
+      // An alternative who was never called on stays on the route as one who
+      // wasn't needed: on a satisfied "any" step the bill's page draws them
+      // pale behind whoever approved, so the route shows who could have.
 
       nodes.push({
         stepIndex: step.index,
@@ -4445,7 +4442,7 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
     (o.kind === 'veto_removed' || o.kind === 'veto_rerouted')
     && (o.removed === approvable.requester_id));
   const requesterView = personView(approvable.requester_id);
-  const firstApprover = nodes[0]?.person?.name ?? null;
+  const firstApprover = nodes.find((n) => n.state !== 'skipped')?.person?.name ?? null;
 
   const viewerPerson = people.find((p) => p.user_id === viewerUserId) ?? null;
   const viewerOpenTask = viewerPerson

@@ -6,11 +6,14 @@ export function Avatar({
   src,
   size = 16,
   className,
+  tone,
 }: {
   name: string;
   src?: string | null;
   size?: number;
   className?: string;
+  /** In place of their own tone: someone drawn pale, not yet reached. */
+  tone?: string | null;
 }) {
   return (
     <span
@@ -19,7 +22,7 @@ export function Avatar({
       style={{
         width: size,
         height: size,
-        background: src ? undefined : personTone(name),
+        background: src ? undefined : tone ?? personTone(name),
         fontSize: Math.round(size * 0.44),
       }}
     >
