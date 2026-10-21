@@ -403,6 +403,15 @@ export function readTradingNames(raw: unknown): string[] {
     .filter((n): n is string => Boolean(n));
 }
 
+/** The names someone recorded as ours off one bill, so that bill can say who did. */
+function tradingNamesRecordedFrom(raw: unknown, paymentOrderId: string) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter(isRecord)
+    .filter((e) => str(e.fromPaymentOrderId) === paymentOrderId && Boolean(str(e.name)))
+    .map((e) => ({ name: str(e.name)!, byName: str(e.addedByName), at: str(e.addedAt) }));
+}
+
 // What the document calls itself. A real invoice carries exactly one invoice
 // number, referring to itself; a statement lists many. Pulled from the line
 // items rather than a new model call — the references are already extracted,
@@ -838,6 +847,8 @@ export async function billWorkLog(organizationId: string, paymentOrderId: string
     field: string | null;
     /** The long form, when there is one worth reading under the headline. */
     detail: string | null;
+    /** Which check an override set aside, so the bill's page can write it as the person's own message. */
+    rule: string | null;
   };
 
   const entries: Entry[] = [];
@@ -854,6 +865,7 @@ export async function billWorkLog(organizationId: string, paymentOrderId: string
       text: `${label} changed from ${from} to ${to}`,
       field: c.fieldKey,
       detail: null,
+      rule: null,
     });
   }
 
@@ -881,6 +893,7 @@ export async function billWorkLog(organizationId: string, paymentOrderId: string
         : `${short}${reason ? ` \u201c${reason}\u201d` : ''}`,
       field: null,
       detail: str(payload.message),
+      rule: e.eventType === 'policy_overridden' ? str(payload.rule) ?? null : null,
     });
   }
 
@@ -924,6 +937,8 @@ const BILL_FIELD_LABELS: Record<string, string> = {
 const OVERRIDE_LABELS: Record<string, string> = {
   pay_the_itemised_total: 'Paying the itemised total',
   duplicate_bill: 'Duplicate flag cleared',
+  bill_ceiling: 'Allowed past the bill limit',
+  similar_vendor: 'Vendor names settled',
 };
 
 // Several rows can share a timestamp, because one thing a person did writes a
@@ -1951,7 +1966,50 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       source: lineSource(line),
     };
   });
-  const lines = verifiedLines ?? proposedLines;
+  // Who settled what, by name and picture: the fields confirmed, and the
+  // categories a person picked or ticked.
+  const confirmedByIds: Record<string, unknown> = verification && isRecord(verification.confirmedBy) ? verification.confirmedBy : {};
+  const savedLineRows = (verifiedLines ?? []).filter(isRecord);
+  const confirmerIds = [...new Set([
+    ...Object.values(confirmedByIds).map((v) => str(v)),
+    ...savedLineRows.map((l) => str(l.categoryConfirmedBy)),
+  ].filter((v): v is string => Boolean(v)))];
+  const confirmers = new Map(confirmerIds.length > 0
+    ? (await prisma.user.findMany({ where: { userId: { in: confirmerIds } }, select: { userId: true, displayName: true, email: true, avatarUrl: true } }))
+      .map((u) => [u.userId, { name: u.displayName?.trim() || u.email, avatarUrl: u.avatarUrl }] as const)
+    : []);
+  const personOf = (id: string | null) => (id ? confirmers.get(id) ?? null : null);
+  const confirmedBy = Object.fromEntries(Object.entries(confirmedByIds)
+    .map(([key, id]) => [key, personOf(str(id))] as const)
+    .filter((entry): entry is readonly [string, { name: string; avatarUrl: string | null }] => entry[1] !== null));
+
+  // A saved line keeps saying where its category came from: the proposal it
+  // still matches (a guess stays a guess until someone settles it), or the
+  // person who settled it. And it keeps pointing at its words on the page.
+  const proposals = Array.isArray(metadata.proposedLineCategories) ? metadata.proposedLineCategories.filter(isRecord) : [];
+  const extractedUsed = new Set<number>();
+  const savedLines = verifiedLines ? savedLineRows.map((line, i) => {
+    const description = str(line.description) ?? '';
+    const category = str(line.category);
+    const settledBy = personOf(str(line.categoryConfirmedBy));
+    const proposal = proposals.find((p) => Number(p.index) === i && p.description === description)
+      ?? proposals.find((p) => p.description === description);
+    const read = extractedLines.findIndex((x, j) => !extractedUsed.has(j) && isRecord(x) && str(x.description) === description);
+    if (read >= 0) extractedUsed.add(read);
+    return {
+      description,
+      quantity: num(line.quantity),
+      unitPrice: num(line.unitPrice),
+      amount: num(line.amount),
+      category,
+      categoryFrom: !settledBy && proposal && category && proposal.category === category
+        ? (isRecord(proposal.from) ? proposal.from : { kind: 'model' as const })
+        : null,
+      categoryConfirmedBy: settledBy,
+      source: read >= 0 ? lineSource(extractedLines[read] as Record<string, unknown>) : null,
+    };
+  }) : null;
+  const lines = savedLines ?? proposedLines.map((l) => ({ ...l, categoryConfirmedBy: null }));
 
   // Remember the categories this screen is about to propose.
   //
@@ -1966,7 +2024,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   // so it has to be written down while it still exists. Recomputed on read
   // like the OCR coding above, and only written when it actually moved.
   if (!opts.readOnly && !verifiedLines && proposedLines.length > 0) {
-    const proposed = proposedLines.map((l, i) => ({ index: i, description: l.description, category: l.category ?? null }));
+    const proposed = proposedLines.map((l, i) => ({ index: i, description: l.description, category: l.category ?? null, from: l.categoryFrom }));
     const stored = metadata.proposedLineCategories;
     if (JSON.stringify(stored ?? null) !== JSON.stringify(proposed)) {
       await prisma.paymentOrder.update({
@@ -2268,6 +2326,9 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     // agrees with it today and drifts tomorrow.
     highlightableFields: [...HIGHLIGHTABLE_FIELDS],
     lines,
+    confirmedBy,
+    // "This is us", said off this bill: the conversation shows it as theirs.
+    tradingNamesFromHere: tradingNamesRecordedFrom(flagOrg.tradingNames, paymentOrderId),
     categoryOptions,
     codingSuggestionSource,
     // Document anchors for the totals block, so the footer rows highlight too.
@@ -2480,11 +2541,35 @@ export type SubmitBillInput = {
     taxAmount?: number | null;
     remitTo?: { street?: string | null; city?: string | null; state?: string | null; zip?: string | null; country?: string | null };
   };
-  lines: Array<{ description: string; quantity: number | null; unitPrice: number | null; amount: number | null; category?: string | null }>;
+  lines: Array<{ description: string; quantity: number | null; unitPrice: number | null; amount: number | null; category?: string | null; categoryConfirmed?: boolean }>;
   confirmedFieldKeys: string[];
   noteForApprovers?: string | null;
   sourceTreasuryWalletId?: string | null;
 };
+
+/**
+ * Who confirmed what. The bill's page says "Confirmed by Zara Okafor" under a
+ * field and shows her picture on a category she settled, so each confirmation
+ * keeps the person who made it: one already on record stays theirs, and a new
+ * one belongs to whoever is saving.
+ */
+function attributeConfirmations(
+  previous: Record<string, unknown>,
+  confirmedFieldKeys: string[],
+  lines: SubmitBillInput['lines'],
+  actorUserId: string,
+) {
+  const before = isRecord(previous.confirmedBy) ? previous.confirmedBy : {};
+  const confirmedBy: Record<string, string> = {};
+  for (const key of confirmedFieldKeys) confirmedBy[key] = str(before[key]) ?? actorUserId;
+  const earlierLines = Array.isArray(previous.lines) ? previous.lines.filter(isRecord) : [];
+  const attributed = lines.map(({ categoryConfirmed, ...line }) => {
+    if (!categoryConfirmed || !line.category) return line;
+    const earlier = earlierLines.find((p) => p.description === line.description && p.category === line.category && str(p.categoryConfirmedBy));
+    return { ...line, categoryConfirmedBy: str(earlier?.categoryConfirmedBy) ?? actorUserId };
+  });
+  return { confirmedBy, lines: attributed };
+}
 
 export async function submitBillForApproval(input: SubmitBillInput) {
   const order = await prisma.paymentOrder.findFirst({
@@ -2737,10 +2822,15 @@ export async function submitBillForApproval(input: SubmitBillInput) {
     }
   }
 
+  const attributed = attributeConfirmations(
+    isRecord(metadata.verification) ? metadata.verification : {},
+    input.confirmedFieldKeys, input.lines, input.actorUserId,
+  );
   const verification = {
     fields: input.fields,
-    lines: input.lines,
+    lines: attributed.lines,
     confirmedFieldKeys: input.confirmedFieldKeys,
+    confirmedBy: attributed.confirmedBy,
     corrections,
     noteForApprovers: str(input.noteForApprovers ?? null),
     confirmedByUserId: input.actorUserId,
@@ -3996,7 +4086,9 @@ async function approvalBlockedFor(
 }
 
 export async function getBillDetail(organizationId: string, paymentOrderId: string, viewerUserId: string, opts: { readOnly?: boolean } = {}) {
-  const billDraft = await getBillDraft(organizationId, paymentOrderId, undefined, opts);
+  // As the viewer sees it: whether they can edit, answer or close a question
+  // is part of what the bill's page shows them.
+  const billDraft = await getBillDraft(organizationId, paymentOrderId, viewerUserId, opts);
   if (!billDraft) return null;
 
   const order = await prisma.paymentOrder.findFirstOrThrow({
@@ -4025,6 +4117,31 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
       by: nameOfUser.get(str(c.byUserId) ?? '') ?? (confirmerId ? nameOfUser.get(confirmerId) ?? null : null),
     }))
     .filter((c) => c.field);
+
+  // How the bill ended, when it has: who closed it and why, and how far
+  // QuickBooks got with it. The page's header and its closed box say so.
+  const notABill = isRecord(metadata.notABill) ? metadata.notABill : null;
+  const closerId = notABill ? str(notABill.markedByUserId) : null;
+  const closer = closerId
+    ? await prisma.user.findUnique({ where: { userId: closerId }, select: { displayName: true, email: true, avatarUrl: true } })
+    : null;
+  const closed = order.state === 'cancelled'
+    ? {
+        reason: notABill ? str(notABill.reason) : null,
+        note: notABill ? str(notABill.note) : null,
+        by: closer ? { name: closer.displayName?.trim() || closer.email, avatarUrl: closer.avatarUrl } : null,
+        at: notABill ? str(notABill.markedAt) : null,
+      }
+    : null;
+  const sync = await prisma.accountingSync.findFirst({
+    where: { organizationId, paymentOrderId },
+    select: { status: true, externalBillId: true, error: true, syncedAt: true, updatedAt: true },
+  });
+  const posting = sync
+    ? sync.externalBillId
+      ? { status: 'posted' as const, at: (sync.syncedAt ?? sync.updatedAt).toISOString(), error: null }
+      : { status: sync.status === 'error' ? 'failed' as const : 'pending' as const, at: sync.updatedAt.toISOString(), error: sync.error }
+    : null;
 
   // The order's invoice approvable — prefer the live one over dead history
   // (a recalled bill that was resubmitted has several).
@@ -4058,6 +4175,8 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
         source: billDraft.source === 'email' ? 'email' : 'upload',
       }),
       status: { macroState: null, subStatus },
+      closed,
+      posting,
       approval: null,
       viewer: { personId: null, name: null, isRequester: false, openTaskId: null, anyTaskId: null },
       requester: null,
@@ -4252,6 +4371,8 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
     recall,
     history,
     status: { macroState: approvable.macro_state, subStatus },
+    closed,
+    posting,
     approval: {
       approvableId: approvable.id,
       macroState: approvable.macro_state,
@@ -4911,11 +5032,13 @@ export async function saveBillDraft(input: {
   const corrections = billFieldCorrections(extracted, input.fields, input.actorUserId);
 
   const savedAt = new Date().toISOString();
+  const attributed = attributeConfirmations(previous, input.confirmedFieldKeys ?? [], input.lines, input.actorUserId);
   const verification = {
     ...previous,
     fields: input.fields,
-    lines: input.lines,
+    lines: attributed.lines,
     confirmedFieldKeys: input.confirmedFieldKeys ?? [],
+    confirmedBy: attributed.confirmedBy,
     corrections,
     noteForApprovers: str(input.noteForApprovers ?? null),
     savedByUserId: input.actorUserId,

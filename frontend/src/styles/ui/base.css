@@ -19,6 +19,8 @@
 .ui :where(img, svg, canvas) { display: block; }
 .ui :where(button, a, input, textarea, select, [tabindex]):focus { outline: none; }
 .ui :where(button, a, [tabindex]):focus-visible { box-shadow: var(--focus); }
+/* Text fields show focus on their own box; the old app's global ring stays out. */
+.ui :where(input, textarea, select):focus-visible { box-shadow: none; }
 
 /* Every figure, date, time, amount and invoice number is in Geist Mono. */
 .ui .num {

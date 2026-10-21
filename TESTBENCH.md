@@ -132,8 +132,9 @@ send from). The simulate endpoint additionally needs `DEV_AUTH_SECRET`.
 - Never touch :3100, :5174, or the `usdc_ops_local` database — that is Zaid's
   stack, in his browser. The bench is :3200 / :5274 / `usdc_ops_bench`.
 - Never touch decimal.finance or anything under Cloudflare — that's production.
-- Fresh orgs have no vendors/categories: create counterparties via API first
-  if the brief involves vendor/category behavior (or the brief will say so).
+- Fresh orgs have no vendors, and start with the built-in categories in
+  `api/src/accounting/default-chart.ts`. Create counterparties via API first if
+  the brief involves vendor behavior (or the brief will say so).
 - If the bench won't start, paste the tail of `.bench/api.log` into the
   report rather than debugging blind.
 - Report format: brief number, date, environment status line, then one section
@@ -145,7 +146,9 @@ send from). The simulate endpoint additionally needs `DEV_AUTH_SECRET`.
 - React controlled inputs (dev-login form and others) may ignore the MCP
   `form_input` tool: set values via the native `HTMLInputElement` value setter
   and dispatch `input`/`change` events instead — works every time.
-- File uploads: inject a `DataTransfer` onto `#dec-bill-upload-input` and fire
-  its `change` event; this exercises the real upload path.
+- File uploads: inject a `DataTransfer` onto the Bills page's `input[type=file]`
+  and fire its `change` event; this exercises the real upload path. An empty
+  organisation's first screen uploads at once. Otherwise open **Upload a bill**
+  first: the file joins the dialog's list, and **Upload 1 file** sends it.
 - Document extraction takes ~10–15s per upload — wait before judging the
   review screen. The page polls and auto-advances when extraction finishes.

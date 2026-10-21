@@ -1037,6 +1037,10 @@ test('"this is us" clears the flag through the API, and a member is refused', as
   assert.equal(res.added, true);
   assert.ok(!res.draft.flags.some((f: any) => f.kind === 'addressed_elsewhere'),
     'the flag is gone in the same response — no reload needed to see it resolved');
+  const recorded = res.draft.tradingNamesFromHere;
+  assert.equal(recorded.length, 1, 'the bill knows the name was recorded off it');
+  assert.equal(recorded[0].name, 'Halcyon Labs');
+  assert.ok(recorded[0].byName && recorded[0].at, 'with who said so and when, so the bill can show it as theirs');
 });
 
 test('closing a bill is admin-only — a member can ask, not kill', async () => {

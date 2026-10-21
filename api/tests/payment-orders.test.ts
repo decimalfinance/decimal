@@ -1181,6 +1181,103 @@ test('editing a field twice reads as a chain, not two edits from the original', 
   assert.match(poEdits[1].text, /PO number changed from PO-1 to PO-2/);
 });
 
+test('a bill keeps who confirmed each field and category, and where a guess came from', async () => {
+  const setup = await createPaymentOrderSetup();
+  const vendorWallet = Keypair.generate().publicKey.toBase58();
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [
+        {
+          counterparty: 'Quayside Fittings',
+          amount: 900,
+          currency: 'USD',
+          reference: 'QF-120',
+          due_date: '2026-09-10',
+          wallet_address: vendorWallet,
+          notes: 'Fittings',
+          source_invoice: {
+            vendorName: 'Quayside Fittings',
+            vendorAddress: null,
+            vendorEmail: null,
+            amount: 900,
+            currency: 'USD',
+            invoiceNumber: 'QF-120',
+            invoiceDate: '2026-08-10',
+            dueDate: '2026-09-10',
+            terms: 'Net 30',
+            poNumber: null,
+            earlyPayDiscount: null,
+            subtotal: 900,
+            taxAmount: 0,
+            billToName: null,
+            remitTo: { street: '2 Quay St', city: 'Seattle', state: 'WA', zip: '98101' },
+            paymentDetails: null,
+            walletAddress: vendorWallet,
+            lineItems: [
+              { description: 'Brass fittings', quantity: 1, unitPrice: 600, total: 600 },
+              { description: 'Delivery', quantity: 1, unitPrice: 300, total: 300 },
+            ],
+            categoryHint: 'Supplies',
+            confidence: { vendor: 0.95, amount: 0.95, overall: 0.95 },
+            fieldConfidence: { invoiceNumber: 0.95, invoiceDate: 0.95, dueDate: 0.95, total: 0.95 },
+          },
+        },
+      ],
+      modelLatencyMs: 5,
+      pageCount: 1,
+    }),
+  });
+
+  const orgId = setup.organization.organizationId;
+  const upload = await post(
+    `/organizations/${orgId}/invoices/upload`,
+    {
+      filename: 'QF-120.pdf',
+      mimeType: 'application/pdf',
+      dataBase64: Buffer.from('%PDF-1.4 quayside').toString('base64'),
+      sourceTreasuryWalletId: setup.sourceTreasuryWallet.treasuryWalletId,
+      autoAdvance: false,
+    },
+    setup.sessionToken,
+  );
+  const billId = upload.paymentOrders[0].paymentOrder.paymentOrderId;
+  const before = await get(`/organizations/${orgId}/bills/${billId}/draft`, setup.sessionToken);
+  const guessed = before.lines.map((l: { category: string | null }) => l.category);
+  assert.ok(before.lines.every((l: { categoryFrom: unknown }) => l.categoryFrom), 'every proposed line says where its category came from');
+
+  await post(`/organizations/${orgId}/bills/${billId}/save`, {
+    fields: {
+      invoiceNumber: 'QF-120',
+      invoiceDate: '2026-08-10',
+      dueDate: '2026-09-10',
+      terms: 'Net 30',
+      currency: 'USD',
+      total: 900,
+      taxAmount: 0,
+      remitTo: { street: '2 Quay St', city: 'Seattle', state: 'WA', zip: '98101' },
+    },
+    lines: [
+      { description: 'Brass fittings', quantity: 1, unitPrice: 600, amount: 600, category: guessed[0], categoryConfirmed: true },
+      { description: 'Delivery', quantity: 1, unitPrice: 300, amount: 300, category: guessed[1] },
+    ],
+    confirmedFieldKeys: ['invoiceDate'],
+    noteForApprovers: null,
+  }, setup.sessionToken);
+
+  const after = await get(`/organizations/${orgId}/bills/${billId}/draft`, setup.sessionToken);
+  assert.equal(after.confirmedBy.invoiceDate?.name, 'Payments Operator', 'the field keeps who confirmed it');
+  assert.equal(after.confirmedBy.dueDate, undefined, 'a field nobody confirmed names nobody');
+  assert.equal(after.lines[0].categoryConfirmedBy?.name, 'Payments Operator', 'the ticked category keeps who settled it');
+  assert.equal(after.lines[0].categoryFrom, null, 'a settled category is no longer a guess');
+  assert.equal(after.lines[1].categoryConfirmedBy, null);
+  assert.deepEqual(after.lines[1].categoryFrom, before.lines[1].categoryFrom, 'an untouched guess is still the same guess after saving');
+
+  // The bill's page reads the detail, and it answers for the person looking.
+  const detail = await get(`/organizations/${orgId}/bills/${billId}/detail`, setup.sessionToken);
+  assert.equal(detail.draft.confirmedBy.invoiceDate?.name, 'Payments Operator');
+  assert.equal(detail.draft.readOnly, false, 'the person who can edit the draft is told so');
+});
+
 test('confirm judges the figures being submitted, not the ones last saved', async () => {
   // Correct the figures on screen and press Confirm without saving first. The
   // gate read the STORED bill to decide whether anything was blocking, so the

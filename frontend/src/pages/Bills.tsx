@@ -15,6 +15,7 @@ import {
 } from '../api';
 import { Avatar } from '../kit/Avatar';
 import { Dialog } from '../kit/Dialog';
+import { useDismiss } from '../kit/hooks';
 import { Icon } from '../kit/icons';
 import { Orb } from '../kit/Orb';
 import { useToaster } from '../kit/Toast';
@@ -159,30 +160,6 @@ function fileToBase64(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error('The file could not be read.'));
     reader.readAsDataURL(file);
   });
-}
-
-/** Closes a menu on a click outside it, or on Esc. */
-function useDismiss(open: boolean, ref: React.RefObject<HTMLElement | null>, close: () => void) {
-  const closeRef = useRef(close);
-  closeRef.current = close;
-  useEffect(() => {
-    if (!open) return;
-    function onDown(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) closeRef.current();
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        closeRef.current();
-      }
-    }
-    document.addEventListener('mousedown', onDown);
-    window.addEventListener('keydown', onKey, true);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      window.removeEventListener('keydown', onKey, true);
-    };
-  }, [open, ref]);
 }
 
 /** "Copy" that reads "Copied" for two seconds. */

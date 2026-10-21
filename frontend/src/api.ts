@@ -1145,12 +1145,14 @@ export interface BillDraftField {
  */
 export interface BillWorkLogEntry {
   id: string;
-  kind: 'field_changed' | 'flag_raised' | 'flag_cleared' | 'policy_overridden';
+  kind: 'field_changed' | 'flag_raised' | 'flag_cleared' | 'policy_overridden' | 'question_settled';
   at: string;
   byName: string | null;
   text: string;
   field: string | null;
   detail: string | null;
+  /** The check an override set aside: 'pay_the_itemised_total', 'duplicate_bill', 'bill_ceiling', 'similar_vendor'. */
+  rule?: string | null;
 }
 
 /**
@@ -1186,14 +1188,18 @@ export interface BillDraftLine {
   amount: number | null;
   category: string | null;
   /**
-   * Why this line has its category (unsaved drafts only). memory: a line the
-   * team settled before from this vendor, so known. similar: the model followed
-   * a past line it judged the same purchase (vendorName set when that line was
-   * another vendor's), still a guess. model: its own reading.
+   * Why this line has its category, while it is still the machine's. memory: a
+   * line the team settled before from this vendor, so known. similar: the model
+   * followed a past line it judged the same purchase (vendorName set when that
+   * line was another vendor's), still a guess. model: its own reading. Null
+   * once a person has settled it.
    */
   categoryFrom?: { kind: 'memory'; like: string; invoiceNumber: string | null; paymentOrderId: string; by: string | null }
     | { kind: 'similar'; like: string; invoiceNumber: string | null; paymentOrderId: string; by: string | null; vendorName?: string | null }
-    | { kind: 'model' };
+    | { kind: 'model' }
+    | null;
+  /** The person who picked this category or ticked the guess. */
+  categoryConfirmedBy?: { name: string; avatarUrl: string | null } | null;
   source?: DocSource;
 }
 
@@ -1255,6 +1261,10 @@ export interface BillDraft {
   workLog: BillWorkLogEntry[];
   /** Every field a question may point at — the server's closed vocabulary. */
   highlightableFields: string[];
+  /** Who confirmed each field, by its key ("invoiceDate", "vendor.name", "remitTo.city"). */
+  confirmedBy?: Record<string, { name: string; avatarUrl: string | null }>;
+  /** Names recorded as the organisation's own off this bill ("This is us"), and who recorded them. */
+  tradingNamesFromHere?: Array<{ name: string; byName: string | null; at: string | null }>;
   comments: Array<{
     billCommentId: string;
     body: string;
@@ -1359,7 +1369,7 @@ export interface ConfirmBillBody {
     taxAmount?: number | null;
     remitTo?: { street?: string | null; city?: string | null; state?: string | null; zip?: string | null; country?: string | null };
   };
-  lines: Array<{ description: string; quantity: number | null; unitPrice: number | null; amount: number | null; category?: string | null }>;
+  lines: Array<{ description: string; quantity: number | null; unitPrice: number | null; amount: number | null; category?: string | null; categoryConfirmed?: boolean }>;
   confirmedFieldKeys: string[];
   noteForApprovers?: string | null;
   sourceTreasuryWalletId?: string | null;
@@ -1639,6 +1649,15 @@ export interface BillDetail {
   signal?: InboxSignal;
   recall: { open: BillRecall | null; history: BillRecall[] };
   status: { macroState: string | null; subStatus: WorkbenchBill['subStatus'] };
+  /** A closed bill: why, the note, who closed it and when. */
+  closed: {
+    reason: 'duplicate' | 'statement' | 'credit_note' | 'not_ours' | 'unreadable' | 'other' | null;
+    note: string | null;
+    by: { name: string; avatarUrl: string | null } | null;
+    at: string | null;
+  } | null;
+  /** How far QuickBooks got with an approved bill. */
+  posting: { status: 'posted' | 'failed' | 'pending'; at: string; error: string | null } | null;
   approval: {
     approvableId: string;
     macroState: string;

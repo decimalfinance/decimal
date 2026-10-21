@@ -83,6 +83,8 @@ const confirmSchema = z.object({
     unitPrice: z.number().nullable(),
     amount: z.number().nullable(),
     category: z.string().trim().max(120).nullable().optional(),
+    // A person settled this line's category: picked it, or ticked the guess.
+    categoryConfirmed: z.boolean().optional(),
   })).max(200),
   confirmedFieldKeys: z.array(z.string().max(60)).max(60).default([]),
   noteForApprovers: z.string().trim().max(500).nullable().optional(),
