@@ -283,6 +283,19 @@ export const api = {
       method: 'POST',
     });
   },
+  updateMe(input: { displayName: string }) {
+    return request<{ user: AuthenticatedSession['user'] }>('/auth/me', {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    });
+  },
+  /** Signs out every other browser; this one stays signed in. */
+  changePassword(input: { currentPassword: string; newPassword: string }) {
+    return request<void>('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
   createOrganization(input: { organizationName: string }) {
     return request<OrganizationCreatedResponse>('/organizations', {
       method: 'POST',
@@ -1005,6 +1018,23 @@ export interface ProtectionCard {
   relaxedAt: string | null;
   reviewAtHeadcount: number | null;
   scopedPeople: { id: string; name: string }[] | null;
+  lastChange: PolicyChange | null;
+}
+
+/** The last recorded change to a policy: when, and who made it. */
+export interface PolicyChange { at: string; personId: string | null; name: string | null }
+
+/** A bill that went through with a policy set aside (Organisation's Exceptions). */
+export interface PolicyException {
+  kind: 'self_approval' | 'over_ceiling';
+  paymentOrderId: string;
+  vendorName: string;
+  invoiceNumber: string | null;
+  /** Minor units (dollars x 10^6), as a decimal string. */
+  amountRaw: string;
+  approvedBy: { personId: string; name: string; avatarUrl: string | null };
+  allowedByName: string | null;
+  approvedAt: string;
 }
 
 export interface ProtectionPerson { id: string; name: string; email: string }
@@ -1013,6 +1043,7 @@ export interface ProtectionPerson { id: string; name: string; email: string }
 // (The R-pack itself stays on protectionsApi — same rows, same ceremony.)
 export interface PoliciesOverview {
   ceilingUsd: number | null;
+  ceilingChange: PolicyChange | null;
   gates: {
     duplicate: { overridesLast30Days: number };
     payable: { held: number; blocked: number };
@@ -1027,10 +1058,47 @@ export const policiesApi = {
   get(organizationId: string) {
     return request<PoliciesOverview>(`/organizations/${organizationId}/policies`);
   },
-  setCeiling(organizationId: string, amountUsd: number | null) {
+  setCeiling(organizationId: string, amountUsd: number | null, password?: string) {
     return request<{ ok: boolean; ceilingUsd: number | null }>(`/organizations/${organizationId}/policies/ceiling`, {
       method: 'PUT',
-      body: JSON.stringify({ amountUsd }),
+      body: JSON.stringify({ amountUsd, password }),
+    });
+  },
+  exceptions(organizationId: string) {
+    return request<{ items: PolicyException[] }>(`/organizations/${organizationId}/policies/exceptions`);
+  },
+};
+
+export interface TradingName {
+  name: string;
+  addedByName: string | null;
+  addedAt: string | null;
+  paymentOrderId: string | null;
+  invoiceNumber: string | null;
+}
+
+// The organisation's own details, on Organisation: admins change them.
+export const organizationApi = {
+  rename(organizationId: string, organizationName: string) {
+    return request<{ organizationId: string; organizationName: string; role: string; status: string }>(`/organizations/${organizationId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ organizationName }),
+    });
+  },
+  tradingNames(organizationId: string) {
+    return request<{ items: TradingName[] }>(`/organizations/${organizationId}/trading-names`);
+  },
+  removeTradingName(organizationId: string, name: string) {
+    return request<{ removed: boolean }>(`/organizations/${organizationId}/trading-names/remove`, {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    });
+  },
+  /** Undo: the same entry back, added by whoever added it. */
+  restoreTradingName(organizationId: string, name: string) {
+    return request<{ restored: boolean }>(`/organizations/${organizationId}/trading-names/restore`, {
+      method: 'POST',
+      body: JSON.stringify({ name }),
     });
   },
 };
@@ -1045,10 +1113,10 @@ export const protectionsApi = {
       body: JSON.stringify(body),
     });
   },
-  retighten(organizationId: string, code: string) {
+  retighten(organizationId: string, code: string, password?: string) {
     return request<{ sweptTasks: number }>(`/organizations/${organizationId}/protections/${code}/retighten`, {
       method: 'POST',
-      body: JSON.stringify({}),
+      body: JSON.stringify({ password }),
     });
   },
 };
@@ -1285,7 +1353,7 @@ export interface BillDraft {
   /** Who confirmed each field, by its key ("invoiceDate", "vendor.name", "remitTo.city"). */
   confirmedBy?: Record<string, { name: string; avatarUrl: string | null }>;
   /** Names recorded as the organisation's own off this bill ("This is us"), and who recorded them. */
-  tradingNamesFromHere?: Array<{ name: string; byName: string | null; at: string | null }>;
+  tradingNamesFromHere?: Array<{ name: string; byName: string | null; at: string | null; removed?: boolean }>;
   comments: Array<{
     billCommentId: string;
     body: string;

@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { ApiError, badRequest, conflict } from '../infra/api-errors.js';
 import { hashPassword, verifyPassword } from '../auth/passwords.js';
 import { createSession, requireAuth } from '../auth/sessions.js';
+import { renamePerson } from '../approvals/store.js';
 import { isEmailDeliveryConfigured, sendVerificationEmail } from '../auth/email.js';
 import { config } from '../config.js';
 import { errorToLogFields, logger } from '../infra/logger.js';
@@ -220,7 +221,7 @@ authRouter.get('/auth/session', requireAuth(), async (req, res, next) => {
     // The picture and how they sign in, for the sidebar's signed-in person.
     const profile = await prisma.user.findUnique({
       where: { userId: auth.userId },
-      select: { avatarUrl: true, googleSubject: true },
+      select: { avatarUrl: true, googleSubject: true, passwordHash: true },
     });
 
     res.json({
@@ -232,6 +233,8 @@ authRouter.get('/auth/session', requireAuth(), async (req, res, next) => {
         displayName: auth.userDisplayName,
         avatarUrl: profile?.avatarUrl ?? null,
         signInMethod: profile?.googleSubject ? 'google' : 'password',
+        // Your account offers Change password only when there is one.
+        hasPassword: Boolean(profile?.passwordHash),
         emailVerifiedAt: auth.userEmailVerifiedAt,
       },
       organizations,
@@ -515,6 +518,67 @@ authRouter.post('/auth/resend-verification', requireAuth(), async (req, res, nex
       emailDelivered: delivery.emailDelivered,
       devEmailVerificationCode: delivery.devEmailVerificationCode,
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// --- Your account -------------------------------------------------------------
+
+const updateMeSchema = z.object({ displayName: z.string().max(400) });
+
+// The name your team sees. The engine's copies follow, in every organisation.
+authRouter.patch('/auth/me', requireAuth(), async (req, res, next) => {
+  try {
+    const displayName = updateMeSchema.parse(req.body).displayName.trim().replace(/\s+/g, ' ');
+    if (!displayName) throw badRequest('Enter your name.');
+    if (displayName.length > 120) throw badRequest('Use 120 characters or fewer.');
+    const user = await prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({
+        where: { userId: req.auth!.userId },
+        data: { displayName },
+        select: { userId: true, email: true, displayName: true, avatarUrl: true, emailVerifiedAt: true },
+      });
+      await renamePerson(tx, req.auth!.userId, displayName);
+      return updated;
+    });
+    res.json({ user: serializeUser(user) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().max(128),
+  newPassword: z.string().max(128),
+});
+
+// A new password. Every other browser signed in as this person is signed out;
+// this one stays. Each refusal carries a code so the page can put it under the
+// field it is about.
+authRouter.post('/auth/change-password', requireAuth(), async (req, res, next) => {
+  try {
+    const input = changePasswordSchema.parse(req.body);
+    const user = await prisma.user.findUnique({ where: { userId: req.auth!.userId }, select: { passwordHash: true } });
+    if (!user?.passwordHash) throw badRequest('This account signs in without a password.');
+    if (!input.currentPassword) throw new ApiError(400, 'current_password_missing', 'Enter your current password.');
+    // Never a 401, which would sign them out for a mistyped password.
+    if (!(await verifyPassword(input.currentPassword, user.passwordHash))) {
+      throw new ApiError(403, 'wrong_password', 'That password isn’t right.');
+    }
+    if (input.newPassword.length < 8) throw new ApiError(400, 'password_too_short', 'Use at least 8 characters.');
+    if (input.newPassword === input.currentPassword) {
+      throw new ApiError(400, 'password_unchanged', 'Choose a password different from your current one.');
+    }
+    const passwordHash = await hashPassword(input.newPassword);
+    await prisma.$transaction([
+      prisma.user.update({ where: { userId: req.auth!.userId }, data: { passwordHash }, select: { userId: true } }),
+      // The session as stored, so this one is the one kept.
+      prisma.authSession.deleteMany({
+        where: { userId: req.auth!.userId, sessionToken: { not: req.auth!.sessionToken } },
+      }),
+    ]);
+    res.status(204).end();
   } catch (error) {
     next(error);
   }

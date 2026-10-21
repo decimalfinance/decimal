@@ -6,7 +6,7 @@ import type { AuthenticatedSession } from '../api';
 export function approvalActErrorMessage(err: unknown): string {
   const msg = err instanceof Error ? err.message : 'Try again.';
   return /separation-of-duties/i.test(msg)
-    ? `${msg} If your team is small enough that this rule doesn't fit, the primary admin can relax it on the Protections page — it goes on the record.`
+    ? `${msg} If your team is too small for this rule, the primary admin can turn No self-approval off on Organisation. That goes on the record.`
     : msg;
 }
 

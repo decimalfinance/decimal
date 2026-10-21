@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { ApiError, forbidden } from '../infra/api-errors.js';
-import { assertOrganizationAccess } from '../auth/organization-access.js';
+import { ApiError, badRequest, forbidden } from '../infra/api-errors.js';
+import { assertOrganizationAccess, isAdminRole } from '../auth/organization-access.js';
 import { ensureDefaultAutomationAgentWithWallet } from '../agents/automation.js';
 import { prisma } from '../infra/prisma.js';
 import { mintIntakeSlug } from '../payments/inbound-email/slug.js';
+import { listTradingNames, removeTradingName, restoreTradingName } from '../payments/trading-names.js';
 import { ensureManagedPersonalWalletForUser } from '../wallets/provisioning.js';
 
 export const organizationsRouter = Router();
@@ -17,13 +18,21 @@ const createOrganizationSchema = z.object({
   organizationName: z.string().min(1),
 });
 
-async function assertOrganizationNameAvailable(organizationName: string) {
+/** How an organisation's name is kept: trimmed, with runs of spaces made one. */
+function tidyName(value: string) {
+  return value.trim().replace(/\s+/g, ' ');
+}
+
+// No two organisations share a name, whatever the capitals. A rename may
+// change its own name's capitals, so it leaves itself out.
+async function assertOrganizationNameAvailable(organizationName: string, exceptOrganizationId?: string) {
   const existing = await prisma.organization.findFirst({
     where: {
       organizationName: {
         equals: organizationName,
         mode: 'insensitive',
       },
+      ...(exceptOrganizationId ? { NOT: { organizationId: exceptOrganizationId } } : {}),
     },
     select: { organizationId: true },
   });
@@ -72,7 +81,8 @@ organizationsRouter.post('/organizations', async (req, res, next) => {
   try {
     assertVerifiedEmail(req.auth!.userEmailVerifiedAt);
     const input = createOrganizationSchema.parse(req.body);
-    const organizationName = input.organizationName.trim();
+    const organizationName = tidyName(input.organizationName);
+    if (!organizationName) throw badRequest('Enter the organisation’s name.');
     await assertOrganizationNameAvailable(organizationName);
 
     const organization = await prisma.$transaction(async (tx) => {
@@ -121,6 +131,71 @@ organizationsRouter.post('/organizations', async (req, res, next) => {
         defaultAgent: agentProvisioning,
       },
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// --- Organisation's details ---------------------------------------------------
+// Admins change these; anyone in the organisation reads them.
+
+const renameOrganizationSchema = z.object({ organizationName: z.string().max(400) });
+
+organizationsRouter.patch('/organizations/:organizationId', async (req, res, next) => {
+  try {
+    const { organizationId } = orgParamsSchema.parse(req.params);
+    const { membership } = await assertOrganizationAccess(organizationId, req.auth!);
+    if (!isAdminRole(membership.role)) throw forbidden('Only an admin can rename the organisation.');
+    const organizationName = tidyName(renameOrganizationSchema.parse(req.body).organizationName);
+    if (!organizationName) throw badRequest('Enter a name for the organisation.');
+    if (organizationName.length > 120) throw badRequest('Use 120 characters or fewer.');
+    await assertOrganizationNameAvailable(organizationName, organizationId);
+    // The forwarding address was minted once, from the first name, and stays.
+    const organization = await prisma.organization.update({
+      where: { organizationId },
+      data: { organizationName },
+      select: { organizationId: true, organizationName: true, status: true },
+    });
+    res.json({ ...organization, role: membership.role });
+  } catch (error) {
+    next(error);
+  }
+});
+
+organizationsRouter.get('/organizations/:organizationId/trading-names', async (req, res, next) => {
+  try {
+    const { organizationId } = orgParamsSchema.parse(req.params);
+    await assertOrganizationAccess(organizationId, req.auth!);
+    res.json({ items: await listTradingNames(organizationId) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+const tradingNameBodySchema = z.object({ name: z.string().trim().min(1).max(120) });
+
+// Taking a name off means bills addressed to it are asked about again, so it
+// is an admin's call, as adding one is.
+organizationsRouter.post('/organizations/:organizationId/trading-names/remove', async (req, res, next) => {
+  try {
+    const { organizationId } = orgParamsSchema.parse(req.params);
+    const { membership } = await assertOrganizationAccess(organizationId, req.auth!);
+    if (!isAdminRole(membership.role)) throw forbidden('Only an admin can take a name off.');
+    const { name } = tradingNameBodySchema.parse(req.body);
+    const actor = await prisma.user.findUniqueOrThrow({ where: { userId: req.auth!.userId }, select: { displayName: true } });
+    res.json(await removeTradingName({ organizationId, name, actorUserId: req.auth!.userId, actorName: actor.displayName }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+organizationsRouter.post('/organizations/:organizationId/trading-names/restore', async (req, res, next) => {
+  try {
+    const { organizationId } = orgParamsSchema.parse(req.params);
+    const { membership } = await assertOrganizationAccess(organizationId, req.auth!);
+    if (!isAdminRole(membership.role)) throw forbidden('Only an admin can put a name back.');
+    const { name } = tradingNameBodySchema.parse(req.body);
+    res.json(await restoreTradingName({ organizationId, name }));
   } catch (error) {
     next(error);
   }

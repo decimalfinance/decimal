@@ -248,6 +248,15 @@ export async function openTasksByPerson(tx: Tx, organizationId: string): Promise
   return rows.map((r) => ({ personId: r.person_id, userId: r.user_id, name: r.name, openCount: r.open_count, waitingSince: r.waiting_since }));
 }
 
+/**
+ * A person's name as their team sees it. The engine keeps its own copy in
+ * every organisation they're in, made when they joined, so a new name goes
+ * to all of them.
+ */
+export async function renamePerson(tx: Tx, userId: string, name: string): Promise<void> {
+  await tx.$executeRaw`UPDATE approval.people SET name = ${name} WHERE user_id = ${userId}::uuid`;
+}
+
 export async function getBillCeilingMinor(tx: Tx, organizationId: string): Promise<bigint | null> {
   const rows = await tx.$queryRaw<{ bill_ceiling_minor: bigint | null }[]>`
     SELECT bill_ceiling_minor FROM approval.org_settings WHERE organization_id = ${organizationId}::uuid`;

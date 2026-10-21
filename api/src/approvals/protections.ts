@@ -39,6 +39,32 @@ export async function ensureRulePack(tx: Tx, organizationId: string): Promise<vo
   }
 }
 
+/** The last recorded change to a policy: when, and who made it. */
+export interface PolicyChange {
+  at: Date;
+  personId: string | null;
+  name: string | null;
+}
+
+/**
+ * The latest change of each policy on the organisation's record, keyed by the
+ * rule's code, or `ceiling` for the bill ceiling: who turned a protection off
+ * or back on, or set the ceiling, and when.
+ */
+export async function latestPolicyChanges(organizationId: string): Promise<Map<string, PolicyChange>> {
+  const rows = await prisma.$queryRaw<{ key: string; at: Date; person_id: string | null; name: string | null }[]>`
+    SELECT DISTINCT ON (key) key, at, person_id, name FROM (
+      SELECT CASE WHEN e.payload->>'kind' = 'ceiling_changed' THEN 'ceiling' ELSE e.payload->>'rule' END AS key,
+             e.at, e.seq, p.id::text AS person_id, p.name
+      FROM approval.approval_events e
+      LEFT JOIN approval.people p ON p.id::text = COALESCE(e.payload->>'acknowledgedBy', e.payload->>'by')
+      WHERE e.organization_id = ${organizationId}::uuid
+        AND e.payload->>'kind' IN ('protection_relaxed', 'protection_retightened', 'ceiling_changed')
+    ) changes
+    ORDER BY key, seq DESC`;
+  return new Map(rows.map((r) => [r.key, { at: r.at, personId: r.person_id, name: r.name }]));
+}
+
 export interface ProtectionStatus {
   code: RuleCode;
   displayName: string;
@@ -49,10 +75,12 @@ export interface ProtectionStatus {
   relaxedAt: Date | null;
   reviewAtHeadcount: number | null;
   scopedPeople: { id: string; name: string }[] | null; // null = everyone
+  lastChange: PolicyChange | null;
 }
 
 export async function listProtections(organizationId: string): Promise<ProtectionStatus[]> {
   await prisma.$transaction((tx) => ensureRulePack(tx, organizationId));
+  const changes = await latestPolicyChanges(organizationId);
   const rows = await prisma.$queryRaw<
     { name: string; cap_b: { oneLiner: string; displayName: string }; relaxable: boolean; ack_name: string | null; acknowledged_at: Date | null; review_at_headcount: number | null; scoped_people: { id: string; name: string }[] | null }[]
   >`
@@ -78,6 +106,7 @@ export async function listProtections(organizationId: string): Promise<Protectio
     relaxedAt: r.acknowledged_at,
     reviewAtHeadcount: r.review_at_headcount,
     scopedPeople: r.scoped_people,
+    lastChange: changes.get(r.name) ?? null,
   }));
 }
 
@@ -126,7 +155,7 @@ export async function relaxProtection(input: {
               ${['badge_on_every_exception', 'monthly_exceptions_digest', 'headcount_review_prompt']}::text[],
               ${input.reviewAtHeadcount ?? 6},
               ${input.scopedPersonIds && input.scopedPersonIds.length > 0 ? input.scopedPersonIds : null}::uuid[])`;
-    await appendProtectionEvent(tx, input.organizationId, {
+    await appendGovernanceEvent(tx, input.organizationId, {
       kind: 'protection_relaxed', rule: input.code,
       acknowledgedBy: input.acknowledgedByPersonId, sheetHash,
       reviewAtHeadcount: input.reviewAtHeadcount ?? 6,
@@ -145,6 +174,8 @@ export async function revokeRelaxation(input: {
   organizationId: string;
   code: RuleCode;
   revokedByPersonId: string;
+  /** How they confirmed who they are: their password, or (no password) their session. */
+  reauthMethod?: 'password' | 'session';
 }): Promise<{ sweptTasks: number }> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`
@@ -152,8 +183,17 @@ export async function revokeRelaxation(input: {
       FROM approval.constraint_rules cr
       WHERE cr.id = rr.rule_id AND cr.organization_id = ${input.organizationId}::uuid
         AND cr.name = ${input.code} AND rr.revoked_at IS NULL`;
-    await appendProtectionEvent(tx, input.organizationId, {
+    // The old Approval flow page could let senders approve with an
+    // organisation-wide flag, outside this ceremony. Back on means on,
+    // whichever way it was turned off.
+    if (input.code === 'R1') {
+      await tx.$executeRaw`
+        UPDATE approval.org_settings SET submitter_can_approve = false
+        WHERE organization_id = ${input.organizationId}::uuid AND submitter_can_approve`;
+    }
+    await appendGovernanceEvent(tx, input.organizationId, {
       kind: 'protection_retightened', rule: input.code, by: input.revokedByPersonId,
+      reauthMethod: input.reauthMethod ?? null,
     });
 
     // Sweep: open tasks that only existed because the rule was relaxed.
@@ -179,7 +219,11 @@ export async function revokeRelaxation(input: {
   });
 }
 
-async function appendProtectionEvent(tx: Tx, organizationId: string, payload: Record<string, unknown>): Promise<void> {
+/**
+ * A change to the organisation's policies, on its record: a protection turned
+ * off or back on, the bill ceiling set.
+ */
+export async function appendGovernanceEvent(tx: Tx, organizationId: string, payload: Record<string, unknown>): Promise<void> {
   // Protection events are org-level; the log requires an approvable — use the
   // org-settings sentinel approvable created lazily for governance events.
   const sentinel = await tx.$queryRaw<{ id: string }[]>`

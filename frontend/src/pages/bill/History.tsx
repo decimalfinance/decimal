@@ -121,7 +121,7 @@ export function historyItems(detail: BillDetail, note: BillCompanionNote | null 
     const name = nameOf(who);
     settles({ at: t.at, byName: t.byName });
     push({
-      id: `tn-${t.name}`, at: new Date(t.at), who, badge: 'good',
+      id: `tn-${t.name}-${t.at}`, at: new Date(t.at), who, badge: 'good',
       line: <><b>{name}</b> recorded {t.name} as a name we trade under</>,
       plain: `${name} recorded ${t.name} as a name we trade under`,
     });

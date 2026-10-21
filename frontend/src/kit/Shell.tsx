@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { accessApi, inboxApi, type AuthenticatedSession, type Capability, type OrganizationMembership } from '../api';
@@ -16,6 +16,13 @@ import { ToastHost } from './Toast';
  * Folded or not is remembered in this browser.
  */
 const FOLD_KEY = 'decimal.sidebar.folded';
+
+const SignOutContext = createContext<() => void>(() => {});
+
+/** Asks before signing out, from a page: the same question the sidebar asks. */
+export function useSignOut() {
+  return useContext(SignOutContext);
+}
 
 function readFolded() {
   try {
@@ -59,6 +66,10 @@ export function Shell({
   const [peek, setPeek] = useState(false);
   const [menu, setMenu] = useState<null | 'org' | 'me'>(null);
   const [askSignOut, setAskSignOut] = useState(false);
+  const askToSignOut = useCallback(() => {
+    setMenu(null);
+    setAskSignOut(true);
+  }, []);
   const [tip, setTip] = useState<null | 'handle' | 'pin'>(null);
   const peekTimer = useRef<number | undefined>(undefined);
 
@@ -167,10 +178,7 @@ export function Shell({
       me={me}
       menu={menu}
       setMenu={setMenu}
-      onSignOut={() => {
-        setMenu(null);
-        setAskSignOut(true);
-      }}
+      onSignOut={askToSignOut}
     />
   );
 
@@ -233,7 +241,7 @@ export function Shell({
       )}
 
       <main className="shell-main">
-        {children}
+        <SignOutContext.Provider value={askToSignOut}>{children}</SignOutContext.Provider>
         <ToastHost />
       </main>
 

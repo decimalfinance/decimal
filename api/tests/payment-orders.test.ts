@@ -1754,7 +1754,7 @@ test('a bill routed to its own submitter deadlocks: the task exists, the rules f
   // the click, naming a rule code and nothing a person could act on.
   assert.equal(detail.viewer.cannotApprove.rule, 'R1');
   assert.match(detail.viewer.cannotApprove.why, /You submitted this bill/);
-  assert.match(detail.viewer.cannotApprove.remedy, /Approval flow page/);
+  assert.match(detail.viewer.cannotApprove.remedy, /turn No self-approval off on Organisation/);
 
   const refusal = await postExpectingStatus(
     `/organizations/${org}/approvals/tasks/${detail.viewer.openTaskId}/command`,

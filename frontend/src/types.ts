@@ -7,6 +7,8 @@ export type User = {
   avatarUrl?: string | null;
   /** Only on GET /auth/session. */
   signInMethod?: 'google' | 'password';
+  /** Only on GET /auth/session: false for an account made with Google. */
+  hasPassword?: boolean;
   emailVerifiedAt: string | null;
 };
 

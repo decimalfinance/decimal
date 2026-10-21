@@ -517,9 +517,9 @@ const relaxSchema = z.object({
 approvalsRouter.get('/organizations/:organizationId/policies', asyncRoute(async (req, res) => {
   const { organizationId } = orgParams.parse(req.params);
   await assertOrganizationAccess(organizationId, req.auth!);
-  const { listProtections } = await import('./protections.js');
+  const { listProtections, latestPolicyChanges } = await import('./protections.js');
   const { getBillCeilingMinor } = await import('./store.js');
-  const [protections, ceilingMinor, payableCounts, duplicateOverrides] = await Promise.all([
+  const [protections, ceilingMinor, payableCounts, duplicateOverrides, changes] = await Promise.all([
     listProtections(organizationId),
     getBillCeilingMinor(prisma, organizationId),
     prisma.$queryRaw<{ status: string; count: bigint }[]>`
@@ -534,6 +534,7 @@ approvalsRouter.get('/organizations/:organizationId/policies', asyncRoute(async 
         createdAt: { gte: new Date(Date.now() - 30 * 24 * 3600 * 1000) },
       },
     }),
+    latestPolicyChanges(organizationId),
   ]);
   const held = Number(payableCounts.find((r) => r.status === 'held')?.count ?? 0n);
   const blocked = Number(payableCounts.find((r) => r.status === 'blocked')?.count ?? 0n);
@@ -547,6 +548,7 @@ approvalsRouter.get('/organizations/:organizationId/policies', asyncRoute(async 
   sendJson(res, {
     protections,
     ceilingUsd: ceilingMinor === null ? null : Number(ceilingMinor) / 1_000_000,
+    ceilingChange: changes.get('ceiling') ?? null,
     gates: {
       duplicate: { overridesLast30Days: duplicateOverrides },
       payable: { held, blocked },
@@ -559,7 +561,18 @@ approvalsRouter.get('/organizations/:organizationId/policies', asyncRoute(async 
   });
 }));
 
-const ceilingSchema = z.object({ amountUsd: z.number().positive().max(1_000_000_000).nullable() });
+const ceilingSchema = z.object({
+  amountUsd: z.number().positive().max(1_000_000_000).nullable(),
+  password: z.string().max(128).optional(),
+});
+
+// Bills that went through with a policy set aside: Organisation's Exceptions.
+approvalsRouter.get('/organizations/:organizationId/policies/exceptions', asyncRoute(async (req, res) => {
+  const { organizationId } = orgParams.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  const { listPolicyExceptions } = await import('./policy-exceptions.js');
+  sendJson(res, { items: await listPolicyExceptions(organizationId) });
+}));
 
 approvalsRouter.put('/organizations/:organizationId/policies/ceiling', asyncRoute(async (req, res) => {
   const { organizationId } = orgParams.parse(req.params);
@@ -567,9 +580,21 @@ approvalsRouter.put('/organizations/:organizationId/policies/ceiling', asyncRout
   const { isPrimaryAdminRole } = await import('../auth/organization-access.js');
   if (!isPrimaryAdminRole(access.membership.role)) throw forbidden('Only the primary admin can change the bill ceiling.');
   const input = ceilingSchema.parse(req.body);
-  const { setBillCeilingMinor } = await import('./store.js');
+  const { confirmPassword } = await import('../auth/confirm-password.js');
+  const reauthMethod = await confirmPassword(req.auth!.userId, input.password);
+  const { getBillCeilingMinor, setBillCeilingMinor } = await import('./store.js');
+  const { appendGovernanceEvent } = await import('./protections.js');
+  const { ensurePersonForUser } = await import('./wiring.js');
   const minor = input.amountUsd === null ? null : BigInt(Math.round(input.amountUsd * 1_000_000));
-  await prisma.$transaction((tx) => setBillCeilingMinor(tx, organizationId, minor));
+  await prisma.$transaction(async (tx) => {
+    const before = await getBillCeilingMinor(tx, organizationId);
+    await setBillCeilingMinor(tx, organizationId, minor);
+    // On the record, as turning a protection off is: who set it, from what, to what.
+    const by = await ensurePersonForUser(tx, organizationId, req.auth!.userId);
+    await appendGovernanceEvent(tx, organizationId, {
+      kind: 'ceiling_changed', from: before?.toString() ?? null, to: minor?.toString() ?? null, by, reauthMethod,
+    });
+  });
   sendJson(res, { ok: true, ceilingUsd: input.amountUsd });
 }));
 
@@ -582,21 +607,16 @@ approvalsRouter.post('/organizations/:organizationId/protections/:code/relax', a
 
   const input = relaxSchema.parse(req.body);
   // Fresh re-authentication — a real identity ceremony, not a checkbox.
-  const user = await prisma.$queryRaw<{ password_hash: string | null }[]>`
-    SELECT password_hash FROM users WHERE user_id = ${req.auth!.userId}::uuid`;
-  if (user[0]?.password_hash) {
-    const { verifyPassword } = await import('../auth/passwords.js');
-    if (!input.password || !(await verifyPassword(input.password, user[0].password_hash))) {
-      throw forbidden('Please confirm your password to relax a protection');
-    }
-  } // passwordless (Google-only) accounts: session suffices; the event records the method
+  // Passwordless (Google-only) accounts: the session suffices; the event records the method.
+  const { confirmPassword } = await import('../auth/confirm-password.js');
+  const reauthMethod = await confirmPassword(req.auth!.userId, input.password);
 
   const { relaxProtection } = await import('./protections.js');
   const { ensurePersonForUser } = await import('./wiring.js');
   const personId = await prisma.$transaction((tx) => ensurePersonForUser(tx, organizationId, req.auth!.userId));
   const result = await relaxProtection({
     organizationId, code, acknowledgedByPersonId: personId,
-    sheetContent: { ...(input.sheetContent as object ?? {}), reauthMethod: user[0]?.password_hash ? 'password' : 'session' },
+    sheetContent: { ...(input.sheetContent as object ?? {}), reauthMethod },
     reviewAtHeadcount: input.reviewAtHeadcount,
     scopedPersonIds: input.scopedPersonIds ?? null,
   });
@@ -609,8 +629,12 @@ approvalsRouter.post('/organizations/:organizationId/protections/:code/retighten
   const access = await assertOrganizationAccess(organizationId, req.auth!);
   const { isPrimaryAdminRole } = await import('../auth/organization-access.js');
   if (!isPrimaryAdminRole(access.membership.role)) throw forbidden('Only the primary admin can change protections');
+  // Back on is a policy change too, so it asks for the password as turning off does.
+  const { password } = z.object({ password: z.string().max(128).optional() }).parse(req.body ?? {});
+  const { confirmPassword } = await import('../auth/confirm-password.js');
+  const reauthMethod = await confirmPassword(req.auth!.userId, password);
   const { revokeRelaxation } = await import('./protections.js');
   const { ensurePersonForUser } = await import('./wiring.js');
   const personId = await prisma.$transaction((tx) => ensurePersonForUser(tx, organizationId, req.auth!.userId));
-  sendJson(res, await revokeRelaxation({ organizationId, code, revokedByPersonId: personId }));
+  sendJson(res, await revokeRelaxation({ organizationId, code, revokedByPersonId: personId, reauthMethod }));
 }));

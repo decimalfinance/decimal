@@ -142,6 +142,7 @@
   /* Focus */
   --focus: 0 0 0 2px #FFFFFF, 0 0 0 4px rgba(92, 31, 51, .45);
   --focus-inset: inset 0 0 0 2px rgba(92, 31, 51, .45);
+  --focus-field: 0 0 0 2px rgba(92, 31, 51, .18);  /* a name edited in place */
   --ring-picked: rgba(92, 31, 51, .14);   /* round the node being edited */
   --field-glow: rgba(92, 31, 51, .12);    /* round a field being typed in */
 

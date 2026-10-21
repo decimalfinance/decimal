@@ -337,10 +337,10 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
         short: 'Over bill ceiling',
         resolutions: [
           { action: 'allow_over_ceiling', label: 'Allow this bill', requires: 'primary_admin', detail: 'Let this one bill past the ceiling, with a reason. The ceiling stays where it is, and the decision becomes the audit record.' },
-          { action: 'raise_ceiling', label: 'Review the ceiling', requires: 'primary_admin', detail: 'Raise the organization ceiling itself, on the Policies page. This affects every bill.' },
+          { action: 'raise_ceiling', label: 'Review the ceiling', requires: 'primary_admin', detail: 'Raise the ceiling itself, on Organisation. This affects every bill.' },
           ASK,
         ],
-        message: `This bill (${usdText(facts.amountRaw)}) is over your organization's bill ceiling of ${usdText(facts.ceilingMinor)}.${stale} The primary admin can allow this one bill, or raise the ceiling on the Policies page.`,
+        message: `This bill (${usdText(facts.amountRaw)}) is over your organization's bill ceiling of ${usdText(facts.ceilingMinor)}.${stale} The primary admin can allow this one bill, or raise the ceiling on Organisation.`,
       });
     }
   }

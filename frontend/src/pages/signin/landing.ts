@@ -45,9 +45,14 @@ export function homeFor(session: AuthenticatedSession) {
   const organizations = session.organizations;
   if (organizations.length === 0) return '/setup';
   if (organizations.length === 1) return `/organizations/${organizations[0]!.organizationId}`;
+  const last = rememberedOrganization(organizations);
+  return last ? `/organizations/${last}` : '/choose-organization';
+}
+
+/** The organisation this browser opened last, if this person is still in it. */
+export function rememberedOrganization(organizations: { organizationId: string }[]) {
   const last = lastOrganization();
-  if (last && organizations.some((o) => o.organizationId === last)) return `/organizations/${last}`;
-  return '/choose-organization';
+  return last && organizations.some((o) => o.organizationId === last) ? last : undefined;
 }
 
 /** Where someone goes the moment they're signed in. An address still to confirm comes first. */

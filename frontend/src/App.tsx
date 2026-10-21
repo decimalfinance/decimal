@@ -8,7 +8,7 @@ import type { AuthenticatedSession } from './api';
 import { ScreenState } from './ui-primitives';
 import { queryKeys } from './lib/app-helpers';
 import { useLiveOrgEvents } from './lib/use-live-org-events';
-import { rememberOrganization, withReturn } from './pages/signin/landing';
+import { rememberOrganization, rememberedOrganization, withReturn } from './pages/signin/landing';
 
 // Lazy-loaded route pages. Each becomes its own chunk, so the main bundle
 // only ships the shell + the first matched page. Notably keeps Solana web3
@@ -30,7 +30,7 @@ const VendorPage = lazy(() => import('./pages/Vendor').then((m) => ({ default: m
 const LandingPage = lazy(() => import('./pages/landing-v4').then((m) => ({ default: m.LandingPage })));
 const TeamPage = lazy(() => import('./pages/Team').then((m) => ({ default: m.TeamPage })));
 const ApprovalsPage = lazy(() => import('./pages/Approvals').then((m) => ({ default: m.ApprovalsPage })));
-const ProtectionsPage = lazy(() => import('./pages/Protections').then((m) => ({ default: m.ProtectionsPage })));
+const OrganisationPage = lazy(() => import('./pages/Organisation').then((m) => ({ default: m.OrganisationPage })));
 const AccountingPage = lazy(() => import('./pages/Accounting').then((m) => ({ default: m.AccountingPage })));
 const TreasuryWalletDetailPage = lazy(() => import('./pages/TreasuryWalletDetail').then((m) => ({ default: m.TreasuryWalletDetailPage })));
 const VaultDetailPage = lazy(() => import('./pages/VaultDetail').then((m) => ({ default: m.VaultDetailPage })));
@@ -49,7 +49,7 @@ const CreateOrganizationPage = lazy(() => import('./pages/signin/Organizations')
 const ChooseOrganizationPage = lazy(() => import('./pages/signin/Organizations').then((m) => ({ default: m.ChooseOrganizationPage })));
 const OnwardRedirect = lazy(() => import('./pages/signin/Organizations').then((m) => ({ default: m.OnwardRedirect })));
 const SignInFrame = lazy(() => import('./pages/signin/parts').then((m) => ({ default: m.Frame })));
-const ProfilePage = lazy(() => import('./pages/Profile').then((m) => ({ default: m.ProfilePage })));
+const AccountPage = lazy(() => import('./pages/Account').then((m) => ({ default: m.AccountPage })));
 
 const RouteFallback = () => (
   <ScreenState title="Loading" description="Fetching the next page." />
@@ -168,8 +168,9 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
   const location = useLocation();
   const activeOrganizationId = useMemo(() => {
     const match = location.pathname.match(/^\/organizations\/([^/]+)/);
-    return match?.[1];
-  }, [location.pathname]);
+    // A page outside any organisation (Your account) keeps the one open last.
+    return match?.[1] ?? rememberedOrganization(session.organizations);
+  }, [location.pathname, session.organizations]);
   // Live updates: stream this org's changes over SSE and invalidate queries so
   // a co-signer's screen reflects a new signature/execution the instant it lands.
   useLiveOrgEvents(activeOrganizationId);
@@ -200,7 +201,7 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
           <Suspense fallback={<Legacy><RouteFallback /></Legacy>}>
             <Routes>
               <Route path="/" element={<HomeRedirect session={session} />} />
-              <Route path="/profile" element={<Legacy><ProfilePage session={session} /></Legacy>} />
+              <Route path="/profile" element={<AccountPage />} />
               <Route path="/organizations/:organizationId" element={<HomePage />} />
               <Route path="/organizations/:organizationId/chat/:chatId" element={<Legacy><ChatPage /></Legacy>} />
               <Route path="/organizations/:organizationId/inbox" element={<InboxPage />} />
@@ -211,7 +212,7 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
               <Route path="/organizations/:organizationId/proposals" element={<Legacy><OrganizationProposalsPage session={session} /></Legacy>} />
               <Route path="/organizations/:organizationId/approvals" element={<Legacy><ApprovalsPage /></Legacy>} />
               <Route path="/organizations/:organizationId/approval-flow" element={<ApprovalRulesPage />} />
-              <Route path="/organizations/:organizationId/policies" element={<Legacy><ProtectionsPage /></Legacy>} />
+              <Route path="/organizations/:organizationId/policies" element={<OrganisationPage />} />
               {/* Protections grew into Policies (P1) — old links land there. */}
               <Route path="/organizations/:organizationId/protections" element={<OrgRedirect to="policies" />} />
               <Route path="/organizations/:organizationId/spending-limits" element={<Legacy><SpendingLimitsPage /></Legacy>} />

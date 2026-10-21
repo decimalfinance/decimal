@@ -432,6 +432,8 @@ async function planAlertsByOrder(organizationId: string, paymentOrderIds: string
 export function readTradingNames(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return raw
+    // Taken off on Organisation: kept on record, marked removed, no longer ours.
+    .filter((e) => !(isRecord(e) && e.removedAt))
     .map((e) => (typeof e === 'string' ? e : isRecord(e) ? str(e.name) : null))
     .filter((n): n is string => Boolean(n));
 }
@@ -439,10 +441,13 @@ export function readTradingNames(raw: unknown): string[] {
 /** The names someone recorded as ours off one bill, so that bill can say who did. */
 function tradingNamesRecordedFrom(raw: unknown, paymentOrderId: string) {
   if (!Array.isArray(raw)) return [];
+  // In use now, from this bill or recorded again off another one.
+  const inUse = new Set(readTradingNames(raw).map((n) => n.toLowerCase()));
   return raw
     .filter(isRecord)
     .filter((e) => str(e.fromPaymentOrderId) === paymentOrderId && Boolean(str(e.name)))
-    .map((e) => ({ name: str(e.name)!, byName: str(e.addedByName), at: str(e.addedAt) }));
+    // A name taken off later stays in the bill's history, but settles nothing now.
+    .map((e) => ({ name: str(e.name)!, byName: str(e.addedByName), at: str(e.addedAt), removed: !inUse.has(str(e.name)!.toLowerCase()) }));
 }
 
 // What the document calls itself. A real invoice carries exactly one invoice
@@ -2849,7 +2854,7 @@ export async function submitBillForApproval(input: SubmitBillInput) {
   // here, not past it.
   if (confirmCeiling !== null && confirmedAmountRaw > confirmCeiling
     && !activeCeilingException(metadata, confirmedAmountRaw)) {
-    throw new Error(`This bill (${usdText(confirmedAmountRaw)}) is over your organization's bill ceiling of ${usdText(confirmCeiling)}. The primary admin can allow this one bill, or raise the ceiling on the Policies page.`);
+    throw new Error(`This bill (${usdText(confirmedAmountRaw)}) is over your organization's bill ceiling of ${usdText(confirmCeiling)}. The primary admin can allow this one bill, or raise the ceiling on Organisation.`);
   }
   // Re-run the duplicate gate against the CONFIRMED values — the bill clerk may
   // have just edited the invoice number or total, and the draft-time flag
@@ -4243,11 +4248,11 @@ async function approvalBlockedFor(
   const WHY: Record<string, { why: string; remedy: string }> = {
     R1: {
       why: 'You submitted this bill, and your organization separates submitting from approving.',
-      remedy: "An admin can turn that separation off on the Approval flow page if your team is too small for it, or add someone else to the flow. Either way it goes on the record.",
+      remedy: 'If your team is too small for this rule, the primary admin can turn No self-approval off on Organisation, or an admin can add someone else in Approval rules. Either way it goes on the record.',
     },
     R2: {
       why: "You entered this bill's details, and your organization separates entering from approving.",
-      remedy: 'An admin can turn that separation off on the Approval flow page, or add someone else to the flow.',
+      remedy: 'An admin can add someone else in Approval rules.',
     },
     R7: {
       why: 'You asked for this payout detail change, so you cannot be the one who verifies it.',
@@ -4256,7 +4261,7 @@ async function approvalBlockedFor(
   };
   const copy = WHY[veto.rule] ?? {
     why: 'Your organization separates this decision from something else you already did on this bill.',
-    remedy: 'An admin can review the separation settings on the Approval flow page.',
+    remedy: 'An admin can add someone else in Approval rules.',
   };
   return { rule: veto.rule, ...copy };
 }

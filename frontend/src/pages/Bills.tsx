@@ -16,7 +16,7 @@ import {
 import { Avatar } from '../kit/Avatar';
 import { Cells } from '../kit/Cells';
 import { Dialog } from '../kit/Dialog';
-import { useDismiss } from '../kit/hooks';
+import { useCopy, useDismiss } from '../kit/hooks';
 import { Icon } from '../kit/icons';
 import { Orb } from '../kit/Orb';
 import { useToaster } from '../kit/Toast';
@@ -65,20 +65,6 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 /** "Copy" that reads "Copied" for two seconds. */
-function useCopy(text: string | null) {
-  const [copied, setCopied] = useState(false);
-  const timer = useRef<number | undefined>(undefined);
-  useEffect(() => () => window.clearTimeout(timer.current), []);
-  const copy = () => {
-    if (!text) return;
-    void navigator.clipboard?.writeText(text).catch(() => {});
-    setCopied(true);
-    window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => setCopied(false), 2000);
-  };
-  return { copied, copy };
-}
-
 export function BillsPage() {
   const { organizationId = '' } = useParams();
   const navigate = useNavigate();

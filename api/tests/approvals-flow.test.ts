@@ -208,6 +208,15 @@ test('fail closed: a pending bill is never ready-to-pay — solo owner approves 
   const after = await get(`/organizations/${orgId}/bills/workbench`, owner.token);
   const afterRow = after.bills.find((b: { paymentOrderId: string }) => b.paymentOrderId === bill.billId);
   assert.equal(afterRow.bucket, 'to_pay', 'approved by the owner → now genuinely ready to pay');
+
+  // …and Organisation lists it under Exceptions: its sender approved it.
+  const { items } = await get(`/organizations/${orgId}/policies/exceptions`, owner.token);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].kind, 'self_approval');
+  assert.equal(items[0].paymentOrderId, bill.billId);
+  assert.equal(items[0].vendorName, 'Solo Vendor');
+  assert.equal(items[0].amountRaw, '400000000');
+  assert.equal(items[0].approvedBy.name, 'solo-owner');
 });
 
 test('release gate: a vendor hold set after approval still blocks release', async () => {
@@ -383,7 +392,7 @@ test('org bill ceiling: over-ceiling bills are blocked while still a draft and u
   const put = await fetch(`${baseUrl}/organizations/${orgId}/policies/ceiling`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${owner.token}` },
-    body: JSON.stringify({ amountUsd: 1000 }),
+    body: JSON.stringify({ amountUsd: 1000, password: 'DemoPass123!' }),
   });
   assert.ok(put.ok);
 
@@ -402,7 +411,7 @@ test('org bill ceiling: over-ceiling bills are blocked while still a draft and u
   await fetch(`${baseUrl}/organizations/${orgId}/policies/ceiling`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${owner.token}` },
-    body: JSON.stringify({ amountUsd: null }),
+    body: JSON.stringify({ amountUsd: null, password: 'DemoPass123!' }),
   });
   await bill.confirm();
 });
@@ -1243,6 +1252,24 @@ test('"this is us" clears the flag through the API, and a member is refused', as
   assert.equal(recorded.length, 1, 'the bill knows the name was recorded off it');
   assert.equal(recorded[0].name, 'Halcyon Labs');
   assert.ok(recorded[0].byName && recorded[0].at, 'with who said so and when, so the bill can show it as theirs');
+  assert.equal(recorded[0].removed, false);
+
+  // Taken off on Organisation: the bill is asked about again, and its record
+  // of the claim says the name has since been taken off.
+  await post(`/organizations/${orgId}/trading-names/remove`, { name: 'Halcyon Labs' }, owner.token);
+  const takenOff = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, owner.token);
+  assert.ok(takenOff.flags.some((f: any) => f.kind === 'addressed_elsewhere'), 'asked about again');
+  assert.equal(takenOff.tradingNamesFromHere[0].removed, true);
+
+  // Recorded again off another bill: the name is in use, so the first bill
+  // no longer says it was taken off.
+  const second = await uploadAndConfirm(orgId, owner.token, {
+    vendor: 'Acme Cloud', amount: 975, invoiceNo: 'TIU-2', billTo: 'Halcyon Labs, Inc.',
+  });
+  await post(`/organizations/${orgId}/bills/${second.billId}/this-is-us`, { name: 'Halcyon Labs' }, owner.token);
+  const again = await get(`/organizations/${orgId}/bills/${bill.billId}/draft`, owner.token);
+  assert.ok(!again.flags.some((f: any) => f.kind === 'addressed_elsewhere'));
+  assert.equal(again.tradingNamesFromHere[0].removed, false, 'in use again, so not "since taken off"');
 });
 
 test('closing a bill is admin-only — a member can ask, not kill', async () => {

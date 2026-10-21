@@ -79,7 +79,7 @@ export async function assertBillApprovedForRelease(organizationId: string, payme
   if (ceilingMinor !== null && order.amountRaw > ceilingMinor
     && !activeCeilingException(order.metadataJson, order.amountRaw)) {
     throw badRequest(
-      "This bill is over the organization's bill ceiling — the primary admin can allow this one bill, or raise the ceiling on the Policies page.",
+      "This bill is over the organization's bill ceiling. The primary admin can allow this one bill, or raise the ceiling on Organisation.",
       { paymentOrderId, rule: 'bill_ceiling', ceilingMinor: ceilingMinor.toString() },
     );
   }

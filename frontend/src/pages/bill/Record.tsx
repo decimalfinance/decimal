@@ -368,7 +368,11 @@ function AskBox({
 }
 
 /** Why the viewer holds the step but can't approve it, in the note on the greyed button. */
-function cannotApproveWords(rule: string) {
+function cannotApproveWords(rule: string, alone: boolean, isPrimary: boolean) {
+  // With nobody else on the step, say what unblocks it, not who doesn't exist.
+  if (rule === 'R1' && alone) {
+    return `You sent this bill, and nobody else can approve it. ${isPrimary ? 'You' : 'The primary admin'} can turn No self-approval off on Organisation.`;
+  }
   if (rule === 'R1') return 'You sent this bill, so someone else approves it.';
   if (rule === 'R2') return 'You entered this bill, so someone else approves it.';
   return 'Someone else has to approve this one.';
@@ -556,7 +560,7 @@ function Bar({
             {blocked ? (
               <span className="bp-tipwrap" onMouseEnter={() => setTip(true)} onMouseLeave={() => setTip(false)} onFocus={() => setTip(true)} onBlur={() => setTip(false)}>
                 <button type="button" className="btn is-primary" aria-disabled onClick={() => setTip(true)}>Approve</button>
-                {tip ? <span className="tip">{cannotApproveWords(blocked.rule)}</span> : null}
+                {tip ? <span className="tip">{cannotApproveWords(blocked.rule, !others, access.isPrimary)}</span> : null}
               </span>
             ) : (
               <button type="button" className="btn is-primary" disabled={busy} onClick={() => void approve()}>Approve</button>

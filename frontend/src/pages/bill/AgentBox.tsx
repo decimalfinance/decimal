@@ -114,9 +114,11 @@ function threadOf(detail: BillDetail, chat: CompanionChat | undefined, viewer: F
   for (const t of draft.tradingNamesFromHere ?? []) {
     if (!t.byName || !t.at) continue;
     out.push({
-      id: `tn-${t.name}`, at: new Date(t.at), who: face(t.byName),
+      id: `tn-${t.name}-${t.at}`, at: new Date(t.at), who: face(t.byName),
       body: `${t.name} is a name we trade under.`,
-      sub: 'Settled · bills addressed to it aren’t flagged again',
+      sub: t.removed
+        ? 'Since taken off on Organisation · bills addressed to it are asked about again'
+        : 'Settled · bills addressed to it aren’t flagged again',
     });
   }
 

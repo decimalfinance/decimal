@@ -1,0 +1,222 @@
+/* ── Organisation (3a) and Your account (2b) ────────────────
+   Every row is in one shape: the setting and a line about it on the left,
+   its value and the action on the right, on one line. Rows join with 2px
+   gaps and only the outer corners are round. */
+
+.ui .st-blocks { margin-top: 26px; display: grid; gap: 26px; }
+.ui .st-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 16px;
+  align-items: start;
+}
+.ui .st-pair.is-stretch { align-items: stretch; }
+.ui .st-col { min-width: 0; display: flex; flex-direction: column; }
+.ui .st-col > .st-rows { flex: 1; }
+
+.ui .st-heading { display: flex; align-items: baseline; gap: 10px; min-width: 0; padding-bottom: 10px; }
+.ui .st-heading.is-tight { gap: 8px; }
+.ui .st-heading > .section-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui .st-hint { flex: none; font: 400 11px/1.3 var(--font); color: var(--ink-3); }
+.ui .st-count { font-size: 11px; color: var(--ink-4); }
+.ui .st-sub { margin: -4px 0 6px; font: 400 10.5px/1.45 var(--font); color: var(--ink-3); text-wrap: pretty; }
+
+.ui .st-rows { display: grid; gap: 2px; }
+.ui .st-rows > * { border-radius: 2px; background: var(--grey); }
+.ui .st-rows > :first-child { border-top-left-radius: 8px; border-top-right-radius: 8px; }
+.ui .st-rows > :last-child { border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; }
+
+.ui .st-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 24px;
+  padding: 12px 16px 13px;
+}
+.ui .st-left { min-width: 0; }
+.ui .st-label { font: 500 12px/1.3 var(--font); color: var(--ink); }
+.ui .st-line { margin-top: 3px; font: 400 11px/1.45 var(--font); color: var(--ink-2); text-wrap: pretty; }
+.ui .st-line.is-error { color: var(--red); }
+.ui .st-right { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ui .st-value { max-width: 280px; font: 400 11.5px/1.3 var(--font); color: var(--ink); }
+.ui .st-value.num { font-size: 11px; }
+.ui .st-value.is-quiet { color: var(--ink-3); }
+
+/* A row with nothing in it yet, or that couldn't be loaded. */
+.ui .st-empty { padding: 12px 16px 13px; font: 400 11px/1.45 var(--font); color: var(--ink-2); }
+.ui .st-again {
+  margin-left: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--maroon);
+  cursor: pointer;
+}
+.ui .st-again:hover { text-decoration: underline; }
+
+/* The small ink pill: Rename, Edit, Remove, Change password, Sign out. */
+.ui .st-pill {
+  flex: none;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  background: var(--white);
+  color: var(--ink);
+  font: 500 10.5px var(--font);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ui .st-pill:hover { background: var(--grey); }
+.ui .st-pill:focus-visible { outline: none; box-shadow: var(--focus); }
+.ui .st-pill:disabled { cursor: default; }
+/* The policies' pill: Turn off, Turn back on, Change. */
+.ui .st-pill.is-policy { padding: 0 11px; font-size: 11px; }
+.ui .st-pill.is-policy:hover { border-color: var(--edge-hover); }
+.ui .st-pill.is-quiet { padding: 0 8px; border-color: transparent; background: none; color: var(--ink-2); }
+.ui .st-pill.is-quiet:hover { background: var(--grey-hover); color: var(--ink); }
+.ui .st-pill.is-primary { border-color: var(--maroon); background: var(--maroon); color: var(--white); }
+.ui .st-pill.is-primary:hover,
+.ui .st-pill.is-primary:disabled { border-color: var(--maroon-hover); background: var(--maroon-hover); }
+
+/* A name edited in place. */
+.ui .st-field {
+  width: 180px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  background: var(--white);
+  font: 400 11.5px var(--font);
+  color: var(--ink);
+  outline: none;
+}
+.ui .st-field.is-wide { width: 220px; }
+.ui .st-field:focus { box-shadow: var(--focus-field); }
+.ui .st-field.is-error { border-color: var(--red-error-edge); }
+
+.ui .st-copy {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--maroon);
+  cursor: pointer;
+}
+.ui .st-copy:hover { background: var(--white); }
+.ui .st-copy:focus-visible { outline: none; box-shadow: var(--focus); }
+.ui .st-copy.is-done { color: var(--green); }
+
+/* No self-approval: who it's on for, and who changed it last. */
+.ui .st-scope { font: 400 11px/1.3 var(--font); color: var(--ink-2); white-space: nowrap; }
+.ui .st-scope.is-warn { color: var(--yellow-ink); }
+.ui .st-foot { display: flex; justify-content: flex-end; padding: 9px 16px 10px; }
+.ui .st-changed { font: 400 10px/1.4 var(--font); color: var(--ink-4); white-space: nowrap; }
+
+/* The ceiling: the rule at the top left, any extra height empty below it. */
+.ui .st-card { display: flex; flex-direction: column; padding: 12px 16px 13px; }
+.ui .st-card-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 24px;
+}
+.ui .st-card-value { display: grid; justify-items: end; gap: 3px; }
+.ui .st-amount { font-size: 12.5px; color: var(--ink); white-space: nowrap; }
+.ui .st-amount.is-quiet { font-family: var(--font); font-size: 11.5px; letter-spacing: 0; color: var(--ink-3); }
+.ui .st-spacer { flex: 1; min-height: 12px; }
+.ui .st-card-actions { display: flex; justify-content: flex-end; }
+
+/* Exceptions: the Bills table's columns, rows that lead nowhere. */
+.ui .st-ex {
+  display: grid;
+  padding: 0 4px;
+  grid-template-columns:
+    max-content minmax(32px, 1fr) max-content minmax(32px, 1fr) max-content minmax(32px, 1fr)
+    max-content minmax(32px, 1fr) minmax(0, max-content) minmax(32px, 1fr) max-content;
+}
+.ui .st-ex .bl-th { height: 26px; }
+.ui .st-ex .bl-row { cursor: default; }
+.ui .st-ex .bl-row:hover { background: none; }
+.ui .st-ex .bl-vendor { font-size: 11.5px; }
+.ui .st-who { gap: 6px; font-size: 11px; color: var(--ink); }
+.ui .st-why { font-size: 10.5px; color: var(--ink-2); }
+.ui .st-why > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* Your account: the picture at the top right. */
+.ui .st-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+.ui .st-top-text { min-width: 0; }
+.ui .st-dots { font: 400 11.5px/1.3 var(--font); color: var(--ink); letter-spacing: .1em; }
+
+/* Inside the dialogs: who it's off for, the people, the line under a field. */
+.ui .st-pick { margin: -2px -6px 0; display: grid; gap: 1px; }
+.ui .st-radios { display: grid; gap: 1px; }
+.ui .st-pick > .field-error { margin: 5px 6px 0; }
+.ui .st-people { margin: 1px 0 0 21px; display: grid; gap: 1px; }
+.ui .st-choice {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  height: 30px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: 400 11.5px var(--font);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.ui .st-choice:hover { background: var(--grey); }
+.ui .st-choice:focus-visible { outline: none; box-shadow: var(--focus-inset); }
+.ui .st-radio {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--edge-hover);
+  border-radius: 50%;
+  background: var(--white);
+  transition: border-width .12s ease;
+}
+.ui .st-choice[aria-checked='true'] .st-radio { border: 4px solid var(--maroon); }
+.ui .st-choice.is-person { gap: 8px; height: 28px; }
+.ui .st-check {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--edge-hover);
+  border-radius: 3px;
+  background: var(--white);
+  color: var(--white);
+}
+.ui .st-choice[aria-checked='true'] .st-check { border-color: var(--maroon); background: var(--maroon); }
+.ui .st-choice-name { white-space: nowrap; }
+.ui .st-you { color: var(--ink-3); }
+.ui .st-choice-role { margin-left: auto; font-size: 10.5px; color: var(--ink-3); white-space: nowrap; }
+.ui .st-dlg-note { font: 400 10.5px/1.4 var(--font); color: var(--ink-3); }
+.ui .st-showhide {
+  flex: none;
+  height: 22px;
+  margin-right: -5px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--maroon);
+  font: 500 10.5px var(--font);
+  cursor: pointer;
+}
+.ui .st-showhide:hover { background: var(--pink-50); }
+.ui .st-showhide:focus-visible { outline: none; box-shadow: var(--focus); }
+.ui .st-amount-field { font-family: var(--mono); letter-spacing: -.01em; }
+.ui .st-dollar { color: var(--ink-3); }
