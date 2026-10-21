@@ -30,7 +30,7 @@ import { useToaster } from '../../kit/Toast';
 import { firstName } from '../../kit/format';
 import { ActionPills, ConfirmCard, FindingText, pillsFor, type Access, type CardResult, type OpenCard, type Pill } from './Findings';
 import { closeReasonFor, findingsOf, linesSum, notesOf, parseMoney, restingMessage, type Face, type Fields, type Flag, type LineEntry } from './model';
-import { Chevron, FaceOf, Figures, Mark, WaitBadge, chatTime } from './parts';
+import { Chevron, FaceOf, Figures, Mark, Markdown, WaitBadge, chatTime } from './parts';
 import { AskCard, isAskCard } from './AskCard';
 
 type Said = {
@@ -51,24 +51,6 @@ type Said = {
 
 const quoted = (text: string) => /“(.*)”\s*$/.exec(text)?.[1] ?? null;
 const capitalise = (s: string) => (s ? s[0]!.toUpperCase() + s.slice(1) : s);
-
-/** Decimal's answers in the chat: paragraphs, "- " lists and **bold**, nothing more. */
-function Markdown({ text }: { text: string }) {
-  const inline = (s: string) => s.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
-    part.startsWith('**') && part.endsWith('**') ? <b key={i}>{part.slice(2, -2)}</b> : <Figures key={i} text={part} />);
-  const blocks = text.trim().split(/\n{2,}/);
-  return (
-    <div className="bp-md">
-      {blocks.map((block, i) => {
-        const rows = block.split('\n');
-        if (rows.every((r) => /^\s*[-•]\s/.test(r))) {
-          return <ul key={i}>{rows.map((r, j) => <li key={j}>{inline(r.replace(/^\s*[-•]\s/, ''))}</li>)}</ul>;
-        }
-        return <p key={i}>{rows.map((r, j) => <span key={j}>{j > 0 ? <br /> : null}{inline(r)}</span>)}</p>;
-      })}
-    </div>
-  );
-}
 
 /** Everything people (and Decimal, in the viewer's chat) said on this bill, oldest first. */
 function threadOf(detail: BillDetail, chat: CompanionChat | undefined, viewer: Face, faces: Map<string, string | null>, lines: LineEntry[]): Said[] {

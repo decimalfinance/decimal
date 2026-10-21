@@ -13,20 +13,18 @@ import { Icon } from '../kit/icons';
 import { Orb } from '../kit/Orb';
 import { daysPast, shortDay, usd } from '../kit/format';
 import { Figures } from './bill/parts';
+import { ASK_KINDS, LINE_ORDER, pathOf } from './inboxLines';
 
 type Tab = 'all' | 'new' | 'approvals' | 'questions' | 'review';
 type Row = { key: string; item: InboxItem; line: InboxLine; to: string; late: number; search: string };
 
-const ASKS: InboxLineKind[] = ['question', 'reply'];
 const TABS: Array<{ key: Tab; label: string; has: (r: Row) => boolean }> = [
   { key: 'all', label: 'All', has: () => true },
   { key: 'new', label: 'New', has: (r) => r.line.isNew },
   { key: 'approvals', label: 'Approvals', has: (r) => r.line.kind === 'approval' },
-  { key: 'questions', label: 'Questions', has: (r) => ASKS.includes(r.line.kind) },
-  { key: 'review', label: 'To review', has: (r) => r.line.kind !== 'approval' && !ASKS.includes(r.line.kind) },
+  { key: 'questions', label: 'Questions', has: (r) => ASK_KINDS.includes(r.line.kind) },
+  { key: 'review', label: 'To review', has: (r) => r.line.kind !== 'approval' && !ASK_KINDS.includes(r.line.kind) },
 ];
-
-const ORDER: InboxLineKind[] = ['approval', 'question', 'reply', 'sent_back', 'sync_failed', 'review', 'unreadable', 'sign_off'];
 
 const TYPE: Record<InboxLineKind, string> = {
   approval: 'Approve',
@@ -55,9 +53,7 @@ function isTab(value: string | null): value is Tab {
 function rowsOf(items: InboxItem[], organizationId: string): Row[] {
   const rows = items.flatMap((item) =>
     item.lines.map((line, i): Row => {
-      const to = item.billId
-        ? `/organizations/${organizationId}/bills/${item.billId}${item.href === 'draft' ? '/draft' : ''}`
-        : `/organizations/${organizationId}/bills/documents/${item.jobId}/draft`;
+      const to = pathOf(item, organizationId);
       const amount = item.amountUsd == null ? '' : usd(item.amountUsd);
       return {
         key: `${item.key}:${line.kind}:${i}`,
@@ -74,7 +70,7 @@ function rowsOf(items: InboxItem[], organizationId: string): Row[] {
   );
   const due = (r: Row) => (r.item.dueAt ? new Date(r.item.dueAt).getTime() : Number.POSITIVE_INFINITY);
   return rows.sort((a, b) =>
-    ORDER.indexOf(a.line.kind) - ORDER.indexOf(b.line.kind)
+    LINE_ORDER.indexOf(a.line.kind) - LINE_ORDER.indexOf(b.line.kind)
     || due(a) - due(b)
     || a.line.at.localeCompare(b.line.at));
 }

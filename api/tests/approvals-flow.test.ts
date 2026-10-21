@@ -3597,6 +3597,7 @@ function scriptedChat(answer: { billIds: (seen: string[]) => string[] }) {
           message: `You have **${found.bills.length}** bill from Chatty Supplies.`,
           tables: [{ title: 'Bills', columns: ['Invoice', 'Amount'], rows: [['CS-1', '$250.00']] }],
           billIds: answer.billIds(found.bills.map((b) => b.billId)),
+          followUps: ['Which of these can I approve now?', '  Which of these   can I approve now? ', 'What was due last week?'],
         }) } },
       ] } };
     },
@@ -3623,7 +3624,8 @@ test('companion chat: a question is answered from tools, with the thoughts and o
   assert.equal(answer.thoughts[0].detail, 'Found 1 bill, $250.00 in total.');
   assert.deepEqual(answer.billIds, [bill.billId], 'a bill the tools never returned is dropped');
   assert.equal(chat.bills[bill.billId].vendorName, 'Chatty Supplies');
-  assert.equal(answer.tables[0].rows[0][1], '$250.00');
+  assert.deepEqual(answer.tables, [], 'no tables: no screen shows one, so a list goes in the message');
+  assert.deepEqual(answer.followUps, ['Which of these can I approve now?', 'What was due last week?'], 'the questions to offer next, once each');
 
   // A follow-up carries the conversation so far.
   await post(`/organizations/${orgId}/companion/chats/${chatId}/messages`, { text: 'And last month?' }, owner.token);
@@ -3783,5 +3785,55 @@ test('companion chat: it can find a bill by number and say whose job each thing 
     'Searched bills numbered nl 77',
     'Looked up the team and who does what',
     'Read the approval rules',
+  ]);
+});
+
+test('companion chat: a search by due date goes by the day each bill is due, and leaves out bills already closed', async () => {
+  const { orgId, owner } = await makeOrg();
+  const late = await uploadAndConfirm(orgId, owner.token, { vendor: 'Late Ltd', amount: 40, invoiceNo: 'DD-1' });
+  const thisWeek = await uploadAndConfirm(orgId, owner.token, { vendor: 'Week Ltd', amount: 50, invoiceNo: 'DD-2' });
+  const closed = await uploadAndConfirm(orgId, owner.token, { vendor: 'Closed Ltd', amount: 60, invoiceNo: 'DD-3' });
+  const later = await uploadAndConfirm(orgId, owner.token, { vendor: 'Later Ltd', amount: 70, invoiceNo: 'DD-4' });
+  await drainAsyncIntake();
+  // Due dates are kept as midnight UTC on the day.
+  for (const [bill, day] of [[late, '2026-10-19'], [thisWeek, '2026-10-25'], [closed, '2026-10-23'], [later, '2026-11-03']] as const) {
+    await prisma.paymentOrder.update({ where: { paymentOrderId: bill.billId }, data: { dueAt: new Date(`${day}T00:00:00.000Z`) } });
+  }
+  await prisma.paymentOrder.update({ where: { paymentOrderId: closed.billId }, data: { state: 'cancelled' } });
+
+  const results: Array<{ bills: Array<{ billId: string; due: string | null }> }> = [];
+  let n = 0;
+  setExceptionAgentRuntimeForTests({
+    isConfigured: () => true,
+    callModel: async ({ messages }: { messages: ChatMessage[] }) => {
+      const usage = { promptTokens: 10, completionTokens: 5 };
+      const lastUser = messages.map((m) => m.role).lastIndexOf('user');
+      const tools = messages.slice(lastUser).filter((m) => m.role === 'tool');
+      if (tools.length === 0) {
+        return { usage, message: { role: 'assistant' as const, content: null, tool_calls: [
+          { id: `d_${++n}`, type: 'function' as const, function: { name: 'find_bills', arguments: JSON.stringify({ dueFrom: '2026-10-21', dueTo: '2026-10-25' }) } },
+          { id: `d_${++n}`, type: 'function' as const, function: { name: 'find_bills', arguments: JSON.stringify({ dueTo: '2026-10-20' }) } },
+          { id: `d_${++n}`, type: 'function' as const, function: { name: 'find_bills', arguments: JSON.stringify({ dueFrom: '2026-10-21' }) } },
+        ] } };
+      }
+      results.push(...tools.map((t) => JSON.parse(t.content as string)));
+      return { usage, message: { role: 'assistant' as const, content: null, tool_calls: [
+        { id: `d_${++n}`, type: 'function' as const, function: { name: 'respond', arguments: JSON.stringify({ message: 'ok', billIds: [], actions: [], followUps: [] }) } },
+      ] } };
+    },
+  });
+  const { chatId } = await post(`/organizations/${orgId}/companion/chats`, { text: 'How much is due this week?' }, owner.token);
+  await drainAsyncIntake();
+
+  const ids = (i: number) => results[i]!.bills.map((b) => b.billId).sort();
+  assert.deepEqual(ids(0), [thisWeek.billId], 'due this week: not the late one, not the closed one, not next month');
+  assert.equal(results[0]!.bills[0]!.due, '2026-10-25', 'the day it is due, as kept');
+  assert.deepEqual(ids(1), [late.billId], 'overdue');
+  assert.deepEqual(ids(2), [thisWeek.billId, later.billId].sort(), 'from a day on, with no end');
+  const chat = await get(`/organizations/${orgId}/companion/chats/${chatId}`, owner.token);
+  assert.deepEqual(chat.messages[1].thoughts.map((t: { text: string }) => t.text).slice(0, 3), [
+    'Searched bills due 2026-10-21 to 2026-10-25',
+    'Searched bills due by 2026-10-20',
+    'Searched bills due from 2026-10-21',
   ]);
 });

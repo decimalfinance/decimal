@@ -40,6 +40,14 @@
   --pink-300: #F0B0BF;
   --pink-400: #DC8DA2;
   --pink-600: #A5516A;
+  --pink-dot: #C16D84;       /* Decimal at work: the reading pill's dot */
+  /* White over Decimal's pink: a pill, a round button under the pointer */
+  --wash: rgba(255, 255, 255, .82);
+  --wash-hover: rgba(255, 255, 255, .7);
+  /* A scrollbar on Decimal's pink: a maroon thumb */
+  --thumb-pink: rgba(92, 31, 51, .18);
+  --thumb-pink-hover: rgba(92, 31, 51, .32);
+  --thumb-pink-thin: rgba(92, 31, 51, .22);
 
   /* Red and green */
   --red: #8B2A22;
@@ -63,6 +71,22 @@
   --chip-question: #D3E9E0;  /* the Inbox's kinds: a question for you */
   --chip-reply: #DCD8F8;     /* an answer to yours */
   --chip-sentback: #EDDCE6;  /* sent back to review */
+  /* Home's attention cards (4a, 6c): the whole card in its reason's pastel,
+     a ring in its line colour under the pointer, the words in its dark.
+     Decimal's own findings are on its cloudy pink instead. */
+  --card-approval: #EDF2F7;
+  --card-approval-ring: #C3D2E0;
+  --card-approval-ink: #3F5A75;
+  --card-question: #E8F3EF;
+  --card-question-ring: #B9D6CA;
+  --card-question-ink: #2F5E4E;
+  --card-reply: #ECEAFC;
+  --card-reply-ring: #C9C4F2;
+  --card-reply-ink: #4B43A3;
+  --card-sentback: #F5EBF1;
+  --card-sentback-ring: #DEC2D2;
+  --card-sentback-ink: #6E3858;
+  --swatch-approval-ring: #AFC1D3; /* Home's tile: the Approvals swatch */
   /* The route of a bill past review: someone not yet asked, someone not needed */
   --bead-off: #E4E1DC;
   --bead-spare: #F1F0ED;
@@ -94,6 +118,10 @@
   --shadow-tip: 0 4px 14px rgba(10, 10, 10, .18);
   --shadow-pop: 0 18px 48px rgba(10, 10, 10, .18), 0 0 0 1px rgba(10, 10, 10, .06);
   --shadow-sheet: -16px 0 40px rgba(10, 10, 10, .12);
+  --shadow-field: 0 1px 2px rgba(10, 10, 10, .04);
+  /* Home's box, full screen: it lifts, and the page under it softens */
+  --shadow-lifted: 0 24px 64px rgba(92, 31, 51, .12);
+  --scrim: rgba(250, 250, 248, .55);
 
   /* Focus */
   --focus: 0 0 0 2px #FFFFFF, 0 0 0 4px rgba(92, 31, 51, .45);

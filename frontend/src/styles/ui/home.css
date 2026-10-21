@@ -1,0 +1,421 @@
+/* Home (Home.dc.html 4a). On the left, Waiting on you (a grey tile summing up
+   the Inbox) beside Needs attention (the bills that need you now, as cards in
+   their reason's pastel). On the right, Decimal's box on its cloudy pink, full
+   height: the greeting until you ask, the conversation after, and full screen
+   when it grows over the page. The box is one element throughout. The title
+   is the list pages' (.list-title); the chat rows are the bill page's (.bp-row
+   and the rest, bill.css); the status chips are Bills' (.chip.is-*). */
+
+.ui.home-page {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  background: var(--white);
+}
+/* The page scrolls only when the window is too short for the box. */
+.ui .hm-scroll { height: 100%; overflow-y: auto; }
+.ui .hm-scroll.is-locked { overflow: hidden; }
+.ui .hm-grid {
+  box-sizing: border-box;
+  min-height: 100%;
+  padding: 18px 30px 30px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  column-gap: 32px;
+  align-items: start;
+}
+.ui .hm-left { min-width: 0; display: flex; flex-direction: column; }
+.ui.home-page .list-title { margin: 0; line-height: 24px; }
+
+.ui .hm-blocks {
+  margin-top: 26px;
+  display: grid;
+  grid-template-columns: 236px minmax(0, 1fr);
+  column-gap: 24px;
+  align-items: stretch;
+}
+.ui .hm-block { min-width: 0; display: flex; flex-direction: column; }
+.ui .hm-h { display: flex; align-items: baseline; gap: 8px; padding-bottom: 10px; }
+.ui .hm-h h2 { margin: 0; font: 600 13px/1.2 var(--font); letter-spacing: -.01em; color: var(--ink); }
+.ui .hm-h-n { font: 400 11px var(--mono); color: var(--ink-4); }
+.ui .hm-h-note { margin-left: auto; font: 400 10.5px var(--font); color: var(--ink-4); white-space: nowrap; }
+
+/* ── Waiting on you: the Inbox, summed up ─────────────────── */
+.ui .hm-tile {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 11px 13px 13px;
+  border-radius: 8px;
+  background: var(--grey);
+}
+.ui .hm-tile-top { display: flex; align-items: baseline; gap: 7px; }
+.ui .hm-tile-n { font: 500 25px/1 var(--mono); letter-spacing: -.03em; color: var(--ink); }
+.ui .hm-tile-label { font: 400 10px/1.2 var(--font); color: var(--ink-2); }
+.ui .hm-tile-late { margin-left: auto; font: 400 10px/1.2 var(--font); color: var(--red); white-space: nowrap; }
+.ui .hm-tile-rows { margin-top: 11px; display: grid; }
+.ui .hm-tile-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 20px;
+  font: 400 10px var(--font);
+  color: var(--ink-2);
+  text-decoration: none;
+}
+.ui .hm-tile-row + .hm-tile-row { border-top: 1px solid var(--line-row); }
+.ui .hm-tile-row:hover { background: var(--grey-hover); color: var(--ink); }
+.ui .hm-tile-row:focus-visible { outline: none; box-shadow: var(--focus-inset); }
+.ui .hm-tile-row-label { flex: 1; min-width: 0; }
+.ui .hm-tile-row-n { font-family: var(--mono); color: var(--ink); }
+/* The Inbox kind's chip colour, ringed. */
+.ui .hm-swatch { flex: none; width: 7px; height: 7px; }
+.ui .hm-swatch.k-approvals { background: var(--chip-waiting); box-shadow: inset 0 0 0 1px var(--swatch-approval-ring); }
+.ui .hm-swatch.k-questions { background: var(--chip-question); box-shadow: inset 0 0 0 1px var(--card-question-ring); }
+.ui .hm-swatch.k-review { background: var(--chip-yours); box-shadow: inset 0 0 0 1px var(--beige-edge); }
+.ui .hm-tile-new { margin-top: 12px; font: 400 10px/1.4 var(--font); color: var(--ink-3); }
+.ui .hm-tile-foot { margin-top: auto; padding-top: 12px; }
+.ui .hm-open {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--white);
+  font: 500 11px var(--font);
+  color: var(--maroon);
+  text-decoration: none;
+}
+.ui .hm-open:hover { color: var(--maroon-active); }
+.ui .hm-open:focus-visible { outline: none; box-shadow: var(--focus); }
+.ui .hm-quiet { font: 400 10.5px/1.4 var(--font); color: var(--ink-3); }
+.ui .hm-retry {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--maroon);
+  text-decoration: underline;
+  text-decoration-color: var(--pink-300);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.ui .hm-retry:hover { text-decoration-color: var(--maroon); }
+
+/* ── Needs attention: a card per bill, in its reason's pastel ─ */
+.ui .hm-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.ui .hm-card {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 11px 13px 12px;
+  border-radius: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+.ui .hm-card.k-approval { background: var(--card-approval); --ring: var(--card-approval-ring); --said: var(--card-approval-ink); }
+.ui .hm-card.k-question { background: var(--card-question); --ring: var(--card-question-ring); --said: var(--card-question-ink); }
+.ui .hm-card.k-reply { background: var(--card-reply); --ring: var(--card-reply-ring); --said: var(--card-reply-ink); }
+.ui .hm-card.k-sentback { background: var(--card-sentback); --ring: var(--card-sentback-ring); --said: var(--card-sentback-ink); }
+.ui .hm-card.k-decimal {
+  background-color: var(--pink-50);
+  background-image: var(--cloud-layers);
+  background-size: 160px 160px, 400px 400px;
+  --ring: var(--pink-200);
+  --said: var(--pink-600);
+}
+.ui .hm-card:hover { box-shadow: inset 0 0 0 1px var(--ring); }
+.ui .hm-card:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--ring), var(--focus); }
+.ui .hm-card-why { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.ui .hm-face { display: block; flex: none; width: 16px; height: 16px; }
+.ui .hm-card-why-text {
+  min-width: 0;
+  font: 400 10.5px/16px var(--font);
+  color: var(--said);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ui .hm-card-vendor {
+  margin-top: 10px;
+  font: 400 12.5px/1.3 var(--font);
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ui .hm-card-foot { margin-top: 3px; display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.ui .hm-card-due { font: 400 10px/1.3 var(--font); color: var(--ink-2); white-space: nowrap; }
+.ui .hm-card-due.is-late { color: var(--red); }
+.ui .hm-card-amt { font: 400 11.5px/1.3 var(--mono); letter-spacing: -.01em; color: var(--ink); white-space: nowrap; }
+.ui .hm-card-amt.is-none { font-family: var(--font); font-size: 10px; color: var(--ink-3); letter-spacing: 0; }
+
+/* ── Decimal's box ─────────────────────────────────────────── */
+/* Its place in the grid: level with the headings, 30px above the foot. */
+.ui .hm-boxwrap { position: relative; align-self: stretch; margin-top: 50px; min-width: 0; min-height: 460px; }
+.ui .hm-box {
+  position: absolute;
+  z-index: 1;
+  box-sizing: border-box;
+  padding: 28px 22px 22px;
+  border: 1px solid var(--pink-200);
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  overflow: hidden;
+  background-color: var(--pink-50);
+  background-image: var(--cloud-layers);
+  background-size: 160px 160px, 400px 400px;
+  background-origin: border-box;
+  box-shadow: 0 0 0 transparent;
+  transition:
+    top .56s var(--ease), left .56s var(--ease), width .56s var(--ease),
+    height .56s var(--ease), box-shadow .56s var(--ease);
+}
+/* Over the scrim while it is full screen, and while it shrinks back. */
+.ui .hm-box.is-full { z-index: 6; box-shadow: var(--shadow-lifted); }
+.ui .hm-box.is-closing { z-index: 6; }
+
+/* Full screen softens the page under the box, as it grows. The sidebar's
+   handle (z 6) stays over it. */
+.ui .hm-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background-color: transparent;
+  -webkit-backdrop-filter: blur(0);
+  backdrop-filter: blur(0);
+  pointer-events: none;
+  transition:
+    background-color .56s var(--ease), backdrop-filter .56s var(--ease),
+    -webkit-backdrop-filter .56s var(--ease);
+}
+.ui .hm-scrim.is-on {
+  background-color: var(--scrim);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  pointer-events: auto;
+}
+
+.ui .hm-icon {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--maroon);
+  cursor: pointer;
+}
+.ui .hm-icon:hover { background: var(--wash-hover); }
+.ui .hm-icon:focus-visible { outline: none; box-shadow: var(--focus); }
+.ui .hm-corner { position: absolute; top: 12px; right: 12px; z-index: 2; }
+
+/* The greeting, centred between spacers, 1 : 1.25. */
+.ui .hm-hello { width: 100%; flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; }
+.ui .hm-space { flex: 1; min-height: 12px; }
+.ui .hm-space.is-low { flex: 1.25; min-height: 24px; }
+.ui .hm-orb { display: block; flex: none; width: 72px; height: 72px; }
+.ui .hm-label { margin-top: 22px; font: 500 9px var(--mono); letter-spacing: .08em; color: var(--pink-600); }
+.ui .hm-greet { margin: 8px 0 0; font: 600 22px/26px var(--font); letter-spacing: -.02em; color: var(--ink); }
+.ui .hm-line { margin: 8px 0 0; font: 400 13px/20px var(--font); color: var(--ink); text-wrap: balance; }
+.ui .hm-line a {
+  color: var(--maroon);
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: var(--pink-300);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.ui .hm-line a:hover { text-decoration-color: var(--maroon); }
+.ui .hm-line a:focus-visible { outline: none; border-radius: 2px; box-shadow: var(--focus); }
+/* What Decimal is reading, while it reads. */
+.ui .hm-reading {
+  margin-top: 16px;
+  max-width: 100%;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 12px 0 10px;
+  border: 1px solid var(--pink-200);
+  border-radius: 999px;
+  background: var(--wash);
+  font: 500 10.5px var(--font);
+  color: var(--ink-2);
+  white-space: nowrap;
+  text-decoration: none;
+}
+.ui .hm-reading:hover { color: var(--ink); }
+.ui .hm-reading:focus-visible { outline: none; box-shadow: var(--focus); }
+.ui .hm-reading-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--pink-dot); }
+.ui .hm-reading-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* Suggestions: chips with a +. A chip fills the field; it never sends. */
+.ui .hm-suggest { width: 100%; display: grid; gap: 7px; justify-items: center; }
+.ui .hm-suggest-label { font: 600 8px/1.2 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--pink-600); }
+.ui .hm-chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.ui .hm-chip {
+  max-width: 100%;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 10px 0 8px;
+  border: 1px solid var(--pink-300);
+  border-radius: 999px;
+  background: var(--white);
+  font: 500 10.5px var(--font);
+  color: var(--maroon);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ui .hm-chip:hover { background: var(--pink-50); }
+.ui .hm-chip:focus-visible { outline: none; box-shadow: var(--focus); }
+.ui .hm-chip-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ui .hm-chip > svg { flex: none; }
+
+/* The field, at the foot of the box in every state. */
+.ui .hm-field {
+  flex: none;
+  margin-top: 12px;
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 5px 0 16px;
+  border: 1px solid var(--pink-300);
+  border-radius: 999px;
+  background: var(--white);
+  box-shadow: var(--shadow-field);
+}
+.ui .hm-field:hover,
+.ui .hm-field:focus-within { border-color: var(--pink-400); }
+.ui .hm-field > input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font: 400 12px var(--font);
+  color: var(--ink);
+  text-align: left;
+}
+.ui .hm-field > input::placeholder { color: var(--ink-4); }
+.ui .hm-send {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--edge);
+  color: var(--white);
+  cursor: default;
+  transition: background-color .12s ease;
+}
+.ui .hm-send.is-ready { background: var(--maroon); cursor: pointer; }
+.ui .hm-send:focus-visible { outline: none; box-shadow: var(--focus); }
+
+/* ── The conversation, in the box ─────────────────────────── */
+.ui .hm-conv { width: 100%; flex: 1; min-height: 0; display: flex; flex-direction: column; text-align: left; }
+.ui .hm-conv-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: -10px 0 14px; }
+.ui .hm-conv-head > .hm-label { margin-top: 0; }
+.ui .hm-conv-tools { display: inline-flex; align-items: center; gap: 14px; }
+.ui .hm-restart {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: 500 10.5px var(--font);
+  color: var(--maroon);
+  text-decoration: underline;
+  text-decoration-color: var(--pink-300);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.ui .hm-restart:hover { text-decoration-color: var(--maroon); }
+.ui .hm-restart:focus-visible { outline: none; border-radius: 2px; box-shadow: var(--focus); }
+/* The thumb sits at the box's edge, clear of the words. */
+.ui .hm-list {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  margin-right: -18px;
+  padding-right: 16px;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--thumb-pink-thin) transparent;
+}
+.ui .hm-list::-webkit-scrollbar { width: 10px; }
+.ui .hm-list::-webkit-scrollbar-track { background: transparent; }
+.ui .hm-list::-webkit-scrollbar-button { display: none; height: 0; }
+.ui .hm-list::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: var(--thumb-pink);
+  background-clip: padding-box;
+}
+.ui .hm-list:hover::-webkit-scrollbar-thumb { background: var(--thumb-pink-hover); background-clip: padding-box; }
+.ui .hm-list > .bp-row { margin-top: 0; }
+.ui .hm-list .bp-said { gap: 3px; }
+.ui .hm-list .bp-live { color: var(--pink-600); }
+
+/* A bill an answer rests on: opens it. Nothing wraps. */
+.ui .hm-bills { margin-top: 6px; display: grid; gap: 6px; }
+.ui .hm-bill {
+  display: block;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 9px 12px 10px;
+  border: 1px solid var(--pink-200);
+  border-radius: 8px;
+  background: var(--white);
+  color: inherit;
+  text-decoration: none;
+}
+.ui .hm-bill:hover { border-color: var(--pink-400); }
+.ui .hm-bill:focus-visible { outline: none; box-shadow: var(--focus); }
+.ui .hm-bill-top { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.ui .hm-bill-vendor {
+  min-width: 0;
+  font: 500 11.5px/1.3 var(--font);
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ui .hm-bill-inv { flex: none; font: 400 10.5px var(--mono); color: var(--ink-3); white-space: nowrap; }
+.ui .hm-bill-amt { flex: none; margin-left: auto; font: 600 11.5px var(--mono); letter-spacing: -.01em; color: var(--ink); white-space: nowrap; }
+.ui .hm-bill-foot { margin-top: 5px; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.ui .hm-bill-due {
+  min-width: 0;
+  font: 400 10.5px/1.3 var(--font);
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ui .hm-bill-due.is-late { color: var(--red); }
+.ui .hm-bill-foot > .chip { flex: none; }
+.ui .hm-asks { margin-top: 6px; display: grid; gap: 6px; }
+.ui .hm-next { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }

@@ -51,6 +51,13 @@ function day(d: Date | string | null | undefined): string | null {
   return localDay(typeof d === 'string' ? new Date(d) : d);
 }
 
+/** A due date is a calendar day, kept at midnight UTC: read it as that day, wherever the server is. */
+function dueDay(d: Date | string | null | undefined): string | null {
+  return d ? new Date(d).toISOString().slice(0, 10) : null;
+}
+
+const dayParam = (s: unknown) => (typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null);
+
 function parseDay(s: unknown, endOfDay = false): Date | null {
   if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
   const d = new Date(`${s}T00:00:00`);
@@ -75,7 +82,7 @@ function brief(row: Row) {
     detail: row.subStatus.text,
     received: day(row.createdAt),
     receivedAt: localTime(row.createdAt),
-    due: day(row.dueAt),
+    due: dueDay(row.dueAt),
     needsAttention: row.companion && !row.companion.ready ? row.companion.reason : null,
     blocked: row.blocking,
   };
@@ -113,8 +120,14 @@ export function chatTools(args: {
     const to = parseDay(a.to, true);
     const bucket = typeof a.status === 'string' ? STATUS_TO_BUCKET[a.status] : null;
     const number = typeof a.invoiceNumber === 'string' && a.invoiceNumber.trim() ? norm(a.invoiceNumber) : null;
+    // A bill already paid or closed is not due, whatever its date says.
+    const dueFrom = dayParam(a.dueFrom);
+    const dueTo = dayParam(a.dueTo);
     return rows.filter((r) =>
       vendorMatches(r, a.vendor)
+      && (!(dueFrom || dueTo) || (r.bucket !== 'done' && r.state !== 'cancelled'))
+      && (!dueFrom || (dueDay(r.dueAt) ?? '') >= dueFrom)
+      && (!dueTo || (dueDay(r.dueAt) ?? '9999-12-31') <= dueTo)
       && (!number || norm(r.invoiceNumber ?? '').includes(number))
       && (!bucket || r.bucket === bucket)
       && (!from || r.createdAt >= from)
@@ -128,6 +141,11 @@ export function chatTools(args: {
     if (typeof a.vendor === 'string' && a.vendor.trim()) parts.push(`from ${a.vendor.trim()}`);
     if (typeof a.status === 'string') parts.push(a.status.replace('_', ' '));
     if (typeof a.from === 'string' || typeof a.to === 'string') parts.push(`received ${a.from ?? 'any time'} to ${a.to ?? 'today'}`);
+    const dueFrom = dayParam(a.dueFrom);
+    const dueTo = dayParam(a.dueTo);
+    if (dueFrom && dueTo) parts.push(`due ${dueFrom} to ${dueTo}`);
+    else if (dueTo) parts.push(`due by ${dueTo}`);
+    else if (dueFrom) parts.push(`due from ${dueFrom}`);
     if (typeof a.minAmount === 'number') parts.push(`over ${usd(a.minAmount)}`);
     if (typeof a.maxAmount === 'number') parts.push(`under ${usd(a.maxAmount)}`);
     return parts.length ? ` ${parts.join(', ')}` : '';
@@ -136,7 +154,7 @@ export function chatTools(args: {
   return [
     {
       name: 'find_bills',
-      description: 'Search the bills this person can see. Filter by invoice number (e.g. "BW-2210"; use this whenever the person names a bill by its number), vendor (partial name), state, the date the bill was received (YYYY-MM-DD), and amount in USD. Returns the count, the total, and up to 25 bills, newest first, each with a billId you can cite.',
+      description: 'Search the bills this person can see. Filter by invoice number (e.g. "BW-2210"; use this whenever the person names a bill by its number), vendor (partial name), state, the date the bill was received or the date it is due (YYYY-MM-DD), and amount in USD. Returns the count, the total, and up to 25 bills, newest first, each with a billId you can cite.',
       parameters: {
         type: 'object',
         additionalProperties: false,
@@ -146,6 +164,8 @@ export function chatTools(args: {
           status: STATUS_PARAM,
           from: { ...NULLABLE_STRING, description: 'Received on or after, YYYY-MM-DD.' },
           to: { ...NULLABLE_STRING, description: 'Received on or before, YYYY-MM-DD.' },
+          dueFrom: { ...NULLABLE_STRING, description: 'Due on or after, YYYY-MM-DD.' },
+          dueTo: { ...NULLABLE_STRING, description: 'Due on or before, YYYY-MM-DD. "Due this week" runs to this Sunday; "overdue" is due before today. A search by due date leaves out bills already paid or closed.' },
           minAmount: NULLABLE_NUMBER,
           maxAmount: NULLABLE_NUMBER,
           needsAttentionOnly: { type: ['boolean', 'null'], description: 'Only drafts that need a person, with the reason.' },

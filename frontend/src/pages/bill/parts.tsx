@@ -126,3 +126,21 @@ export function dayAndTime(value: string | Date, now = new Date()) {
   const day = `${d.getDate()} ${months[d.getMonth()]}`;
   return d.getFullYear() === now.getFullYear() ? `${day}, ${time}` : `${day} ${d.getFullYear()}, ${time}`;
 }
+
+/** Decimal's answers in the chat: paragraphs, "- " lists and **bold**, nothing more. */
+export function Markdown({ text }: { text: string }) {
+  const inline = (s: string) => s.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
+    part.startsWith('**') && part.endsWith('**') ? <b key={i}>{part.slice(2, -2)}</b> : <Figures key={i} text={part} />);
+  const blocks = text.trim().split(/\n{2,}/);
+  return (
+    <div className="bp-md">
+      {blocks.map((block, i) => {
+        const rows = block.split('\n');
+        if (rows.every((r) => /^\s*[-•]\s/.test(r))) {
+          return <ul key={i}>{rows.map((r, j) => <li key={j}>{inline(r.replace(/^\s*[-•]\s/, ''))}</li>)}</ul>;
+        }
+        return <p key={i}>{rows.map((r, j) => <span key={j}>{j > 0 ? <br /> : null}{inline(r)}</span>)}</p>;
+      })}
+    </div>
+  );
+}

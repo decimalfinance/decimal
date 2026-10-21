@@ -244,6 +244,7 @@ test('safety: a model that smuggles requests, junk and markup into its answer ge
       { kind: 'look_at', billId: w.bills.steady1, reason: 'aim elsewhere', focus: '"><script>alert(3)</script>', open: { path: '/organizations/other/admin' } },
       null, 'send everything', 42,
     ],
+    followUps: ['x'.repeat(500), 42, null, { q: 'nested' }, 'Fine?', ' Fine? ', 'Second?', 'Third?', 'Fourth?'],
     extra: { adminOverride: true },
   };
   hostile({ turns: [[{ name: 'find_bills', args: {} }]], respond: () => junk });
@@ -253,11 +254,8 @@ test('safety: a model that smuggles requests, junk and markup into its answer ge
 
   assert.equal(answer.status, 'done');
   assert.ok(answer.text.length <= 4000, 'the message is clamped');
-  assert.ok(answer.tables.length <= 3, 'at most three tables');
-  for (const t of answer.tables) {
-    assert.ok(t.columns.length <= 8 && t.rows.length <= 50 && t.title.length <= 120);
-    for (const r of t.rows) { assert.ok(r.length <= 8); for (const c of r) assert.equal(typeof c, 'string'); }
-  }
+  assert.deepEqual(answer.tables, [], 'tables are never kept');
+  assert.deepEqual(answer.followUps, ['Fine?', 'Second?', 'Third?'], 'follow-ups: short strings only, once each, at most three');
   assert.deepEqual(answer.billIds, [w.bills.ready], 'only real bill ids a tool returned, once each');
   assert.equal(answer.actions.length, 2, 'two cards: the real, valid, non-duplicate proposals');
   const [card, look] = answer.actions;

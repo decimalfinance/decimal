@@ -2218,9 +2218,12 @@ export interface CompanionChat {
     status: 'running' | 'done' | 'failed';
     text: string;
     thoughts: Array<{ text: string; detail: string | null; at: string }>;
+    /** Only answers from before tables were dropped have any. */
     tables: Array<{ title: string; columns: string[]; rows: string[][] }>;
     billIds: string[];
     actions: CompanionActionCard[];
+    /** Questions worth asking next, in the person's words. */
+    followUps: string[];
     createdAt: string;
   }>;
   /** The bills answers point at, as they are now. */

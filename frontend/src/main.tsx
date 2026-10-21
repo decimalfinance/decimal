@@ -28,6 +28,7 @@ import './styles/ui/components.css';
 import './styles/ui/bills.css';
 import './styles/ui/bill.css';
 import './styles/ui/inbox.css';
+import './styles/ui/home.css';
 
 const queryClient = new QueryClient({
   defaultOptions: {

@@ -2,9 +2,9 @@
 //
 // A person asks; the companion works the answer out in the background, writing
 // each thing it looks at as a thought the moment it has looked, and finishes
-// with an answer: a few sentences, tables where numbers are the point, and the
-// bills it rests on. The screen polls the chat and shows the work as it
-// happens.
+// with an answer: a few sentences (a short list where a list is the point), the
+// bills it rests on, and the questions worth asking next. The screen polls the
+// chat and shows the work as it happens.
 //
 // It answers from tools, never from memory, and sees only what the person
 // asking can see. It does not act from here: anything that changes a bill is
@@ -25,8 +25,12 @@ const MAX_TURNS = 8;
 const TIMEOUT_MS = 90_000;
 const HISTORY_MESSAGES = 12;
 
+/** Answers written before tables were dropped still carry them; no screen shows them. */
 export type ChatTable = { title: string; columns: string[]; rows: string[][] };
-export type ChatBlocks = { tables?: ChatTable[]; billIds?: string[]; actions?: ActionCard[] };
+export type ChatBlocks = { tables?: ChatTable[]; billIds?: string[]; actions?: ActionCard[]; followUps?: string[] };
+
+/** Where the chat is: in the box on Home, or on a bill's own page. */
+type Surface = 'home' | 'bill';
 
 /** The server's time zone, e.g. "Asia/Kolkata (UTC+05:30)" — the one flags and screens speak in. */
 function teamTimeZone(): string {
@@ -40,7 +44,7 @@ function teamTimeZone(): string {
 
 type Asker = { name: string; access: string; roles: string[] };
 
-function system(today: string, asker: Asker): string {
+function system(today: string, asker: Asker, surface: Surface): string {
   return `You are Decimal's accounts-payable companion. You work for the team: you read every bill that comes in, check it, categorise it, investigate anything odd, and answer questions about their bills. Today is ${today}. The team's time zone is ${teamTimeZone()}: timestamps from tools ending in Z are UTC, so convert them before you state a date or time.
 
 You are talking to ${asker.name} (${asker.access}${asker.roles.length ? `; roles: ${asker.roles.join(', ')}` : ''}). "I", "me" and "my" mean ${asker.name}: a bill waiting on ${asker.name}'s approval is waiting on the person you are talking to.
@@ -50,10 +54,13 @@ How to answer:
 - For "who" questions (who does this, who is it waiting on, who should I ask), use team, approval_trail and bill_history, and name the people.
 - A bill named by its number ("BW-2210") is found with find_bills invoiceNumber, then read with get_bill, approval_trail or bill_history.
 - Call as many tools as you need, then finish by calling respond. Do not ask the person to wait.
-- Be brief and plain: a sentence or two, then a table if the answer is a list or a set of numbers. No preamble, no sign-off.
+- Be brief and plain: a sentence or two. ${surface === 'home'
+    ? 'Never list bills in the message: each bill in billIds is shown as a card under it. Lines starting "- " are only for figures that are not one bill each, such as a total per vendor, one short line each.'
+    : 'When the answer is a list or a set of numbers, follow with lines starting "- ", one short line each.'} No tables. No preamble, no sign-off.
 - Money is USD: write $4,500.00. Dates as 3 Sep 2026.
 - Put the bills your answer rests on in billIds, using billIds the tools returned. Never invent one.
-- Tables: a short title, a few columns, cells as short text. Put the amount column last, always with cents ($4,500.00). Never put a billId or any other internal id in a table or in the message: a person identifies a bill by vendor and invoice number, and billIds is where ids go.
+- Never put a billId or any other internal id in the message: a person identifies a bill by vendor and invoice number, and billIds is where ids go.
+- In followUps, two or three short questions this person is likely to ask you next, in their words ("Which of these can I approve now?", "Who approves after me?"), each one you could answer with the tools.
 - Words to use: bill, approval, approvers, team members, category, vendor. Never "payment order", "GL code", "multisig", "wallet".
 - You never change anything yourself, and a card never changes a bill. Anything about a bill — its figures, its lines, its categories, approving it, sending it on, closing or clearing a duplicate — is done ON THE BILL, where the person sees the whole bill and its document. Your card for it OPENS THE BILL at the right place; say what to look at and why. Cards (in actions):
   - look_at: a bill that needs a person's eyes on something (focus: where on the bill — "vendor", "invoice_number", "invoice_date", "due_date", "terms", "po_number", "total", "tax", "line 2" (lines numbered from 1, as get_bill lists them), or "flag:<kind>" for one of its flags; null for the top). Use it for anything to check or correct: a figure that looks wrong, a line's category, an answer the bill needs.
@@ -62,30 +69,19 @@ How to answer:
   - close_duplicate: the copy in a duplicate pair (keep the older bill; close the newer copy; reason says why it is a copy). Opens the bill at its duplicate check. When get_bill has a duplicateInvestigation, follow its verdict and which bill it says to keep, and say so.
   - clear_duplicate: a duplicate flag on bills that are genuinely different (reason says why). Opens the bill at its duplicate check.
   A card that acts here, because it is not a judgement about a bill:
-  - ask_person: ask a teammate something about a bill (toPerson: their name from the team tool; message: the question, written to them, e.g. "While you're approving this, can you check the tax line?"). The system checks their inbox and either sends it as a question on the bill or tells the person it is already there. A question never holds the bill. Only people who work on bills can be asked: never someone whose only role is Viewer (the team tool shows roles); say they only view bills instead. Use it when someone asks you to chase, remind, or ask a colleague.
+  - ask_person: ask a teammate something about a bill (toPerson: their name from the team tool; message: the question, written to them, e.g. "While you're approving this, can you check the tax line?"). The system checks their inbox and either drafts it as a question the person sends from the card, or tells the person it is already there. So in the message say what you would ask them and why, never "I'll ask" or "I've asked". A question never holds the bill. Only people who work on bills can be asked: never someone whose only role is Viewer (the team tool shows roles); say they only view bills instead. Use it when someone asks you to chase, remind, or ask a colleague.
   Propose when the person asks you to do something, or when one of these is plainly the next step. Say in the message what the card is for, and never say it is done: a go-there card opens the bill, the person does it there. Anything you say you are proposing MUST be in actions. Payments, settings and policies are not on cards: say where they are done.
-- Payments are not live in Decimal: never say a bill was paid out unless its state says paid.`;
+- Payments are not live in Decimal: never say a bill was paid out unless its state says paid.${surface === 'home' ? `
+
+You are answering in the box on Home. Under your message the screen shows a card for each bill in billIds, in that order: its vendor, invoice number, amount, due date and where it stands, and the card opens the bill. So the message is the answer itself (how many, the total, who, why) and the cards are the list. Most pressing first, at most ten.` : ''}`;
 }
 
 const RESPOND_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['message', 'tables', 'billIds', 'actions'],
+  required: ['message', 'billIds', 'actions', 'followUps'],
   properties: {
     message: { type: 'string', description: 'The answer, in plain sentences. **bold** and lines starting "- " are allowed.' },
-    tables: {
-      type: 'array',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['title', 'columns', 'rows'],
-        properties: {
-          title: { type: 'string' },
-          columns: { type: 'array', items: { type: 'string' } },
-          rows: { type: 'array', items: { type: 'array', items: { type: 'string' } } },
-        },
-      },
-    },
     billIds: { type: 'array', items: { type: 'string' } },
     actions: {
       type: 'array',
@@ -103,6 +99,11 @@ const RESPOND_SCHEMA = {
           focus: { type: ['string', 'null'], description: 'look_at only: where on the bill to open it ("total", "line 2", "flag:lines_do_not_sum", ...). Null otherwise, or for the top of the bill.' },
         },
       },
+    },
+    followUps: {
+      type: 'array',
+      description: 'Up to three short questions the person might ask next, in their words. Empty when none.',
+      items: { type: 'string' },
     },
   },
 };
@@ -205,6 +206,7 @@ async function ask(organizationId: string, userId: string, chatId: string, quest
     organizationId,
     userId,
     messageId: answer.messageId,
+    surface: chat.billId ? 'bill' : 'home',
     question: bill
       ? `(Asked on the screen of the bill ${bill.label}, billId ${bill.billId}. "This bill", "it" and "here" mean that bill: read it with get_bill before answering.)\n\n${question}`
       : question,
@@ -216,6 +218,7 @@ async function answerQuestion(args: {
   organizationId: string;
   userId: string;
   messageId: string;
+  surface: Surface;
   question: string;
   history: ChatMessage[];
 }): Promise<void> {
@@ -240,7 +243,7 @@ async function answerQuestion(args: {
     ];
     const run = await runAgent({
       label: 'chat',
-      system: system(localDay(new Date()), await askerOf(args.organizationId, args.userId)),
+      system: system(localDay(new Date()), await askerOf(args.organizationId, args.userId), args.surface),
       history: args.history,
       user: args.question,
       tools,
@@ -254,14 +257,12 @@ async function answerQuestion(args: {
     }
     const a = run.terminal.args;
     const message = typeof a.message === 'string' && a.message.trim() ? a.message.trim().slice(0, 4000) : 'Done.';
-    const tables = (Array.isArray(a.tables) ? a.tables : [])
-      .filter((t): t is ChatTable => Boolean(t) && Array.isArray((t as ChatTable).columns) && Array.isArray((t as ChatTable).rows))
-      .slice(0, 3)
-      .map((t) => ({
-        title: String(t.title ?? '').slice(0, 120),
-        columns: t.columns.slice(0, 8).map((c) => String(c).slice(0, 60)),
-        rows: t.rows.slice(0, 50).map((r) => (Array.isArray(r) ? r : []).slice(0, 8).map((c) => String(c).slice(0, 120))),
-      }));
+    // Questions to offer next: short, plain text, never more than three.
+    const followUps = [...new Set((Array.isArray(a.followUps) ? a.followUps : [])
+      .filter((f): f is string => typeof f === 'string')
+      .map((f) => f.replace(/\s+/g, ' ').trim())
+      .filter((f) => f.length > 0 && f.length <= 120))]
+      .slice(0, 3);
     // Only bills a tool actually returned. An answer pointing at a bill it
     // never looked at is exactly the invented fact this is meant to stop.
     const billIds = [...new Set((Array.isArray(a.billIds) ? a.billIds : []).map(String))].filter((id) => seen.has(id)).slice(0, 12);
@@ -276,18 +277,17 @@ async function answerQuestion(args: {
     // does not allow it for this person).
     const promisesACard = /\b(i'?m proposing|i propose|proposing to|here(?:'s| is) (?:a|the) card|click (?:the|to))\b/i.test(message);
     // An ask the system found already covered, or aimed at someone who only
-    // views bills, sends nothing; say so, so the answer never reads as if a
-    // question is on its way when none is.
+    // views bills, sends nothing. Its card says so, in the system's words,
+    // under the answer.
     const covered = actions.filter((c) => c.status === 'info');
     const actionable = actions.filter((c) => c.status === 'proposed');
-    let answerText = promisesACard && actionable.length === 0 && covered.length === 0
+    const answerText = promisesACard && actionable.length === 0 && covered.length === 0
       ? `${message}\n\nI could not turn that into something you can click here, so do it on the bill itself.`
       : message;
-    for (const c of covered) answerText += `\n\nNothing to send: ${c.detail}`;
     await finish({
       status: 'done',
       text: answerText,
-      blocks: { tables, billIds, actions } as unknown as Prisma.InputJsonValue,
+      blocks: { billIds, actions, followUps } as unknown as Prisma.InputJsonValue,
       model: run.model,
       latencyMs: run.latencyMs,
     });
@@ -351,6 +351,7 @@ export async function getChat(organizationId: string, userId: string, chatId: st
       tables: (m.blocks as ChatBlocks | null)?.tables ?? [],
       billIds: (m.blocks as ChatBlocks | null)?.billIds ?? [],
       actions: ((m.blocks as ChatBlocks | null)?.actions ?? []).map((c) => ({ ...c, call: { path: c.call.path, body: c.call.body, method: c.call.method ?? 'POST' } })),
+      followUps: (m.blocks as ChatBlocks | null)?.followUps ?? [],
       createdAt: m.createdAt.toISOString(),
     })),
     bills,
