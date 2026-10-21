@@ -2816,6 +2816,7 @@ export function DocumentDraftPage() {
         mimeType: data.mimeType,
         byteSize: 0,
         pageCount: data.pageCount,
+        status: data.status,
       }
     : null;
 

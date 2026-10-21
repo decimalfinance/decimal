@@ -69,8 +69,42 @@ export function fieldsFrom(draft: BillDraft): Fields {
     inferred: false,
     source: draft.totalsSources?.tax ?? null,
   };
+  // A document nothing could be read from carries placeholders ("Unreadable
+  // document", a cent): they are not what the bill says, so the page shows
+  // nothing there until someone types it. Empty saves as null, so the server
+  // keeps its own record meanwhile.
+  if (draft.unreadable) {
+    for (const [key, entry] of Object.entries(out)) {
+      if (entry.state !== 'confirmed') out[key] = { ...entry, value: '', state: 'not_on_document', reason: null, inferred: false };
+    }
+  }
   return out;
 }
+
+// While Decimal reads a bill (5r) its parts land one tick apart, in this
+// order: the vendor, the invoice, its figures, the lines, their categories.
+// The reading arrives all at once; the landing is how the page shows it.
+export const READ_TICK_MS = 220;
+const LANDS_AT: Record<string, number> = {
+  'vendor.name': 1,
+  'vendor.email': 2,
+  'remitTo.street': 2,
+  'remitTo.city': 2,
+  'remitTo.state': 2,
+  'remitTo.zip': 2,
+  'remitTo.country': 2,
+  invoiceNumber: 3,
+  invoiceDate: 3,
+  dueDate: 4,
+  terms: 4,
+};
+const FIGURES_AT = 5;
+const LINES_AT = 6;
+export const CATEGORIES_AT = 11;
+export const READ_DONE = 12;
+export const landsAt = (key: string) => LANDS_AT[key] ?? FIGURES_AT;
+/** The lines share five ticks, so a long bill lands as fast as a short one. */
+export const lineLandsAt = (i: number, n: number) => LINES_AT + Math.min(4, Math.floor((i * 5) / Math.max(n, 1)));
 
 export type LineEntry = {
   id: string;
@@ -254,6 +288,7 @@ export function notesOf(draft: BillDraft): string[] {
  */
 export function sendGap(draft: BillDraft, fields: Fields, lines: LineEntry[]): string | null {
   if (draft.flags.some((f) => f.blocking)) return 'Settle the finding to send it on';
+  if (!fields['vendor.name']?.value.trim()) return 'Add the vendor name to send it on';
   const total = parseMoney(fields.total?.value) ?? 0;
   if (total <= 0) return 'Add the total to send it on';
   const real = lines.filter((l) => l.description.trim());

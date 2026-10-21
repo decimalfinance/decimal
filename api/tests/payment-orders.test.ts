@@ -528,6 +528,9 @@ test('a document nothing could read still becomes a bill somebody can key in', a
   const board = await get(`/organizations/${orgId}/bills/workbench`, setup.sessionToken);
   assert.equal(board.pending.length, 0, 'it did not stay a failed row');
   assert.equal(board.bills.length, 1, 'it is a bill');
+  // The list shows the file, not the placeholder it was made with.
+  assert.equal(board.bills[0].unreadable, true);
+  assert.equal(board.bills[0].filename, 'illegible-scan.pdf');
 
   const billId = board.bills[0].paymentOrderId;
   const draft = await get(`/organizations/${orgId}/bills/${billId}/draft`, setup.sessionToken);
@@ -539,6 +542,10 @@ test('a document nothing could read still becomes a bill somebody can key in', a
 
   // And nothing was invented on the way.
   assert.equal(draft.fields.find((f: { key: string }) => f.key === 'invoiceNumber').value ?? null, null);
+
+  // The page says so plainly, rather than printing the placeholder as if read.
+  assert.equal(draft.unreadable, true);
+  assert.equal(draft.document.status, 'processed');
   void up;
 });
 
@@ -569,6 +576,75 @@ test('a provider outage is not a fact about the invoice', async () => {
   assert.equal(board.bills.length, 0, 'no junk draft');
   assert.equal(board.pending.length, 1, 'it stayed a failed row');
   assert.equal(board.pending[0].status, 'failed');
+
+  // The page can say whose fault it was, and who brought the file in.
+  const docId = board.pending[0].invoiceDocumentId;
+  const status = await get(`/organizations/${orgId}/invoice-documents/${docId}/status`, setup.sessionToken);
+  assert.equal(status.failure, 'ours');
+  assert.match(status.processingError, /fault on our side/);
+  assert.ok(status.uploadedByName, 'who uploaded it');
+  assert.ok(status.byteSize > 0);
+
+  // When the provider is back, it reads again from the stored file.
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [{
+        counterparty: 'Back Online Ltd',
+        amount: 640,
+        currency: 'USD',
+        reference: 'BO-1',
+        due_date: '2026-09-10',
+        wallet_address: Keypair.generate().publicKey.toBase58(),
+        notes: null,
+      }],
+      modelLatencyMs: 5,
+      pageCount: 1,
+    }),
+  });
+  const again = await post(`/organizations/${orgId}/invoice-documents/${docId}/retry`, {}, setup.sessionToken);
+  assert.equal(again.invoiceDocumentId, docId, 'the same document, not a copy');
+  await drainAsyncIntake();
+  const reread = await get(`/organizations/${orgId}/invoice-documents/${docId}/status`, setup.sessionToken);
+  assert.equal(reread.status, 'processed');
+  assert.equal(reread.failure, null);
+  assert.equal(reread.paymentOrders.length, 1);
+  const draft = await get(`/organizations/${orgId}/bills/${reread.paymentOrders[0].paymentOrderId}/draft`, setup.sessionToken);
+  assert.equal(draft.unreadable, false);
+
+  // A document that read fine is not read again, and is not removed.
+  await postExpectingStatus(`/organizations/${orgId}/invoice-documents/${docId}/retry`, {}, setup.sessionToken, 409);
+  await postExpectingStatus(`/organizations/${orgId}/invoice-documents/${docId}/remove`, {}, setup.sessionToken, 409);
+});
+
+test('a failed document can be taken off the list, and comes back if uploaded again', async () => {
+  const setup = await createPaymentOrderSetup();
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => {
+      throw new Error('OpenAI 503: upstream unavailable');
+    },
+  });
+  const orgId = setup.organization.organizationId;
+  const file = {
+    filename: 'not-a-bill.pdf',
+    mimeType: 'application/pdf',
+    dataBase64: Buffer.from(`%PDF ${crypto.randomUUID()}`).toString('base64'),
+  };
+  const up = await post(`/organizations/${orgId}/invoices/upload-async`, file, setup.sessionToken);
+  await drainAsyncIntake();
+
+  const removed = await post(`/organizations/${orgId}/invoice-documents/${up.invoiceDocumentId}/remove`, {}, setup.sessionToken);
+  assert.equal(removed.status, 'removed');
+  const board = await get(`/organizations/${orgId}/bills/workbench`, setup.sessionToken);
+  assert.equal(board.pending.length, 0, 'off the list');
+  const status = await get(`/organizations/${orgId}/invoice-documents/${up.invoiceDocumentId}/status`, setup.sessionToken);
+  assert.equal(status.status, 'removed');
+
+  // The same file again is read again, not silently swallowed.
+  await post(`/organizations/${orgId}/invoices/upload-async`, file, setup.sessionToken);
+  await drainAsyncIntake();
+  const back = await get(`/organizations/${orgId}/bills/workbench`, setup.sessionToken);
+  assert.equal(back.pending.length, 1);
+  assert.equal(back.pending[0].invoiceDocumentId, up.invoiceDocumentId);
 });
 
 test('refined highlight boxes survive the rest of the request that computed them', async () => {

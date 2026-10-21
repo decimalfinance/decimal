@@ -1,17 +1,19 @@
 import type { Counterparty, CounterpartyWallet, Prisma } from '@prisma/client';
 import { logger } from '../infra/logger.js';
-import { ApiError, badRequest } from '../infra/api-errors.js';
+import { ApiError, badRequest, conflict, notFound } from '../infra/api-errors.js';
 import { prisma } from '../infra/prisma.js';
 import { trackBackgroundWork } from '../infra/background.js';
 import { deriveUsdcAtaForWallet, SOLANA_CHAIN, USDC_ASSET, USDC_DECIMALS } from '../solana.js';
 import { createPaymentOrder } from './orders.js';
 import {
+  READ_FAILED_ON_OUR_SIDE,
+  getInvoiceDocumentWithBytes,
   storeInvoiceDocument,
   storeInvoiceDocumentPages,
   setInvoiceDocumentPageCount,
   setInvoiceDocumentStatus,
 } from './documents.js';
-import { extractPaymentRowsFromDocument, renderDocumentToImages, type ExtractedRow } from './document-extract.js';
+import { UNREADABLE_MARKS, extractPaymentRowsFromDocument, renderDocumentToImages, type ExtractedRow } from './document-extract.js';
 import { extractPdfLayoutText, ungroundedFields } from './doc-provenance.js';
 import {
   extractPdfTextLayer, extractImageTextLayer, refineInvoiceSources, stripUnmeasuredSources,
@@ -134,7 +136,7 @@ export async function uploadInvoiceToPaymentOrders(args: {
  */
 export function describeIntakeFailure(error: unknown): string {
   if (error instanceof ApiError) return error.message;
-  return 'We could not read this document. That is a fault on our side rather than a problem with the file — it is stored, so try the upload again.';
+  return READ_FAILED_ON_OUR_SIDE;
 }
 
 export async function processInvoiceDocument(args: {
@@ -258,7 +260,7 @@ export async function processInvoiceDocument(args: {
     // about the invoice, and turning an outage into a queue full of empty
     // drafts somebody has to clean up would be worse than the outage.
     if (!isDocumentDefeatedUs(error)) {
-      await reading.failed('Could not read it: a fault on our side', 'The document is stored. Try the upload again.');
+      await reading.failed('Could not read it: a fault on our side', 'The document is stored, so it can be read again.');
       throw error;
     }
     unreadable = true;
@@ -350,7 +352,7 @@ export async function processInvoiceDocument(args: {
   for (const [index, row] of extraction.rows.entries()) {
     try {
       if (!isUsdLikeCurrency(row.currency)) {
-        skipped.push(buildSkippedRow(row, 'unsupported_currency', `Currency ${row.currency} is not supported for USDC payout creation yet.`));
+        skipped.push(buildSkippedRow(row, 'unsupported_currency', `It is in ${row.currency}, and only bills in US dollars can be made for now.`));
         continue;
       }
 
@@ -609,7 +611,7 @@ export async function processInvoiceDocument(args: {
       skippedCount: skipped.length,
       skippedRows: skipped.slice(0, 10),
     });
-    throw badRequest(`Invoice upload did not create any payment orders.${detail ? ` ${detail}` : ''}`);
+    throw badRequest(`No bill could be made from this document.${detail ? ` ${detail}` : ''}`);
   }
 
   logger.info('invoice_intake.completed', {
@@ -666,30 +668,81 @@ export async function beginAsyncInvoiceIntake(args: {
       where: { invoiceDocumentId: stored.invoiceDocumentId },
       select: { status: true },
     });
-    // Same file again: already processed (or mid-processing) — nothing to redo.
-    if (current && current.status !== 'failed') {
+    // Same file again: already processed (or mid-processing), nothing to redo.
+    // A failed one, or one taken off the list, is read again.
+    if (current && current.status !== 'failed' && current.status !== 'removed') {
       return { invoiceDocumentId: stored.invoiceDocumentId, reused: true };
     }
     await setInvoiceDocumentStatus(stored.invoiceDocumentId, 'processing');
   }
 
+  readInBackground(args, stored.invoiceDocumentId);
+  return { invoiceDocumentId: stored.invoiceDocumentId, reused: false };
+}
+
+/** Read a stored document off the request: processed when it's done, failed with a reason when not. */
+function readInBackground(args: Parameters<typeof beginAsyncInvoiceIntake>[0], invoiceDocumentId: string) {
   trackBackgroundWork((async () => {
     try {
-      await processInvoiceDocument({ ...args, invoiceDocumentId: stored.invoiceDocumentId });
-      await setInvoiceDocumentStatus(stored.invoiceDocumentId, 'processed');
+      await processInvoiceDocument({ ...args, invoiceDocumentId });
+      await setInvoiceDocumentStatus(invoiceDocumentId, 'processed');
     } catch (error) {
       logger.error('invoice_intake.async_failed', {
         organizationId: args.organizationId,
-        invoiceDocumentId: stored.invoiceDocumentId,
+        invoiceDocumentId,
         ...(error instanceof Error ? { message: error.message, stack: error.stack } : { error: String(error) }),
       });
       await setInvoiceDocumentStatus(
-        stored.invoiceDocumentId, 'failed', describeIntakeFailure(error),
+        invoiceDocumentId, 'failed', describeIntakeFailure(error),
       ).catch(() => {});
     }
   })());
+}
 
-  return { invoiceDocumentId: stored.invoiceDocumentId, reused: false };
+/** A document that failed and made no bill: the only kind these two touch. */
+async function failedDocument(organizationId: string, invoiceDocumentId: string) {
+  const doc = await prisma.invoiceDocument.findFirst({
+    where: { organizationId, invoiceDocumentId },
+    select: { status: true, _count: { select: { paymentOrders: true } } },
+  });
+  if (!doc) throw notFound('Invoice document not found');
+  if (doc.status !== 'failed' || doc._count.paymentOrders > 0) {
+    throw conflict('Only a document that could not be read can be read again or removed.');
+  }
+}
+
+/**
+ * Read a failed document again, from the file as stored: this document, the
+ * way an upload of it is read, without looking it up again by its bytes.
+ */
+export async function retryInvoiceDocument(args: { organizationId: string; invoiceDocumentId: string; actorUserId: string }) {
+  await failedDocument(args.organizationId, args.invoiceDocumentId);
+  const doc = await getInvoiceDocumentWithBytes(args.organizationId, args.invoiceDocumentId);
+  if (!doc) throw notFound('Invoice document not found');
+  await setInvoiceDocumentStatus(args.invoiceDocumentId, 'processing');
+  readInBackground({
+    organizationId: args.organizationId,
+    actorUserId: args.actorUserId,
+    fileBytes: Buffer.from(doc.data),
+    filename: doc.filename,
+    mimeType: doc.mimeType,
+  }, args.invoiceDocumentId);
+  return { invoiceDocumentId: args.invoiceDocumentId, reused: false };
+}
+
+/**
+ * Take a failed document off the Bills list. It made no bill, so nothing else
+ * refers to it; the file stays stored, and uploading it again reads it again.
+ */
+export async function removeInvoiceDocument(args: { organizationId: string; invoiceDocumentId: string; actorUserId: string }) {
+  await failedDocument(args.organizationId, args.invoiceDocumentId);
+  await setInvoiceDocumentStatus(args.invoiceDocumentId, 'removed');
+  logger.info('invoice_document.removed', {
+    organizationId: args.organizationId,
+    invoiceDocumentId: args.invoiceDocumentId,
+    actorUserId: args.actorUserId,
+  });
+  return { invoiceDocumentId: args.invoiceDocumentId, status: 'removed' as const };
 }
 
 /**
@@ -720,9 +773,7 @@ function isDocumentDefeatedUs(error: unknown): boolean {
  * — one convention, not two.
  */
 function unreadableRow(filename: string, message: string): ExtractedRow {
-  const unreadable = [
-    'vendorName', 'invoiceNumber', 'invoiceDate', 'dueDate', 'total', 'lineItems',
-  ];
+  const unreadable = UNREADABLE_MARKS;
   return {
     counterparty: 'Unreadable document',
     amount: 0.01,

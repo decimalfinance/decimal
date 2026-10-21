@@ -18,7 +18,7 @@ import {
   extractPdfTextLayer, extractImageTextLayer, refineInvoiceSources, stripUnmeasuredSources,
   ungroundedFields, splitPostalAddress, PROVENANCE_VERSION,
 } from './doc-provenance.js';
-import { DOUBTFUL_FIELD_STATUSES, renderDocumentToImages } from './document-extract.js';
+import { DOUBTFUL_FIELD_STATUSES, UNREADABLE_MARKS, renderDocumentToImages } from './document-extract.js';
 import {
   loadVendorDirectory, similarVendorsIn, normalizeVendorName,
   recordVendorAlias, recordVendorsDiffer,
@@ -1018,6 +1018,7 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
         memo: true,
         invoiceNumber: true,
         invoiceDocumentId: true,
+        invoiceDocument: { select: { filename: true } },
         dueAt: true,
         createdAt: true,
         metadataJson: true,
@@ -1292,6 +1293,11 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
           : null,
       invoiceNumber: order.invoiceNumber,
       invoiceDocumentId: order.invoiceDocumentId,
+      filename: order.invoiceDocument?.filename ?? null,
+      // Nothing could be read off its document: the row is the file, not the
+      // placeholder vendor and cent the bill was made with.
+      unreadable: order.state === 'draft'
+        && UNREADABLE_MARKS.every((key) => isRecord(extracted?.fieldStatus) && extracted!.fieldStatus[key] === 'unreadable'),
       dueAt: order.dueAt,
       createdAt: order.createdAt,
       ...billSource(order.metadataJson, order.createdByUser?.displayName ?? null),
@@ -1633,7 +1639,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       counterparty: true,
       createdByUser: { select: { displayName: true } },
       invoiceDocument: {
-        select: { invoiceDocumentId: true, filename: true, mimeType: true, byteSize: true, pageCount: true },
+        select: { invoiceDocumentId: true, filename: true, mimeType: true, byteSize: true, pageCount: true, status: true },
       },
     },
   });
@@ -2305,6 +2311,10 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       trustState: order.counterpartyWallet.trustState,
     },
     document: order.invoiceDocument,
+    // Nothing could be read off the document: every field the reader marks
+    // came back unreadable, and the bill is a placeholder until a person keys
+    // it in (see unreadableRow in invoice-intake.ts).
+    unreadable: UNREADABLE_MARKS.every((key) => fieldStatus?.[key] === 'unreadable'),
     fields,
     remitFields,
     // Offered, never filled in.

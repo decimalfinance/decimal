@@ -416,6 +416,7 @@ export function AgentBox({
   onFixTotal,
   onSaveNow,
   onChanged,
+  lead = null,
 }: {
   organizationId: string;
   detail: BillDetail;
@@ -434,6 +435,11 @@ export function AgentBox({
   onSaveNow: () => Promise<void>;
   /** Something on the bill changed: read it again. */
   onChanged: () => Promise<void>;
+  /**
+   * What Decimal says in place of its findings: while it reads the bill
+   * (5r), or when it couldn't read the document (5u).
+   */
+  lead?: { text: string; working: boolean } | null;
 }) {
   const draft = detail.draft;
   const billId = draft.paymentOrderId;
@@ -460,7 +466,8 @@ export function AgentBox({
     refetchInterval: (q) => (q.state.data?.running ? 1500 : false),
   });
 
-  const findings = useMemo(() => findingsOf(draft), [draft]);
+  const allFindings = useMemo(() => findingsOf(draft), [draft]);
+  const findings = lead ? [] : allFindings;
   const notes = notesOf(draft);
   const faces = useMemo(() => {
     const map = new Map<string, string | null>();
@@ -653,7 +660,10 @@ export function AgentBox({
 
   let message: ReactNode;
   let foldedLine: ReactNode;
-  if (findings.length === 0) {
+  if (lead) {
+    message = <div className="bp-msg"><Figures text={lead.text} /></div>;
+    foldedLine = <Figures text={lead.text} />;
+  } else if (findings.length === 0) {
     const resting = draft.state === 'draft' ? restingMessage(draft, fields, lines) : 'Nothing to flag.';
     message = <div className="bp-msg"><Figures text={resting} /></div>;
     foldedLine = <Figures text={resting} />;
@@ -735,7 +745,7 @@ export function AgentBox({
           <Chevron />
         </button>
         <div className="bp-row">
-          <span className="bp-face"><FaceOf who="decimal" size={28} orb={chat.data?.running ? 'work' : 'rest'} bg="surf" /></span>
+          <span className="bp-face"><FaceOf who="decimal" size={28} orb={chat.data?.running || lead?.working ? 'work' : 'rest'} bg="surf" /></span>
           <div className="bp-said">
             <div className="bp-who">
               <span className="bp-who-name">Decimal agent</span>

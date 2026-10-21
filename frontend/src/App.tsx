@@ -20,7 +20,7 @@ const KnowledgePage = lazy(() => import('./pages/Knowledge').then((m) => ({ defa
 const ProposalRedirectPage = lazy(() => import('./pages/ProposalRedirect').then((m) => ({ default: m.ProposalRedirectPage })));
 const BillsPage = lazy(() => import('./pages/Bills').then((m) => ({ default: m.BillsPage })));
 const BillRoute = lazy(() => import('./pages/bill/BillPage').then((m) => ({ default: m.BillRoute })));
-const DocumentDraftPage = lazy(() => import('./pages/BillDraft').then((m) => ({ default: m.DocumentDraftPage })));
+const DocumentPage = lazy(() => import('./pages/bill/Reading').then((m) => ({ default: m.DocumentPage })));
 const BillDetailPage = lazy(() => import('./pages/BillDetail').then((m) => ({ default: m.BillDetailPage })));
 const FlowBuilderPage = lazy(() => import('./pages/FlowBuilder').then((m) => ({ default: m.FlowBuilderPage })));
 const PaymentDetailPageV2 = lazy(() => import('./pages/PaymentDetail').then((m) => ({ default: m.PaymentDetailPage })));
@@ -208,7 +208,7 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
               <Route path="/organizations/:organizationId/bills" element={<BillsPage />} />
               <Route path="/organizations/:organizationId/bills/:paymentOrderId" element={<BillRoute legacy={<Legacy><BillDetailPage /></Legacy>} />} />
               <Route path="/organizations/:organizationId/bills/:paymentOrderId/draft" element={<BillRoute legacy={<Legacy><BillDetailPage /></Legacy>} />} />
-              <Route path="/organizations/:organizationId/bills/documents/:invoiceDocumentId/draft" element={<Legacy><DocumentDraftPage /></Legacy>} />
+              <Route path="/organizations/:organizationId/bills/documents/:invoiceDocumentId/draft" element={<DocumentPage />} />
               {/* The Payments list is retired — Bills IS the payments surface. Old links land on Bills. */}
               <Route path="/organizations/:organizationId/payments" element={<OrgRedirect to="bills" />} />
               <Route path="/organizations/:organizationId/payments/:paymentOrderId" element={<Legacy><PaymentDetailPageV2 /></Legacy>} />

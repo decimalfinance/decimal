@@ -2,7 +2,12 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { assertOrganizationAccess } from '../auth/organization-access.js';
 import { asyncRoute, sendCreated } from '../infra/route-helpers.js';
-import { uploadInvoiceToPaymentOrders, beginAsyncInvoiceIntake } from '../payments/invoice-intake.js';
+import {
+  uploadInvoiceToPaymentOrders,
+  beginAsyncInvoiceIntake,
+  removeInvoiceDocument,
+  retryInvoiceDocument,
+} from '../payments/invoice-intake.js';
 import {
   MAX_DOCUMENT_BYTES,
   getInvoiceDocumentMeta,
@@ -86,6 +91,20 @@ invoicesRouter.get('/organizations/:organizationId/invoice-documents/:invoiceDoc
     return;
   }
   res.json(status);
+}));
+
+// A document that failed, read again from the file as stored.
+invoicesRouter.post('/organizations/:organizationId/invoice-documents/:invoiceDocumentId/retry', asyncRoute(async (req, res) => {
+  const { organizationId, invoiceDocumentId } = documentParamsSchema.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  res.json(await retryInvoiceDocument({ organizationId, invoiceDocumentId, actorUserId: req.auth!.userId }));
+}));
+
+// A document that failed, taken off the Bills list.
+invoicesRouter.post('/organizations/:organizationId/invoice-documents/:invoiceDocumentId/remove', asyncRoute(async (req, res) => {
+  const { organizationId, invoiceDocumentId } = documentParamsSchema.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  res.json(await removeInvoiceDocument({ organizationId, invoiceDocumentId, actorUserId: req.auth!.userId }));
 }));
 
 const pageParamsSchema = z.object({

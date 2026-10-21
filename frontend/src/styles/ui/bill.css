@@ -58,7 +58,7 @@
   color: var(--ink);
   overflow-wrap: anywhere;
 }
-.ui .bp-title.is-file { font: 600 15px/1.25 var(--mono); letter-spacing: -.02em; }
+.ui .bp-title.is-file { font: 600 17px/1.2 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
 .ui .bp-status {
   display: flex;
   flex-wrap: wrap;
@@ -80,6 +80,19 @@
 .ui .bp-status .chip { color: #1A1A1A; }
 .ui .bp-amount { flex: none; display: grid; justify-items: end; gap: 3px; }
 .ui .bp-total { font: 600 16px var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -.01em; color: var(--ink); }
+/* Where the total will be, while the bill is read. */
+.ui .bp-total-reading {
+  display: block;
+  width: 72px;
+  height: 14px;
+  margin-top: 3px;
+  border: 1px solid var(--pink-200);
+  border-radius: 4px;
+  background-color: var(--pink-50);
+  background-image: var(--tex-field);
+  background-size: 160px 160px, 120px 120px;
+  animation: ui-breathe 1.6s ease-in-out infinite;
+}
 .ui .bp-due { font-size: 10.5px; color: var(--ink-3); }
 .ui .bp-due.is-late { color: var(--red); }
 .ui .num { font-family: var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
@@ -471,6 +484,7 @@
   background-size: 160px 160px, 120px 120px;
   animation: ui-breathe 1.6s ease-in-out infinite;
 }
+.ui .bp-field.is-reading .bp-label { color: var(--pink-600); }
 .ui .bp-field.is-unread .bp-box { border: 1px dashed var(--edge-hover); background: var(--grey-faint); color: var(--ink-3); }
 .ui .bp-box:focus-within { border-color: var(--maroon); box-shadow: 0 0 0 3px rgba(92, 31, 51, .12); }
 .ui .bp-field.is-look .bp-box:focus-within,
@@ -488,7 +502,8 @@
   text-overflow: ellipsis;
 }
 .ui .bp-box input.num { font-family: var(--mono); }
-.ui .bp-box input::placeholder { color: var(--ink-3); opacity: 1; }
+/* "Not read", "Not on the document": words, never figures, in any box. */
+.ui .bp-box input::placeholder { color: var(--ink-3); opacity: 1; font-family: var(--font); letter-spacing: 0; }
 .ui .bp-box-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ui .bp-box-quiet { color: var(--ink-3); }
 .ui .bp-tick {
@@ -539,7 +554,7 @@
 .ui .bp-lsum.is-end,
 .ui .bp-lsum-amt.is-end { padding-bottom: 12px; font-weight: 600; color: var(--ink); }
 .ui .bp-lsum-amt.is-wrong { color: var(--red); }
-.ui .bp-empty-lines { grid-column: 1 / -1; padding: 12px; border-top: 1px solid var(--line); font-size: 11px; color: var(--ink-3); }
+.ui .bp-empty-lines { grid-column: 1 / -1; display: flex; align-items: center; min-height: 36px; padding-left: 12px; border-top: 1px solid var(--line); font-size: 11px; color: var(--ink-3); }
 
 /* A value that sizes to what it holds and edits in place. */
 .ui .bp-grow { display: inline-grid; min-width: 0; max-width: 100%; }
@@ -817,7 +832,7 @@
 .ui .bp-ground { flex: 1 1 0%; min-height: 0; overflow: auto; background: var(--grey); padding: 8px; display: grid; align-content: start; justify-items: center; gap: 8px; }
 .ui .bp-page { position: relative; background: var(--white); box-shadow: rgba(10, 10, 10, .12) 0 1px 8px; }
 .ui .bp-page img { display: block; width: 100%; height: auto; }
-.ui .bp-page.is-faint img { opacity: .38; filter: blur(.6px); }
+.ui .bp-page.is-faint { opacity: .38; filter: blur(.6px) contrast(.7); }
 .ui .bp-page-blank { width: 100%; aspect-ratio: 8.5 / 11; background: var(--white); }
 .ui .bp-hl {
   position: absolute;

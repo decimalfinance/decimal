@@ -49,6 +49,9 @@ const RULES: Array<{ pattern: RegExp; view: Need; act: Need }> = [
   // Viewer may upload — it creates a draft, which does nothing until a clerk
   // works it. Must sit above the general bills rule; first match wins.
   { pattern: /^\/invoices\/upload(-async)?$/, view: 'bills.view', act: 'bills.create' },
+  // A failed document read again is the same file uploaded again; taking one
+  // off the list touches no bill, because a failed document made none.
+  { pattern: /^\/invoice-documents\/[0-9a-f-]{36}\/(retry|remove)$/, view: 'bills.view', act: 'bills.create' },
   // Bills work surface.
   { pattern: /^\/(bills|invoices|invoice-documents)(\/|$)/, view: 'bills.view', act: 'bills.edit' },
   // The org's inbound invoice address is part of the bills surface: anyone who

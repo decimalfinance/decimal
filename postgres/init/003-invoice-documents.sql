@@ -30,8 +30,10 @@ ALTER TABLE invoice_documents
   ADD COLUMN IF NOT EXISTS processing_error TEXT;
 ALTER TABLE invoice_documents
   DROP CONSTRAINT IF EXISTS chk_invoice_documents_status;
+-- 'removed': a document that failed and that somebody took off the list. It
+-- stays stored; uploading the same file again reads it again.
 ALTER TABLE invoice_documents
-  ADD CONSTRAINT chk_invoice_documents_status CHECK (status IN ('processing', 'processed', 'failed'));
+  ADD CONSTRAINT chk_invoice_documents_status CHECK (status IN ('processing', 'processed', 'failed', 'removed'));
 
 -- Rendered page images (PNG) — the review screen shows these, not a PDF viewer.
 CREATE TABLE IF NOT EXISTS invoice_document_pages

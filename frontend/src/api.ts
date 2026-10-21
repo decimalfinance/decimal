@@ -1089,6 +1089,9 @@ export interface WorkbenchBill {
   amountOriginal: { amount: number; currency: string } | null;
   invoiceNumber: string | null;
   invoiceDocumentId: string | null;
+  filename: string | null;
+  /** In review, and nothing could be read off its document. */
+  unreadable: boolean;
   dueAt: string | null;
   createdAt: string;
   // How the bill arrived. 'email' means someone forwarded it to the org's
@@ -1243,7 +1246,17 @@ export interface BillDraft {
   /** `name` is what the DOCUMENT prints; `paidAs` is the vendor record it is
    *  linked to, present only when that record goes by a different name. */
   vendor: { name: string; paidAs?: string | null; email: string | null; nameSource?: DocSource; emailSource?: DocSource; nameState: BillDraftField['state']; emailState: BillDraftField['state']; isNew: boolean; trustState: string };
-  document: { invoiceDocumentId: string; filename: string; mimeType: string; byteSize: number; pageCount: number | null } | null;
+  document: {
+    invoiceDocumentId: string;
+    filename: string;
+    mimeType: string;
+    byteSize: number;
+    pageCount: number | null;
+    /** 'processing' while Decimal is still working on the file the bill came from. */
+    status: 'processing' | 'processed' | 'failed' | 'removed';
+  } | null;
+  /** Nothing could be read off the document: the fields are placeholders until a person types them. */
+  unreadable: boolean;
   fields: BillDraftField[];
   remitFields: BillDraftField[];
   /** A reference to offer when the document prints no invoice number. */
@@ -1583,10 +1596,15 @@ export interface InvoiceDocumentStatus {
   invoiceDocumentId: string;
   filename: string;
   mimeType: string;
-  status: 'processing' | 'processed' | 'failed';
+  byteSize: number;
+  status: 'processing' | 'processed' | 'failed' | 'removed';
   processingError: string | null;
+  /** Whose fault a failure was: ours reads fine next time; no_bill is what the document gave. */
+  failure: 'ours' | 'no_bill' | null;
   pageCount: number | null;
   pagesStored: number;
+  uploadedAt: string;
+  uploadedByName: string | null;
   paymentOrders: Array<{ paymentOrderId: string; state: string }>;
 }
 
@@ -1599,6 +1617,14 @@ export const invoiceIntakeApi = {
   },
   status(organizationId: string, invoiceDocumentId: string) {
     return request<InvoiceDocumentStatus>(`/organizations/${organizationId}/invoice-documents/${invoiceDocumentId}/status`);
+  },
+  /** A failed document, read again from the stored file. */
+  retry(organizationId: string, invoiceDocumentId: string) {
+    return request<{ invoiceDocumentId: string; reused: boolean }>(`/organizations/${organizationId}/invoice-documents/${invoiceDocumentId}/retry`, { method: 'POST' });
+  },
+  /** A failed document, taken off the Bills list. */
+  remove(organizationId: string, invoiceDocumentId: string) {
+    return request<{ invoiceDocumentId: string; status: 'removed' }>(`/organizations/${organizationId}/invoice-documents/${invoiceDocumentId}/remove`, { method: 'POST' });
   },
   // Rendered page image as an object URL (endpoint needs the auth header).
   async fetchPageObjectUrl(organizationId: string, invoiceDocumentId: string, pageIndex: number) {

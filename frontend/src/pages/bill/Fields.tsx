@@ -88,7 +88,7 @@ export function FieldBox({
             onChange={(e) => change(e.target.value)}
           />
         ) : (
-          <span className={`bp-box-text${mono ? ' num' : ''}${display ? '' : ' bp-box-quiet'}`}>{display || placeholder}</span>
+          <span className={`bp-box-text${mono && display ? ' num' : ''}${display ? '' : ' bp-box-quiet'}`}>{display || placeholder}</span>
         )}
         {look === 'look' && editable ? (
           <button type="button" className="bp-tick" title={`Confirm ${display}`} aria-label={`Confirm ${display}`} onClick={onConfirm}>

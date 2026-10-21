@@ -33,6 +33,12 @@ export function when(value: string | Date, now = new Date()) {
   return d.getFullYear() === now.getFullYear() ? dayMonth : `${dayMonth} ${d.getFullYear()}`;
 }
 
+/** A moment in full, for a record of it: "30 Sep 2026, 9:14". */
+export function stamp(value: string | Date) {
+  const d = new Date(value);
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}, ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
 /** How long ago, for things that just happened: "just now", "4 min ago", "2 hours ago". */
 export function ago(value: string | Date, now = new Date()) {
   const minutes = Math.floor((now.getTime() - new Date(value).getTime()) / 60_000);

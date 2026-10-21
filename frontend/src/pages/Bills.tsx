@@ -502,6 +502,24 @@ function BillRow({ row, organizationId }: { row: Row; organizationId: string }) 
   const to = bill.bucket === 'draft'
     ? `/organizations/${organizationId}/bills/${bill.paymentOrderId}/draft`
     : `/organizations/${organizationId}/bills/${bill.paymentOrderId}`;
+  if (bill.unreadable) {
+    return (
+      <Link to={to} className="bl-row" title="Opens the file: enter the details by hand, or remove it">
+        <Cells>
+          <span className="bl-td bl-vendor">{bill.filename ?? 'A file'}</span>
+          <span className="bl-td bl-desc">
+            <span>Nothing could be read. Enter the details by hand, or remove it.</span>
+          </span>
+          <span className="bl-td bl-inv num">{bill.invoiceNumber ?? '—'}</span>
+          <span className="bl-td is-end bl-amt num">—</span>
+          <span className="bl-td bl-due num">—</span>
+          <span className="bl-td">
+            <span className="chip is-blocking">Couldn’t be read</span>
+          </span>
+        </Cells>
+      </Link>
+    );
+  }
   return (
     <Link to={to} className="bl-row" title={`Opens ${bill.invoiceNumber ?? 'the bill'}`}>
       <Cells>
@@ -565,11 +583,11 @@ function ReadingCells({ name, line }: { name: string; line: string }) {
 function UploadRow({ doc, to, by, size }: { doc: PendingDocument; to: string; by: string; size: number | null }) {
   if (doc.status === 'failed') {
     return (
-      <Link to={to} className="bl-row" title="Opens the file: upload a clearer copy, enter the details by hand, or remove it">
+      <Link to={to} className="bl-row" title="Opens the file: read it again, or remove it">
         <Cells>
           <span className="bl-td bl-vendor">{doc.filename}</span>
           <span className="bl-td bl-desc">
-            <span>Couldn’t be read. Upload a clearer copy, or enter the details by hand.</span>
+            <span>No bill came out of it. Read it again, or remove it.</span>
           </span>
           <span className="bl-td bl-inv num">—</span>
           <span className="bl-td is-end bl-amt num">—</span>

@@ -2,12 +2,17 @@
 // line items and History on the left; the document on the right, behind a
 // hairline that drags; the bar along the bottom with what still stands
 // between the bill and approval. Every change saves itself a moment later.
+//
+// The same page while Decimal reads the bill (5r): its parts land in order as
+// the reading arrives, and nothing can be changed or sent until it's done. And
+// a bill nothing could be read from (5u): every box says "Not read", the file
+// sits faded, and the person removes it or enters the details by hand.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router';
 import { billsApi, type BillCompanionNote, type BillDetail, type ConfirmBillBody, type DocSource } from '../../api';
 import { useToaster } from '../../kit/Toast';
-import { calendarDay, daysPast, usd } from '../../kit/format';
+import { ago, calendarDay, daysPast, fileSize, stamp, usd } from '../../kit/format';
 import { AgentBox } from './AgentBox';
 import { DocPane, Separator, useDocWidth } from './DocPane';
 import { FieldBox, lookOf } from './Fields';
@@ -18,6 +23,7 @@ import {
   DETAIL_FIELDS,
   DISCOUNT_FIELD,
   VENDOR_FIELDS,
+  landsAt,
   bodyOf,
   closeReasonFor,
   fieldsFrom,
@@ -30,6 +36,7 @@ import {
   sendGap,
   type Face,
   type FieldDef,
+  type ChipTone,
   type Fields,
   type LineEntry,
 } from './model';
@@ -49,6 +56,7 @@ export function Review({
   note,
   viewer,
   access,
+  reading,
   onRefetch,
 }: {
   organizationId: string;
@@ -56,6 +64,8 @@ export function Review({
   note: BillCompanionNote | null | undefined;
   viewer: Face;
   access: Access;
+  /** While Decimal reads the bill, the tick its landing has reached (5r); null once read. */
+  reading: number | null;
   onRefetch: () => Promise<unknown>;
 }) {
   const draft = detail.draft;
@@ -74,6 +84,7 @@ export function Review({
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'failed'>('saved');
   const [sending, setSending] = useState(false);
   const [closeTip, setCloseTip] = useState(false);
+  const [byHand, setByHand] = useState(false);
 
   const body = useMemo(() => bodyOf(fields, lines, noteForApprovers), [fields, lines, noteForApprovers]);
   const bodyText = JSON.stringify(body);
@@ -145,7 +156,24 @@ export function Review({
   const rowRef = useRef<HTMLDivElement | null>(null);
   const doc = useDocWidth(rowRef);
 
+  const isReading = reading !== null;
+  const landed = (key: string) => reading === null || reading >= landsAt(key);
+  // Nothing changes while Decimal is still reading: its reading would land on top.
+  const canEdit = editable && !isReading;
+  const unreadable = draft.unreadable;
+  const typedAny = Object.values(fields).some((f) => f.state === 'confirmed') || lines.some((l) => l.description.trim());
+  // Until somebody starts typing, a bill nothing could be read from says so.
+  const couldntRead = unreadable && !isReading && !byHand && !typedAny;
+  const filename = draft.document?.filename ?? null;
+  const arrived = detail.history.before.find((h) => h.kind === 'uploaded' || h.kind === 'forwarded') ?? null;
+  const arrivedBy = arrived?.person ? ` by ${arrived.person.name}` : '';
+  const arrivedVerb = arrived?.kind === 'forwarded' ? 'Forwarded' : 'Uploaded';
+
   const header = headerOf(detail, fields);
+  const chip: { text: string; tone: ChipTone } | null = couldntRead ? { text: 'Couldn’t be read', tone: 'blocking' }
+    // Typed in by hand, nothing about it is "checked" yet.
+    : unreadable && header.chip?.tone === 'checked' ? { text: 'Needs a check', tone: 'yours' }
+    : header.chip;
   const findings = findingsOf(draft);
   const tax = parseMoney(fields.taxAmount?.value) ?? 0;
   const total = parseMoney(fields.total?.value);
@@ -176,10 +204,10 @@ export function Review({
         key={def.key}
         def={def}
         entry={entry}
-        look={lookOf(entry, { wrong })}
+        look={!landed(def.key) ? 'reading' : unreadable ? lookOf(entry, { unread: true }) : lookOf(entry, { wrong })}
         by={byOf(def.key)}
         wrongNote={wrong && diff !== 0 ? <span><span className="num">{usd(Math.abs(diff))}</span> {diff > 0 ? 'more' : 'less'} than its lines</span> : undefined}
-        editable={editable}
+        editable={canEdit}
         onEdit={(v) => edit(def.key, v)}
         onConfirm={() => confirmField(def.key)}
         onFocus={() => setSpot(def.key === 'total' ? entry?.source ?? draft.totalsSources.total : entry?.source ?? null)}
@@ -212,11 +240,29 @@ export function Review({
   const closeBill = () => {
     if (!access.isAdmin) return;
     const closable = findings.find((f) => f.resolutions.some((r) => r.action === 'not_ours'));
-    setCard({ kind: 'close', reason: closable ? closeReasonFor(closable.kind) : 'other', note: '' });
+    setCard({ kind: 'close', reason: unreadable ? 'unreadable' : closable ? closeReasonFor(closable.kind) : 'other', note: '' });
+  };
+
+  const startByHand = () => {
+    setByHand(true);
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLInputElement>('[data-focus="field:vendor.name"] input')?.focus();
+    });
   };
 
   const detailDefs = [...DETAIL_FIELDS, ...(fields.discount?.value ? [DISCOUNT_FIELD] : [])];
-  const title = fields.invoiceNumber?.value.trim() || draft.vendor.name || draft.document?.filename || 'A bill';
+  const number = fields.invoiceNumber?.value.trim() ?? '';
+  // A file's name until its invoice number is known: while it's read, and when it couldn't be.
+  const showFile = (isReading || unreadable) && filename !== null && !(number && landed('invoiceNumber'));
+  const title = showFile ? filename : number || draft.vendor.name || filename || 'A bill';
+  const vendorText = isReading && !landed('vendor.name') ? 'New bill'
+    : fields['vendor.name']?.value || (unreadable ? 'New bill' : draft.vendor.name);
+
+  const lead = isReading ? { text: `Extracting the details from ${filename ?? 'the document'}.`, working: true }
+    : couldntRead ? { text: `I couldn’t read ${filename ?? 'this document'}, so nothing here is filled in and nothing was guessed. Enter the details by hand and I’ll check them.`, working: false }
+    // Typing it in: what it found about a placeholder vendor would only mislead.
+    : unreadable && !draft.flags.some((f) => f.blocking) ? { text: `I couldn’t read ${filename ?? 'this document'}, so the details are yours to type in. I’ll check them once they’re in.`, working: false }
+    : null;
 
   return (
     <>
@@ -224,25 +270,44 @@ export function Review({
         <div className="bp-panel">
           <div className="bp-head">
             <div style={{ minWidth: 0 }}>
-              <h1 className="bp-title">{title}</h1>
-              <div className="bp-status">
-                <span>{fields['vendor.name']?.value || draft.vendor.name}</span>
-                <span className="bp-dot">·</span>
-                <span className="bp-stage">{header.stageText}</span>
-                {header.chip ? (
-                  <>
-                    <span className="bp-dot">·</span>
-                    <span className={`chip ${CHIP_CLASS[header.chip.tone]}`}>{header.chip.text}</span>
-                  </>
+              <h1 className={`bp-title${showFile ? ' is-file' : ''}`}>{title}</h1>
+              {couldntRead ? (
+                <div className="bp-status">
+                  <span>
+                    {arrived?.at ? `${arrivedVerb} ${stamp(arrived.at)}${arrivedBy}` : arrivedVerb}
+                    {draft.document?.pageCount ? ` · ${draft.document.pageCount} ${draft.document.pageCount === 1 ? 'page' : 'pages'}` : ''}
+                    {draft.document?.byteSize ? ` · ${fileSize(draft.document.byteSize)}` : ''}
+                  </span>
+                  <span className="bp-dot">·</span>
+                  <span className={`chip ${CHIP_CLASS[chip!.tone]}`}>{chip!.text}</span>
+                </div>
+              ) : (
+                <div className="bp-status">
+                  <span>{vendorText}</span>
+                  <span className="bp-dot">·</span>
+                  <span className={`bp-stage${isReading ? ' is-reading' : ''}`}>{isReading ? 'Extracting' : header.stageText}</span>
+                  {chip && !isReading ? (
+                    <>
+                      <span className="bp-dot">·</span>
+                      <span className={`chip ${CHIP_CLASS[chip.tone]}`}>{chip.text}</span>
+                    </>
+                  ) : null}
+                </div>
+              )}
+            </div>
+            {isReading ? (
+              <div className="bp-amount">
+                {total !== null && total > 0 && landed('total') ? <span className="bp-total">{usd(total)}</span> : <span className="bp-total-reading" />}
+                <span className="bp-due">{arrived?.at ? `${arrivedVerb} ${ago(arrived.at)}${arrivedBy}` : `${arrivedVerb}${arrivedBy}`}</span>
+              </div>
+            ) : couldntRead ? null : (
+              <div className="bp-amount">
+                {total !== null && total > 0 ? <span className="bp-total">{usd(total)}</span> : null}
+                {dueDay ? (
+                  <span className={`bp-due${late ? ' is-late' : ''}`}>Due <span className="num">{calendarDay(dueDay)}</span></span>
                 ) : null}
               </div>
-            </div>
-            <div className="bp-amount">
-              {total !== null && total > 0 ? <span className="bp-total">{usd(total)}</span> : null}
-              {dueDay ? (
-                <span className={`bp-due${late ? ' is-late' : ''}`}>Due <span className="num">{calendarDay(dueDay)}</span></span>
-              ) : null}
-            </div>
+            )}
           </div>
 
           <AgentBox
@@ -253,12 +318,13 @@ export function Review({
             lines={lines}
             viewer={viewer}
             access={access}
-            editable={editable}
+            editable={canEdit}
             card={card}
             setCard={setCard}
             onFixTotal={fixTotal}
             onSaveNow={() => save(body)}
             onChanged={refreshAround}
+            lead={lead}
           />
 
           <div className="bp-sec is-first">
@@ -276,10 +342,13 @@ export function Review({
               total={total}
               vendorName={fields['vendor.name']?.value || draft.vendor.name}
               options={draft.categoryOptions}
-              editable={editable}
+              editable={canEdit}
               wrongTotal={figuresWrong}
               viewer={viewer}
               highlighted={lineInHand}
+              reading={reading}
+              emptyText={unreadable ? 'None read' : undefined}
+              bare={couldntRead}
               onChange={(id, patch) => setLines((ls) => ls.map((l) => (l.id === id ? { ...l, ...patch } : l)))}
               onRemove={(id) => setLines((ls) => ls.filter((l) => l.id !== id))}
               onAdd={() => setLines((ls) => [...ls, { id: newLineId(), description: '', quantity: '1', unitPrice: '', amount: '', category: null, from: null, settledBy: null, source: null }])}
@@ -290,14 +359,44 @@ export function Review({
               onFocusTotals={() => setSpot(draft.totalsSources.total)}
             />
           </div>
-          <div className="bp-sec">
-            <History detail={detail} note={note} />
-          </div>
+          {isReading || couldntRead ? null : (
+            <div className="bp-sec">
+              <History detail={detail} note={note} />
+            </div>
+          )}
         </div>
         <Separator rowRef={rowRef} width={doc.width} setWidth={doc.setWidth} />
-        <DocPane organizationId={organizationId} document={draft.document} source={spot} width={doc.width} />
+        <DocPane organizationId={organizationId} document={draft.document} source={spot} width={doc.width} faint={couldntRead} />
       </div>
 
+      {isReading ? (
+        <div className="bp-foot">
+          <span className="bp-saved">Extracting…</span>
+          <span className="bp-foot-gap" />
+          {editable ? (
+            <>
+              <span className="bp-foot-note">Once the details are in</span>
+              <button type="button" className="btn is-primary" disabled>Send for approval</button>
+            </>
+          ) : null}
+        </div>
+      ) : couldntRead ? (
+        <div className="bp-foot">
+          <span className="bp-saved">Nothing read</span>
+          <span className="bp-foot-gap" />
+          {editable ? (
+            <>
+              <span className="bp-tipwrap" onMouseEnter={() => setCloseTip(true)} onMouseLeave={() => setCloseTip(false)}>
+                <button type="button" className="btn is-quiet-red" aria-disabled={!access.isAdmin} onClick={closeBill}>
+                  Not a bill? Remove this file
+                </button>
+                {closeTip && !access.isAdmin ? <span className="tip">Only an admin can do this. Ask one to look.</span> : null}
+              </span>
+              <button type="button" className="btn" onClick={startByHand}>Enter the details by hand</button>
+            </>
+          ) : null}
+        </div>
+      ) : (
       <div className="bp-foot">
         {editable ? (
           <span className={`bp-saved${saveState === 'failed' ? ' is-failed' : ''}`}>
@@ -326,6 +425,7 @@ export function Review({
           </>
         ) : null}
       </div>
+      )}
     </>
   );
 }

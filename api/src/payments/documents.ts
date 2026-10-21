@@ -123,7 +123,7 @@ export async function getInvoiceDocumentPage(
 
 export async function setInvoiceDocumentStatus(
   invoiceDocumentId: string,
-  status: 'processing' | 'processed' | 'failed',
+  status: 'processing' | 'processed' | 'failed' | 'removed',
   processingError?: string | null,
 ) {
   await prisma.invoiceDocument.update({
@@ -132,6 +132,10 @@ export async function setInvoiceDocumentStatus(
   });
 }
 
+/** The words a document that failed on our side carries: the file is fine, the reading was not. */
+export const READ_FAILED_ON_OUR_SIDE =
+  'We could not read this document. That is a fault on our side, not a problem with the file. It is stored, so it can be read again.';
+
 export async function getInvoiceDocumentStatus(organizationId: string, invoiceDocumentId: string) {
   const doc = await prisma.invoiceDocument.findFirst({
     where: { organizationId, invoiceDocumentId },
@@ -139,9 +143,12 @@ export async function getInvoiceDocumentStatus(organizationId: string, invoiceDo
       invoiceDocumentId: true,
       filename: true,
       mimeType: true,
+      byteSize: true,
       status: true,
       processingError: true,
       pageCount: true,
+      createdAt: true,
+      uploadedByUser: { select: { displayName: true } },
       pages: { select: { pageIndex: true }, orderBy: { pageIndex: 'asc' } },
       paymentOrders: { select: { paymentOrderId: true, state: true }, orderBy: { createdAt: 'asc' } },
     },
@@ -151,10 +158,18 @@ export async function getInvoiceDocumentStatus(organizationId: string, invoiceDo
     invoiceDocumentId: doc.invoiceDocumentId,
     filename: doc.filename,
     mimeType: doc.mimeType,
+    byteSize: doc.byteSize,
     status: doc.status,
     processingError: doc.processingError,
+    // Whose fault a failure was. Ours (a provider down, no key, a bug) reads
+    // fine next time; anything else is what the document gave us.
+    failure: doc.status !== 'failed' ? null
+      : !doc.processingError || /fault on our side/.test(doc.processingError) ? 'ours' as const
+      : 'no_bill' as const,
     pageCount: doc.pageCount,
     pagesStored: doc.pages.length,
+    uploadedAt: doc.createdAt,
+    uploadedByName: doc.uploadedByUser?.displayName ?? null,
     paymentOrders: doc.paymentOrders,
   };
 }

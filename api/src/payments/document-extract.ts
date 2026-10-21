@@ -581,6 +581,12 @@ export const DOUBTFUL_FIELD_STATUSES: ReadonlySet<string> = new Set([
   'partial', 'ambiguous', 'conflicting', 'unreadable',
 ]);
 
+/**
+ * The fields a document nothing could be read from is marked unreadable on.
+ * All of them unreadable at once is how a bill knows it is that placeholder.
+ */
+export const UNREADABLE_MARKS = ['vendorName', 'invoiceNumber', 'invoiceDate', 'dueDate', 'total', 'lineItems'] as const;
+
 /** One row of a statement of account: a reference to a DIFFERENT document. */
 const StatementRowSchema = z.object({
   reference: z.string().nullable().default(null).catch(null),

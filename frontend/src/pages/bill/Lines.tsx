@@ -9,10 +9,31 @@ import { Avatar } from '../../kit/Avatar';
 import { useDismiss } from '../../kit/hooks';
 import { Icon } from '../../kit/icons';
 import { usd } from '../../kit/format';
-import { linesSum, parseMoney, parseNumber, type Face, type LineEntry } from './model';
+import { CATEGORIES_AT, lineLandsAt, linesSum, parseMoney, parseNumber, type Face, type LineEntry } from './model';
 import { Chevron, TickGlyph } from './parts';
 
 const COLUMNS = ['Description', 'Qty', 'Unit', 'Category', 'Amount'];
+/** How wide each bar breathes while a line is read: varied, as lines are. */
+const READING_WIDTHS = [190, 150, 110, 160, 140];
+
+const Bar = ({ width }: { width: number }) => <span className="bl-reading" style={{ width }} />;
+
+/** A line Decimal hasn't read yet: a bar where each figure will be. */
+function ReadingRow({ width }: { width: number }) {
+  return (
+    <div className="bp-lrow">
+      <div className="bp-lc is-first"><Bar width={width} /></div>
+      <div className="bp-lc" />
+      <div className="bp-lc is-num"><Bar width={14} /></div>
+      <div className="bp-lc" />
+      <div className="bp-lc is-num"><Bar width={40} /></div>
+      <div className="bp-lc" />
+      <div className="bp-lc is-cat"><Bar width={90} /></div>
+      <div className="bp-lc" />
+      <div className="bp-lc is-num is-last"><Bar width={52} /></div>
+    </div>
+  );
+}
 
 function Grow({ value, onChange, placeholder, label, mono, onFocus, editable }: {
   value: string;
@@ -231,6 +252,9 @@ export function LineItems({
   wrongTotal,
   viewer,
   highlighted,
+  reading = null,
+  emptyText = 'No lines yet.',
+  bare = false,
   onChange,
   onRemove,
   onAdd,
@@ -247,6 +271,12 @@ export function LineItems({
   wrongTotal: boolean;
   viewer: Face;
   highlighted: string | null;
+  /** While Decimal reads the bill, the tick its landing has reached (5r). */
+  reading?: number | null;
+  /** What the table says with no lines. */
+  emptyText?: string;
+  /** Without the lines, tax and total under the table. */
+  bare?: boolean;
   onChange: (id: string, patch: Partial<LineEntry>) => void;
   onRemove: (id: string) => void;
   onAdd: () => void;
@@ -266,7 +296,7 @@ export function LineItems({
     <>
       <div className="bp-sec-head">
         <div className="bp-sec-title">Line items</div>
-        {editable ? <button type="button" className="bp-add" onClick={onAdd}>+ Add a line</button> : null}
+        {editable && reading === null ? <button type="button" className="bp-add" onClick={onAdd}>+ Add a line</button> : null}
       </div>
       <div className="bp-lines">
         <div className="bp-lines-grid">
@@ -280,8 +310,11 @@ export function LineItems({
               </div>
             ))}
           </div>
-          {lines.length === 0 ? <div className="bp-empty-lines">No lines yet.</div> : null}
-          {lines.map((line, i) => (
+          {lines.length === 0 && reading !== null ? READING_WIDTHS.map((w) => <ReadingRow key={w} width={w} />) : null}
+          {lines.length === 0 && reading === null ? <div className="bp-empty-lines">{emptyText}</div> : null}
+          {lines.map((line, i) => reading !== null && reading < lineLandsAt(i, lines.length) ? (
+            <ReadingRow key={line.id} width={READING_WIDTHS[i % READING_WIDTHS.length]!} />
+          ) : (
             <div key={line.id} className={`bp-lrow${highlighted === line.id ? ' is-hl' : ''}`} data-focus={`line:${i}`}>
               <div className="bp-lc is-first">
                 <Grow
@@ -310,14 +343,18 @@ export function LineItems({
                 <MoneyCell value={line.unitPrice} label={`Line ${i + 1} unit price`} editable={editable} onFocus={() => onFocusLine(line)} onChange={(v) => setAmountFrom(line, { unitPrice: v })} />
               </div>
               <div className="bp-lc" />
-              <CategoryCell
-                line={line}
-                vendorName={vendorName}
-                options={options}
-                editable={editable}
-                onPick={(value) => onChange(line.id, { category: value, from: null, settledBy: viewer })}
-                onConfirm={() => onChange(line.id, { from: null, settledBy: viewer })}
-              />
+              {reading !== null && reading < CATEGORIES_AT ? (
+                <div className="bp-lc is-cat"><Bar width={90} /></div>
+              ) : (
+                <CategoryCell
+                  line={line}
+                  vendorName={vendorName}
+                  options={options}
+                  editable={editable}
+                  onPick={(value) => onChange(line.id, { category: value, from: null, settledBy: viewer })}
+                  onConfirm={() => onChange(line.id, { from: null, settledBy: viewer })}
+                />
+              )}
               <div className="bp-lc" />
               <div className="bp-lc is-num is-last">
                 <MoneyCell value={line.amount} label={`Line ${i + 1} amount`} editable={editable} onFocus={() => onFocusLine(line)} onChange={(v) => onChange(line.id, { amount: v })} />
@@ -329,21 +366,25 @@ export function LineItems({
               </div>
             </div>
           ))}
-          <div className="bp-lrow" onClick={onFocusTotals}>
-            <div className="bp-lsum is-top">Lines</div>
-            <div className="bp-lsum-gap is-top" />
-            <div className="bp-lsum-amt is-top num">{usd(sum)}</div>
-          </div>
-          <div className="bp-lrow">
-            <div className="bp-lsum">Tax</div>
-            <div className="bp-lsum-gap" />
-            <div className="bp-lsum-amt num">{usd(tax)}</div>
-          </div>
-          <div className="bp-lrow">
-            <div className="bp-lsum is-end">Total on the document</div>
-            <div className="bp-lsum-gap" />
-            <div className={`bp-lsum-amt is-end num${wrongTotal ? ' is-wrong' : ''}`}>{total == null ? '—' : usd(total)}</div>
-          </div>
+          {reading === null && !bare ? (
+            <>
+              <div className="bp-lrow" onClick={onFocusTotals}>
+                <div className="bp-lsum is-top">Lines</div>
+                <div className="bp-lsum-gap is-top" />
+                <div className="bp-lsum-amt is-top num">{usd(sum)}</div>
+              </div>
+              <div className="bp-lrow">
+                <div className="bp-lsum">Tax</div>
+                <div className="bp-lsum-gap" />
+                <div className="bp-lsum-amt num">{usd(tax)}</div>
+              </div>
+              <div className="bp-lrow">
+                <div className="bp-lsum is-end">Total on the document</div>
+                <div className="bp-lsum-gap" />
+                <div className={`bp-lsum-amt is-end num${wrongTotal ? ' is-wrong' : ''}`}>{total == null ? '—' : usd(total)}</div>
+              </div>
+            </>
+          ) : null}
         </div>
       </div>
     </>
