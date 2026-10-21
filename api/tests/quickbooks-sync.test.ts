@@ -123,7 +123,8 @@ test('quickbooks: a category missing from the chart fails loudly, lands in the r
 
   const ownerBox = await get(`/organizations/${w.orgId}/inbox`, w.owner.token);
   const line = ownerBox.items.find((i: { billId: string }) => i.billId === w.bills.submitted)?.lines.find((l: { kind: string }) => l.kind === 'sync_failed');
-  assert.match(line?.text ?? '', /^Couldn't post to QuickBooks: /, 'whoever manages accounting is told');
+  assert.equal(line?.text, 'QuickBooks refused it: “Cloud hosting & infrastructure” is not in your QuickBooks chart of accounts', 'whoever manages accounting is told, in its first sentence');
+  assert.equal(line?.who, null, 'nobody sent it: it is Decimal\'s');
   const approverBox = await get(`/organizations/${w.orgId}/inbox`, w.apprA.token);
   assert.equal(JSON.stringify(approverBox).includes('sync_failed'), false, 'an approver is not');
 

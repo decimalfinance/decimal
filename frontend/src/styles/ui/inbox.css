@@ -1,0 +1,207 @@
+/* The Inbox (Inbox.dc.html 22b): everything waiting on you, one table. The
+   header and the tabs stay put; only the table scrolls, under its labels.
+   The title is the list pages' (.list-head, .list-title), the tabs are the
+   Bills stage bar (.bl-stages, .bl-stage), the type is the table chip. */
+
+.ui.inbox-page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--white);
+}
+.ui.inbox-page > .list-head { flex: none; }
+
+/* "3 people are waiting on you", after their faces. */
+.ui .ib-waiting {
+  margin-top: 5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 400 11px/1.3 var(--font);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.ui .ib-waiting b { font-weight: 500; color: var(--ink); }
+.ui .ib-faces { display: flex; }
+.ui .ib-faces > span { display: flex; }
+.ui .ib-faces > span + span { margin-left: -5px; }
+/* Each face but the last is cut where the next one overlaps it. */
+.ui .ib-faces > span:not(:last-child) {
+  -webkit-mask-image: radial-gradient(circle at 19px 8px, transparent 8.6px, var(--ink) 9.4px);
+  mask-image: radial-gradient(circle at 19px 8px, transparent 8.6px, var(--ink) 9.4px);
+}
+
+.ui .ib-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 4px 30px 24px;
+}
+.ui .ib-bar { flex: none; display: flex; align-items: center; gap: 16px; padding: 9px 0; }
+.ui .ib-tools { margin-left: auto; display: flex; align-items: center; gap: 14px; }
+.ui .ib-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 190px;
+  height: 26px;
+  box-sizing: border-box;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--white);
+  color: var(--ink-4);
+}
+.ui .ib-search:focus-within { border-color: var(--edge); }
+.ui .ib-search > input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font: 400 11px var(--font);
+  color: var(--ink);
+}
+.ui .ib-search > input::placeholder { color: var(--ink-4); }
+.ui .ib-search > input::-webkit-search-cancel-button { display: none; }
+
+/* The table scrolls in the page's right gap, so rows always end level with
+   the search, whether or not the list is long enough to scroll. */
+.ui .ib-scroll {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  margin-right: -14px;
+  padding-right: 8px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) transparent;
+}
+.ui .ib-scroll::-webkit-scrollbar { width: 6px; }
+.ui .ib-scroll::-webkit-scrollbar-track { margin-top: 18px; background: transparent; }
+.ui .ib-scroll::-webkit-scrollbar-thumb { border-radius: 3px; background: var(--scroll-thumb); }
+.ui .ib-scroll:hover::-webkit-scrollbar-thumb { background: var(--edge-hover); }
+
+.ui .ib-grid {
+  display: grid;
+  grid-template-columns:
+    max-content 48px minmax(0, max-content) 48px max-content 48px
+    max-content 48px max-content 48px minmax(0, 1fr);
+  padding-bottom: 2px;
+}
+.ui .ib-head,
+.ui .ib-row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; }
+.ui .ib-head { position: sticky; top: 0; z-index: 3; background: var(--white); }
+.ui .ib-th {
+  height: 18px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: flex-end;
+  padding: 0 0 7px;
+  font: 600 8px var(--mono);
+  letter-spacing: .08em;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.ui .ib-th:first-child,
+.ui .ib-td:first-child { padding-left: 4px; }
+.ui .ib-th:last-child,
+.ui .ib-td:last-child { padding-right: 4px; }
+.ui .ib-th.is-end,
+.ui .ib-td.is-end { justify-content: flex-end; }
+
+.ui .ib-row {
+  position: relative;
+  align-items: center;
+  height: 30px;
+  box-sizing: border-box;
+  border-top: 1px solid var(--line);
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color .12s ease, border-color .12s ease;
+  scroll-margin-top: 22px; /* clear of the labels, when the keys bring it into view */
+}
+/* A band that hides its own line, and the next row's with its shadow. */
+.ui .ib-row:hover {
+  z-index: 2;
+  border-top-color: var(--grey);
+  border-radius: 6px;
+  background: var(--grey);
+  box-shadow: 0 1px 0 0 var(--grey);
+}
+.ui .ib-row.is-picked,
+.ui .ib-row.is-picked:hover {
+  z-index: 1;
+  border-top-color: var(--grey-picked);
+  border-radius: 6px;
+  background: var(--grey-picked);
+  box-shadow: 0 1px 0 0 var(--grey-picked);
+}
+.ui .ib-row:focus-visible { outline: none; box-shadow: var(--focus-inset); }
+.ui .ib-td {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  line-height: 1;
+  white-space: nowrap;
+}
+.ui .ib-vendor { font-size: 11px; color: var(--ink); }
+.ui .ib-desc { gap: 6px; font-size: 10.5px; color: var(--ink-2); }
+.ui .ib-desc-text { min-width: 0; max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
+.ui .ib-dot { flex: none; color: var(--edge-hover); }
+.ui .ib-inv { flex: none; color: var(--ink-3); }
+.ui .ib-amt { font-size: 11px; color: var(--ink); }
+.ui .ib-due { font-size: 10.5px; color: var(--ink-2); }
+.ui .ib-due.is-late { color: var(--red); }
+.ui .ib-none { font: 400 10.5px var(--font); color: var(--ink-3); }
+
+/* The type of each line, in the Inbox's own colours (not Bills' status chips). */
+.ui .chip.k-approval { background: var(--chip-waiting); }
+.ui .chip.k-question { background: var(--chip-question); }
+.ui .chip.k-reply { background: var(--chip-reply); }
+.ui .chip.k-sent_back { background: var(--chip-sentback); }
+.ui .chip.k-sync_failed { background: var(--chip-blocking); }
+.ui .chip.k-review { background: var(--chip-yours); }
+.ui .chip.k-unreadable { background: var(--chip-finished); }
+.ui .chip.k-sign_off { background: var(--chip-checked); }
+
+/* What's waiting: a face (or Decimal's orb), then one line of words. */
+.ui .ib-what { gap: 8px; font-size: 10.5px; }
+.ui .ib-what-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
+.ui .ib-what-text.is-decimal { color: var(--ink-2); }
+.ui .ib-quote { color: var(--ink-2); }
+.ui .ib-orb { display: block; flex: none; width: 16px; height: 16px; }
+
+/* Nothing to show: an empty Inbox, an empty tab, or a search that finds nothing. */
+.ui .ib-empty {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+  padding: 0 4px;
+  border-top: 1px solid var(--line);
+  font: 400 11px var(--font);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.ui .ib-clear {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--maroon);
+  text-decoration: underline;
+  text-decoration-color: var(--pink-300);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.ui .ib-clear:hover { text-decoration-color: var(--maroon); }

@@ -1222,7 +1222,7 @@ test('"I don\'t know" goes back to the asker as a reply, and settles nothing', a
 
   const asker = await get(`/organizations/${orgId}/inbox`, owner.token);
   const line = asker.items.flatMap((i: { lines: Array<{ kind: string; text: string }> }) => i.lines).find((l: { kind: string }) => l.kind === 'reply');
-  assert.match(line.text, /couldn't answer/, 'the asker hears it came back to them');
+  assert.match(line.text, /couldn’t answer/, 'the asker hears it came back to them');
   const asked2 = await get(`/organizations/${orgId}/inbox`, helper.token);
   assert.ok(!asked2.items.some((i: { lines: Array<{ kind: string }> }) => i.lines.some((l) => l.kind === 'question')), 'and it is off the helper\'s list');
 });
@@ -1317,7 +1317,7 @@ test('anyone who works on bills can answer, and any answer closes the question',
   assert.ok(!helperInbox.items.some((i: { lines: Array<{ kind: string }> }) => i.lines.some((l) => l.kind === 'question')), 'the person asked is off the hook');
   const askerInbox = await get(`/organizations/${orgId}/inbox`, owner.token);
   const reply = askerInbox.items.flatMap((i: { lines: Array<{ kind: string; text: string }> }) => i.lines).find((l: { kind: string }) => l.kind === 'reply');
-  assert.equal(reply.text, 'pa-knower answered: "Both right, I set this vendor up."', 'the asker hears the answer');
+  assert.equal(reply.text, 'pa-knower answered: “Both right, I set this vendor up.”', 'the asker hears the answer');
 });
 
 test('passing it on raises a linked question, still asked by whoever wanted to know', async () => {
@@ -2024,7 +2024,7 @@ test('whoever knows answers by saying so: Tom answers what was put to Marcus', a
 
   const askerInbox = await get(`/organizations/${orgId}/inbox`, owner.token);
   const reply = askerInbox.items.flatMap((i: { lines: Array<{ kind: string; text: string }> }) => i.lines).find((l: { kind: string }) => l.kind === 'reply');
-  assert.equal(reply.text, 'gc-tom answered: "Yes, $1,850.00 is the agreed rate."', 'the asker hears it');
+  assert.equal(reply.text, 'gc-tom answered: “Yes, $1,850.00 is the agreed rate.”', 'the asker hears it');
   const marcusInbox = await get(`/organizations/${orgId}/inbox`, marcus.token);
   assert.ok(!marcusInbox.items.some((i: { lines: Array<{ kind: string }> }) => i.lines.some((l) => l.kind === 'question')), 'Marcus is off the hook');
 

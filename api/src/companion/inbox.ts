@@ -9,12 +9,15 @@
 //     back. It clears itself when state moves.
 //   - What PEOPLE ask is a question on the bill (bill_questions): one asked of
 //     you, until anyone answers it, and the reply to one you asked, until you
-//     deal with it. There is no other kind of ask. Nudges were removed on
-//     2026-10-14: once a question stopped holding the bill, the two no longer
-//     worked differently, and two kinds of ask only confused people.
+//     open the bill after it or act on it. There is no other kind of ask, and
+//     nothing to tick off. Nudges were removed on 2026-10-14: once a question
+//     stopped holding the bill, the two no longer worked differently, and two
+//     kinds of ask only confused people.
 //
-// An item is "new" when anything in it is later than the last time the
-// person looked at it (inbox_seen).
+// Each line says who it comes from (none for what Decimal raises itself),
+// what they did, and their own words apart, so a screen can quote them. A
+// line is "new" when it is later than the last time the person opened the
+// bill (inbox_seen).
 import { prisma } from '../infra/prisma.js';
 import { notFound } from '../infra/api-errors.js';
 import { getApprovalsInbox, getBillsWorkbench } from '../payments/bills.js';
@@ -23,13 +26,24 @@ import { getOrgAccess } from '../approvals/permissions.js';
 
 export type InboxLineKind = 'approval' | 'question' | 'reply' | 'review' | 'sign_off' | 'sent_back' | 'unreadable' | 'sync_failed';
 
+export type InboxPerson = { name: string; avatarUrl: string | null };
+
 export type InboxLine = {
   kind: InboxLineKind;
+  /** The whole line as one sentence, for whatever reads it as text. */
   text: string;
+  /** What the line says before any quote: "Zara Okafor asked". */
+  lead: string;
+  /** Someone's own words, quoted after the lead: a question, an answer, a reason. */
+  quote: string | null;
+  /** Who it comes from. None for what Decimal raises itself. */
+  who: InboxPerson | null;
   at: string;
+  /** Later than the last time this person opened the bill. */
+  isNew: boolean;
   /** Who asked, for a question; who answered, for a reply. */
   from?: string | null;
-  /** For a reply to your question: the question, to tick the reply off. */
+  /** For a reply to your question: the question it answers. */
   questionId?: string;
 };
 
@@ -38,6 +52,8 @@ export type InboxItem = {
   billId: string | null;
   jobId: string | null;
   vendorName: string;
+  /** What the bill is for: its first line, or its memo. */
+  description: string | null;
   invoiceNumber: string | null;
   amountUsd: number | null;
   /** Where the bill stands, in the bills list's words. */
@@ -52,10 +68,29 @@ export type InboxItem = {
 
 const URGENCY: Record<InboxLineKind, number> = { question: 0, reply: 0, approval: 1, sync_failed: 3, sent_back: 3, review: 4, unreadable: 5, sign_off: 6 };
 
+/** A line's own words and the quote apart, and the whole sentence they make. */
+function said(lead: string, quote: string | null): { lead: string; quote: string | null; text: string } {
+  const words = quote?.trim() || null;
+  return { lead, quote: words, text: words ? `${lead}: “${words}”` : lead };
+}
+
+/** The first sentence of a message, without its full stop: what fits on a line. */
+function firstSentence(text: string): string {
+  return text.trim().split(/(?<=[.!?])\s+(?=[A-Z"“])/)[0]!.replace(/[.!]\s*$/, '');
+}
+
+/** A file no bill came out of, as one line: whose fault it was, in the Inbox's words. */
+export function failedFileLine(error: string | null | undefined): string {
+  const words = error?.trim() ?? '';
+  if (!words || /fault on our side/.test(words)) return 'Something went wrong while reading it';
+  if (/^(No bill could be made from this document|Invoice upload did not create any payment orders)/.test(words)) return 'No bill came out of it';
+  return firstSentence(words);
+}
+
 /**
- * Mark replies to this person's questions as dealt with once they act on the
- * bill after the reply (a comment or anything they do to it), or the bill is
- * closed. Done does the same by hand.
+ * Mark replies to this person's questions as dealt with once they open the
+ * bill after the reply, act on it (a comment or anything they do to it), or
+ * the bill is closed. Done does the same by hand.
  */
 async function settleReplies(organizationId: string, userId: string): Promise<void> {
   const open = await prisma.billQuestion.findMany({
@@ -64,14 +99,16 @@ async function settleReplies(organizationId: string, userId: string): Promise<vo
   });
   if (open.length === 0) return;
   const billIds = [...new Set(open.map((q) => q.paymentOrderId))];
-  const [bills, comments, events] = await Promise.all([
+  const [bills, comments, events, opened] = await Promise.all([
     prisma.paymentOrder.findMany({ where: { paymentOrderId: { in: billIds } }, select: { paymentOrderId: true, state: true } }),
     prisma.billComment.findMany({ where: { paymentOrderId: { in: billIds }, authorUserId: userId }, select: { paymentOrderId: true, createdAt: true } }),
     prisma.paymentOrderEvent.findMany({ where: { paymentOrderId: { in: billIds }, actorId: userId }, select: { paymentOrderId: true, createdAt: true } }),
+    // Opening the bill shows the answer in its thread: that is reading it.
+    prisma.inboxSeen.findMany({ where: { organizationId, userId, paymentOrderId: { in: billIds } }, select: { paymentOrderId: true, seenAt: true } }),
   ]);
   const closedBills = new Set(bills.filter((b) => b.state === 'cancelled' || b.state === 'executed' || b.state === 'settled').map((b) => b.paymentOrderId));
   const lastAct = new Map<string, Date>();
-  for (const x of [...comments, ...events]) {
+  for (const x of [...comments, ...events, ...opened.map((o) => ({ paymentOrderId: o.paymentOrderId, createdAt: o.seenAt }))]) {
     const was = lastAct.get(x.paymentOrderId);
     if (!was || x.createdAt > was) lastAct.set(x.paymentOrderId, x.createdAt);
   }
@@ -93,14 +130,29 @@ export async function getInbox(organizationId: string, viewerUserId: string, opt
   const isAdmin = access?.isPrimaryOrAdmin ?? false;
   const canReview = isAdmin || (access?.capabilities.includes('bills.edit') ?? false);
 
-  const [board, approvals, seen] = await Promise.all([
+  const [board, approvals, seen, members] = await Promise.all([
     getBillsWorkbench(organizationId, viewerUserId),
     getApprovalsInbox(organizationId, viewerUserId),
     prisma.inboxSeen.findMany({ where: { organizationId, userId: viewerUserId }, select: { paymentOrderId: true, seenAt: true } }),
+    prisma.organizationMembership.findMany({
+      where: { organizationId },
+      select: { user: { select: { userId: true, displayName: true, email: true, avatarUrl: true } } },
+    }),
   ]);
   const rows = new Map(board.bills.map((b) => [b.paymentOrderId, b]));
   const seenAt = new Map(seen.map((s) => [s.paymentOrderId, s.seenAt]));
   const items = new Map<string, InboxItem>();
+
+  // A face for whoever a line comes from: by their account where we know it,
+  // else by the name the bill recorded (a send-back keeps only the name).
+  const people = members.map((m) => ({ userId: m.user.userId, name: m.user.displayName?.trim() || m.user.email, avatarUrl: m.user.avatarUrl }));
+  const byUser = new Map(people.map((p) => [p.userId, p]));
+  const byName = new Map(people.map((p) => [p.name, p]));
+  const personOf = (userId: string | null | undefined, name: string | null | undefined): InboxPerson | null => {
+    const known = (userId ? byUser.get(userId) : undefined) ?? (name ? byName.get(name) : undefined);
+    if (known) return { name: known.name, avatarUrl: known.avatarUrl };
+    return name ? { name, avatarUrl: null } : null;
+  };
 
   const itemFor = (billId: string, fallback?: { vendor: string; invoice: string | null; amountUsd: number | null }): InboxItem | null => {
     const existing = items.get(billId);
@@ -114,11 +166,14 @@ export async function getInbox(organizationId: string, viewerUserId: string, opt
       // The bill's own row when there is one, even where it is empty: a
       // statement has no invoice number, and falling back to a fallback that
       // was never given crashed the inbox (and every bill note) for it.
-      vendorName: row ? row.vendorName : fallback!.vendor,
+      // A bill nothing could be read from is its file until someone types it in.
+      vendorName: row ? (row.unreadable ? row.filename ?? row.vendorName : row.vendorName) : fallback!.vendor,
+      description: row?.unreadable ? null : row?.description ?? null,
       invoiceNumber: row ? row.invoiceNumber : fallback!.invoice,
-      amountUsd: row ? row.amountUsd : fallback!.amountUsd,
+      // Nor has it an amount or a due date: the amount it carries holds a place.
+      amountUsd: row ? (row.unreadable ? null : row.amountUsd) : fallback!.amountUsd,
       status: row?.subStatus.text ?? null,
-      dueAt: row?.dueAt ? row.dueAt.toISOString() : null,
+      dueAt: row?.dueAt && !row.unreadable ? row.dueAt.toISOString() : null,
       href: row?.state === 'draft' ? 'draft' : 'bill',
       lines: [],
       latestAt: new Date(0).toISOString(),
@@ -127,39 +182,56 @@ export async function getInbox(organizationId: string, viewerUserId: string, opt
     items.set(billId, item);
     return item;
   };
-  const add = (item: InboxItem | null, line: InboxLine) => {
+  const add = (item: InboxItem | null, line: Omit<InboxLine, 'isNew'>) => {
     if (!item) return;
-    item.lines.push(line);
+    item.lines.push({ ...line, isNew: false });
   };
 
-  // What the approval engine is waiting on this person for.
-  for (const w of approvals.waitingOnYou as Array<{ paymentOrderId: string; vendor: string; invoice: string | null; amountUsd: number; overdueDays: number | null; blocked: boolean }>) {
+  // What the approval engine is waiting on this person for, and who handed
+  // it to them: the one who sent it, or the approver just before them.
+  type Waiting = { paymentOrderId: string; vendor: string; invoice: string | null; amountUsd: number; handedBy: { kind: 'sent' | 'approved'; name: string; userId: string | null } | null; arrivedAt: string | null };
+  for (const w of approvals.waitingOnYou as Waiting[]) {
     const row = rows.get(w.paymentOrderId);
+    const by = w.handedBy;
     add(itemFor(w.paymentOrderId, { vendor: w.vendor, invoice: w.invoice, amountUsd: w.amountUsd }), {
       kind: 'approval',
-      text: w.blocked ? 'Your approval, once the open question is answered' : w.overdueDays ? `Your approval, ${w.overdueDays} ${w.overdueDays === 1 ? 'day' : 'days'} overdue` : 'Your approval',
-      at: (row?.createdAt ?? new Date()).toISOString(),
+      ...said(!by ? 'Waiting on your approval' : by.kind === 'approved' ? `${by.name} approved it; your step is next` : `${by.name} sent it for your approval`, null),
+      who: by ? personOf(by.userId, by.name) : null,
+      at: w.arrivedAt ?? (row?.createdAt ?? new Date()).toISOString(),
     });
   }
   // Questions asked of this person, until anyone answers them. A question
   // holds nothing; it waits on them only in the sense that they were asked.
-  for (const q of (approvals.questionsForYou ?? []) as Array<{ paymentOrderId: string; question: string; askedByName: string | null; askedAt: string | Date; vendorName: string; invoiceNumber: string | null; amountUsd: number }>) {
+  type Asked = { paymentOrderId: string; question: string; askedByUserId?: string; askedByName: string | null; askedAt: string | Date; vendorName: string; invoiceNumber: string | null; amountUsd: number };
+  for (const q of (approvals.questionsForYou ?? []) as Asked[]) {
+    const asker = personOf(q.askedByUserId, q.askedByName);
     add(itemFor(q.paymentOrderId, { vendor: q.vendorName, invoice: q.invoiceNumber, amountUsd: q.amountUsd }), {
       kind: 'question',
-      text: `${q.askedByName ?? 'Someone'} asked: "${q.question}"`,
+      ...said(`${asker?.name ?? 'Someone'} asked`, q.question),
+      who: asker,
       at: new Date(q.askedAt).toISOString(),
       from: q.askedByName,
     });
   }
-  // The review pile, for whoever reviews bills.
+  // The team's pile, for whoever reviews bills: what to look at, what was
+  // sent back, what is ready to send, what couldn't be read.
   if (canReview) {
     for (const b of board.bills) {
-      if (b.state === 'draft' && b.companion) {
-        add(itemFor(b.paymentOrderId), b.companion.ready
-          ? { kind: 'sign_off', text: 'Checked and ready: confirm to send it for approval', at: b.createdAt.toISOString() }
-          : { kind: 'review', text: b.companion.reason ?? 'Needs a check', at: b.createdAt.toISOString() });
+      const at = b.createdAt.toISOString();
+      if (b.state === 'draft') {
+        if (b.unreadable) {
+          add(itemFor(b.paymentOrderId), { kind: 'unreadable', ...said('Nothing could be read off the document', null), who: null, at });
+        } else if (b.sentBack) {
+          const by = personOf(null, b.sentBackBy?.name);
+          add(itemFor(b.paymentOrderId), { kind: 'sent_back', ...said(by ? `${by.name} sent it back` : 'Sent back to review', b.sentBackBy?.reason ?? null), who: by, at });
+        } else if (b.companion?.ready) {
+          add(itemFor(b.paymentOrderId), { kind: 'sign_off', ...said('Checked and ready to send for approval', null), who: null, at });
+        } else {
+          add(itemFor(b.paymentOrderId), { kind: 'review', ...said(firstSentence(b.companion?.reason ?? 'Needs a check'), null), who: null, at });
+        }
       } else if (b.bucket === 'needs_attention' && b.subStatus.kind === 'loud') {
-        add(itemFor(b.paymentOrderId), { kind: 'sent_back', text: b.subStatus.text, at: b.createdAt.toISOString() });
+        // Past review and stuck: a flow with no one to act, a danger flag.
+        add(itemFor(b.paymentOrderId), { kind: 'review', ...said(firstSentence(b.subStatus.text), null), who: null, at });
       }
     }
   }
@@ -172,7 +244,8 @@ export async function getInbox(organizationId: string, viewerUserId: string, opt
       select: { paymentOrderId: true, error: true, updatedAt: true },
     });
     for (const f of failed) {
-      add(itemFor(f.paymentOrderId), { kind: 'sync_failed', text: `Couldn't post to QuickBooks: ${f.error ?? 'unknown error'}`, at: f.updatedAt.toISOString() });
+      const why = f.error?.trim() ? firstSentence(f.error).replace(/"([^"]*)"/g, '“$1”') : null;
+      add(itemFor(f.paymentOrderId), { kind: 'sync_failed', ...said(why ? `QuickBooks refused it: ${why}` : 'QuickBooks refused it', null), who: null, at: f.updatedAt.toISOString() });
     }
   }
 
@@ -183,27 +256,25 @@ export async function getInbox(organizationId: string, viewerUserId: string, opt
     orderBy: { answeredAt: 'asc' },
   });
   if (replies.length > 0) {
-    const who = new Map((await prisma.user.findMany({
-      where: { userId: { in: [...new Set(replies.map((r) => r.answeredByUserId ?? r.askedOfUserId))] } },
-      select: { userId: true, displayName: true, email: true },
-    })).map((u) => [u.userId, u.displayName?.trim() || u.email]));
     for (const r of replies) {
       if (!rows.get(r.paymentOrderId)) continue; // a bill this person can no longer see
-      const by = who.get(r.answeredByUserId ?? r.askedOfUserId) ?? 'Someone';
+      const person = personOf(r.answeredByUserId ?? r.askedOfUserId, null);
+      const by = person?.name ?? 'Someone';
       const answer = (r.answer ?? '').trim();
       // A question settled by something someone did already says who did it.
-      const text = r.outcome === 'handed_back' ? `${by} couldn't answer: "${answer}"`
-        : answer.startsWith(by) ? answer
-        : `${by} answered: "${answer}"`;
-      add(itemFor(r.paymentOrderId), { kind: 'reply', text, at: r.answeredAt!.toISOString(), from: by, questionId: r.billQuestionId });
+      const words = r.outcome === 'handed_back' ? said(`${by} couldn’t answer`, answer)
+        : answer.startsWith(by) ? said(answer, null)
+        : said(`${by} answered`, answer);
+      add(itemFor(r.paymentOrderId), { kind: 'reply', ...words, who: person, at: r.answeredAt!.toISOString(), from: by, questionId: r.billQuestionId });
     }
   }
   // Documents that could not be read have no bill, and still need someone.
   if (canReview) {
     for (const d of board.pending.filter((p) => p.status === 'failed')) {
+      // A file has no bill to open, so nothing marks it seen: it is never new.
       items.set(`doc:${d.invoiceDocumentId}`, {
-        key: `doc:${d.invoiceDocumentId}`, billId: null, jobId: d.invoiceDocumentId, vendorName: d.filename, invoiceNumber: null, amountUsd: null, status: 'Could not be read', dueAt: null, href: null,
-        lines: [{ kind: 'unreadable', text: d.error ?? 'Could not make a bill from this document', at: d.createdAt.toISOString() }],
+        key: `doc:${d.invoiceDocumentId}`, billId: null, jobId: d.invoiceDocumentId, vendorName: d.filename, description: null, invoiceNumber: null, amountUsd: null, status: 'Could not be read', dueAt: null, href: null,
+        lines: [{ kind: 'unreadable', ...said(failedFileLine(d.error), null), who: null, at: d.createdAt.toISOString(), isNew: false }],
         latestAt: d.createdAt.toISOString(), isNew: false,
       });
     }
@@ -213,14 +284,19 @@ export async function getInbox(organizationId: string, viewerUserId: string, opt
     item.lines.sort((x, y) => URGENCY[x.kind] - URGENCY[y.kind] || x.at.localeCompare(y.at));
     item.latestAt = item.lines.reduce((m, l) => (l.at > m ? l.at : m), item.latestAt);
     const seen = item.billId ? seenAt.get(item.billId) : undefined;
-    item.isNew = !seen || item.latestAt > seen.toISOString();
+    if (item.billId) {
+      for (const line of item.lines) line.isNew = !seen || line.at > seen.toISOString();
+    }
+    item.isNew = item.lines.some((l) => l.isNew);
     return item;
   });
   // New first; then what blocks other people (questions, approvals); then the longest wait.
   list.sort((a, b) => Number(b.isNew) - Number(a.isNew)
     || URGENCY[a.lines[0]!.kind] - URGENCY[b.lines[0]!.kind]
     || a.lines[0]!.at.localeCompare(b.lines[0]!.at));
-  return { items: list, count: list.length, newCount: list.filter((i) => i.isNew).length };
+  // Counted by line, as the Inbox shows them: one bill can want two things.
+  const lines = list.flatMap((i) => i.lines);
+  return { items: list, count: lines.length, newCount: lines.filter((l) => l.isNew).length };
 }
 
 /** Mark this person's item for a bill as seen now. */

@@ -6,11 +6,15 @@ import { test } from 'node:test';
 import { prisma } from '../src/infra/prisma.js';
 import { drainAsyncIntake } from '../src/payments/invoice-intake.js';
 import { setAskClassifierForTests, classifyAskByRule } from '../src/companion/ask-classifier.js';
+import { setAnswerJudgeForTests } from '../src/payments/answer-judge.js';
+import { failedFileLine } from '../src/companion/inbox.js';
+import { READ_FAILED_ON_OUR_SIDE } from '../src/payments/documents.js';
 import {
   raw, post, get, makeWorld, fingerprint, assertUnchanged, hostile, ask, EMPTY,
 } from './helpers/companion-harness.js';
 
-type Item = { key: string; billId: string | null; lines: Array<{ kind: string; text: string; from?: string | null; questionId?: string }>; isNew: boolean };
+type Line = { kind: string; text: string; lead: string; quote: string | null; who: { name: string; avatarUrl: string | null } | null; isNew: boolean; from?: string | null; questionId?: string };
+type Item = { key: string; billId: string | null; lines: Line[]; isNew: boolean };
 const inboxOf = async (orgId: string, token: string) => (await get(`/organizations/${orgId}/inbox`, token)) as { items: Item[]; count: number; newCount: number };
 const itemFor = (inbox: { items: Item[] }, billId: string) => inbox.items.find((i) => i.billId === billId);
 
@@ -21,7 +25,7 @@ test('inbox: each person sees their own work, one item per bill', async () => {
   // The clerk was asked about Lonely Ltd AND reviews it: one item, two lines.
   const lonely = itemFor(clerk, w.bills.lonely)!;
   assert.deepEqual(lonely.lines.map((l) => l.kind), ['question', 'review'], 'the question first: somebody is waiting on the answer');
-  assert.match(lonely.lines[0]!.text, /asked: "Which category is this\?"/);
+  assert.match(lonely.lines[0]!.text, /asked: “Which category is this\?”/);
   assert.equal(clerk.items.filter((i) => i.billId === w.bills.lonely).length, 1, 'never the same bill twice');
   assert.equal(itemFor(clerk, w.bills.ready)!.lines[0]!.kind, 'sign_off');
   assert.equal(itemFor(clerk, w.bills.submitted), undefined, 'not the clerk\'s approval');
@@ -53,6 +57,67 @@ test('inbox: a question is a line on the existing item, and makes it new until s
   assert.equal(box.newCount, 1);
 });
 
+
+test('inbox: each line says who it comes from, with their own words apart, and is counted as a line', async () => {
+  const w = await makeWorld();
+  const owner = w.owner.name.trim();
+  const adam = itemFor(await inboxOf(w.orgId, w.apprA.token), w.bills.submitted)!;
+  const approval = adam.lines.find((l) => l.kind === 'approval')!;
+  assert.equal(approval.lead, `${owner} sent it for your approval`, 'the first step: whoever sent it');
+  assert.equal(approval.who?.name, owner);
+  assert.equal(approval.quote, null);
+
+  const clerk = await inboxOf(w.orgId, w.clerk.token);
+  const lonely = itemFor(clerk, w.bills.lonely)!;
+  const question = lonely.lines.find((l) => l.kind === 'question')!;
+  assert.equal(question.lead, `${owner} asked`);
+  assert.equal(question.quote, 'Which category is this?');
+  assert.equal(question.text, `${owner} asked: “Which category is this?”`);
+  assert.equal(question.who?.name, owner);
+  assert.equal(lonely.lines.find((l) => l.kind === 'review')!.who, null, 'what Decimal raises comes from nobody');
+  assert.equal(itemFor(clerk, w.bills.ready)!.lines[0]!.lead, 'Checked and ready to send for approval');
+  assert.equal(clerk.count, clerk.items.reduce((n, i) => n + i.lines.length, 0), 'one bill can want two things, and both count');
+});
+
+test('inbox: a bill sent back says who sent it back and why, to whoever reviews bills', async () => {
+  const w = await makeWorld();
+  const detail = await get(`/organizations/${w.orgId}/bills/${w.bills.submitted}/detail`, w.apprA.token);
+  await post(`/organizations/${w.orgId}/approvals/tasks/${detail.viewer.openTaskId}/command`, {
+    command: { kind: 'reject', reason: 'The PO number is for the March order.' }, idempotencyKey: crypto.randomUUID(),
+  }, w.apprA.token);
+  const back = itemFor(await inboxOf(w.orgId, w.clerk.token), w.bills.submitted)!.lines.find((l) => l.kind === 'sent_back')!;
+  assert.equal(back.lead, 'Adam Approver sent it back');
+  assert.equal(back.quote, 'The PO number is for the March order.');
+  assert.equal(back.who?.name, 'Adam Approver');
+  assert.equal(itemFor(await inboxOf(w.orgId, w.apprA.token), w.bills.submitted), undefined, 'it has left the approver\'s');
+});
+
+test('inbox: a reply waits for its asker until they open the bill after it; there is nothing to tick', async () => {
+  const w = await makeWorld();
+  setAnswerJudgeForTests(async (input) => input.questions.map((q) => ({ billQuestionId: q.billQuestionId, verdict: 'answers' as const })));
+  try {
+    await post(`/organizations/${w.orgId}/bills/${w.bills.lonely}/messages`, { body: 'Office supplies, like the last one.' }, w.clerk.token);
+  } finally {
+    setAnswerJudgeForTests(null);
+  }
+  const reply = itemFor(await inboxOf(w.orgId, w.owner.token), w.bills.lonely)!.lines.find((l) => l.kind === 'reply')!;
+  assert.equal(reply.lead, 'Clara Clerk answered');
+  assert.equal(reply.quote, 'Office supplies, like the last one.');
+  assert.equal(reply.isNew, true);
+  assert.ok(itemFor(await inboxOf(w.orgId, w.owner.token), w.bills.lonely)!.lines.some((l) => l.kind === 'reply'), 'reading the Inbox is not reading the answer');
+
+  await new Promise((r) => setTimeout(r, 5));
+  await post(`/organizations/${w.orgId}/inbox/seen`, { billId: w.bills.lonely }, w.owner.token);
+  const after = itemFor(await inboxOf(w.orgId, w.owner.token), w.bills.lonely);
+  assert.equal(after?.lines.some((l) => l.kind === 'reply') ?? false, false, 'opening the bill shows the answer in its thread: that is reading it');
+});
+
+test('inbox: a file no bill came out of says whose fault it was, never the raw error', () => {
+  assert.equal(failedFileLine(READ_FAILED_ON_OUR_SIDE), 'Something went wrong while reading it', 'ours: the file is fine');
+  assert.equal(failedFileLine(null), 'Something went wrong while reading it');
+  assert.equal(failedFileLine('No bill could be made from this document. Acme: the amount is missing'), 'No bill came out of it');
+  assert.equal(failedFileLine('This file is password protected. Remove the password and upload it again.'), 'This file is password protected', 'anything else written for a reader: its first sentence');
+});
 
 test('inbox: there are no nudges, and nobody reads another team\'s inbox', async () => {
   const w = await makeWorld();
@@ -104,7 +169,7 @@ test('inbox: a companion ask becomes a question or "already has it" — and only
   assert.equal(cards[0]!.call.path, '', 'nothing to send');
   assert.match(cards[0]!.title, /Adam Approver already has this/);
   assert.equal(decisions[0]!.existing.length, 1);
-  assert.match(decisions[0]!.existing[0]!, /^Your approval/, 'it looked at what Adam\'s item already asks');
+  assert.match(decisions[0]!.existing[0]!, /sent it for your approval$/, 'it looked at what Adam\'s item already asks');
   const info = await post(`/organizations/${w.orgId}/companion/chats/${chatId}/actions/${cards[0]!.actionId}/outcome`, { ok: true }, w.owner.token);
   assert.equal(info.status, 'info', 'an info card cannot be "done"');
 

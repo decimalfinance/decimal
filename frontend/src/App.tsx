@@ -183,7 +183,7 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
               <Route path="/profile" element={<Legacy><ProfilePage session={session} /></Legacy>} />
               <Route path="/organizations/:organizationId" element={<Legacy><HomePage /></Legacy>} />
               <Route path="/organizations/:organizationId/chat/:chatId" element={<Legacy><ChatPage /></Legacy>} />
-              <Route path="/organizations/:organizationId/inbox" element={<Legacy><InboxPage /></Legacy>} />
+              <Route path="/organizations/:organizationId/inbox" element={<InboxPage />} />
               <Route path="/organizations/:organizationId/knowledge" element={<Legacy><KnowledgePage /></Legacy>} />
               <Route path="/organizations/:organizationId/wallets" element={<Legacy><WalletsPage session={session} /></Legacy>} />
               <Route path="/organizations/:organizationId/wallets/:treasuryWalletId" element={<Legacy><TreasuryWalletDetailPage session={session} /></Legacy>} />

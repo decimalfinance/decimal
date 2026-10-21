@@ -1331,9 +1331,13 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
       })(),
       // Somebody is waiting on this reader for an answer about THIS bill.
       questionForYou: questionByOrder.get(order.paymentOrderId) ?? null,
-      // An approver sent it back. Said here because the line above is
-      // rewritten for every draft, and "sent back" would be lost in it.
-      sentBack: order.state === 'draft' && invoice?.macro_state === 'rejected',
+      // Sent back to review, by an approver or by an admin after approval.
+      // Said here because the line above is rewritten for every draft, and
+      // "sent back" would be lost in it. Who and why go to the Inbox.
+      sentBack: order.state === 'draft' && (invoice?.macro_state === 'rejected' || isRecord(metadataRecord.sentBack)),
+      sentBackBy: order.state === 'draft' && isRecord(metadataRecord.sentBack)
+        ? { name: str(metadataRecord.sentBack.byName), reason: str(metadataRecord.sentBack.reason) }
+        : null,
       waitingOn,
       posting: postingByOrder.get(order.paymentOrderId) ?? null,
       // Why a closed bill was closed: duplicate, not ours, credit note...
@@ -4881,6 +4885,7 @@ async function questionsAskedOf(organizationId: string, viewerUserId: string) {
         billQuestionId: q.billQuestionId,
         paymentOrderId: q.paymentOrderId,
         question: q.question,
+        askedByUserId: q.askedByUserId,
         askedByName: askerName.get(q.askedByUserId) ?? 'Someone',
         askedAt: q.createdAt.toISOString(),
         vendorName: order.counterparty?.displayName ?? order.counterpartyWallet.label,
@@ -4923,9 +4928,10 @@ export async function getApprovalsInbox(organizationId: string, viewerUserId: st
       AND ((t.state IN ('open', 'info_requested'))
            OR (t.state = 'approved' AND a.macro_state IN ('pending_approval', 'returned_for_info', 'on_hold')))`;
 
-  const people = await prisma.$queryRaw<{ id: string; name: string }[]>`
-    SELECT id, name FROM approval.people WHERE organization_id = ${organizationId}::uuid`;
+  const people = await prisma.$queryRaw<{ id: string; name: string; user_id: string | null }[]>`
+    SELECT id, name, user_id FROM approval.people WHERE organization_id = ${organizationId}::uuid`;
   const nameOf = new Map(people.map((p) => [p.id, p.name]));
+  const userOf = new Map(people.map((p) => [p.id, p.user_id]));
 
   const openTaskByApprovable = new Map<string, InboxTaskRow>();
   const approvedTaskByApprovable = new Map<string, InboxTaskRow>();
@@ -5043,6 +5049,17 @@ export async function getApprovalsInbox(organizationId: string, viewerUserId: st
       if (alongsideMe.length) hintParts.push(`${alongsideMe.join(', ')} can approve instead`);
       if (afterMe.length) hintParts.push(`then ${afterMe.join(', ')}`);
 
+      // Who handed it to me: whoever approved the step before mine, or, on
+      // the first step, whoever sent it. And when it reached me: the last
+      // thing that moved it.
+      const before = myIndex > 0 ? chain[myIndex - 1]!.people.find((p) => p.state === 'approved') ?? null : null;
+      const handerId = before?.personId ?? task.requester_id;
+      const handedBy = handerId && nameOf.get(handerId)
+        ? { kind: before ? 'approved' as const : 'sent' as const, name: nameOf.get(handerId)!, userId: userOf.get(handerId) ?? null }
+        : null;
+      const moved = await prisma.$queryRaw<{ at: Date | null }[]>`
+        SELECT max(at) AS at FROM approval.approval_events WHERE approvable_id = ${task.approvable_id}::uuid`;
+
       waitingOnYou.push({
         taskId: task.task_id,
         paymentOrderId: order.paymentOrderId,
@@ -5056,6 +5073,8 @@ export async function getApprovalsInbox(organizationId: string, viewerUserId: st
         hint: hintParts.join(' · ') || null,
         signal,
         blocked: task.state === 'info_requested',
+        handedBy,
+        arrivedAt: moved[0]?.at ? new Date(moved[0].at).toISOString() : null,
       });
     } else {
       // In-flight: I approved, it's still moving. Where is it now?

@@ -4,9 +4,9 @@
 // read, the bill lands part by part (5r) before it settles into review. Past
 // review it is read rather than edited, and its document opens over the page.
 import { useEffect, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
-import { accessApi, api, billsApi, companionApi, type BillDetail } from '../../api';
+import { accessApi, api, billsApi, companionApi, inboxApi, type BillDetail } from '../../api';
 import { Icon } from '../../kit/icons';
 import { DocPane } from './DocPane';
 import { READ_DONE, READ_TICK_MS, headerOf, fieldsFrom, landsAt, type Face } from './model';
@@ -47,6 +47,7 @@ export function BillPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const landing = Boolean((location.state as { justRead?: boolean } | null)?.justRead);
+  const queryClient = useQueryClient();
   const session = useQuery({ queryKey: ['session'], queryFn: () => api.getSession(), staleTime: Infinity });
   const access = useQuery({
     queryKey: ['my-access', organizationId],
@@ -66,6 +67,16 @@ export function BillPage() {
     enabled: Boolean(organizationId && paymentOrderId),
     staleTime: 30_000,
   });
+
+  // Opening the bill is looking at what the Inbox has on it: nothing on it is
+  // new any more, and a reply to your question here has been read.
+  const opened = detail.isSuccess;
+  useEffect(() => {
+    if (!opened || !organizationId || !paymentOrderId) return;
+    inboxApi.seen(organizationId, paymentOrderId)
+      .then(() => queryClient.invalidateQueries({ queryKey: ['inbox', organizationId] }))
+      .catch(() => null);
+  }, [opened, organizationId, paymentOrderId, queryClient]);
 
   const data = detail.data;
   const user = session.data?.user;

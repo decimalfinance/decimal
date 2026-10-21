@@ -1114,8 +1114,10 @@ export interface WorkbenchBill {
   /** What is flagged on it, worst first. */
   flags: Array<{ kind: string; severity: 'danger' | 'warning' | 'info'; blocking: boolean; short: string }>;
   blocking: boolean;
-  /** An approver sent it back to review. */
+  /** An approver sent it back to review, or an admin did after approval. */
   sentBack: boolean;
+  /** Who sent it back and why, as they said it. */
+  sentBackBy: { name: string | null; reason: string | null } | null;
   /** Everyone who could act on it now: "Tom or Ines" when either may. */
   waitingOn: Array<{ userId: string | null; name: string }>;
   /** Where QuickBooks has got to with it, once approved. */
@@ -2126,18 +2128,38 @@ export interface CompanionActionCard {
 
 export type InboxLineKind = 'approval' | 'question' | 'reply' | 'review' | 'sign_off' | 'sent_back' | 'unreadable' | 'sync_failed';
 
+/** One thing wanted of a person on a bill: who it comes from, what they did, their words. */
+export interface InboxLine {
+  kind: InboxLineKind;
+  /** The whole line as one sentence. */
+  text: string;
+  /** Before any quote: "Zara Okafor asked". */
+  lead: string;
+  /** Their own words: a question, an answer, a reason. */
+  quote: string | null;
+  /** None for what Decimal raises itself. */
+  who: { name: string; avatarUrl: string | null } | null;
+  at: string;
+  /** Since this person last opened the bill. */
+  isNew: boolean;
+  from?: string | null;
+  questionId?: string;
+}
+
 /** One bill in a person's inbox, with everything wanted of them on it. */
 export interface InboxItem {
   key: string;
   billId: string | null;
   jobId: string | null;
   vendorName: string;
+  /** What the bill is for: its first line, or its memo. */
+  description: string | null;
   invoiceNumber: string | null;
   amountUsd: number | null;
   status: string | null;
   dueAt: string | null;
   href: 'draft' | 'bill' | null;
-  lines: Array<{ kind: InboxLineKind; text: string; at: string; from?: string | null; questionId?: string }>;
+  lines: InboxLine[];
   latestAt: string;
   isNew: boolean;
 }

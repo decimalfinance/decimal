@@ -15,6 +15,13 @@ export function calendarDay(value: string | Date) {
   return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 }
 
+/** A calendar day, without the year when it is this year's: "9 Oct", "30 Dec 2025". */
+export function shortDay(value: string | Date, now = new Date()) {
+  const d = new Date(value);
+  const day = `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
+  return d.getUTCFullYear() === now.getFullYear() ? day : `${day} ${d.getUTCFullYear()}`;
+}
+
 /** Whole days a calendar day is behind today; 0 or less when it isn't. */
 export function daysPast(value: string | Date, now = new Date()) {
   const d = new Date(value);

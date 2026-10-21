@@ -14,6 +14,7 @@ import {
   type WorkbenchBill,
 } from '../api';
 import { Avatar } from '../kit/Avatar';
+import { Cells } from '../kit/Cells';
 import { Dialog } from '../kit/Dialog';
 import { useDismiss } from '../kit/hooks';
 import { Icon } from '../kit/icons';
@@ -484,19 +485,6 @@ export function BillsPage() {
 }
 
 /** The six cells of a row with the five gaps between them, for the subgrid. */
-function Cells({ children }: { children: ReactNode[] }) {
-  return (
-    <>
-      {children.map((cell, i) => (
-        <Fragment key={i}>
-          {i > 0 ? <span aria-hidden /> : null}
-          {cell}
-        </Fragment>
-      ))}
-    </>
-  );
-}
-
 function BillRow({ row, organizationId }: { row: Row; organizationId: string }) {
   const { bill } = row;
   const to = bill.bucket === 'draft'

@@ -34,7 +34,7 @@ export function classifyAskByRule(input: AskInput): AskDecision {
     return { decision: 'covered', note: `${input.recipientName} has already been asked this.` };
   }
   const aboutApproving = /\b(approve|approval|sign off|signoff)\b/.test(msg) && !/\b(check|verify|confirm|look at|review)\b/.test(msg);
-  if (aboutApproving && already.some((e) => /\byour approval\b/.test(e))) {
+  if (aboutApproving && already.some((e) => /\byour approval\b|\byour step is next\b/.test(e))) {
     return { decision: 'covered', note: `${input.recipientName}'s approval is already waiting on this bill.` };
   }
   return { decision: 'new', note: `Goes to ${input.recipientName} as a question on the bill.` };

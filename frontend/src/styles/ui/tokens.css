@@ -26,6 +26,8 @@
   /* Greys */
   --grey: #F5F4F2;           /* tiles, rows, the sidebar */
   --grey-hover: #ECEAE6;
+  --grey-picked: #EFEDE9;    /* the picked row in a list */
+  --scroll-thumb: #E0DDD7;
   --grey-faint: #FAFAF8;
   --white: #FFFFFF;
 
@@ -58,6 +60,9 @@
   --chip-waiting: #DCE5EE;
   --yellow: #FACC15;         /* the chain's waiting badge */
   --chip-finished: #E9E9E4;
+  --chip-question: #D3E9E0;  /* the Inbox's kinds: a question for you */
+  --chip-reply: #DCD8F8;     /* an answer to yours */
+  --chip-sentback: #EDDCE6;  /* sent back to review */
   /* The route of a bill past review: someone not yet asked, someone not needed */
   --bead-off: #E4E1DC;
   --bead-spare: #F1F0ED;
