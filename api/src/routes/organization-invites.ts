@@ -108,11 +108,13 @@ organizationInvitesRouter.post('/organizations/:organizationId/invites', asyncRo
   const expiresAt = new Date(Date.now() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000);
 
   const invite = await prisma.$transaction(async (tx) => {
+    // A new invitation replaces any earlier one to the same address that
+    // hasn't been used: still open, or expired after someone tried it late.
     await tx.organizationInvite.updateMany({
       where: {
         organizationId,
         invitedEmail,
-        status: 'pending',
+        status: { in: ['pending', 'expired'] },
       },
       data: {
         status: 'revoked',
@@ -151,8 +153,10 @@ organizationInvitesRouter.post('/organizations/:organizationId/invites/:organiza
   if (!existing) {
     throw notFound('Invite not found');
   }
-  if (existing.status !== 'pending') {
-    throw badRequest('Only pending invites can be revoked.');
+  // An expired invite is revoked to take it off the list; one someone tried to
+  // accept late is stored as expired.
+  if (existing.status !== 'pending' && existing.status !== 'expired') {
+    throw badRequest('Only pending or expired invites can be revoked.');
   }
 
   const invite = await prisma.organizationInvite.update({

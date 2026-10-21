@@ -127,6 +127,14 @@ export const Icon = {
       <path d="M6 6l12 12M18 6 6 18" />
     </Stroked>
   ),
+  /** A person with a plus: inviting someone. */
+  userPlus: (p: IconProps) => (
+    <Stroked {...p}>
+      <circle cx="9.5" cy="8" r="3.5" />
+      <path d="M3 20c.6-3.6 3.2-5.8 6.5-5.8 1.6 0 3 .5 4.1 1.4" />
+      <path d="M18.5 13v7M15 16.5h7" />
+    </Stroked>
+  ),
   file: (p: IconProps) => (
     <Stroked strokeWidth={1.9} {...p}>
       <path d="M7 3.5h6.5L18 8v11.5a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1z" />

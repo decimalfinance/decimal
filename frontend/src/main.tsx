@@ -29,6 +29,7 @@ import './styles/ui/bills.css';
 import './styles/ui/bill.css';
 import './styles/ui/inbox.css';
 import './styles/ui/home.css';
+import './styles/ui/team.css';
 
 const queryClient = new QueryClient({
   defaultOptions: {

@@ -1,0 +1,260 @@
+/*
+ * Team members (Team members.dc.html 1a). The header, role bar, search and
+ * table are Bills' (bills.css); this is what the page adds: the role menu,
+ * what waits on each person, the invitations and their pills, and the
+ * invitation and role-change dialogs.
+ */
+
+/* ── Header: someone who isn't an admin sees why they can't invite ─ */
+.ui .tm-noinvite {
+  flex: none;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font: 400 10.5px/1.4 var(--font);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.ui .split-main.tm-invite:disabled,
+.ui .split-main.tm-invite:disabled:hover {
+  border-color: var(--line);
+  background: var(--grey);
+  color: var(--ink-4);
+  cursor: not-allowed;
+}
+.ui .bl-search.tm-search { width: 200px; }
+.ui .tm-search > input { flex: 1; width: auto; min-width: 0; }
+
+/* ── The tables: columns as wide as what's in them, equal gaps ─ */
+.ui .tm-grid {
+  display: grid;
+  grid-template-columns:
+    max-content minmax(32px, 1fr) max-content minmax(32px, 1fr) max-content
+    minmax(32px, 1fr) max-content minmax(32px, 1fr) max-content;
+}
+.ui .tm-grid.is-roster {
+  grid-template-columns:
+    max-content minmax(32px, 1fr) max-content minmax(32px, 1fr) max-content
+    minmax(32px, 1fr) max-content;
+}
+/* Rows here open nothing: no pointer, no hover. */
+.ui .tm-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: center;
+  height: 30px;
+  border-top: 1px solid var(--line);
+}
+.ui .tm-name { gap: 8px; font-size: 11px; color: var(--ink); }
+.ui .tm-name-text { display: inline-flex; gap: 4px; }
+.ui .tm-you { color: var(--ink-3); }
+.ui .tm-email { font-size: 10.5px; color: var(--ink-2); }
+.ui .tm-wait { gap: 5px; font-size: 11px; color: var(--ink); }
+.ui .tm-count { display: inline-flex; gap: 4px; }
+.ui .tm-sep { color: var(--edge-hover); }
+.ui .tm-over { color: var(--red); }
+.ui .tm-note { color: var(--ink-2); }
+.ui .tm-nothing { color: var(--ink-3); }
+
+/* When a role or a search leaves nobody */
+.ui .tm-empty {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 44px;
+  padding: 0 4px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.ui .tm-show {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: 500 11px var(--font);
+  color: var(--maroon);
+  text-decoration: underline;
+  text-decoration-color: var(--edge-hover);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+/* ── A role, and the menu of the four ───────────────────── */
+.ui .tm-rolecell { position: relative; font-size: 11px; color: var(--ink); }
+.ui .tm-role {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  margin: 0 -6px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  font: 400 11px var(--font);
+  color: var(--ink);
+  cursor: pointer;
+}
+.ui .tm-role > svg { flex: none; color: var(--ink-4); }
+.ui .tm-role:hover,
+.ui .tm-role.is-open { background: var(--grey); }
+.ui .tm-menu {
+  position: absolute;
+  left: -10px;
+  top: calc(100% - 3px);
+  z-index: 20;
+  width: 284px;
+  white-space: normal;
+  line-height: 1.3;
+}
+.ui .tm-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 12px;
+  gap: 2px 10px;
+  width: 100%;
+  padding: 7px 10px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.ui .tm-item:hover { background: var(--grey); }
+.ui .tm-item:focus-visible { box-shadow: var(--focus-inset); }
+.ui .tm-item-name { font: 500 11px/1.3 var(--font); color: var(--ink); }
+.ui .tm-item-mark { display: flex; align-items: center; justify-content: center; color: var(--maroon); }
+.ui .tm-item-desc { grid-column: 1; font: 400 10px/1.4 var(--font); color: var(--ink-2); text-wrap: pretty; }
+.ui .tm-item.is-off { cursor: not-allowed; }
+.ui .tm-item.is-off:hover { background: transparent; }
+.ui .tm-item.is-off .tm-item-name,
+.ui .tm-item.is-off .tm-item-desc { color: var(--ink-4); }
+/* Left of the menu: the role column sits near the page's right edge. */
+.ui .tm-item .tip { right: calc(100% + 12px); top: 50%; transform: translateY(-50%); font-weight: 400; }
+.ui .tm-menu-foot {
+  display: block;
+  margin: 4px -4px -4px;
+  padding: 8px 14px 9px;
+  border-top: 1px solid var(--line);
+  font: 400 10px/1.4 var(--font);
+  color: var(--ink-3);
+}
+
+/* ── Invitations ─────────────────────────────────────────── */
+.ui .tm-inv-head { display: flex; align-items: baseline; gap: 8px; padding: 30px 34px 2px; }
+.ui .tm-inv-title { font: 600 11px var(--font); color: var(--ink); }
+.ui .tm-inv-n { font-size: 10px; color: var(--ink-3); }
+.ui .tm-inv-line { font-size: 10.5px; color: var(--ink-2); }
+/* Where their picture will be once they join */
+.ui .tm-ring {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border: 1px dashed var(--edge-hover);
+  border-radius: 50%;
+}
+.ui .tm-sent { gap: 4px; font-size: 10.5px; color: var(--ink-3); }
+.ui .tm-acts { gap: 6px; }
+.ui .tm-pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid;
+  border-radius: 999px;
+  font: 500 10.5px var(--font);
+  letter-spacing: -.005em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ui .tm-pill:focus-visible { box-shadow: var(--focus); }
+.ui .tm-pill:disabled { cursor: progress; }
+.ui .tm-pill.is-new { border-color: var(--pink-200); background: var(--pink-50); color: var(--maroon); }
+.ui .tm-pill.is-new:hover { border-color: var(--pink-300); background: var(--pink-100); }
+.ui .tm-pill.is-new:active { border-color: var(--pink-300); background: var(--pink-200); }
+.ui .tm-pill.is-cancel { border-color: var(--yellow-edge); background: var(--yellow-tint); color: var(--yellow-ink); }
+.ui .tm-pill.is-cancel:hover { border-color: var(--yellow-edge-hover); background: var(--yellow-tint-2); }
+.ui .tm-pill.is-cancel:active { border-color: var(--yellow-edge-hover); background: var(--yellow-active); }
+.ui .tm-pill.is-remove { border-color: var(--red-edge); background: var(--red-tint); color: var(--red); }
+.ui .tm-pill.is-remove:hover { border-color: var(--red-edge-hover); background: var(--red-tint-2); }
+.ui .tm-pill.is-remove:active { border-color: var(--red-edge-hover); background: var(--red-active); }
+.ui .tm-pill.is-off,
+.ui .tm-pill.is-off:hover,
+.ui .tm-pill.is-off:active { border-color: var(--line); background: var(--grey); color: var(--ink-4); cursor: not-allowed; }
+.ui .tm-pill .tip { bottom: calc(100% + 6px); right: 0; font-weight: 400; }
+
+/* ── Inviting: the four roles as radio rows ─────────────── */
+.ui .tm-radios { border: 1px solid var(--line); border-radius: 6px; }
+.ui .tm-radio-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  align-items: start;
+  gap: 2px 10px;
+  width: 100%;
+  padding: 9px 12px 10px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: var(--white);
+  text-align: left;
+  cursor: pointer;
+}
+.ui .tm-radio-row:first-child { border-top: 0; border-radius: 5px 5px 0 0; }
+.ui .tm-radio-row:last-child { border-radius: 0 0 5px 5px; }
+.ui .tm-radio-row:hover { background: var(--grey-faint); }
+.ui .tm-radio-row:focus-visible { box-shadow: var(--focus-inset); }
+.ui .tm-radio {
+  display: grid;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  margin-top: 1px;
+  border: 1px solid var(--edge-hover);
+  border-radius: 50%;
+  background: var(--white);
+}
+.ui .tm-radio-row[aria-checked='true'] .tm-radio { border-color: var(--maroon); }
+.ui .tm-radio-row[aria-checked='true'] .tm-radio::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--maroon);
+}
+.ui .tm-radio-name { font: 500 11px/1.3 var(--font); color: var(--ink); }
+.ui .tm-radio-desc { grid-column: 2; font: 400 10px/1.45 var(--font); color: var(--ink-2); text-wrap: pretty; }
+.ui .tm-radio-row.is-off { cursor: not-allowed; }
+.ui .tm-radio-row.is-off:hover { background: var(--white); }
+.ui .tm-radio-row.is-off .tm-radio { border-color: var(--line); background: var(--grey); }
+.ui .tm-radio-row.is-off .tm-radio-name,
+.ui .tm-radio-row.is-off .tm-radio-desc { color: var(--ink-4); }
+.ui .tm-radio-row .tip { bottom: calc(100% - 4px); left: 34px; font-weight: 400; }
+.ui .tm-foot { font: 400 10px/1.4 var(--font); color: var(--ink-3); }
+
+/* The link, once made: shown this once */
+.ui .tm-link { display: flex; gap: 8px; }
+.ui .tm-link > .input { flex: 1; min-width: 0; font-size: 11px; color: var(--ink-2); }
+
+/* ── Changing a role: who, and from what to what ────────── */
+.ui .tm-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: 400 11px/1.3 var(--font);
+  color: var(--ink);
+}
+.ui .tm-card-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.ui .tm-card-roles { margin-left: auto; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.ui .tm-card-old { color: var(--ink-3); }
+.ui .tm-card-arrow { color: var(--ink-4); }
+.ui .tm-card-new { font-weight: 600; }

@@ -1955,7 +1955,7 @@ export interface FlowAssistResult {
 // viewer). Assignment only — the set itself is not editable.
 export type RoleKey = 'bill_clerk' | 'approver' | 'payer' | 'viewer';
 export interface OrgRole { key: RoleKey; name: string; summary: string; holders: { personId: string; name: string; userId: string | null }[] }
-export interface MemberWithRoles { userId: string; personId: string | null; name: string; email: string; access: string; roles: RoleKey[] }
+export interface MemberWithRoles { userId: string; personId: string | null; name: string; email: string; avatarUrl: string | null; access: string; roles: RoleKey[] }
 export interface MembersAndRoles { members: MemberWithRoles[]; roles: OrgRole[] }
 
 export const rolesApi = {

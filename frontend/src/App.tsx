@@ -26,7 +26,7 @@ const PaymentDetailPageV2 = lazy(() => import('./pages/PaymentDetail').then((m) 
 const WalletsPage = lazy(() => import('./pages/Wallets').then((m) => ({ default: m.WalletsPage })));
 const CounterpartiesPage = lazy(() => import('./pages/Counterparties').then((m) => ({ default: m.CounterpartiesPage })));
 const LandingPage = lazy(() => import('./pages/landing-v4').then((m) => ({ default: m.LandingPage })));
-const MembersPage = lazy(() => import('./pages/Members').then((m) => ({ default: m.MembersPage })));
+const TeamPage = lazy(() => import('./pages/Team').then((m) => ({ default: m.TeamPage })));
 const ApprovalsPage = lazy(() => import('./pages/Approvals').then((m) => ({ default: m.ApprovalsPage })));
 const ProtectionsPage = lazy(() => import('./pages/Protections').then((m) => ({ default: m.ProtectionsPage })));
 const AccountingPage = lazy(() => import('./pages/Accounting').then((m) => ({ default: m.AccountingPage })));
@@ -198,7 +198,7 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
               <Route path="/organizations/:organizationId/spending-limits/:spendingLimitPolicyId" element={<Legacy><SpendingLimitDetailPage /></Legacy>} />
               <Route path="/organizations/:organizationId/proposals/:decimalProposalId" element={<Legacy><ProposalRedirectPage /></Legacy>} />
               <Route path="/organizations/:organizationId/proposals/:decimalProposalId/legacy" element={<Legacy><OrganizationProposalDetailPage session={session} /></Legacy>} />
-              <Route path="/organizations/:organizationId/members" element={<Legacy><MembersPage session={session} /></Legacy>} />
+              <Route path="/organizations/:organizationId/members" element={<TeamPage />} />
               <Route path="/organizations/:organizationId/accounting" element={<Legacy><AccountingPage session={session} /></Legacy>} />
               {/* The Coding inbox is gone: categories are chosen in review, and approved bills post to QuickBooks. */}
               <Route path="/organizations/:organizationId/accounting/coding" element={<OrgRedirect to="inbox" />} />

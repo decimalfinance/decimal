@@ -13,7 +13,9 @@
 
 /* ── Focus ring (unified, accent-aware) ────────────────── */
 
-:where(a, button, input, select, textarea):focus-visible {
+/* The old pages' ring. Redesigned pages (.ui) draw their own focus, and this
+   rule's !important border would cover their fields' error edge. */
+:where(a, button, input, select, textarea):where(:not(.ui *)):focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px var(--ax-surface-0), 0 0 0 4px var(--ax-accent-ring);
   border-color: var(--ax-accent) !important;
@@ -99,7 +101,8 @@ textarea {
 
 /* ── Form field (label + input/select/textarea) ────────── */
 
-.field {
+/* Old pages' fields; the redesign's .field is in styles/ui. */
+.field:where(:not(.ui *)) {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -108,9 +111,9 @@ textarea {
   color: var(--ax-text-secondary);
 }
 
-.field input:not([type='checkbox']):not([type='radio']),
-.field select,
-.field textarea,
+.field:where(:not(.ui *)) input:not([type='checkbox']):not([type='radio']),
+.field:where(:not(.ui *)) select,
+.field:where(:not(.ui *)) textarea,
 .login-form input,
 .sidebar-switcher-select {
   min-height: 40px;
@@ -182,7 +185,7 @@ input[type='checkbox']:checked::after {
   color: var(--ax-text);
 }
 
-.field select,
+.field:where(:not(.ui *)) select,
 .sidebar-switcher-select {
   appearance: none;
   -webkit-appearance: none;
@@ -193,19 +196,19 @@ input[type='checkbox']:checked::after {
   background-size: 16px;
 }
 
-.field input::placeholder,
-.field textarea::placeholder,
+.field:where(:not(.ui *)) input::placeholder,
+.field:where(:not(.ui *)) textarea::placeholder,
 .login-form input::placeholder {
   color: var(--ax-text-faint);
 }
 
-.field input:hover,
-.field select:hover,
-.field textarea:hover {
+.field:where(:not(.ui *)) input:hover,
+.field:where(:not(.ui *)) select:hover,
+.field:where(:not(.ui *)) textarea:hover {
   border-color: var(--ax-border-strong);
 }
 
-.field textarea {
+.field:where(:not(.ui *)) textarea {
   min-height: 160px;
   padding: 10px 12px;
   resize: vertical;

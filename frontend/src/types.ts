@@ -1,3 +1,5 @@
+import type { RoleKey } from './api';
+
 export type User = {
   userId: string;
   email: string;
@@ -66,6 +68,8 @@ export type OrganizationInvite = {
   organizationId: string;
   invitedEmail: string;
   role: OrganizationInviteRole;
+  /** What a member will do once they join; none for an admin. */
+  jobRole: RoleKey | null;
   status: OrganizationInviteStatus;
   expiresAt: string;
   acceptedAt: string | null;

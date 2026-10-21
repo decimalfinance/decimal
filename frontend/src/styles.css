@@ -742,7 +742,7 @@ a {
 .side-panel p,
 .hero-cell span,
 .metric span,
-.field {
+.field:where(:not(.ui *)) {
   color: var(--text-muted);
 }
 
@@ -1551,7 +1551,7 @@ a {
   align-items: end;
 }
 
-.field {
+.field:where(:not(.ui *)) {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1559,9 +1559,9 @@ a {
   font-weight: 600;
 }
 
-.field input,
-.field select,
-.field textarea,
+.field:where(:not(.ui *)) input,
+.field:where(:not(.ui *)) select,
+.field:where(:not(.ui *)) textarea,
 .login-form input {
   min-height: 42px;
   width: 100%;
@@ -1572,7 +1572,7 @@ a {
   color: var(--text);
 }
 
-.field textarea {
+.field:where(:not(.ui *)) textarea {
   min-height: 180px;
   padding: 14px 16px;
   resize: vertical;

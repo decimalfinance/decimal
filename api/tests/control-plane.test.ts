@@ -275,6 +275,52 @@ test('organization membership is invite-only and email-bound', async () => {
   assert.equal(invites.items[0].status, 'accepted');
 });
 
+test('an expired invitation can be removed, and a new one to the same address replaces it', async () => {
+  const owner = await post('/auth/register', {
+    email: 'expiry-owner@example.com',
+    password: 'DemoPass123!',
+    displayName: 'Expiry Owner',
+  });
+  await verifyRegisteredEmail(owner);
+  const organization = await post('/organizations', { organizationName: 'Expiry Org' }, owner.sessionToken);
+  const invitesPath = `/organizations/${organization.organizationId}/invites`;
+  const invite = (email: string) => post(invitesPath, { email, role: 'member', jobRole: 'approver' }, owner.sessionToken);
+  const statusOf = async (id: string) =>
+    (await get(invitesPath, owner.sessionToken)).items.find((i: { organizationInviteId: string }) => i.organizationInviteId === id)?.status;
+  const lapse = (id: string, status: 'pending' | 'expired') =>
+    prisma.organizationInvite.update({ where: { organizationInviteId: id }, data: { status, expiresAt: new Date(Date.now() - 86_400_000) } });
+
+  // Someone opened the link after it lapsed, so it is stored as expired.
+  const first = await invite('late@example.com');
+  await lapse(first.organizationInviteId, 'expired');
+  assert.equal(await statusOf(first.organizationInviteId), 'expired');
+
+  // A new invitation to the address takes its place.
+  const second = await invite('late@example.com');
+  assert.equal(await statusOf(first.organizationInviteId), 'revoked');
+  assert.equal(await statusOf(second.organizationInviteId), 'pending');
+
+  // Lapsed but never opened: listed as expired, and removed by revoking it.
+  await lapse(second.organizationInviteId, 'pending');
+  assert.equal(await statusOf(second.organizationInviteId), 'expired');
+  await post(`${invitesPath}/${second.organizationInviteId}/revoke`, {}, owner.sessionToken);
+  assert.equal(await statusOf(second.organizationInviteId), 'revoked');
+
+  // Stored as expired: removed the same way.
+  const third = await invite('late@example.com');
+  await lapse(third.organizationInviteId, 'expired');
+  await post(`${invitesPath}/${third.organizationInviteId}/revoke`, {}, owner.sessionToken);
+  assert.equal(await statusOf(third.organizationInviteId), 'revoked');
+
+  // Anything already settled stays as it is.
+  const again = await fetch(`${baseUrl}${invitesPath}/${third.organizationInviteId}/revoke`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...authHeaders(owner.sessionToken) },
+    body: '{}',
+  });
+  assert.equal(again.status, 400);
+});
+
 test('organization onboarding automatically provisions personal and agent wallets when enabled', async () => {
   const originalPrivyAppId = config.privyAppId;
   const originalPrivyAppSecret = config.privyAppSecret;

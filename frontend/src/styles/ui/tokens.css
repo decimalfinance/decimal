@@ -36,6 +36,7 @@
   --maroon-hover: #481627;
   --maroon-active: #350E1B;
   --pink-50: #FFF2F5;
+  --pink-100: #FDE6EC;
   --pink-200: #FCCCD7;
   --pink-300: #F0B0BF;
   --pink-400: #DC8DA2;
@@ -57,8 +58,17 @@
   --red-edge: #EFC9C2;
   --red-edge-hover: #E6ADA3;
   --red-error-edge: #C9776D;
+  --red-active: #F2CDC6;
   --green: #2B6339;
   --green-2: #3D7A4B;
+
+  /* Yellow: a step back that isn't a removal (cancelling an invitation) */
+  --yellow-tint: #FDF6E6;
+  --yellow-tint-2: #F8ECCD;
+  --yellow-active: #F4E6C6;
+  --yellow-edge: #EBD7A6;
+  --yellow-edge-hover: #E2C98C;
+  --yellow-ink: #755411;
 
   /* Status chips */
   --chip-yours: #EFE9DD;     /* your move */

@@ -11,6 +11,7 @@ Things that were designed but never built. Compiled 2026-09-17 by checking the o
 - **Class and Location pass-through to QuickBooks, bulk coding, and a coding accuracy view.**
 - **Multi-invoice PDFs.** One upload that contains several bills should offer to split into several bills.
 - **Retract an approval** (an approver takes back their own sign-off; recall is the submitter's tool) and **mark as synced** (resolve a bill already entered in QuickBooks by hand). Neither exists. Vendor-level hold, once on this list, is built.
+- **Team members, the rest of design 1a.** Removing someone from an organisation needs an endpoint and a rule for the approval tasks they hold: reroute them through the silent recompile, or refuse while they hold any. The design's remove menu and confirmation were left out until then. Invitation emails: the design says "They’ll get an email"; today the admin copies a link that is shown once (`sendInviteEmail` beside `sendVerificationEmail` would do it). Handing on the primary admin role has an endpoint (`/primary-admin/transfer`) but no place in the new page.
 
 ## Deferred on purpose
 

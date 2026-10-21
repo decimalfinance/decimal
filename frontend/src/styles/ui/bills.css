@@ -223,6 +223,7 @@
   color: var(--ink);
 }
 .ui .bl-search > input::placeholder { color: var(--ink-4); }
+.ui .bl-search > input::-webkit-search-cancel-button { display: none; }
 .ui .bl-sort { position: relative; }
 .ui .bl-sort-btn {
   display: flex;

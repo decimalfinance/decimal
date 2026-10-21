@@ -22,8 +22,8 @@ export async function getMembersAndRoles(organizationId: string) {
   });
 
   const [members, assignments] = await Promise.all([
-    prisma.$queryRaw<{ user_id: string; name: string; email: string; access: string; person_id: string | null }[]>`
-      SELECT om.user_id, u.display_name AS name, u.email, om.role AS access, p.id AS person_id
+    prisma.$queryRaw<{ user_id: string; name: string; email: string; avatar_url: string | null; access: string; person_id: string | null }[]>`
+      SELECT om.user_id, u.display_name AS name, u.email, u.avatar_url, om.role AS access, p.id AS person_id
       FROM organization_memberships om
       JOIN users u ON u.user_id = om.user_id
       LEFT JOIN approval.people p ON p.organization_id = om.organization_id AND p.user_id = om.user_id
@@ -58,6 +58,7 @@ export async function getMembersAndRoles(organizationId: string) {
       personId: m.person_id,
       name: m.name,
       email: m.email,
+      avatarUrl: m.avatar_url,
       access: m.access,
       roles: m.person_id ? (rolesByPerson.get(m.person_id) ?? []) : [],
     })),

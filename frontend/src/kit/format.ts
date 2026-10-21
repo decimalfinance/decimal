@@ -40,6 +40,12 @@ export function when(value: string | Date, now = new Date()) {
   return d.getFullYear() === now.getFullYear() ? dayMonth : `${dayMonth} ${d.getFullYear()}`;
 }
 
+/** The day a moment fell on, with its year: "28 Sep 2026". */
+export function fullDay(value: string | Date) {
+  const d = new Date(value);
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
+
 /** A moment in full, for a record of it: "30 Sep 2026, 9:14". */
 export function stamp(value: string | Date) {
   const d = new Date(value);
