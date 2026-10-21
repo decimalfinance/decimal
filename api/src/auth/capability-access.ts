@@ -41,8 +41,10 @@ const RULES: Array<{ pattern: RegExp; view: Need; act: Need }> = [
   { pattern: /^\/bills\/[0-9a-f-]{36}\/questions\/[0-9a-f-]{36}\/(answer|close)$/, view: 'bills.view', act: null },
   // Commenting is weaker than either: it names nobody and closes nothing. If it
   // needed bills.edit then an approver, who cannot edit by design, could not
-  // say a word on a bill they are being asked to approve.
-  { pattern: /^\/bills\/[0-9a-f-]{36}\/comments$/, view: 'bills.view', act: null },
+  // say a word on a bill they are being asked to approve. A message is the
+  // conversation's own way of saying something, and may answer a question
+  // the way answering does; the function decides who may.
+  { pattern: /^\/bills\/[0-9a-f-]{36}\/(comments|messages)$/, view: 'bills.view', act: null },
   // Bringing a bill IN is wider than working on one. Anybody who is not a
   // Viewer may upload — it creates a draft, which does nothing until a clerk
   // works it. Must sit above the general bills rule; first match wins.

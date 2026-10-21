@@ -136,7 +136,7 @@ export async function buildActionCards(args: {
         if (!canBeAskedAboutBills(await getOrgAccess(args.organizationId, person.userId))) {
           cardKind = 'cannot_ask';
           title = `Can't ask ${person.name}: ${name}`;
-          detail = `${person.name} only views bills, so they can't be asked about one. Ask someone who works on bills.`;
+          detail = `${person.name.split(/\s+/)[0]} only views bills, so they can't be asked about one. Anyone who works on bills can answer.`;
           status = 'info';
           call = { path: '', body: {} };
           break;

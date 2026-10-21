@@ -315,6 +315,23 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/comments'
   res.status(201).json({ billCommentId: created.billCommentId });
 }));
 
+// Say something in the bill's conversation. Decimal judges whether it answers
+// a question still open on the bill; what the person asked says, and anything
+// that settles a question, lands in the thread for everyone. Anything else
+// comes back `posted: false`: it was said to Decimal, and the screen puts it
+// to the companion instead.
+const messageSchema = z.object({ body: z.string().trim().min(1).max(2000) });
+
+billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/messages', asyncRoute(async (req, res) => {
+  const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
+  const input = messageSchema.parse(req.body);
+  const { postBillMessage } = await import('../payments/bills.js');
+  const result = await postBillMessage({ organizationId, paymentOrderId, authorUserId: req.auth!.userId, body: input.body });
+  res.status(result.posted ? 201 : 200).json(result);
+}));
+
 // Ask a colleague about a bill. No role gate on purpose: asking is never the
 // dangerous act, and it must never be the thing an approver cannot do.
 const askSchema = z.object({

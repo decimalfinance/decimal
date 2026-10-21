@@ -1291,6 +1291,13 @@ export interface BillDraft {
     youWereAsked: boolean; youAsked: boolean;
     /** Draft-screen field keys this question is about. */
     highlightFields: string[];
+    /**
+     * How it was answered: 'message' in the conversation (answerCommentId is
+     * that message, already in the thread), 'deed' by doing what it asked,
+     * 'words' in the old answer box. Null before 2026-10-21.
+     */
+    answerVia: 'message' | 'deed' | 'words' | null;
+    answerCommentId: string | null;
   }>;
   flags: Array<{
     kind: string;
@@ -1498,6 +1505,20 @@ export const billsApi = {
     return request<{ billCommentId: string }>(
       `/organizations/${organizationId}/bills/${paymentOrderId}/comments`,
       { method: 'POST', body: JSON.stringify(body) },
+    );
+  },
+  /**
+   * Say something in the bill's conversation. Decimal judges whether it answers
+   * a question still open there. `posted: false` means it settled nothing and
+   * was not a reply from the person asked: it was said to Decimal.
+   */
+  message(organizationId: string, paymentOrderId: string, body: string) {
+    return request<
+      | { posted: false }
+      | { posted: true; billCommentId: string; settled: Array<{ billQuestionId: string; outcome: 'answered' | 'handed_back' | 'closed' }> }
+    >(
+      `/organizations/${organizationId}/bills/${paymentOrderId}/messages`,
+      { method: 'POST', body: JSON.stringify({ body }) },
     );
   },
   suggestAskFields(organizationId: string, paymentOrderId: string, question: string, aboutFlag?: string | null) {

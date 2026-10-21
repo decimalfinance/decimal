@@ -224,15 +224,17 @@ export function historyItems(detail: BillDetail, note: BillCompanionNote | null 
   }
 
   for (const question of draft.questions) {
-    const asker = faceOf(question.askedByName);
-    push({
-      id: `q-${question.billQuestionId}`,
-      at: new Date(question.askedAt),
-      who: asker,
-      line: <><b>{question.askedByName}</b> asked {question.askedOfName}: {q(question.question)}</>,
-      plain: `${question.askedByName} asked ${question.askedOfName}`,
-      sub: question.stillOpen ? `Waiting on ${question.askedOfName}` : undefined,
-    });
+    // A question passed on is the passer's entry below, not a second ask.
+    if (!question.forwardedFromQuestionId) {
+      push({
+        id: `q-${question.billQuestionId}`,
+        at: new Date(question.askedAt),
+        who: faceOf(question.askedByName),
+        line: <><b>{question.askedByName}</b> asked {question.askedOfName}: {q(question.question)}</>,
+        plain: `${question.askedByName} asked ${question.askedOfName}`,
+        sub: question.stillOpen ? `Waiting on ${question.askedOfName}` : undefined,
+      });
+    }
     if (question.answeredAt) {
       const by = question.answeredByName ?? question.askedOfName;
       const at = new Date(question.answeredAt);
@@ -243,7 +245,10 @@ export function historyItems(detail: BillDetail, note: BillCompanionNote | null 
       } else if (question.outcome === 'handed_back') {
         push({ id, at, who: faceOf(by), line: <><b>{by}</b> couldn’t answer{said}</>, plain: `${by} couldn’t answer` });
       } else if (question.outcome === 'forwarded') {
-        push({ id, at, who: faceOf(by), line: <><b>{by}</b> passed the question on</>, plain: `${by} passed the question on` });
+        const next = draft.questions.find((x) => x.forwardedFromQuestionId === question.billQuestionId);
+        push(next
+          ? { id, at, who: faceOf(by), line: <><b>{by}</b> passed it on to {next.askedOfName}{said}</>, plain: `${by} passed it on to ${next.askedOfName}`, sub: next.stillOpen ? `Waiting on ${next.askedOfName}` : undefined }
+          : { id, at, who: faceOf(by), line: <><b>{by}</b> passed it on{said}</>, plain: `${by} passed it on` });
       } else if (question.outcome === 'partial') {
         push({ id, at, who: faceOf(by), line: <><b>{by}</b> answered part of it{said}</>, plain: `${by} answered part of it` });
       } else if (question.answer) {

@@ -68,7 +68,7 @@
   font-size: 12.5px;
   color: var(--ink-2);
 }
-.ui .bp-dot { color: #C4C0B9; }
+.ui .bp-dot { color: var(--edge-hover); }
 .ui .bp-stage {
   font: 600 9.5px var(--mono);
   letter-spacing: .08em;
@@ -120,8 +120,7 @@
 
 .ui .bp-row { display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 8px; align-items: start; }
 .ui .bp-row + .bp-row,
-.ui .bp-thread > .bp-row,
-.ui .bp-thread > .bp-qwrap { margin-top: 12px; }
+.ui .bp-thread > .bp-row { margin-top: 12px; }
 .ui .bp-face { position: relative; display: flex; padding-top: 1px; }
 .ui .bp-face .avatar { box-shadow: 0 0 0 1px #FFFFFF; }
 .ui .bp-said { display: grid; gap: 2px; min-width: 0; }
@@ -239,9 +238,9 @@
 .ui .bp-figs { display: grid; grid-template-columns: max-content 16px max-content; align-items: end; column-gap: 14px; }
 .ui .bp-fig { display: grid; gap: 4px; }
 .ui .bp-fig-label { font: 600 8px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
-.ui .bp-fig-was { font: 14px/1 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -.01em; color: var(--ink-3); text-decoration: line-through; text-decoration-color: #C4C0B9; text-decoration-thickness: 1px; }
+.ui .bp-fig-was { font: 14px/1 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -.01em; color: var(--ink-3); text-decoration: line-through; text-decoration-color: var(--edge-hover); text-decoration-thickness: 1px; }
 .ui .bp-fig-now { font: 600 14px/1 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -.01em; color: var(--ink); }
-.ui .bp-fig-arrow { padding-bottom: 1px; color: #C4C0B9; }
+.ui .bp-fig-arrow { padding-bottom: 1px; color: var(--edge-hover); }
 .ui .bp-pill {
   display: inline-flex;
   align-items: center;
@@ -457,7 +456,7 @@
   background-image: var(--tex-look);
   background-size: 160px 160px, 120px 120px;
 }
-.ui .bp-field.is-none .bp-box { border: 1px dashed #C4C0B9; background: var(--grey-faint); }
+.ui .bp-field.is-none .bp-box { border: 1px dashed var(--edge-hover); background: var(--grey-faint); }
 .ui .bp-field.is-wrong .bp-box {
   padding-right: 7px;
   border: 2px solid #C9655A;
@@ -472,7 +471,7 @@
   background-size: 160px 160px, 120px 120px;
   animation: ui-breathe 1.6s ease-in-out infinite;
 }
-.ui .bp-field.is-unread .bp-box { border: 1px dashed #C4C0B9; background: var(--grey-faint); color: var(--ink-3); }
+.ui .bp-field.is-unread .bp-box { border: 1px dashed var(--edge-hover); background: var(--grey-faint); color: var(--ink-3); }
 .ui .bp-box:focus-within { border-color: var(--maroon); box-shadow: 0 0 0 3px rgba(92, 31, 51, .12); }
 .ui .bp-field.is-look .bp-box:focus-within,
 .ui .bp-field.is-none .bp-box:focus-within { border-style: solid; }
@@ -602,7 +601,7 @@
   text-align: left;
   cursor: pointer;
 }
-.ui .bp-cat:hover { border-color: #C4C0B9; }
+.ui .bp-cat:hover { border-color: var(--edge-hover); }
 .ui .bp-cat-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ui .bp-cat > svg:last-child { flex: none; color: var(--ink-4); }
 .ui .bp-cat.is-known {
@@ -619,7 +618,7 @@
   background-size: 160px 160px, 120px 120px;
 }
 .ui .bp-cat.is-guess:hover { border-color: #C98B64; }
-.ui .bp-cat.is-empty { border: 1px dashed #C4C0B9; background: var(--grey-faint); color: var(--ink-3); }
+.ui .bp-cat.is-empty { border: 1px dashed var(--edge-hover); background: var(--grey-faint); color: var(--ink-3); }
 .ui .bp-cat.is-plain { cursor: default; border-color: transparent; background: transparent; padding-left: 0; }
 .ui .bp-note-tip {
   position: absolute;
@@ -866,3 +865,40 @@
 .ui .btn[aria-disabled='true'],
 .ui .btn[aria-disabled='true']:hover { background: transparent; color: var(--ink-4); cursor: not-allowed; }
 .ui .bp-loading { width: 160px; height: 18px; border-radius: 4px; background: var(--grey); animation: ui-breathe 1.6s ease-in-out infinite; }
+
+/* A question put to you and still open (5c, 58a): the asker's message on the
+   maroon band, bleeding 8px each side so the picture stays aligned. */
+.ui .bp-row.is-for-you {
+  margin-left: -8px;
+  margin-right: -8px;
+  padding: 8px 8px 9px;
+  border-radius: 10px;
+  background-color: var(--maroon);
+  background-image: var(--maroon-layers);
+  background-size: 160px 160px, 400px 400px;
+}
+.ui .bp-row.is-for-you .bp-face .avatar { box-shadow: none; }
+.ui .bp-row.is-for-you .bp-who-name,
+.ui .bp-row.is-for-you .bp-msg { color: var(--white); }
+.ui .bp-row.is-for-you .bp-who-time,
+.ui .bp-row.is-for-you .bp-sub { color: var(--pink-300); }
+.ui .bp-row.is-for-you .bp-msg .at { color: var(--pink-200); }
+.ui .bp-row.is-for-you .bp-sub { margin-top: 1px; }
+/* Whoever a question still waits on (5b, 60b): the chain's yellow badge. */
+.ui .bp-badge.is-waiting { z-index: 2; width: 11px; height: 11px; background: var(--yellow); color: var(--white); }
+.ui .bp-msg.is-quiet { color: var(--ink-3); }
+/* Your message while Decimal judges whether it answers anything. */
+.ui .bp-row.is-sending .bp-said { opacity: .55; }
+
+/* The companion's ask cards (61o–r): drafted, already asked, can't be asked. */
+.ui .bp-askcard { margin-top: 2px; padding: 11px 14px 12px; border-radius: 12px; background: var(--white); display: grid; gap: 7px; }
+.ui .bp-askcard-head { display: flex; align-items: center; gap: 8px; min-width: 0; font: 400 11.5px/1.35 var(--font); color: var(--ink); }
+.ui .bp-askcard-head b { font-weight: 600; }
+.ui .bp-askcard-ref { color: var(--ink-3); }
+.ui .bp-askcard-body { padding-left: 24px; font: 400 11.5px/1.5 var(--font); color: var(--ink); text-wrap: pretty; overflow-wrap: anywhere; }
+.ui .bp-askcard-body.is-quiet { color: var(--ink-2); }
+.ui .bp-askcard-foot { display: flex; align-items: center; gap: 8px; padding: 3px 0 0 24px; }
+.ui .bp-askcard-foot.is-failed { font: 400 10.5px/1.4 var(--font); color: var(--red-2); }
+.ui .bp-askcard-sent { display: inline-flex; align-items: center; gap: 6px; font: 500 11px var(--font); color: var(--green); }
+.ui .bp-askcard-tick { width: 14px; height: 14px; flex: none; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--green-2); color: var(--white); }
+.ui .bp-askcard-time { font: 400 10px var(--font); color: var(--ink-4); }

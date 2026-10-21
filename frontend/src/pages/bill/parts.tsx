@@ -37,6 +37,19 @@ export function Badge({ good }: { good: boolean }) {
   );
 }
 
+/** The chain's yellow badge: still waiting on this person. */
+export function WaitBadge() {
+  return (
+    <span className="bp-badge is-waiting">
+      <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+        <circle cx="4.5" cy="12" r="2.6" />
+        <circle cx="12" cy="12" r="2.6" />
+        <circle cx="19.5" cy="12" r="2.6" />
+      </svg>
+    </span>
+  );
+}
+
 /** Someone's face, or Decimal's orb when it was Decimal. */
 export function FaceOf({ who, size, orb = 'rest', bg = 'surf' }: {
   who: Face | 'decimal';
@@ -52,6 +65,15 @@ export function FaceOf({ who, size, orb = 'rest', bg = 'surf' }: {
     );
   }
   return <Avatar name={who.name} src={who.avatarUrl} size={size} />;
+}
+
+/** "10:14" today, "12 Aug, 9:12" before. */
+export function chatTime(value: string | Date, now = new Date()) {
+  const d = new Date(value);
+  const time = `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+  if (d.toDateString() === now.toDateString()) return time;
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${d.getDate()} ${months[d.getMonth()]}${d.getFullYear() === now.getFullYear() ? '' : ` ${d.getFullYear()}`}, ${time}`;
 }
 
 export function Chevron({ size = 10 }: { size?: number }) {

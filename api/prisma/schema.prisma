@@ -892,6 +892,10 @@ model BillQuestion {
   answeredByUserId String?  @map("answered_by_user_id") @db.Uuid
   /// When the asker dealt with the reply: ticked Done, acted on the bill, or closed it themselves.
   askerDoneAt    DateTime? @map("asker_done_at") @db.Timestamptz(6)
+  /// The message in the bill's conversation that answered it, when one did.
+  answerCommentId String?  @map("answer_comment_id") @db.Uuid
+  /// 'message' (answered in the conversation) | 'deed' (a deed did it) | 'words' (the old answer box). Null before 2026-10-21.
+  answerVia      String?   @map("answer_via")
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@index([organizationId, askedOfUserId, answeredAt])

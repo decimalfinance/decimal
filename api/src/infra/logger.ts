@@ -68,11 +68,15 @@ function writeLog(level: Exclude<LogLevel, 'silent'>, message: string, fields: L
     return;
   }
 
+  // A field called `message` (an error's, usually) must not replace the event
+  // name, or the line can't be found by what happened: it becomes `detail`.
+  const { message: detail, ...rest } = fields;
   const payload = {
     ts: new Date().toISOString(),
     level,
     message,
-    ...fields,
+    ...(detail !== undefined ? { detail } : {}),
+    ...rest,
   };
   const line = JSON.stringify(payload, jsonReplacer);
 

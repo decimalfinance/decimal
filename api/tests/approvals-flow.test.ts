@@ -12,6 +12,7 @@ import { prisma } from '../src/infra/prisma.js';
 import { requireTestDatabase } from './helpers/require-test-database.js';
 import { setInvoiceIntakeRuntimeForTests } from '../src/payments/invoice-intake.js';
 import { setExceptionAgentRuntimeForTests, type ChatMessage } from '../src/exceptions/agent.js';
+import { judgeByRule, setAnswerJudgeForTests, type JudgeInput } from '../src/payments/answer-judge.js';
 import { config } from '../src/config.js';
 import { executeCommand } from '../src/approvals/lifecycle.js';
 
@@ -44,6 +45,7 @@ beforeEach(async () => {
   await drainAsyncIntake();
   setInvoiceIntakeRuntimeForTests(null);
   setExceptionAgentRuntimeForTests(null);
+  setAnswerJudgeForTests(null);
   await prisma.$executeRawUnsafe(`TRUNCATE approval.approval_events, approval.tasks, approval.approval_plans,
     approval.policy_sets, approval.policies, approval.approvable_lines, approval.approvables, approval.rule_relaxations,
     approval.constraint_rules, approval.seat_assignments, approval.authority_grants, approval.seats,
@@ -1306,6 +1308,7 @@ test('anyone who works on bills can answer, and any answer closes the question',
   assert.equal(q.outcome, 'answered');
   assert.equal(q.stillOpen, false, 'any answer closes it');
   assert.equal(q.answeredByName, 'pa-knower', 'and the thread says who answered');
+  assert.equal(q.answerVia, 'words', 'typed into the answer box');
   assert.deepEqual(q.resolvedFields, ['remitTo.street', 'remitTo.city']);
 
   const helperInbox = await get(`/organizations/${orgId}/inbox`, helper.token);
@@ -1775,6 +1778,7 @@ test('a deed settles the question that asked for it', async () => {
   assert.ok(q, 'the question is still on the bill');
   assert.equal(q.outcome, 'answered', 'and it is settled');
   assert.equal(q.stillOpen, false, 'so it is closed');
+  assert.equal(q.answerVia, 'deed', 'by the deed, not by anybody saying so');
   assert.match(q.answer, /recorded/, 'the answer says what was done');
   assert.match(q.answer, /Northwind Trading Co\./);
 
@@ -1963,6 +1967,165 @@ test('a comment on a question settles nothing, and anyone who works on bills may
   const closed = answered.questions.find((x: { billQuestionId: string }) => x.billQuestionId === asked.billQuestionId);
   assert.equal(closed.stillOpen, false);
   assert.equal(closed.answeredByName, 'chat-bystander');
+});
+
+// ---- A bill's conversation is a group chat (2026-10-21) -------------------
+// A question names a person, but nobody clicks Answer: whoever knows says so,
+// and Decimal judges whether the message answers it.
+
+async function chatOrg(tag: string) {
+  const owner = await register(`${tag}-asker`);
+  const org = await post('/organizations', { organizationName: `${tag} Org` }, owner.token);
+  const orgId = org.organizationId as string;
+  const marcus = await register(`${tag}-marcus`);
+  const tom = await register(`${tag}-tom`);
+  await prisma.organizationMembership.createMany({
+    data: [
+      { organizationId: orgId, userId: marcus.userId, role: 'admin', status: 'active' },
+      { organizationId: orgId, userId: tom.userId, role: 'admin', status: 'active' },
+    ],
+  });
+  const bill = await uploadAndConfirm(orgId, owner.token, { vendor: 'Northwind Supplies', amount: 120, invoiceNo: `${tag}-1`, billTo: `${tag} Org` });
+  return { orgId, owner, marcus, tom, billId: bill.billId as string };
+}
+
+const everyQuestion = (verdict: 'answers' | 'cant_answer' | 'withdraws' | 'none') =>
+  async (input: JudgeInput) => input.questions.map((q) => ({ billQuestionId: q.billQuestionId, verdict }));
+
+test('whoever knows answers by saying so: Tom answers what was put to Marcus', async () => {
+  const { orgId, owner, marcus, tom, billId } = await chatOrg('gc');
+  const asked = await post(`/organizations/${orgId}/bills/${billId}/ask`, {
+    askedOfUserId: marcus.userId, question: 'Is $1,850.00 the rate we agreed?',
+  }, owner.token);
+
+  let seen: JudgeInput | null = null;
+  setAnswerJudgeForTests(async (input) => {
+    seen = input;
+    return everyQuestion('answers')(input);
+  });
+  const res = await post(`/organizations/${orgId}/bills/${billId}/messages`, { body: 'Yes, $1,850.00 is the agreed rate.' }, tom.token);
+  assert.equal(res.posted, true);
+  assert.deepEqual(res.settled, [{ billQuestionId: asked.billQuestionId, outcome: 'answered' }]);
+  assert.equal(seen!.senderName, 'gc-tom');
+  assert.equal(seen!.questions[0]!.senderRole, 'other', 'the judge knows Tom was not the one asked');
+  assert.equal(seen!.questions[0]!.askedOfName, 'gc-marcus');
+
+  const draft = await get(`/organizations/${orgId}/bills/${billId}/draft`, owner.token);
+  const q = draft.questions.find((x: { billQuestionId: string }) => x.billQuestionId === asked.billQuestionId);
+  assert.equal(q.stillOpen, false);
+  assert.equal(q.outcome, 'answered');
+  assert.equal(q.answeredByName, 'gc-tom', 'asked of Marcus, answered by Tom');
+  assert.equal(q.answerVia, 'message');
+  assert.equal(q.answerCommentId, res.billCommentId, 'the message is the answer, kept once');
+  assert.equal(draft.comments.length, 1);
+  assert.equal(draft.comments[0].body, 'Yes, $1,850.00 is the agreed rate.');
+
+  const askerInbox = await get(`/organizations/${orgId}/inbox`, owner.token);
+  const reply = askerInbox.items.flatMap((i: { lines: Array<{ kind: string; text: string }> }) => i.lines).find((l: { kind: string }) => l.kind === 'reply');
+  assert.equal(reply.text, 'gc-tom answered: "Yes, $1,850.00 is the agreed rate."', 'the asker hears it');
+  const marcusInbox = await get(`/organizations/${orgId}/inbox`, marcus.token);
+  assert.ok(!marcusInbox.items.some((i: { lines: Array<{ kind: string }> }) => i.lines.some((l) => l.kind === 'question')), 'Marcus is off the hook');
+
+  // A second message about it, a moment later, is just a message.
+  const late = await post(`/organizations/${orgId}/bills/${billId}/messages`, { body: 'Agreed, $1,850.00.' }, marcus.token);
+  assert.deepEqual(late, { posted: false }, 'nothing is open any more, so it goes to Decimal');
+});
+
+test('a message that settles nothing goes to Decimal, unless the person asked wrote it', async () => {
+  const { orgId, owner, marcus, tom, billId } = await chatOrg('gn');
+  const asked = await post(`/organizations/${orgId}/bills/${billId}/ask`, {
+    askedOfUserId: marcus.userId, question: 'Who signed the quote?',
+  }, owner.token);
+
+  setAnswerJudgeForTests(everyQuestion('none'));
+  const toDecimal = await post(`/organizations/${orgId}/bills/${billId}/messages`, { body: 'What is the tax on this one?' }, tom.token);
+  assert.deepEqual(toDecimal, { posted: false }, 'said to Decimal, not to the team');
+
+  const holding = await post(`/organizations/${orgId}/bills/${billId}/messages`, { body: 'Let me check the contract.' }, marcus.token);
+  assert.equal(holding.posted, true, 'the person asked is replying to whoever asked');
+  assert.deepEqual(holding.settled, []);
+  let draft = await get(`/organizations/${orgId}/bills/${billId}/draft`, owner.token);
+  assert.deepEqual(draft.comments.map((c: { body: string }) => c.body), ['Let me check the contract.']);
+  assert.equal(draft.questions.find((x: { billQuestionId: string }) => x.billQuestionId === asked.billQuestionId).stillOpen, true);
+
+  // Whatever the judge says, the asker cannot answer their own question, and
+  // only the person asked can say they can't answer.
+  setAnswerJudgeForTests(everyQuestion('answers'));
+  assert.deepEqual(await post(`/organizations/${orgId}/bills/${billId}/messages`, { body: 'It was Priya.' }, owner.token), { posted: false });
+  setAnswerJudgeForTests(everyQuestion('cant_answer'));
+  assert.deepEqual(await post(`/organizations/${orgId}/bills/${billId}/messages`, { body: 'No idea.' }, tom.token), { posted: false });
+  setAnswerJudgeForTests(everyQuestion('withdraws'));
+  assert.deepEqual(await post(`/organizations/${orgId}/bills/${billId}/messages`, { body: 'Never mind.' }, tom.token), { posted: false });
+
+  // Nor does somebody who only views bills join in.
+  const watcher = await register('gn-watcher');
+  await prisma.organizationMembership.create({ data: { organizationId: orgId, userId: watcher.userId, role: 'member', status: 'active' } });
+  const person = await prisma.$queryRaw<{ id: string }[]>`
+    INSERT INTO approval.people (organization_id, user_id, name, email)
+    VALUES (${orgId}::uuid, ${watcher.userId}::uuid, 'GN Watcher', 'gn-watcher@dev.decimal.test')
+    RETURNING id`;
+  await prisma.$executeRaw`
+    INSERT INTO approval.person_roles (organization_id, person_id, role)
+    VALUES (${orgId}::uuid, ${person[0]!.id}::uuid, 'viewer')`;
+  setAnswerJudgeForTests(everyQuestion('answers'));
+  assert.deepEqual(await post(`/organizations/${orgId}/bills/${billId}/messages`, { body: 'It was Priya.' }, watcher.token), { posted: false });
+
+  draft = await get(`/organizations/${orgId}/bills/${billId}/draft`, owner.token);
+  assert.equal(draft.comments.length, 1, 'none of those landed in the thread');
+  assert.equal(draft.questions.find((x: { billQuestionId: string }) => x.billQuestionId === asked.billQuestionId).stillOpen, true);
+});
+
+test('the person asked hands it back, and the asker withdraws it, both by saying so', async () => {
+  const { orgId, owner, marcus, billId } = await chatOrg('gb');
+  const first = await post(`/organizations/${orgId}/bills/${billId}/ask`, {
+    askedOfUserId: marcus.userId, question: 'Which project is this for?',
+  }, owner.token);
+
+  setAnswerJudgeForTests(everyQuestion('cant_answer'));
+  const back = await post(`/organizations/${orgId}/bills/${billId}/messages`, { body: 'No idea, Nadia set this up.' }, marcus.token);
+  assert.deepEqual(back.settled, [{ billQuestionId: first.billQuestionId, outcome: 'handed_back' }]);
+  // Handed back, it waits in the asker's Inbox.
+  const inbox = await get(`/organizations/${orgId}/inbox`, owner.token);
+  const replies = inbox.items.flatMap((i: { lines: Array<{ kind: string; text: string }> }) => i.lines).filter((l: { kind: string }) => l.kind === 'reply');
+  assert.equal(replies.length, 1);
+  assert.match(replies[0].text, /gb-marcus/);
+
+  const second = await post(`/organizations/${orgId}/bills/${billId}/ask`, {
+    askedOfUserId: marcus.userId, question: 'Who signed the quote?',
+  }, owner.token);
+  setAnswerJudgeForTests(everyQuestion('withdraws'));
+  const gone = await post(`/organizations/${orgId}/bills/${billId}/messages`, { body: 'Never mind, I found the signed quote.' }, owner.token);
+  assert.deepEqual(gone.settled, [{ billQuestionId: second.billQuestionId, outcome: 'closed' }]);
+
+  const draft = await get(`/organizations/${orgId}/bills/${billId}/draft`, owner.token);
+  const one = draft.questions.find((x: { billQuestionId: string }) => x.billQuestionId === first.billQuestionId);
+  const two = draft.questions.find((x: { billQuestionId: string }) => x.billQuestionId === second.billQuestionId);
+  assert.equal(one.outcome, 'handed_back');
+  assert.equal(one.answeredByName, 'gb-marcus');
+  assert.equal(one.answer, 'No idea, Nadia set this up.');
+  assert.equal(two.outcome, 'closed');
+  assert.equal(two.answeredByName, 'gb-asker');
+  assert.equal(two.answerVia, 'message');
+  assert.equal(draft.comments.length, 2, 'both said in the thread');
+
+  // Withdrawn, there is nothing for the asker to hear.
+  const after = await get(`/organizations/${orgId}/inbox`, owner.token);
+  const heard = after.items.flatMap((i: { lines: Array<{ kind: string; text: string }> }) => i.lines).filter((l: { kind: string; text: string }) => l.kind === 'reply' && /signed quote/.test(l.text));
+  assert.equal(heard.length, 0);
+});
+
+test('with no model, whatever the person asked says is their answer', () => {
+  const out = judgeByRule({
+    billLabel: 'Northwind NW-1',
+    senderName: 'Marcus',
+    message: 'Yes',
+    questions: [
+      { billQuestionId: 'a', askedByName: 'Zara', askedOfName: 'Marcus', question: 'Rate right?', senderRole: 'asked' },
+      { billQuestionId: 'b', askedByName: 'Zara', askedOfName: 'Tom', question: 'Signed?', senderRole: 'other' },
+      { billQuestionId: 'c', askedByName: 'Marcus', askedOfName: 'Tom', question: 'Project?', senderRole: 'asker' },
+    ],
+  });
+  assert.deepEqual(out.map((v) => v.verdict), ['answers', 'none', 'none']);
 });
 
 test('a reply to a reply joins the same thread rather than starting a third rung', async () => {

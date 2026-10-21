@@ -127,6 +127,7 @@ export async function settleQuestionsFromDeed(deed: Deed): Promise<void> {
           answeredAt: deed.at,
           answeredByUserId: deed.actorUserId ?? null,
           outcome: 'answered',
+          answerVia: 'deed',
           resolvedFields: s.resolvedFields as Prisma.InputJsonValue,
         },
       });

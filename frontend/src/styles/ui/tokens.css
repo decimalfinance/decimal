@@ -21,6 +21,7 @@
   --line-soft: #F0EEEA;
   --edge: #D8D5CF;           /* field edges */
   --edge-handle: #E2DFDA;
+  --edge-hover: #C4C0B9;     /* edges under the pointer, dashed empties */
 
   /* Greys */
   --grey: #F5F4F2;           /* tiles, rows, the sidebar */
@@ -55,6 +56,7 @@
   --chip-blocking: #F6DAD5;
   --chip-warning: #F4E6C6;
   --chip-waiting: #DCE5EE;
+  --yellow: #FACC15;         /* the chain's waiting badge */
   --chip-finished: #E9E9E4;
 
   /* A field that needs a look */
@@ -87,4 +89,8 @@
      Decimal did. */
   --cloud-layers: url('data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20width=%22160%22%20height=%22160%22%3E%3Cfilter%20id=%22g%22%20x=%220%22%20y=%220%22%20width=%22100%%22%20height=%22100%%22%3E%3CfeTurbulence%20type=%22fractalNoise%22%20baseFrequency=%220.9%22%20numOctaves=%221%22%20seed=%220%22%20stitchTiles=%22stitch%22/%3E%3CfeColorMatrix%20values=%220%200%200%200%200.757%200%200%200%200%200.427%200%200%200%200%200.518%200%200%200%201.1%20-0.52%22/%3E%3C/filter%3E%3Crect%20width=%22160%22%20height=%22160%22%20filter=%22url(%23g)%22/%3E%3C/svg%3E'),
     url('data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20width=%22400%22%20height=%22400%22%3E%3Cfilter%20id=%22g%22%20x=%220%22%20y=%220%22%20width=%22100%%22%20height=%22100%%22%3E%3CfeTurbulence%20type=%22fractalNoise%22%20baseFrequency=%220.01%22%20numOctaves=%224%22%20seed=%220%22%20stitchTiles=%22stitch%22/%3E%3CfeColorMatrix%20values=%220%200%200%200%200.941%200%200%200%200%200.690%200%200%200%200%200.749%200%200%200%201.6%20-0.72%22/%3E%3C/filter%3E%3Crect%20width=%22400%22%20height=%22400%22%20filter=%22url(%23g)%22/%3E%3C/svg%3E');
+  /* A question put to you (58a): the maroon band's own grain (160px) and
+     clouds (400px), the pink surface's layers recoloured. */
+  --maroon-layers: url('data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20width=%22160%22%20height=%22160%22%3E%3Cfilter%20id=%22g%22%20x=%220%22%20y=%220%22%20width=%22100%%22%20height=%22100%%22%3E%3CfeTurbulence%20type=%22fractalNoise%22%20baseFrequency=%220.9%22%20numOctaves=%221%22%20seed=%220%22%20stitchTiles=%22stitch%22/%3E%3CfeColorMatrix%20values=%220%200%200%200%200.604%200%200%200%200%200.314%200%200%200%200%200.408%200%200%200%201.1%20-0.52%22/%3E%3C/filter%3E%3Crect%20width=%22160%22%20height=%22160%22%20filter=%22url(%23g)%22/%3E%3C/svg%3E'),
+    url('data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20width=%22400%22%20height=%22400%22%3E%3Cfilter%20id=%22g%22%20x=%220%22%20y=%220%22%20width=%22100%%22%20height=%22100%%22%3E%3CfeTurbulence%20type=%22fractalNoise%22%20baseFrequency=%220.01%22%20numOctaves=%224%22%20seed=%220%22%20stitchTiles=%22stitch%22/%3E%3CfeColorMatrix%20values=%220%200%200%200%200.431%200%200%200%200%200.165%200%200%200%200%200.251%200%200%200%201.6%20-0.72%22/%3E%3C/filter%3E%3Crect%20width=%22400%22%20height=%22400%22%20filter=%22url(%23g)%22/%3E%3C/svg%3E');
 }

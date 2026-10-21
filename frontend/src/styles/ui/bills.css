@@ -101,7 +101,7 @@
 .ui .bl-part + .bl-part { border-top: 1px solid var(--line-row); }
 .ui .bl-part-btn {
   --box-bg: var(--white);
-  --box-ring: #C4C0B9;
+  --box-ring: var(--edge-hover);
   --box-on: var(--maroon);
   display: flex;
   align-items: center;
@@ -198,7 +198,7 @@
   font: 500 10px var(--font);
   color: var(--maroon);
   text-decoration: underline;
-  text-decoration-color: #C4C0B9;
+  text-decoration-color: var(--edge-hover);
   text-underline-offset: 3px;
   cursor: pointer;
 }
@@ -313,7 +313,7 @@
   cursor: pointer;
   transition: height .18s ease;
 }
-.ui .drop:hover { background: var(--grey); border-color: #C4C0B9; }
+.ui .drop:hover { background: var(--grey); border-color: var(--edge-hover); }
 .ui .drop.is-over { background: var(--pink-50); border-color: var(--maroon); }
 .ui .drop:focus-visible { box-shadow: var(--focus); }
 .ui .drop-icon { display: flex; color: var(--ink-4); }

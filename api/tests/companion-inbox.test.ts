@@ -125,7 +125,7 @@ test('inbox: a companion ask becomes a question or "already has it" — and only
   propose([a(w.viewer.name, 'Can you look at the tax line?')]);
   const vTurn = await ask(w.orgId, w.owner.token, 'Ask Victor about it.');
   assert.deepEqual(vTurn.answer.actions.map((c: { kind: string; status: string; call: { path: string } }) => [c.kind, c.status, c.call.path]), [['cannot_ask', 'info', '']], 'nothing to send to a viewer');
-  assert.match(vTurn.answer.text, /Nothing to send: Victor Viewer only views bills/);
+  assert.match(vTurn.answer.text, /Nothing to send: Victor only views bills/);
   assert.equal(itemFor(await inboxOf(w.orgId, w.viewer.token), w.bills.submitted), undefined, 'nothing reached the viewer');
   setAskClassifierForTests(null);
 });

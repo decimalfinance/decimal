@@ -3274,7 +3274,116 @@ export async function listBillQuestions(organizationId: string, paymentOrderId: 
     forwardedFromQuestionId: r.forwardedFromQuestionId,
     answeredAt: r.answeredAt?.toISOString() ?? null,
     askedAt: r.createdAt.toISOString(),
+    // How it was answered: in the conversation (the message is in the thread
+    // already, so the screen shows the words once), by a deed, or in the old
+    // answer box. Null on rows from before 2026-10-21.
+    answerVia: r.answerVia as 'message' | 'deed' | 'words' | null,
+    answerCommentId: r.answerCommentId,
   }));
+}
+
+/**
+ * Say something on a bill. Its conversation is a group chat (2026-10-21): a
+ * question names a person, but whoever knows the answer simply says it, and
+ * Decimal judges whether the message answers anything still open
+ * (answer-judge.ts). Nobody clicks Answer.
+ *
+ * What lands in the shared thread: anything the person asked says (it is
+ * their reply to whoever asked, answer or not), and any message that settles a
+ * question. Anything else was said to Decimal rather than to the team, so it
+ * comes back `posted: false` for the caller to put to the companion.
+ */
+export async function postBillMessage(args: {
+  organizationId: string;
+  paymentOrderId: string;
+  authorUserId: string;
+  body: string;
+}): Promise<
+  | { posted: false }
+  | { posted: true; billCommentId: string; settled: Array<{ billQuestionId: string; outcome: 'answered' | 'handed_back' | 'closed' }> }
+> {
+  const body = args.body.trim();
+  if (body.length < 1) throw badRequest('Write something first.');
+  const open = await prisma.billQuestion.findMany({
+    where: { organizationId: args.organizationId, paymentOrderId: args.paymentOrderId, answeredAt: null },
+    orderBy: { createdAt: 'asc' },
+  });
+  if (open.length === 0) return { posted: false };
+  // Somebody who only views bills reads the conversation without joining in.
+  const { getOrgAccess, canBeAskedAboutBills } = await import('../approvals/permissions.js');
+  if (!canBeAskedAboutBills(await getOrgAccess(args.organizationId, args.authorUserId))) return { posted: false };
+
+  const people = await prisma.user.findMany({
+    where: { userId: { in: [...new Set([args.authorUserId, ...open.flatMap((q) => [q.askedByUserId, q.askedOfUserId])])] } },
+    select: { userId: true, displayName: true },
+  });
+  const nameOf = new Map(people.map((u) => [u.userId, u.displayName]));
+  const order = await prisma.paymentOrder.findFirst({
+    where: { organizationId: args.organizationId, paymentOrderId: args.paymentOrderId },
+    select: { invoiceNumber: true, counterparty: { select: { displayName: true } } },
+  });
+  if (!order) throw notFound('No such bill.');
+  const roleOf = (q: (typeof open)[number]) =>
+    q.askedOfUserId === args.authorUserId ? 'asked' as const
+      : q.askedByUserId === args.authorUserId ? 'asker' as const
+      : 'other' as const;
+
+  const { judgeAnswer } = await import('./answer-judge.js');
+  const verdicts = await judgeAnswer({
+    billLabel: [order.counterparty?.displayName, order.invoiceNumber].filter(Boolean).join(' ') || 'this bill',
+    senderName: nameOf.get(args.authorUserId) ?? 'Someone',
+    message: body,
+    questions: open.map((q) => ({
+      billQuestionId: q.billQuestionId,
+      askedByName: nameOf.get(q.askedByUserId) ?? 'Someone',
+      askedOfName: nameOf.get(q.askedOfUserId) ?? 'Someone',
+      question: q.question,
+      senderRole: roleOf(q),
+    })),
+  });
+  const settling = verdicts.filter((v) => v.verdict !== 'none');
+  const wasAsked = open.some((q) => roleOf(q) === 'asked');
+  if (settling.length === 0 && !wasAsked) return { posted: false };
+
+  const comment = await commentOnBill({
+    organizationId: args.organizationId,
+    paymentOrderId: args.paymentOrderId,
+    authorUserId: args.authorUserId,
+    body,
+  });
+  const at = new Date();
+  const settled: Array<{ billQuestionId: string; outcome: 'answered' | 'handed_back' | 'closed' }> = [];
+  for (const v of settling) {
+    const q = open.find((x) => x.billQuestionId === v.billQuestionId)!;
+    const outcome = v.verdict === 'answers' ? 'answered' as const : v.verdict === 'cant_answer' ? 'handed_back' as const : 'closed' as const;
+    // Whoever got there first answered it. A second message about the same
+    // question, landing a moment later, is just a message.
+    const done = await prisma.billQuestion.updateMany({
+      where: { billQuestionId: q.billQuestionId, answeredAt: null },
+      data: {
+        answer: body,
+        answeredAt: at,
+        answeredByUserId: args.authorUserId,
+        outcome,
+        answerVia: 'message',
+        answerCommentId: comment.billCommentId,
+        resolvedFields: (outcome === 'answered' && Array.isArray(q.highlightFields) ? q.highlightFields : []) as Prisma.InputJsonValue,
+        // The asker who withdraws it has dealt with it: nothing waits in their Inbox.
+        ...(outcome === 'closed' ? { askerDoneAt: at } : {}),
+      },
+    });
+    if (done.count === 0) continue;
+    if (q.taskId && outcome !== 'handed_back') {
+      await releaseParkedQuestion(args.organizationId, q.taskId, args.authorUserId, q.billQuestionId, body);
+    }
+    settled.push({ billQuestionId: q.billQuestionId, outcome });
+  }
+  logger.info('bill_message.posted', {
+    paymentOrderId: args.paymentOrderId,
+    open: open.length,
+    settled: settled.length,
+  });
+  return { posted: true, billCommentId: comment.billCommentId, settled };
 }
 
 /**
@@ -3357,6 +3466,7 @@ export async function answerBillQuestion(args: {
       answeredAt: at,
       answeredByUserId: args.answererUserId,
       outcome: args.outcome,
+      answerVia: 'words',
       // Passed on: nothing for the asker to hear about yet. The new question
       // carries on, and its answer is what reaches them.
       ...(args.outcome === 'forwarded' ? { askerDoneAt: at } : {}),
@@ -3415,7 +3525,7 @@ export async function closeBillQuestion(args: {
   const at = new Date();
   return prisma.billQuestion.update({
     where: { billQuestionId: args.billQuestionId },
-    data: { answer: note, answeredAt: at, answeredByUserId: args.userId, outcome: 'closed', askerDoneAt: at },
+    data: { answer: note, answeredAt: at, answeredByUserId: args.userId, outcome: 'closed', askerDoneAt: at, answerVia: 'words' },
   });
 }
 

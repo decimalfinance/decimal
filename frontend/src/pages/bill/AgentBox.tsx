@@ -5,6 +5,13 @@
 // conversation. What people do is written as their own message: Decimal never
 // adds one affirming it. The reply line talks to Decimal, or with an @name
 // asks a colleague.
+//
+// The conversation is a group chat (5b, 5c; Zaid, 2026-10-21). A question is
+// its asker's message, "@name" and the words, and nothing is clicked to answer
+// it: whoever knows says so, and Decimal judges whether that answered it. The
+// person asked sees the question on a maroon band, everyone else sees a row
+// for whoever it still waits on, and a finished question says, in one grey
+// line, who answered it.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
@@ -23,7 +30,8 @@ import { useToaster } from '../../kit/Toast';
 import { firstName } from '../../kit/format';
 import { ActionPills, ConfirmCard, FindingText, pillsFor, type Access, type CardResult, type OpenCard, type Pill } from './Findings';
 import { closeReasonFor, findingsOf, linesSum, notesOf, parseMoney, restingMessage, type Face, type Fields, type Flag, type LineEntry } from './model';
-import { Chevron, FaceOf, Figures } from './parts';
+import { Chevron, FaceOf, Figures, WaitBadge, chatTime } from './parts';
+import { AskCard, isAskCard } from './AskCard';
 
 type Said = {
   id: string;
@@ -33,16 +41,13 @@ type Said = {
   sub?: ReactNode;
   live?: boolean;
   cards?: CompanionActionCard[];
+  /** A question put to the viewer and still open: the asker's message on the maroon band. */
+  forYou?: boolean;
+  /** Whoever a question still waits on: their face with the yellow badge. */
+  waiting?: boolean;
+  /** The viewer's message on its way. */
+  sending?: boolean;
 };
-
-/** "10:14" today, "12 Aug, 9:12" before. */
-function chatTime(value: string | Date, now = new Date()) {
-  const d = new Date(value);
-  const time = `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
-  if (d.toDateString() === now.toDateString()) return time;
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return `${d.getDate()} ${months[d.getMonth()]}${d.getFullYear() === now.getFullYear() ? '' : ` ${d.getFullYear()}`}, ${time}`;
-}
 
 const quoted = (text: string) => /“(.*)”\s*$/.exec(text)?.[1] ?? null;
 const capitalise = (s: string) => (s ? s[0]!.toUpperCase() + s.slice(1) : s);
@@ -133,28 +138,31 @@ function threadOf(detail: BillDetail, chat: CompanionChat | undefined, viewer: F
     });
   }
 
+  // A question is its asker's message. An answer said in the conversation is
+  // already in the thread as that person's message, and a deed has no words,
+  // so the question only says who answered it. Words typed into the old answer
+  // box, or a note closing it, aren't in the thread yet: they become a message.
   for (const q of draft.questions) {
+    const by = q.answeredByName ?? 'Someone';
+    const next = q.outcome === 'forwarded' ? draft.questions.find((x) => x.forwardedFromQuestionId === q.billQuestionId) : null;
+    // A question passed on was raised in the same instant as the words that
+    // passed it on: it follows them.
+    const from = q.forwardedFromQuestionId ? draft.questions.find((x) => x.billQuestionId === q.forwardedFromQuestionId) : null;
+    const askedAt = Math.max(new Date(q.askedAt).getTime(), from?.answeredAt ? new Date(from.answeredAt).getTime() + 1 : 0);
     out.push({
-      id: `q-${q.billQuestionId}`,
-      at: new Date(q.askedAt),
-      who: face(q.askedByName),
-      body: <><span className="at">@{q.askedOfName}</span> {q.question}</>,
-      sub: q.stillOpen ? (q.youWereAsked ? 'Waiting on you' : `Waiting on ${q.askedOfName}`) : undefined,
+      id: `q-${q.billQuestionId}`, at: new Date(askedAt), who: face(q.askedByName),
+      body: <><span className="at">@{q.askedOfName}</span> <Figures text={q.question} /></>,
+      sub: q.stillOpen ? (q.youWereAsked ? 'Question for you' : undefined)
+        : q.outcome === 'handed_back' ? `${by} couldn’t answer`
+        : q.outcome === 'closed' ? `Closed by ${by}`
+        : q.outcome === 'forwarded' ? `${by} passed it on${next ? ` to ${next.askedOfName}` : ''}`
+        : q.outcome === 'partial' ? `Partly answered by ${by}`
+        : q.answerVia === 'deed' && q.answer ? <Figures text={`Answered · ${q.answer}`} />
+        : `Answered by ${by}`,
+      forYou: q.stillOpen && q.youWereAsked,
     });
-    if (q.answeredAt) {
-      const by = q.outcome === 'closed' ? q.askedByName : q.answeredByName ?? q.askedOfName;
-      const what = q.outcome === 'closed' ? 'Closed the question'
-        : q.outcome === 'handed_back' ? 'Couldn’t answer'
-        : q.outcome === 'forwarded' ? 'Passed the question on'
-        : q.outcome === 'partial' ? 'Answered part of it'
-        : null;
-      out.push({
-        id: `qa-${q.billQuestionId}`,
-        at: new Date(q.answeredAt),
-        who: face(by),
-        body: q.answer ? <Figures text={q.answer} /> : what ?? '',
-        sub: q.answer ? what ?? undefined : undefined,
-      });
+    if (q.answer?.trim() && q.answeredAt && q.answerVia !== 'message' && q.answerVia !== 'deed') {
+      out.push({ id: `qa-${q.billQuestionId}`, at: new Date(q.answeredAt), who: face(q.answeredByName), body: <Figures text={q.answer} /> });
     }
   }
 
@@ -201,25 +209,31 @@ function ChatCard({ card, busy, onRun }: { card: CompanionActionCard; busy: bool
 }
 
 /** One message: a face, the name and time, the words, and anything under them. */
-function Row({ said, onRunCard, busyCard }: {
+function Row({ said, onRunCard, busyCard, sentAt }: {
   said: Said;
   onRunCard: (card: CompanionActionCard) => void;
   busyCard: string | null;
+  /** When a question a chat card sent was asked, once it is on the bill. */
+  sentAt: (card: CompanionActionCard) => string | null;
 }) {
   const name = said.who === 'decimal' ? 'Decimal agent' : said.who.name;
+  const timed = !said.live && !said.waiting && !said.sending;
   return (
-    <div className="bp-row">
-      <span className="bp-face"><FaceOf who={said.who} size={28} orb={said.live ? 'work' : 'rest'} bg="surf" /></span>
+    <div className={`bp-row${said.forYou ? ' is-for-you' : ''}${said.sending ? ' is-sending' : ''}`}>
+      <span className="bp-face">
+        <FaceOf who={said.who} size={28} orb={said.live ? 'work' : 'rest'} bg="surf" />
+        {said.waiting ? <WaitBadge /> : null}
+      </span>
       <div className="bp-said">
         <div className="bp-who">
           <span className="bp-who-name">{name}</span>
-          {said.live ? null : <span className="bp-who-time num">{chatTime(said.at)}</span>}
+          {timed ? <span className="bp-who-time num">{chatTime(said.at)}</span> : null}
         </div>
-        <div className="bp-msg">{said.body}</div>
+        {said.body ? <div className={`bp-msg${said.waiting ? ' is-quiet' : ''}`}>{said.body}</div> : null}
         {said.sub ? <div className="bp-sub">{said.sub}</div> : null}
-        {said.cards?.map((card) => (
-          <ChatCard key={card.actionId} card={card} busy={busyCard === card.actionId} onRun={() => onRunCard(card)} />
-        ))}
+        {said.cards?.map((card) => (isAskCard(card)
+          ? <AskCard key={card.actionId} card={card} busy={busyCard === card.actionId} sentAt={sentAt(card)} onRun={() => onRunCard(card)} />
+          : <ChatCard key={card.actionId} card={card} busy={busyCard === card.actionId} onRun={() => onRunCard(card)} />))}
       </div>
     </div>
   );
@@ -245,7 +259,7 @@ function ReplyLine({
   aboutFlag,
   actions,
   onAsked,
-  onTalk,
+  onSay,
 }: {
   organizationId: string;
   billId: string;
@@ -255,7 +269,8 @@ function ReplyLine({
   aboutFlag: string | null;
   actions: ReactNode;
   onAsked: () => Promise<void>;
-  onTalk: (text: string) => Promise<void>;
+  /** Anything without an @name: it may answer a question, or it is for Decimal. */
+  onSay: (text: string) => Promise<void>;
 }) {
   const toaster = useToaster();
   const [text, setText] = useState('');
@@ -307,7 +322,12 @@ function ReplyLine({
         await onAsked();
       } else {
         setText('');
-        await onTalk(words);
+        try {
+          await onSay(words);
+        } catch (e) {
+          setText((t) => t || words);
+          throw e;
+        }
       }
     } catch (e) {
       toaster.show(e instanceof Error ? e.message : 'That didn’t go through. Try again.');
@@ -450,7 +470,25 @@ export function AgentBox({
     map.set(viewer.name, viewer.avatarUrl);
     return map;
   }, [detail, draft.confirmedBy, viewer]);
-  const thread = useMemo(() => threadOf(detail, chat.data, viewer, faces, lines), [detail, chat.data, viewer, faces, lines]);
+  // The viewer's message while Decimal judges whether it answers anything.
+  const [saying, setSaying] = useState<{ text: string; at: Date } | null>(null);
+  const thread = useMemo(() => {
+    const said = threadOf(detail, chat.data, viewer, faces, lines);
+    if (saying) said.push({ id: 'saying', at: saying.at, who: viewer, body: <Figures text={saying.text} />, sending: true });
+    // Whoever a question still waits on ends the thread, once each. The person
+    // asked has the question on the band instead.
+    const seen = new Set<string>();
+    for (const q of detail.draft.questions) {
+      if (!q.stillOpen || q.youWereAsked || seen.has(q.askedOfUserId)) continue;
+      seen.add(q.askedOfUserId);
+      said.push({
+        id: `wait-${q.askedOfUserId}`, at: new Date(), waiting: true,
+        who: { name: q.askedOfName, avatarUrl: faces.get(q.askedOfName) ?? null },
+        body: 'Hasn’t answered yet',
+      });
+    }
+    return said;
+  }, [detail, chat.data, viewer, faces, lines, saying]);
 
   const tax = parseMoney(fields.taxAmount?.value) ?? 0;
   const printed = parseMoney(fields.total?.value) ?? draft.totalUsd;
@@ -549,6 +587,26 @@ export function AgentBox({
     await queryClient.invalidateQueries({ queryKey: ['companion-chat', organizationId] });
   };
 
+  // Said without an @name. With a question open it may be the answer, whoever
+  // says it: Decimal judges, and the server keeps it in the shared thread when
+  // it settles a question or comes from the person asked. Otherwise it was
+  // said to Decimal.
+  const say = async (text: string) => {
+    setSaying({ text, at: new Date() });
+    try {
+      if (draft.questions.some((q) => q.stillOpen && (q.canAnswer || q.youAsked))) {
+        const res = await billsApi.message(organizationId, billId, text);
+        if (res.posted) {
+          await refresh();
+          return;
+        }
+      }
+      await talk(text);
+    } finally {
+      setSaying(null);
+    }
+  };
+
   const runChatCard = async (action: CompanionActionCard) => {
     if (!chatId) return;
     if (action.open) {
@@ -576,6 +634,14 @@ export function AgentBox({
         refresh(),
       ]);
     }
+  };
+
+  // A question sent from a chat card is on the bill now: when it was asked.
+  const sentAt = (c: CompanionActionCard) => {
+    const words = /^"([\s\S]*)"(?:\s·\s[^"]*)?$/.exec(c.detail)?.[1]?.trim();
+    const to = /^Ask\s+(.*?):\s/.exec(c.title)?.[1];
+    const q = draft.questions.find((x) => x.question.trim() === words && x.askedOfName === to);
+    return q?.askedAt ?? null;
   };
 
   // What Decimal says, and the ways to settle it.
@@ -654,6 +720,7 @@ export function AgentBox({
   // A card from the single finding, or the close card, sits under the thread.
   const bottomCard = card && (card.kind === 'close' || findings.length <= 1) ? card : null;
   const canAsk = draft.canJoinConversation;
+  const forMe = draft.questions.find((q) => q.stillOpen && q.youWereAsked);
 
   return (
     <div className="bp-agentwrap">
@@ -687,7 +754,7 @@ export function AgentBox({
             {thread.length > 0 ? (
               <div className="bp-thread">
                 {thread.map((said) => (
-                  <Row key={said.id} said={said} busyCard={busyCard} onRunCard={(c) => void runChatCard(c)} />
+                  <Row key={said.id} said={said} busyCard={busyCard} onRunCard={(c) => void runChatCard(c)} sentAt={sentAt} />
                 ))}
               </div>
             ) : null}
@@ -710,11 +777,11 @@ export function AgentBox({
                 billId={billId}
                 viewer={viewer}
                 canAsk={canAsk}
-                placeholder={thread.length > 0 ? 'Reply… type @ to bring someone in' : 'Ask here… @ brings someone in'}
+                placeholder={forMe ? `Answer ${firstName(forMe.askedByName)}…` : thread.length > 0 ? 'Reply… type @ to bring someone in' : 'Ask here… @ brings someone in'}
                 aboutFlag={single?.kind ?? findings[0]?.kind ?? null}
                 actions={singleActions}
                 onAsked={refresh}
-                onTalk={talk}
+                onSay={say}
               />
             )}
           </>
