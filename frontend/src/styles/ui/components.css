@@ -227,6 +227,7 @@
 .ui .chip.is-warning { background: var(--chip-warning); }
 .ui .chip.is-waiting { background: var(--chip-waiting); }
 .ui .chip.is-finished { background: var(--chip-finished); }
+.ui .chip.is-hold { background: var(--chip-hold); }
 
 /* ── Pages ──────────────────────────────────────────────── */
 .ui.page {

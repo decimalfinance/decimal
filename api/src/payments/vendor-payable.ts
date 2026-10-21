@@ -35,9 +35,11 @@ export function readPayableHold(metadata: unknown): PayableHold | null {
 
 export function describePayableHold(vendorName: string, hold: PayableHold): string {
   const why = hold.reason ? ` — ${hold.byName}: “${hold.reason}”` : ` by ${hold.byName}`;
+  // A reason that already ends a sentence doesn't get a second full stop.
+  const stop = /[.!?]$/.test(hold.reason.trim()) ? '' : '.';
   return hold.status === 'blocked'
-    ? `${vendorName} is blocked${why}. Bills for a blocked vendor can't proceed; only the primary admin can unblock them.`
-    : `Payments to ${vendorName} are on hold${why}. An admin can release the hold from the Vendors page.`;
+    ? `${vendorName} is blocked${why}${stop} Bills for a blocked vendor can’t proceed; only the primary admin can unblock them.`
+    : `${vendorName} is on hold${why}${stop} Its bills can’t be sent for approval until an admin releases the hold on the vendor’s page.`;
 }
 
 export async function setVendorPayableStatus(args: {

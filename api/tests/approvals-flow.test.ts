@@ -229,6 +229,46 @@ test('release gate: a vendor hold set after approval still blocks release', asyn
   await assert.rejects(() => assertBillApprovedForRelease(orgId, bill.billId), /on hold/);
 });
 
+test('a bill row names its vendor record and the contact its document gives', async () => {
+  const { orgId, owner } = await makeOrg();
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [{
+        counterparty: 'Westlake Paper', amount: 120, currency: 'USD', reference: 'WP-7',
+        due_date: '2026-08-30', wallet_address: null, notes: null,
+        source_invoice: {
+          vendorName: 'Westlake Paper', vendorAddress: '450 Westlake Ave N, Seattle, WA 98109', vendorEmail: 'billing@westlake.example',
+          amount: 120, currency: 'USD', invoiceNumber: 'WP-7', invoiceDate: '2026-08-02', dueDate: '2026-08-30', terms: 'Net 30',
+          poNumber: null, earlyPayDiscount: null, subtotal: 120, taxAmount: 0, billToName: 'Halcyon Labs, Inc.',
+          remitTo: null, paymentDetails: { method: 'ACH', bankName: 'First Interstate Bank', accountLast4: '6621', routingNumber: '125000105' },
+          walletAddress: null, lineItems: [{ description: 'Copier paper', quantity: 1, unitPrice: 120, total: 120 }],
+          categoryHint: null, confidence: { vendor: 1, amount: 1, overall: 1 }, fieldConfidence: null,
+        },
+      }],
+      modelLatencyMs: 1, pageCount: 1,
+    }),
+  });
+  const up = await post(`/organizations/${orgId}/invoices/upload`, {
+    filename: 'w.pdf', mimeType: 'application/pdf', dataBase64: Buffer.from(`%PDF ${crypto.randomUUID()}`).toString('base64'), autoAdvance: false,
+  }, owner.token);
+  const billId = up.paymentOrders[0].paymentOrder.paymentOrderId as string;
+  const vendor = await prisma.counterparty.findFirstOrThrow({ where: { organizationId: orgId, displayName: 'Westlake Paper' } });
+
+  const wb = await get(`/organizations/${orgId}/bills/workbench`, owner.token);
+  const row = wb.bills.find((b: { paymentOrderId: string }) => b.paymentOrderId === billId);
+  assert.equal(row.counterpartyId, vendor.counterpartyId);
+  assert.equal(row.vendorEmail, 'billing@westlake.example');
+  // No Remit To panel on the document: the letterhead address, in parts.
+  assert.equal(row.vendorAddress.street, '450 Westlake Ave N');
+  assert.equal(row.vendorAddress.city, 'Seattle');
+  assert.equal(row.vendorAddress.state, 'WA');
+  assert.equal(row.vendorAddress.zip, '98109');
+
+  // The bill's page links to the same record.
+  const draft = await get(`/organizations/${orgId}/bills/${billId}/draft`, owner.token);
+  assert.equal(draft.vendor.counterpartyId, vendor.counterpartyId);
+});
+
 test('agent preconditions: autonomy is earned per vendor and vetoed by holds/duplicates', async () => {
   const { orgId, owner } = await makeOrg();
   // A trusted-rail bill from a NEW vendor: the agent must decline (no track

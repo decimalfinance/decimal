@@ -21,7 +21,7 @@ import { Icon } from '../kit/icons';
 import { Orb } from '../kit/Orb';
 import { useToaster } from '../kit/Toast';
 import { ago, calendarDay, daysPast, fileSize, usd } from '../kit/format';
-import { classify, type Part, type Stage, type TileKey } from './billStatus';
+import { classify, STAGE_EMPTY, STAGES, type Part, type Stage, type TileKey } from './billStatus';
 
 type SortKey = 'due' | 'newest' | 'amount';
 
@@ -30,25 +30,11 @@ type Row = { bill: WorkbenchBill; stage: Stage; part: Part; chip: string; late: 
 /** A file on its way up, before the server has it. */
 type Sending = { key: string; name: string; size: number; documentId: string | null };
 
-const STAGES: Array<{ key: Stage | 'all'; label: string }> = [
-  { key: 'all', label: 'All' },
-  { key: 'review', label: 'In review' },
-  { key: 'approval', label: 'In approval' },
-  { key: 'done', label: 'Done' },
-];
-
 const SORTS: Array<{ key: SortKey; label: string }> = [
   { key: 'due', label: 'Due date' },
   { key: 'newest', label: 'Newest' },
   { key: 'amount', label: 'Amount' },
 ];
-
-const EMPTY: Record<Stage | 'all', string> = {
-  all: 'No bills yet.',
-  review: 'Nothing in review.',
-  approval: 'Nothing with the approvers.',
-  done: 'Nothing done yet.',
-};
 
 const ACCEPT = '.pdf,.png,.jpg,.jpeg,.heic,.webp,image/*,application/pdf';
 
@@ -378,7 +364,7 @@ export function BillsPage() {
               ))}
             </div>
             {shown.length === 0 && uploadRows.length === 0 && sendingRows.length === 0 ? (
-              <div className="bl-empty">{filtering || query ? 'No bills match.' : EMPTY[stage]}</div>
+              <div className="bl-empty">{filtering || query ? 'No bills match.' : STAGE_EMPTY[stage]}</div>
             ) : null}
           </div>
         </>

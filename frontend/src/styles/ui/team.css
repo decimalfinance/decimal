@@ -23,8 +23,6 @@
   color: var(--ink-4);
   cursor: not-allowed;
 }
-.ui .bl-search.tm-search { width: 200px; }
-.ui .tm-search > input { flex: 1; width: auto; min-width: 0; }
 
 /* ── The tables: columns as wide as what's in them, equal gaps ─ */
 .ui .tm-grid {

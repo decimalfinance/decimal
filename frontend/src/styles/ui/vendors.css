@@ -1,0 +1,59 @@
+/*
+ * Vendors (Vendors.dc.html 1a, 2a and 2d). The list is Bills' header, bar and
+ * table (bills.css), and a vendor's page borrows the bill page's breadcrumb and
+ * details grid (bill.css). This is what the two pages add: the New label, the
+ * newest bill's day and number, the page's frame and five-column table, and
+ * the blocks that show only when they apply: a hold, and other names.
+ */
+
+/* ── The list ───────────────────────────────────────────── */
+.ui .vd-none { color: var(--ink-4); }
+.ui .vd-latest { gap: 6px; font-size: 11px; color: var(--ink); }
+.ui .vd-nonum { font-size: 10.5px; color: var(--ink-3); }
+.ui .vd-new {
+  font: 600 8.5px/1 var(--mono);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--maroon);
+}
+.ui .bl-empty.vd-failed { display: flex; align-items: center; gap: 14px; }
+
+/* ── A vendor's page: the breadcrumb stays, the rest scrolls ─ */
+.ui.vd-page { height: 100%; display: flex; flex-direction: column; min-height: 0; background: var(--white); }
+.ui .vd-scroll { flex: 1 1 0%; min-height: 0; overflow-y: auto; padding-bottom: 24px; }
+.ui .list-head.vd-head { gap: 24px; }
+.ui .vd-act { flex: none; margin-left: auto; }
+/* At the top of the scroller, so its hint opens below it. */
+.ui .vd-act .tip { top: calc(100% + 6px); bottom: auto; right: 0; }
+.ui .vd-note { display: flex; align-items: center; gap: 14px; padding: 18px 30px; font-size: 11px; color: var(--ink-2); }
+.ui .vd-details { padding: 14px 30px 17px; }
+
+/* The five columns of its bills, with the four gaps between them */
+.ui .vd-grid {
+  display: grid;
+  grid-template-columns:
+    max-content minmax(32px, 1fr) max-content minmax(32px, 1fr) max-content
+    minmax(32px, 1fr) max-content minmax(32px, 1fr) max-content;
+}
+
+/* ── Only when they apply (2d): a hold, and other names ── */
+.ui .vd-blocks { display: grid; gap: 22px; padding: 0 30px 17px; }
+.ui .vd-block { display: grid; gap: 9px; }
+.ui .vd-block-title { font: 600 13px/1.3 var(--font); letter-spacing: -.01em; color: var(--ink); }
+/* White, never the pink cloud: a person held it, not Decimal. */
+.ui .vd-hold {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 16px;
+  row-gap: 5px;
+  padding: 12px 14px 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.ui .vd-hold-name { display: flex; align-items: center; gap: 8px; min-width: 0; font: 600 11.5px/1.3 var(--font); color: var(--ink); }
+.ui .vd-hold-act { grid-column: 2; grid-row: 1 / span 3; align-self: start; }
+.ui .vd-hold-by { display: flex; align-items: center; gap: 6px; font: 400 10.5px/1.3 var(--font); color: var(--ink-3); }
+.ui .vd-hold-why { font: 400 11px/1.5 var(--font); color: var(--ink); text-wrap: pretty; }
+.ui .vd-hold-holds { color: var(--ink-3); }
+.ui .vd-alias { font: 400 11.5px/1.5 var(--font); color: var(--ink); }
+.ui .btn.vd-small { height: 24px; padding: 0 10px; font-size: 10.5px; }

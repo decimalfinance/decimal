@@ -224,6 +224,9 @@
 }
 .ui .bl-search > input::placeholder { color: var(--ink-4); }
 .ui .bl-search > input::-webkit-search-cancel-button { display: none; }
+/* The 200px search of the pages without a sort beside it */
+.ui .bl-search.is-wide { width: 200px; }
+.ui .bl-search.is-wide > input { flex: 1; width: auto; min-width: 0; }
 .ui .bl-sort { position: relative; }
 .ui .bl-sort-btn {
   display: flex;

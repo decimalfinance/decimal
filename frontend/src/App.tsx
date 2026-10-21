@@ -24,7 +24,8 @@ const DocumentPage = lazy(() => import('./pages/bill/Reading').then((m) => ({ de
 const FlowBuilderPage = lazy(() => import('./pages/FlowBuilder').then((m) => ({ default: m.FlowBuilderPage })));
 const PaymentDetailPageV2 = lazy(() => import('./pages/PaymentDetail').then((m) => ({ default: m.PaymentDetailPage })));
 const WalletsPage = lazy(() => import('./pages/Wallets').then((m) => ({ default: m.WalletsPage })));
-const CounterpartiesPage = lazy(() => import('./pages/Counterparties').then((m) => ({ default: m.CounterpartiesPage })));
+const VendorsPage = lazy(() => import('./pages/Vendors').then((m) => ({ default: m.VendorsPage })));
+const VendorPage = lazy(() => import('./pages/Vendor').then((m) => ({ default: m.VendorPage })));
 const LandingPage = lazy(() => import('./pages/landing-v4').then((m) => ({ default: m.LandingPage })));
 const TeamPage = lazy(() => import('./pages/Team').then((m) => ({ default: m.TeamPage })));
 const ApprovalsPage = lazy(() => import('./pages/Approvals').then((m) => ({ default: m.ApprovalsPage })));
@@ -202,7 +203,8 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
               <Route path="/organizations/:organizationId/accounting" element={<Legacy><AccountingPage session={session} /></Legacy>} />
               {/* The Coding inbox is gone: categories are chosen in review, and approved bills post to QuickBooks. */}
               <Route path="/organizations/:organizationId/accounting/coding" element={<OrgRedirect to="inbox" />} />
-              <Route path="/organizations/:organizationId/counterparties" element={<Legacy><CounterpartiesPage session={session} /></Legacy>} />
+              <Route path="/organizations/:organizationId/counterparties" element={<VendorsPage />} />
+              <Route path="/organizations/:organizationId/counterparties/:counterpartyId" element={<VendorPage />} />
               <Route path="/organizations/:organizationId/destinations" element={<OrgRedirect to="counterparties" />} />
               <Route path="/organizations/:organizationId/bills" element={<BillsPage />} />
               <Route path="/organizations/:organizationId/bills/:paymentOrderId" element={<BillPage />} />

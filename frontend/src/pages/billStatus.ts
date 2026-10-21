@@ -8,6 +8,21 @@ export type Stage = 'review' | 'approval' | 'done';
 export type TileKey = 'you' | 'approvers' | 'done';
 export type Tone = 'blocking' | 'warning' | 'yours' | 'checked' | 'waiting' | 'finished';
 
+/** The stage bar over a table of bills, and what it says when a stage is empty. */
+export const STAGES: Array<{ key: Stage | 'all'; label: string }> = [
+  { key: 'all', label: 'All' },
+  { key: 'review', label: 'In review' },
+  { key: 'approval', label: 'In approval' },
+  { key: 'done', label: 'Done' },
+];
+
+export const STAGE_EMPTY: Record<Stage | 'all', string> = {
+  all: 'No bills yet.',
+  review: 'Nothing in review.',
+  approval: 'Nothing with the approvers.',
+  done: 'Nothing done yet.',
+};
+
 /** One row of a tile: every bill is in exactly one, and it names the bill's chip. */
 export type Part = {
   key: string;

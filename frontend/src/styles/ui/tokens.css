@@ -78,6 +78,7 @@
   --chip-waiting: #DCE5EE;
   --yellow: #FACC15;         /* the chain's waiting badge */
   --chip-finished: #E9E9E4;
+  --chip-hold: #F8D3B6;      /* a vendor on hold */
   --chip-question: #D3E9E0;  /* the Inbox's kinds: a question for you */
   --chip-reply: #DCD8F8;     /* an answer to yours */
   --chip-sentback: #EDDCE6;  /* sent back to review */

@@ -296,7 +296,7 @@ export function TeamPage() {
           ))}
         </div>
         <div className="bl-tools">
-          <label className="bl-search tm-search">
+          <label className="bl-search is-wide">
             <Icon.search size={11} />
             <input
               type="search"

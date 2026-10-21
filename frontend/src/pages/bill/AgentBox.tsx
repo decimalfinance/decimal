@@ -524,7 +524,9 @@ export function AgentBox({
       return;
     }
     if (pill.action === 'release_vendor') {
-      navigate(`/organizations/${organizationId}/counterparties`);
+      // Released on the vendor's page, where it was set.
+      const vendorId = draft.vendor.counterpartyId;
+      navigate(`/organizations/${organizationId}/counterparties${vendorId ? `/${vendorId}` : ''}`);
       return;
     }
     if (pill.action === 'different_vendor') {

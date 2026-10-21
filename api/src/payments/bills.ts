@@ -324,6 +324,39 @@ function num(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+const REMIT_PARTS = ['street', 'city', 'state', 'zip', 'country'] as const;
+type RemitPart = (typeof REMIT_PARTS)[number];
+
+/**
+ * Where a bill's vendor address comes from. remitTo only fills when the
+ * invoice prints an explicit "Remit To" panel; most invoices just carry the
+ * address on the letterhead, which extraction puts in the flat `vendorAddress`
+ * string. So fall back to that, split into parts, rather than say the address
+ * isn't on a document that plainly shows it. Whether the country was worked
+ * out rather than read comes with it.
+ */
+function remitSource(extracted: Record<string, unknown>) {
+  const panel = isRecord(extracted.remitTo) ? extracted.remitTo : {};
+  if (REMIT_PARTS.some((p) => str(panel[p]))) return { remitTo: panel, usedVendorAddress: false, countryInferred: false };
+  const split = splitPostalAddress(str(extracted.vendorAddress));
+  return { remitTo: split as Record<string, unknown>, usedVendorAddress: true, countryInferred: split.countryInferred };
+}
+
+/**
+ * The vendor's contact as one bill gives it, by the bill page's rule: what a
+ * person verified wins over what was read. A vendor record keeps no contact of
+ * its own, so the Vendors pages read it off the vendor's bills.
+ */
+function vendorContactOf(extracted: Record<string, unknown>, verifiedFields: Record<string, unknown> | null) {
+  const verified = verifiedFields && isRecord(verifiedFields.remitTo) ? verifiedFields.remitTo : null;
+  const from = verified ?? remitSource(extracted).remitTo;
+  const address = Object.fromEntries(REMIT_PARTS.map((p) => [p, str(from[p])])) as Record<RemitPart, string | null>;
+  return {
+    vendorEmail: (verifiedFields ? str(verifiedFields.vendorEmail) : null) ?? str(extracted.vendorEmail),
+    vendorAddress: REMIT_PARTS.some((p) => address[p]) ? address : null,
+  };
+}
+
 function usdText(amountRaw: bigint): string {
   return '$' + amountRawToUsd(amountRaw).toLocaleString('en-US', { maximumFractionDigits: 2 });
 }
@@ -1285,6 +1318,15 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
       bucket,
       state: order.state,
       vendorName,
+      // The vendor record it is filed under, and the vendor's contact as this
+      // bill gives it: the Vendors pages are built from these rows.
+      counterpartyId: order.counterpartyId,
+      ...vendorContactOf(
+        extracted ?? {},
+        isRecord(metadataRecord.verification) && isRecord(metadataRecord.verification.fields)
+          ? metadataRecord.verification.fields
+          : null,
+      ),
       description: firstLine ?? order.memo,
       amountUsd: amountRawToUsd(order.amountRaw),
       amountOriginal:
@@ -1735,25 +1777,15 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     source: f.value == null || f.value === '' ? null : sourceOf(sourceKeyByField[f.key] ?? f.key),
   }));
 
-  const remitToRaw = isRecord(extracted.remitTo) ? extracted.remitTo : {};
-  // These four inputs live inside the Vendor block and read as "the vendor's
-  // address", but remitTo only fills when the invoice prints an explicit
-  // "Remit To" panel. Most invoices just carry the address on the letterhead,
-  // which extraction puts in the flat `vendorAddress` string — so the fields
-  // rendered "Not on document" about an address plainly on the page. Fall back
-  // to the letterhead address rather than tell the bill clerk it isn't there.
-  const remitTo = (['street', 'city', 'state', 'zip', 'country'] as const).some((p) => str(remitToRaw[p]))
-    ? remitToRaw
-    : splitPostalAddress(str(extracted.vendorAddress));
-  const usedVendorAddress = remitTo !== remitToRaw;
-  // Whether the country was worked out rather than read. Carried to the screen
-  // so the one field we are willing to fill without the document saying so is
-  // also the one field that admits it.
-  const countryInferred = usedVendorAddress
-    && splitPostalAddress(str(extracted.vendorAddress)).countryInferred;
+  // These inputs live inside the Vendor block and read as "the vendor's
+  // address": the Remit To panel, else the letterhead address (remitSource).
+  // Whether the country was worked out rather than read is carried to the
+  // screen, so the one field we are willing to fill without the document
+  // saying so is also the one field that admits it.
+  const { remitTo, usedVendorAddress, countryInferred } = remitSource(extracted);
   const remitToVerified = verifiedFields && isRecord(verifiedFields.remitTo) ? verifiedFields.remitTo : null;
   const remitPartSourceKey = { street: 'remitStreet', city: 'remitCity', state: 'remitState', zip: 'remitZip', country: 'remitCountry' } as const;
-  const remitFields = (['street', 'city', 'state', 'zip', 'country'] as const).map((part) => {
+  const remitFields = REMIT_PARTS.map((part) => {
     const value = remitToVerified ? remitToVerified[part] : str(remitTo[part]);
     return {
       key: `remitTo.${part}`,
@@ -2284,6 +2316,8 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
         && order.counterparty.displayName !== str(extracted.vendorName)
         ? order.counterparty.displayName
         : null,
+      // The record itself, for a link to the vendor's page.
+      counterpartyId: order.counterpartyId,
       email: (verifiedFields ? str(verifiedFields.vendorEmail) : null) ?? str(extracted.vendorEmail),
       nameSource: sourceOf('vendorName'),
       emailSource: sourceOf('vendorEmail'),

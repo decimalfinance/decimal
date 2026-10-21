@@ -511,7 +511,8 @@ export const api = {
     }>(`/organizations/${organizationId}/treasury-wallets/balances`);
   },
   listCounterparties(organizationId: string) {
-    return request<{ items: Counterparty[] }>(`/organizations/${organizationId}/counterparties`);
+    // The most the route gives; its default of 100 would cut the list silently.
+    return request<{ items: Counterparty[] }>(`/organizations/${organizationId}/counterparties?limit=250`);
   },
   // Vendor payable gate: held = admin sets/releases; blocked = primary admin only.
   setVendorPayableStatus(
@@ -1084,6 +1085,11 @@ export interface WorkbenchBill {
   bucket: BillBucket;
   state: string;
   vendorName: string;
+  /** The vendor record it is filed under. */
+  counterpartyId: string | null;
+  /** The vendor's contact as this bill gives it: what a person verified, else what was read. */
+  vendorEmail: string | null;
+  vendorAddress: { street: string | null; city: string | null; state: string | null; zip: string | null; country: string | null } | null;
   description: string | null;
   amountUsd: number;
   amountOriginal: { amount: number; currency: string } | null;
@@ -1247,7 +1253,7 @@ export interface BillDraft {
   sentBack: { reason: string | null; byName: string | null; at: string | null } | null;
   /** `name` is what the DOCUMENT prints; `paidAs` is the vendor record it is
    *  linked to, present only when that record goes by a different name. */
-  vendor: { name: string; paidAs?: string | null; email: string | null; nameSource?: DocSource; emailSource?: DocSource; nameState: BillDraftField['state']; emailState: BillDraftField['state']; isNew: boolean; trustState: string };
+  vendor: { name: string; paidAs?: string | null; counterpartyId?: string | null; email: string | null; nameSource?: DocSource; emailSource?: DocSource; nameState: BillDraftField['state']; emailState: BillDraftField['state']; isNew: boolean; trustState: string };
   document: {
     invoiceDocumentId: string;
     filename: string;

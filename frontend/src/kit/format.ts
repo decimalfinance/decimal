@@ -46,6 +46,12 @@ export function fullDay(value: string | Date) {
   return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 }
 
+/** The month a moment fell in: "Mar 2025". */
+export function monthOf(value: string | Date) {
+  const d = new Date(value);
+  return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
+
 /** A moment in full, for a record of it: "30 Sep 2026, 9:14". */
 export function stamp(value: string | Date) {
   const d = new Date(value);
