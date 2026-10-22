@@ -296,7 +296,7 @@ export function LineItems({
     <>
       <div className="bp-sec-head">
         <div className="bp-sec-title">Line items</div>
-        {editable && reading === null ? <button type="button" className="bp-add" onClick={onAdd}>+ Add a line</button> : null}
+        {editable && reading === null ? <button type="button" className="bp-add" aria-label="Add a line" onClick={onAdd}>Add</button> : null}
       </div>
       <div className="bp-lines">
         <div className="bp-lines-grid">
