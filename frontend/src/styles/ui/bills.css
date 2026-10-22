@@ -47,7 +47,7 @@
 .ui .split-main:focus-visible,
 .ui .split-arrow:focus-visible { position: relative; z-index: 1; box-shadow: var(--focus); }
 /* 300px, and wider only to show a long forwarding address whole. */
-.ui .split-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; width: max-content; min-width: 300px; max-width: min(440px, calc(100vw - 32px)); }
+.ui .split-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; width: max-content; min-width: 300px; max-width: min(440px, calc(100vw / var(--app-zoom, 1) - 32px)); }
 .ui .split-item {
   display: grid;
   grid-template-columns: 13px minmax(0, 1fr);

@@ -7,6 +7,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import type { FlowNode } from '../../api';
 import { Avatar } from '../../kit/Avatar';
 import { Icon } from '../../kit/icons';
+import { zoomOf } from '../../kit/zoom';
 import { Figures, TickGlyph } from '../bill/parts';
 import { find, listAt, type ListKey, type Route } from './flowTree';
 import { layout } from './layout';
@@ -117,8 +118,10 @@ export function Canvas({
     function move(e: MouseEvent) {
       const d = drag.current;
       if (!d) return;
-      const dx = e.clientX - d.mx;
-      const dy = e.clientY - d.my;
+      // The pointer moves in screen pixels; the view is in the canvas's own.
+      const k = ground.current ? zoomOf(ground.current) : 1;
+      const dx = (e.clientX - d.mx) / k;
+      const dy = (e.clientY - d.my) / k;
       if (!d.moved && Math.abs(dx) + Math.abs(dy) < 4) return;
       d.moved = true;
       setView((v) => ({ ...v, x: Math.round(d.x + dx), y: Math.round(d.y + dy) }));
@@ -147,11 +150,14 @@ export function Canvas({
       const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el!.clientHeight : 1;
       if (e.ctrlKey || e.metaKey) {
         const r = el!.getBoundingClientRect();
-        zoomBy(Math.pow(1.0015, -e.deltaY * unit), e.clientX - r.left, e.clientY - r.top);
+        const k = zoomOf(el!);
+        zoomBy(Math.pow(1.0015, -e.deltaY * unit), (e.clientX - r.left) / k, (e.clientY - r.top) / k);
         return;
       }
-      const dx = (e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX) * unit;
-      const dy = (e.shiftKey && !e.deltaX ? 0 : e.deltaY) * unit;
+      // A wheel's pixels are the screen's; the view is in the canvas's own.
+      const k = e.deltaMode === 0 ? zoomOf(el!) : 1;
+      const dx = ((e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX) * unit) / k;
+      const dy = ((e.shiftKey && !e.deltaX ? 0 : e.deltaY) * unit) / k;
       setView((v) => ({ ...v, x: Math.round(v.x - dx), y: Math.round(v.y - dy) }));
     }
     el.addEventListener('wheel', wheel, { passive: false });
@@ -428,7 +434,10 @@ function Float({ open, ground, view, children }: { open: Open; ground: RefObject
     const anchor = g.querySelector<HTMLElement>(open.kind === 'node' ? `[data-node="${open.id}"]` : `[data-anchor="${open.anchor}"]`);
     if (!anchor) return;
     const gr = g.getBoundingClientRect();
-    const ar = anchor.getBoundingClientRect();
+    const r = anchor.getBoundingClientRect();
+    // The anchor's box in the canvas's own pixels: the rects are in screen pixels.
+    const k = zoomOf(g);
+    const ar = { left: (r.left - gr.left) / k, top: (r.top - gr.top) / k, bottom: (r.bottom - gr.top) / k, width: r.width / k };
     const w = g.clientWidth;
     const h = g.clientHeight;
     const ew = el.offsetWidth;
@@ -436,17 +445,17 @@ function Float({ open, ground, view, children }: { open: Open; ground: RefObject
     let x: number;
     let y: number;
     if (open.kind === 'node') {
-      const ax = ar.left - gr.left;
+      const ax = ar.left;
       x = ax + ar.width + 12;
       if (x + ew > w - 12) x = ax - ew - 12;
       if (x < 12) x = Math.min(Math.max(12, ax), w - ew - 12);
-      y = ar.top - gr.top - 4;
+      y = ar.top - 4;
       if (y + eh > h - 12) y = h - eh - 12;
       el.style.maxHeight = `${h - 24}px`;
     } else {
-      x = Math.min(w - ew - 12, ar.left - gr.left + ar.width / 2 - ew / 2);
-      y = ar.bottom - gr.top + 6;
-      if (y + eh > h - 12) y = ar.top - gr.top - eh - 6;
+      x = Math.min(w - ew - 12, ar.left + ar.width / 2 - ew / 2);
+      y = ar.bottom + 6;
+      if (y + eh > h - 12) y = ar.top - eh - 6;
     }
     el.style.left = `${Math.round(Math.max(12, x))}px`;
     el.style.top = `${Math.round(Math.max(12, y))}px`;

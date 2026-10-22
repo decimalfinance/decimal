@@ -117,7 +117,7 @@
 .ui .dlg {
   width: 400px;
   max-width: 100%;
-  max-height: calc(100vh - 48px);
+  max-height: calc(100vh / var(--app-zoom, 1) - 48px);
   overflow: auto;
   padding: 20px;
   background: var(--white);

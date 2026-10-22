@@ -4,11 +4,21 @@
  * out over the page. The grey under the rail is painted on the frame itself,
  * so the column can animate without a white gap.
  */
+
+/*
+ * The app reads at 110%: at the browser's 100% it was all a little small.
+ * App.tsx sets app-zoom on <html> on every page but the landing page, so
+ * dialogs and toasts come too. A bill's page undoes it, and so does a toast or
+ * dialog over a bill (bill.css). Anything sized to the window divides by
+ * --app-zoom: under zoom, 100vh is 110% of the window.
+ */
+html.app-zoom { --app-zoom: 1.1; --app-unzoom: 0.9090909; zoom: var(--app-zoom); }
+
 .shell {
   position: relative;
   display: grid;
   grid-template-columns: 200px minmax(0, 1fr);
-  height: 100vh;
+  height: calc(100vh / var(--app-zoom, 1));
   overflow: hidden;
   background: linear-gradient(90deg, var(--grey) 51px, var(--line) 51px, var(--line) 52px, var(--white) 52px);
   transition: grid-template-columns .18s ease;
@@ -20,7 +30,7 @@
   grid-row: 1;
   position: relative;
   min-width: 0;
-  height: 100vh;
+  height: calc(100vh / var(--app-zoom, 1));
   overflow: hidden;
   background: var(--white);
 }
@@ -210,7 +220,7 @@
   align-self: start;
   position: relative;
   z-index: 3;
-  height: 100vh;
+  height: calc(100vh / var(--app-zoom, 1));
   display: flex;
   flex-direction: column;
   gap: 1px;

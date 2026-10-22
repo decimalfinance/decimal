@@ -23,6 +23,7 @@ import {
 import { Avatar } from '../kit/Avatar';
 import { Orb } from '../kit/Orb';
 import { useToaster } from '../kit/Toast';
+import { zoomOf } from '../kit/zoom';
 import { daysPast, firstName, shortDay, usd } from '../kit/format';
 import { AskCard, isAskCard } from './bill/AskCard';
 import type { Face } from './bill/model';
@@ -174,9 +175,10 @@ function useFullScreen(page: RefObject<HTMLDivElement | null>, wrap: RefObject<H
     if (!root || !place) return null;
     const r = root.getBoundingClientRect();
     const p = place.getBoundingClientRect();
+    const z = zoomOf(root);
     return {
-      top: r.top + FULL_GAP - p.top,
-      left: r.left + FULL_GAP - p.left,
+      top: (r.top - p.top) / z + FULL_GAP,
+      left: (r.left - p.left) / z + FULL_GAP,
       width: root.clientWidth - 2 * FULL_GAP,
       height: root.clientHeight - 2 * FULL_GAP,
     };
@@ -667,7 +669,7 @@ function DecimalBox({ organizationId, me, canReview, screen, opening, suggestion
     const asked = el.querySelectorAll<HTMLElement>('[data-asked]');
     const last = asked[asked.length - 1];
     if (!last) return;
-    const top = last.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
+    const top = (last.getBoundingClientRect().top - el.getBoundingClientRect().top) / zoomOf(el) + el.scrollTop;
     el.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
   }, [tail]);
 

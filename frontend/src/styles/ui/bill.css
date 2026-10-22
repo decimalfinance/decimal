@@ -23,13 +23,19 @@
 }
 
 /* ── The frame ──────────────────────────────────────────── */
+/* A bill's page stays at the browser's 100%: it undoes the app's 110% (shell.css),
+   and so does a dialog or toast shown over it. Inside them, --app-zoom is 1 again. */
 .ui.bp {
+  zoom: var(--app-unzoom, 1);
+  --app-zoom: 1;
   height: 100%;
   display: flex;
   flex-direction: column;
   min-height: 0;
   background: var(--white);
 }
+html.app-zoom:has(.ui.bp) .ui.dlg-scrim,
+html.app-zoom:has(.ui.bp) .ui.toast { zoom: var(--app-unzoom); --app-zoom: 1; }
 .ui .bp-crumb {
   flex: none;
   display: flex;

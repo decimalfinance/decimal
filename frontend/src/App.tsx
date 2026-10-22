@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useMemo, type ReactNode } from 'react';
+import { Suspense, lazy, useEffect, useLayoutEffect, useMemo, type ReactNode } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Shell } from './kit/Shell';
@@ -56,6 +56,10 @@ const RouteFallback = () => <div className="ui page" />;
 
 export function App() {
   const location = useLocation();
+  // Every page but the landing page reads at 110% (html.app-zoom, styles/ui/shell.css).
+  useLayoutEffect(() => {
+    document.documentElement.classList.toggle('app-zoom', location.pathname !== '/');
+  }, [location.pathname]);
   const capabilitiesQuery = useQuery({
     queryKey: ['capabilities'] as const,
     queryFn: () => api.getCapabilities(),

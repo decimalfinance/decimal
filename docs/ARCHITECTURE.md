@@ -205,6 +205,8 @@ React Router with every page lazy-loaded in `src/App.tsx`, which keeps Solana we
 
 Read `frontend/src/pages/PAGE-PLAYBOOK.md` before creating or editing any page: the page shapes, the shared classes, the kit and the rules. Colours, shadows and scrims come only from `styles/ui/tokens.css`. The pages still in the old system (Chat, Knowledge, Accounting, the approvals and proposals screens, and the frozen payment screens) keep `src/styles/decimal/` and the primitives in `src/dec/`, cut down to what they use; don't extend them, redesign them.
 
+**The app reads at 110%.** At the browser's 100% everything was a little small, so `App.tsx` puts `app-zoom` on `<html>` on every page but the landing page, and `html.app-zoom` sets CSS `zoom: 1.1` (`styles/ui/shell.css`). A bill's page undoes it (`.ui.bp` in `bill.css`), as does a dialog or toast shown over it, so a bill reads at the browser's 100% while the sidebar beside it stays at 110%. Under `zoom`, `100vh` and `100vw` are 110% of the window, so anything sized to the window divides by `--app-zoom` (`calc(100vh / var(--app-zoom, 1))`), which is 1 inside a bill's page. A mouse position and `getBoundingClientRect()` are in screen pixels while `offsetWidth`, `scrollTop` and the lengths written to a style are in the element's own, so code that carries a distance from one to the other divides by `zoomOf(el)` from `kit/zoom.ts` (the rules canvas, Home's full screen). Media queries still measure the window, so a breakpoint meant for the zoomed page is its width times 1.1 (sign-in's 836px). The design's artboards are drawn at 100%: to compare a page with them, take `app-zoom` off `<html>`.
+
 The public landing page is `src/pages/landing-v4/`.
 
 ## Payment execution (Frozen)

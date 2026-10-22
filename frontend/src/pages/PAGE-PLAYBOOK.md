@@ -104,6 +104,7 @@ Pages the redesign hasn't reached render inside `<Legacy>` in `App.tsx` (`div.de
 - **Copy.** Sentence case for titles, buttons, tabs and menu items; column heads in capitals. "Organisation" in copy, while identifiers and the API keep `organization`. Typographic apostrophes and quotes. No em dashes. The product's words: bill, approval, approvers, team members, Category. A question on a bill is a plain chat message, never a card.
 - **Text fills its container.** No `max-width` on prose.
 - **Light only.** There is no dark theme.
+- **The app reads at 110%** (`zoom` on `<html>`, `styles/ui/shell.css`; a bill's page undoes it). Size to the window with `calc(100vh / var(--app-zoom, 1))`, never a bare `100vh` or `100vw`. In script, a mouse position or `getBoundingClientRect()` is in screen pixels, and `offsetWidth`, `scrollTop` and style lengths are in the element's own: divide a distance carried from one to the other by `zoomOf(el)` (`kit/zoom.ts`). A media query measures the window, so multiply a breakpoint by 1.1.
 
 ## Keeping this true
 

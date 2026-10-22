@@ -7,7 +7,7 @@
  * link. Buttons have no edges: the border stays, transparent.
  */
 .ui.si-page {
-  min-height: 100vh;
+  min-height: calc(100vh / var(--app-zoom, 1));
   display: grid;
   /* The form keeps its 360px and its margins; the art gives way. */
   grid-template-columns: 3fr minmax(456px, 2fr);
@@ -22,7 +22,7 @@
 .ui .si-art {
   position: sticky;
   top: 0;
-  height: 100vh;
+  height: calc(100vh / var(--app-zoom, 1));
   min-width: 0;
   display: flex;
   align-items: center;
@@ -50,13 +50,14 @@
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding: max(48px, calc(50vh - 190px)) 48px 48px;
+  padding: max(48px, calc(50vh / var(--app-zoom, 1) - 190px)) 48px 48px;
   background: var(--white);
 }
 .ui .si-form { width: 360px; max-width: 100%; }
 
-/* Too narrow for both: the form alone. */
-@media (max-width: 760px) {
+/* Too narrow for both: the form alone. 836px is 760px at the app's 110%
+   (shell.css): a media query measures the window, not the zoomed page. */
+@media (max-width: 836px) {
   .ui.si-page { grid-template-columns: 1fr; }
   .ui .si-art { display: none; }
   .ui .si-col { padding-right: 16px; padding-left: 16px; }
