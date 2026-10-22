@@ -134,7 +134,7 @@ export function VendorPage() {
                   {(off) => (
                     <button
                       type="button"
-                      className={`btn${off ? ' is-primary' : ''}`}
+                      className="btn is-primary"
                       aria-disabled={off || undefined}
                       tabIndex={off ? -1 : undefined}
                       onClick={

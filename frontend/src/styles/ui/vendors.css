@@ -27,6 +27,8 @@
 .ui .vd-act .tip { top: calc(100% + 6px); bottom: auto; right: 0; }
 .ui .vd-note { display: flex; align-items: center; gap: 14px; padding: 18px 30px; font-size: 11px; color: var(--ink-2); }
 .ui .vd-details { padding: 14px 30px 17px; }
+/* The vendor's own details on a grey card that hugs them. */
+.ui .vd-details > .bp-kv { padding: 10px 16px; border-radius: 8px; background: var(--grey); }
 
 /* The five columns of its bills, with the four gaps between them */
 .ui .vd-grid {
