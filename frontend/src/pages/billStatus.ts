@@ -85,7 +85,8 @@ export function classify(bill: WorkbenchBill, viewer: { userId: string; canRevie
       return {
         stage,
         part: part(`w:${names.join('|')}`, 'approvers', names.join(' or '), 'waiting', 10, names),
-        chip: `Waiting on ${names.map(firstName).join(' or ')}`,
+        // Past two people the chip stops naming them; the bill shows who.
+        chip: names.length > 2 ? 'Waiting on others' : `Waiting on ${names.map(firstName).join(' or ')}`,
       };
     }
     // Nobody to act: held, or a route with no one on it.

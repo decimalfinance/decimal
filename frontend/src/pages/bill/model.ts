@@ -402,6 +402,8 @@ export function headerOf(detail: BillDetail, fields: Fields): { stage: Stage; st
     if (takeBackAsked(detail)) return approval('On hold', 'waiting');
     if (detail.viewer.openTaskId) return approval('Waiting on you', 'yours');
     if (draft.questions.some((q) => q.youWereAsked && q.stillOpen)) return approval('Question for you', 'yours');
+    // Past two people the chip stops naming them; the route below shows who.
+    if (people.length > 2) return approval('Waiting on others', 'waiting');
     if (people.length > 0) return approval(`Waiting on ${people.map((p) => (people.length > 1 ? firstName(p.name) : p.name)).join(' or ')}`, 'waiting');
     return approval(detail.status.subStatus.text, 'finished');
   }
