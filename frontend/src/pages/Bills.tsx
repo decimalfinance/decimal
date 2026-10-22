@@ -520,14 +520,25 @@ function Tile({
                   <span className="bl-part-label">
                     {p.people ? (
                       <>
-                        {p.people.map((person, i) => (
-                          <Fragment key={person}>
-                            {i > 0 ? <span className="bl-part-or">or</span> : null}
-                            <span className={i === p.people!.length - 1 ? 'clip' : undefined} style={i < p.people!.length - 1 ? { flex: 'none' } : undefined}>
-                              {person}
+                        {p.people.length > 2 ? (
+                          // Past two people, one name and how many more: the faces show who.
+                          <>
+                            <span className="clip">{p.people[0]}</span>
+                            <span className="bl-part-or">or</span>
+                            <span style={{ flex: 'none' }}>
+                              <span className="num">{p.people.length - 1}</span> others
                             </span>
-                          </Fragment>
-                        ))}
+                          </>
+                        ) : (
+                          p.people.map((person, i) => (
+                            <Fragment key={person}>
+                              {i > 0 ? <span className="bl-part-or">or</span> : null}
+                              <span className={i === p.people!.length - 1 ? 'clip' : undefined} style={i < p.people!.length - 1 ? { flex: 'none' } : undefined}>
+                                {person}
+                              </span>
+                            </Fragment>
+                          ))
+                        )}
                         {p.people.map((person) => (
                           <Avatar key={`face-${person}`} name={person} />
                         ))}
