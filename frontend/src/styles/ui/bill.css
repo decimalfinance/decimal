@@ -437,7 +437,9 @@
 }
 .ui .bp-add:hover { border-color: var(--pink-300); }
 .ui .bp-fields { display: grid; gap: 8px 10px; margin-top: 8px; }
-.ui .bp-fields.is-vendor { grid-template-columns: 1.3fr 1.2fr 1fr; }
+.ui .bp-fields.is-vendor { grid-template-columns: 1.3fr .6fr .6fr 1fr; }
+/* Two rows: Email spans the State and ZIP code columns, so Country sits beside ZIP code. */
+.ui .bp-fields.is-vendor > .bp-field:nth-child(2) { grid-column: span 2; }
 .ui .bp-fields.is-details { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .ui .bp-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .ui .bp-label { font-size: 10px; font-weight: 500; color: var(--ink-2); }
