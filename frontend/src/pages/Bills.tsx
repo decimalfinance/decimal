@@ -64,7 +64,6 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
-/** "Copy" that reads "Copied" for two seconds. */
 export function BillsPage() {
   const { organizationId = '' } = useParams();
   const navigate = useNavigate();
@@ -638,17 +637,25 @@ function AddBill({ address, onUpload }: { address: string | null; onUpload: () =
                 <span />
                 <span className="split-item-line">PDF, photo or scan. One file can hold several bills.</span>
               </button>
-              <div className="split-item" style={{ cursor: 'default' }}>
+              {/* The whole item copies the address; the menu stays open to show it did. */}
+              <button
+                type="button"
+                role="menuitem"
+                className="split-item has-copy"
+                aria-label={`Forward by email: copy ${address}`}
+                title={copied ? 'Copied' : 'Copy the address'}
+                onClick={copy}
+              >
                 <Icon.mail size={13} />
                 <span className="split-item-title">Forward by email</span>
+                <span className={`split-item-copy${copied ? ' is-done' : ''}`}>
+                  {copied ? <Icon.tick size={13} /> : <Icon.copy size={13} />}
+                </span>
                 <span />
                 <span className="split-item-addr">
                   <span className="num">{address}</span>
-                  <button type="button" className="text-action" onClick={copy}>
-                    {copied ? 'Copied' : 'Copy'}
-                  </button>
                 </span>
-              </div>
+              </button>
             </div>
           ) : null}
         </>
