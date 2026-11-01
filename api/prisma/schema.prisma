@@ -39,6 +39,8 @@ model Organization {
   spendingLimitPolicyDestinations SpendingLimitPolicyDestination[]
   spendingLimitExecutions SpendingLimitExecution[]
   accountingConnections AccountingConnection[]
+  integrationSetups     IntegrationSetup[]
+  booksRecords          BooksRecord[]
   accountingAccountMaps AccountingAccountMap[]
   accountingSyncs AccountingSync[]
   paymentOrderGlCodings PaymentOrderGlCoding[]
@@ -46,6 +48,127 @@ model Organization {
   inboundEmailMessages InboundEmailMessage[]
 
   @@map("organizations")
+}
+
+/// A chat between one person and the Decimal agent that connects an accounting
+/// system. What survives between the agent's steps: nothing lives in a process.
+model IntegrationSetup {
+  setupId             String                    @id @default(dbgenerated("gen_random_uuid()")) @map("setup_id") @db.Uuid
+  organizationId      String                    @map("organization_id") @db.Uuid
+  system              String
+  startedByUserId     String?                   @map("started_by_user_id") @db.Uuid
+  status              String                    @default("open")
+  stopReason          String?                   @map("stop_reason")
+  turnLeaseUntil      DateTime?                 @map("turn_lease_until") @db.Timestamptz(6)
+  handledThroughSeq   BigInt                    @default(0) @map("handled_through_seq")
+  consecutiveFailures Int                       @default(0) @map("consecutive_failures")
+  tokensUsed          BigInt                    @default(0) @map("tokens_used")
+  turnsUsed           Int                       @default(0) @map("turns_used")
+  companyId           String?                   @map("company_id")
+  companyName         String?                   @map("company_name")
+  companyConfirmedAt  DateTime?                 @map("company_confirmed_at") @db.Timestamptz(6)
+  companyConfirmedByUserId String?              @map("company_confirmed_by_user_id") @db.Uuid
+  studyStatus         String?                   @map("study_status")
+  studyLeaseUntil     DateTime?                 @map("study_lease_until") @db.Timestamptz(6)
+  studyAttempts       Int                       @default(0) @map("study_attempts")
+  studySteps          Json                      @default("[]") @map("study_steps")
+  studyError          Json?                     @map("study_error")
+  findings            Json?
+  outcome             Json?
+  createdAt           DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization        Organization              @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
+  startedByUser       User?                     @relation("IntegrationSetupStartedBy", fields: [startedByUserId], references: [userId], onDelete: SetNull)
+  companyConfirmedByUser User?                  @relation("IntegrationSetupCompanyConfirmedBy", fields: [companyConfirmedByUserId], references: [userId], onDelete: SetNull)
+  messages            IntegrationSetupMessage[]
+  events              IntegrationSetupEvent[]
+  calls               IntegrationSetupCall[]
+
+  @@map("integration_setups")
+}
+
+/// What only the person can decide. One row per call, so a repeated turn cannot
+/// ask twice or lose an answer.
+model IntegrationSetupCall {
+  setupId          String                   @map("setup_id") @db.Uuid
+  key              String
+  kind             String
+  question         String
+  recommendation   String?
+  why              String?
+  refs             Json                     @default("[]")
+  required         Boolean                  @default(false)
+  status           String                   @default("open")
+  answer           String?
+  value            Json?
+  answerMessageId  String?                  @map("answer_message_id") @db.Uuid
+  answeredByUserId String?                  @map("answered_by_user_id") @db.Uuid
+  answeredAt       DateTime?                @map("answered_at") @db.Timestamptz(6)
+  createdAt        DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  setup            IntegrationSetup         @relation(fields: [setupId], references: [setupId], onDelete: Cascade)
+  answerMessage    IntegrationSetupMessage? @relation(fields: [answerMessageId], references: [messageId], onDelete: SetNull)
+  answeredByUser   User?                    @relation(fields: [answeredByUserId], references: [userId], onDelete: SetNull)
+
+  @@id([setupId, key])
+  @@map("integration_setup_calls")
+}
+
+/// A copy of a company's records, in one shape across systems. The model asks
+/// this, not the live system. Deleted on disconnect.
+model BooksRecord {
+  organizationId String       @map("organization_id") @db.Uuid
+  system         String
+  companyId      String       @map("company_id")
+  kind           String
+  recordId       String       @map("record_id")
+  date           DateTime?    @db.Date
+  name           String?
+  partyId        String?      @map("party_id")
+  amountMinor    BigInt?      @map("amount_minor")
+  currency       String?
+  searchText     String       @default("") @map("search_text")
+  data           Json
+  readAt         DateTime     @default(now()) @map("read_at") @db.Timestamptz(6)
+  organization   Organization @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
+
+  @@id([organizationId, system, companyId, kind, recordId])
+  @@index([organizationId, system, companyId, kind, partyId], map: "books_records_by_party")
+  @@map("books_records")
+}
+
+model IntegrationSetupMessage {
+  messageId    String           @id @default(dbgenerated("gen_random_uuid()")) @map("message_id") @db.Uuid
+  setupId      String           @map("setup_id") @db.Uuid
+  role         String
+  status       String           @default("done")
+  authorUserId String?          @map("author_user_id") @db.Uuid
+  text         String           @default("")
+  thoughts     Json             @default("[]")
+  actions      Json             @default("[]")
+  claims       Json             @default("[]")
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  setup        IntegrationSetup @relation(fields: [setupId], references: [setupId], onDelete: Cascade)
+  authorUser   User?            @relation(fields: [authorUserId], references: [userId], onDelete: SetNull)
+  answers      IntegrationSetupCall[]
+
+  @@index([setupId, createdAt], map: "integration_setup_messages_by_setup")
+  @@map("integration_setup_messages")
+}
+
+/// The receipt: everything that happened, in order, and never edited.
+model IntegrationSetupEvent {
+  seq         BigInt           @id @default(autoincrement())
+  setupId     String           @map("setup_id") @db.Uuid
+  at          DateTime         @default(now()) @db.Timestamptz(6)
+  actorUserId String?          @map("actor_user_id") @db.Uuid
+  kind        String
+  wakes       Boolean          @default(false)
+  payload     Json             @default("{}")
+  setup       IntegrationSetup @relation(fields: [setupId], references: [setupId], onDelete: Cascade)
+  actorUser   User?            @relation(fields: [actorUserId], references: [userId], onDelete: SetNull)
+
+  @@index([setupId, seq], map: "integration_setup_events_by_setup")
+  @@map("integration_setup_events")
 }
 
 // One OAuth connection per organization + accounting provider (the customer's books).
@@ -170,6 +293,11 @@ model User {
   paymentOrdersCreated       PaymentOrder[]           @relation("PaymentOrderCreatedByUser")
   acceptedGlCodings          PaymentOrderGlCoding[]
   postingEnabledConnections  AccountingConnection[]
+  integrationSetupsStarted   IntegrationSetup[]        @relation("IntegrationSetupStartedBy")
+  integrationSetupsConfirmed IntegrationSetup[]        @relation("IntegrationSetupCompanyConfirmedBy")
+  integrationSetupMessages   IntegrationSetupMessage[]
+  integrationSetupEvents     IntegrationSetupEvent[]
+  integrationSetupAnswers    IntegrationSetupCall[]
   decimalProposalsCreated    DecimalProposal[]        @relation("DecimalProposalCreatedByUser")
   organizationInvitesSent    OrganizationInvite[]     @relation("OrganizationInviteInvitedBy")
   organizationInvitesAccepted OrganizationInvite[]    @relation("OrganizationInviteAcceptedBy")

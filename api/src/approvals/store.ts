@@ -276,6 +276,36 @@ export async function billsApprovedSince(organizationId: string, since: Date): P
   return rows.map((r) => r.id).filter((id): id is string => Boolean(id));
 }
 
+/** Approved bills that never reached the books: nothing posts them by itself once posting is on. */
+export async function approvedBillsNotInTheBooks(organizationId: string): Promise<string[]> {
+  const rows = await prisma.$queryRaw<{ id: string }[]>`
+    SELECT DISTINCT a.attributes->>'paymentOrderId' AS id
+    FROM approval.approvables a
+    WHERE a.organization_id = ${organizationId}::uuid
+      AND a.type = 'invoice' AND a.macro_state IN ('approved', 'auto_approved')
+      AND a.attributes->>'paymentOrderId' IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM accounting_syncs s
+        WHERE s.payment_order_id = (a.attributes->>'paymentOrderId')::uuid AND s.external_bill_id IS NOT NULL)`;
+  return rows.map((r) => r.id);
+}
+
+/**
+ * Could a bill this person sends reach someone else? Admins are approvers of last
+ * resort (compile.ts) and approvers are approvers; a bill clerk or a viewer can't.
+ */
+export async function someoneElseCanApprove(organizationId: string, userId: string): Promise<boolean> {
+  const rows = await prisma.$queryRaw<{ user_id: string }[]>`
+    SELECT om.user_id FROM organization_memberships om
+    WHERE om.organization_id = ${organizationId}::uuid AND om.status = 'active' AND om.user_id <> ${userId}::uuid
+      AND (om.role IN ('primary_admin', 'admin') OR EXISTS (
+        SELECT 1 FROM approval.people p
+        JOIN approval.person_roles pr ON pr.person_id = p.id
+        WHERE p.organization_id = om.organization_id AND p.user_id = om.user_id AND p.status = 'active' AND pr.role = 'approver'))
+    LIMIT 1`;
+  return rows.length > 0;
+}
+
 export async function getBillCeilingMinor(tx: Tx, organizationId: string): Promise<bigint | null> {
   const rows = await tx.$queryRaw<{ bill_ceiling_minor: bigint | null }[]>`
     SELECT bill_ceiling_minor FROM approval.org_settings WHERE organization_id = ${organizationId}::uuid`;

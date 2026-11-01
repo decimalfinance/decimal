@@ -72,6 +72,8 @@ const RULES: Array<{ pattern: RegExp; view: Need; act: Need }> = [
   // Vendors (incl. payment rails).
   { pattern: /^\/(counterparties|counterparty-wallets|destinations|vendors)(\/|$)/, view: 'vendors.view', act: 'vendors.manage' },
   { pattern: /^\/accounting(\/|$)/, view: 'accounting.view', act: 'accounting.manage' },
+  // Setting up an accounting system connects the organisation's books: even reading the chat is for admins.
+  { pattern: /^\/integrations(\/|$)/, view: 'accounting.manage', act: 'accounting.manage' },
   // The companion's briefing is every member's: what it shows is filtered to the
   // viewer's own work inside the briefing, so any active member may read it.
   { pattern: /^\/companion(\/|$)/, view: null, act: null },

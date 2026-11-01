@@ -7,8 +7,9 @@ import { prisma } from '../infra/prisma.js';
 import { asyncRoute, sendJson, sendList } from '../infra/route-helpers.js';
 import { assertOrganizationAccess, assertOrganizationAdmin } from '../auth/organization-access.js';
 import { QuickBooks } from '../accounting/quickbooks.js';
-import { disconnect, enablePosting, getConnection, getQuickBooksForOrg, saveConnection } from '../accounting/connections.js';
+import { disconnect, getConnection, getQuickBooksForOrg, saveConnection } from '../accounting/connections.js';
 import { resetSyncForRetry, syncBillNow } from '../accounting/account-sync.js';
+import { noteDisconnected, noteSignedIn, noteSignInFailed } from '../integrations/setup/service.js';
 
 const PROVIDER = 'quickbooks';
 
@@ -148,6 +149,7 @@ publicAccountingRouter.get(
     const ctx = { organizationId: state?.organizationId, frontendOrigin: state?.frontendOrigin ?? null };
 
     if (req.query.error) {
+      if (state) await noteSignInFailed(state.organizationId, PROVIDER, String(req.query.error));
       finishCallback(res, 'error', ctx, String(req.query.error));
       return;
     }
@@ -160,6 +162,7 @@ publicAccountingRouter.get(
     const tokens = await QuickBooks.exchangeCode(code, realmId, state?.redirectUri ?? callbackRedirectUri(req));
     // Only the tokens. Signing in writes nothing to the customer's books.
     await saveConnection(state.organizationId, tokens);
+    await noteSignedIn(state.organizationId, PROVIDER, tokens.realmId);
     finishCallback(res, 'connected', ctx);
   }),
 );
@@ -229,21 +232,6 @@ accountingRouter.get(
   }),
 );
 
-// A person's yes: from now on, approved bills go to QuickBooks. A click reaches
-// this, as the person who clicked. No agent tool does.
-accountingRouter.post(
-  '/organizations/:organizationId/accounting/quickbooks/posting',
-  asyncRoute(async (req, res) => {
-    const { organizationId } = orgParams.parse(req.params);
-    await assertOrganizationAdmin(organizationId, req.auth!);
-    const postingEnabledAt = await enablePosting(organizationId, req.auth!.userId);
-    if (!postingEnabledAt) {
-      throw new ApiError(409, 'quickbooks_not_connected', 'QuickBooks is not connected.');
-    }
-    sendJson(res, { postingEnabledAt });
-  }),
-);
-
 // Disconnect.
 accountingRouter.delete(
   '/organizations/:organizationId/accounting/quickbooks',
@@ -251,6 +239,7 @@ accountingRouter.delete(
     const { organizationId } = orgParams.parse(req.params);
     await assertOrganizationAdmin(organizationId, req.auth!);
     await disconnect(organizationId);
+    await noteDisconnected(organizationId, PROVIDER);
     res.status(204).end();
   }),
 );

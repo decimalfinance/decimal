@@ -26,6 +26,7 @@ import { paymentOrdersRouter } from './routes/payment-orders.js';
 import { proposalsRouter } from './routes/proposals.js';
 import { approvalsRouter } from './approvals/routes.js';
 import { companionRouter } from './companion/routes.js';
+import { integrationSetupRouter } from './integrations/setup/routes.js';
 import { publicRateLimitMiddleware } from './infra/rate-limit.js';
 import { solanaRpcRouter } from './routes/solana-rpc.js';
 import { treasuryWalletsRouter } from './routes/treasury-wallets.js';
@@ -125,6 +126,7 @@ export function createApp() {
   app.use(approvalsRouter);
   app.use(companionRouter);
   app.use(accountingRouter);
+  app.use(integrationSetupRouter);
 
   app.use((error: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
     if (error instanceof ZodError) {

@@ -49,13 +49,15 @@ export type ModelCall = (request: {
   messages: ChatMessage[];
   tools: AgentTool[];
   signal: AbortSignal;
+  maxTokens: number;
 }) => Promise<ModelReply>;
 
 export type AgentRun =
   | { ok: true; terminal: { name: string; args: Record<string, unknown> }; turns: number; latencyMs: number; promptTokens: number; completionTokens: number; model: string }
-  | { ok: false; error: string; turns: number; latencyMs: number; promptTokens: number; completionTokens: number; model: string };
+  | { ok: false; error: string; stoppedBy?: 'tokens'; turns: number; latencyMs: number; promptTokens: number; completionTokens: number; model: string };
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
+const DEFAULT_OUTPUT_TOKENS = 1500;
 
 function toOpenAiTools(tools: AgentTool[]) {
   return tools.map((t) => ({
@@ -69,11 +71,11 @@ function toOpenAiTools(tools: AgentTool[]) {
   }));
 }
 
-const callOpenAi: ModelCall = async ({ model, messages, tools, signal }) => {
+const callOpenAi: ModelCall = async ({ model, messages, tools, signal, maxTokens }) => {
   const res = await fetch(OPENAI_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.openAiApiKey}` },
-    body: JSON.stringify(chatCompletionBody({ model, temperature: 0, max_tokens: 1500, messages, tools: toOpenAiTools(tools), tool_choice: 'required' })),
+    body: JSON.stringify(chatCompletionBody({ model, temperature: 0, max_tokens: maxTokens, messages, tools: toOpenAiTools(tools), tool_choice: 'required' })),
     signal,
   });
   if (!res.ok) throw new Error(`OpenAI ${res.status}`);
@@ -117,6 +119,10 @@ export async function runAgent(args: {
   timeoutMs?: number;
   /** Earlier turns of a conversation, placed between the system prompt and `user`. */
   history?: ChatMessage[];
+  /** Output per model call. */
+  maxOutputTokens?: number;
+  /** Stop asking the model once this run has spent this many tokens. */
+  tokenLimit?: number;
 }): Promise<AgentRun> {
   const model = exceptionAgentModel();
   const maxTurns = args.maxTurns ?? 6;
@@ -136,7 +142,10 @@ export async function runAgent(args: {
 
   try {
     for (turn = 1; turn <= maxTurns; turn += 1) {
-      const reply = await runtime.callModel({ model, messages, tools: args.tools, signal });
+      if (args.tokenLimit !== undefined && promptTokens + completionTokens >= args.tokenLimit) {
+        return { ok: false, error: `reached the limit of ${args.tokenLimit} tokens`, stoppedBy: 'tokens', ...done(turn - 1) };
+      }
+      const reply = await runtime.callModel({ model, messages, tools: args.tools, signal, maxTokens: args.maxOutputTokens ?? DEFAULT_OUTPUT_TOKENS });
       promptTokens += reply.usage.promptTokens;
       completionTokens += reply.usage.completionTokens;
       messages.push(reply.message);
