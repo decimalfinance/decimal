@@ -7,10 +7,8 @@ import { prisma } from '../infra/prisma.js';
 import { asyncRoute, sendJson, sendList } from '../infra/route-helpers.js';
 import { assertOrganizationAccess, assertOrganizationAdmin } from '../auth/organization-access.js';
 import { QuickBooks } from '../accounting/quickbooks.js';
-import { disconnect, getConnection, getQuickBooksForOrg, saveConnection } from '../accounting/connections.js';
+import { disconnect, enablePosting, getConnection, getQuickBooksForOrg, saveConnection } from '../accounting/connections.js';
 import { resetSyncForRetry, syncBillNow } from '../accounting/account-sync.js';
-import { ensureDefaultAccountingSetup } from '../accounting/setup.js';
-import { logger } from '../infra/logger.js';
 
 const PROVIDER = 'quickbooks';
 
@@ -160,15 +158,8 @@ publicAccountingRouter.get(
       return;
     }
     const tokens = await QuickBooks.exchangeCode(code, realmId, state?.redirectUri ?? callbackRedirectUri(req));
+    // Only the tokens. Signing in writes nothing to the customer's books.
     await saveConnection(state.organizationId, tokens);
-    // Provision sensible defaults (clearing + expense accounts, mapped) so the
-    // operator lands on a ready page. Best-effort: never block the connection.
-    await ensureDefaultAccountingSetup(state.organizationId).catch((e) =>
-      logger.warn('accounting_setup.failed', {
-        organizationId: state.organizationId,
-        error: e instanceof Error ? e.message : String(e),
-      }),
-    );
     finishCallback(res, 'connected', ctx);
   }),
 );
@@ -221,6 +212,7 @@ accountingRouter.get(
       syncCounts,
       status: conn?.status ?? 'disconnected',
       realmId: conn?.realmId ?? null,
+      postingEnabledAt: conn?.postingEnabledAt ?? null,
       environment: conn?.environment ?? config.quickbooksEnvironment,
       accountMap: map
         ? {
@@ -234,6 +226,21 @@ accountingRouter.get(
         : null,
       mappingComplete: Boolean(map?.clearingAccountId && map?.defaultExpenseAccountId),
     });
+  }),
+);
+
+// A person's yes: from now on, approved bills go to QuickBooks. A click reaches
+// this, as the person who clicked. No agent tool does.
+accountingRouter.post(
+  '/organizations/:organizationId/accounting/quickbooks/posting',
+  asyncRoute(async (req, res) => {
+    const { organizationId } = orgParams.parse(req.params);
+    await assertOrganizationAdmin(organizationId, req.auth!);
+    const postingEnabledAt = await enablePosting(organizationId, req.auth!.userId);
+    if (!postingEnabledAt) {
+      throw new ApiError(409, 'quickbooks_not_connected', 'QuickBooks is not connected.');
+    }
+    sendJson(res, { postingEnabledAt });
   }),
 );
 

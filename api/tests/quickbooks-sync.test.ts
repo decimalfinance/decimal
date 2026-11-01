@@ -2,16 +2,21 @@
 // books learn the money is owed), the payment is recorded against it when it is
 // PAID. Categories come from what a person confirmed in review.
 //
+// Before either, a person has to have turned posting on: signing in only lets
+// Decimal read.
+//
 // QuickBooks is a fake that records every call, so these assert exactly what
 // Decimal would send.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { beforeEach, test } from 'node:test';
+import { config } from '../src/config.js';
 import { prisma } from '../src/infra/prisma.js';
 import { drainAsyncIntake } from '../src/payments/invoice-intake.js';
+import { createPolicy, upsertPolicySet } from '../src/approvals/store.js';
 import { setQuickBooksForTests } from '../src/accounting/connections.js';
 import { syncApprovedBill, syncSettledPaymentOrder, sweepUnsyncedSettledOrders } from '../src/accounting/account-sync.js';
-import { raw, post, get, makeWorld, confirmBody } from './helpers/companion-harness.js';
+import { baseUrl, raw, post, get, makeWorld, confirmBody } from './helpers/companion-harness.js';
 
 beforeEach(() => setQuickBooksForTests(null));
 
@@ -38,18 +43,61 @@ function fakeQuickBooks(initial: Chart = CLOUD) {
   return { state, calls };
 }
 
-async function connect(orgId: string) {
+/** Connected, and by default with posting already on, a minute ago on any clock. */
+async function connect(orgId: string, { posting = true } = {}) {
   const far = new Date(Date.now() + 86_400_000);
-  await prisma.accountingConnection.create({ data: { organizationId: orgId, realmId: 'realm-test', accessToken: 'x', refreshToken: 'y', accessTokenExpiresAt: far, refreshTokenExpiresAt: far } });
+  await prisma.accountingConnection.create({ data: {
+    organizationId: orgId, realmId: 'realm-test', accessToken: 'x', refreshToken: 'y', accessTokenExpiresAt: far, refreshTokenExpiresAt: far,
+    ...(posting ? { postingEnabledAt: new Date(Date.now() - 60_000) } : {}),
+  } });
   await prisma.accountingAccountMap.create({ data: { organizationId: orgId, clearingAccountId: '901', clearingAccountName: 'USDC clearing' } });
 }
 
-/** Approve the submitted bill as the approver it waits on; the post runs in the background. */
-async function approve(w: Awaited<ReturnType<typeof makeWorld>>) {
+/** Approve a bill as the approver it waits on; the post runs in the background. */
+async function approve(w: Awaited<ReturnType<typeof makeWorld>>, billId = w.bills.submitted) {
   const inbox = await get(`/organizations/${w.orgId}/bills/approvals-inbox`, w.apprA.token);
-  const mine = (inbox.waitingOnYou as Array<{ paymentOrderId: string; taskId: string }>).find((x) => x.paymentOrderId === w.bills.submitted)!;
+  const mine = (inbox.waitingOnYou as Array<{ paymentOrderId: string; taskId: string }>).find((x) => x.paymentOrderId === billId)!;
   await post(`/organizations/${w.orgId}/approvals/tasks/${mine.taskId}/command`, { command: { kind: 'approve' }, idempotencyKey: crypto.randomUUID() }, w.apprA.token);
   await drainAsyncIntake();
+}
+
+const go = (orgId: string, token: string) => raw('POST', `/organizations/${orgId}/accounting/quickbooks/posting`, token, {});
+
+/**
+ * Intuit, for a sign-in: every request that leaves Decimal is recorded and gets a
+ * token. Nothing reaches the network, and a request to the books would show up here.
+ */
+function intuit() {
+  const realFetch = globalThis.fetch;
+  const saved = { id: config.quickbooksClientId, secret: config.quickbooksClientSecret, state: config.oauthStateSecret };
+  config.quickbooksClientId = 'test-client';
+  config.quickbooksClientSecret = 'test-secret';
+  config.oauthStateSecret = 'test-state-secret';
+  const outside: string[] = [];
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (url.startsWith(baseUrl)) return realFetch(input, init);
+    outside.push(url.split('?')[0]!);
+    return new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r', expires_in: 3600, x_refresh_token_expires_in: 8_640_000 }), { status: 200 });
+  }) as typeof fetch;
+  return {
+    outside,
+    /** Through the callback Intuit redirects to. Redirects are not followed: they point at the frontend. */
+    async signIn(w: Awaited<ReturnType<typeof makeWorld>>, realmId: string) {
+      const { authorizeUrl } = await get(`/organizations/${w.orgId}/accounting/quickbooks/connect`, w.owner.token);
+      const state = new URL(authorizeUrl).searchParams.get('state')!;
+      const res = await realFetch(`${baseUrl}/accounting/quickbooks/callback?code=c&realmId=${realmId}&state=${encodeURIComponent(state)}`, { redirect: 'manual' });
+      await res.arrayBuffer();
+      assert.ok(res.status < 400, `the callback answered ${res.status}`);
+      return prisma.accountingConnection.findFirstOrThrow({ where: { organizationId: w.orgId } });
+    },
+    restore() {
+      globalThis.fetch = realFetch;
+      config.quickbooksClientId = saved.id;
+      config.quickbooksClientSecret = saved.secret;
+      config.oauthStateSecret = saved.state;
+    },
+  };
 }
 
 const syncOf = (billId: string) => prisma.accountingSync.findUnique({ where: { paymentOrderId_provider: { paymentOrderId: billId, provider: 'quickbooks' } } });
@@ -161,6 +209,144 @@ test('quickbooks: confirming a bill records its categories as the bill\'s coding
   assert.deepEqual((coding.lines as Array<{ accountId: string; accountName: string; amount: number }>).map((l) => [l.accountId, l.accountName, l.amount]),
     [['301', 'Cloud hosting & infrastructure', 310]]);
   assert.equal(coding.acceptedByUserId, w.owner.userId, 'recorded as the person who confirmed it');
+});
+
+test('quickbooks: signing in saves the tokens and writes nothing to the books', async () => {
+  const w = await makeWorld();
+  const outside = intuit();
+  try {
+    const row = await outside.signIn(w, 'realm-a');
+    assert.equal(row.status, 'connected');
+    assert.equal(row.realmId, 'realm-a');
+    assert.equal(row.postingEnabledAt, null, 'connecting does not turn posting on');
+    assert.deepEqual(outside.outside, ['https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer'], 'the token exchange and nothing else');
+    assert.equal(await prisma.accountingAccountMap.count({ where: { organizationId: w.orgId } }), 0, 'no accounts added, none mapped');
+    const status = await get(`/organizations/${w.orgId}/accounting/quickbooks/status`, w.owner.token);
+    assert.equal(status.connected, true);
+    assert.equal(status.postingEnabledAt, null);
+  } finally {
+    outside.restore();
+  }
+});
+
+test('quickbooks: the yes belongs to one company: signing in again keeps it, another company or disconnecting loses it', async () => {
+  const w = await makeWorld();
+  const outside = intuit();
+  try {
+    await outside.signIn(w, 'realm-a');
+    assert.equal((await go(w.orgId, w.owner.token)).status, 200);
+    await prisma.accountingAccountMap.create({ data: { organizationId: w.orgId, apAccountId: '33' } });
+    const said = await prisma.accountingConnection.findFirstOrThrow({ where: { organizationId: w.orgId } });
+
+    const again = await outside.signIn(w, 'realm-a');
+    assert.deepEqual(again.postingEnabledAt, said.postingEnabledAt, 'the same books, tokens lapsed: still yes');
+    assert.equal(again.postingEnabledByUserId, w.owner.userId);
+    assert.equal(await prisma.accountingAccountMap.count({ where: { organizationId: w.orgId } }), 1);
+
+    const other = await outside.signIn(w, 'realm-b');
+    assert.equal(other.postingEnabledAt, null, 'the yes was about the other books');
+    assert.equal(other.postingEnabledByUserId, null);
+    assert.equal(await prisma.accountingAccountMap.count({ where: { organizationId: w.orgId } }), 0, 'its accounts were the other books\' too');
+
+    assert.equal((await go(w.orgId, w.owner.token)).status, 200);
+    assert.equal((await raw('DELETE', `/organizations/${w.orgId}/accounting/quickbooks`, w.owner.token)).status, 204);
+    const gone = await prisma.accountingConnection.findFirstOrThrow({ where: { organizationId: w.orgId } });
+    assert.equal(gone.status, 'disconnected');
+    assert.equal(gone.postingEnabledAt, null, 'disconnecting takes it with it');
+    assert.equal((await outside.signIn(w, 'realm-b')).postingEnabledAt, null, 'and coming back starts from no');
+  } finally {
+    outside.restore();
+  }
+});
+
+test('quickbooks: only an admin can say go, only to a live connection, and saying it again keeps the first moment', async () => {
+  const w = await makeWorld();
+  assert.equal((await go(w.orgId, w.owner.token)).status, 409, 'nothing connected to say yes to');
+
+  await connect(w.orgId, { posting: false });
+  for (const person of [w.clerk, w.apprA, w.viewer]) {
+    assert.equal((await go(w.orgId, person.token)).status, 403, `${person.userId} is not an admin`);
+  }
+  assert.equal((await get(`/organizations/${w.orgId}/accounting/quickbooks/status`, w.owner.token)).postingEnabledAt, null);
+
+  const first = await go(w.orgId, w.owner.token);
+  assert.equal(first.status, 200);
+  assert.ok(first.json.postingEnabledAt);
+  const row = await prisma.accountingConnection.findFirstOrThrow({ where: { organizationId: w.orgId } });
+  assert.equal(row.postingEnabledByUserId, w.owner.userId, 'on the record as the person who said it');
+  assert.equal((await get(`/organizations/${w.orgId}/accounting/quickbooks/status`, w.owner.token)).postingEnabledAt, first.json.postingEnabledAt);
+
+  assert.equal((await go(w.orgId, w.owner.token)).json.postingEnabledAt, first.json.postingEnabledAt, 'a second click moves nothing');
+
+  await prisma.accountingConnection.updateMany({ where: { organizationId: w.orgId }, data: { status: 'needs_reauth', postingEnabledAt: null } });
+  assert.equal((await go(w.orgId, w.owner.token)).status, 409, 'a lapsed connection cannot take a yes');
+});
+
+test('quickbooks: with posting off Decimal still reads, and nothing goes out: not at approval, not by the sweep, not on a retry', async () => {
+  const w = await makeWorld();
+  const { calls } = fakeQuickBooks();
+  await connect(w.orgId, { posting: false });
+
+  const chart = await get(`/organizations/${w.orgId}/accounting/quickbooks/accounts`, w.owner.token);
+  assert.deepEqual(chart.items.map((a: { id: string }) => a.id), ['301', '302'], 'connected means it can read');
+
+  await approve(w);
+  await sweepUnsyncedSettledOrders();
+  assert.equal(await syncApprovedBill(w.bills.submitted), 'skipped');
+  assert.equal((await post(`/organizations/${w.orgId}/payment-orders/${w.bills.submitted}/accounting/sync`, {}, w.owner.token)).outcome, 'skipped');
+
+  await prisma.paymentOrder.update({ where: { paymentOrderId: w.bills.submitted }, data: { state: 'settled' } });
+  assert.equal(await syncSettledPaymentOrder(w.bills.submitted), 'skipped');
+  await sweepUnsyncedSettledOrders();
+
+  assert.deepEqual(calls, { bills: [], payments: [], vendors: [] }, 'not one call that writes');
+  assert.equal(await prisma.accountingSync.count({ where: { organizationId: w.orgId } }), 0, 'not an error, and it leaves no trace');
+});
+
+test('quickbooks: the yes covers bills approved from then on; earlier ones stay out unless they are approved again', async () => {
+  const w = await makeWorld();
+  const { calls } = fakeQuickBooks();
+  await connect(w.orgId, { posting: false });
+  await approve(w);
+  assert.equal((await go(w.orgId, w.owner.token)).status, 200);
+
+  await sweepUnsyncedSettledOrders();
+  assert.equal(await syncApprovedBill(w.bills.submitted), 'skipped');
+  assert.equal((await post(`/organizations/${w.orgId}/payment-orders/${w.bills.submitted}/accounting/sync`, {}, w.owner.token)).outcome, 'skipped');
+  assert.equal(calls.bills.length, 0, 'the backlog does not post by itself');
+
+  await post(`/organizations/${w.orgId}/bills/${w.bills.ready}/confirm`, confirmBody('SS-2', 310), w.owner.token);
+  await approve(w, w.bills.ready);
+  assert.deepEqual(calls.bills.map((b) => b.body.DocNumber), ['SS-2'], 'approved after the yes: posted');
+  await sweepUnsyncedSettledOrders();
+  assert.equal(calls.bills.length, 1, 'once');
+
+  await post(`/organizations/${w.orgId}/bills/${w.bills.submitted}/send-back`, { reason: 'The amount needs a second look' }, w.owner.token);
+  await post(`/organizations/${w.orgId}/bills/${w.bills.submitted}/confirm`, confirmBody('SC-1', 700), w.owner.token);
+  await approve(w);
+  assert.deepEqual(calls.bills.map((b) => b.body.DocNumber), ['SS-2', 'SC-1'], 'sent back and approved again, it counts by the later approval');
+});
+
+test('quickbooks: a bill the rules approve without anyone counts by that moment too', async () => {
+  const w = await makeWorld();
+  const { calls } = fakeQuickBooks();
+  await connect(w.orgId, { posting: false });
+  await prisma.$transaction(async (tx) => {
+    const policy = await createPolicy(tx, w.orgId, 'invoice', 'Everything passes', [{ type: 'terminal', outcome: 'auto_approve', reason: 'Test rule' }]);
+    await upsertPolicySet(tx, w.orgId, 'invoice', [], policy.id, policy.version);
+  });
+
+  await post(`/organizations/${w.orgId}/bills/${w.bills.ready}/confirm`, confirmBody('SS-2', 310), w.owner.token);
+  await drainAsyncIntake();
+  assert.equal(calls.bills.length, 0, 'posting is off');
+
+  assert.equal((await go(w.orgId, w.owner.token)).status, 200);
+  await sweepUnsyncedSettledOrders();
+  assert.equal(calls.bills.length, 0, 'approved before the yes');
+
+  await post(`/organizations/${w.orgId}/bills/${w.bills.lonely}/confirm`, confirmBody('LL-1', 90), w.owner.token);
+  await drainAsyncIntake();
+  assert.deepEqual(calls.bills.map((b) => b.body.DocNumber), ['LL-1'], 'approved after it');
 });
 
 test('quickbooks: the Coding inbox is gone, and its old address lands on the Inbox', async () => {

@@ -257,6 +257,25 @@ export async function renamePerson(tx: Tx, userId: string, name: string): Promis
   await tx.$executeRaw`UPDATE approval.people SET name = ${name} WHERE user_id = ${userId}::uuid`;
 }
 
+/**
+ * Bills whose approval completed at or after a moment. The log holds the moment:
+ * `approved` when the last step settled, `activated` when the rules passed the
+ * bill without anyone. A bill sent back and approved again counts by the later one.
+ */
+export async function billsApprovedSince(organizationId: string, since: Date): Promise<string[]> {
+  const rows = await prisma.$queryRaw<{ id: string | null }[]>`
+    SELECT DISTINCT a.attributes->>'paymentOrderId' AS id
+    FROM approval.approvables a
+    WHERE a.organization_id = ${organizationId}::uuid
+      AND a.type = 'invoice' AND a.macro_state IN ('approved', 'auto_approved')
+      AND EXISTS (
+        SELECT 1 FROM approval.approval_events e
+        WHERE e.approvable_id = a.id AND e.at >= ${since.toISOString()}::timestamptz
+          AND (e.payload->>'kind' = 'approved'
+            OR (e.payload->>'kind' = 'activated' AND e.payload->>'macroState' = 'auto_approved')))`;
+  return rows.map((r) => r.id).filter((id): id is string => Boolean(id));
+}
+
 export async function getBillCeilingMinor(tx: Tx, organizationId: string): Promise<bigint | null> {
   const rows = await tx.$queryRaw<{ bill_ceiling_minor: bigint | null }[]>`
     SELECT bill_ceiling_minor FROM approval.org_settings WHERE organization_id = ${organizationId}::uuid`;

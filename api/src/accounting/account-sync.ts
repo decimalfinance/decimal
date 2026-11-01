@@ -9,10 +9,15 @@
 // One accounting_syncs row per bill carries both: externalBillId once posted,
 // externalBillPaymentId once paid. Idempotent at two layers: the QBO requestid
 // and that unique row.
+//
+// Nothing here writes until a person has turned posting on (`enablePosting`), and
+// a bill approved before that moment is not posted by itself. Connecting alone
+// only lets Decimal read.
 
+import { billsApprovedSince } from '../approvals/store.js';
 import { logger } from '../infra/logger.js';
 import { prisma } from '../infra/prisma.js';
-import { getQuickBooksForOrg } from './connections.js';
+import { getQuickBooksForOrg, postingEnabledSince } from './connections.js';
 import { postBillToQuickBooks, recordBillPaymentInQuickBooks, syncPaymentToQuickBooks } from './sync.js';
 import { BUILTIN_ACCOUNT_PREFIX } from './default-chart.js';
 
@@ -80,6 +85,13 @@ export async function syncSettledPaymentOrder(paymentOrderId: string): Promise<A
   }
   if (existing?.status === 'error' && existing.attempts >= MAX_ATTEMPTS) {
     return 'skipped';
+  }
+
+  const since = await postingEnabledSince(order.organizationId);
+  if (!since) return 'skipped';
+  if (!existing?.externalBillId) {
+    const approved = await billsApprovedSince(order.organizationId, since);
+    if (!approved.includes(paymentOrderId)) return 'skipped';
   }
 
   const map = await prisma.accountingAccountMap.findUnique({
@@ -200,8 +212,8 @@ export async function sweepUnsyncedSettledOrders(): Promise<AccountingSweepSumma
   const summary: AccountingSweepSummary = { synced: 0, skipped: 0, error: 0 };
 
   const connected = await prisma.accountingConnection.findMany({
-    where: { provider: PROVIDER, status: 'connected' },
-    select: { organizationId: true },
+    where: { provider: PROVIDER, status: 'connected', postingEnabledAt: { not: null } },
+    select: { organizationId: true, postingEnabledAt: true },
   });
   if (connected.length === 0) {
     return summary;
@@ -209,10 +221,14 @@ export async function sweepUnsyncedSettledOrders(): Promise<AccountingSweepSumma
 
   const orgIds = connected.map((c) => c.organizationId);
 
-  // Approved bills not yet in QuickBooks: posted now. Catches a bill approved
-  // before QuickBooks was connected, a post the approval hook could not make,
-  // and retries of one that failed (until MAX_ATTEMPTS; a person can retry).
-  const approved = await approvedBillIds(orgIds);
+  // Bills approved since posting was turned on and not yet in QuickBooks: posted
+  // now. Catches a post the approval hook could not make, such as while the
+  // connection had lapsed, and retries of one that failed (until MAX_ATTEMPTS; a
+  // person can retry). A bill approved before that moment is left alone.
+  const approved: string[] = [];
+  for (const c of connected) {
+    approved.push(...await billsApprovedSince(c.organizationId, c.postingEnabledAt!));
+  }
   if (approved.length > 0) {
     const due = await prisma.paymentOrder.findMany({
       where: {
@@ -258,22 +274,13 @@ export async function sweepUnsyncedSettledOrders(): Promise<AccountingSweepSumma
   return summary;
 }
 
-/** Bills whose approval is complete (approved or auto-approved), for these organisations. */
-async function approvedBillIds(organizationIds: string[]): Promise<string[]> {
-  if (organizationIds.length === 0) return [];
-  const rows = await prisma.$queryRaw<Array<{ id: string | null }>>`
-    SELECT DISTINCT attributes->>'paymentOrderId' AS id FROM approval.approvables
-    WHERE type = 'invoice' AND macro_state IN ('approved', 'auto_approved')
-      AND organization_id = ANY(${organizationIds}::uuid[])`;
-  return rows.map((r) => r.id).filter((id): id is string => Boolean(id));
-}
-
 /**
  * Post one approved bill to QuickBooks as a Bill. Idempotent: a bill already
  * posted is skipped, and QuickBooks itself dedupes on the requestid.
  *
- * An organisation without QuickBooks is not an error and leaves no trace. One
- * that is connected but cannot take the bill — a category missing from its
+ * An organisation without QuickBooks is not an error and leaves no trace, and
+ * neither is one that hasn't turned posting on, or a bill approved before it did.
+ * One that is connected but cannot take the bill — a category missing from its
  * chart, no categories at all — records the reason as an error, which lands in
  * the inbox of whoever manages accounting.
  */
@@ -283,7 +290,9 @@ export async function syncApprovedBill(paymentOrderId: string): Promise<Accounti
     include: { counterparty: true, counterpartyWallet: true, accountingSyncs: { where: { provider: PROVIDER } }, glCoding: true },
   });
   if (!order || order.state === 'draft' || order.state === 'cancelled') return 'skipped';
-  const approved = await approvedBillIds([order.organizationId]);
+  const since = await postingEnabledSince(order.organizationId);
+  if (!since) return 'skipped';
+  const approved = await billsApprovedSince(order.organizationId, since);
   if (!approved.includes(paymentOrderId)) return 'skipped';
   const existing = order.accountingSyncs[0] ?? null;
   if (existing?.externalBillId) return 'skipped';

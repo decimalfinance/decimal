@@ -60,10 +60,14 @@ model AccountingConnection {
   accessTokenExpiresAt   DateTime     @map("access_token_expires_at") @db.Timestamptz(6)
   refreshTokenExpiresAt  DateTime     @map("refresh_token_expires_at") @db.Timestamptz(6)
   status                 String       @default("connected")
+  /// A person's yes to writing to these books. Null means posting is off.
+  postingEnabledAt       DateTime?    @map("posting_enabled_at") @db.Timestamptz(6)
+  postingEnabledByUserId String?      @map("posting_enabled_by_user_id") @db.Uuid
   metadataJson           Json         @default("{}") @map("metadata_json")
   createdAt              DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt              DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
   organization           Organization @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
+  postingEnabledByUser   User?        @relation(fields: [postingEnabledByUserId], references: [userId], onDelete: SetNull)
 
   @@unique([organizationId, provider])
   @@map("accounting_connections")
@@ -165,6 +169,7 @@ model User {
   executionRecords           ExecutionRecord[]        @relation("ExecutionRecordExecutorUser")
   paymentOrdersCreated       PaymentOrder[]           @relation("PaymentOrderCreatedByUser")
   acceptedGlCodings          PaymentOrderGlCoding[]
+  postingEnabledConnections  AccountingConnection[]
   decimalProposalsCreated    DecimalProposal[]        @relation("DecimalProposalCreatedByUser")
   organizationInvitesSent    OrganizationInvite[]     @relation("OrganizationInviteInvitedBy")
   organizationInvitesAccepted OrganizationInvite[]    @relation("OrganizationInviteAcceptedBy")

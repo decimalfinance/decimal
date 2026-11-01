@@ -9,7 +9,14 @@ import { QuickBooks, type QboTokens } from './quickbooks.js';
 
 const PROVIDER = 'quickbooks';
 
-function tokensFromRow(row: AccountingConnection): QboTokens {
+/** What a client needs from the row. A bill's draft reads the chart through here on every open. */
+const CLIENT_FIELDS = {
+  realmId: true, accessToken: true, refreshToken: true, accessTokenExpiresAt: true, refreshTokenExpiresAt: true, status: true,
+} as const;
+
+type ClientFields = Pick<AccountingConnection, keyof typeof CLIENT_FIELDS>;
+
+function tokensFromRow(row: ClientFields): QboTokens {
   return {
     realmId: row.realmId,
     accessToken: row.accessToken,
@@ -34,7 +41,10 @@ export function setQuickBooksForTests(fn: ((organizationId: string) => QuickBook
 
 export async function getQuickBooksForOrg(organizationId: string): Promise<QuickBooks | null> {
   if (testClient) return testClient(organizationId);
-  const row = await getConnection(organizationId);
+  const row = await prisma.accountingConnection.findUnique({
+    where: { organizationId_provider: { organizationId, provider: PROVIDER } },
+    select: CLIENT_FIELDS,
+  });
   if (!row || row.status !== 'connected') {
     return null;
   }
@@ -54,8 +64,8 @@ export async function markNeedsReauth(organizationId: string): Promise<void> {
 }
 
 export async function persistTokens(organizationId: string, tokens: QboTokens): Promise<void> {
-  await prisma.accountingConnection.update({
-    where: { organizationId_provider: { organizationId, provider: PROVIDER } },
+  await prisma.accountingConnection.updateMany({
+    where: { organizationId, provider: PROVIDER },
     data: {
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
@@ -66,6 +76,11 @@ export async function persistTokens(organizationId: string, tokens: QboTokens): 
   });
 }
 
+/**
+ * Save what a sign-in returned. The same company, signing in again after its
+ * tokens lapsed, keeps its yes to posting. A different company does not: that
+ * yes was about the other books, and the account map held the other books' ids.
+ */
 export async function saveConnection(organizationId: string, tokens: QboTokens): Promise<void> {
   const data = {
     realmId: tokens.realmId,
@@ -76,11 +91,42 @@ export async function saveConnection(organizationId: string, tokens: QboTokens):
     refreshTokenExpiresAt: new Date(tokens.refreshExpiresAt),
     status: 'connected',
   };
-  await prisma.accountingConnection.upsert({
-    where: { organizationId_provider: { organizationId, provider: PROVIDER } },
-    create: { organizationId, provider: PROVIDER, ...data },
-    update: data,
+  await prisma.$transaction(async (tx) => {
+    const where = { organizationId_provider: { organizationId, provider: PROVIDER } };
+    const existing = await tx.accountingConnection.findUnique({ where, select: { realmId: true } });
+    const otherCompany = existing !== null && existing.realmId !== tokens.realmId;
+    await tx.accountingConnection.upsert({
+      where,
+      create: { organizationId, provider: PROVIDER, ...data },
+      update: { ...data, ...(otherCompany ? { postingEnabledAt: null, postingEnabledByUserId: null } : {}) },
+    });
+    if (otherCompany) await tx.accountingAccountMap.deleteMany({ where: { organizationId, provider: PROVIDER } });
   });
+}
+
+/**
+ * A person's yes: from this moment, approved bills go to QuickBooks. Connecting
+ * only lets Decimal read. Saying yes twice keeps the first moment, which decides
+ * what counts as backlog. The clock is the database's, the same one that stamps
+ * approvals. Null when there is no live connection to say yes to.
+ */
+export async function enablePosting(organizationId: string, userId: string): Promise<Date | null> {
+  await prisma.$executeRaw`
+    UPDATE accounting_connections
+    SET posting_enabled_at = now(), posting_enabled_by_user_id = ${userId}::uuid, updated_at = now()
+    WHERE organization_id = ${organizationId}::uuid AND provider = ${PROVIDER}
+      AND status = 'connected' AND posting_enabled_at IS NULL`;
+  const row = await getConnection(organizationId);
+  return row?.status === 'connected' ? row.postingEnabledAt : null;
+}
+
+/** When posting was turned on for this organisation's books, or null while it is off. */
+export async function postingEnabledSince(organizationId: string): Promise<Date | null> {
+  const row = await prisma.accountingConnection.findUnique({
+    where: { organizationId_provider: { organizationId, provider: PROVIDER } },
+    select: { postingEnabledAt: true },
+  });
+  return row?.postingEnabledAt ?? null;
 }
 
 export async function disconnect(organizationId: string): Promise<void> {
@@ -94,6 +140,6 @@ export async function disconnect(organizationId: string): Promise<void> {
   }
   await prisma.accountingConnection.updateMany({
     where: { organizationId, provider: PROVIDER },
-    data: { status: 'disconnected' },
+    data: { status: 'disconnected', postingEnabledAt: null, postingEnabledByUserId: null },
   });
 }

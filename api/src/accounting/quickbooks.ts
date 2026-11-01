@@ -203,10 +203,6 @@ export class QuickBooks {
     return this.request<T>('GET', `/${entity}/${id}`);
   }
 
-  createAccount<T = any>(body: unknown, requestId?: string): Promise<T> {
-    return this.request<T>('POST', '/account', { body, requestId });
-  }
-
   createVendor<T = any>(body: unknown, requestId?: string): Promise<T> {
     return this.request<T>('POST', '/vendor', { body, requestId });
   }
