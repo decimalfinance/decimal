@@ -370,6 +370,12 @@ export async function syncApprovedBill(paymentOrderId: string): Promise<Accounti
   const vendorLabel = billHeader.vendorName?.trim() || order.counterparty?.displayName || order.counterpartyWallet.label;
   const outcome = await readOutcome(order.organizationId, PROVIDER, qb.realmId);
   try {
+    // Its figures are that currency's. Posted as they are, they'd read as dollars.
+    const { amountsOfBill, currencyOfBill } = await import('../payments/bills.js');
+    const currency = currencyOfBill(order.metadataJson);
+    if (currency !== 'USD') {
+      return await fail(`This bill is in ${currency}, and Decimal posts in USD only. Enter it in QuickBooks by hand.`);
+    }
     // A closed period stays closed, whether or not QuickBooks would only have warned.
     const billDate = billHeader.billDate?.trim() || null;
     const closed = billDate ? await closedThrough(qb, outcome) : null;
@@ -378,7 +384,6 @@ export async function syncApprovedBill(paymentOrderId: string): Promise<Accounti
     }
     const vendor = await vendorForBill(order.organizationId, PROVIDER, qb.realmId, vendorLabel, outcome);
     if (vendor && 'problem' in vendor) return await fail(vendor.problem);
-    const { amountsOfBill } = await import('../payments/bills.js');
     const posted = await postBillToQuickBooks(
       qb,
       {

@@ -428,7 +428,7 @@ const posted = (bill: { body: any }) => bill.body.Line.map((l: any) => [l.Amount
 async function finishedSetup(w: Awaited<ReturnType<typeof makeWorld>>, outcome: { closingDate?: string | null; vendorLinks?: Array<{ useVendorId: string; vendorIds: string[] }> }, vendors: Array<{ id: string; name: string; active?: boolean }> = []) {
   await prisma.integrationSetup.create({ data: {
     organizationId: w.orgId, system: 'quickbooks', startedByUserId: w.owner.userId, status: 'done', companyId: 'realm-test',
-    outcome: { companyId: 'realm-test', postingFrom: new Date().toISOString(), closingDate: null, vendorLinks: [], lineChoices: [], categoriesInUse: [], cantPost: [], ...outcome },
+    outcome: { companyId: 'realm-test', postingFrom: new Date().toISOString(), closingDate: null, vendorLinks: [], lineChoices: [], categoriesInUse: [], leftOut: [], ...outcome },
   } });
   await prisma.booksRecord.createMany({ data: vendors.map((v) => ({
     organizationId: w.orgId, system: 'quickbooks', companyId: 'realm-test', kind: 'vendor', recordId: v.id, name: v.name, searchText: v.name, data: { active: v.active ?? true },
@@ -556,6 +556,16 @@ test('quickbooks: a bill dated in a closed period does not post, and the date in
   await approve(w, w.bills.ready);
   assert.match((await syncOf(w.bills.ready))?.error ?? '', /closed through 2026-08-31/);
   assert.equal(qb.calls.bills.length, 1);
+});
+
+test('quickbooks: a bill in another currency does not post its figures as dollars', async () => {
+  const w = await makeWorld();
+  const qb = fakeQuickBooks();
+  await connect(w.orgId);
+  await postReady(w, { currency: 'EUR', total: 310 }, [{ amount: 310, category: 'Travel' }]);
+  assert.match((await syncOf(w.bills.ready))?.error ?? '', /in EUR, and Decimal posts in USD only/);
+  assert.deepEqual(qb.calls.bills, []);
+  assert.deepEqual(qb.calls.vendors, []);
 });
 
 test('quickbooks: the Coding inbox is gone, and its old address lands on the Inbox', async () => {

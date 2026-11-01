@@ -58,6 +58,7 @@ export type AgentRun =
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const DEFAULT_OUTPUT_TOKENS = 1500;
+const MAX_SEND_BACKS = 2;
 
 function toOpenAiTools(tools: AgentTool[]) {
   return tools.map((t) => ({
@@ -124,6 +125,13 @@ export async function runAgent(args: {
   maxOutputTokens?: number;
   /** Stop asking the model once this run has spent this many tokens. */
   tokenLimit?: number;
+  /**
+   * A last look at what the model is finishing with, for the rules code can check. What
+   * this says goes back to the model as that tool's error and it tries again, twice at
+   * most. After that the run ends with what it has, so a hard rule still has to be
+   * enforced by whoever takes the result.
+   */
+  checkTerminal?: (args: Record<string, unknown>) => Promise<string | null>;
 }): Promise<AgentRun> {
   const model = exceptionAgentModel();
   const maxTurns = args.maxTurns ?? 6;
@@ -138,6 +146,7 @@ export async function runAgent(args: {
   let promptTokens = 0;
   let completionTokens = 0;
   let nudged = false;
+  let sendBacks = 0;
   let turn = 0;
   const done = (turns: number) => ({ turns, latencyMs: Date.now() - started, promptTokens, completionTokens, model });
 
@@ -188,7 +197,14 @@ export async function runAgent(args: {
         }
         messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(output) });
       }
-      if (terminal) return { ok: true, terminal, ...done(turn) };
+      if (terminal) {
+        const problem = sendBacks < MAX_SEND_BACKS && args.checkTerminal ? await args.checkTerminal(terminal.args) : null;
+        if (!problem) return { ok: true, terminal, ...done(turn) };
+        sendBacks += 1;
+        for (const call of calls) {
+          if (byName.get(call.function.name)?.terminal) messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ error: problem }) });
+        }
+      }
     }
     return { ok: false, error: `no finding after ${maxTurns} turns`, ...done(maxTurns) };
   } catch (error) {

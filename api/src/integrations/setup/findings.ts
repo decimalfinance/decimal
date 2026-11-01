@@ -4,6 +4,7 @@
 //
 // Everything here is pure, and comes out JSON-safe to keep on the setup.
 
+import { lineKey } from '../../accounting/line-words.js';
 import { minorToText, type BooksAccount, type BooksBill, type BooksCompany, type BooksExpense, type BooksVendor } from '../books.js';
 
 /** Legal forms and filler: "Delta Inc." and "The Delta, LLC" are the same name. */
@@ -16,21 +17,55 @@ const LEARNED_MIN_SHARE = 0.9;
 const SECOND_WAY_MIN_LINES = 2;
 const SECOND_WAY_MIN_SHARE = 0.2;
 const MAX_LISTED = 20;
+const MAX_LEARNED = 5_000;
 
 export type LookalikeVendors = {
-  why: 'same_name' | 'same_email' | 'similar_name';
-  vendors: Array<{ id: string; name: string; active: boolean; bills: number; expenses: number; lastUsed: string | null }>;
+  why: LookalikeReason;
+  vendors: Array<{
+    id: string; name: string; active: boolean; bills: number; expenses: number; lastUsed: string | null;
+    company: string | null; email: string | null; phone: string | null; address: string | null; accountNumber: string | null;
+  }>;
+  /** What two or more of them have in common. A name alone is weak evidence that they are one business. */
+  shared: string[];
 };
 
 export type CodedTwoWays = {
   vendorId: string;
   vendorName: string;
-  /** The line's words, or null when its lines have none and the vendor as a whole is what varies. */
+  /** The kind of line, as code compares it, or null when its lines have no words and the vendor as a whole is what varies. */
   line: string | null;
-  accounts: Array<{ id: string; name: string; lines: number; lastUsed: string | null }>;
+  /** The newest such line, as it was written. */
+  example: string | null;
+  accounts: Array<{ id: string; name: string; lines: number; firstUsed: string | null; lastUsed: string | null }>;
 };
 
-export type CantPost = {
+/** A line the team moved to another category: both ways saw real use, and they never overlap. Decimal fills in the newer. */
+export type MovedLine = {
+  vendorId: string;
+  vendorName: string;
+  line: string | null;
+  example: string | null;
+  from: { id: string; name: string };
+  to: { id: string; name: string };
+  on: string;
+  lines: number;
+};
+
+/** A vendor and kind of line, repeated and consistent, on a category still in use: what Decimal can fill in from day one. */
+export type LearnedLine = {
+  vendorId: string;
+  vendorName: string;
+  line: string;
+  example: string;
+  categoryId: string;
+  categoryName: string;
+  lines: number;
+  lastUsed: string | null;
+  /** The number on the newest bill it was seen on, to say which one it is like. */
+  number: string | null;
+};
+
+export type LeftOut = {
   kind: 'item_lines' | 'classes' | 'locations' | 'other_currency' | 'billable_to_customer';
   /** Bills it shows up on. */
   bills: number;
@@ -49,9 +84,12 @@ export type Findings = {
   busiestVendors: Array<{ id: string; name: string; bills: number; expenses: number; total: string }>;
   lookalikeVendors: LookalikeVendors[];
   codedTwoWays: CodedTwoWays[];
+  movedLines: MovedLine[];
   /** Vendor and line pairs that are repeated and consistent: what Decimal can fill in from day one. */
-  learned: { pairs: number; lines: number; sample: Array<{ vendorId: string; vendorName: string; line: string | null; categoryId: string; accountName: string; lines: number }> };
-  cantPost: CantPost[];
+  learned: { pairs: number; lines: number; sample: Array<{ vendorId: string; vendorName: string; line: string | null; example: string | null; categoryId: string; accountName: string; lines: number }> };
+  /** All of them. Too long to show the model; a finished setup hands them to bill coding. */
+  learnedLines: LearnedLine[];
+  leftOut: LeftOut[];
   /** Reads that came back short. Over zero has to be told to the person. */
   shortfalls: Array<{ what: string; expected: number; read: number; problems: string[] }>;
 };
@@ -76,11 +114,6 @@ export function cleanName(name: string): string {
   const kept = words.filter((w) => !NOISE_WORDS.has(w));
   return (kept.length > 0 ? kept : words).join(' ');
 }
-
-const cleanLine = (text: string | null) => {
-  const words = text?.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean) ?? [];
-  return words.length > 0 ? words.join(' ') : null;
-};
 
 /** Edit distance, giving up past `max`. */
 function closeEnough(a: string, b: string, max: number): boolean {
@@ -112,38 +145,64 @@ function similarNames(a: string, b: string): boolean {
 
 type Activity = { bills: number; expenses: number; lastUsed: string | null };
 
+/** What two or more of these vendors have in common, for the person to weigh. */
+function sharedDetails(vendors: BooksVendor[]): string[] {
+  const inCommon = (key: (v: BooksVendor) => string | null | undefined) => {
+    const keys = vendors.map(key).filter(Boolean);
+    return new Set(keys).size < keys.length;
+  };
+  return [
+    ...(inCommon((v) => cleanName(v.name)) ? ['name'] : []),
+    ...(inCommon((v) => v.email?.toLowerCase()) ? ['email'] : []),
+    ...(inCommon((v) => phoneKey(v.phone)) ? ['phone'] : []),
+    ...(inCommon((v) => addressKey(v.address)) ? ['address'] : []),
+    ...(inCommon((v) => v.accountNumber) ? ['account number'] : []),
+  ];
+}
+
+/** The strongest reason wins: the same name says more than the same inbox, and so on down to close spelling. */
+const LOOKALIKE_REASONS = ['same_name', 'same_email', 'same_phone', 'same_address', 'similar_name'] as const;
+export type LookalikeReason = (typeof LOOKALIKE_REASONS)[number];
+
+const phoneKey = (phone: string | null) => {
+  const digits = phone?.replace(/\D/g, '') ?? '';
+  return digits.length >= 7 ? digits.slice(-10) : null;
+};
+const addressKey = (address: string | null) => {
+  const words = address?.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean).join(' ') ?? '';
+  return words.length >= 8 ? words : null;
+};
+
 function findLookalikes(vendors: BooksVendor[], activity: Map<string, Activity>): LookalikeVendors[] {
   const parent = new Map(vendors.map((v) => [v.id, v.id]));
-  const reasons = new Map<string, LookalikeVendors['why']>();
+  const reasons = new Map<string, LookalikeReason>();
   const root = (id: string): string => {
     let at = id;
     while (parent.get(at) !== at) at = parent.get(at)!;
     return at;
   };
-  const join = (a: string, b: string, why: LookalikeVendors['why']) => {
+  const join = (a: string, b: string, why: LookalikeReason) => {
     const [ra, rb] = [root(a), root(b)];
-    if (ra === rb) return;
-    parent.set(rb, ra);
-    // The strongest reason wins: the same name says more than the same inbox, which says more than close spelling.
-    const order: Array<LookalikeVendors['why']> = ['same_name', 'same_email', 'similar_name'];
-    const known = [why, reasons.get(ra), reasons.get(rb)].filter((r): r is LookalikeVendors['why'] => Boolean(r));
-    reasons.set(ra, order.find((o) => known.includes(o))!);
+    if (ra !== rb) parent.set(rb, ra);
+    const known = [why, reasons.get(ra), reasons.get(rb)];
+    reasons.set(ra, LOOKALIKE_REASONS.find((r) => known.includes(r))!);
   };
 
-  const byName = new Map<string, string>();
-  const byEmail = new Map<string, string>();
+  // A trading name counts as a name: it is what the next bill may be made out to.
+  const first = new Map<string, string>();
+  const sameKey = (why: LookalikeReason, key: string | null | undefined, id: string) => {
+    if (!key) return;
+    const had = first.get(`${why}|${key}`);
+    if (had) join(had, id, why);
+    else first.set(`${why}|${key}`, id);
+  };
   const named = vendors.map((v) => ({ id: v.id, clean: cleanName(v.name) }));
   for (const v of vendors) {
-    const clean = cleanName(v.name);
-    const sameName = byName.get(clean);
-    if (sameName) join(sameName, v.id, 'same_name');
-    else byName.set(clean, v.id);
-    const email = v.email?.toLowerCase();
-    if (email) {
-      const sameEmail = byEmail.get(email);
-      if (sameEmail) join(sameEmail, v.id, 'same_email');
-      else byEmail.set(email, v.id);
-    }
+    sameKey('same_name', cleanName(v.name), v.id);
+    sameKey('same_name', v.company ? cleanName(v.company) : null, v.id);
+    sameKey('same_email', v.email?.toLowerCase(), v.id);
+    sameKey('same_phone', phoneKey(v.phone), v.id);
+    sameKey('same_address', addressKey(v.address), v.id);
   }
   // Only names starting alike are compared, which keeps this far from n squared.
   const byFirst = new Map<string, typeof named>();
@@ -175,13 +234,30 @@ function findLookalikes(vendors: BooksVendor[], activity: Map<string, Activity>)
         bills: activity.get(v.id)?.bills ?? 0,
         expenses: activity.get(v.id)?.expenses ?? 0,
         lastUsed: activity.get(v.id)?.lastUsed ?? null,
+        company: v.company,
+        email: v.email,
+        phone: v.phone,
+        address: v.address,
+        accountNumber: v.accountNumber,
       })),
+      shared: sharedDetails(members),
     }))
     .sort((a, b) => b.vendors.reduce((n, v) => n + v.bills + v.expenses, 0) - a.vendors.reduce((n, v) => n + v.bills + v.expenses, 0))
     .slice(0, MAX_LISTED);
 }
 
 const later = (a: string | null, b: string | null) => (!a ? b : !b ? a : a > b ? a : b);
+const earlier = (a: string | null, b: string | null) => (!a ? b : !b ? a : a < b ? a : b);
+
+type Way = { lines: number; firstUsed: string | null; lastUsed: string | null };
+
+/** The top two ways, if one ended before the other began. */
+function switchBetween(ways: Array<[string, Way]>): { fromId: string; toId: string; on: string } | null {
+  const [a, b] = ways;
+  if (!a || !b || !a[1].firstUsed || !a[1].lastUsed || !b[1].firstUsed || !b[1].lastUsed) return null;
+  const [older, newer] = a[1].lastUsed < b[1].firstUsed ? [a, b] : b[1].lastUsed < a[1].firstUsed ? [b, a] : [null, null];
+  return older && newer ? { fromId: older[0], toId: newer[0], on: newer[1].firstUsed! } : null;
+}
 
 export function computeFindings(input: StudyInput): Findings {
   const { company, accounts, vendors, bills, expenses } = input;
@@ -205,60 +281,95 @@ export function computeFindings(input: StudyInput): Findings {
   }
 
   // Every coded line, on bills and expenses alike: both are how the team has categorised this vendor.
-  type Way = { lines: number; lastUsed: string | null };
-  const pairs = new Map<string, { vendorId: string; line: string | null; ways: Map<string, Way> }>();
+  type Pair = { vendorId: string; line: string | null; example: string | null; number: string | null; newest: string | null; ways: Map<string, Way> };
+  const pairs = new Map<string, Pair>();
   const billLines = new Map<string, number>();
-  const note = (vendorId: string | null, date: string | null, line: { kind: string; accountId: string | null; description: string | null }) => {
+  const note = (vendorId: string | null, date: string | null, number: string | null, line: { kind: string; accountId: string | null; description: string | null }) => {
     if (!vendorId || line.kind !== 'account' || !line.accountId) return;
-    const words = cleanLine(line.description);
+    const words = lineKey(line.description ?? '') || null;
     const key = `${vendorId}\u0000${words ?? ''}`;
-    const pair = pairs.get(key) ?? { vendorId, line: words, ways: new Map<string, Way>() };
-    const way = pair.ways.get(line.accountId) ?? { lines: 0, lastUsed: null };
+    const pair: Pair = pairs.get(key) ?? { vendorId, line: words, example: null, number: null, newest: null, ways: new Map<string, Way>() };
+    if (!pair.newest || (date && date >= pair.newest)) {
+      pair.newest = date;
+      pair.example = line.description?.trim() || pair.example;
+      pair.number = number ?? pair.number;
+    }
+    const way = pair.ways.get(line.accountId) ?? { lines: 0, firstUsed: null, lastUsed: null };
     way.lines += 1;
+    way.firstUsed = earlier(way.firstUsed, date);
     way.lastUsed = later(way.lastUsed, date);
     pair.ways.set(line.accountId, way);
     pairs.set(key, pair);
   };
   for (const b of bills.records) {
     for (const l of b.lines) {
-      note(b.vendorId, b.date, l);
+      note(b.vendorId, b.date, b.number, l);
       if (l.accountId) billLines.set(l.accountId, (billLines.get(l.accountId) ?? 0) + 1);
     }
   }
   for (const e of expenses.records) {
     if (e.payeeType !== null && e.payeeType !== 'Vendor') continue;
-    for (const l of e.lines) note(e.payeeId, e.date, l);
+    for (const l of e.lines) note(e.payeeId, e.date, e.number, l);
   }
 
+  const activeAccount = new Set(accounts.records.filter((a) => a.active).map((a) => a.id));
   const codedTwoWays: CodedTwoWays[] = [];
+  const movedLines: MovedLine[] = [];
+  const learnedLines: LearnedLine[] = [];
   const learnedSample: Findings['learned']['sample'] = [];
   let learnedPairs = 0;
-  let learnedLines = 0;
+  let learnedLineCount = 0;
   for (const pair of pairs.values()) {
     const ways = [...pair.ways.entries()].sort((a, b) => b[1].lines - a[1].lines);
     const total = ways.reduce((n, [, w]) => n + w.lines, 0);
     const top = ways[0]!;
     const second = ways[1];
+    // They moved on, and however few lines the newer way has, it is what they do now. A person still checks it on every bill.
+    const moved = second && second[1].lines >= SECOND_WAY_MIN_LINES ? switchBetween(ways) : null;
+    if (moved) {
+      const to = pair.ways.get(moved.toId)!;
+      const names = (id: string) => ({ id, name: accountName.get(id) ?? id });
+      const named = { vendorId: pair.vendorId, vendorName: vendorName.get(pair.vendorId) ?? pair.vendorId, line: pair.line, example: pair.example };
+      movedLines.push({ ...named, from: names(moved.fromId), to: names(moved.toId), on: moved.on, lines: total });
+      if (pair.line && pair.example && activeAccount.has(moved.toId)) {
+        learnedLines.push({ ...named, line: pair.line, example: pair.example, categoryId: moved.toId, categoryName: names(moved.toId).name, lines: to.lines, lastUsed: to.lastUsed, number: pair.number });
+      }
+      continue;
+    }
     if (total >= LEARNED_MIN_LINES && top[1].lines / total >= LEARNED_MIN_SHARE) {
       learnedPairs += 1;
-      learnedLines += total;
-      learnedSample.push({ vendorId: pair.vendorId, vendorName: vendorName.get(pair.vendorId) ?? pair.vendorId, line: pair.line, categoryId: top[0], accountName: accountName.get(top[0]) ?? top[0], lines: top[1].lines });
+      learnedLineCount += total;
+      learnedSample.push({ vendorId: pair.vendorId, vendorName: vendorName.get(pair.vendorId) ?? pair.vendorId, line: pair.line, example: pair.example, categoryId: top[0], accountName: accountName.get(top[0]) ?? top[0], lines: top[1].lines });
+      if (pair.line && pair.example && activeAccount.has(top[0])) {
+        learnedLines.push({
+          vendorId: pair.vendorId,
+          vendorName: vendorName.get(pair.vendorId) ?? pair.vendorId,
+          line: pair.line,
+          example: pair.example,
+          categoryId: top[0],
+          categoryName: accountName.get(top[0]) ?? top[0],
+          lines: top[1].lines,
+          lastUsed: top[1].lastUsed,
+          number: pair.number,
+        });
+      }
     }
     if (second && second[1].lines >= SECOND_WAY_MIN_LINES && second[1].lines / total >= SECOND_WAY_MIN_SHARE) {
       codedTwoWays.push({
         vendorId: pair.vendorId,
         vendorName: vendorName.get(pair.vendorId) ?? pair.vendorId,
         line: pair.line,
-        accounts: ways.map(([id, w]) => ({ id, name: accountName.get(id) ?? id, lines: w.lines, lastUsed: w.lastUsed })),
+        example: pair.example,
+        accounts: ways.map(([id, w]) => ({ id, name: accountName.get(id) ?? id, lines: w.lines, firstUsed: w.firstUsed, lastUsed: w.lastUsed })),
       });
     }
   }
   const linesIn = (c: CodedTwoWays) => c.accounts.reduce((n, a) => n + a.lines, 0);
 
-  const cantPost: CantPost[] = [];
-  const noteIf = (kind: CantPost['kind'], matches: (b: BooksBill) => boolean) => {
+  const leftOut: LeftOut[] = [];
+  const noteIf = (kind: LeftOut['kind'], matches: (b: BooksBill) => boolean) => {
     const found = bills.records.filter(matches);
-    if (found.length > 0) cantPost.push({ kind, bills: found.length, sampleBillIds: found.slice(0, 5).map((b) => b.id) });
+    if (found.length > 0) leftOut.push({ kind, bills: found.length, sampleBillIds: found.slice(0, 5).map((b) => b.id) });
   };
   noteIf('item_lines', (b) => b.lines.some((l) => l.kind === 'item'));
   noteIf('classes', (b) => b.lines.some((l) => l.classId));
@@ -298,8 +409,10 @@ export function computeFindings(input: StudyInput): Findings {
       .map(([id, a]) => ({ id, name: vendorName.get(id)!, bills: a.bills, expenses: a.expenses, total: minorToText(spend.get(id) ?? 0n, home) })),
     lookalikeVendors: findLookalikes(vendors.records, activity),
     codedTwoWays: codedTwoWays.sort((a, b) => linesIn(b) - linesIn(a)).slice(0, MAX_LISTED),
-    learned: { pairs: learnedPairs, lines: learnedLines, sample: learnedSample.sort((a, b) => b.lines - a.lines).slice(0, 10) },
-    cantPost,
+    movedLines: movedLines.sort((a, b) => b.lines - a.lines).slice(0, MAX_LISTED),
+    learned: { pairs: learnedPairs, lines: learnedLineCount, sample: learnedSample.sort((a, b) => b.lines - a.lines).slice(0, 10) },
+    learnedLines: learnedLines.sort((a, b) => b.lines - a.lines).slice(0, MAX_LEARNED),
+    leftOut,
     shortfalls: [
       { what: 'categories', read: accounts },
       { what: 'vendors', read: vendors },
@@ -321,7 +434,7 @@ export function companyProblems(company: BooksCompany): CompanyProblem[] {
   }
   const status = company.subscriptionStatus?.toUpperCase() ?? '';
   if (/(CANCEL|EXPIRED|SUSPEND|LAPSED|INACTIVE)/.test(status)) {
-    problems.push({ code: 'subscription', blocking: true, detail: `The QuickBooks subscription shows as ${company.subscriptionStatus}.` });
+    problems.push({ code: 'subscription', blocking: true, detail: `The QuickBooks subscription shows as ${company.subscriptionStatus}. A company in that state can be looked at but not changed, so Decimal could never post to it. Once the subscription is active again, setup can carry on from here.` });
   }
   return problems;
 }

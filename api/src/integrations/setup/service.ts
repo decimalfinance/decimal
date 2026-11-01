@@ -122,11 +122,10 @@ async function outcomeOf(setup: IntegrationSetup, postingFrom: Date): Promise<Se
     companyId: setup.companyId,
     postingFrom: postingFrom.toISOString(),
     closingDate: valueOf<{ date: string | null }>('closing_date')[0]?.date ?? null,
-    vendorLinks: valueOf<{ useVendorId: string | null; vendorIds: string[] }>('lookalike_vendors')
-      .filter((v): v is { useVendorId: string; vendorIds: string[] } => Boolean(v.useVendorId)),
-    lineChoices: valueOf<{ vendorId: string; line: string | null; categoryId: string | null }>('coded_two_ways'),
+    vendorLinks: valueOf<{ links: SetupOutcome['vendorLinks'] }>('lookalike_vendors').flatMap((v) => v.links),
+    lineChoices: valueOf<{ choices: SetupOutcome['lineChoices'] }>('coded_two_ways').flatMap((v) => v.choices),
     categoriesInUse: findings?.accountsBillsUse.map((a) => a.id) ?? [],
-    cantPost: findings?.cantPost.map((c) => c.kind) ?? [],
+    leftOut: findings?.leftOut.map((c) => c.kind) ?? [],
   };
 }
 
@@ -157,7 +156,7 @@ export async function goLive(organizationId: string, userId: string, setupId: st
       setupId,
       role: 'assistant',
       status: 'done',
-      text: `Done. Bills approved from now on post to ${label} as unpaid bills. Nothing already in ${label} changed.`,
+      text: `Done. Posting is on. Nothing already in ${label} changed.`,
     },
   });
   await appendEvent(setupId, 'go', { companyId: setup.companyId, companyName: setup.companyName, postingFrom: postingFrom.toISOString() }, { actorUserId: userId });

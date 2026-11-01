@@ -1005,6 +1005,14 @@ function formatLoggedValue(fieldKey: string, value: string): string {
 }
 
 /** A bill's figures as they stand: what a person corrected, else what was read off the document. */
+/** The currency on the document, as read or corrected. USDC is dollars. */
+export function currencyOfBill(metadataJson: unknown): string {
+  const verification = isRecord(metadataJson) && isRecord(metadataJson.verification) && isRecord(metadataJson.verification.fields) ? metadataJson.verification.fields : null;
+  const read = str(verification?.currency) ?? str(extractedOf(metadataJson)?.currency);
+  const code = read?.toUpperCase() ?? 'USD';
+  return code === 'USDC' ? 'USD' : code;
+}
+
 export function amountsOfBill(metadataJson: unknown) {
   const verification = isRecord(metadataJson) && isRecord(metadataJson.verification) ? metadataJson.verification : null;
   return documentAmounts(extractedOf(metadataJson), verification);

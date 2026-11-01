@@ -52,7 +52,7 @@ test('findings: an empty company is a plain empty result', () => {
   assert.deepEqual(f.counts, { accounts: 0, activeAccounts: 0, vendors: 0, activeVendors: 0, bills: 0, expenses: 0, billsUnpaid: 0 });
   assert.deepEqual(f.totals, { bills: '0.00 USD', expenses: '0.00 USD', unpaid: '0.00 USD' });
   assert.deepEqual(f.window, { since: '2024-11-01', firstBill: null, lastBill: null });
-  assert.deepEqual([f.lookalikeVendors, f.codedTwoWays, f.cantPost, f.shortfalls, f.accountsBillsUse, f.busiestVendors], [[], [], [], [], [], []]);
+  assert.deepEqual([f.lookalikeVendors, f.codedTwoWays, f.leftOut, f.shortfalls, f.accountsBillsUse, f.busiestVendors], [[], [], [], [], [], []]);
   assert.equal(JSON.parse(JSON.stringify(f)).counts.bills, 0, 'safe to store');
 });
 
@@ -114,7 +114,7 @@ test('findings: look-alike vendors are caught by name, inbox and close spelling,
     ['same_email', ['3', '4']],
     ['similar_name', ['5', '6']],
   ], 'most used first');
-  assert.deepEqual(f.lookalikeVendors[0]!.vendors[0], { id: '1', name: 'Delta Freight, Inc.', active: true, bills: 2, expenses: 0, lastUsed: '2026-03-01' });
+  assert.deepEqual(f.lookalikeVendors[0]!.vendors[0], { id: '1', name: 'Delta Freight, Inc.', active: true, bills: 2, expenses: 0, lastUsed: '2026-03-01', company: null, email: null, phone: null, address: null, accountNumber: null });
 });
 
 test('findings: look-alikes nobody uses are left out, and three of a kind are one group', () => {
@@ -143,15 +143,128 @@ test('findings: a vendor coded two ways is found per line, and a slip is not two
       bill('1', [line('8', 1n, 'Airfare')]),
     ]),
   });
+  assert.deepEqual(f.codedTwoWays, [], 'Delta moved, the other is steady');
+  assert.deepEqual(f.movedLines, [{
+    vendorId: '1',
+    vendorName: 'Delta',
+    line: 'freight ocean',
+    example: 'Ocean freight',
+    from: { id: '7', name: 'Freight' },
+    to: { id: '8', name: 'Travel' },
+    on: '2026-03-01',
+    lines: 4,
+  }]);
+});
+
+test('findings: a recent move to another category is what they do now, however few lines it has: the newer is learned, and the old one is not', () => {
+  const f = study({
+    vendors: read([vendor('1', 'Delta')]),
+    bills: read([
+      ...Array.from({ length: 28 }, (_, i) => bill('1', [line('7', 1n, 'Ocean freight')], { date: `2025-${String((i % 12) + 1).padStart(2, '0')}-01` })),
+      bill('1', [line('8', 1n, 'Ocean freight')], { date: '2026-02-01' }),
+      bill('1', [line('8', 1n, 'Ocean freight')], { date: '2026-03-01' }),
+    ]),
+  });
+  assert.deepEqual(f.codedTwoWays, []);
+  assert.deepEqual(f.movedLines.map((m) => [m.from.id, m.to.id, m.on]), [['7', '8', '2026-02-01']]);
+  assert.deepEqual(f.learnedLines.map((l) => [l.line, l.categoryId, l.lines]), [['freight ocean', '8', 2]]);
+  assert.equal(f.learned.pairs, 0);
+});
+
+test('findings: one odd line at the end is still a slip, and the habit is still learned', () => {
+  const f = study({
+    vendors: read([vendor('1', 'Delta')]),
+    bills: read([
+      ...Array.from({ length: 28 }, () => bill('1', [line('7', 1n, 'Ocean freight')], { date: '2025-06-01' })),
+      bill('1', [line('8', 1n, 'Ocean freight')], { date: '2026-03-01' }),
+    ]),
+  });
+  assert.deepEqual(f.codedTwoWays, []);
+  assert.equal(f.learnedLines[0]?.categoryId, '7');
+});
+
+test('findings: vendors sharing a phone, an address or a trading name look alike, and the strongest reason is the one given', () => {
+  const f = study({ vendors: read([
+    vendor('1', 'Northgate Haulage', { phone: '(555) 201-4477' }),
+    vendor('2', 'NGH Transport', { phone: '555.201.4477' }),
+    vendor('3', 'Pine Depot', { address: '14 Mill Road, Akron OH' }),
+    vendor('4', 'Akron Storage', { address: '14 MILL ROAD AKRON, OH' }),
+    vendor('5', 'Blue Harbor LLC'),
+    vendor('6', 'J Smith', { company: 'Blue Harbor, Inc.' }),
+    vendor('7', 'Short Phone', { phone: '12345' }),
+    vendor('8', 'Short Phone Two', { phone: '12345' }),
+    vendor('9', 'Rosewood', { email: 'ap@rosewood.test', phone: '555 777 8888' }),
+    vendor('10', 'Rosewood Trading', { email: 'AP@rosewood.test', phone: '555-777-8888' }),
+  ]) });
+  const groups = Object.fromEntries(f.lookalikeVendors.map((g) => [g.vendors.map((v) => v.id).sort().join(','), g.why]));
+  assert.equal(groups['1,2'], 'same_phone');
+  assert.equal(groups['3,4'], 'same_address');
+  assert.equal(groups['5,6'], 'same_name');
+  assert.equal(groups['7,8'], undefined, 'too short to mean anything');
+  assert.equal(groups['10,9'], 'same_email');
+});
+
+test('findings: a look-alike group says what its vendors have in common, and shows the details to weigh', () => {
+  const f = study({ vendors: read([
+    vendor('1', 'Harbor Fuel', { phone: '555 201 4477', email: 'a@harbor.test' }),
+    vendor('2', 'HARBOR FUEL LLC', { phone: '(555) 201-4477', email: 'b@harbor.test' }),
+    vendor('3', 'Larkspur Trucking'),
+    vendor('4', 'Larkspur Tracking'),
+  ]) });
+  const byIds = (ids: string) => f.lookalikeVendors.find((g) => g.vendors.map((v) => v.id).sort().join(',') === ids);
+  assert.deepEqual(byIds('1,2')?.shared, ['name', 'phone']);
+  assert.equal(byIds('1,2')?.vendors.find((v) => v.id === '1')?.email, 'a@harbor.test');
+  assert.deepEqual(byIds('3,4')?.shared, [], 'only close spelling, and it says so by saying nothing');
+});
+
+test('findings: two ways still mixed in time have not switched', () => {
+  const f = study({
+    vendors: read([vendor('1', 'Delta')]),
+    bills: read([
+      bill('1', [line('7', 1n, 'Ocean freight')], { date: '2026-01-01' }),
+      bill('1', [line('8', 1n, 'Ocean freight')], { date: '2026-02-01' }),
+      bill('1', [line('7', 1n, 'Ocean freight')], { date: '2026-03-01' }),
+      bill('1', [line('8', 1n, 'Ocean freight')], { date: '2026-04-01' }),
+    ]),
+  });
+  assert.deepEqual(f.movedLines, []);
   assert.deepEqual(f.codedTwoWays, [{
     vendorId: '1',
     vendorName: 'Delta',
-    line: 'ocean freight',
+    line: 'freight ocean',
+    example: 'Ocean freight',
     accounts: [
-      { id: '7', name: 'Freight', lines: 2, lastUsed: '2026-02-01' },
-      { id: '8', name: 'Travel', lines: 2, lastUsed: '2026-04-01' },
+      { id: '7', name: 'Freight', lines: 2, firstUsed: '2026-01-01', lastUsed: '2026-03-01' },
+      { id: '8', name: 'Travel', lines: 2, firstUsed: '2026-02-01', lastUsed: '2026-04-01' },
     ],
   }]);
+});
+
+test('findings: a line is the same line whatever month, year or quantity it mentions, and the newest wording is kept', () => {
+  const f = study({
+    vendors: read([vendor('1', 'Delta')]),
+    bills: read([
+      bill('1', [line('7', 1n, 'Monthly storage (40 pallets) - October 2026')], { date: '2026-10-01', number: 'D-10' }),
+      bill('1', [line('7', 1n, 'Monthly storage, Nov 2026')], { date: '2026-11-01', number: 'D-11' }),
+      bill('1', [line('7', 1n, 'Monthly storage - Sept')], { date: '2026-09-01', number: 'D-9' }),
+    ]),
+  });
+  assert.deepEqual(f.learnedLines, [{
+    vendorId: '1', vendorName: 'Delta', line: 'monthly storage', example: 'Monthly storage, Nov 2026',
+    categoryId: '7', categoryName: 'Freight', lines: 3, lastUsed: '2026-11-01', number: 'D-11',
+  }]);
+});
+
+test('findings: what can fill in a bill needs words to match on, and a category still in use', () => {
+  const f = study({
+    vendors: read([vendor('1', 'Delta'), vendor('2', 'Steady')]),
+    bills: read([
+      ...Array.from({ length: 3 }, () => bill('1', [line('8', 1n, null)])),
+      ...Array.from({ length: 3 }, () => bill('2', [line('9', 1n, 'Pallets')])),
+    ]),
+  });
+  assert.equal(f.learned.pairs, 2, 'both are habits');
+  assert.deepEqual(f.learnedLines, []);
 });
 
 test('findings: only what is repeated and consistent counts as learned, from bills and expenses alike', () => {
@@ -170,8 +283,8 @@ test('findings: only what is repeated and consistent counts as learned, from bil
     pairs: 2,
     lines: 13,
     sample: [
-      { vendorId: '2', vendorName: 'Steady', line: 'storage', categoryId: '7', accountName: 'Freight', lines: 9 },
-      { vendorId: '1', vendorName: 'Delta', line: 'airfare', categoryId: '8', accountName: 'Travel', lines: 3 },
+      { vendorId: '2', vendorName: 'Steady', line: 'storage', example: 'Storage', categoryId: '7', accountName: 'Freight', lines: 9 },
+      { vendorId: '1', vendorName: 'Delta', line: 'airfare', example: 'Airfare', categoryId: '8', accountName: 'Travel', lines: 3 },
     ],
   });
 });
@@ -197,7 +310,7 @@ test('findings: what cannot be posted yet is listed with bills to open', () => {
       bill('1', [line('7', 1n, null, { customerId: '9' })], { id: 'billable' }),
     ]),
   });
-  assert.deepEqual(f.cantPost, [
+  assert.deepEqual(f.leftOut, [
     { kind: 'item_lines', bills: 1, sampleBillIds: ['item'] },
     { kind: 'classes', bills: 1, sampleBillIds: ['class'] },
     { kind: 'locations', bills: 1, sampleBillIds: ['where'] },

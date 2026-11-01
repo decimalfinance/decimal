@@ -7,6 +7,7 @@
 import type { IntegrationSetup } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../../infra/prisma.js';
+import { lineKey } from '../../accounting/line-words.js';
 import type { AgentTool } from '../../exceptions/agent.js';
 import { BooksReadError } from '../books.js';
 import { connectorFor } from '../connectors.js';
@@ -14,13 +15,14 @@ import {
   checkFilters, isDate, lookUp, RECORD_KINDS, RECORD_SORTS, refOf, SUMMARY_GROUPS, summarize, type CopyScope, type RecordFilters, type RecordSort,
 } from '../copy.js';
 import { companyProblems } from './findings.js';
-import { doneConditions, readyForGo, stillMissing } from './gates.js';
+import { doneConditions, notRaised, wordsSaid, readyForGo, stillMissing } from './gates.js';
 import { appendEvent } from './record.js';
-import { MAX_STUDY_ATTEMPTS, type StudyFindings } from './study.js';
+import type { StudyFindings } from './study.js';
 
 /** "About seven at most." The rest waits until a bill raises it. */
 const MAX_CALLS = 7;
-const MAX_OPEN_CALLS = 3;
+/** How many it asks in one message. The rest wait their turn in the record, where they can't be forgotten. */
+export const ASK_AT_ONCE = 2;
 
 export type SetupAction =
   | { kind: 'sign_in'; system: string; path: string }
@@ -36,6 +38,8 @@ export type TurnContext = {
   seen: Set<string>;
   /** What this turn's answer will carry. Built here, never by the model. */
   actions: SetupAction[];
+  /** What was saved this turn on vendors and lines, in code's words, by call. It goes above the message. */
+  saved: Map<string, string[]>;
   onThought(thought: Thought): Promise<void>;
   startStudy(): void;
 };
@@ -63,10 +67,10 @@ const scopeOf = (setup: IntegrationSetup): CopyScope => {
   return { organizationId: setup.organizationId, system: setup.system, companyId: setup.companyId };
 };
 
-/** The copy is only worth asking once a study has filled it. */
+/** The copy is only worth asking once reading has filled it. */
 function assertStudied(setup: IntegrationSetup) {
-  if (setup.studyStatus === 'running') throw new Error('The study is still reading. Its results arrive by themselves when it finishes.');
-  if (setup.studyStatus !== 'finished') throw new Error('There is no study to look at yet. It needs a confirmed company, then start_study.');
+  if (setup.studyStatus === 'running') throw new Error('Their books are still being read. You hear when it finishes.');
+  if (setup.studyStatus !== 'finished') throw new Error('Nothing has been read yet. It needs a confirmed company, then start_reading.');
 }
 
 const homeCurrency = (setup: IntegrationSetup) => (setup.findings as StudyFindings | null)?.company?.homeCurrency ?? 'USD';
@@ -110,13 +114,19 @@ const SUMMARIZE = FILTERS.extend({ kind: z.enum(['bill', 'expense']), by: z.enum
 /** Who may open which call. The two that code insists on are opened by code. */
 const CALL_KINDS = ['lookalike_vendors', 'coded_two_ways', 'approved_before_connecting', 'other'] as const;
 
+/** What has to have come up, in anything either of them said, before an answer to these can be real. */
+const CAME_UP: Record<string, RegExp> = { closing_date: /\bclos(e|ed|es|ing)\b/i, who_approves: /\bapprov/i };
+
+/** What takes the same kind of answer is one question: the person answers it in one go, and a setup stays about seven questions. */
+const ONE_CALL_PER_KIND: readonly string[] = ['lookalike_vendors', 'coded_two_ways', 'approved_before_connecting'];
+
 const OPEN_CALL = z.object({
   key: z.string().regex(/^[a-z0-9_-]{2,60}$/, 'a short slug, like lookalike-delta'),
   kind: z.enum(CALL_KINDS),
-  question: z.string().trim().min(5).max(500),
-  recommendation: z.string().trim().min(3).max(500),
-  why: z.string().trim().min(3).max(500),
-  refs: z.array(z.string().max(120)).max(50),
+  question: z.string().trim().min(5).max(1500),
+  recommendation: z.string().trim().min(3).max(1000),
+  why: z.string().trim().min(3).max(1000),
+  refs: z.array(z.string().max(120)).max(100),
 });
 
 const RECORD_ANSWER = z.object({
@@ -125,12 +135,119 @@ const RECORD_ANSWER = z.object({
   value: z.record(z.string(), z.unknown()).nullish(),
 });
 
+const NAME = z.string().trim().min(1).max(300);
+const SAME = z.array(z.object({ keep: NAME, with: z.array(NAME).min(1) }));
+const CHOICES = z.array(z.object({ vendor: NAME, line: z.string().max(500).nullable(), category: NAME.nullable() })).min(1);
+
+type VendorLink = { useVendorId: string; vendorIds: string[] };
+type LineChoice = { vendorId: string; line: string | null; categoryId: string | null };
+
+const idOf = (kind: 'vendor' | 'category', id: string) => (id.startsWith(`${kind}:`) ? id.slice(kind.length + 1) : id);
+const looseName = (name: string) => name.toLowerCase().replace(/[’‘`]/g, "'").replace(/\s+/g, ' ').trim();
+
+/**
+ * Answers come by name, because that's how a person says them and a model copies them. Turning a name into a
+ * record has to be exact, so code does it: the exact name, then the same but for case and spacing, then an id.
+ * "Sterling Office Supply" and "Sterling Office Supply, Inc." are two vendors, so nothing looser than that.
+ */
+async function vendorsByName(setup: IntegrationSetup): Promise<(text: string) => { id: string; name: string }> {
+  const rows = (await prisma.booksRecord.findMany({ where: { ...scopeOf(setup), kind: 'vendor' }, select: { recordId: true, name: true } }))
+    .map((r) => ({ id: r.recordId, name: r.name ?? r.recordId }));
+  return (text) => {
+    const exact = rows.filter((r) => r.name === text);
+    const loose = exact.length > 0 ? exact : rows.filter((r) => looseName(r.name) === looseName(text));
+    const found = loose.length > 0 ? loose : rows.filter((r) => r.id === idOf('vendor', text));
+    if (found.length === 1) return found[0]!;
+    throw new Error(found.length > 1 ? `More than one vendor is called "${text}". Copy the name exactly as the call shows it.` : `No vendor is called "${text}". Copy the name exactly as the call shows it.`);
+  };
+}
+
+/** Lines with a decision to make: those coded two ways, and those that moved, if a person disagrees with the move. */
+const linesToDecide = (findings: StudyFindings | null) => [
+  ...(findings?.codedTwoWays ?? []),
+  ...(findings?.movedLines ?? []).map((m) => ({ vendorId: m.vendorId, vendorName: m.vendorName, line: m.line, example: m.example, accounts: [m.from, m.to] })),
+];
+
+/** An answer as names, for the model to say back. A wrong id shows up here, where the person can catch it. */
+export async function inWords(call: { kind: string; refs: unknown }, value: unknown, setup: IntegrationSetup): Promise<string[] | undefined> {
+  if (call.kind === 'who_approves') return ['Recorded. What they chose is theirs to do before their first bill, and it doesn\'t hold up Go.'];
+  if (call.kind === 'approved_before_connecting') return ['Recorded. Decimal doesn\'t do this for them: to post one of those bills, someone sends it back and approves it again after Go. It doesn\'t hold up Go.'];
+  if (call.kind === 'other') return ['Kept on the record, and that is all. It changes nothing in their books or in how a bill posts, so don\'t say it will.'];
+  const saved = (value ?? {}) as { date?: string | null; links?: VendorLink[]; choices?: LineChoice[] };
+  if (call.kind === 'closing_date') return [saved.date ? `Closed through ${saved.date}.` : 'Their books have never been closed.'];
+  if (saved.links) {
+    if (saved.links.length === 0) return ['They all stay separate vendors.'];
+    const rows = await prisma.booksRecord.findMany({
+      where: { ...scopeOf(setup), kind: 'vendor', recordId: { in: saved.links.flatMap((l) => l.vendorIds) } },
+      select: { recordId: true, name: true },
+    });
+    const name = (id: string) => rows.find((r) => r.recordId === id)?.name ?? id;
+    return [
+      ...saved.links.map((l) => {
+        const others = l.vendorIds.filter((id) => id !== l.useVendorId).map(name);
+        return `Bills for ${others.slice(0, -1).join(', ')}${others.length > 1 ? ' and ' : ''}${others.at(-1)} go to ${name(l.useVendorId).replace(/\.$/, '')}.`;
+      }),
+      'Every other vendor stays as it is.',
+    ];
+  }
+  if (saved.choices) {
+    const findings = setup.findings as StudyFindings | null;
+    const lines = linesToDecide(findings);
+    const cited = Array.isArray(call.refs) ? (call.refs as string[]) : [];
+    const unsettled = (findings?.codedTwoWays ?? []).filter((t) => cited.includes(`vendor:${t.vendorId}`) && !saved.choices!.some((c) => c.vendorId === t.vendorId && c.line === t.line));
+    return [
+      ...saved.choices.map((c) => {
+        const entry = lines.find((t) => t.vendorId === c.vendorId && t.line === c.line);
+        const what = `"${entry?.example ?? c.line}" from ${entry?.vendorName ?? c.vendorId}`;
+        return c.categoryId === null ? `${what}: a person picks the category each time.` : `${what} goes to ${entry?.accounts.find((a) => a.id === c.categoryId)?.name ?? c.categoryId}.`;
+      }),
+      ...unsettled.map((t) => `Nothing was said on "${t.example ?? t.line}" from ${t.vendorName}, so a person picks the category each time.`),
+    ];
+  }
+  return undefined;
+}
+
+/**
+ * What a question asks about, written by code under the model's words: the exact names, how much each is used,
+ * and what they share. Asked to write this itself, a model asks "which of your vendors are one business?" and names none.
+ */
+export async function listFor(kind: unknown, setupId: string): Promise<string> {
+  if (kind !== 'lookalike_vendors' && kind !== 'coded_two_ways') return '';
+  const [setup, call] = await Promise.all([
+    prisma.integrationSetup.findUniqueOrThrow({ where: { setupId }, select: { findings: true } }),
+    prisma.integrationSetupCall.findFirst({ where: { setupId, kind }, select: { refs: true } }),
+  ]);
+  const findings = setup.findings as StudyFindings | null;
+  const cited = new Set(Array.isArray(call?.refs) ? (call.refs as string[]) : []);
+  const isCited = (id: string) => cited.size === 0 || cited.has(`vendor:${id}`);
+  const count = (n: number, what: string) => `${n} ${what}${n === 1 ? '' : 's'}`;
+  if (kind === 'coded_two_ways') {
+    return (findings?.codedTwoWays ?? [])
+      .filter((c) => isCited(c.vendorId))
+      .map((c) => `- ${c.vendorName}, "${c.example ?? 'its lines'}": ${c.accounts.map((a) => `${a.name} (${count(a.lines, 'line')})`).join(' or ')}`)
+      .join('\n');
+  }
+  return (findings?.lookalikeVendors ?? [])
+    .filter((g) => g.vendors.filter((v) => isCited(v.id)).length >= 2)
+    .map((g) => {
+      const vendors = g.vendors.map((v) => {
+        const used = [...(v.bills > 0 || v.expenses === 0 ? [count(v.bills, 'bill')] : []), ...(v.expenses > 0 ? [count(v.expenses, 'expense')] : []), ...(v.active ? [] : ['inactive'])];
+        return `${v.name} (${used.join(', ')})`;
+      });
+      return `- ${vendors.join(', ')}${g.shared.length > 0 ? `: same ${g.shared.join(', ')}` : ''}`;
+    })
+    .join('\n');
+}
+
+const OFFER_GO = z.object({ passedOver: z.array(z.object({ id: z.string(), why: z.string().trim().min(3).max(500) })).max(40).optional() });
+
 /**
  * The part of an answer fixed code will use later, checked against what was asked.
  * A reply the model can't turn into this is refused, and it has to ask again.
  */
-function answerValue(call: { kind: string; refs: unknown }, value: Record<string, unknown> | null | undefined, findings: StudyFindings | null): Record<string, unknown> | null {
-  const refs = Array.isArray(call.refs) ? (call.refs as string[]) : [];
+async function answerValue(call: { kind: string; value: unknown }, value: Record<string, unknown> | null | undefined, setup: IntegrationSetup): Promise<Record<string, unknown> | null> {
+  const findings = setup.findings as StudyFindings | null;
+  const before = (call.value ?? {}) as { links?: VendorLink[]; choices?: LineChoice[] };
   if (call.kind === 'closing_date') {
     const date = value?.date;
     if (date === null) return { date: null };
@@ -141,26 +258,62 @@ function answerValue(call: { kind: string; refs: unknown }, value: Record<string
     return { date };
   }
   if (call.kind === 'lookalike_vendors') {
-    const useVendorId = value?.useVendorId;
-    if (useVendorId === null) return { useVendorId: null };
-    if (typeof useVendorId !== 'string' || !refs.includes(refOf('vendor', useVendorId))) {
-      throw new Error('value.useVendorId must be one of the vendors in this call, or null to keep them apart.');
+    const same = SAME.safeParse(value?.same ?? (value?.apart ? [] : undefined));
+    const apartNames = z.array(NAME).safeParse(value?.apart ?? []);
+    if (!same.success || !apartNames.success) {
+      throw new Error('value.same lists {keep, with: [...]} by name for each group they said is one vendor, and value.apart any vendor to take back out of a group. Vendors nobody names stay separate, so {same: []} is right when they all are.');
     }
-    return { useVendorId, vendorIds: refs.filter((r) => r.startsWith('vendor:')).map((r) => r.slice('vendor:'.length)) };
+    const named = await vendorsByName(setup);
+    const used = new Set<string>(apartNames.data.map((text) => named(text).id));
+    const links = same.data.map((group) => {
+      const keep = named(group.keep);
+      const vendorIds = [...new Set([keep.id, ...group.with.map((text) => named(text).id)])];
+      if (vendorIds.length < 2) throw new Error(`"${group.keep}" needs another vendor to be one with.`);
+      for (const id of vendorIds) {
+        if (used.has(id)) throw new Error(`Vendor ${id} is in two groups.`);
+        used.add(id);
+      }
+      return { useVendorId: keep.id, vendorIds };
+    });
+    // A later answer only changes the vendors it names. What they said about the others stands.
+    const kept = (before.links ?? [])
+      .map((l) => ({ ...l, vendorIds: l.vendorIds.filter((id) => !used.has(id)) }))
+      .filter((l) => l.vendorIds.length >= 2 && l.vendorIds.includes(l.useVendorId));
+    return { links: [...kept, ...links] };
   }
   if (call.kind === 'coded_two_ways') {
-    const { vendorId, line, categoryId } = value ?? {};
-    const entry = findings?.codedTwoWays.find((c) => c.vendorId === vendorId && c.line === (line ?? null));
-    if (!entry) throw new Error('value.vendorId and value.line must match one entry in codedTwoWays.');
-    if (categoryId === null) return { vendorId, line: entry.line, categoryId: null };
-    if (!entry.accounts.some((a) => a.id === categoryId)) throw new Error('value.categoryId must be one of the categories this line has used, or null to ask each time.');
-    return { vendorId, line: entry.line, categoryId };
+    const choices = CHOICES.safeParse(value?.choices);
+    if (!choices.success) throw new Error('value.choices lists {vendor, line, category} for each line they decided: the vendor by name, the line\'s words, and the category by name, or null for a person to pick each time.');
+    const named = await vendorsByName(setup);
+    const lines = linesToDecide(findings);
+    const said = choices.data.map((choice) => {
+      const vendor = named(choice.vendor);
+      const ofVendor = lines.filter((l) => l.vendorId === vendor.id);
+      const entry = ofVendor.find((l) => l.line === (choice.line === null ? null : lineKey(choice.line) || null));
+      if (!entry) {
+        throw new Error(`"${choice.line}" from ${vendor.name} isn't a line with a decision to make.${ofVendor.length > 0 ? ` Its lines are: ${ofVendor.map((l) => l.example ?? l.line).join(', ')}.` : ''}`);
+      }
+      if (choice.category === null) return { vendorId: vendor.id, line: entry.line, categoryId: null };
+      const text = looseName(choice.category);
+      const category = entry.accounts.filter((a) => looseName(a.name) === text || looseName(a.name.split(':').at(-1)!) === text || a.id === idOf('category', choice.category!));
+      if (category.length !== 1) {
+        throw new Error(`"${choice.category}" isn't one of the categories this line has used: ${entry.accounts.map((a) => a.name).join(', ')}. Use one of those, or null for a person to pick each time.`);
+      }
+      return { vendorId: vendor.id, line: entry.line, categoryId: category[0]!.id };
+    });
+    for (const [i, c] of said.entries()) {
+      if (said.slice(0, i).some((o) => o.vendorId === c.vendorId && o.line === c.line && o.categoryId !== c.categoryId)) {
+        throw new Error(`"${choices.data[i]!.line}" can't go to two categories. If it depends on something, use category null: a person picks each time.`);
+      }
+    }
+    // The same here: the lines it doesn't name stand as they were.
+    return { choices: [...(before.choices ?? []).filter((b) => !said.some((c) => c.vendorId === b.vendorId && c.line === b.line)), ...said] };
   }
   return null;
 }
 
 /** Findings as the model sees them: everything it might cite carries the ref to cite it by. */
-function findingsWithRefs(findings: StudyFindings, seen: Set<string>) {
+function findingsWithRefs({ learnedLines: _forCoding, shortfalls, leftOut, decimal: { approvedBeforeConnecting: approved, ...decimal }, ...findings }: StudyFindings, seen: Set<string>) {
   const ref = (kind: Parameters<typeof refOf>[0], id: string) => {
     const r = refOf(kind, id);
     seen.add(r);
@@ -181,23 +334,42 @@ function findingsWithRefs(findings: StudyFindings, seen: Set<string>) {
       ref: ref('vendor', c.vendorId),
       accounts: c.accounts.map((a) => ({ ...a, ref: ref('category', a.id) })),
     })),
+    ...(findings.counts.bills + findings.counts.expenses === 0 ? { noHistory: true } : {}),
+    ...(findings.counts.bills === 0 && findings.counts.expenses > 0 ? { expensesOnly: true } : {}),
+    ...(findings.movedLines.length > 0 ? { movedLines: findings.movedLines.map((m) => ({ ...m, refs: [ref('vendor', m.vendorId), ref('category', m.from.id), ref('category', m.to.id)] })) } : {}),
     learned: {
       ...findings.learned,
       sample: findings.learned.sample.map((s) => ({ ...s, refs: [ref('vendor', s.vendorId), ref('category', s.categoryId)] })),
     },
-    cantPost: findings.cantPost.map((c) => ({ ...c, sampleRefs: c.sampleBillIds.map((id) => ref('bill', id)) })),
+    // What isn't there isn't shown, so it doesn't get brought up.
+    ...(leftOut.length > 0 ? { leftOut: leftOut.map((c) => ({ ...c, sampleRefs: c.sampleBillIds.map((id) => ref('bill', id)) })) } : {}),
+    ...(shortfalls.length > 0 ? { notFullyRead: shortfalls } : {}),
     decimal: {
-      ...findings.decimal,
-      approvedBeforeConnecting: {
-        ...findings.decimal.approvedBeforeConnecting,
-        sampleRefs: findings.decimal.approvedBeforeConnecting.sampleBillIds.map(decimalRef),
-      },
+      ...decimal,
+      ...(approved.bills > 0 ? { approvedBeforeConnecting: { ...approved, sampleRefs: approved.sampleBillIds.map(decimalRef) } } : {}),
     },
   };
 }
 
+/** Why this call has nothing behind it, if it doesn't. A question with no evidence wastes the person's time. */
+function nothingToAsk(kind: string, refs: string[], findings: StudyFindings | null): string | null {
+  const vendors = refs.filter((r) => r.startsWith('vendor:')).map((r) => r.slice('vendor:'.length));
+  if (kind === 'lookalike_vendors' && vendors.length < 2) return 'A look-alike call cites the vendors that could be confused: at least two.';
+  if (kind === 'coded_two_ways' && !linesToDecide(findings).some((c) => vendors.includes(c.vendorId))) {
+    return 'Their books show no line coded two ways for this vendor, so there is nothing to ask. Having no calls of your own is normal.';
+  }
+  if (kind === 'approved_before_connecting' && !findings?.decimal.approvedBeforeConnecting.bills) {
+    return 'No bills were approved before connecting, so there is nothing to ask.';
+  }
+  return null;
+}
+
 /** Of these refs, the ones that really are records: seen this turn, or in this company's copy. */
-async function realRefs(scope: CopyScope, refs: string[], seen: Set<string>): Promise<string[]> {
+/** Decimal's own bills that came up. They aren't in the copy, and a later turn can cite them too. */
+export const decimalRefs = (findings: unknown): string[] =>
+  ((findings as StudyFindings | null)?.decimal.approvedBeforeConnecting.sampleBillIds ?? []).map((id) => `decimal-bill:${id}`);
+
+export async function realRefs(scope: CopyScope, refs: string[], seen: Set<string>): Promise<string[]> {
   const real: string[] = [];
   for (const candidate of new Set(refs)) {
     if (seen.has(candidate)) {
@@ -268,11 +440,11 @@ export function setupTools(ctx: TurnContext): AgentTool[] {
           data: { companyId: company.id, companyName: company.name, companyConfirmedAt: new Date(), companyConfirmedByUserId: ctx.speaker.userId },
         });
         await appendEvent(ctx.setupId, 'company_confirmed', { companyId: company.id, companyName: company.name, messageId: ctx.speaker.messageId }, { actorUserId: ctx.speaker.userId });
-        return { confirmed: company.name, next: 'start_study' };
+        return { confirmed: company.name, next: 'start_reading' };
       },
     },
     {
-      name: 'start_study',
+      name: 'start_reading',
       description: 'Start reading the company\'s categories, vendors, bills and expenses (24 months) into a copy, and work out the findings. Runs by itself; you hear when it finishes. Use again to read it again after they changed something in their books.',
       parameters: { type: 'object', properties: { again: { type: 'boolean' } } },
       run: async (args) => {
@@ -281,8 +453,9 @@ export function setupTools(ctx: TurnContext): AgentTool[] {
         if (!setup.companyConfirmedAt) throw new Error('The person has to confirm the company first.');
         if (setup.studyStatus === 'running') return { status: 'running', note: 'It is already reading.' };
         if (setup.studyStatus === 'finished' && !again) return { status: 'finished', note: 'Already finished. get_findings has the results.' };
-        if (setup.studyAttempts >= MAX_STUDY_ATTEMPTS) {
-          throw new Error(`It has failed ${setup.studyAttempts} times since the last sign-in, so stop trying. Tell the person what is in the way. Signing in again starts the count again.`);
+        // Code already tried more than once before it failed. Only a person's word, or a new sign-in, makes another try worth it.
+        if (setup.studyStatus === 'failed' && setup.studyAttempts > 0 && !ctx.speaker) {
+          throw new Error('It has only just failed, and it already tried more than once by itself. Tell the person what is in the way. It can try again when they ask, or after they sign in again.');
         }
         const { count } = await prisma.integrationSetup.updateMany({
           where: { setupId: ctx.setupId, OR: [{ studyStatus: null }, { studyStatus: { in: ['failed', 'finished'] } }] },
@@ -296,12 +469,12 @@ export function setupTools(ctx: TurnContext): AgentTool[] {
     },
     {
       name: 'get_findings',
-      description: 'What the study worked out: counts, totals, busiest vendors, categories in use, look-alike vendors, lines coded two ways, what cannot post yet, reads that came back short, bills approved before connecting. Made by code, so quote it rather than recount it.',
+      description: 'What reading their books came to: counts, totals, busiest vendors, categories in use, look-alike vendors, lines coded two ways, what a posted bill leaves out, anything not fully read, bills approved before connecting. Made by code, so quote it rather than recount it.',
       parameters: { type: 'object', properties: {} },
       run: async () => {
         const setup = await load(ctx.setupId);
         assertStudied(setup);
-        await ctx.onThought({ text: 'Going through what the study found' });
+        await ctx.onThought({ text: 'Going through their books' });
         return findingsWithRefs(setup.findings as StudyFindings, ctx.seen);
       },
     },
@@ -355,7 +528,7 @@ export function setupTools(ctx: TurnContext): AgentTool[] {
     },
     {
       name: 'open_call',
-      description: 'Record something only the person can decide, with your recommendation, why, and the records behind it. Then ask it in your message. The closing date and who approves are opened for you.',
+      description: 'Record something only the person can decide, with your recommendation, why, and the records behind it. Open everything you want to ask as soon as you know it: the state keeps it and marks which to ask now. Where the same kind of answer fits several look-alike groups, or several lines, put them in one call, so one reply can settle them. The closing date and who approves are opened for you.',
       parameters: {
         type: 'object',
         required: ['key', 'kind', 'question', 'recommendation', 'why', 'refs'],
@@ -369,34 +542,40 @@ export function setupTools(ctx: TurnContext): AgentTool[] {
         },
       },
       run: async (args) => {
+        const key = typeof args.key === 'string' ? args.key : null;
+        const existing = key ? await prisma.integrationSetupCall.findUnique({ where: { setupId_key: { setupId: ctx.setupId, key } } }) : null;
+        const had = Array.isArray(existing?.refs) ? (existing.refs as string[]) : [];
+        const given = Array.isArray(args.refs) ? args.refs : [];
+        // An answered one opens again only for something new to ask.
+        if (existing?.status === 'answered' && (existing.required || given.every((r) => had.includes(r as string)))) return { alreadyAnswered: existing.answer };
+        if (existing?.required) return { alreadyOpen: existing.key, note: 'Its words are in the state. Just ask it in your message.' };
         const input = parsed(OPEN_CALL, args);
         const setup = await load(ctx.setupId);
         assertStudied(setup);
-        const refs = await realRefs(scopeOf(setup), input.refs, ctx.seen);
+        const refs = await realRefs(scopeOf(setup), input.refs, new Set([...ctx.seen, ...decimalRefs(setup.findings)]));
         if (refs.length === 0) throw new Error('A call has to cite records your tools returned, and none of these are.');
-        const existing = await prisma.integrationSetupCall.findUnique({ where: { setupId_key: { setupId: ctx.setupId, key: input.key } } });
-        if (existing?.status === 'answered') return { alreadyAnswered: existing.answer };
-        if (existing?.required) throw new Error('This call was opened for you. Just ask it.');
+        const cites = [...new Set([...had, ...refs])];
+        const empty = nothingToAsk(input.kind, cites, setup.findings as StudyFindings | null);
+        if (empty) throw new Error(empty);
         if (!existing) {
-          const calls = await prisma.integrationSetupCall.findMany({ where: { setupId: ctx.setupId }, select: { status: true } });
-          if (calls.length >= MAX_CALLS) throw new Error(`That is ${MAX_CALLS} calls, the most one setup asks. Anything smaller waits until a bill raises it.`);
-          if (calls.filter((c) => c.status === 'open').length >= MAX_OPEN_CALLS) {
-            throw new Error(`${MAX_OPEN_CALLS} calls are already waiting on the person. Get those answered first.`);
-          }
+          const calls = await prisma.integrationSetupCall.findMany({ where: { setupId: ctx.setupId }, select: { key: true, kind: true } });
+          const same = ONE_CALL_PER_KIND.includes(input.kind) ? calls.find((c) => c.kind === input.kind) : null;
+          if (same) throw new Error(`These all go in one question, ${same.key}. Open that one again, with the whole question and what this cites.`);
+          if (calls.length >= MAX_CALLS) throw new Error(`That is ${MAX_CALLS} calls, the most one setup asks. Put more into one call, or pass over the smaller things: they wait until a bill raises them.`);
         }
-        const { key, ...words } = { ...input, refs };
+        const { key: slug, ...words } = { ...input, refs: cites };
         await prisma.integrationSetupCall.upsert({
-          where: { setupId_key: { setupId: ctx.setupId, key } },
-          create: { setupId: ctx.setupId, key, ...words },
-          update: words,
+          where: { setupId_key: { setupId: ctx.setupId, key: slug } },
+          create: { setupId: ctx.setupId, key: slug, ...words },
+          update: { ...words, status: 'open' },
         });
-        await appendEvent(ctx.setupId, 'call_opened', { key, kind: input.kind, refs });
-        return { opened: key };
+        await appendEvent(ctx.setupId, 'call_opened', { key: slug, kind: input.kind, refs });
+        return { opened: slug, ...(existing?.status === 'answered' ? { note: 'It is open again. What they said is in the state: when they answer, record all of it again, with the new part.' } : {}) };
       },
     },
     {
       name: 'record_answer',
-      description: 'Save what the person decided on a call. Only when they have just said so. value holds the usable part: closing_date {date: "YYYY-MM-DD" or null}; lookalike_vendors {useVendorId, or null to keep them apart}; coded_two_ways {vendorId, line, categoryId, or null to ask each time}. They can change their mind: record it again.',
+      description: 'Save what the person decided on a call. Only when they have just said so. A later answer only changes the vendors or lines it names, and the rest stands. What comes back as means is everything saved on this call: check it against what they said. On vendors and lines they read it above your message, so there is no need to say it again. value holds the usable part, by name, as the call or their books show it: closing_date {date: "YYYY-MM-DD" or null}; lookalike_vendors {same: [{keep, with: [...]}], apart: [...]}, same for each group they said is one vendor and apart for any to take back out of a group; vendors nobody names stay separate, so {same: []} is right when they all are; coded_two_ways {choices: [{vendor, line, category}]}, one for each line, with category null for a person to pick each time. answer is what they decided, in a few plain words.',
       parameters: {
         type: 'object',
         required: ['key', 'answer'],
@@ -412,7 +591,12 @@ export function setupTools(ctx: TurnContext): AgentTool[] {
         const setup = await load(ctx.setupId);
         const call = await prisma.integrationSetupCall.findUnique({ where: { setupId_key: { setupId: ctx.setupId, key: input.key } } });
         if (!call) throw new Error(`There is no call called ${input.key}.`);
-        const value = answerValue(call, input.value, setup.findings as StudyFindings | null);
+        const topic = CAME_UP[call.kind];
+        if (topic) {
+          const talked = await prisma.integrationSetupMessage.findMany({ where: { setupId: ctx.setupId, status: 'done' }, select: { text: true } });
+          if (!talked.some((m) => topic.test(m.text ?? ''))) throw new Error('This hasn\'t come up with them yet. Ask it in your message, and record it when they answer.');
+        }
+        const value = await answerValue(call, input.value, setup);
         await prisma.integrationSetupCall.update({
           where: { setupId_key: { setupId: ctx.setupId, key: input.key } },
           data: {
@@ -425,17 +609,48 @@ export function setupTools(ctx: TurnContext): AgentTool[] {
           },
         });
         await appendEvent(ctx.setupId, 'call_answered', { key: input.key, answer: input.answer, value, messageId: ctx.speaker.messageId }, { actorUserId: ctx.speaker.userId });
-        return { recorded: input.key };
+        const means = await inWords(call, value, setup);
+        // A mapping has to be exact, so they read what was saved rather than what the model makes of it.
+        if (means && (call.kind === 'lookalike_vendors' || call.kind === 'coded_two_ways')) ctx.saved.set(input.key, means);
+        return { recorded: input.key, means };
       },
     },
     {
       name: 'offer_go',
-      description: 'Ask to put the Go button under your message. Code decides: if anything is missing you hear what. Only the person pressing it turns posting on.',
-      parameters: { type: 'object', properties: {} },
-      run: async () => {
+      description: 'Ask to put the Go button under your message. Code decides: if anything is missing you hear what. Whatever their books show that the person hasn\'t heard from you comes back as notRaised: ask them, or, if no question of yours cites it, pass it over here with the reason it can wait. Only the person pressing it turns posting on.',
+      parameters: {
+        type: 'object',
+        properties: {
+          passedOver: {
+            type: 'array',
+            description: 'What notRaised listed that isn\'t worth their time, with why. It goes on the record.',
+            items: { type: 'object', required: ['id', 'why'], properties: { id: { type: 'string' }, why: { type: 'string' } } },
+          },
+        },
+      },
+      run: async (args) => {
         const setup = await load(ctx.setupId);
         const conditions = await doneConditions(setup);
-        if (!readyForGo(conditions)) return { offered: false, stillNeeded: stillMissing(conditions) };
+        const [calls, told, earlier] = await Promise.all([
+          prisma.integrationSetupCall.findMany({ where: { setupId: ctx.setupId }, select: { kind: true, refs: true } }),
+          prisma.integrationSetupMessage.findMany({ where: { setupId: ctx.setupId, status: 'done' }, select: { text: true, claims: true } }),
+          prisma.integrationSetupEvent.findMany({ where: { setupId: ctx.setupId, kind: 'tool_call', payload: { path: ['tool'], equals: 'offer_go' } }, select: { payload: true } }),
+        ]);
+        const said = wordsSaid(told.flatMap((m) => [m.text ?? '', ...(Array.isArray(m.claims) ? (m.claims as Array<{ text: string }>).map((c) => c.text) : [])]));
+        // What it passed over stays passed over. What a question cites can't be: the person has to see what they're asked about.
+        const passedOver = new Set([
+          ...earlier.flatMap((e) => ((e.payload as { args?: { passedOver?: Array<{ id: string }> } }).args?.passedOver ?? []).map((p) => p.id)),
+          ...(parsed(OFFER_GO, args).passedOver ?? []).map((p) => p.id),
+        ]);
+        const left = notRaised(setup.findings as StudyFindings | null, calls, said).filter((n) => n.inACall || !passedOver.has(n.id));
+        if (!readyForGo(conditions) || left.length > 0) {
+          return {
+            offered: false,
+            ...(readyForGo(conditions) ? {} : { stillNeeded: stillMissing(conditions) }),
+            ...(left.length > 0 ? { notRaised: left } : {}),
+            ...(left.some((n) => n.inACall) ? { note: 'Your questions ask about these, but they were never named to the person. Set list when you respond, and they see them.' } : {}),
+          };
+        }
         if (!ctx.actions.some((a) => a.kind === 'go')) {
           ctx.actions.push({
             kind: 'go',

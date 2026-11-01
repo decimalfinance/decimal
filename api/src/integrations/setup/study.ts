@@ -16,7 +16,6 @@ import { appendEvent } from './record.js';
 
 const LEASE_SECONDS = 600;
 const HISTORY_MONTHS = 24;
-export const MAX_STUDY_ATTEMPTS = 3;
 
 export type DecimalSide = {
   /** Someone other than the person setting this up can approve what they send. */

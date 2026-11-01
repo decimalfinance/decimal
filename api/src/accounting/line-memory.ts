@@ -21,6 +21,9 @@
 // bill it is like. Other vendors' lines are only ever shown to the model, as a
 // hint for its guess (relevantPrecedents), and a guess stays a guess.
 import { prisma } from '../infra/prisma.js';
+import { lineKey, lineSimilarity, lineTokens } from './line-words.js';
+
+export { lineKey, lineSimilarity, lineTokens };
 
 export type Precedent = {
   key: string;
@@ -50,33 +53,6 @@ export type LineMatch = {
 /** Two lines at or above this similarity read as the same thing. */
 export const SAME_LINE = 0.6;
 const PRECEDENT_BILLS = 500;
-
-const MONTHS = new Set(['jan', 'january', 'feb', 'february', 'mar', 'march', 'apr', 'april', 'may', 'jun', 'june', 'jul', 'july',
-  'aug', 'august', 'sep', 'sept', 'september', 'oct', 'october', 'nov', 'november', 'dec', 'december']);
-const STOP = new Set(['a', 'an', 'the', 'of', 'for', 'and', 'to', 'in', 'on', 'with', 'per', 'x', 'at', 'by', 'from', 'qty', 'ea', 'each']);
-
-/** The words that say what a line is: lower-cased, singular, without quantities, dates or months. */
-export function lineTokens(description: string): Set<string> {
-  const words = description.toLowerCase()
-    .replace(/\([^)]*\d[^)]*\)/g, ' ')          // "(8)", "(4 assets)"
-    .replace(/[^a-z0-9]+/g, ' ')
-    .split(' ')
-    .filter((w) => w.length > 1 && !/\d/.test(w) && !MONTHS.has(w) && !STOP.has(w))
-    .map((w) => (w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w));
-  return new Set(words);
-}
-
-/** One key per kind of line: its words, sorted. */
-export function lineKey(description: string): string {
-  return [...lineTokens(description)].sort().join(' ');
-}
-
-export function lineSimilarity(a: Set<string>, b: Set<string>): number {
-  if (a.size === 0 || b.size === 0) return 0;
-  let shared = 0;
-  for (const w of a) if (b.has(w)) shared += 1;
-  return shared / (a.size + b.size - shared);
-}
 
 const rec = (v: unknown): Record<string, unknown> | null => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null);
 const text = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);

@@ -14,7 +14,7 @@ const OUTCOME = z.object({
   /** What the person said a line coded two ways should be. A null category means ask each time. */
   lineChoices: z.array(z.object({ vendorId: z.string(), line: z.string().nullable(), categoryId: z.string().nullable() })),
   categoriesInUse: z.array(z.string()),
-  cantPost: z.array(z.string()),
+  leftOut: z.array(z.string()),
 });
 
 export type SetupOutcome = z.infer<typeof OUTCOME>;
