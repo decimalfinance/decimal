@@ -27,6 +27,8 @@ export type LookalikeVendors = {
   }>;
   /** What two or more of them have in common. A name alone is weak evidence that they are one business. */
   shared: string[];
+  /** Each has an account number with them, and they differ: two accounts, so maybe two businesses. */
+  differentAccounts: boolean;
 };
 
 export type CodedTwoWays = {
@@ -241,6 +243,7 @@ function findLookalikes(vendors: BooksVendor[], activity: Map<string, Activity>)
         accountNumber: v.accountNumber,
       })),
       shared: sharedDetails(members),
+      differentAccounts: new Set(members.map((m) => m.accountNumber?.trim()).filter(Boolean)).size > 1,
     }))
     .sort((a, b) => b.vendors.reduce((n, v) => n + v.bills + v.expenses, 0) - a.vendors.reduce((n, v) => n + v.bills + v.expenses, 0))
     .slice(0, MAX_LISTED);

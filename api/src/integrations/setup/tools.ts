@@ -112,13 +112,16 @@ const LOOK_UP = FILTERS.extend({
 const SUMMARIZE = FILTERS.extend({ kind: z.enum(['bill', 'expense']), by: z.enum(SUMMARY_GROUPS) });
 
 /** Who may open which call. The two that code insists on are opened by code. */
-const CALL_KINDS = ['lookalike_vendors', 'coded_two_ways', 'approved_before_connecting', 'other'] as const;
+const CALL_KINDS = ['lookalike_vendors', 'coded_two_ways', 'other'] as const;
 
 /** What has to have come up, in anything either of them said, before an answer to these can be real. */
 const CAME_UP: Record<string, RegExp> = { closing_date: /\bclos(e|ed|es|ing)\b/i, who_approves: /\bapprov/i };
 
+/** A closing date decides which bills can't post, so it's one they said or agreed to. Picking one for them isn't an answer. */
+const GAVE_OR_AGREED = /\d|\b(yes|yep|yeah|right|correct|agreed?|confirm(ed)?|ok(ay)?|fine|exactly|go ahead)\b|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/i;
+
 /** What takes the same kind of answer is one question: the person answers it in one go, and a setup stays about seven questions. */
-const ONE_CALL_PER_KIND: readonly string[] = ['lookalike_vendors', 'coded_two_ways', 'approved_before_connecting'];
+const ONE_CALL_PER_KIND: readonly string[] = ['lookalike_vendors', 'coded_two_ways'];
 
 const OPEN_CALL = z.object({
   key: z.string().regex(/^[a-z0-9_-]{2,60}$/, 'a short slug, like lookalike-delta'),
@@ -171,7 +174,6 @@ const linesToDecide = (findings: StudyFindings | null) => [
 /** An answer as names, for the model to say back. A wrong id shows up here, where the person can catch it. */
 export async function inWords(call: { kind: string; refs: unknown }, value: unknown, setup: IntegrationSetup): Promise<string[] | undefined> {
   if (call.kind === 'who_approves') return ['Recorded. What they chose is theirs to do before their first bill, and it doesn\'t hold up Go.'];
-  if (call.kind === 'approved_before_connecting') return ['Recorded. Decimal doesn\'t do this for them: to post one of those bills, someone sends it back and approves it again after Go. It doesn\'t hold up Go.'];
   if (call.kind === 'other') return ['Kept on the record, and that is all. It changes nothing in their books or in how a bill posts, so don\'t say it will.'];
   const saved = (value ?? {}) as { date?: string | null; links?: VendorLink[]; choices?: LineChoice[] };
   if (call.kind === 'closing_date') return [saved.date ? `Closed through ${saved.date}.` : 'Their books have never been closed.'];
@@ -234,7 +236,8 @@ export async function listFor(kind: unknown, setupId: string): Promise<string> {
         const used = [...(v.bills > 0 || v.expenses === 0 ? [count(v.bills, 'bill')] : []), ...(v.expenses > 0 ? [count(v.expenses, 'expense')] : []), ...(v.active ? [] : ['inactive'])];
         return `${v.name} (${used.join(', ')})`;
       });
-      return `- ${vendors.join(', ')}${g.shared.length > 0 ? `: same ${g.shared.join(', ')}` : ''}`;
+      const about = [...(g.shared.length > 0 ? [`same ${g.shared.join(', ')}`] : []), ...(g.differentAccounts ? ['different account numbers'] : [])];
+      return `- ${vendors.join(', ')}${about.length > 0 ? `: ${about.join('; ')}` : ''}`;
     })
     .join('\n');
 }
@@ -249,10 +252,11 @@ async function answerValue(call: { kind: string; value: unknown }, value: Record
   const findings = setup.findings as StudyFindings | null;
   const before = (call.value ?? {}) as { links?: VendorLink[]; choices?: LineChoice[] };
   if (call.kind === 'closing_date') {
+    // Stored as null, which reads like "don't know" and was recorded for it. So the model has to say it outright.
+    if (value?.neverClosed === true) return { date: null };
     const date = value?.date;
-    if (date === null) return { date: null };
     if (typeof date !== 'string' || !isDate(date)) {
-      throw new Error('A closing date needs value.date as YYYY-MM-DD, or null if the books have never been closed.');
+      throw new Error('A closing date needs value.date as YYYY-MM-DD, or value.neverClosed as true if they said the books have never been closed. If they are not sure, record nothing and leave it open.');
     }
     if (date > new Date().toISOString().slice(0, 10)) throw new Error('A closing date cannot be in the future. Check it with the person.');
     return { date };
@@ -357,9 +361,6 @@ function nothingToAsk(kind: string, refs: string[], findings: StudyFindings | nu
   if (kind === 'lookalike_vendors' && vendors.length < 2) return 'A look-alike call cites the vendors that could be confused: at least two.';
   if (kind === 'coded_two_ways' && !linesToDecide(findings).some((c) => vendors.includes(c.vendorId))) {
     return 'Their books show no line coded two ways for this vendor, so there is nothing to ask. Having no calls of your own is normal.';
-  }
-  if (kind === 'approved_before_connecting' && !findings?.decimal.approvedBeforeConnecting.bills) {
-    return 'No bills were approved before connecting, so there is nothing to ask.';
   }
   return null;
 }
@@ -575,7 +576,7 @@ export function setupTools(ctx: TurnContext): AgentTool[] {
     },
     {
       name: 'record_answer',
-      description: 'Save what the person decided on a call. Only when they have just said so. A later answer only changes the vendors or lines it names, and the rest stands. What comes back as means is everything saved on this call: check it against what they said. On vendors and lines they read it above your message, so there is no need to say it again. value holds the usable part, by name, as the call or their books show it: closing_date {date: "YYYY-MM-DD" or null}; lookalike_vendors {same: [{keep, with: [...]}], apart: [...]}, same for each group they said is one vendor and apart for any to take back out of a group; vendors nobody names stay separate, so {same: []} is right when they all are; coded_two_ways {choices: [{vendor, line, category}]}, one for each line, with category null for a person to pick each time. answer is what they decided, in a few plain words.',
+      description: 'Save what the person decided on a call. Only when they have just said so. A later answer only changes the vendors or lines it names, and the rest stands. What comes back as means is everything saved on this call: check it against what they said. On vendors and lines they read it above your message, so there is no need to say it again. value holds the usable part, by name, as the call or their books show it: closing_date {date: "YYYY-MM-DD"}, or {neverClosed: true} only if they said so; lookalike_vendors {same: [{keep, with: [...]}], apart: [...]}, same for each group they said is one vendor and apart for any to take back out of a group; vendors nobody names stay separate, so {same: []} is right when they all are; coded_two_ways {choices: [{vendor, line, category}]}, one for each line, with category null for a person to pick each time. answer is what they decided, in a few plain words.',
       parameters: {
         type: 'object',
         required: ['key', 'answer'],
@@ -595,6 +596,10 @@ export function setupTools(ctx: TurnContext): AgentTool[] {
         if (topic) {
           const talked = await prisma.integrationSetupMessage.findMany({ where: { setupId: ctx.setupId, status: 'done' }, select: { text: true } });
           if (!talked.some((m) => topic.test(m.text ?? ''))) throw new Error('This hasn\'t come up with them yet. Ask it in your message, and record it when they answer.');
+        }
+        if (call.kind === 'closing_date' && input.value?.date) {
+          const message = await prisma.integrationSetupMessage.findUnique({ where: { messageId: ctx.speaker.messageId }, select: { text: true } });
+          if (!GAVE_OR_AGREED.test(message?.text ?? '')) throw new Error('They haven\'t given a date or agreed to one. Ask them, and record it when they do.');
         }
         const value = await answerValue(call, input.value, setup);
         await prisma.integrationSetupCall.update({
@@ -636,13 +641,15 @@ export function setupTools(ctx: TurnContext): AgentTool[] {
           prisma.integrationSetupMessage.findMany({ where: { setupId: ctx.setupId, status: 'done' }, select: { text: true, claims: true } }),
           prisma.integrationSetupEvent.findMany({ where: { setupId: ctx.setupId, kind: 'tool_call', payload: { path: ['tool'], equals: 'offer_go' } }, select: { payload: true } }),
         ]);
-        const said = wordsSaid(told.flatMap((m) => [m.text ?? '', ...(Array.isArray(m.claims) ? (m.claims as Array<{ text: string }>).map((c) => c.text) : [])]));
+        const claimsOf = (m: { claims: unknown }) => (Array.isArray(m.claims) ? (m.claims as Array<{ text: string; refs: string[] }>) : []);
+        const said = wordsSaid(told.flatMap((m) => [m.text ?? '', ...claimsOf(m).map((c) => c.text)]));
+        const claimed = new Set(told.flatMap((m) => claimsOf(m).flatMap((c) => c.refs ?? [])));
         // What it passed over stays passed over. What a question cites can't be: the person has to see what they're asked about.
         const passedOver = new Set([
           ...earlier.flatMap((e) => ((e.payload as { args?: { passedOver?: Array<{ id: string }> } }).args?.passedOver ?? []).map((p) => p.id)),
           ...(parsed(OFFER_GO, args).passedOver ?? []).map((p) => p.id),
         ]);
-        const left = notRaised(setup.findings as StudyFindings | null, calls, said).filter((n) => n.inACall || !passedOver.has(n.id));
+        const left = notRaised(setup.findings as StudyFindings | null, calls, said, claimed).filter((n) => n.inACall || !passedOver.has(n.id));
         if (!readyForGo(conditions) || left.length > 0) {
           return {
             offered: false,

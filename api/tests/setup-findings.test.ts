@@ -213,6 +213,7 @@ test('findings: a look-alike group says what its vendors have in common, and sho
   ]) });
   const byIds = (ids: string) => f.lookalikeVendors.find((g) => g.vendors.map((v) => v.id).sort().join(',') === ids);
   assert.deepEqual(byIds('1,2')?.shared, ['name', 'phone']);
+  assert.equal(byIds('1,2')?.differentAccounts, false);
   assert.equal(byIds('1,2')?.vendors.find((v) => v.id === '1')?.email, 'a@harbor.test');
   assert.deepEqual(byIds('3,4')?.shared, [], 'only close spelling, and it says so by saying nothing');
 });

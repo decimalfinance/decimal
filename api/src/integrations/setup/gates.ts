@@ -43,7 +43,7 @@ export const wordsSaid = (texts: string[]) => new Set(texts.flatMap(wordsOf));
 export const cameUp = (name: string, said: Set<string>) => said.has(wordsOf(name).find((w) => w !== 'the') ?? '');
 
 /** What their books put in front of the agent that the person hasn't heard: cited in a call, and named in what they were told. */
-export function notRaised(findings: StudyFindings | null, calls: Array<{ kind: string; refs: unknown }>, said: Set<string>): NotRaised[] {
+export function notRaised(findings: StudyFindings | null, calls: Array<{ kind: string; refs: unknown }>, said: Set<string>, claimed: Set<string>): NotRaised[] {
   if (!findings) return [];
   const cited = calls.map((c) => ({ kind: c.kind, refs: new Set(Array.isArray(c.refs) ? (c.refs as string[]) : []) }));
   const missing: NotRaised[] = [];
@@ -60,8 +60,10 @@ export function notRaised(findings: StudyFindings | null, calls: Array<{ kind: s
       missing.push({ id: `coded:${line.vendorId}:${line.line ?? ''}`, what: `${line.vendorName}: "${line.example ?? 'their lines'}" went to ${line.accounts.map((a) => a.name).join(' and ')}`, inACall });
     }
   }
-  if (findings.decimal.approvedBeforeConnecting.bills > 0 && !cited.some((c) => c.kind === 'approved_before_connecting')) {
-    missing.push({ id: 'approved_before_connecting', what: `${findings.decimal.approvedBeforeConnecting.bills} bills approved in Decimal before connecting`, inACall: false });
+  // Not a question: they never post by themselves, so there's nothing to decide. They only have to hear it, with the bills to open.
+  const approved = findings.decimal.approvedBeforeConnecting;
+  if (approved.bills > 0 && !approved.sampleBillIds.some((id) => claimed.has(`decimal-bill:${id}`))) {
+    missing.push({ id: 'approved_before_connecting', what: `${approved.bills} bills approved in Decimal before connecting, which they haven't been told about in a claim citing them`, inACall: false });
   }
   return missing;
 }

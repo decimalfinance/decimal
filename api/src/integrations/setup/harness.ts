@@ -15,10 +15,10 @@ import { errorToLogFields, logger } from '../../infra/logger.js';
 import { prisma } from '../../infra/prisma.js';
 import { isExceptionAgentConfigured, runAgent, type AgentRun, type AgentTool, type ChatMessage } from '../../exceptions/agent.js';
 import { connectorFor } from '../connectors.js';
-import { doneConditions, readyForGo, stillMissing } from './gates.js';
+import { doneConditions, readyForGo, stillMissing, wordsSaid } from './gates.js';
 import { playbookFor, playbookVersion, type Playbook } from './playbooks.js';
 import { appendEvent, claimTurn, pendingEvents, releaseTurn, setupsOwedATurn } from './record.js';
-import { approvalPicture, runStudy, studiesOwed } from './study.js';
+import { approvalPicture, runStudy, studiesOwed, type StudyFindings } from './study.js';
 import { ASK_AT_ONCE, decimalRefs, inWords, listFor, realRefs, setupTools, type SetupAction, type Thought, type TurnContext } from './tools.js';
 
 /** One run of the model, between hearing something and answering. */
@@ -44,6 +44,9 @@ const LONGEST_MESSAGE = 1_200;
 const LONGEST_CLAIM = 240;
 const MOST_QUESTIONS = 2;
 const MAX_CLAIMS = 5;
+const FEWEST_CLAIMS = 3;
+/** The share of a claim's words already in the message that means it is the same sentence. */
+const SAID_TWICE = 0.7;
 
 const RESPOND_SCHEMA = {
   type: 'object',
@@ -246,6 +249,15 @@ async function notRightYet(args: Record<string, unknown>, seen: Set<string>, set
   if (typeof args.list === 'string' && (claims.length > 0 || asked > 1)) {
     problems.push('A list goes in a message of its own, with the one question it asks. Send everything else now, and the list next.');
   }
+  // Claims show under the message, so a sentence in both says it twice, and that's most of what makes a message long.
+  const inMessage = wordsSaid([message]);
+  const twice = claims.find((c) => {
+    const words = [...wordsSaid([String(c?.text ?? '')])];
+    return words.length > 0 && words.filter((w) => inMessage.has(w)).length / words.length >= SAID_TWICE;
+  });
+  if (twice) problems.push(`They see your claims under your message, so this is said twice: "${String(twice.text).slice(0, 80)}". Leave it out of your message.`);
+  const notTold = await howTheyWorkNotTold(setup, claims.length);
+  if (notTold) problems.push(notTold);
   if (asked === 0 && actions.length === 0) {
     const next = await nothingLeftToDo(setup);
     if (next) problems.push(next);
@@ -256,6 +268,21 @@ async function notRightYet(args: Record<string, unknown>, seen: Set<string>, set
     if ((await realRefsOf(claim, seen, setup)).length === 0) problems.push(`This claim cites nothing real: "${String(claim?.text).slice(0, 80)}". Cite what your tools returned, or put it in message if it has no records behind it.`);
   }
   return problems.length > 0 ? problems.join(' ') : null;
+}
+
+/**
+ * Step 5 is what shows it understood them, so it isn't skipped: once their books are read,
+ * they hear how they work before anything else, as far as their books can say.
+ */
+async function howTheyWorkNotTold(setup: IntegrationSetup, claims: number): Promise<string | null> {
+  const findings = setup.findings as StudyFindings | null;
+  if (setup.studyStatus !== 'finished' || !findings) return null;
+  const enough = Math.min(FEWEST_CLAIMS, findings.busiestVendors.length + findings.learned.sample.length + findings.movedLines.length);
+  if (claims >= enough) return null;
+  const said = await prisma.integrationSetupMessage.findMany({ where: { setupId: setup.setupId, role: 'assistant', status: 'done' }, select: { claims: true } });
+  const told = said.flatMap((m) => (Array.isArray(m.claims) ? m.claims : [])).length;
+  if (told + claims >= enough) return null;
+  return `They haven't heard how they work yet. Put at least ${enough} claims in this message, with no list, and whatever else you need to say.`;
 }
 
 /**
