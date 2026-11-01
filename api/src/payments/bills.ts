@@ -1004,6 +1004,12 @@ function formatLoggedValue(fieldKey: string, value: string): string {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 }
 
+/** A bill's figures as they stand: what a person corrected, else what was read off the document. */
+export function amountsOfBill(metadataJson: unknown) {
+  const verification = isRecord(metadataJson) && isRecord(metadataJson.verification) ? metadataJson.verification : null;
+  return documentAmounts(extractedOf(metadataJson), verification);
+}
+
 function documentAmounts(
   extracted: Record<string, unknown> | null,
   verification: Record<string, unknown> | null,

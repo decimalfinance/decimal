@@ -17,9 +17,13 @@
 import { billsApprovedSince } from '../approvals/store.js';
 import { logger } from '../infra/logger.js';
 import { prisma } from '../infra/prisma.js';
+import { isDate } from '../integrations/copy.js';
+import { readOutcome, type SetupOutcome } from '../integrations/setup/outcome.js';
 import { getQuickBooksForOrg, postingEnabledSince } from './connections.js';
-import { postBillToQuickBooks, recordBillPaymentInQuickBooks, syncPaymentToQuickBooks } from './sync.js';
+import { plainQboReason, type QuickBooks } from './quickbooks.js';
+import { postBillToQuickBooks, PostedTotalDiffers, recordBillPaymentInQuickBooks, recordedCents, syncPaymentToQuickBooks } from './sync.js';
 import { BUILTIN_ACCOUNT_PREFIX } from './default-chart.js';
+import { vendorForBill } from './vendor-match.js';
 
 const PROVIDER = 'quickbooks';
 export const MAX_ATTEMPTS = 5;
@@ -275,6 +279,17 @@ export async function sweepUnsyncedSettledOrders(): Promise<AccountingSweepSumma
 }
 
 /**
+ * The date the books are closed through. QuickBooks' own, when it shares one: that
+ * moves as they close each month. Else what the person said in setup.
+ */
+async function closedThrough(qb: QuickBooks, outcome: SetupOutcome | null): Promise<string | null> {
+  const answer = await qb.query('SELECT * FROM Preferences').catch(() => null);
+  const live = answer?.QueryResponse?.Preferences?.[0]?.AccountingInfoPrefs?.BookCloseDate;
+  const date = typeof live === 'string' ? live.slice(0, 10) : null;
+  return date && isDate(date) ? date : outcome?.closingDate ?? null;
+}
+
+/**
  * Post one approved bill to QuickBooks as a Bill. Idempotent: a bill already
  * posted is skipped, and QuickBooks itself dedupes on the requestid.
  *
@@ -295,7 +310,7 @@ export async function syncApprovedBill(paymentOrderId: string): Promise<Accounti
   const approved = await billsApprovedSince(order.organizationId, since);
   if (!approved.includes(paymentOrderId)) return 'skipped';
   const existing = order.accountingSyncs[0] ?? null;
-  if (existing?.externalBillId) return 'skipped';
+  if (existing?.externalBillId && existing.status === 'synced') return 'skipped';
   if (existing?.status === 'error' && existing.attempts >= MAX_ATTEMPTS) return 'skipped';
 
   const qb = await getQuickBooksForOrg(order.organizationId);
@@ -306,6 +321,20 @@ export async function syncApprovedBill(paymentOrderId: string): Promise<Accounti
     logger.warn('accounting_sync.bill_failed', { organizationId: order.organizationId, paymentOrderId, error: message });
     return 'error';
   };
+  const approvedCents = (order.amountRaw + 5_000n) / 10_000n;
+
+  // In QuickBooks already, with a total that didn't match: a retry looks again.
+  if (existing?.externalBillId) {
+    try {
+      const after = (await qb.readEntity('bill', existing.externalBillId)).Bill;
+      const recorded = recordedCents(after);
+      if (recorded !== approvedCents) throw new PostedTotalDiffers(existing.externalVendorId ?? '', existing.externalBillId, recorded, approvedCents);
+      await upsertSync(order.organizationId, paymentOrderId, { status: 'synced', requestId, externalBillBalance: Number(after.Balance), error: null, syncedAt: new Date() });
+      return 'synced';
+    } catch (error) {
+      return fail(plainQboReason(error));
+    }
+  }
 
   // The categories confirmed in review. A bill confirmed before these were
   // recorded gets them now, from what review stored.
@@ -338,18 +367,32 @@ export async function syncApprovedBill(paymentOrderId: string): Promise<Accounti
     where: { organizationId_provider: { organizationId: order.organizationId, provider: PROVIDER } },
   });
   const billHeader = (coding?.billHeader ?? {}) as { vendorName?: string | null; invoiceNumber?: string | null; billDate?: string | null };
+  const vendorLabel = billHeader.vendorName?.trim() || order.counterparty?.displayName || order.counterpartyWallet.label;
+  const outcome = await readOutcome(order.organizationId, PROVIDER, qb.realmId);
   try {
+    // A closed period stays closed, whether or not QuickBooks would only have warned.
+    const billDate = billHeader.billDate?.trim() || null;
+    const closed = billDate ? await closedThrough(qb, outcome) : null;
+    if (billDate && closed && billDate <= closed) {
+      return await fail(`This bill is dated ${billDate}, and the books are closed through ${closed}. Send it back to change the date, or reopen the period in QuickBooks, then retry.`);
+    }
+    const vendor = await vendorForBill(order.organizationId, PROVIDER, qb.realmId, vendorLabel, outcome);
+    if (vendor && 'problem' in vendor) return await fail(vendor.problem);
+    const { amountsOfBill } = await import('../payments/bills.js');
     const posted = await postBillToQuickBooks(
       qb,
       {
         id: requestId,
-        vendorLabel: billHeader.vendorName?.trim() || order.counterparty?.displayName || order.counterpartyWallet.label,
-        amountUsdc: Number(order.amountRaw) / 10 ** USDC_DECIMALS,
+        vendorLabel,
+        vendorId: vendor?.vendorId ?? null,
+        amountUsdc: Number(approvedCents) / 100,
         invoiceNumber: order.invoiceNumber,
         reference: order.externalReference,
         codedLines: lines.map((l) => ({ accountId: l.accountId!, amount: Number(l.amount) || 0, description: l.description ?? null })),
+        taxAmount: amountsOfBill(order.metadataJson).tax,
         docNumber: billHeader.invoiceNumber ?? order.invoiceNumber,
         txnDate: billHeader.billDate ?? null,
+        dueDate: order.dueAt?.toISOString().slice(0, 10) ?? null,
       },
       { apAccountId: map?.apAccountId ?? null },
     );
@@ -360,7 +403,16 @@ export async function syncApprovedBill(paymentOrderId: string): Promise<Accounti
     logger.info('accounting_sync.bill_posted', { organizationId: order.organizationId, paymentOrderId, billId: posted.billId });
     return 'synced';
   } catch (error) {
-    return fail(error instanceof Error ? error.message : String(error));
+    if (error instanceof PostedTotalDiffers) {
+      // It is in the books, so it must never post again. A person looks at it.
+      await upsertSync(order.organizationId, paymentOrderId, {
+        status: 'error', requestId, externalVendorId: error.vendorId, externalBillId: error.billId, externalBillPaymentId: null,
+        error: error.message, incrementAttempts: true,
+      });
+      logger.warn('accounting_sync.posted_total_differs', { organizationId: order.organizationId, paymentOrderId, billId: error.billId });
+      return 'error';
+    }
+    return fail(plainQboReason(error));
   }
 }
 

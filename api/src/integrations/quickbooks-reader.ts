@@ -5,7 +5,7 @@
 
 import { z } from 'zod';
 import { getQuickBooksForOrg } from '../accounting/connections.js';
-import { QboError } from '../accounting/quickbooks.js';
+import { faultOf, QboError } from '../accounting/quickbooks.js';
 import {
   BooksReadError,
   toMinor,
@@ -137,16 +137,6 @@ const purchaseSchema = z.object({
 
 /** The part of the client a reader may use. */
 type QueryClient = { realmId: string; query(sql: string): Promise<unknown> };
-
-/** Intuit's first error from a body, if it has one. It can arrive on a 200. */
-function faultOf(body: unknown): { code: string | null; message: string } | null {
-  if (typeof body === 'string') return body ? { code: null, message: body.slice(0, 300) } : null;
-  const fault = (body as { Fault?: { Error?: Array<{ code?: unknown; Message?: unknown; Detail?: unknown }> } } | null)?.Fault;
-  if (!fault) return null;
-  const first = fault.Error?.[0];
-  const words = [first?.Message, first?.Detail].filter((w): w is string => typeof w === 'string' && w.length > 0);
-  return { code: first?.code === undefined ? null : String(first.code), message: words.join(': ') || 'QuickBooks returned an error.' };
-}
 
 function named(error: unknown): BooksReadError {
   if (error instanceof BooksReadError) return error;

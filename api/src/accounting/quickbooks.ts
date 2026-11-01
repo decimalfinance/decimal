@@ -54,6 +54,49 @@ export class QboError extends Error {
   }
 }
 
+/** Intuit's first error from a body, if it has one. It can arrive on a 200. */
+export function faultOf(body: unknown): { code: string | null; message: string } | null {
+  if (typeof body === 'string') return body ? { code: null, message: body.slice(0, 300) } : null;
+  const fault = (body as { Fault?: { Error?: Array<{ code?: unknown; Message?: unknown; Detail?: unknown }> } } | null)?.Fault;
+  if (!fault) return null;
+  const first = fault.Error?.[0];
+  const words = [first?.Message, first?.Detail].filter((w): w is string => typeof w === 'string' && w.length > 0);
+  return { code: first?.code === undefined ? null : String(first.code), message: words.join(': ') || 'QuickBooks returned an error.' };
+}
+
+/**
+ * Why QuickBooks refused, for the person who has to do something about it. The raw
+ * error goes in the log; this goes on the screen, and the first sentence reaches
+ * the Inbox.
+ */
+export function plainQboReason(error: unknown): string {
+  if (!(error instanceof QboError)) return error instanceof Error ? error.message : String(error);
+  const fault = faultOf(error.body);
+  switch (fault?.code) {
+    case '6240':
+      return 'A customer, vendor or employee in QuickBooks already has this vendor\'s name, and QuickBooks needs them to differ. Rename one of them there, then retry.';
+    case '6140':
+      return 'QuickBooks already has a bill with this number. Check whether this one is already in your books. If it isn\'t, change the number on the bill or turn off the duplicate warning in QuickBooks, then retry.';
+    case '6200':
+    case '6210':
+      return 'QuickBooks says this bill\'s date is in a closed period. Change the date on the bill, or reopen the period in QuickBooks, then retry.';
+    case '610':
+    case '2500':
+      return 'This bill uses something that has been made inactive or deleted in QuickBooks: its vendor or one of its categories. Make it active there, or pick another on the bill, then retry.';
+    case '120':
+    case '3100':
+    case '5020':
+      return 'QuickBooks won\'t let this sign-in do that. An admin needs to sign in again.';
+    default:
+  }
+  if (error.isAuthInvalid || error.status === 401 || fault?.code === '3200') return 'The QuickBooks sign-in has stopped working. An admin needs to sign in again.';
+  if (error.status === 403) return 'QuickBooks won\'t let this sign-in do that. An admin needs to sign in again.';
+  if (error.status === 429) return 'QuickBooks asked Decimal to slow down. It will try again by itself.';
+  // Its body may be an outage page. The status says enough.
+  if (error.status >= 500) return 'QuickBooks isn\'t answering. Decimal will try again by itself.';
+  return fault ? `QuickBooks said: ${fault.message}` : `QuickBooks answered ${error.status}.`;
+}
+
 function basicAuth(): string {
   return 'Basic ' + Buffer.from(`${config.quickbooksClientId}:${config.quickbooksClientSecret}`).toString('base64');
 }
@@ -201,6 +244,8 @@ export class QuickBooks {
       }
     }
     if (!res.ok) throw new QboError(res.status, body);
+    // A 200 can carry a refusal too, and nothing above this should have to look for one.
+    if ((body as { Fault?: unknown }).Fault) throw new QboError(res.status, body);
     return body as T;
   }
 
@@ -231,7 +276,7 @@ export class QuickBooks {
   }
 }
 
-/** Escape a value for use inside a QBO query string literal (single quotes). */
+/** A value inside a QuickBooks query's quotes. Intuit's documented form: 'Adam\'s Candy Shop'. */
 export function qboLiteral(value: string): string {
-  return value.replace(/'/g, "''");
+  return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }

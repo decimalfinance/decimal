@@ -11,7 +11,7 @@ function fakeQb() {
     createVendor: async (body: any) => { calls.vendor = body; return { Vendor: { Id: 'V1' } }; },
     createBill: async (body: any) => { calls.bill = body; return { Bill: { Id: 'B1' } }; },
     createBillPayment: async (body: any) => { calls.billPayment = body; return { BillPayment: { Id: 'P1' } }; },
-    readEntity: async () => ({ Bill: { Balance: 0 } }),
+    readEntity: async () => ({ Bill: { Balance: 0, TotalAmt: calls.bill.Line.reduce((n: number, l: any) => n + l.Amount, 0) } }),
   };
   return { qb, calls };
 }
@@ -47,4 +47,10 @@ test('vendor DisplayName is sanitized: control chars -> space, trimmed, clamped 
   assert.equal(name, name.trim(), 'leading/trailing whitespace trimmed');
   assert.ok(name.length <= 100, `clamped to <=100, got ${name.length}`);
   assert.ok(name.startsWith('Acme Corp'), `control chars became a single space, got "${name.slice(0, 20)}"`);
+});
+
+test('vendor DisplayName loses colons, which QuickBooks refuses', async () => {
+  const { qb, calls } = fakeQb();
+  await syncPaymentToQuickBooks(qb, { id: 'd', vendorLabel: 'Acme: West', amountUsdc: 100 }, ACCOUNTS);
+  assert.equal(calls.vendor.DisplayName, 'Acme West');
 });

@@ -71,7 +71,8 @@ function toOpenAiTools(tools: AgentTool[]) {
   }));
 }
 
-const callOpenAi: ModelCall = async ({ model, messages, tools, signal, maxTokens }) => {
+/** The real model call. Exported so an eval can run through it, counting what it spends. */
+export const callOpenAi: ModelCall = async ({ model, messages, tools, signal, maxTokens }) => {
   const res = await fetch(OPENAI_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.openAiApiKey}` },

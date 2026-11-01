@@ -8,6 +8,7 @@ import { connectorFor } from '../connectors.js';
 import { deleteCopy, lookUp, type RecordKind } from '../copy.js';
 import { doneConditions, readyForGo, stillMissing } from './gates.js';
 import { wake } from './harness.js';
+import type { SetupOutcome } from './outcome.js';
 import { playbookFor } from './playbooks.js';
 import { appendEvent, liveSetup, type SetupSystem } from './record.js';
 import type { StudyFindings } from './study.js';
@@ -113,7 +114,7 @@ export async function noteDisconnected(organizationId: string, system: string): 
 }
 
 /** What the person's calls come to, as data. Fixed code reads this when it codes and posts a bill. */
-async function outcomeOf(setup: IntegrationSetup, postingFrom: Date) {
+async function outcomeOf(setup: IntegrationSetup, postingFrom: Date): Promise<SetupOutcome> {
   const calls = await prisma.integrationSetupCall.findMany({ where: { setupId: setup.setupId, status: 'answered' } });
   const valueOf = <T>(kind: string) => calls.filter((c) => c.kind === kind && c.value !== null).map((c) => c.value as T);
   const findings = setup.findings as StudyFindings | null;
@@ -121,7 +122,8 @@ async function outcomeOf(setup: IntegrationSetup, postingFrom: Date) {
     companyId: setup.companyId,
     postingFrom: postingFrom.toISOString(),
     closingDate: valueOf<{ date: string | null }>('closing_date')[0]?.date ?? null,
-    vendorLinks: valueOf<{ useVendorId: string | null; vendorIds: string[] }>('lookalike_vendors').filter((v) => v.useVendorId),
+    vendorLinks: valueOf<{ useVendorId: string | null; vendorIds: string[] }>('lookalike_vendors')
+      .filter((v): v is { useVendorId: string; vendorIds: string[] } => Boolean(v.useVendorId)),
     lineChoices: valueOf<{ vendorId: string; line: string | null; categoryId: string | null }>('coded_two_ways'),
     categoriesInUse: findings?.accountsBillsUse.map((a) => a.id) ?? [],
     cantPost: findings?.cantPost.map((c) => c.kind) ?? [],
@@ -144,10 +146,12 @@ export async function goLive(organizationId: string, userId: string, setupId: st
   if (!postingFrom) throw new ApiError(409, 'not_connected', 'The connection is no longer live.');
   const outcome = await outcomeOf(setup, postingFrom);
   const label = playbookFor(setup.system).label;
-  const done = await prisma.integrationSetup.update({
-    where: { setupId },
-    data: { status: 'done', stopReason: null, outcome: outcome as object },
+  const { count } = await prisma.integrationSetup.updateMany({
+    where: { setupId, status: { not: 'done' } },
+    data: { status: 'done', stopReason: null, outcome },
   });
+  // Two clicks at once: the other one said it.
+  if (count === 0) return setupView(await ownSetup(organizationId, setupId));
   await prisma.integrationSetupMessage.create({
     data: {
       setupId,
@@ -157,7 +161,7 @@ export async function goLive(organizationId: string, userId: string, setupId: st
     },
   });
   await appendEvent(setupId, 'go', { companyId: setup.companyId, companyName: setup.companyName, postingFrom: postingFrom.toISOString() }, { actorUserId: userId });
-  return setupView(done);
+  return setupView(await ownSetup(organizationId, setupId));
 }
 
 export async function getSetup(organizationId: string, setupId: string) {

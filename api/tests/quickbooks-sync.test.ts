@@ -15,6 +15,7 @@ import { prisma } from '../src/infra/prisma.js';
 import { drainAsyncIntake } from '../src/payments/invoice-intake.js';
 import { createPolicy, upsertPolicySet } from '../src/approvals/store.js';
 import { enablePosting, setQuickBooksForTests } from '../src/accounting/connections.js';
+import { QboError } from '../src/accounting/quickbooks.js';
 import { syncApprovedBill, syncSettledPaymentOrder, sweepUnsyncedSettledOrders } from '../src/accounting/account-sync.js';
 import { drainBackgroundWork } from '../src/infra/background.js';
 import { setExceptionAgentRuntimeForTests } from '../src/exceptions/agent.js';
@@ -26,23 +27,41 @@ type Chart = Array<{ Id: string; Name: string }>;
 const CLOUD: Chart = [{ Id: '301', Name: 'Cloud hosting & infrastructure' }, { Id: '302', Name: 'Travel' }];
 
 function fakeQuickBooks(initial: Chart = CLOUD) {
-  const state = { chart: initial, failBill: null as string | null };
+  const state = {
+    chart: initial,
+    failBill: null as string | null,
+    refuseBill: null as Error | null,
+    /** What QuickBooks says a bill came to, when that isn't what was sent. */
+    recordedTotal: null as number | null,
+    /** The vendor its own exact-name query finds. */
+    named: null as Record<string, unknown> | null,
+    closedThrough: null as string | null,
+  };
+  const asked: string[] = [];
   const calls = { bills: [] as Array<{ body: any; requestId: string }>, payments: [] as Array<{ body: any; requestId: string }>, vendors: [] as any[] };
   const qb: any = {
-    query: async (q: string) => q.includes('FROM Account')
-      ? { QueryResponse: { Account: state.chart.map((a) => ({ ...a, FullyQualifiedName: a.Name, Classification: 'Expense', AccountType: 'Expense' })) } }
-      : { QueryResponse: { Vendor: calls.vendors.length ? [{ Id: 'V1' }] : [] } },
+    query: async (q: string) => {
+      asked.push(q);
+      if (q.includes('FROM Account')) return { QueryResponse: { Account: state.chart.map((a) => ({ ...a, FullyQualifiedName: a.Name, Classification: 'Expense', AccountType: 'Expense' })) } };
+      if (q.includes('FROM Preferences')) return { QueryResponse: { Preferences: [{ AccountingInfoPrefs: state.closedThrough ? { BookCloseDate: state.closedThrough } : {} }] } };
+      return { QueryResponse: { Vendor: state.named ? [state.named] : calls.vendors.length ? [{ Id: 'V1' }] : [] } };
+    },
     createVendor: async (body: any) => { calls.vendors.push(body); return { Vendor: { Id: 'V1' } }; },
     createBill: async (body: any, requestId: string) => {
       if (state.failBill) throw new Error(state.failBill);
+      if (state.refuseBill) throw state.refuseBill;
       calls.bills.push({ body, requestId });
       return { Bill: { Id: `B${calls.bills.length}` } };
     },
     createBillPayment: async (body: any, requestId: string) => { calls.payments.push({ body, requestId }); return { BillPayment: { Id: `P${calls.payments.length}` } }; },
-    readEntity: async () => ({ Bill: { Balance: calls.payments.length ? 0 : 700 } }),
+    readEntity: async (_entity: string, id: string) => {
+      const sent = calls.bills[Number(id.slice(1)) - 1]?.body;
+      const total = (sent?.Line ?? []).reduce((n: number, l: { Amount: number }) => n + l.Amount, 0);
+      return { Bill: { Balance: calls.payments.length ? 0 : total, TotalAmt: state.recordedTotal ?? total } };
+    },
   };
   setQuickBooksForTests(() => qb);
-  return { state, calls };
+  return { state, calls, asked };
 }
 
 /** Connected, and by default with posting already on, a minute ago on any clock. */
@@ -390,6 +409,153 @@ test('quickbooks: a bill the rules approve without anyone counts by that moment 
   await post(`/organizations/${w.orgId}/bills/${w.bills.lonely}/confirm`, confirmBody('LL-1', 90), w.owner.token);
   await drainAsyncIntake();
   assert.deepEqual(calls.bills.map((b) => b.body.DocNumber), ['LL-1'], 'approved after it');
+});
+
+/** A bill with its own figures, confirmed and approved. It uploaded at 310. */
+async function postReady(w: Awaited<ReturnType<typeof makeWorld>>, fields: Record<string, unknown>, lines: Array<{ amount: number; category: string }>) {
+  const body = confirmBody('SS-2', 310);
+  await post(`/organizations/${w.orgId}/bills/${w.bills.ready}/confirm`, {
+    ...body,
+    fields: { ...body.fields, ...fields },
+    lines: lines.map((l, i) => ({ description: `Line ${i + 1}`, quantity: 1, unitPrice: l.amount, ...l })),
+  }, w.owner.token);
+  await approve(w, w.bills.ready);
+}
+
+const posted = (bill: { body: any }) => bill.body.Line.map((l: any) => [l.Amount, l.AccountBasedExpenseLineDetail.AccountRef.value, l.Description ?? null]);
+
+/** A setup that finished on the books connect() signs in to, with what the person decided and what the study read. */
+async function finishedSetup(w: Awaited<ReturnType<typeof makeWorld>>, outcome: { closingDate?: string | null; vendorLinks?: Array<{ useVendorId: string; vendorIds: string[] }> }, vendors: Array<{ id: string; name: string; active?: boolean }> = []) {
+  await prisma.integrationSetup.create({ data: {
+    organizationId: w.orgId, system: 'quickbooks', startedByUserId: w.owner.userId, status: 'done', companyId: 'realm-test',
+    outcome: { companyId: 'realm-test', postingFrom: new Date().toISOString(), closingDate: null, vendorLinks: [], lineChoices: [], categoriesInUse: [], cantPost: [], ...outcome },
+  } });
+  await prisma.booksRecord.createMany({ data: vendors.map((v) => ({
+    organizationId: w.orgId, system: 'quickbooks', companyId: 'realm-test', kind: 'vendor', recordId: v.id, name: v.name, searchText: v.name, data: { active: v.active ?? true },
+  })) });
+}
+
+test('quickbooks: a taxed bill posts at its whole total, with tax on its own line in the category of the largest line', async () => {
+  const w = await makeWorld();
+  const { calls } = fakeQuickBooks();
+  await connect(w.orgId);
+  await postReady(w, { taxAmount: 10, total: 310 }, [{ amount: 100, category: 'Travel' }, { amount: 200, category: 'Cloud hosting & infrastructure' }]);
+  assert.deepEqual(posted(calls.bills[0]!), [[100, '302', 'Line 1'], [200, '301', 'Line 2'], [10, '301', 'Tax']]);
+  assert.equal((await syncOf(w.bills.ready))?.status, 'synced');
+});
+
+test('quickbooks: a bill carries its due date and bill date', async () => {
+  const w = await makeWorld();
+  const { calls } = fakeQuickBooks();
+  await connect(w.orgId);
+  await approve(w);
+  assert.equal(calls.bills[0]!.body.DueDate, '2026-08-30');
+  assert.equal(calls.bills[0]!.body.TxnDate, '2026-08-02');
+});
+
+test('quickbooks: when QuickBooks records another total, it is flagged and never posted twice, and a retry looks again', async () => {
+  const w = await makeWorld();
+  const qb = fakeQuickBooks();
+  qb.state.recordedTotal = 756;
+  await connect(w.orgId);
+  await approve(w);
+  const wrong = await syncOf(w.bills.submitted);
+  assert.equal(wrong?.status, 'error');
+  assert.equal(wrong?.externalBillId, 'B1', 'it is in the books, and the record says so');
+  assert.match(wrong?.error ?? '', /QuickBooks recorded this bill at \$756\.00, and it was approved at \$700\.00/);
+
+  await sweepUnsyncedSettledOrders();
+  const retry = () => post(`/organizations/${w.orgId}/payment-orders/${w.bills.submitted}/accounting/sync`, {}, w.owner.token);
+  assert.equal((await retry()).outcome, 'error', 'still wrong');
+  assert.equal(qb.calls.bills.length, 1, 'never a second bill');
+
+  qb.state.recordedTotal = null;
+  assert.equal((await retry()).outcome, 'synced', 'someone corrected it in QuickBooks');
+  const right = await syncOf(w.bills.submitted);
+  assert.equal(right?.status, 'synced');
+  assert.equal(right?.error, null);
+  assert.equal(qb.calls.bills.length, 1);
+});
+
+test('quickbooks: a refusal reaches a person in plain words', async () => {
+  const w = await makeWorld();
+  const qb = fakeQuickBooks();
+  qb.state.refuseBill = new QboError(400, { Fault: { Error: [{ code: '6140', Message: 'Duplicate Document Number Error' }], type: 'ValidationFault' } });
+  await connect(w.orgId);
+  await approve(w);
+  const sync = await syncOf(w.bills.submitted);
+  assert.match(sync?.error ?? '', /^QuickBooks already has a bill with this number\./);
+  assert.doesNotMatch(sync?.error ?? '', /Fault|QBO 400/);
+});
+
+test('quickbooks: a vendor is found with its name escaped, inactive ones included, and an inactive one is said so rather than duplicated', async () => {
+  const w = await makeWorld();
+  const qb = fakeQuickBooks();
+  qb.state.named = { Id: 'V9', Active: false };
+  await connect(w.orgId);
+  await approve(w);
+  assert.ok(qb.asked.some((q) => q.includes("DisplayName = 'Submit Co' AND Active IN (true, false)")), qb.asked.join('; '));
+  assert.match((await syncOf(w.bills.submitted))?.error ?? '', /"Submit Co" is inactive in QuickBooks/);
+  assert.deepEqual(qb.calls.vendors, [], 'no second vendor');
+  assert.deepEqual(qb.calls.bills, []);
+
+  qb.state.named = { Id: 'V9', Active: true };
+  assert.equal((await post(`/organizations/${w.orgId}/payment-orders/${w.bills.submitted}/accounting/sync`, {}, w.owner.token)).outcome, 'synced', 'made active again');
+  assert.equal(qb.calls.bills[0]!.body.VendorRef.value, 'V9');
+});
+
+test('quickbooks: what setup learned picks the vendor: the same name however it is spelled, and a link the person made', async () => {
+  const w = await makeWorld();
+  const qb = fakeQuickBooks();
+  await connect(w.orgId);
+  await finishedSetup(w, { vendorLinks: [{ useVendorId: '77', vendorIds: ['77', '78'] }] }, [
+    { id: '55', name: 'SUBMIT CO., INC.' },
+    { id: '77', name: 'Lonely Limited' },
+    { id: '78', name: 'LONELY LTD' },
+  ]);
+  await approve(w);
+  assert.equal(qb.calls.bills[0]!.body.VendorRef.value, '55', 'Submit Co');
+  assert.deepEqual(qb.calls.vendors, [], 'nothing created');
+  assert.equal(qb.asked.some((q) => q.includes('FROM Vendor')), false, 'and nothing to look up');
+
+  await post(`/organizations/${w.orgId}/bills/${w.bills.lonely}/confirm`, confirmBody('LL-1', 90), w.owner.token);
+  await approve(w, w.bills.lonely);
+  assert.equal(qb.calls.bills[1]!.body.VendorRef.value, '77', 'the record the person said to use');
+});
+
+test('quickbooks: two live vendors a bill could be for are not guessed between', async () => {
+  const w = await makeWorld();
+  const qb = fakeQuickBooks();
+  await connect(w.orgId);
+  await finishedSetup(w, {}, [{ id: '55', name: 'SUBMIT CO., INC.' }, { id: '56', name: 'Submit Co, LLC' }]);
+  await approve(w);
+  assert.match((await syncOf(w.bills.submitted))?.error ?? '', /more than one vendor this bill could be for: "SUBMIT CO\., INC\." and "Submit Co, LLC"/);
+  assert.deepEqual(qb.calls.bills, []);
+  assert.deepEqual(qb.calls.vendors, []);
+});
+
+test('quickbooks: a bill dated in a closed period does not post, and the date in QuickBooks wins over the one given in setup', async () => {
+  const w = await makeWorld();
+  const qb = fakeQuickBooks();
+  await connect(w.orgId);
+  await finishedSetup(w, { closingDate: '2026-08-02' });
+  await approve(w);
+  assert.match((await syncOf(w.bills.submitted))?.error ?? '', /dated 2026-08-02, and the books are closed through 2026-08-02/);
+  assert.deepEqual(qb.calls.bills, []);
+  assert.deepEqual(qb.calls.vendors, [], 'a refused bill writes nothing at all');
+
+  // They reopened the period in QuickBooks.
+  qb.state.closedThrough = '2026-06-30';
+  const retry = () => post(`/organizations/${w.orgId}/payment-orders/${w.bills.submitted}/accounting/sync`, {}, w.owner.token);
+  assert.equal((await retry()).outcome, 'synced');
+  assert.equal(qb.calls.bills.length, 1);
+
+  // They closed a later month in QuickBooks. What setup was told is out of date, and this one is caught.
+  qb.state.closedThrough = '2026-08-31';
+  await post(`/organizations/${w.orgId}/bills/${w.bills.ready}/confirm`, confirmBody('SS-2', 310), w.owner.token);
+  await approve(w, w.bills.ready);
+  assert.match((await syncOf(w.bills.ready))?.error ?? '', /closed through 2026-08-31/);
+  assert.equal(qb.calls.bills.length, 1);
 });
 
 test('quickbooks: the Coding inbox is gone, and its old address lands on the Inbox', async () => {

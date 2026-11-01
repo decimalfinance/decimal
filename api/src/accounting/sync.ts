@@ -3,6 +3,7 @@
 // is recorded against it from the clearing account. Both idempotent through the
 // requestid. A bill paid before it was ever posted gets both at once.
 
+import { isDate } from '../integrations/copy.js';
 import { QuickBooks, qboLiteral } from './quickbooks.js';
 
 export interface AccountMap {
@@ -27,6 +28,12 @@ export interface SyncablePayment {
   docNumber?: string | null;
   /** Operator-set Bill TxnDate (YYYY-MM-DD). Defaults to QBO's "today" when absent. */
   txnDate?: string | null;
+  /** When it is due (YYYY-MM-DD). Absent, QuickBooks works it out from the vendor's terms. */
+  dueDate?: string | null;
+  /** The tax on the bill, in dollars. Only ever a figure a person confirmed or the document printed. */
+  taxAmount?: number | null;
+  /** The vendor in the books, when something has already said which it is. */
+  vendorId?: string | null;
 }
 
 export interface SyncResult {
@@ -43,6 +50,63 @@ export interface PostedBill {
   billBalance: number;
 }
 
+/** QuickBooks has the bill, and recorded a different total. It stays there, so it can't be posted again. */
+export class PostedTotalDiffers extends Error {
+  constructor(public readonly vendorId: string, public readonly billId: string, recorded: bigint | null, expected: bigint) {
+    super(`QuickBooks recorded this bill at ${recorded === null ? 'no total' : dollars(recorded)}, and it was approved at ${dollars(expected)}. Correct bill ${billId} in QuickBooks, then retry to check it again.`);
+    this.name = 'PostedTotalDiffers';
+  }
+}
+
+const toCents = (amount: number): bigint => BigInt(Math.round(amount * 100));
+const fromCents = (cents: bigint): number => Number(cents) / 100;
+
+function dollars(cents: bigint): string {
+  const sign = cents < 0n ? '-' : '';
+  const raw = (cents < 0n ? -cents : cents).toString().padStart(3, '0');
+  const whole = raw.slice(0, -2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `${sign}$${whole}.${raw.slice(-2)}`;
+}
+
+/** What QuickBooks says a bill came to. Null if it doesn't say. */
+export function recordedCents(bill: { TotalAmt?: unknown } | null | undefined): bigint | null {
+  const total = Number(bill?.TotalAmt ?? Number.NaN);
+  return Number.isFinite(total) ? toCents(total) : null;
+}
+
+export type PostableLine = { accountId: string; amount: number; description?: string | null };
+export type PostedLine = { accountId: string; cents: bigint; description: string | null };
+
+/**
+ * The lines a bill posts with. They have to come to what was approved: that is what
+ * the team owes, so it is what the books have to say.
+ *
+ * Tax goes on its own line, in the category of the bill's largest line, so it stays
+ * visible and the total holds. Cents lost to rounding go on the largest line. Any
+ * other gap is refused rather than guessed at: nothing says where that money belongs.
+ */
+export function linesToPost(lines: PostableLine[], totalCents: bigint, taxCents: bigint | null): { lines: PostedLine[] } | { problem: string } {
+  const posted: PostedLine[] = lines.map((l) => ({ accountId: l.accountId, cents: toCents(Number(l.amount) || 0), description: l.description ? String(l.description).slice(0, 4000) : null }));
+  const sum = posted.reduce((n, l) => n + l.cents, 0n);
+  const largest = posted.reduce((best, l) => (l.cents > best.cents ? l : best), posted[0]!);
+  // Each amount was rounded to the cent once, so this many cents can only be rounding.
+  const rounding = BigInt(posted.length);
+  const within = (gap: bigint) => (gap < 0n ? -gap : gap) <= rounding;
+  const gap = totalCents - sum;
+  if (within(gap)) {
+    // Tax printed on the bill but already inside the lines lands here too.
+    largest.cents += gap;
+    return { lines: posted };
+  }
+  const tax = taxCents !== null && taxCents > 0n ? taxCents : null;
+  if (tax !== null && within(gap - tax)) {
+    largest.cents += gap - tax;
+    return { lines: [...posted, { accountId: largest.accountId, cents: tax, description: 'Tax' }] };
+  }
+  const parts = tax !== null ? 'lines and tax' : 'lines';
+  return { problem: `Its ${parts} come to ${dollars(sum + (tax ?? 0n))}, and it was approved at ${dollars(totalCents)}, so QuickBooks would show the wrong amount. Send it back to correct the figures.` };
+}
+
 /**
  * Post a bill to QuickBooks: find or create the vendor, then create the Bill
  * with one line per coded line. This is the moment the books learn the money
@@ -55,51 +119,48 @@ export async function postBillToQuickBooks(
   accounts: { defaultExpenseAccountId?: string | null; apAccountId?: string | null },
 ): Promise<PostedBill> {
   // QBO holds money at 2-decimal (cent) precision and stores DisplayName trimmed,
-  // control-char-free, and <=100 chars. Normalize once so the Bill, the
-  // BillPayment, and any re-sync vendor lookup all agree with what QBO records —
+  // control-char-free, without colons, and <=100 chars. Normalize once so the Bill,
+  // the BillPayment, and any re-sync vendor lookup all agree with what QBO records —
   // otherwise a 6-decimal USDC amount drifts on rounding, or a name QBO would
   // reject/trim fails the sync or creates a near-duplicate vendor.
-  const amount = Math.round(payment.amountUsdc * 100) / 100;
-  const vendorLabel = Array.from(payment.vendorLabel, (c) => (c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127 ? ' ' : c))
+  const totalCents = toCents(payment.amountUsdc);
+  const vendorLabel = Array.from(payment.vendorLabel, (c) => (c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127 || c === ':' ? ' ' : c))
     .join('')
     .replace(/ {2,}/g, ' ')
     .trim()
     .slice(0, 100);
 
-  // Vendor: find or create by DisplayName (no upsert in QBO — query then create).
-  let vendor = (await qb.query(`SELECT * FROM Vendor WHERE DisplayName = '${qboLiteral(vendorLabel)}'`))
-    .QueryResponse?.Vendor?.[0];
-  if (!vendor) {
-    vendor = (await qb.createVendor({ DisplayName: vendorLabel })).Vendor;
+  // One Bill line per coded line; otherwise a single line on the default expense
+  // account. Worked out first, so a bill that can't post writes nothing at all.
+  if ((!payment.codedLines || payment.codedLines.length === 0) && !accounts.defaultExpenseAccountId) {
+    throw new Error('This bill has no categories to post, and no default expense account is set.');
+  }
+  const built = payment.codedLines && payment.codedLines.length > 0
+    ? linesToPost(payment.codedLines, totalCents, payment.taxAmount ? toCents(payment.taxAmount) : null)
+    : { lines: [{ accountId: accounts.defaultExpenseAccountId!, cents: totalCents, description: null }] };
+  if ('problem' in built) throw new Error(built.problem);
+  const billLines = built.lines.map((l) => ({
+    Amount: fromCents(l.cents),
+    DetailType: 'AccountBasedExpenseLineDetail',
+    ...(l.description ? { Description: l.description } : {}),
+    AccountBasedExpenseLineDetail: { AccountRef: { value: l.accountId } },
+  }));
+
+  // Vendor: the one already worked out, else find or create by DisplayName (no upsert
+  // in QBO — query then create). Inactive ones count: their names are still taken.
+  let vendorId = payment.vendorId ?? null;
+  if (!vendorId) {
+    const named = (await qb.query(`SELECT * FROM Vendor WHERE DisplayName = '${qboLiteral(vendorLabel)}' AND Active IN (true, false)`))
+      .QueryResponse?.Vendor?.[0];
+    if (named?.Active === false) throw new Error(`"${vendorLabel}" is inactive in QuickBooks. Make it active there, then retry.`);
+    vendorId = String((named ?? (await qb.createVendor({ DisplayName: vendorLabel })).Vendor).Id);
   }
 
   const reference = payment.invoiceNumber ?? payment.reference ?? null;
 
-  // One Bill line per coded line (account + amount + description); otherwise a single
-  // line on the default expense account. All amounts at 2dp.
-  if ((!payment.codedLines || payment.codedLines.length === 0) && !accounts.defaultExpenseAccountId) {
-    throw new Error('This bill has no categories to post, and no default expense account is set.');
-  }
-  const billLines =
-    payment.codedLines && payment.codedLines.length > 0
-      ? payment.codedLines.map((l) => ({
-          Amount: Math.round((Number(l.amount) || 0) * 100) / 100,
-          DetailType: 'AccountBasedExpenseLineDetail',
-          ...(l.description ? { Description: String(l.description).slice(0, 4000) } : {}),
-          AccountBasedExpenseLineDetail: { AccountRef: { value: l.accountId } },
-        }))
-      : [
-          {
-            Amount: amount,
-            DetailType: 'AccountBasedExpenseLineDetail',
-            AccountBasedExpenseLineDetail: { AccountRef: { value: accounts.defaultExpenseAccountId! } },
-          },
-        ];
-  const billTotal = Math.round(billLines.reduce((sum, l) => sum + Number(l.Amount), 0) * 100) / 100;
-
   // Bill (idempotent via requestid). APAccountRef optional — QBO defaults if omitted.
   const billBody: Record<string, unknown> = {
-    VendorRef: { value: vendor.Id },
+    VendorRef: { value: vendorId },
     PrivateNote: `Decimal ${payment.id}${reference ? ` | ${reference}` : ''}`,
     Line: billLines,
   };
@@ -110,10 +171,14 @@ export async function postBillToQuickBooks(
   const docNumber = payment.docNumber?.trim() || payment.invoiceNumber?.trim() || null;
   if (docNumber) billBody.DocNumber = docNumber.slice(0, 21);
   if (payment.txnDate?.trim()) billBody.TxnDate = payment.txnDate.trim();
+  if (payment.dueDate && isDate(payment.dueDate)) billBody.DueDate = payment.dueDate;
 
   const bill = (await qb.createBill(billBody, `${payment.id}_bill`)).Bill;
+  // Read it back: what QuickBooks recorded is what counts, whatever was sent.
   const after = (await qb.readEntity('bill', bill.Id)).Bill;
-  return { vendorId: vendor.Id, billId: bill.Id, billTotal, billBalance: Number(after.Balance) };
+  const recorded = recordedCents(after);
+  if (recorded !== totalCents) throw new PostedTotalDiffers(vendorId, bill.Id, recorded, totalCents);
+  return { vendorId, billId: bill.Id, billTotal: fromCents(totalCents), billBalance: Number(after.Balance) };
 }
 
 /**
