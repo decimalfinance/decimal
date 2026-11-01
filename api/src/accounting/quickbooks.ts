@@ -14,6 +14,8 @@ const MINOR_VERSION = '75';
 const AUTHORIZE_URL = 'https://appcenter.intuit.com/connect/oauth2';
 const TOKEN_URL = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer';
 const REVOKE_URL = 'https://developer.api.intuit.com/v2/oauth2/tokens/revoke';
+// Intuit times a request out at 120 seconds. Past that, nothing is coming.
+const REQUEST_TIMEOUT_MS = 130_000;
 
 function apiBase(): string {
   return config.quickbooksEnvironment === 'production'
@@ -179,6 +181,7 @@ export class QuickBooks {
           ...(opts.body ? { 'Content-Type': 'application/json' } : {}),
         },
         body: opts.body ? JSON.stringify(opts.body) : undefined,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
     };
 
@@ -188,9 +191,17 @@ export class QuickBooks {
       res = await doFetch();
     }
     const text = await res.text();
-    const json = text ? JSON.parse(text) : {};
-    if (!res.ok) throw new QboError(res.status, json);
-    return json as T;
+    let body: unknown = {};
+    if (text) {
+      try {
+        body = JSON.parse(text);
+      } catch {
+        // An outage page, not an API answer. It still has to arrive as a QboError.
+        throw new QboError(res.status, text);
+      }
+    }
+    if (!res.ok) throw new QboError(res.status, body);
+    return body as T;
   }
 
   // ---- the calls our GL-sync flow needs ----

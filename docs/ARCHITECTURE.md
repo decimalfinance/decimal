@@ -186,6 +186,12 @@ The UI never says "GL coding". It says "Line items" and "Category".
 
 Frontend: `pages/Accounting.tsx` (connection, account map, sync health, failures with Retry, and the posted-to-QuickBooks history). Nothing on it turns posting on yet: that arrives with the setup chat.
 
+## Integration setup (Building)
+
+A harness, in the sense Claude Code is one: a model in a loop picks its next step, with tools, instructions, saved state and limits it cannot override. It sets up an accounting system in a chat with one person. Nothing in the product reaches it yet.
+
+- **Readers.** `integrations/books.ts` is what any accounting system looks like to it: one shape, read only. `integrations/quickbooks-reader.ts` is QuickBooks in that shape. The harness holds a reader and so holds no way to write: a bill reaches the books only through the posting code above, after its own approval. A failed read is a named `BooksReadError`, never an empty list, and every read is checked against the system's own count and says what is missing. `api/scripts/books-read-check.mts` runs one against a real company on the bench.
+
 ## Auth and roles (Live)
 
 `api/src/auth/`. Session tokens, email and password, Google OAuth. `capability-access.ts` maps roles to capabilities and the frontend hides what a user cannot do.
