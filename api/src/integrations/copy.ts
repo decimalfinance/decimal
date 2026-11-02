@@ -169,6 +169,8 @@ export type RecordSort = keyof typeof SORTS;
 export const RECORD_SORTS = Object.keys(SORTS) as RecordSort[];
 
 const escapeLike = (text: string) => text.replace(/[\\%_]/g, (c) => `\\${c}`);
+/** Each word, in any order, without the punctuation around it: "Tri-County Pallet Co." has to find "Tri-County Pallet Co - Dayton". */
+const searchWords = (text: string) => text.split(/\s+/).map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')).filter(Boolean);
 
 function whereOf(scope: CopyScope, kind: RecordKind, filters: RecordFilters, homeCurrency: string): Prisma.Sql {
   const clauses = [
@@ -180,7 +182,11 @@ function whereOf(scope: CopyScope, kind: RecordKind, filters: RecordFilters, hom
   if (filters.id) clauses.push(Prisma.sql`record_id = ${filters.id}`);
   if (filters.vendorId) clauses.push(Prisma.sql`party_id = ${filters.vendorId}`);
   if (filters.categoryId) clauses.push(Prisma.sql`data->'lines' @> ${JSON.stringify([{ accountId: filters.categoryId }])}::jsonb`);
-  if (filters.text) clauses.push(Prisma.sql`search_text ILIKE ${`%${escapeLike(filters.text)}%`}`);
+  if (filters.text) {
+    // Only punctuation has no words, and is looked for as it is: it mustn't come to mean everything.
+    const words = searchWords(filters.text);
+    for (const word of words.length > 0 ? words : [filters.text]) clauses.push(Prisma.sql`search_text ILIKE ${`%${escapeLike(word)}%`}`);
+  }
   if (filters.from) clauses.push(Prisma.sql`date >= ${filters.from}::date`);
   if (filters.to) clauses.push(Prisma.sql`date <= ${filters.to}::date`);
   // Dollars and yen cannot share a comparison, so an amount looks only at the books' own currency.

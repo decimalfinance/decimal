@@ -134,7 +134,7 @@ async function openRequiredCalls(setup: IntegrationSetup, findings: StudyFinding
     ...(findings.decimal.someoneElseCanApprove || findings.decimal.selfApprovalOff ? [] : [{
       key: 'who_approves',
       kind: 'who_approves',
-      question: 'Nobody else can approve a bill this person sends, so a bill they send would stop there and never post. Will they invite an approver, or turn No self-approval off?',
+      question: 'Nobody else can approve a bill you send, so it would stop there and never post. Will you invite an approver, or turn No self-approval off?',
       recommendation: 'Invite an approver before the first bill.',
       why: 'A second person checking each bill is the safer setup. Turning the rule off goes on the record, and only the primary admin can do it.',
     }]),

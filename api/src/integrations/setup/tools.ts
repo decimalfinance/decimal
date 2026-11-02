@@ -127,7 +127,7 @@ const OPEN_CALL = z.object({
   key: z.string().regex(/^[a-z0-9_-]{2,60}$/, 'a short slug, like lookalike-delta'),
   kind: z.enum(CALL_KINDS),
   question: z.string().trim().min(5).max(1500),
-  recommendation: z.string().trim().min(3).max(1000),
+  recommendation: z.string().trim().min(3).max(1000, 'Keep the recommendation to a sentence or two: code lists the records under your question.'),
   why: z.string().trim().min(3).max(1000),
   refs: z.array(z.string().max(120)).max(100),
 });
@@ -217,20 +217,22 @@ export async function listFor(kind: unknown, setupId: string): Promise<string> {
   if (kind !== 'lookalike_vendors' && kind !== 'coded_two_ways') return '';
   const [setup, call] = await Promise.all([
     prisma.integrationSetup.findUniqueOrThrow({ where: { setupId }, select: { findings: true } }),
-    prisma.integrationSetupCall.findFirst({ where: { setupId, kind }, select: { refs: true } }),
+    prisma.integrationSetupCall.findFirst({ where: { setupId, kind }, select: { refs: true, value: true } }),
   ]);
   const findings = setup.findings as StudyFindings | null;
   const cited = new Set(Array.isArray(call?.refs) ? (call.refs as string[]) : []);
   const isCited = (id: string) => cited.size === 0 || cited.has(`vendor:${id}`);
+  // What they've settled isn't asked again, unless that's all there is: asked for then, it's because they never saw it.
+  const settled = (call?.value ?? {}) as { links?: Array<{ vendorIds: string[] }>; choices?: Array<{ vendorId: string; line: string | null }> };
+  const stillOpen = <T>(rows: T[], isSettled: (row: T) => boolean) => (rows.some((r) => !isSettled(r)) ? rows.filter((r) => !isSettled(r)) : rows);
   const count = (n: number, what: string) => `${n} ${what}${n === 1 ? '' : 's'}`;
   if (kind === 'coded_two_ways') {
-    return (findings?.codedTwoWays ?? [])
-      .filter((c) => isCited(c.vendorId))
+    return stillOpen((findings?.codedTwoWays ?? []).filter((c) => isCited(c.vendorId)), (c) => Boolean(settled.choices?.some((s) => s.vendorId === c.vendorId && s.line === c.line)))
       .map((c) => `- ${c.vendorName}, "${c.example ?? 'its lines'}": ${c.accounts.map((a) => `${a.name} (${count(a.lines, 'line')})`).join(' or ')}`)
       .join('\n');
   }
-  return (findings?.lookalikeVendors ?? [])
-    .filter((g) => g.vendors.filter((v) => isCited(v.id)).length >= 2)
+  const askedOf = (g: { vendors: Array<{ id: string }> }) => g.vendors.filter((v) => isCited(v.id));
+  return stillOpen((findings?.lookalikeVendors ?? []).filter((g) => askedOf(g).length >= 2), (g) => Boolean(settled.links?.some((l) => askedOf(g).every((v) => l.vendorIds.includes(v.id)))))
     .map((g) => {
       const vendors = g.vendors.map((v) => {
         const used = [...(v.bills > 0 || v.expenses === 0 ? [count(v.bills, 'bill')] : []), ...(v.expenses > 0 ? [count(v.expenses, 'expense')] : []), ...(v.active ? [] : ['inactive'])];
@@ -240,6 +242,26 @@ export async function listFor(kind: unknown, setupId: string): Promise<string> {
       return `- ${vendors.join(', ')}${about.length > 0 ? `: ${about.join('; ')}` : ''}`;
     })
     .join('\n');
+}
+
+/**
+ * What a posted bill leaves out, in code's words, under the first message once their books are read.
+ * Given it to say, the model said "your bills leave out class" in run after run, which is backwards.
+ */
+export function leftOutInWords(findings: StudyFindings | null, label: string): string {
+  const billsWith = (kind: string) => findings?.leftOut.find((l) => l.kind === kind)?.bills ?? 0;
+  const used = [
+    [billsWith('item_lines'), 'used products or services'],
+    [billsWith('classes'), 'used classes'],
+    [billsWith('locations'), 'used locations'],
+    [billsWith('billable_to_customer'), 'were marked billable to a customer'],
+  ].filter(([n]) => Number(n) > 0).map(([n, what]) => `${n} ${what}`);
+  const other = billsWith('other_currency');
+  const lines = [
+    ...(used.length > 0 ? [`A bill Decimal posts has Category lines only. Of your past bills, ${used.slice(0, -1).join(', ')}${used.length > 1 ? ' and ' : ''}${used.at(-1)}. You can add those in ${label} once a bill is posted, and none of it stops a bill posting.`] : []),
+    ...(other > 0 ? [`${other === 1 ? 'One past bill was' : `${other} past bills were`} in another currency. A bill like that doesn't post, so enter it in ${label} by hand.`] : []),
+  ];
+  return lines.length > 0 ? `Worth knowing:\n${lines.map((l) => `- ${l}`).join('\n')}` : '';
 }
 
 const OFFER_GO = z.object({ passedOver: z.array(z.object({ id: z.string(), why: z.string().trim().min(3).max(500) })).max(40).optional() });
@@ -529,7 +551,7 @@ export function setupTools(ctx: TurnContext): AgentTool[] {
     },
     {
       name: 'open_call',
-      description: 'Record something only the person can decide, with your recommendation, why, and the records behind it. Open everything you want to ask as soon as you know it: the state keeps it and marks which to ask now. Where the same kind of answer fits several look-alike groups, or several lines, put them in one call, so one reply can settle them. The closing date and who approves are opened for you.',
+      description: 'Record something only the person can decide, with your recommendation, why, and the records behind it. Open everything you want to ask as soon as you know it: the state keeps it and marks which to ask now. Where the same kind of answer fits several look-alike groups, or several lines, put them in one call, so one reply can settle them: there is one call of each of those kinds, and opening it again adds to it. The closing date and who approves are opened for you.',
       parameters: {
         type: 'object',
         required: ['key', 'kind', 'question', 'recommendation', 'why', 'refs'],
@@ -544,25 +566,25 @@ export function setupTools(ctx: TurnContext): AgentTool[] {
       },
       run: async (args) => {
         const key = typeof args.key === 'string' ? args.key : null;
-        const existing = key ? await prisma.integrationSetupCall.findUnique({ where: { setupId_key: { setupId: ctx.setupId, key } } }) : null;
+        // One question per kind, whatever this one calls it. Told to use the other name, the model spent whole turns trying new ones.
+        const one = typeof args.kind === 'string' && ONE_CALL_PER_KIND.includes(args.kind) ? await prisma.integrationSetupCall.findFirst({ where: { setupId: ctx.setupId, kind: args.kind } }) : null;
+        const existing = one ?? (key ? await prisma.integrationSetupCall.findUnique({ where: { setupId_key: { setupId: ctx.setupId, key } } }) : null);
         const had = Array.isArray(existing?.refs) ? (existing.refs as string[]) : [];
         const given = Array.isArray(args.refs) ? args.refs : [];
         // An answered one opens again only for something new to ask.
         if (existing?.status === 'answered' && (existing.required || given.every((r) => had.includes(r as string)))) return { alreadyAnswered: existing.answer };
         if (existing?.required) return { alreadyOpen: existing.key, note: 'Its words are in the state. Just ask it in your message.' };
-        const input = parsed(OPEN_CALL, args);
+        const input = parsed(OPEN_CALL, existing ? { ...args, key: existing.key } : args);
         const setup = await load(ctx.setupId);
         assertStudied(setup);
         const refs = await realRefs(scopeOf(setup), input.refs, new Set([...ctx.seen, ...decimalRefs(setup.findings)]));
-        if (refs.length === 0) throw new Error('A call has to cite records your tools returned, and none of these are.');
+        if (refs.length === 0 && had.length === 0) throw new Error('A call has to cite records your tools returned, and none of these are.');
         const cites = [...new Set([...had, ...refs])];
         const empty = nothingToAsk(input.kind, cites, setup.findings as StudyFindings | null);
         if (empty) throw new Error(empty);
         if (!existing) {
-          const calls = await prisma.integrationSetupCall.findMany({ where: { setupId: ctx.setupId }, select: { key: true, kind: true } });
-          const same = ONE_CALL_PER_KIND.includes(input.kind) ? calls.find((c) => c.kind === input.kind) : null;
-          if (same) throw new Error(`These all go in one question, ${same.key}. Open that one again, with the whole question and what this cites.`);
-          if (calls.length >= MAX_CALLS) throw new Error(`That is ${MAX_CALLS} calls, the most one setup asks. Put more into one call, or pass over the smaller things: they wait until a bill raises them.`);
+          const calls = await prisma.integrationSetupCall.count({ where: { setupId: ctx.setupId } });
+          if (calls >= MAX_CALLS) throw new Error(`That is ${MAX_CALLS} calls, the most one setup asks. Put more into one call, or pass over the smaller things: they wait until a bill raises them.`);
         }
         const { key: slug, ...words } = { ...input, refs: cites };
         await prisma.integrationSetupCall.upsert({
@@ -571,7 +593,7 @@ export function setupTools(ctx: TurnContext): AgentTool[] {
           update: { ...words, status: 'open' },
         });
         await appendEvent(ctx.setupId, 'call_opened', { key: slug, kind: input.kind, refs });
-        return { opened: slug, ...(existing?.status === 'answered' ? { note: 'It is open again. What they said is in the state: when they answer, record all of it again, with the new part.' } : {}) };
+        return { opened: slug, ...(existing?.status === 'answered' ? { note: 'It is open again. When they answer, whatever they don\'t mention stands.' } : {}) };
       },
     },
     {
@@ -598,6 +620,10 @@ export function setupTools(ctx: TurnContext): AgentTool[] {
           if (!talked.some((m) => topic.test(m.text ?? ''))) throw new Error('This hasn\'t come up with them yet. Ask it in your message, and record it when they answer.');
         }
         if (call.kind === 'closing_date' && input.value?.date) {
+          // Saying it again changes nothing. Refused, the model told them it couldn't save a date it already had.
+          if (call.status === 'answered' && (call.value as { date?: unknown } | null)?.date === input.value.date) {
+            return { recorded: input.key, means: await inWords(call, call.value, setup) };
+          }
           const message = await prisma.integrationSetupMessage.findUnique({ where: { messageId: ctx.speaker.messageId }, select: { text: true } });
           if (!GAVE_OR_AGREED.test(message?.text ?? '')) throw new Error('They haven\'t given a date or agreed to one. Ask them, and record it when they do.');
         }
@@ -622,7 +648,7 @@ export function setupTools(ctx: TurnContext): AgentTool[] {
     },
     {
       name: 'offer_go',
-      description: 'Ask to put the Go button under your message. Code decides: if anything is missing you hear what. Whatever their books show that the person hasn\'t heard from you comes back as notRaised: ask them, or, if no question of yours cites it, pass it over here with the reason it can wait. Only the person pressing it turns posting on.',
+      description: 'Ask to put the Go button under your message. Code decides: if anything is missing you hear what. Whatever their books show that the person hasn\'t heard from you comes back as notRaised, with its refs: ask them, or, if no question of yours cites it, pass it over here with the reason it can wait. Only the person pressing it turns posting on.',
       parameters: {
         type: 'object',
         properties: {

@@ -19,7 +19,7 @@ import { doneConditions, readyForGo, stillMissing, wordsSaid } from './gates.js'
 import { playbookFor, playbookVersion, type Playbook } from './playbooks.js';
 import { appendEvent, claimTurn, pendingEvents, releaseTurn, setupsOwedATurn } from './record.js';
 import { approvalPicture, runStudy, studiesOwed, type StudyFindings } from './study.js';
-import { ASK_AT_ONCE, decimalRefs, inWords, listFor, realRefs, setupTools, type SetupAction, type Thought, type TurnContext } from './tools.js';
+import { ASK_AT_ONCE, decimalRefs, inWords, leftOutInWords, listFor, realRefs, setupTools, type SetupAction, type Thought, type TurnContext } from './tools.js';
 
 /** One run of the model, between hearing something and answering. */
 const MODEL_CALLS_PER_TURN = 12;
@@ -45,8 +45,10 @@ const LONGEST_CLAIM = 240;
 const MOST_QUESTIONS = 2;
 const MAX_CLAIMS = 5;
 const FEWEST_CLAIMS = 3;
-/** The share of a claim's words already in the message that means it is the same sentence. */
+/** The share of a sentence's words the claims already have that means it says the same thing. */
 const SAID_TWICE = 0.7;
+/** Where one sentence ends and another starts. A company's "Inc." is not the end of one. */
+const SENTENCE_END = /(?<=[.!])(?<!\b(?:Inc|INC|Co|CO|Ltd|LTD|LLC|Corp|CORP|St|No|Mr|Ms|Dr)\.)[^\S\n]+(?=[\p{Lu}\p{N}“"'])/u;
 
 const RESPOND_SCHEMA = {
   type: 'object',
@@ -61,7 +63,7 @@ const RESPOND_SCHEMA = {
     },
     claims: {
       type: 'array',
-      description: 'Statements about how they work, each opening the records behind it. Empty when there are none.',
+      description: 'Statements about how they work, each opening the records behind it. They show under your message, so leave them out of it. Empty when there are none.',
       items: {
         type: 'object',
         additionalProperties: false,
@@ -204,12 +206,24 @@ async function takeTurn(setup: IntegrationSetup): Promise<boolean> {
     return false;
   }
 
-  const { text, claims, dropped } = await spoken(run.terminal.args, seen, setup, [...ctx.saved.values()].flat());
+  // Sent back and still nothing for them to do, so code does what the model was told to:
+  // nobody should be left looking at a message with nothing to answer and nothing to press.
+  const next = questionsIn(run.terminal.args) === 0 && actions.length === 0 ? await whatsNext(setup) : null;
+  if (next && !next.call) await tools.find((t) => t.name === 'offer_go')?.run?.({}).catch(() => null);
+
+  // Once, on the message that tells them their books are read.
+  const worthKnowing = pending.some((e) => e.kind === 'study_finished') ? leftOutInWords(setup.findings as StudyFindings | null, playbook.label) : '';
+  const { text, claims, dropped } = await spoken(next?.call ? { ...run.terminal.args, list: null } : run.terminal.args, seen, setup, [...ctx.saved.values()].flat(), worthKnowing);
   if (dropped.length > 0) await appendEvent(setup.setupId, 'claims_dropped', { claims: dropped });
   await prisma.integrationSetupMessage.update({
     where: { messageId: answer.messageId },
     data: { status: 'done', text, claims, actions },
   });
+  if (next?.call) {
+    const asking = [next.call.question, await listFor(next.call.kind, setup.setupId)].filter(Boolean).join('\n\n');
+    await prisma.integrationSetupMessage.create({ data: { setupId: setup.setupId, role: 'assistant', status: 'done', text: asking } });
+    await appendEvent(setup.setupId, 'asked_by_code', { key: next.call.key });
+  }
   await answered();
   return true;
 }
@@ -221,46 +235,61 @@ function realRefsOf(claim: { refs?: unknown } | null | undefined, seen: Set<stri
   return realRefs({ organizationId: setup.organizationId, system: setup.system, companyId: setup.companyId }, given, new Set([...seen, ...decimalRefs(setup.findings)]));
 }
 
-/** Once their books are read, a message that asks nothing and has no button leaves them with nothing to do. */
-async function nothingLeftToDo(setup: IntegrationSetup): Promise<string | null> {
+const questionsIn = (args: Record<string, unknown>) => (typeof args.message === 'string' ? args.message.match(/\?/g)?.length ?? 0 : 0);
+
+/**
+ * Claims show under the message, so a sentence they already say comes out, and that's most of
+ * what makes a message long. Sent back to reword it, the model dropped the claim instead, and they
+ * heard less. A question stays, whatever it repeats.
+ */
+export function withoutWhatClaimsSay(message: string, claims: Array<{ text?: unknown }>): string {
+  const inClaims = wordsSaid(claims.map((c) => String(c?.text ?? '')));
+  if (inClaims.size === 0) return message;
+  const keep = (sentence: string) => {
+    const words = [...wordsSaid([sentence])];
+    return sentence.includes('?') || words.length === 0 || words.filter((w) => inClaims.has(w)).length / words.length < SAID_TWICE;
+  };
+  return message.split('\n').map((paragraph) => paragraph.split(SENTENCE_END).filter(keep).join(' ')).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/**
+ * Once their books are read, a message that asks nothing and has no button leaves them with
+ * nothing to do. What's next, if so: the first question still open, or, with none, Go.
+ */
+async function whatsNext(setup: IntegrationSetup): Promise<{ call: { key: string; kind: string; question: string } | null } | null> {
   // As this turn began: a small company can finish reading while the model is still telling them they can leave.
   if (setup.studyStatus !== 'finished') return null;
   const [fresh, connection, next] = await Promise.all([
     prisma.integrationSetup.findUniqueOrThrow({ where: { setupId: setup.setupId }, select: { status: true } }),
     connectorFor(setup.system).connection(setup.organizationId),
-    prisma.integrationSetupCall.findFirst({ where: { setupId: setup.setupId, status: { not: 'answered' } }, orderBy: { createdAt: 'asc' }, select: { key: true } }),
+    prisma.integrationSetupCall.findFirst({ where: { setupId: setup.setupId, status: { not: 'answered' } }, orderBy: { createdAt: 'asc' }, select: { key: true, kind: true, question: true } }),
   ]);
   if (fresh.status !== 'open' || connection?.status !== 'connected') return null;
-  return next
-    ? `This leaves them with nothing to do. Ask ${next.key} in this message.`
-    : 'This leaves them with nothing to do, and nothing is left to ask, so offer_go in this turn. If it says something is missing, deal with that.';
+  return { call: next };
 }
 
 /** The rules of a good answer that code can check. What this says goes back to the model, which says it again. */
 async function notRightYet(args: Record<string, unknown>, seen: Set<string>, setup: IntegrationSetup, actions: SetupAction[]): Promise<string | null> {
-  const message = typeof args.message === 'string' ? args.message.trim() : '';
   const claims: Array<{ text?: unknown; refs?: unknown }> = Array.isArray(args.claims) ? args.claims : [];
+  const message = withoutWhatClaimsSay(typeof args.message === 'string' ? args.message.trim() : '', claims);
   const problems: string[] = [];
   if (message.length > LONGEST_MESSAGE) {
     problems.push(`Your message is ${message.length} characters. A busy person is reading this. Say it in under ${LONGEST_MESSAGE}, and leave the rest for your next message.`);
   }
-  const asked = message.match(/\?/g)?.length ?? 0;
+  const asked = questionsIn({ message });
   if (asked > MOST_QUESTIONS) problems.push(`You asked ${asked} questions. Ask ${MOST_QUESTIONS} at most, and the rest once they have answered.`);
   if (typeof args.list === 'string' && (claims.length > 0 || asked > 1)) {
     problems.push('A list goes in a message of its own, with the one question it asks. Send everything else now, and the list next.');
   }
-  // Claims show under the message, so a sentence in both says it twice, and that's most of what makes a message long.
-  const inMessage = wordsSaid([message]);
-  const twice = claims.find((c) => {
-    const words = [...wordsSaid([String(c?.text ?? '')])];
-    return words.length > 0 && words.filter((w) => inMessage.has(w)).length / words.length >= SAID_TWICE;
-  });
-  if (twice) problems.push(`They see your claims under your message, so this is said twice: "${String(twice.text).slice(0, 80)}". Leave it out of your message.`);
   const notTold = await howTheyWorkNotTold(setup, claims.length);
   if (notTold) problems.push(notTold);
   if (asked === 0 && actions.length === 0) {
-    const next = await nothingLeftToDo(setup);
-    if (next) problems.push(next);
+    const next = await whatsNext(setup);
+    if (next) {
+      problems.push(next.call
+        ? `This leaves them with nothing to do. Ask ${next.call.key} in this message.`
+        : 'This leaves them with nothing to do, and nothing is left to ask, so offer_go in this turn. If it says something is missing, deal with that.');
+    }
   }
   if (claims.length > MAX_CLAIMS) problems.push(`You made ${claims.length} claims. Make ${MAX_CLAIMS} at most: what matters most to them.`);
   if (claims.some((c) => typeof c?.text === 'string' && c.text.length > LONGEST_CLAIM)) problems.push('Keep each claim to one short sentence, and say more if they ask.');
@@ -282,7 +311,7 @@ async function howTheyWorkNotTold(setup: IntegrationSetup, claims: number): Prom
   const said = await prisma.integrationSetupMessage.findMany({ where: { setupId: setup.setupId, role: 'assistant', status: 'done' }, select: { claims: true } });
   const told = said.flatMap((m) => (Array.isArray(m.claims) ? m.claims : [])).length;
   if (told + claims >= enough) return null;
-  return `They haven't heard how they work yet. Put at least ${enough} claims in this message, with no list, and whatever else you need to say.`;
+  return `They haven't heard how they work yet. Put at least ${enough - told} claims in this message, with no list, and whatever else you need to say. get_findings has what to cite.`;
 }
 
 /**
@@ -291,8 +320,7 @@ async function howTheyWorkNotTold(setup: IntegrationSetup, claims: number): Prom
  * as it may be citing what it read a turn ago. One citing nothing real is dropped and
  * goes on the receipt, so a measure of it exists. The rules were sent back to it already: this is what's left if it didn't listen.
  */
-async function spoken(args: Record<string, unknown>, seen: Set<string>, setup: IntegrationSetup, saved: string[]) {
-  const said = typeof args.message === 'string' ? args.message.trim().slice(0, MAX_MESSAGE_CHARS) : '';
+async function spoken(args: Record<string, unknown>, seen: Set<string>, setup: IntegrationSetup, saved: string[], worthKnowing: string) {
   const raw = Array.isArray(args.claims) ? args.claims : [];
   const claims: Array<{ text: string; refs: string[] }> = [];
   const dropped: unknown[] = [];
@@ -302,9 +330,11 @@ async function spoken(args: Record<string, unknown>, seen: Set<string>, setup: I
     if (text && refs.length > 0 && claims.length < MAX_CLAIMS) claims.push({ text, refs });
     else dropped.push(claim);
   }
+  // Against the claims that made it: what a dropped one said is still only said here.
+  const said = withoutWhatClaimsSay(typeof args.message === 'string' ? args.message.trim().slice(0, MAX_MESSAGE_CHARS) : '', claims);
   const above = saved.length > 0 ? `Saved:\n${saved.map((line) => `- ${line}`).join('\n')}` : '';
   const list = await listFor(args.list, setup.setupId);
-  return { text: [above, said || (claims.length > 0 || list || above ? '' : 'Done.'), list].filter(Boolean).join('\n\n'), claims, dropped };
+  return { text: [above, said || (claims.length > 0 || list || above || worthKnowing ? '' : 'Done.'), worthKnowing, list].filter(Boolean).join('\n\n'), claims, dropped };
 }
 
 /** Tokens and turns on the record, and on the receipt: which words, which model, what it cost. */

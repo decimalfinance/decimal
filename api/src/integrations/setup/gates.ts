@@ -30,7 +30,7 @@ export const readyForGo = (conditions: DoneCondition[]) => conditions.every((c) 
 export const stillMissing = (conditions: DoneCondition[]) => conditions.filter((c) => !c.done).map((c) => c.missing);
 
 /** inACall: it is cited in a question, so the person has to see it. Otherwise it can wait, for a reason. */
-export type NotRaised = { id: string; what: string; inACall: boolean };
+export type NotRaised = { id: string; what: string; inACall: boolean; refs: string[] };
 
 /**
  * What the study found that changes how a bill posts, and no call has taken up. Which of
@@ -51,19 +51,19 @@ export function notRaised(findings: StudyFindings | null, calls: Array<{ kind: s
     const ids = group.vendors.map((v) => `vendor:${v.id}`);
     const inACall = cited.some((c) => ids.filter((id) => c.refs.has(id)).length >= 2);
     if (!inACall || !group.vendors.some((v) => cameUp(v.name, said))) {
-      missing.push({ id: `lookalike:${group.vendors[0]!.id}`, what: `Vendors that look alike: ${group.vendors.map((v) => v.name).join(', ')}`, inACall });
+      missing.push({ id: `lookalike:${group.vendors[0]!.id}`, what: `Vendors that look alike: ${group.vendors.map((v) => v.name).join(', ')}`, inACall, refs: ids });
     }
   }
   for (const line of findings.codedTwoWays) {
     const inACall = cited.some((c) => c.refs.has(`vendor:${line.vendorId}`) && c.kind !== 'lookalike_vendors');
     if (!inACall || !cameUp(line.vendorName, said)) {
-      missing.push({ id: `coded:${line.vendorId}:${line.line ?? ''}`, what: `${line.vendorName}: "${line.example ?? 'their lines'}" went to ${line.accounts.map((a) => a.name).join(' and ')}`, inACall });
+      missing.push({ id: `coded:${line.vendorId}:${line.line ?? ''}`, what: `${line.vendorName}: "${line.example ?? 'their lines'}" went to ${line.accounts.map((a) => a.name).join(' and ')}`, inACall, refs: [`vendor:${line.vendorId}`, ...line.accounts.map((a) => `category:${a.id}`)] });
     }
   }
   // Not a question: they never post by themselves, so there's nothing to decide. They only have to hear it, with the bills to open.
   const approved = findings.decimal.approvedBeforeConnecting;
   if (approved.bills > 0 && !approved.sampleBillIds.some((id) => claimed.has(`decimal-bill:${id}`))) {
-    missing.push({ id: 'approved_before_connecting', what: `${approved.bills} bills approved in Decimal before connecting, which they haven't been told about in a claim citing them`, inACall: false });
+    missing.push({ id: 'approved_before_connecting', what: `${approved.bills} bills approved in Decimal before connecting, which they haven't been told about in a claim citing them`, inACall: false, refs: approved.sampleBillIds.map((id) => `decimal-bill:${id}`) });
   }
   return missing;
 }
