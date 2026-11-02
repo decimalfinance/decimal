@@ -6,6 +6,7 @@ import { ApiError, conflict, notFound } from '../../infra/api-errors.js';
 import { prisma } from '../../infra/prisma.js';
 import { connectorFor } from '../connectors.js';
 import { deleteCopy, lookUp, type RecordKind } from '../copy.js';
+import { linesToDecide } from './findings.js';
 import { doneConditions, readyForGo, stillMissing } from './gates.js';
 import { wake } from './harness.js';
 import type { SetupOutcome } from './outcome.js';
@@ -118,15 +119,47 @@ async function outcomeOf(setup: IntegrationSetup, postingFrom: Date): Promise<Se
   const calls = await prisma.integrationSetupCall.findMany({ where: { setupId: setup.setupId, status: 'answered' } });
   const valueOf = <T>(kind: string) => calls.filter((c) => c.kind === kind && c.value !== null).map((c) => c.value as T);
   const findings = setup.findings as StudyFindings | null;
+  const lineChoices = valueOf<{ choices: SetupOutcome['lineChoices'] }>('coded_two_ways').flatMap((v) => v.choices);
   return {
     companyId: setup.companyId,
     postingFrom: postingFrom.toISOString(),
     closingDate: valueOf<{ date: string | null }>('closing_date')[0]?.date ?? null,
     vendorLinks: valueOf<{ links: SetupOutcome['vendorLinks'] }>('lookalike_vendors').flatMap((v) => v.links),
-    lineChoices: valueOf<{ choices: SetupOutcome['lineChoices'] }>('coded_two_ways').flatMap((v) => v.choices),
+    lineChoices,
+    learnedLines: await linesToLearn(setup, findings, lineChoices, postingFrom),
     categoriesInUse: findings?.accountsBillsUse.map((a) => a.id) ?? [],
     leftOut: findings?.leftOut.map((c) => c.kind) ?? [],
   };
+}
+
+/** What repeated in the books, with what the person said in place of it. "A person picks each time" leaves nothing to fill in. */
+async function linesToLearn(setup: IntegrationSetup, findings: StudyFindings | null, choices: SetupOutcome['lineChoices'], postingFrom: Date): Promise<SetupOutcome['learnedLines']> {
+  const same = (a: { vendorId: string; line: string | null }, b: { vendorId: string; line: string | null }) => a.vendorId === b.vendorId && a.line === b.line;
+  const picked = choices.filter((c) => c.line && c.categoryId);
+  const rows = picked.length > 0 && setup.companyId
+    ? await prisma.booksRecord.findMany({
+        where: { organizationId: setup.organizationId, system: setup.system, companyId: setup.companyId, kind: 'category', recordId: { in: picked.map((c) => c.categoryId!) } },
+        select: { recordId: true, name: true },
+      })
+    : [];
+  const decided = linesToDecide(findings);
+  return [
+    ...(findings?.learnedLines ?? [])
+      .filter((l) => !choices.some((c) => same(c, l)))
+      .map(({ vendorId, line, example, categoryName, lines, lastUsed, number }) => ({ vendorId, line, example, categoryName, lines, lastUsed, number })),
+    ...picked.flatMap((c) => {
+      const categoryName = rows.find((r) => r.recordId === c.categoryId)?.name;
+      if (!categoryName) return [];
+      const was = decided.find((l) => same(c, l));
+      // A line that moved says only where it went. One coded two ways says how much.
+      const used = was?.accounts.find((a) => a.id === c.categoryId);
+      return [{
+        vendorId: c.vendorId, line: c.line!, example: was?.example ?? c.line!, categoryName,
+        lines: used && 'lines' in used ? Number(used.lines) : 0,
+        lastUsed: postingFrom.toISOString(), number: null,
+      }];
+    }),
+  ];
 }
 
 /**

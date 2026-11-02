@@ -14,7 +14,8 @@ import { sweepSetups, wake, withoutWhatClaimsSay } from '../src/integrations/set
 import { noteDisconnected, noteSignedIn, noteSignInFailed } from '../src/integrations/setup/service.js';
 import { setRole } from '../src/approvals/roles.js';
 import { ensureEngineSetup } from '../src/approvals/wiring.js';
-import { raw, post, get, register, type Person } from './helpers/companion-harness.js';
+import { drainAsyncIntake } from '../src/payments/invoice-intake.js';
+import { raw, post, get, register, upload, type Person } from './helpers/companion-harness.js';
 
 // ─── A company, in memory ─────────────────────────────────────────────────────
 
@@ -125,8 +126,9 @@ let orgs = 0;
 async function makeOrg() {
   const owner = await register('Olive Owner');
   orgs += 1;
-  const org = await post('/organizations', { organizationName: `Larkspur Freight ${orgs}` }, owner.token);
-  return { owner, orgId: org.organizationId as string };
+  const orgName = `Larkspur Freight ${orgs}`;
+  const org = await post('/organizations', { organizationName: orgName }, owner.token);
+  return { owner, orgId: org.organizationId as string, orgName };
 }
 type World = Awaited<ReturnType<typeof makeOrg>>;
 
@@ -1566,4 +1568,106 @@ test('setup tools: the model never gets anything that writes, and what it reads 
   assert.deepEqual(names, ['read_company', 'offer_sign_in', 'confirm_company', 'start_reading', 'get_findings', 'look_up', 'summarize', 'open_call', 'record_answer', 'offer_go', 'respond']);
   assert.equal(/token|secret|password/i.test(system.split('Where things stand:')[1] ?? ''), false);
   assert.equal(state.goes.length, 0);
+});
+
+// ─── What the study is for: a vendor's first bill in Decimal ──────────────────
+
+const inCategory = (id: string, name: string, description: string): BooksLine => ({ ...line(id, 40_00n, description), accountName: name });
+const WAYS: Array<[string, string, string, string]> = [['9', 'Taxes & licenses', '30', '60'], ['8', 'Travel', '40', '50']];
+const twoWays = (prefix: string, vendorId: string, vendorName: string, description: string) => WAYS.flatMap(([id, name, a, b]) => [a, b].map((days) =>
+  bill(`${prefix}${id}${days}`, vendorId, vendorName, daysAgo(Number(days)), [inCategory(id, name, description)])));
+
+/** Who they buy from, in the words a bill will use, and in categories Decimal can pick from, but for Ocean Carriers. */
+const HISTORY: BooksFixture = {
+  company: COMPANY,
+  accounts: [account('7', 'Freight'), account('8', 'Travel'), account('9', 'Taxes & licenses')],
+  vendors: [
+    vendor('1', 'Brightwave Media', { phone: '(555) 010-0100' }),
+    vendor('2', 'Bright Wave Media', { phone: '(555) 010-0100' }),
+    vendor('3', 'Pixel Foundry'),
+    vendor('4', 'Harbor Mutual'),
+    vendor('5', 'Ocean Carriers'),
+  ],
+  bills: [
+    ...[30, 60, 90].map((days) => bill(`21${days}`, '1', 'Brightwave Media', daysAgo(days), [inCategory('9', 'Taxes & licenses', 'Stock photography licenses')])),
+    ...[30, 60, 90].map((days) => bill(`22${days}`, '2', 'Bright Wave Media', daysAgo(days), [inCategory('8', 'Travel', 'Brand workshop facilitation')])),
+    ...twoWays('23', '3', 'Pixel Foundry', 'Annual license'),
+    ...twoWays('24', '4', 'Harbor Mutual', 'Ocean cover'),
+    ...[30, 60, 90].map((days) => bill(`25${days}`, '5', 'Ocean Carriers', daysAgo(days), [inCategory('7', 'Freight', 'Ocean freight')])),
+  ],
+  expenses: [],
+};
+
+test("bill coding: after Go, a vendor's first bill fills in from its history in the books, says so, and a person has the last word", async () => {
+  const w = await makeOrg();
+  const state = pretendSystem(HISTORY);
+  const setupId = await studied(w, state);
+  script([{ calls: [call('alike', ['vendor:1', 'vendor:2'], 'lookalike_vendors'), call('coded', ['vendor:3', 'vendor:4'], 'coded_two_ways')], say: 'Which?' }]);
+  await say(w, setupId, 'Go on');
+  const recorded = script([{
+    calls: [
+      { tool: 'record_answer', args: { key: 'alike', answer: 'One vendor', value: { same: [{ keep: 'Brightwave Media', with: ['Bright Wave Media'] }] } } },
+      { tool: 'record_answer', args: { key: 'coded', answer: 'Pixel each time, Harbor to Travel', value: { choices: [{ vendor: 'Pixel Foundry', line: 'Annual license', category: null }, { vendor: 'Harbor Mutual', line: 'Ocean cover', category: 'Travel' }] } } },
+    ],
+    say: 'Anything else?',
+  }]);
+  await say(w, setupId, 'One vendor. Pixel each time. Harbor goes to Travel.');
+  assert.ok(recorded.seen.results.every((r) => r.output.recorded), JSON.stringify(recorded.seen.results.map((r) => r.output)));
+  await answerEverything(w, setupId);
+
+  const uploaded = async (vendorName: string, invoiceNo: string, description: string) => {
+    const id = await upload(w.orgId, w.owner.token, w.orgName, { vendor: vendorName, amount: 400, invoiceNo, line: description });
+    await drainAsyncIntake();
+    return id;
+  };
+  const lineOf = async (id: string) => (await get(`/organizations/${w.orgId}/bills/${id}/draft`, w.owner.token)).lines[0];
+  const settle = (id: string, invoiceNo: string, description: string, category: string) => post(`/organizations/${w.orgId}/bills/${id}/confirm`, {
+    fields: { invoiceNumber: invoiceNo, invoiceDate: '2026-08-02', dueDate: '2026-08-30', terms: 'Net 30', currency: 'USD', total: 400, taxAmount: 0 },
+    lines: [{ description, quantity: 1, unitPrice: 400, amount: 400, category }],
+    confirmedFieldKeys: [],
+  }, w.owner.token);
+
+  const before = await lineOf(await uploaded('Brightwave Media', 'BW-0', 'Stock photography licenses (8)'));
+  assert.notEqual(before.categoryFrom?.kind, 'memory', 'nothing until a person has pressed Go');
+  await post(`${pathOf(w, setupId)}/go`, {}, w.owner.token);
+
+  const first = await lineOf(await uploaded('Brightwave Media', 'BW-1', 'Stock photography licenses (20)'));
+  assert.equal(first.category, 'Taxes & licenses', 'the same line from the same vendor, though quantities differ');
+  assert.equal(first.categoryFrom.kind, 'memory');
+  assert.equal(first.categoryFrom.books, 'QuickBooks');
+  assert.equal(first.categoryFrom.like, 'Stock photography licenses');
+  assert.equal(first.categoryFrom.paymentOrderId, null);
+
+  const linked = await uploaded('Brightwave Media', 'BW-2', 'Brand workshop facilitation');
+  assert.equal((await lineOf(linked)).category, 'Travel', 'look-alikes they said are one business teach as one');
+  assert.equal((await lineOf(await uploaded('Bright Wave Media', 'BW-3', 'Stock photography licenses'))).categoryFrom.kind, 'memory', 'whichever name the bill uses');
+
+  const chosen = await lineOf(await uploaded('Harbor Mutual', 'HM-1', 'Ocean cover'));
+  assert.deepEqual([chosen.category, chosen.categoryFrom.kind, chosen.categoryFrom.books], ['Travel', 'memory', 'QuickBooks'], 'what they chose, over how the books split it');
+
+  const pickEachTime = await uploaded('Pixel Foundry', 'PF-1', 'Annual license');
+  assert.notEqual((await lineOf(pickEachTime)).categoryFrom?.kind, 'memory', 'a person picks each time, so nothing is known');
+  await settle(pickEachTime, 'PF-1', 'Annual license', 'Travel');
+  assert.notEqual((await lineOf(await uploaded('Pixel Foundry', 'PF-2', 'Annual license'))).categoryFrom?.kind, 'memory', 'not even after a person picked once');
+
+  assert.notEqual((await lineOf(await uploaded('Ocean Carriers', 'OC-1', 'Ocean freight'))).categoryFrom?.kind, 'memory', 'a category they can no longer pick fills in nothing');
+  assert.notEqual((await lineOf(await uploaded('Tide Logistics', 'TL-1', 'Ocean freight'))).categoryFrom?.kind, 'memory', "another vendor's history isn't this one's");
+
+  await settle(linked, 'BW-2', 'Brand workshop facilitation', 'Taxes & licenses');
+  const later = await lineOf(await uploaded('Brightwave Media', 'BW-4', 'Brand workshop facilitation'));
+  assert.equal(later.category, 'Taxes & licenses', 'a decision here outranks the books');
+  assert.equal(later.categoryFrom.invoiceNumber, 'BW-2');
+  assert.equal(later.categoryFrom.books, null);
+
+  const knownLines = () => get(`/organizations/${w.orgId}/knowledge`, w.owner.token).then((k) => k.lines as Array<{ vendorName: string; description: string; counterpartyId: string; books: string | null; billId: string | null; fromLines: number; invoiceNumber: string | null }>);
+  const row = (await knownLines()).find((l) => l.vendorName === 'Harbor Mutual')!;
+  assert.deepEqual([row.description, row.books, row.billId, row.fromLines], ['Ocean cover', 'QuickBooks', null, 2], 'What I know shows it, with what it came from');
+  const licenses = (await knownLines()).find((l) => l.vendorName === 'Brightwave Media' && l.description === 'Stock photography licenses')!;
+  assert.deepEqual([licenses.books, licenses.fromLines, licenses.invoiceNumber], ['QuickBooks', 3, 'N-2130'], 'how many lines it stands for, and the newest bill');
+
+  await post(`/organizations/${w.orgId}/knowledge/lines/forget`, { counterpartyId: row.counterpartyId, description: row.description }, w.owner.token);
+  assert.notEqual((await lineOf(await uploaded('Harbor Mutual', 'HM-2', 'Ocean cover'))).categoryFrom?.kind, 'memory', 'forgetting works on it as on any other');
+
+  await noteDisconnected(w.orgId, 'quickbooks');
+  assert.notEqual((await lineOf(await uploaded('Brightwave Media', 'BW-5', 'Stock photography licenses'))).categoryFrom?.kind, 'memory', 'disconnecting stops it, as the copy goes');
 });

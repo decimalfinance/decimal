@@ -13,15 +13,20 @@
 //   - every line on a CONFIRMED bill is a precedent (confirming is agreeing);
 //   - on a SAVED draft, a line whose category a person CHANGED from what the
 //     screen proposed is a precedent too (a deliberate correction, before the
-//     bill is finished).
+//     bill is finished);
+//   - what a finished setup learned from the company's own books is too
+//     (books-lines.ts), so a vendor's first bill here is known. A person's later
+//     decision outranks it by being newer.
 //
 // A new line takes the category of the closest precedent from the same vendor
 // when the two read as the same thing (same words once quantities, dates and
 // months are dropped). Deterministic and explainable: the screen can say which
 // bill it is like. Other vendors' lines are only ever shown to the model, as a
 // hint for its guess (relevantPrecedents), and a guess stays a guess.
+import { errorToLogFields, logger } from '../infra/logger.js';
 import { prisma } from '../infra/prisma.js';
-import { lineKey, lineSimilarity, lineTokens } from './line-words.js';
+import { linesFromTheBooks } from './books-lines.js';
+import { lineKey, lineSimilarity, lineTokens, vendorLine } from './line-words.js';
 
 export { lineKey, lineSimilarity, lineTokens };
 
@@ -33,21 +38,27 @@ export type Precedent = {
   /** The vendor of the bill it was settled on. A line is learned per vendor. */
   counterpartyId: string | null;
   vendorName: string | null;
-  paymentOrderId: string;
+  /** The bill it was settled on. Null when it came from the books. */
+  paymentOrderId: string | null;
   invoiceNumber: string | null;
   byUserId: string | null;
   at: number;
   confirmed: boolean;
+  /** How many lines it stands for, when it isn't one. */
+  lines?: number;
+  /** The system it was learned from, when it came from the books. */
+  books?: string;
 };
 
 export type LineMatch = {
   category: string;
   /** The precedent's own description, as a person saw it. */
   like: string;
-  paymentOrderId: string;
+  paymentOrderId: string | null;
   invoiceNumber: string | null;
   byUserId: string | null;
   score: number;
+  books: string | null;
 };
 
 /** Two lines at or above this similarity read as the same thing. */
@@ -57,13 +68,10 @@ const PRECEDENT_BILLS = 500;
 const rec = (v: unknown): Record<string, unknown> | null => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null);
 const text = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
 
-/** A forget is per vendor + kind of line, like the lesson it stops. */
-const forgetKey = (counterpartyId: string | null, key: string) => `${counterpartyId ?? ''}|${key}`;
-
-/** Every line a person settled in this organisation, newest first. */
+/** Every line a person settled in this organisation, and what its books taught, newest first. */
 export async function loadPrecedents(organizationId: string, opts: { excludeBillId?: string } = {}): Promise<Precedent[]> {
   const forgotten = new Map((await prisma.forgottenLine.findMany({ where: { organizationId }, select: { counterpartyId: true, lineKey: true, forgottenAt: true } }))
-    .map((f) => [forgetKey(f.counterpartyId, f.lineKey), f.forgottenAt.getTime()]));
+    .map((f) => [vendorLine(f.counterpartyId, f.lineKey), f.forgottenAt.getTime()]));
   const orders = await prisma.paymentOrder.findMany({
     where: { organizationId, state: { not: 'cancelled' }, ...(opts.excludeBillId ? { paymentOrderId: { not: opts.excludeBillId } } : {}) },
     orderBy: { updatedAt: 'desc' },
@@ -96,7 +104,7 @@ export async function loadPrecedents(organizationId: string, opts: { excludeBill
       if (tokens.size === 0) continue;
       const key = [...tokens].sort().join(' ');
       // Told to forget this vendor's kind of line: only what was settled after counts.
-      const forgottenAt = forgotten.get(forgetKey(o.counterpartyId, key));
+      const forgottenAt = forgotten.get(vendorLine(o.counterpartyId, key));
       if (forgottenAt !== undefined && at <= forgottenAt) continue;
       out.push({
         key, description, tokens, category,
@@ -105,7 +113,17 @@ export async function loadPrecedents(organizationId: string, opts: { excludeBill
       });
     }
   }
-  return out.sort((a, b) => b.at - a.at);
+  const books = await linesFromTheBooks(organizationId).catch((error) => {
+    logger.warn('line_memory.books_lines_failed', { organizationId, ...errorToLogFields(error) });
+    return { precedents: [] as Precedent[], askEachTime: new Set<string>() };
+  });
+  const remembered = books.precedents.filter((p) => {
+    const forgottenAt = forgotten.get(vendorLine(p.counterpartyId, p.key));
+    return forgottenAt === undefined || p.at > forgottenAt;
+  });
+  return [...out, ...remembered]
+    .filter((p) => !books.askEachTime.has(vendorLine(p.counterpartyId, p.key)))
+    .sort((a, b) => b.at - a.at);
 }
 
 /**
@@ -134,6 +152,7 @@ export function matchLine(description: string, precedents: Precedent[], counterp
     invoiceNumber: best.p.invoiceNumber,
     byUserId: best.p.byUserId,
     score: Math.round(best.score * 100) / 100,
+    books: best.p.books ?? null,
   };
 }
 

@@ -89,7 +89,7 @@ export function KnowledgePage() {
                       <td>{l.category}</td>
                       <td>
                         <span className="cell-mono">{l.invoiceNumber ?? 'A bill'}</span>
-                        <span style={{ color: 'var(--text-muted)' }}>{l.by ? ` · ${l.by}` : ''} · {day(l.at)}</span>
+                        <span style={{ color: 'var(--text-muted)' }}>{l.books ? ` · ${l.books}` : l.by ? ` · ${l.by}` : ''} · {day(l.at)}</span>
                       </td>
                       <td className="td-num">{l.fromLines}</td>
                       <td>

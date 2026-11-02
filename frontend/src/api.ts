@@ -1235,13 +1235,14 @@ export interface BillDraftLine {
   category: string | null;
   /**
    * Why this line has its category, while it is still the machine's. memory: a
-   * line the team settled before from this vendor, so known. similar: the model
+   * line the team settled before from this vendor, here or (books set) in their
+   * accounting system, so known. similar: the model
    * followed a past line it judged the same purchase (vendorName set when that
    * line was another vendor's), still a guess. model: its own reading. Null
    * once a person has settled it.
    */
-  categoryFrom?: { kind: 'memory'; like: string; invoiceNumber: string | null; paymentOrderId: string; by: string | null }
-    | { kind: 'similar'; like: string; invoiceNumber: string | null; paymentOrderId: string; by: string | null; vendorName?: string | null }
+  categoryFrom?: { kind: 'memory'; like: string; invoiceNumber: string | null; paymentOrderId: string | null; by: string | null; books?: string | null }
+    | { kind: 'similar'; like: string; invoiceNumber: string | null; paymentOrderId: string | null; by: string | null; vendorName?: string | null }
     | { kind: 'model' }
     | null;
   /** The person who picked this category or ticked the guess. */
@@ -2142,7 +2143,8 @@ export interface RememberedLine {
   description: string;
   category: string;
   invoiceNumber: string | null;
-  billId: string;
+  billId: string | null;
+  books: string | null;
   by: string | null;
   at: string;
   fromLines: number;

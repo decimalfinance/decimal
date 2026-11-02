@@ -22,9 +22,11 @@ export type RememberedLine = {
   /** The line as a person last saw it. */
   description: string;
   category: string;
-  /** The bill it was last settled on. */
+  /** The bill it was last settled on. A line from the books has a number there, and no bill here. */
   invoiceNumber: string | null;
-  billId: string;
+  billId: string | null;
+  /** The system it was learned from, when nobody here settled it. */
+  books: string | null;
   by: string | null;
   at: string;
   /** How many of this vendor's settled lines read like this one. */
@@ -45,8 +47,8 @@ export async function getKnowledge(organizationId: string, viewerUserId: string)
     if (!p.counterpartyId) continue;
     const k = `${p.counterpartyId}|${p.key}`;
     const had = byKey.get(k);
-    if (had) had.count += 1;
-    else byKey.set(k, { latest: { ...p, counterpartyId: p.counterpartyId }, count: 1 });
+    if (had) had.count += p.lines ?? 1;
+    else byKey.set(k, { latest: { ...p, counterpartyId: p.counterpartyId }, count: p.lines ?? 1 });
   }
   const forgottenVendors = new Map((await prisma.counterparty.findMany({
     where: { organizationId, counterpartyId: { in: [...new Set(forgotten.map((f) => f.counterpartyId))] } },
@@ -67,6 +69,7 @@ export async function getKnowledge(organizationId: string, viewerUserId: string)
     category: latest.category,
     invoiceNumber: latest.invoiceNumber,
     billId: latest.paymentOrderId,
+    books: latest.books ?? null,
     by: latest.byUserId ? name.get(latest.byUserId) ?? null : null,
     at: new Date(latest.at).toISOString(),
     fromLines: count,

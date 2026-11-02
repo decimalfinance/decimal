@@ -13,11 +13,27 @@ const OUTCOME = z.object({
   vendorLinks: z.array(z.object({ useVendorId: z.string(), vendorIds: z.array(z.string()) })),
   /** What the person said a line coded two ways should be. A null category means ask each time. */
   lineChoices: z.array(z.object({ vendorId: z.string(), line: z.string().nullable(), categoryId: z.string().nullable() })),
+  /** What bill coding fills in from: what repeated in the books, with what the person said in place of it. */
+  learnedLines: z.array(z.object({
+    vendorId: z.string(),
+    line: z.string(),
+    example: z.string(),
+    categoryName: z.string(),
+    lines: z.number(),
+    lastUsed: z.string().nullable(),
+    number: z.string().nullable(),
+  })).default([]),
   categoriesInUse: z.array(z.string()),
   leftOut: z.array(z.string()),
 });
 
 export type SetupOutcome = z.infer<typeof OUTCOME>;
+
+/** Stored JSON, checked on the way out. Null if it can't be read. */
+export function parseOutcome(stored: unknown): SetupOutcome | null {
+  const parsed = OUTCOME.safeParse(stored);
+  return parsed.success ? parsed.data : null;
+}
 
 /** The latest finished setup for these books. Null when there is none, or it can't be read. */
 export async function readOutcome(organizationId: string, system: string, companyId: string): Promise<SetupOutcome | null> {
@@ -26,6 +42,5 @@ export async function readOutcome(organizationId: string, system: string, compan
     orderBy: { updatedAt: 'desc' },
     select: { outcome: true },
   });
-  const parsed = OUTCOME.safeParse(setup?.outcome);
-  return parsed.success ? parsed.data : null;
+  return parseOutcome(setup?.outcome);
 }

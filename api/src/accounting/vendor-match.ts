@@ -29,16 +29,20 @@ export function matchVendor(name: string, vendors: KnownVendor[], links: SetupOu
   return { problem: `"${same[0]!.name}" is inactive in QuickBooks. Make it active there, then retry.` };
 }
 
-/** From the copy the study read. A vendor added since is found by QuickBooks' own exact match. */
-export async function vendorForBill(organizationId: string, system: string, companyId: string, name: string, outcome: SetupOutcome | null): Promise<VendorMatch> {
+/** The vendors in the copy the study read. Disconnecting, or signing in to another company, deletes it. */
+export async function vendorsInCopy(organizationId: string, system: string, companyId: string): Promise<KnownVendor[]> {
   const rows = await prisma.booksRecord.findMany({
     where: { organizationId, system, companyId, kind: 'vendor' },
     select: { recordId: true, name: true, data: true },
   });
-  const vendors = rows.map((r) => ({
+  return rows.map((r) => ({
     id: r.recordId,
     name: r.name ?? '',
     active: (r.data as { active?: unknown } | null)?.active !== false,
   }));
-  return matchVendor(name, vendors, outcome?.vendorLinks ?? []);
+}
+
+/** From the copy. A vendor added since is found by QuickBooks' own exact match. */
+export async function vendorForBill(organizationId: string, system: string, companyId: string, name: string, outcome: SetupOutcome | null): Promise<VendorMatch> {
+  return matchVendor(name, await vendorsInCopy(organizationId, system, companyId), outcome?.vendorLinks ?? []);
 }

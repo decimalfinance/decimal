@@ -94,6 +94,7 @@ function provenance(line: LineEntry, vendorName: string): string | null {
   const from = line.from;
   if (!from) return null;
   if (from.kind === 'memory') {
+    if (from.books) return `Known · from your ${from.books} history, like “${from.like}”`;
     return `Known · like ${from.invoiceNumber ?? 'an earlier bill'}${from.by ? `, settled by ${from.by}` : ''}`;
   }
   if (from.kind === 'similar') {

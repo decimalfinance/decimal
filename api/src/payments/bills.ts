@@ -2039,7 +2039,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       category: remembered ?? modelGuess ?? resolveLineCategory(str(line.categoryHint)),
       // Why this line has the category it has, so the screen can say so.
       categoryFrom: remembered && memory
-        ? { kind: 'memory' as const, like: memory.like, invoiceNumber: memory.invoiceNumber, paymentOrderId: memory.paymentOrderId, by: memory.byUserId ? precedentNames.get(memory.byUserId) ?? null : null }
+        ? { kind: 'memory' as const, like: memory.like, invoiceNumber: memory.invoiceNumber, paymentOrderId: memory.paymentOrderId, books: memory.books, by: memory.byUserId ? precedentNames.get(memory.byUserId) ?? null : null }
         : (modelGuess ? similarFrom(i) : null) ?? { kind: 'model' as const },
       source: lineSource(line),
     };

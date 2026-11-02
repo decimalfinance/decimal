@@ -96,6 +96,12 @@ export type Findings = {
   shortfalls: Array<{ what: string; expected: number; read: number; problems: string[] }>;
 };
 
+/** Lines with a decision to make: those coded two ways, and those that moved, if a person disagrees with the move. */
+export const linesToDecide = (findings: Pick<Findings, 'codedTwoWays' | 'movedLines'> | null) => [
+  ...(findings?.codedTwoWays ?? []),
+  ...(findings?.movedLines ?? []).map((m) => ({ vendorId: m.vendorId, vendorName: m.vendorName, line: m.line, example: m.example, accounts: [m.from, m.to] })),
+];
+
 export type StudyInput = {
   company: BooksCompany;
   since: string;

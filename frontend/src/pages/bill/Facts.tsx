@@ -124,6 +124,7 @@ function categoryNote(line: LineEntry, vendorName: string): ReactNode | null {
   const from = line.from;
   if (!from) return null;
   if (from.kind === 'memory') {
+    if (from.books) return <ByNote face={null} text={`Picked by the Decimal agent · from your ${from.books} history, like “${from.like}”`} />;
     return <ByNote face={null} text={`Picked by the Decimal agent · like ${from.invoiceNumber ?? 'an earlier bill'}${from.by ? `, settled by ${from.by}` : ''}`} />;
   }
   if (from.kind === 'similar') {

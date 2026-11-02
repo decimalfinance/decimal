@@ -344,7 +344,8 @@ export async function processInvoiceDocument(args: {
     })),
   );
   // What the team settled before, to say which lines are known (vendor + line).
-  const precedents = await loadPrecedents(args.organizationId).catch(() => [] as Precedent[]);
+  let precedents = await loadPrecedents(args.organizationId).catch(() => [] as Precedent[]);
+  const vendorsLookedAt = new Set(precedents.map((p) => p.counterpartyId));
 
   const created = [];
   const skipped: InvoiceIntakeSkippedRow[] = [];
@@ -462,6 +463,12 @@ export async function processInvoiceDocument(args: {
       const billJob: JobRef = { ...job, paymentOrderId: paymentOrder.paymentOrderId };
       const vendorName = counterpartyWallet.counterparty?.displayName ?? row.counterparty;
       await recordStep(billJob, 'vendor', ...(await describeVendor(args.organizationId, counterpartyWallet, paymentOrder.paymentOrderId, vendorName)));
+      // A vendor new here can have a history in the books, and that only shows once the vendor exists.
+      if (!vendorsLookedAt.has(counterpartyWallet.counterpartyId)) {
+        vendorsLookedAt.add(counterpartyWallet.counterpartyId);
+        const known = precedents;
+        precedents = await loadPrecedents(args.organizationId).catch(() => known);
+      }
       categoryOutcomes.push(describeCategories(
         vendorName,
         counterpartyWallet.counterpartyId,

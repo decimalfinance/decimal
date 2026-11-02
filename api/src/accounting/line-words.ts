@@ -22,6 +22,9 @@ export function lineKey(description: string): string {
   return [...lineTokens(description)].sort().join(' ');
 }
 
+/** One vendor's kind of line: what a forget, and "a person picks each time", are about. */
+export const vendorLine = (counterpartyId: string | null, key: string) => `${counterpartyId ?? ''}|${key}`;
+
 export function lineSimilarity(a: Set<string>, b: Set<string>): number {
   if (a.size === 0 || b.size === 0) return 0;
   let shared = 0;

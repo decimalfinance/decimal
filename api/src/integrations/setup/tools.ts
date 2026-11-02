@@ -14,7 +14,7 @@ import { connectorFor } from '../connectors.js';
 import {
   checkFilters, isDate, lookUp, RECORD_KINDS, RECORD_SORTS, refOf, SUMMARY_GROUPS, summarize, type CopyScope, type RecordFilters, type RecordSort,
 } from '../copy.js';
-import { companyProblems } from './findings.js';
+import { companyProblems, linesToDecide } from './findings.js';
 import { doneConditions, notRaised, wordsSaid, readyForGo, stillMissing } from './gates.js';
 import { appendEvent } from './record.js';
 import type { StudyFindings } from './study.js';
@@ -164,12 +164,6 @@ async function vendorsByName(setup: IntegrationSetup): Promise<(text: string) =>
     throw new Error(found.length > 1 ? `More than one vendor is called "${text}". Copy the name exactly as the call shows it.` : `No vendor is called "${text}". Copy the name exactly as the call shows it.`);
   };
 }
-
-/** Lines with a decision to make: those coded two ways, and those that moved, if a person disagrees with the move. */
-const linesToDecide = (findings: StudyFindings | null) => [
-  ...(findings?.codedTwoWays ?? []),
-  ...(findings?.movedLines ?? []).map((m) => ({ vendorId: m.vendorId, vendorName: m.vendorName, line: m.line, example: m.example, accounts: [m.from, m.to] })),
-];
 
 /** An answer as names, for the model to say back. A wrong id shows up here, where the person can catch it. */
 export async function inWords(call: { kind: string; refs: unknown }, value: unknown, setup: IntegrationSetup): Promise<string[] | undefined> {
