@@ -11,9 +11,24 @@ export type KnownVendor = { id: string; name: string; active: boolean };
 
 export type VendorMatch = { vendorId: string } | { problem: string } | null;
 
+/**
+ * The name an inactive vendor had. QuickBooks renames a vendor it makes inactive
+ * "Name (deleted)", or "Name (deleted-2)" when that is taken, so its name looks
+ * free when the vendor is still there.
+ */
+export function nameBeforeInactive(name: string): string {
+  return name.replace(/ \(deleted(-\d+)?\)$/, '');
+}
+
+/** What to tell a person when the vendor a bill is for is inactive in QuickBooks. */
+export function inactiveVendor(name: string, shownAs?: string | null): string {
+  const shown = shownAs && shownAs !== name ? `, where it shows as "${shownAs}"` : '';
+  return `"${name}" is inactive in QuickBooks${shown}. Make it active there, then retry.`;
+}
+
 export function matchVendor(name: string, vendors: KnownVendor[], links: SetupOutcome['vendorLinks']): VendorMatch {
   const clean = cleanName(name);
-  const same = vendors.filter((v) => cleanName(v.name) === clean);
+  const same = vendors.filter((v) => cleanName(v.active ? v.name : nameBeforeInactive(v.name)) === clean);
   if (same.length === 0) return null;
   // What the person said in setup comes first.
   const link = links.find((l) => same.some((v) => l.vendorIds.includes(v.id)));
@@ -26,7 +41,7 @@ export function matchVendor(name: string, vendors: KnownVendor[], links: SetupOu
     const names = active.map((v) => `"${v.name}"`).join(' and ');
     return { problem: `QuickBooks has more than one vendor this bill could be for: ${names}. Change the vendor's name on the bill to match one of them exactly, then retry.` };
   }
-  return { problem: `"${same[0]!.name}" is inactive in QuickBooks. Make it active there, then retry.` };
+  return { problem: inactiveVendor(nameBeforeInactive(same[0]!.name), same[0]!.name) };
 }
 
 /** The vendors in the copy the study read. Disconnecting, or signing in to another company, deletes it. */

@@ -4,7 +4,8 @@
 // requestid. A bill paid before it was ever posted gets both at once.
 
 import { isDate } from '../integrations/copy.js';
-import { QuickBooks, qboLiteral } from './quickbooks.js';
+import { QboError, QuickBooks, faultOf, qboLiteral } from './quickbooks.js';
+import { inactiveVendor, nameBeforeInactive } from './vendor-match.js';
 
 export interface AccountMap {
   clearingAccountId: string;
@@ -146,15 +147,8 @@ export async function postBillToQuickBooks(
     AccountBasedExpenseLineDetail: { AccountRef: { value: l.accountId } },
   }));
 
-  // Vendor: the one already worked out, else find or create by DisplayName (no upsert
-  // in QBO — query then create). Inactive ones count: their names are still taken.
-  let vendorId = payment.vendorId ?? null;
-  if (!vendorId) {
-    const named = (await qb.query(`SELECT * FROM Vendor WHERE DisplayName = '${qboLiteral(vendorLabel)}' AND Active IN (true, false)`))
-      .QueryResponse?.Vendor?.[0];
-    if (named?.Active === false) throw new Error(`"${vendorLabel}" is inactive in QuickBooks. Make it active there, then retry.`);
-    vendorId = String((named ?? (await qb.createVendor({ DisplayName: vendorLabel })).Vendor).Id);
-  }
+  // Vendor: the one already worked out, else the one QuickBooks has by that name, or a new one.
+  const vendorId = payment.vendorId ?? await vendorInBooks(qb, vendorLabel);
 
   const reference = payment.invoiceNumber ?? payment.reference ?? null;
 
@@ -179,6 +173,57 @@ export async function postBillToQuickBooks(
   const recorded = recordedCents(after);
   if (recorded !== totalCents) throw new PostedTotalDiffers(vendorId, bill.Id, recorded, totalCents);
   return { vendorId, billId: bill.Id, billTotal: fromCents(totalCents), billBalance: Number(after.Balance) };
+}
+
+type QboVendor = { Id: string | number; DisplayName?: string; Active?: boolean };
+
+/** A business that is also a customer, or someone on the payroll, gets its vendor record under this name. */
+const AS_VENDOR = ' (vendor)';
+
+/**
+ * The vendor a bill names, as QuickBooks has it: found by name (QuickBooks ignores
+ * case), or made. QuickBooks has no upsert, so it is a query and then a create.
+ *
+ * Two things in QuickBooks make a name look free when it isn't. An inactive vendor is
+ * renamed "Name (deleted)", so it is looked for under that name too, and refused
+ * rather than made a second time. And one name belongs to one record across
+ * customers, employees and vendors, so a business that is also a customer gets
+ * "Name (vendor)", the way a bookkeeper names it by hand, and is found under it after.
+ */
+async function vendorInBooks(qb: QuickBooks, name: string): Promise<string> {
+  const found = await vendorNamed(qb, name);
+  if (found) return found;
+  try {
+    return String((await qb.createVendor({ DisplayName: name })).Vendor.Id);
+  } catch (error) {
+    if (!(error instanceof QboError) || faultOf(error.body)?.code !== '6240' || !(await customerOrEmployeeNamed(qb, name))) throw error;
+    const alias = `${name.slice(0, 100 - AS_VENDOR.length).trimEnd()}${AS_VENDOR}`;
+    return (await vendorNamed(qb, alias)) ?? String((await qb.createVendor({ DisplayName: alias })).Vendor.Id);
+  }
+}
+
+/** The vendor with this name, or null when there is none. One that is inactive is refused, in words. */
+async function vendorNamed(qb: QuickBooks, name: string): Promise<string | null> {
+  const exact = ((await qb.query(`SELECT * FROM Vendor WHERE DisplayName = '${qboLiteral(name)}' AND Active IN (true, false)`))
+    .QueryResponse?.Vendor ?? []) as QboVendor[];
+  const live = exact.find((v) => v.Active !== false);
+  if (live) return String(live.Id);
+  if (exact[0]) throw new Error(inactiveVendor(name, exact[0].DisplayName));
+  const renamed = ((await qb.query(`SELECT * FROM Vendor WHERE DisplayName LIKE '${qboLiteral(name)} (deleted%' AND Active = false`))
+    .QueryResponse?.Vendor ?? []) as QboVendor[];
+  const gone = renamed.find((v) => nameBeforeInactive(v.DisplayName ?? '').toLowerCase() === name.toLowerCase());
+  if (gone) throw new Error(inactiveVendor(name, gone.DisplayName));
+  return null;
+}
+
+/** Whether a customer or an employee has this name, the reason QuickBooks won't give it to a vendor. */
+async function customerOrEmployeeNamed(qb: QuickBooks, name: string): Promise<boolean> {
+  for (const entity of ['Customer', 'Employee'] as const) {
+    const rows = (await qb.query(`SELECT Id FROM ${entity} WHERE DisplayName = '${qboLiteral(name)}' AND Active IN (true, false)`))
+      .QueryResponse?.[entity] ?? [];
+    if (rows.length > 0) return true;
+  }
+  return false;
 }
 
 /**

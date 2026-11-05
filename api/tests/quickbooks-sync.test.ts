@@ -13,6 +13,7 @@ import { beforeEach, test } from 'node:test';
 import { config } from '../src/config.js';
 import { prisma } from '../src/infra/prisma.js';
 import { drainAsyncIntake } from '../src/payments/invoice-intake.js';
+import { categoryNamesFor } from '../src/payments/bills.js';
 import { createPolicy, upsertPolicySet } from '../src/approvals/store.js';
 import { enablePosting, setQuickBooksForTests } from '../src/accounting/connections.js';
 import { QboError } from '../src/accounting/quickbooks.js';
@@ -23,7 +24,7 @@ import { baseUrl, raw, post, get, makeWorld, confirmBody } from './helpers/compa
 
 beforeEach(() => setQuickBooksForTests(null));
 
-type Chart = Array<{ Id: string; Name: string }>;
+type Chart = Array<{ Id: string; Name: string; AccountType?: string }>;
 const CLOUD: Chart = [{ Id: '301', Name: 'Cloud hosting & infrastructure' }, { Id: '302', Name: 'Travel' }];
 
 function fakeQuickBooks(initial: Chart = CLOUD) {
@@ -42,7 +43,7 @@ function fakeQuickBooks(initial: Chart = CLOUD) {
   const qb: any = {
     query: async (q: string) => {
       asked.push(q);
-      if (q.includes('FROM Account')) return { QueryResponse: { Account: state.chart.map((a) => ({ ...a, FullyQualifiedName: a.Name, Classification: 'Expense', AccountType: 'Expense' })) } };
+      if (q.includes('FROM Account')) return { QueryResponse: { Account: state.chart.map((a) => ({ FullyQualifiedName: a.Name, Classification: 'Expense', AccountType: 'Expense', ...a })) } };
       if (q.includes('FROM Preferences')) return { QueryResponse: { Preferences: [{ AccountingInfoPrefs: state.closedThrough ? { BookCloseDate: state.closedThrough } : {} }] } };
       return { QueryResponse: { Vendor: state.named ? [state.named] : calls.vendors.length ? [{ Id: 'V1' }] : [] } };
     },
@@ -502,6 +503,21 @@ test('quickbooks: a vendor is found with its name escaped, inactive ones include
   qb.state.named = { Id: 'V9', Active: true };
   assert.equal((await post(`/organizations/${w.orgId}/payment-orders/${w.bills.submitted}/accounting/sync`, {}, w.owner.token)).outcome, 'synced', 'made active again');
   assert.equal(qb.calls.bills[0]!.body.VendorRef.value, 'V9');
+});
+
+test('quickbooks: a bill line is never offered Accounts Payable or Receivable, which QuickBooks refuses on a bill', async () => {
+  const w = await makeWorld();
+  fakeQuickBooks([
+    ...CLOUD,
+    { Id: '33', Name: 'Accounts Payable (A/P)', AccountType: 'Accounts Payable' },
+    { Id: '84', Name: 'Accounts Receivable (A/R)', AccountType: 'Accounts Receivable' },
+    { Id: '35', Name: 'Checking', AccountType: 'Bank' },
+  ]);
+  await connect(w.orgId);
+  const draft = await get(`/organizations/${w.orgId}/bills/${w.bills.ready}/draft`, w.owner.token);
+  const offered = ['Cloud hosting & infrastructure', 'Travel', 'Checking'];
+  assert.deepEqual(draft.categoryOptions.map((o: { value: string }) => o.value), offered);
+  assert.deepEqual(await categoryNamesFor(w.orgId), offered, 'and the same to anything that suggests one');
 });
 
 test('quickbooks: what setup learned picks the vendor: the same name however it is spelled, and a link the person made', async () => {

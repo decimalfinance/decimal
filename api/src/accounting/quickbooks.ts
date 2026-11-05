@@ -118,6 +118,17 @@ type RequestOpts = {
   requestId?: string;
 };
 
+/**
+ * Renewals in flight, by the refresh token they spend. Each request builds its own
+ * client from the stored tokens, so two at once on an expired token would each spend
+ * the same refresh token, and on the day Intuit rotates it the second could be
+ * refused and mark a healthy connection as signed out. They share one renewal
+ * instead, and its answer is kept a minute for a client that read the tokens just
+ * before the new ones were stored.
+ */
+const renewals = new Map<string, Promise<any>>();
+const RENEWAL_KEPT_MS = 60_000;
+
 export class QuickBooks {
   constructor(
     private tokens: QboTokens,
@@ -125,6 +136,9 @@ export class QuickBooks {
     // Fired when a token refresh fails because the refresh token is dead, so the
     // owner can mark the connection as needing re-auth.
     private onAuthInvalid?: () => void | Promise<void>,
+    // The tokens as stored now: another process may have spent this refresh token
+    // first, and kept what it got.
+    private storedTokens?: () => Promise<QboTokens | null>,
   ) {}
 
   get realmId(): string {
@@ -182,16 +196,29 @@ export class QuickBooks {
   }
 
   private async refresh(): Promise<void> {
+    const spent = this.tokens.refreshToken;
+    let renewal = renewals.get(spent);
+    if (!renewal) {
+      renewal = QuickBooks.tokenRequest({ grant_type: 'refresh_token', refresh_token: spent });
+      renewals.set(spent, renewal);
+      renewal.then(
+        () => setTimeout(() => renewals.delete(spent), RENEWAL_KEPT_MS).unref(),
+        () => renewals.delete(spent),
+      );
+    }
     let json: any;
     try {
-      json = await QuickBooks.tokenRequest({
-        grant_type: 'refresh_token',
-        refresh_token: this.tokens.refreshToken,
-      });
+      json = await renewal;
     } catch (error) {
       // A dead refresh token can't be recovered automatically — signal the owner
       // so the connection is flagged for re-auth instead of failing silently.
+      // Unless it was only spent: then what it was spent for is already stored.
       if (error instanceof QboError && error.isAuthInvalid) {
+        const stored = await this.storedTokens?.().catch(() => null);
+        if (stored && stored.refreshToken !== spent) {
+          this.tokens = stored;
+          return;
+        }
         await this.onAuthInvalid?.();
       }
       throw error;

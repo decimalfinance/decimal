@@ -52,7 +52,17 @@ export async function getQuickBooksForOrg(organizationId: string): Promise<Quick
     tokensFromRow(row),
     (tokens) => persistTokens(organizationId, tokens),
     () => markNeedsReauth(organizationId),
+    () => storedTokens(organizationId),
   );
+}
+
+/** The tokens as stored now, while the connection still works. */
+async function storedTokens(organizationId: string): Promise<QboTokens | null> {
+  const row = await prisma.accountingConnection.findUnique({
+    where: { organizationId_provider: { organizationId, provider: PROVIDER } },
+    select: CLIENT_FIELDS,
+  });
+  return row && row.status === 'connected' ? tokensFromRow(row) : null;
 }
 
 /** Flag a connection whose refresh token died — the operator must reconnect. */

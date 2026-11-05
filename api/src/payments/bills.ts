@@ -1665,16 +1665,22 @@ const DOUBTFUL_STATUS_REASON: Record<string, string> = {
 const ACCOUNT_TYPE_ORDER = [
   'Expense', 'Cost of Goods Sold', 'Other Expense',
   'Fixed Asset', 'Other Current Asset', 'Other Asset', 'Bank',
-  'Accounts Payable', 'Credit Card', 'Other Current Liability', 'Long Term Liability',
-  'Accounts Receivable', 'Income', 'Other Income', 'Equity',
+  'Credit Card', 'Other Current Liability', 'Long Term Liability',
+  'Income', 'Other Income', 'Equity',
 ];
+
+// QuickBooks refuses a bill line on either ("You can't use an Accounts Payable
+// account on the detail portion of a Bill"; tried on a sandbox, 5 Nov 2026), so
+// offering them only lets someone pick a category the bill can't post with.
+const NOT_ON_A_BILL = new Set(['Accounts Payable', 'Accounts Receivable']);
 
 function buildChartOptions(chart: Awaited<ReturnType<typeof listChartOfAccounts>>) {
   const orderOf = (t: string) => {
     const i = ACCOUNT_TYPE_ORDER.indexOf(t);
     return i === -1 ? ACCOUNT_TYPE_ORDER.length : i;
   };
-  return [...chart]
+  return chart
+    .filter((a) => !NOT_ON_A_BILL.has(a.accountType))
     .sort((a, b) =>
       orderOf(a.accountType) - orderOf(b.accountType)
       || (a.acctNum ?? '').localeCompare(b.acctNum ?? '', undefined, { numeric: true })
@@ -1869,7 +1875,8 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   const extractedLines = Array.isArray(extracted.lineItems) ? (extracted.lineItems as unknown[]) : [];
   // Category picker: the org's FULL numbered chart of accounts when QuickBooks
   // is connected ("7410 · Accounting", grouped by account type — a bill line
-  // can code to an asset or COGS account, not just Expense), the builtin
+  // can code to an asset or COGS account, not just Expense, but never to
+  // Accounts Payable or Receivable, which QuickBooks refuses on a bill), the builtin
   // standard chart otherwise, so the picker is never empty.
   const chart = await listChartOfAccounts(organizationId);
   const { DEFAULT_EXPENSE_ACCOUNTS } = await import('../accounting/default-chart.js');
