@@ -15,6 +15,7 @@
 // the facts however is cheapest for them (the draft screen queries per bill;
 // the workbench batches across all rows) and the verdict cannot diverge
 // between them, because there is only one copy of the reasoning.
+import type { BooksFlagFacts, BooksMatch } from '../accounting/books-check.js';
 import type { DuplicateClearance, DuplicateMatch } from './duplicate-check.js';
 import { ceilingExceptionCovers, type CeilingException } from './ceiling-exception.js';
 import { describeDuplicate } from './duplicate-check.js';
@@ -35,6 +36,7 @@ export const BILL_FLAG_KINDS = [
   'looks_like_credit_note',
   'approval_weakened',
   'similar_vendor',
+  'in_books',
   'lines_do_not_sum',
   'total_does_not_reconcile',
   'short_paid',
@@ -47,7 +49,7 @@ export type BillFlagKind = (typeof BILL_FLAG_KINDS)[number];
 export type FlagResolution = {
   /** Stable identifier the UI posts back. */
   action: 'this_is_us' | 'not_ours' | 'ask_someone' | 'clear_duplicate' | 'fix_fields' | 'raise_ceiling' | 'release_vendor' | 'pay_the_lines'
-    | 'same_vendor' | 'different_vendor' | 'allow_over_ceiling';
+    | 'same_vendor' | 'different_vendor' | 'allow_over_ceiling' | 'same_bill' | 'different_bill';
   label: string;
   /**
    * Who may take it. The UI greys what the viewer cannot do and says why.
@@ -145,6 +147,12 @@ export type BillFlagFacts = {
   /** Vendors already on file whose identifying name matches this one's. */
   similarVendors: Array<{ counterpartyId: string; displayName: string; billCount: number }>;
   /**
+   * Bills already in the books this one could be, from the last live look
+   * (accounting/books-check.ts), and what people said about them. Absent when
+   * nothing was looked for: no books to post to, or posting not turned on.
+   */
+  inBooks?: BooksFlagFacts | null;
+  /**
    * Bills this org has had from this vendor BEFORE this one — counted now,
    * not when the document was uploaded.
    */
@@ -229,6 +237,29 @@ const NAME_NOISE = new Set([
   'global', 'international', 'digital', 'capital', 'studio', 'studios',
   'agency', 'media', 'consulting', 'software', 'industries', 'enterprises',
 ]);
+
+/** The books' system, as people call it. */
+export function systemName(system: string): string {
+  return system === 'quickbooks' ? 'QuickBooks' : system === 'xero' ? 'Xero' : system;
+}
+
+/** "8 Oct 2026" from "2026-10-08". */
+function dayText(date: string): string {
+  const at = Date.parse(`${date.slice(0, 10)}T00:00:00Z`);
+  return Number.isNaN(at) ? date : new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+}
+
+/** A bill in the books, in words: "bill CT-41822 from Cal Telephone for $193.60, dated 8 Oct 2026". */
+export function describeBooksBill(m: BooksMatch): string {
+  const units = Number(BigInt(m.totalMinor)) / 100;
+  const amount = m.currency === 'USD' ? money(units) : `${units.toFixed(2)} ${m.currency}`;
+  const from = m.vendorName ? ` from ${m.vendorName}` : '';
+  const dated = m.date ? `, dated ${dayText(m.date)}` : '';
+  const paid = m.open === false ? ', already paid' : '';
+  return m.number
+    ? `bill ${m.number}${from} for ${amount}${dated}${paid}`
+    : `a bill${from} for the same ${amount}${dated}, with no number${paid}`;
+}
 
 export function namesLookRelated(a: string, b: string): boolean {
   const tokens = (s: string) =>
@@ -384,6 +415,61 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
         ? `Looked like a duplicate of ${other} — cleared by ${clearance.byName}: “${clearance.reason}”.`
         : `Looked like a duplicate of ${other} — cleared on that bill by ${clearance.byName}: “${clearance.reason}”.`,
     });
+  }
+
+  // Already in the books it would post to (accounting/books-check.ts). Someone may
+  // have keyed it in by hand, and QuickBooks takes the same bill twice without a
+  // word.
+  //
+  // Not blocking, ever: QuickBooks is not a step in the approval chain. The bill
+  // is reviewed and approved as usual; its posting is what waits for an answer.
+  // Both answers are determinations about two records a person can compare, so
+  // neither asks for a reason, and both are recorded under their name.
+  if (facts.inBooks) {
+    const { matches, answers } = facts.inBooks;
+    const system = systemName(facts.inBooks.system);
+    // An answer about a bill no longer among the matches (deleted there, or this
+    // bill has changed) is about something that isn't so any more: posting ignores
+    // it too (books-check.ts).
+    const linked = answers.find((a) => a.same && matches.some((m) => m.recordId === a.recordId)) ?? null;
+    const open = matches.filter((m) => !answers.some((a) => a.recordId === m.recordId));
+    if (linked) {
+      const m = matches.find((x) => x.recordId === linked.recordId)!;
+      flags.push({
+        kind: 'in_books',
+        severity: 'info',
+        blocking: false,
+        short: `Linked in ${system}`,
+        resolutions: [],
+        message: `${linked.byName} said this is the bill already in ${system}: ${describeBooksBill(m)}. Decimal links to it rather than posting it again.`,
+      });
+    } else if (open.length > 0) {
+      const m = open[0]!;
+      const more = open.length > 1 ? ` It has ${open.length - 1} more that could be this one.` : '';
+      flags.push({
+        kind: 'in_books',
+        severity: 'warning',
+        blocking: false,
+        short: `Already in ${system}?`,
+        resolutions: [
+          { action: 'same_bill', label: 'Same bill', requires: 'anyone', noReason: true, targetId: m.recordId, detail: `Decimal links this bill to that one, and doesn't post it to ${system} again.` },
+          { action: 'different_bill', label: 'Different bill', requires: 'anyone', noReason: true, targetId: m.recordId, detail: 'Decimal posts this one as its own bill, and stops asking about that one.' },
+          ASK,
+        ],
+        message: `${system} already has ${describeBooksBill(m)}, entered there outside Decimal.${more} If it's this bill, Decimal links to it instead of posting it twice.`,
+      });
+    } else if (matches.length > 0) {
+      const m = matches[0]!;
+      const said = answers.find((a) => a.recordId === m.recordId);
+      flags.push({
+        kind: 'in_books',
+        severity: 'info',
+        blocking: false,
+        short: `Checked in ${system}`,
+        resolutions: [],
+        message: `${system} also has ${describeBooksBill(m)}. ${said?.byName ?? 'Someone'} said it's a different bill, so this one posts as its own.`,
+      });
+    }
   }
 
   // Is this an invoice at all?

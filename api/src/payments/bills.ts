@@ -686,7 +686,9 @@ export async function flagsForOrder(
   const vendorNameForFlags = order.counterparty?.displayName ?? order.counterpartyWallet.label;
   const directory = await loadVendorDirectory(organizationId);
   const similarVendors = similarVendorsIn(directory, vendorNameForFlags, order.counterpartyId);
+  const { booksFactsFor } = await import('../accounting/books-check.js');
   return evaluateBillFlags({
+    inBooks: (await booksFactsFor(organizationId, [order.paymentOrderId])).get(order.paymentOrderId) ?? null,
     similarVendors,
     priorBillsFromVendor: priorBillsIn(directory, order.counterpartyId),
     vendorName: order.counterparty?.displayName ?? order.counterpartyWallet.label,
@@ -977,6 +979,7 @@ const OVERRIDE_LABELS: Record<string, string> = {
   duplicate_bill: 'Duplicate flag cleared',
   bill_ceiling: 'Allowed past the bill limit',
   similar_vendor: 'Vendor names settled',
+  in_books: 'Checked against the books',
 };
 
 // Several rows can share a timestamp, because one thing a person did writes a
@@ -1133,13 +1136,14 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
     where: { organizationId, paymentOrderId: { in: orders.map((o) => o.paymentOrderId) } },
     select: { paymentOrderId: true, status: true, externalBillId: true, syncedAt: true, updatedAt: true },
   });
-  const postingByOrder = new Map<string, { status: 'posted' | 'failed' | 'pending'; at: Date }>();
+  const postingByOrder = new Map<string, { status: 'posted' | 'failed' | 'pending' | 'held'; at: Date }>();
   for (const sync of syncs) {
     postingByOrder.set(
       sync.paymentOrderId,
       sync.externalBillId
         ? { status: 'posted', at: sync.syncedAt ?? sync.updatedAt }
-        : { status: sync.status === 'error' ? 'failed' : 'pending', at: sync.updatedAt },
+        // Held: it may be in the books already, and waits for someone to say.
+        : { status: sync.status === 'error' ? 'failed' : sync.status === 'held' ? 'held' : 'pending', at: sync.updatedAt },
     );
   }
 
@@ -1148,6 +1152,10 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
   // candidate set, in memory. Grouped by vendor because that is how the query
   // scopes candidates, and cancelled orders are excluded for the same reason.
   const alertsByOrder = await planAlertsByOrder(organizationId, orders.map((o) => o.paymentOrderId));
+  // What was last seen in the books, read once for the board. Nothing is looked
+  // up live from here: that happens when a bill is opened, and before it posts.
+  const { booksFactsFor } = await import('../accounting/books-check.js');
+  const booksByOrder = await booksFactsFor(organizationId, orders.map((o) => o.paymentOrderId));
   const liveOrders = orders.filter((o) => o.state !== 'cancelled');
   // Once for the whole board, not once per row.
   const vendorDirectory = await loadVendorDirectory(organizationId);
@@ -1268,6 +1276,7 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
       (id) => liveById.get(id)?.metadataJson,
     );
     const flags = evaluateBillFlags({
+      inBooks: booksByOrder.get(order.paymentOrderId) ?? null,
       // Matched against a directory loaded once for the whole board. Looking it
       // up per row would be a query per bill on the one screen built to show
       // many of them.
@@ -2165,7 +2174,13 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     select: { organizationName: true, tradingNames: true },
   });
   const draftDirectory = await loadVendorDirectory(organizationId);
+  // Whether it is in the books already: looked for again in the background when
+  // what's on file is stale, and only here, never for the whole board.
+  const booksCheck = await import('../accounting/books-check.js');
+  if (!opts.readOnly) await booksCheck.ensureBooksCheck(organizationId, order.paymentOrderId);
+  const inBooks = (await booksCheck.booksFactsFor(organizationId, [order.paymentOrderId])).get(order.paymentOrderId) ?? null;
   const flags = evaluateBillFlags({
+    inBooks,
     similarVendors: similarVendorsIn(
       draftDirectory,
       order.counterparty?.displayName ?? order.counterpartyWallet.label,
@@ -2447,6 +2462,8 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       const finding = findings.get(f.kind);
       return finding ? { ...withBrief, finding } : withBrief;
     }),
+    // Still looking in the books: the page asks again until it's done.
+    booksCheck: inBooks ? { status: inBooks.status } : null,
     verification: verification
       ? {
           confirmedAt: str(verification.confirmedAt),
@@ -4337,17 +4354,21 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
     : null;
   const sync = await prisma.accountingSync.findFirst({
     where: { organizationId, paymentOrderId },
-    select: { status: true, externalBillId: true, error: true, attempts: true, syncedAt: true, updatedAt: true },
+    select: { status: true, externalBillId: true, error: true, attempts: true, syncedAt: true, updatedAt: true, metadataJson: true },
   });
   // Whether the sweep will still try a failed bill again by itself, so the
   // page only promises a retry that is coming.
   const { MAX_ATTEMPTS } = await import('../accounting/account-sync.js');
+  const linked = isRecord(sync?.metadataJson) && sync.metadataJson.linkedFromBooks === true;
   const posting = sync
     ? sync.externalBillId
-      ? { status: 'posted' as const, at: (sync.syncedAt ?? sync.updatedAt).toISOString(), error: null, retrying: false }
+      ? { status: 'posted' as const, at: (sync.syncedAt ?? sync.updatedAt).toISOString(), error: null, retrying: false, linked }
       : sync.status === 'error'
-        ? { status: 'failed' as const, at: sync.updatedAt.toISOString(), error: sync.error, retrying: sync.attempts < MAX_ATTEMPTS }
-        : { status: 'pending' as const, at: sync.updatedAt.toISOString(), error: sync.error, retrying: false }
+        ? { status: 'failed' as const, at: sync.updatedAt.toISOString(), error: sync.error, retrying: sync.attempts < MAX_ATTEMPTS, linked: false }
+        // It may be in the books already: nothing goes until someone says.
+        : sync.status === 'held'
+          ? { status: 'held' as const, at: sync.updatedAt.toISOString(), error: sync.error, retrying: false, linked: false }
+          : { status: 'pending' as const, at: sync.updatedAt.toISOString(), error: sync.error, retrying: false, linked: false }
     : null;
 
   // The order's invoice approvable — prefer the live one over dead history

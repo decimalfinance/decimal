@@ -60,11 +60,13 @@ function Num({ children }: { children: ReactNode }) {
 
 /** How far QuickBooks got with it, after the stage word. Not a link: there's no address for the bill there. */
 function QuickBooksTag({ posting }: { posting: NonNullable<BillDetail['posting']> }) {
-  const failed = posting.status === 'failed';
-  const word = posting.status === 'posted' ? 'Synced' : failed ? 'Couldn’t sync' : 'Syncing';
+  const held = posting.status === 'held';
+  const failed = posting.status === 'failed' || held;
+  const word = posting.status === 'posted' ? 'Synced' : held ? 'On hold' : failed ? 'Couldn’t sync' : 'Syncing';
+  const title = held ? 'QuickBooks may have it already' : failed ? 'Couldn’t sync to QuickBooks' : posting.status === 'posted' ? 'In QuickBooks' : 'On its way to QuickBooks';
   return (
     <>
-      <span className="bp-qb" title={failed ? 'Couldn’t sync to QuickBooks' : posting.status === 'posted' ? 'In QuickBooks' : 'On its way to QuickBooks'}>
+      <span className="bp-qb" title={title}>
         <img src="/quickbooks.svg" alt="QuickBooks" />
         <span className={`bp-qb-word${failed ? ' is-failed' : posting.status === 'pending' ? ' is-pending' : ''}`}>{word}</span>
       </span>
@@ -96,6 +98,14 @@ const listed = (items: string[]) => (items.length <= 1 ? items.join('') : `${ite
 const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 type Lead = { text: string; working: boolean; points?: Array<{ tone: 'ok' | 'bad'; text: string }>; at?: string | null; actions?: ReactNode };
+
+/**
+ * What the books have that could be this bill, from the in-books flag or the held
+ * posting's message: up to "outside Decimal", and how many more. Never cut by
+ * sentence, as a vendor's name can have a full stop in it.
+ */
+const inBooksWhat = (message: string | null | undefined) =>
+  /^(\S+ already has .+?, entered there outside Decimal\.(?: It has \d+ more that could be this one\.)?)/.exec(message ?? '')?.[1] ?? null;
 
 /**
  * The bill as Decimal hands it on: checked, and what people changed on the way.
@@ -159,6 +169,10 @@ function checkedWords(detail: BillDetail, viewer: Face, yourTurn: boolean): Lead
       });
     }
   }
+  // The approvers decide the bill, so they hear it too. It doesn't stop them: only
+  // the posting waits for someone to say whether it's the same bill.
+  const what = inBooksWhat(draft.flags.find((f) => f.kind === 'in_books' && f.severity === 'warning')?.message);
+  if (what && !detail.posting) points.push({ tone: 'bad', text: `${what} Nobody has said yet whether it’s this one. Approving it doesn’t post it twice: it waits for that answer.` });
   const sends = [...detail.history.before, ...detail.history.after].filter((h) => h.kind === 'submitted' && h.at);
   return {
     text: `${yourTurn ? 'Ready for your approval. ' : ''}${changed}`,
@@ -602,7 +616,7 @@ function Bar({
 
   // Approved and not in QuickBooks yet: an admin can still send it back to be put right.
   const approved = ['approved', 'auto_approved'].includes(detail.approval?.macroState ?? '');
-  const mayUnwind = access.isAdmin && draft.state === 'submitted' && approved && (!detail.posting || detail.posting.status === 'failed');
+  const mayUnwind = access.isAdmin && draft.state === 'submitted' && approved && (!detail.posting || detail.posting.status === 'failed' || detail.posting.status === 'held');
   if (!mayUnwind) return null;
   return (
     <div className="bp-foot">
@@ -667,7 +681,27 @@ export function Record({
     setRetrying(true);
     try {
       const { outcome } = await api.syncPaymentOrderAccounting(organizationId, billId);
-      toaster.show(outcome === 'synced' ? 'Synced to QuickBooks.' : outcome === 'error' ? 'QuickBooks refused it again.' : 'Nothing was sent to QuickBooks.');
+      toaster.show(outcome === 'synced' ? 'Synced to QuickBooks.' : outcome === 'error' ? 'QuickBooks refused it again.'
+        : outcome === 'held' ? 'QuickBooks still has a bill like it. Say whether it’s the same one.'
+        : 'Nothing was sent to QuickBooks.');
+      await refreshAround();
+    } catch (e) {
+      toaster.show(e instanceof Error ? e.message : 'That didn’t go through. Try again.');
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  // "Different bill" needs no second look: it posts this one as its own, now.
+  const differentBill = async (recordId: string) => {
+    if (retrying) return;
+    setRetrying(true);
+    try {
+      const { posting } = await billsApi.answerInBooks(organizationId, billId, recordId, false);
+      toaster.show(posting === 'synced' ? 'Kept as two bills. This one is in QuickBooks now.'
+        : posting === 'held' ? 'Kept as two bills. QuickBooks has another one like it.'
+        : posting === 'error' ? 'Kept as two bills, but QuickBooks refused this one. The bill says why.'
+        : 'Kept as two bills.');
       await refreshAround();
     } catch (e) {
       toaster.show(e instanceof Error ? e.message : 'That didn’t go through. Try again.');
@@ -677,7 +711,33 @@ export function Record({
   };
 
   const failedSync = detail.posting?.status === 'failed' ? detail.posting : null;
+  const heldSync = detail.posting?.status === 'held' && !closed ? detail.posting : null;
+  const inBooks = heldSync ? draft.flags.find((f) => f.kind === 'in_books' && f.severity === 'warning') ?? null : null;
+  const sameId = inBooks?.resolutions.find((r) => r.action === 'same_bill')?.targetId ?? null;
+  const differentId = inBooks?.resolutions.find((r) => r.action === 'different_bill')?.targetId ?? null;
+  const heldWhat = heldSync ? inBooksWhat(inBooks?.message ?? heldSync.error) : null;
   const lead: Lead = closed ? closedWords(detail)
+    : heldSync ? {
+      text: `${heldWhat ?? 'QuickBooks may have this bill already.'} I’ve held this one back so it isn’t in QuickBooks twice. Is it the same bill?`,
+      working: false,
+      at: heldSync.at,
+      actions: !access.canEdit ? null : sameId && differentId ? (
+        <>
+          <button
+            type="button"
+            className="bp-pill is-white"
+            disabled={retrying}
+            onClick={() => setCard(card?.kind === 'finding' && card.action === 'same_bill' ? null : { kind: 'finding', flagKind: 'in_books', action: 'same_bill', targetId: sameId })}
+          >
+            Same bill
+          </button>
+          <button type="button" className="bp-pill is-white" disabled={retrying} onClick={() => void differentBill(differentId)}>Different bill</button>
+        </>
+      ) : (
+        // Nothing on file to answer about: look in QuickBooks again.
+        <button type="button" className="bp-pill is-white" disabled={retrying} onClick={() => void retrySync()}>Look again</button>
+      ),
+    }
     : failedSync ? {
       text: `QuickBooks refused it: ${syncProblem(failedSync.error) ?? 'it gave no reason'}.${failedSync.retrying ? ' I’ll try again by itself a few times.' : ''}`,
       working: false,

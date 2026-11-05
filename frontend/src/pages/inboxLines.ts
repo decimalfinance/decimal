@@ -3,7 +3,7 @@
 import type { InboxItem, InboxLineKind } from '../api';
 
 /** Approvals first, then questions and the replies to yours, then the team's pile. */
-export const LINE_ORDER: InboxLineKind[] = ['approval', 'question', 'reply', 'sent_back', 'sync_failed', 'review', 'unreadable', 'sign_off'];
+export const LINE_ORDER: InboxLineKind[] = ['approval', 'question', 'reply', 'sent_back', 'sync_failed', 'sync_held', 'review', 'unreadable', 'sign_off'];
 
 /** The Questions tab: questions put to you, and the answers to yours. */
 export const ASK_KINDS: InboxLineKind[] = ['question', 'reply'];

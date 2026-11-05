@@ -32,6 +32,7 @@ const TYPE: Record<InboxLineKind, string> = {
   reply: 'Reply',
   sent_back: 'Sent back',
   sync_failed: 'QuickBooks',
+  sync_held: 'QuickBooks',
   review: 'Review',
   unreadable: 'Can’t read',
   sign_off: 'Sign off',

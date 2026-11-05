@@ -1161,8 +1161,8 @@ export interface WorkbenchBill {
   sentBackBy: { name: string | null; reason: string | null } | null;
   /** Everyone who could act on it now: "Tom or Ines" when either may. */
   waitingOn: Array<{ userId: string | null; name: string }>;
-  /** Where QuickBooks has got to with it, once approved. */
-  posting: { status: 'posted' | 'failed' | 'pending'; at: string } | null;
+  /** Where QuickBooks has got to with it, once approved. `held`: it may be there already, and waits for an answer. */
+  posting: { status: 'posted' | 'failed' | 'pending' | 'held'; at: string } | null;
   /** Why a closed bill was closed. */
   closedReason: 'duplicate' | 'statement' | 'credit_note' | 'not_ours' | 'unreadable' | 'other' | null;
 }
@@ -1366,7 +1366,8 @@ export interface BillDraft {
     resolutions: Array<{
       action: 'this_is_us' | 'not_ours' | 'ask_someone' | 'clear_duplicate' | 'fix_fields' | 'raise_ceiling' | 'release_vendor' | 'pay_the_lines'
         | 'allow_over_ceiling'
-        | 'same_vendor' | 'different_vendor';
+        | 'same_vendor' | 'different_vendor'
+        | 'same_bill' | 'different_bill';
       /** The answer is a determination, so the composer asks for no reason. */
       noReason?: boolean;
       /** The other record the answer is about. */
@@ -1380,6 +1381,8 @@ export interface BillDraft {
     /** What the exception agent found about a flag on this bill alone (statement, credit note, figures, bill-to name). */
     finding?: FlagFinding;
   }>;
+  /** Looking in QuickBooks for this bill already there: `running` until the look is done. */
+  booksCheck?: { status: 'running' | 'ready' | 'failed' } | null;
   verification: { confirmedAt: string | null; confirmedByUserId: string | null; noteForApprovers: string | null } | null;
 }
 
@@ -1471,6 +1474,13 @@ export const billsApi = {
     return request<{ merged: boolean; draft: BillDraft }>(
       `/organizations/${organizationId}/bills/${paymentOrderId}/similar-vendor`,
       { method: 'POST', body: JSON.stringify({ otherCounterpartyId, same }) },
+    );
+  },
+  /** Whether the bill already in QuickBooks is this one. If its posting was waiting on this, it goes now. */
+  answerInBooks(organizationId: string, paymentOrderId: string, recordId: string, same: boolean) {
+    return request<{ posting: 'synced' | 'skipped' | 'error' | 'held' | null; linked: boolean; draft: BillDraft }>(
+      `/organizations/${organizationId}/bills/${paymentOrderId}/in-books`,
+      { method: 'POST', body: JSON.stringify({ recordId, same }) },
     );
   },
   requestRecall(organizationId: string, paymentOrderId: string, reason: string) {
@@ -1692,7 +1702,8 @@ export interface BillDetail {
   } | null;
   /** How far QuickBooks got with an approved bill. */
   /** `retrying`: a failed post the sweep will still try again by itself. */
-  posting: { status: 'posted' | 'failed' | 'pending'; at: string; error: string | null; retrying: boolean } | null;
+  /** `held`: QuickBooks may have it already, and nothing goes until someone says. `linked`: it was there, and Decimal linked to it. */
+  posting: { status: 'posted' | 'failed' | 'pending' | 'held'; at: string; error: string | null; retrying: boolean; linked?: boolean } | null;
   approval: {
     approvableId: string;
     macroState: string;
@@ -2097,7 +2108,7 @@ export interface CompanionActionCard {
   result: string | null;
 }
 
-export type InboxLineKind = 'approval' | 'question' | 'reply' | 'review' | 'sign_off' | 'sent_back' | 'unreadable' | 'sync_failed';
+export type InboxLineKind = 'approval' | 'question' | 'reply' | 'review' | 'sign_off' | 'sent_back' | 'unreadable' | 'sync_failed' | 'sync_held';
 
 /** One thing wanted of a person on a bill: who it comes from, what they did, their words. */
 export interface InboxLine {

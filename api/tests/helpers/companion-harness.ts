@@ -197,7 +197,7 @@ export async function makeWorld(orgName = 'Halcyon Labs, Inc.') {
 // The companion's own records, and sessions. Everything else is business data.
 export const OWN_TABLES = new Set([
   'public.companion_chats', 'public.companion_messages', 'public.companion_steps', 'public.companion_views',
-  'public.bill_exception_briefs', 'public.ai_suggestions', 'public.ai_suggestion_outcomes',
+  'public.bill_exception_briefs', 'public.bill_books_checks', 'public.ai_suggestions', 'public.ai_suggestion_outcomes',
   'public.auth_sessions', 'public.idempotency_records',
 ]);
 

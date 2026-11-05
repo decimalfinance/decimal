@@ -5,7 +5,7 @@
 
 import { z } from 'zod';
 import { getQuickBooksForOrg } from '../accounting/connections.js';
-import { faultOf, QboError } from '../accounting/quickbooks.js';
+import { faultOf, QboError, qboLiteral } from '../accounting/quickbooks.js';
 import {
   BooksReadError,
   toMinor,
@@ -20,6 +20,7 @@ import {
 } from './books.js';
 
 const PAGE_SIZE = 1000; // Intuit's maximum for one query.
+const NUMBERED_MAX = 100; // Bills sharing a number: a handful, even across vendors.
 const MAX_ATTEMPTS = 3;
 const THROTTLE_WAIT_MS = 60_000; // Intuit: on a 429, wait 60 seconds.
 const UNAVAILABLE_WAIT_MS = 5_000;
@@ -251,6 +252,32 @@ export function quickBooksReader(client: QueryClient, options: { wait?: (ms: num
     return ` WHERE TxnDate >= '${since}'`;
   };
 
+  function toBill(b: z.infer<typeof billSchema>, home: string): BooksBill {
+    const currency = b.CurrencyRef?.value ?? home;
+    return {
+      id: b.Id,
+      number: present(b.DocNumber),
+      vendorId: b.VendorRef?.value ?? null,
+      vendorName: b.VendorRef?.name ?? null,
+      date: b.TxnDate ?? null,
+      dueDate: b.DueDate ?? null,
+      currency,
+      totalMinor: toMinor(b.TotalAmt, currency),
+      balanceMinor: typeof b.Balance === 'number' ? toMinor(b.Balance, currency) : null,
+      taxMinor: typeof b.TxnTaxDetail?.TotalTax === 'number' ? toMinor(b.TxnTaxDetail.TotalTax, currency) : null,
+      payableAccountId: b.APAccountRef?.value ?? null,
+      termsId: b.SalesTermRef?.value ?? null,
+      locationId: b.DepartmentRef?.value ?? null,
+      locationName: b.DepartmentRef?.name ?? null,
+      note: present(b.PrivateNote),
+      lines: (b.Line ?? []).map((line) => toLine(line, currency)),
+      createdAt: b.MetaData?.CreateTime ?? null,
+      updatedAt: b.MetaData?.LastUpdatedTime ?? null,
+    };
+  }
+
+  const quoted = (values: string[]) => values.map((v) => `'${qboLiteral(v)}'`).join(', ');
+
   return {
     system: 'quickbooks',
     companyId: client.realmId,
@@ -323,29 +350,29 @@ export function quickBooksReader(client: QueryClient, options: { wait?: (ms: num
     async bills(since) {
       const where = onOrAfter(since);
       const home = await homeCurrency();
-      return readAll('Bill', where, billSchema, (b): BooksBill => {
-        const currency = b.CurrencyRef?.value ?? home;
-        return {
-          id: b.Id,
-          number: present(b.DocNumber),
-          vendorId: b.VendorRef?.value ?? null,
-          vendorName: b.VendorRef?.name ?? null,
-          date: b.TxnDate ?? null,
-          dueDate: b.DueDate ?? null,
-          currency,
-          totalMinor: toMinor(b.TotalAmt, currency),
-          balanceMinor: typeof b.Balance === 'number' ? toMinor(b.Balance, currency) : null,
-          taxMinor: typeof b.TxnTaxDetail?.TotalTax === 'number' ? toMinor(b.TxnTaxDetail.TotalTax, currency) : null,
-          payableAccountId: b.APAccountRef?.value ?? null,
-          termsId: b.SalesTermRef?.value ?? null,
-          locationId: b.DepartmentRef?.value ?? null,
-          locationName: b.DepartmentRef?.name ?? null,
-          note: present(b.PrivateNote),
-          lines: (b.Line ?? []).map((line) => toLine(line, currency)),
-          createdAt: b.MetaData?.CreateTime ?? null,
-          updatedAt: b.MetaData?.LastUpdatedTime ?? null,
-        };
-      });
+      return readAll('Bill', where, billSchema, (b) => toBill(b, home));
+    },
+
+    // Number matching in QuickBooks ignores case, and IN takes a list (both tried on
+    // a sandbox, 5 Nov 2026). A row it can't read is left out: this is a lookup, not
+    // a count that has to add up.
+    async billsLike({ numbers, vendorIds, since }) {
+      const home = await homeCurrency();
+      const found = new Map<string, BooksBill>();
+      const keep = (rows: unknown) => {
+        for (const row of Array.isArray(rows) ? rows : []) {
+          const parsed = billSchema.safeParse(row);
+          if (parsed.success) found.set(parsed.data.Id, toBill(parsed.data, home));
+        }
+      };
+      if (numbers.length > 0) {
+        keep((await ask(`SELECT * FROM Bill WHERE DocNumber IN (${quoted(numbers)}) MAXRESULTS ${NUMBERED_MAX}`)).Bill);
+      }
+      if (vendorIds.length > 0) {
+        const dated = onOrAfter(since).replace(' WHERE ', ' AND ');
+        keep((await ask(`SELECT * FROM Bill WHERE VendorRef IN (${quoted(vendorIds)})${dated} MAXRESULTS ${PAGE_SIZE}`)).Bill);
+      }
+      return [...found.values()];
     },
 
     async expenses(since) {

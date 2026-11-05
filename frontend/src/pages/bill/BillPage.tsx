@@ -16,7 +16,8 @@ import type { Access } from './Findings';
 
 /** Decimal is still investigating a finding: read again shortly. */
 function stillWorking(detail: BillDetail | undefined) {
-  return Boolean(detail?.draft.flags.some((f) => f.brief?.status === 'running' || f.finding?.status === 'running'));
+  return Boolean(detail?.draft.flags.some((f) => f.brief?.status === 'running' || f.finding?.status === 'running'))
+    || detail?.draft.booksCheck?.status === 'running';
 }
 
 /** The file the bill came from is still being worked on: its checks are still to come. */

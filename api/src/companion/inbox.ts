@@ -24,7 +24,7 @@ import { getApprovalsInbox, getBillsWorkbench } from '../payments/bills.js';
 import { involvedBillIds } from '../payments/bill-visibility.js';
 import { getOrgAccess } from '../approvals/permissions.js';
 
-export type InboxLineKind = 'approval' | 'question' | 'reply' | 'review' | 'sign_off' | 'sent_back' | 'unreadable' | 'sync_failed';
+export type InboxLineKind = 'approval' | 'question' | 'reply' | 'review' | 'sign_off' | 'sent_back' | 'unreadable' | 'sync_failed' | 'sync_held';
 
 export type InboxPerson = { name: string; avatarUrl: string | null };
 
@@ -66,7 +66,7 @@ export type InboxItem = {
   isNew: boolean;
 };
 
-const URGENCY: Record<InboxLineKind, number> = { question: 0, reply: 0, approval: 1, sync_failed: 3, sent_back: 3, review: 4, unreadable: 5, sign_off: 6 };
+const URGENCY: Record<InboxLineKind, number> = { question: 0, reply: 0, approval: 1, sync_failed: 3, sync_held: 3, sent_back: 3, review: 4, unreadable: 5, sign_off: 6 };
 
 /** A line's own words and the quote apart, and the whole sentence they make. */
 function said(lead: string, quote: string | null): { lead: string; quote: string | null; text: string } {
@@ -246,6 +246,20 @@ export async function getInbox(organizationId: string, viewerUserId: string, opt
     for (const f of failed) {
       const why = f.error?.trim() ? firstSentence(f.error).replace(/"([^"]*)"/g, '“$1”') : null;
       add(itemFor(f.paymentOrderId), { kind: 'sync_failed', ...said(why ? `QuickBooks refused it: ${why}` : 'QuickBooks refused it', null), who: null, at: f.updatedAt.toISOString() });
+    }
+  }
+  // Approved, and held back: QuickBooks may have it already (accounting/books-check.ts).
+  // For whoever reviews bills, since they're who can say whether it's the same one;
+  // it stays until someone does.
+  if (canReview) {
+    const held = await prisma.accountingSync.findMany({
+      where: { organizationId, provider: 'quickbooks', status: 'held', paymentOrder: { state: { not: 'cancelled' } } },
+      select: { paymentOrderId: true, error: true, updatedAt: true },
+    });
+    for (const h of held) {
+      // Up to "outside Decimal", never by sentence: a vendor's name can have a full stop in it.
+      const what = /^(.+?, entered there outside Decimal)\./.exec(h.error ?? '')?.[1] ?? 'QuickBooks may have it already';
+      add(itemFor(h.paymentOrderId), { kind: 'sync_held', ...said(`${what}. Is it the same bill?`, null), who: null, at: h.updatedAt.toISOString() });
     }
   }
 

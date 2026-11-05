@@ -151,6 +151,12 @@ export interface BooksReader {
   /** Dated on or after `since`, YYYY-MM-DD. */
   bills(since: string): Promise<BooksRead<BooksBill>>;
   expenses(since: string): Promise<BooksRead<BooksExpense>>;
+  /**
+   * The bills one bill could be: those numbered any of `numbers`, from any vendor,
+   * and those from `vendorIds` dated on or after `since`. A narrow read about one
+   * bill (accounting/books-check.ts), not a study, so nothing is counted.
+   */
+  billsLike(query: { numbers: string[]; vendorIds: string[]; since: string }): Promise<BooksBill[]>;
 }
 
 /** A system's decimal amount as exact minor units of its currency: 0.07 USD is 7, 1000 JPY is 1000. */

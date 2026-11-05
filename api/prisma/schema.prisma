@@ -136,6 +136,27 @@ model BooksRecord {
   @@map("books_records")
 }
 
+/// Whether a bill is in the books already, checked live, and what people said about
+/// it. A bill keyed in by hand would otherwise post twice. See accounting/books-check.ts.
+model BillBooksCheck {
+  paymentOrderId String    @id @map("payment_order_id") @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  system         String
+  companyId      String    @map("company_id")
+  status         String    @default("running")
+  fingerprint    String
+  leaseUntil     DateTime? @map("lease_until") @db.Timestamptz(6)
+  matches        Json      @default("[]")
+  error          String?
+  checkedAt      DateTime? @map("checked_at") @db.Timestamptz(6)
+  answers        Json      @default("[]")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([organizationId], map: "bill_books_checks_by_org")
+  @@map("bill_books_checks")
+}
+
 model IntegrationSetupMessage {
   messageId    String           @id @default(dbgenerated("gen_random_uuid()")) @map("message_id") @db.Uuid
   setupId      String           @map("setup_id") @db.Uuid

@@ -14,13 +14,14 @@
 // a bill approved before that moment is not posted by itself. Connecting alone
 // only lets Decimal read.
 
+import type { Prisma } from '@prisma/client';
 import { billsApprovedSince } from '../approvals/store.js';
 import { logger } from '../infra/logger.js';
 import { prisma } from '../infra/prisma.js';
 import { isDate } from '../integrations/copy.js';
 import { readOutcome, type SetupOutcome } from '../integrations/setup/outcome.js';
 import { getQuickBooksForOrg, postingEnabledSince } from './connections.js';
-import { plainQboReason, type QuickBooks } from './quickbooks.js';
+import { faultOf, plainQboReason, QboError, type QuickBooks } from './quickbooks.js';
 import { postBillToQuickBooks, PostedTotalDiffers, recordBillPaymentInQuickBooks, recordedCents, syncPaymentToQuickBooks } from './sync.js';
 import { BUILTIN_ACCOUNT_PREFIX } from './default-chart.js';
 import { vendorForBill } from './vendor-match.js';
@@ -30,10 +31,12 @@ export const MAX_ATTEMPTS = 5;
 const SWEEP_BATCH = 20;
 const USDC_DECIMALS = 6;
 
-export type AccountingSyncOutcome = 'synced' | 'skipped' | 'error';
+/** `held`: it may be in the books already, and nothing goes until someone says (books-check.ts). */
+export type AccountingSyncOutcome = 'synced' | 'skipped' | 'error' | 'held';
 
 type SyncFields = {
   status: string;
+  metadataJson?: Prisma.InputJsonValue;
   requestId?: string;
   externalVendorId?: string | null;
   externalBillId?: string | null;
@@ -43,6 +46,11 @@ type SyncFields = {
   syncedAt?: Date | null;
   incrementAttempts?: boolean;
 };
+
+/** Linked to a bill already in the books rather than posted (books-check.ts). */
+function isLinkedFromBooks(metadata: unknown): boolean {
+  return typeof metadata === 'object' && metadata !== null && (metadata as Record<string, unknown>).linkedFromBooks === true;
+}
 
 async function upsertSync(organizationId: string, paymentOrderId: string, fields: SyncFields): Promise<void> {
   const { incrementAttempts, requestId, ...rest } = fields;
@@ -57,11 +65,12 @@ async function upsertSync(organizationId: string, paymentOrderId: string, fields
 /**
  * Clear a failed sync's attempt counter so an operator's manual retry actually
  * runs (the sweep gives up at MAX_ATTEMPTS; a deliberate retry should not).
- * Only touches error rows — never re-opens a successful sync.
+ * Only touches error and held rows — never re-opens a successful sync. A held one
+ * looks in the books again: the bill there may have gone.
  */
 export async function resetSyncForRetry(paymentOrderId: string): Promise<void> {
   await prisma.accountingSync.updateMany({
-    where: { paymentOrderId, provider: PROVIDER, status: 'error' },
+    where: { paymentOrderId, provider: PROVIDER, status: { in: ['error', 'held'] } },
     data: { attempts: 0, status: 'pending', error: null },
   });
 }
@@ -209,11 +218,11 @@ export async function syncSettledPaymentOrder(paymentOrderId: string): Promise<A
   }
 }
 
-export type AccountingSweepSummary = { synced: number; skipped: number; error: number };
+export type AccountingSweepSummary = { synced: number; skipped: number; error: number; held: number };
 
 /** Find settled, not-yet-synced payment orders for connected orgs and sync them. */
 export async function sweepUnsyncedSettledOrders(): Promise<AccountingSweepSummary> {
-  const summary: AccountingSweepSummary = { synced: 0, skipped: 0, error: 0 };
+  const summary: AccountingSweepSummary = { synced: 0, skipped: 0, error: 0, held: 0 };
 
   const connected = await prisma.accountingConnection.findMany({
     where: { provider: PROVIDER, status: 'connected', postingEnabledAt: { not: null } },
@@ -228,7 +237,8 @@ export async function sweepUnsyncedSettledOrders(): Promise<AccountingSweepSumma
   // Bills approved since posting was turned on and not yet in QuickBooks: posted
   // now. Catches a post the approval hook could not make, such as while the
   // connection had lapsed, and retries of one that failed (until MAX_ATTEMPTS; a
-  // person can retry). A bill approved before that moment is left alone.
+  // person can retry). A bill approved before that moment is left alone, and so
+  // is one held for an answer: looking again every 30 seconds changes nothing.
   const approved: string[] = [];
   for (const c of connected) {
     approved.push(...await billsApprovedSince(c.organizationId, c.postingEnabledAt!));
@@ -238,7 +248,7 @@ export async function sweepUnsyncedSettledOrders(): Promise<AccountingSweepSumma
       where: {
         paymentOrderId: { in: approved },
         state: { notIn: ['draft', 'cancelled', 'settled'] },
-        NOT: { accountingSyncs: { some: { provider: PROVIDER, OR: [{ externalBillId: { not: null } }, { status: 'error', attempts: { gte: MAX_ATTEMPTS } }] } } },
+        NOT: { accountingSyncs: { some: { provider: PROVIDER, OR: [{ externalBillId: { not: null } }, { status: 'error', attempts: { gte: MAX_ATTEMPTS } }, { status: 'held' }] } } },
       },
       orderBy: { updatedAt: 'asc' },
       take: SWEEP_BATCH,
@@ -332,6 +342,17 @@ export async function syncApprovedBill(paymentOrderId: string): Promise<Accounti
       await upsertSync(order.organizationId, paymentOrderId, { status: 'synced', requestId, externalBillBalance: Number(after.Balance), error: null, syncedAt: new Date() });
       return 'synced';
     } catch (error) {
+      // Linked to a bill someone entered there by hand, and since deleted it: unlinked,
+      // so the next try looks in the books again (books-check.ts) and posts or asks.
+      const linked = isLinkedFromBooks(existing.metadataJson);
+      if (linked && error instanceof QboError && faultOf(error.body)?.code === '610') {
+        await upsertSync(order.organizationId, paymentOrderId, {
+          status: 'error', requestId, externalBillId: null, externalVendorId: null, metadataJson: {}, incrementAttempts: true,
+          error: 'The bill in QuickBooks this was linked to has been deleted there, so it isn\'t linked any more. Decimal will look in QuickBooks again.',
+        });
+        logger.warn('accounting_sync.linked_bill_gone', { organizationId: order.organizationId, paymentOrderId, billId: existing.externalBillId });
+        return 'error';
+      }
       return fail(plainQboReason(error));
     }
   }
@@ -384,6 +405,43 @@ export async function syncApprovedBill(paymentOrderId: string): Promise<Accounti
     }
     const vendor = await vendorForBill(order.organizationId, PROVIDER, qb.realmId, vendorLabel, outcome);
     if (vendor && 'problem' in vendor) return await fail(vendor.problem);
+
+    // Is it in the books already? QuickBooks takes the same bill twice without a
+    // word, so look, live, right before posting (books-check.ts).
+    const docNumber = billHeader.invoiceNumber ?? order.invoiceNumber;
+    const { checkBeforePosting, knownVendorIds } = await import('./books-check.js');
+    const { quickBooksReader } = await import('../integrations/quickbooks-reader.js');
+    const scope = { system: PROVIDER, companyId: qb.realmId };
+    const vendorIds = await knownVendorIds(order.organizationId, scope, vendorLabel, order.counterpartyId);
+    const inBooks = await checkBeforePosting({
+      organizationId: order.organizationId,
+      paymentOrderId,
+      reader: quickBooksReader(qb),
+      bill: {
+        vendorName: vendorLabel,
+        vendorIds: [...new Set([...(vendor?.vendorId ? [vendor.vendorId] : []), ...vendorIds])],
+        number: docNumber,
+        totalMinor: approvedCents,
+        currency,
+        date: billDate,
+      },
+    });
+    if (inBooks.kind === 'held') {
+      await upsertSync(order.organizationId, paymentOrderId, { status: 'held', requestId, error: inBooks.message });
+      logger.info('accounting_sync.bill_held', { organizationId: order.organizationId, paymentOrderId });
+      return 'held';
+    }
+    if (inBooks.kind === 'same') {
+      // A person said it is that bill: link to it rather than post, then check it
+      // the way a posted bill is checked, its total against the approved one.
+      await upsertSync(order.organizationId, paymentOrderId, {
+        status: 'pending', requestId, externalVendorId: inBooks.vendorId, externalBillId: inBooks.recordId, externalBillPaymentId: null,
+        error: null, metadataJson: { linkedFromBooks: true, number: inBooks.number },
+      });
+      logger.info('accounting_sync.bill_linked', { organizationId: order.organizationId, paymentOrderId, billId: inBooks.recordId });
+      return await syncApprovedBill(paymentOrderId);
+    }
+
     const posted = await postBillToQuickBooks(
       qb,
       {
@@ -395,7 +453,7 @@ export async function syncApprovedBill(paymentOrderId: string): Promise<Accounti
         reference: order.externalReference,
         codedLines: lines.map((l) => ({ accountId: l.accountId!, amount: Number(l.amount) || 0, description: l.description ?? null })),
         taxAmount: amountsOfBill(order.metadataJson).tax,
-        docNumber: billHeader.invoiceNumber ?? order.invoiceNumber,
+        docNumber,
         txnDate: billHeader.billDate ?? null,
         dueDate: order.dueAt?.toISOString().slice(0, 10) ?? null,
       },

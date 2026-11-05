@@ -398,6 +398,18 @@ export function ConfirmCard({ card, flag, draft, totals, busy, onConfirm, onCanc
       </div>
     );
   }
+  if (action === 'same_bill') {
+    const m = flag ? /^(\S+) already has (.+?), entered there outside Decimal/.exec(flag.message) : null;
+    const books = m?.[1] ?? 'QuickBooks';
+    return (
+      <div ref={boxRef} className="bp-card">
+        <div className="bp-card-text">
+          <Figures text={`Is this the bill already in ${books}${m ? `: ${m[2]}` : ''}? If so, Decimal links to it rather than posting this bill a second time.`} />
+        </div>
+        {buttons('Yes, same bill', true, {})}
+      </div>
+    );
+  }
   if (action === 'same_vendor') {
     const target = flag ? /you already pay "([^"]+)"/.exec(flag.message)?.[1] ?? 'the vendor you already pay' : 'the vendor you already pay';
     return (

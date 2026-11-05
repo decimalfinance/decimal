@@ -130,6 +130,21 @@ test('books reader: bills and expenses ask only from the date given, and refuse 
   await assert.rejects(reader.bills(`2024' OR '1'='1`), (e: BooksReadError) => e.kind === 'refused');
 });
 
+test('books reader: bills like one are asked for by number, and by vendor from a date, quoted, and each comes back once', async () => {
+  const row = { Id: '7', DocNumber: 'O\'Brien-1', VendorRef: { value: '5', name: 'Hall' }, TxnDate: '2026-10-01', TotalAmt: 12.5 };
+  const books = fakeBooks({ Bill: [row] });
+  const reader = quickBooksReader(books);
+  const found = await reader.billsLike({ numbers: ['O\'Brien-1', 'OBRIEN1'], vendorIds: ['5'], since: '2026-07-01' });
+  assert.ok(books.asked.includes(`SELECT * FROM Bill WHERE DocNumber IN ('O\\'Brien-1', 'OBRIEN1') MAXRESULTS 100`));
+  assert.ok(books.asked.includes(`SELECT * FROM Bill WHERE VendorRef IN ('5') AND TxnDate >= '2026-07-01' MAXRESULTS 1000`));
+  assert.deepEqual(found.map((b) => [b.id, b.number, b.totalMinor]), [['7', 'O\'Brien-1', 1250n]], 'found both ways, kept once');
+
+  books.asked.length = 0;
+  assert.deepEqual(await reader.billsLike({ numbers: [], vendorIds: [], since: '2026-07-01' }), []);
+  assert.equal(books.asked.filter((q) => q.includes('FROM Bill')).length, 0, 'nothing to look for, nothing asked');
+  await assert.rejects(reader.billsLike({ numbers: [], vendorIds: ['5'], since: '2026\' OR \'1\'=\'1' }), (e: BooksReadError) => e.kind === 'refused');
+});
+
 test('books reader: a bill keeps its header, its tax and each line, whichever way the line was coded', async () => {
   const { records: [bill] } = await quickBooksReader(fakeBooks({ Bill: [{
     Id: '145', DocNumber: 'INV-77', VendorRef: { value: '56', name: "O'Brien Freight" }, TxnDate: '2026-03-01', DueDate: '2026-03-31',
@@ -369,7 +384,7 @@ test('books reader: the settings are asked for once, however many reads need the
 
 test('books reader: what the harness holds can read, and has no way to write', async () => {
   const reader = quickBooksReader(fakeBooks()) as unknown as Record<string, unknown>;
-  assert.deepEqual(Object.keys(reader).sort(), ['accounts', 'bills', 'company', 'companyId', 'expenses', 'system', 'vendors']);
+  assert.deepEqual(Object.keys(reader).sort(), ['accounts', 'bills', 'billsLike', 'company', 'companyId', 'expenses', 'system', 'vendors']);
   for (const value of Object.values(reader)) {
     assert.ok(typeof value === 'string' || typeof value === 'function', 'no client hanging off it');
   }

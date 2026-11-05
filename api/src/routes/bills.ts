@@ -219,6 +219,26 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/similar-v
   res.json({ ...result, draft: await getBillDraft(organizationId, paymentOrderId, req.auth!.userId) });
 }));
 
+// Is the bill already in the books the same as this one? (accounting/books-check.ts)
+//
+// Not admin-gated, like the vendor question: whoever has the document in front of
+// them can compare it with the bill in the books, and the answer goes on the record
+// under their name. "Same" makes Decimal link to that bill rather than post a second
+// one; neither answer moves money or skips an approval. If the bill's posting was
+// waiting on this, it goes now and the outcome comes back.
+billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/in-books', asyncRoute(async (req, res) => {
+  const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
+  const input = z.object({
+    recordId: z.string().trim().min(1).max(64),
+    same: z.boolean(),
+  }).parse(req.body);
+  const { answerBooksMatch } = await import('../accounting/books-check.js');
+  const result = await answerBooksMatch({ organizationId, paymentOrderId, actorUserId: req.auth!.userId, recordId: input.recordId, same: input.same });
+  res.json({ ...result, draft: await getBillDraft(organizationId, paymentOrderId, req.auth!.userId) });
+}));
+
 // Pay what the bill itemises rather than what it prints, with a reason.
 //
 // Not admin-gated, unlike clearing a duplicate: this does not bypass a control,

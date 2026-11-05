@@ -104,9 +104,9 @@ export function historyItems(detail: BillDetail, note: BillCompanionNote | null 
     } else if (e.rule === 'bill_ceiling') {
       line = <><b>{name}</b> allowed it over the bill limit, this bill only{reason ? ',' : null}{because}</>;
       plain = `${name} allowed it over the bill limit`;
-    } else if (e.rule === 'similar_vendor' && reason && e.byName && reason.startsWith(`${e.byName} `)) {
+    } else if ((e.rule === 'similar_vendor' || e.rule === 'in_books') && reason && e.byName && reason.startsWith(`${e.byName} `)) {
       const rest = reason.slice(e.byName.length + 1);
-      line = <><b>{name}</b> {rest}</>;
+      line = <><b>{name}</b> <Figures text={rest} /></>;
       plain = `${name} ${rest}`;
     } else {
       line = m ? <><b>{name}</b>: {lowerFirst(m[1]!)}{because}</> : <><b>{name}</b>: {e.text}</>;
@@ -311,8 +311,18 @@ export function historyItems(detail: BillDetail, note: BillCompanionNote | null 
 
   // QuickBooks, once the bill is approved: Decimal posts it, or says why it couldn't.
   const posting = detail.posting;
-  if (posting?.status === 'posted') {
+  if (posting?.status === 'posted' && posting.linked) {
+    // It was there already, entered by hand: linked to that bill, not posted again.
+    push({ id: 'h-qb', at: new Date(posting.at), who: 'decimal', badge: 'good', line: <><b>Decimal agent</b> linked it to the bill already in QuickBooks</>, plain: 'Decimal agent linked it to the bill already in QuickBooks' });
+  } else if (posting?.status === 'posted') {
     push({ id: 'h-qb', at: new Date(posting.at), who: 'decimal', badge: 'good', line: <><b>Decimal agent</b> synced it to QuickBooks</>, plain: 'Decimal agent synced it to QuickBooks' });
+  } else if (posting?.status === 'held') {
+    push({
+      id: 'h-qb', at: new Date(posting.at), who: 'decimal',
+      line: <><b>Decimal agent</b> held it back from QuickBooks, which may have it already</>,
+      plain: 'Decimal agent held it back from QuickBooks, which may have it already',
+      sub: 'Waits for someone to say whether it’s the same bill',
+    });
   } else if (posting?.status === 'failed') {
     const why = syncProblem(posting.error);
     push({

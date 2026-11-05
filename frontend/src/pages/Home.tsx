@@ -102,6 +102,7 @@ function reasonOf(line: InboxLine): string {
     case 'reply': return `${first} ${line.lead.includes('couldn’t answer') ? 'couldn’t answer' : 'answered'} your question`;
     case 'sent_back': return name ? `${first} sent it back` : line.lead;
     case 'sync_failed': return 'QuickBooks refused it';
+    case 'sync_held': return 'Already in QuickBooks?';
     default: return line.lead;
   }
 }

@@ -47,6 +47,13 @@ export function fixtureReader(fixture: BooksFixture, faults: FixtureFault[] = []
     vendors: async () => read('vendors', fixture.vendors),
     bills: async (since) => read('bills', dated(fixture.bills, since)),
     expenses: async (since) => read('expenses', dated(fixture.expenses, since)),
+    // As QuickBooks does it: numbers ignore case, and a vendor's bills are dated on or after.
+    billsLike: async ({ numbers, vendorIds, since }) => {
+      fail('bills');
+      const wanted = new Set(numbers.map((n) => n.toLowerCase()));
+      return fixture.bills.filter((b) => (b.number !== null && wanted.has(b.number.toLowerCase()))
+        || (b.vendorId !== null && vendorIds.includes(b.vendorId) && b.date !== null && b.date >= since));
+    },
   };
 }
 

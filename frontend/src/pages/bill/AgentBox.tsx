@@ -93,6 +93,12 @@ function threadOf(detail: BillDetail, chat: CompanionChat | undefined, viewer: F
           body: capitalise(reason.replace(new RegExp(`^${e.byName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} confirmed\\s+`), '')),
           sub: 'Settled',
         });
+      } else if (e.rule === 'in_books' && reason) {
+        out.push({
+          id: e.id, at, who: face(e.byName),
+          body: <Figures text={capitalise(reason.replace(new RegExp(`^${e.byName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} said\\s+`), ''))} />,
+          sub: 'Settled',
+        });
       }
     } else if (e.kind === 'field_changed' && e.field === 'total' && e.byName && e.byName !== 'Decimal' && figuresRaised) {
       const m = /changed from (.*) to (.*)$/.exec(e.text);
@@ -545,6 +551,20 @@ export function AgentBox({
       }
       return;
     }
+    if (pill.action === 'different_bill') {
+      if (!pill.targetId) return;
+      setBusy(true);
+      try {
+        await billsApi.answerInBooks(organizationId, billId, pill.targetId, false);
+        toaster.show('Kept as two bills. This one posts to QuickBooks as its own once it’s approved.');
+        await refresh();
+      } catch (e) {
+        toaster.show(e instanceof Error ? e.message : 'That didn’t go through. Try again.');
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     const open = card?.kind === 'finding' && card.flagKind === flag.kind && card.action === pill.action;
     setCard(open ? null : { kind: 'finding', flagKind: flag.kind, action: pill.action, targetId: pill.targetId });
   };
@@ -572,6 +592,14 @@ export function AgentBox({
         if (!card.targetId) throw new Error('That vendor is no longer on file.');
         await billsApi.resolveSimilarVendor(organizationId, billId, card.targetId, true);
         toaster.show('Moved onto the vendor you already pay. The next bill under that name will match.');
+      } else if (card.action === 'same_bill') {
+        if (!card.targetId) throw new Error('That bill is no longer in QuickBooks.');
+        // Approved and held for this answer, it links now; in review, at approval.
+        const { posting, linked } = await billsApi.answerInBooks(organizationId, billId, card.targetId, true);
+        toaster.show(posting === null || posting === 'skipped' ? 'Noted. Decimal links to that bill instead of posting this one to QuickBooks.'
+          : !linked && posting === 'synced' ? 'That bill has gone from QuickBooks since, so Decimal posted this one.'
+          : posting === 'synced' ? 'Linked to the bill already in QuickBooks.'
+          : 'QuickBooks has a problem with it. The bill says what.');
       }
       setCard(null);
       await refresh();
