@@ -70,7 +70,7 @@ test-one: ## run one API test file against the test database: make test-one FILE
 	test -n "$(FILE)" || { echo "usage: make test-one FILE=tests/<name>.test.ts"; exit 1; } && \
 	export DATABASE_URL="$(PG)/$(TEST_DB)?schema=public" && \
 	$(MAKE) sync-postgres-schema DB=$(TEST_DB) && \
-	(cd api && npm run prisma:generate >/dev/null && NODE_ENV=test INBOUND_EMAIL_DOMAIN=bills.decimal.test RESEND_INBOUND_WEBHOOK_SECRET="whsec_$$(printf 'decimal-test-only-not-a-secret' | base64)" npx tsx --test --test-concurrency=1 $(if $(NAME),--test-name-pattern="$(NAME)") $(FILE))
+	(cd api && npm run prisma:generate >/dev/null && NODE_ENV=test OPENAI_API_KEY= ANTHROPIC_API_KEY= INBOUND_EMAIL_DOMAIN=bills.decimal.test RESEND_INBOUND_WEBHOOK_SECRET="whsec_$$(printf 'decimal-test-only-not-a-secret' | base64)" npx tsx --test --test-concurrency=1 $(if $(NAME),--test-name-pattern="$(NAME)") $(FILE))
 
 reset: ## wipe local dev data (schema stays)
 	set -euo pipefail && ./scripts/db-reset.sh $(DEV_DB) $(BENCH_DB)

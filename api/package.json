@@ -7,9 +7,10 @@
     "dev": "prisma generate && tsx watch src/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prisma:generate": "prisma generate",
-    "test": "NODE_ENV=test INBOUND_EMAIL_DOMAIN=bills.decimal.test RESEND_INBOUND_WEBHOOK_SECRET=\"whsec_$(printf 'decimal-test-only-not-a-secret' | base64)\" tsx --test --test-concurrency=1 tests/**/*.test.ts"
+    "test": "NODE_ENV=test OPENAI_API_KEY= ANTHROPIC_API_KEY= INBOUND_EMAIL_DOMAIN=bills.decimal.test RESEND_INBOUND_WEBHOOK_SECRET=\"whsec_$(printf 'decimal-test-only-not-a-secret' | base64)\" tsx --test --test-concurrency=1 tests/**/*.test.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0",
     "@prisma/client": "^6.0.0",
     "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.98.4",

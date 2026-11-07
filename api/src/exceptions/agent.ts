@@ -12,11 +12,15 @@
 //   - Tokens and turns are counted, because "is the agent worth running on every
 //     flagged bill" is a question about cost as much as accuracy.
 //
-// Tests never reach OpenAI: `setExceptionAgentRuntimeForTests` swaps the model
+// The loop runs on Claude when ANTHROPIC_API_KEY is set (claude.ts turns this shape
+// into a Messages API request and back), and on OpenAI otherwise.
+//
+// Tests never reach a model: `setExceptionAgentRuntimeForTests` swaps the model
 // call for a scripted one, the same seam intake uses for extraction.
 import { config } from '../config.js';
 import { logger } from '../infra/logger.js';
 import { chatCompletionBody } from '../infra/openai-params.js';
+import { callClaude } from './claude.js';
 
 export type ChatMessage = {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -92,9 +96,10 @@ export const callOpenAi: ModelCall = async ({ model, messages, tools, signal, ma
 };
 
 type ExceptionAgentRuntime = { callModel: ModelCall; isConfigured: () => boolean };
+const onClaude = () => Boolean(config.anthropicApiKey);
 const defaultRuntime: ExceptionAgentRuntime = {
-  callModel: callOpenAi,
-  isConfigured: () => Boolean(config.openAiApiKey),
+  callModel: (request) => (onClaude() ? callClaude(request) : callOpenAi(request)),
+  isConfigured: () => onClaude() || Boolean(config.openAiApiKey),
 };
 let runtime: ExceptionAgentRuntime = defaultRuntime;
 
@@ -109,7 +114,7 @@ export function isExceptionAgentConfigured(): boolean {
 }
 
 export function exceptionAgentModel(): string {
-  return config.openAiAgentModel || config.openAiModel;
+  return onClaude() ? config.anthropicAgentModel : config.openAiAgentModel || config.openAiModel;
 }
 
 export async function runAgent(args: {

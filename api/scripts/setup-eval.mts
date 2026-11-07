@@ -29,12 +29,18 @@ if (!/\/usdc_eval_test(\?|$)/.test(process.env.DATABASE_URL ?? '')) {
   console.error('Refusing to run: DATABASE_URL must point at usdc_eval_test.');
   process.exit(2);
 }
-if (!process.env.OPENAI_API_KEY) { console.error('OPENAI_API_KEY is not set.'); process.exit(2); }
+if (!process.env.OPENAI_API_KEY && !process.env.ANTHROPIC_API_KEY) { console.error('Neither ANTHROPIC_API_KEY nor OPENAI_API_KEY is set.'); process.exit(2); }
 
 const { prisma } = await import('../src/infra/prisma.js');
 const { config } = await import('../src/config.js');
 const { chatCompletionBody } = await import('../src/infra/openai-params.js');
 const { callOpenAi, exceptionAgentModel, setExceptionAgentRuntimeForTests } = await import('../src/exceptions/agent.js');
+const { callClaude } = await import('../src/exceptions/claude.js');
+const { default: Anthropic } = await import('@anthropic-ai/sdk');
+/** The agent, the person and the judge all run on Claude when its key is set, as the product does. */
+const onClaude = Boolean(config.anthropicApiKey);
+const agentCall = onClaude ? callClaude : callOpenAi;
+let claude: InstanceType<typeof Anthropic> | null = null;
 const { setConnectorForTests } = await import('../src/integrations/connectors.js');
 const { fixtureReader, failure } = await import('../src/integrations/fixture-reader.js');
 const { wake } = await import('../src/integrations/setup/harness.js');
@@ -311,7 +317,7 @@ setExceptionAgentRuntimeForTests({
   callModel: async (request) => {
     for (let attempt = 1; ; attempt += 1) {
       try {
-        const reply = await callOpenAi(request);
+        const reply = await agentCall(request);
         use.promptTokens += reply.usage.promptTokens;
         use.completionTokens += reply.usage.completionTokens;
         use.calls += 1;
@@ -325,7 +331,7 @@ setExceptionAgentRuntimeForTests({
         }
         return reply;
       } catch (error) {
-        if (attempt >= 4 || !String(error).includes('OpenAI 429')) throw error;
+        if (attempt >= 4 || !/(OpenAI|Anthropic) (429|529)\b/.test(String(error))) throw error;
         await new Promise((r) => { setTimeout(r, 5000 * attempt); });
       }
     }
@@ -335,6 +341,21 @@ setExceptionAgentRuntimeForTests({
 const textModel = exceptionAgentModel();
 
 async function structured<T>(system: string, user: string, schema: Record<string, unknown>, effort: 'low' | 'medium' = 'low'): Promise<T> {
+  if (onClaude) {
+    claude ??= new Anthropic({ apiKey: config.anthropicApiKey });
+    const reply = await claude.messages.create({
+      model: textModel,
+      max_tokens: 16_000,
+      system,
+      messages: [{ role: 'user', content: user }],
+      output_config: { effort, format: { type: 'json_schema', schema } },
+    });
+    use.promptTokens += reply.usage.input_tokens + (reply.usage.cache_read_input_tokens ?? 0) + (reply.usage.cache_creation_input_tokens ?? 0);
+    use.completionTokens += reply.usage.output_tokens;
+    use.calls += 1;
+    if (reply.stop_reason === 'refusal' || reply.stop_reason === 'max_tokens') throw new Error(`Claude stopped: ${reply.stop_reason}`);
+    return JSON.parse(reply.content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('') || '{}') as T;
+  }
   const body = await openAi(chatCompletionBody({
     model: textModel,
     messages: [{ role: 'system', content: system }, { role: 'user', content: user }],

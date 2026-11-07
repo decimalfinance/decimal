@@ -102,6 +102,13 @@ type DecimalConfig = {
    * extraction model is good enough at it. Empty falls back to openAiModel.
    */
   openAiAgentModel: string;
+  /**
+   * Claude for the agent loop: the exception agent, the integration setup and the
+   * companion chat. With the key set the loop runs on Claude, and without it on OpenAI.
+   * Extraction and the other single calls stay on OpenAI either way.
+   */
+  anthropicApiKey: string;
+  anthropicAgentModel: string;
   squadsProgramId: string;
   squadsDefaultVaultIndex: number;
   squadsDefaultTimelockSeconds: number;
@@ -196,6 +203,8 @@ function buildConfig(): DecimalConfig {
     openAiModel: (process.env.OPENAI_MODEL ?? fileConfig.openAiModel ?? 'gpt-6-luna').trim(),
     openAiTextModel: (process.env.OPENAI_TEXT_MODEL ?? '').trim(),
     openAiAgentModel: (process.env.OPENAI_AGENT_MODEL ?? '').trim(),
+    anthropicApiKey: (process.env.ANTHROPIC_API_KEY ?? '').trim(),
+    anthropicAgentModel: (process.env.ANTHROPIC_AGENT_MODEL ?? '').trim() || 'claude-opus-5-5',
     squadsProgramId:
       (process.env.SQUADS_V4_PROGRAM_ID ?? fileConfig.squadsProgramId ?? 'SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf').trim(),
     squadsDefaultVaultIndex: Number(process.env.SQUADS_DEFAULT_VAULT_INDEX ?? fileConfig.squadsDefaultVaultIndex ?? 0),
