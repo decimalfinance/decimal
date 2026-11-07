@@ -18,6 +18,11 @@ const SECOND_WAY_MIN_LINES = 2;
 const SECOND_WAY_MIN_SHARE = 0.2;
 const MAX_LISTED = 20;
 const MAX_LEARNED = 5_000;
+/** Ways of writing one kind of line kept while reading, and how many go with the newest. A monthly line has a wording a month. */
+const MAX_WORDINGS = 12;
+const MAX_ALSO_WRITTEN = 3;
+/** One wording, whatever its case and punctuation: "OCEAN FREIGHT." is how "Ocean freight" was typed once. */
+const wordingKey = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
 export type LookalikeVendors = {
   why: LookalikeReason;
@@ -29,15 +34,23 @@ export type LookalikeVendors = {
   shared: string[];
   /** Each has an account number with them, and they differ: two accounts, so maybe two businesses. */
   differentAccounts: boolean;
+  /**
+   * They read as one business entered more than once: each joins the rest by a name, or a close
+   * spelling of one, and a contact detail in common, or by the same name and nothing that differs,
+   * and no two account numbers differ. Otherwise it could be two businesses, and only the person knows.
+   */
+  oneBusiness: boolean;
 };
 
 export type CodedTwoWays = {
   vendorId: string;
   vendorName: string;
-  /** The kind of line, as code compares it, or null when its lines have no words and the vendor as a whole is what varies. */
+  /** The kind of line, as code compares it. Lines with no words are never one: Decimal can't fill them in, so an answer about them would change nothing. */
   line: string | null;
   /** The newest such line, as it was written. */
   example: string | null;
+  /** Other ways it was written, newest first, when there are some: "Electric - Depot 3" also stands for Depots 1 and 2. */
+  alsoWritten?: string[];
   accounts: Array<{ id: string; name: string; lines: number; firstUsed: string | null; lastUsed: string | null }>;
 };
 
@@ -47,6 +60,7 @@ export type MovedLine = {
   vendorName: string;
   line: string | null;
   example: string | null;
+  alsoWritten?: string[];
   from: { id: string; name: string };
   to: { id: string; name: string };
   on: string;
@@ -88,7 +102,7 @@ export type Findings = {
   codedTwoWays: CodedTwoWays[];
   movedLines: MovedLine[];
   /** Vendor and line pairs that are repeated and consistent: what Decimal can fill in from day one. */
-  learned: { pairs: number; lines: number; sample: Array<{ vendorId: string; vendorName: string; line: string | null; example: string | null; categoryId: string; accountName: string; lines: number }> };
+  learned: { pairs: number; lines: number; sample: Array<{ vendorId: string; vendorName: string; line: string | null; example: string | null; alsoWritten?: string[]; categoryId: string; accountName: string; lines: number }> };
   /** All of them. Too long to show the model; a finished setup hands them to bill coding. */
   learnedLines: LearnedLine[];
   leftOut: LeftOut[];
@@ -161,7 +175,7 @@ function sharedDetails(vendors: BooksVendor[]): string[] {
   };
   return [
     ...(inCommon((v) => cleanName(v.name)) ? ['name'] : []),
-    ...(inCommon((v) => v.email?.toLowerCase()) ? ['email'] : []),
+    ...(inCommon((v) => v.email?.toLowerCase()) ? ['email'] : inCommon((v) => emailDomain(v.email)) ? ['email domain'] : []),
     ...(inCommon((v) => phoneKey(v.phone)) ? ['phone'] : []),
     ...(inCommon((v) => addressKey(v.address)) ? ['address'] : []),
     ...(inCommon((v) => v.accountNumber) ? ['account number'] : []),
@@ -176,10 +190,70 @@ const phoneKey = (phone: string | null) => {
   const digits = phone?.replace(/\D/g, '') ?? '';
   return digits.length >= 7 ? digits.slice(-10) : null;
 };
-const addressKey = (address: string | null) => {
-  const words = address?.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean).join(' ') ?? '';
-  return words.length >= 8 ? words : null;
+/** How a street is written varies: "1630 Woodside Road" and "1630 WOODSIDE RD." are one place. */
+const STREET_WORDS: Record<string, string> = {
+  road: 'rd', street: 'st', avenue: 'ave', boulevard: 'blvd', drive: 'dr', lane: 'ln', court: 'ct', place: 'pl', parkway: 'pkwy',
+  highway: 'hwy', terrace: 'ter', circle: 'cir', square: 'sq', suite: 'ste', north: 'n', south: 's', east: 'e', west: 'w',
 };
+const addressKey = (address: string | null) => {
+  const words = (address?.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean) ?? []).map((w) => STREET_WORDS[w] ?? w);
+  // The country is often on one record and not the other.
+  const text = words.join(' ').replace(/ (usa|us|united states( of america)?)$/, '');
+  return text.length >= 8 ? text : null;
+};
+
+/** Free mailboxes: two vendors on gmail.com have nothing in common. */
+const PUBLIC_MAIL = new Set([
+  'gmail.com', 'googlemail.com', 'yahoo.com', 'ymail.com', 'hotmail.com', 'outlook.com', 'live.com', 'msn.com', 'aol.com', 'icloud.com', 'me.com', 'mac.com',
+  'proton.me', 'protonmail.com', 'gmx.com', 'mail.com', 'zoho.com', 'yandex.com', 'comcast.net', 'att.net', 'verizon.net', 'sbcglobal.net',
+]);
+/** A business's own domain: accounts@ and orders@ at one business are one business, so it is shared evidence. It never makes a group by itself. */
+const emailDomain = (email: string | null) => {
+  const domain = email?.trim().toLowerCase().split('@')[1];
+  return domain && domain.includes('.') && !PUBLIC_MAIL.has(domain) ? domain : null;
+};
+
+const contactKeys = [
+  (v: BooksVendor) => v.email?.trim().toLowerCase() || null,
+  (v: BooksVendor) => phoneKey(v.phone),
+  (v: BooksVendor) => addressKey(v.address),
+];
+/** A contact detail two vendors have in common. With a name in common, a business's own email domain counts. */
+const contactInCommon = (a: BooksVendor, b: BooksVendor) =>
+  [...contactKeys, (v: BooksVendor) => emailDomain(v.email)].some((key) => {
+    const k = key(a);
+    return k !== null && k === key(b);
+  });
+/** A contact detail both have, written down differently. */
+const detailsDiffer = (a: BooksVendor, b: BooksVendor) =>
+  contactKeys.some((key) => {
+    const [ka, kb] = [key(a), key(b)];
+    return ka !== null && kb !== null && ka !== kb;
+  });
+
+/**
+ * The same name, or a close spelling, with a phone, address or inbox in common is one business
+ * keyed twice. Contact details under different names can be an owner, an office or a bookkeeper
+ * two businesses share, and a name alone can be two branches: those are the person's to say.
+ */
+function oneBusiness(members: BooksVendor[]): boolean {
+  if (new Set(members.map((m) => m.accountNumber?.trim()).filter(Boolean)).size > 1) return false;
+  const names = new Map(members.map((m) => [m.id, cleanName(m.name)]));
+  const joins = (a: BooksVendor, b: BooksVendor) => {
+    const [na, nb] = [names.get(a.id)!, names.get(b.id)!];
+    if (na === nb) return contactInCommon(a, b) || !detailsDiffer(a, b);
+    return similarNames(na, nb) && contactInCommon(a, b);
+  };
+  // Each has to join the rest, though not every other: in a chain, the one in the middle carries it.
+  const joined = [members[0]!];
+  const waiting = members.slice(1);
+  for (let i = 0; i < joined.length; i += 1) {
+    for (let j = waiting.length - 1; j >= 0; j -= 1) {
+      if (joins(joined[i]!, waiting[j]!)) joined.push(...waiting.splice(j, 1));
+    }
+  }
+  return waiting.length === 0;
+}
 
 function findLookalikes(vendors: BooksVendor[], activity: Map<string, Activity>): LookalikeVendors[] {
   const parent = new Map(vendors.map((v) => [v.id, v.id]));
@@ -250,6 +324,7 @@ function findLookalikes(vendors: BooksVendor[], activity: Map<string, Activity>)
       })),
       shared: sharedDetails(members),
       differentAccounts: new Set(members.map((m) => m.accountNumber?.trim()).filter(Boolean)).size > 1,
+      oneBusiness: oneBusiness(members),
     }))
     .sort((a, b) => b.vendors.reduce((n, v) => n + v.bills + v.expenses, 0) - a.vendors.reduce((n, v) => n + v.bills + v.expenses, 0))
     .slice(0, MAX_LISTED);
@@ -290,18 +365,28 @@ export function computeFindings(input: StudyInput): Findings {
   }
 
   // Every coded line, on bills and expenses alike: both are how the team has categorised this vendor.
-  type Pair = { vendorId: string; line: string | null; example: string | null; number: string | null; newest: string | null; ways: Map<string, Way> };
+  type Pair = {
+    vendorId: string; line: string | null; example: string | null; number: string | null; newest: string | null; ways: Map<string, Way>;
+    /** Each way it was written, case and punctuation aside, with the newest text and date. */
+    wordings: Map<string, { text: string; date: string | null }>;
+  };
   const pairs = new Map<string, Pair>();
   const billLines = new Map<string, number>();
   const note = (vendorId: string | null, date: string | null, number: string | null, line: { kind: string; accountId: string | null; description: string | null }) => {
     if (!vendorId || line.kind !== 'account' || !line.accountId) return;
     const words = lineKey(line.description ?? '') || null;
     const key = `${vendorId}\u0000${words ?? ''}`;
-    const pair: Pair = pairs.get(key) ?? { vendorId, line: words, example: null, number: null, newest: null, ways: new Map<string, Way>() };
+    const pair: Pair = pairs.get(key) ?? { vendorId, line: words, example: null, number: null, newest: null, ways: new Map<string, Way>(), wordings: new Map() };
     if (!pair.newest || (date && date >= pair.newest)) {
       pair.newest = date;
       pair.example = line.description?.trim() || pair.example;
       pair.number = number ?? pair.number;
+    }
+    const text = line.description?.trim();
+    if (text) {
+      const had = pair.wordings.get(wordingKey(text));
+      const newer = had ? !had.date || (date !== null && date >= had.date) : pair.wordings.size < MAX_WORDINGS;
+      if (newer) pair.wordings.set(wordingKey(text), { text, date });
     }
     const way = pair.ways.get(line.accountId) ?? { lines: 0, firstUsed: null, lastUsed: null };
     way.lines += 1;
@@ -321,6 +406,18 @@ export function computeFindings(input: StudyInput): Findings {
     for (const l of e.lines) note(e.payeeId, e.date, e.number, l);
   }
 
+  // One wording can't stand for a kind of line written several ways: 46 lines of "Electric - Depot 3"
+  // would be wrong when the depots were 1, 2 and 3. So the others go with it.
+  const alsoWritten = (pair: Pair) => {
+    const shown = pair.example ? wordingKey(pair.example) : null;
+    const others = [...pair.wordings.entries()]
+      .filter(([key]) => key !== shown)
+      .sort((a, b) => (b[1].date ?? '').localeCompare(a[1].date ?? ''))
+      .slice(0, MAX_ALSO_WRITTEN)
+      .map(([, w]) => w.text);
+    return others.length > 0 ? { alsoWritten: others } : {};
+  };
+
   const activeAccount = new Set(accounts.records.filter((a) => a.active).map((a) => a.id));
   const codedTwoWays: CodedTwoWays[] = [];
   const movedLines: MovedLine[] = [];
@@ -334,12 +431,13 @@ export function computeFindings(input: StudyInput): Findings {
     const top = ways[0]!;
     const second = ways[1];
     // They moved on, and however few lines the newer way has, it is what they do now. A person still checks it on every bill.
-    const moved = second && second[1].lines >= SECOND_WAY_MIN_LINES ? switchBetween(ways) : null;
+    // A line with no words is neither moved nor coded two ways: Decimal can't fill it in, so there is nothing to say or ask about it.
+    const moved = pair.line && second && second[1].lines >= SECOND_WAY_MIN_LINES ? switchBetween(ways) : null;
     if (moved) {
       const to = pair.ways.get(moved.toId)!;
       const names = (id: string) => ({ id, name: accountName.get(id) ?? id });
       const named = { vendorId: pair.vendorId, vendorName: vendorName.get(pair.vendorId) ?? pair.vendorId, line: pair.line, example: pair.example };
-      movedLines.push({ ...named, from: names(moved.fromId), to: names(moved.toId), on: moved.on, lines: total });
+      movedLines.push({ ...named, ...alsoWritten(pair), from: names(moved.fromId), to: names(moved.toId), on: moved.on, lines: total });
       if (pair.line && pair.example && activeAccount.has(moved.toId)) {
         learnedLines.push({ ...named, line: pair.line, example: pair.example, categoryId: moved.toId, categoryName: names(moved.toId).name, lines: to.lines, lastUsed: to.lastUsed, number: pair.number });
       }
@@ -348,7 +446,7 @@ export function computeFindings(input: StudyInput): Findings {
     if (total >= LEARNED_MIN_LINES && top[1].lines / total >= LEARNED_MIN_SHARE) {
       learnedPairs += 1;
       learnedLineCount += total;
-      learnedSample.push({ vendorId: pair.vendorId, vendorName: vendorName.get(pair.vendorId) ?? pair.vendorId, line: pair.line, example: pair.example, categoryId: top[0], accountName: accountName.get(top[0]) ?? top[0], lines: top[1].lines });
+      learnedSample.push({ vendorId: pair.vendorId, vendorName: vendorName.get(pair.vendorId) ?? pair.vendorId, line: pair.line, example: pair.example, ...alsoWritten(pair), categoryId: top[0], accountName: accountName.get(top[0]) ?? top[0], lines: top[1].lines });
       if (pair.line && pair.example && activeAccount.has(top[0])) {
         learnedLines.push({
           vendorId: pair.vendorId,
@@ -363,12 +461,13 @@ export function computeFindings(input: StudyInput): Findings {
         });
       }
     }
-    if (second && second[1].lines >= SECOND_WAY_MIN_LINES && second[1].lines / total >= SECOND_WAY_MIN_SHARE) {
+    if (pair.line && second && second[1].lines >= SECOND_WAY_MIN_LINES && second[1].lines / total >= SECOND_WAY_MIN_SHARE) {
       codedTwoWays.push({
         vendorId: pair.vendorId,
         vendorName: vendorName.get(pair.vendorId) ?? pair.vendorId,
         line: pair.line,
         example: pair.example,
+        ...alsoWritten(pair),
         accounts: ways.map(([id, w]) => ({ id, name: accountName.get(id) ?? id, lines: w.lines, firstUsed: w.firstUsed, lastUsed: w.lastUsed })),
       });
     }

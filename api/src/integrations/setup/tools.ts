@@ -222,7 +222,7 @@ export async function listFor(kind: unknown, setupId: string): Promise<string> {
   const count = (n: number, what: string) => `${n} ${what}${n === 1 ? '' : 's'}`;
   if (kind === 'coded_two_ways') {
     return stillOpen((findings?.codedTwoWays ?? []).filter((c) => isCited(c.vendorId)), (c) => Boolean(settled.choices?.some((s) => s.vendorId === c.vendorId && s.line === c.line)))
-      .map((c) => `- ${c.vendorName}, "${c.example ?? 'its lines'}": ${c.accounts.map((a) => `${a.name} (${count(a.lines, 'line')})`).join(' or ')}`)
+      .map((c) => `- ${c.vendorName}, ${c.example ? `"${c.example}"${c.alsoWritten?.length ? ` (also "${c.alsoWritten.join('", "')}")` : ''}` : 'its lines'}: ${c.accounts.map((a) => `${a.name} (${count(a.lines, 'line')})`).join(' or ')}`)
       .join('\n');
   }
   const askedOf = (g: { vendors: Array<{ id: string }> }) => g.vendors.filter((v) => isCited(v.id));
@@ -332,6 +332,9 @@ async function answerValue(call: { kind: string; value: unknown }, value: Record
   return null;
 }
 
+/** A line as it was written. Its key ("laptop plan support") is how code compares lines, and the model quoted it to people. */
+const asWritten = <T extends { line: string | null; example: string | null }>({ line, example, ...rest }: T) => ({ ...rest, line: example ?? line });
+
 /** Findings as the model sees them: everything it might cite carries the ref to cite it by. */
 function findingsWithRefs({ learnedLines: _forCoding, shortfalls, leftOut, decimal: { approvedBeforeConnecting: approved, ...decimal }, ...findings }: StudyFindings, seen: Set<string>) {
   const ref = (kind: Parameters<typeof refOf>[0], id: string) => {
@@ -350,16 +353,16 @@ function findingsWithRefs({ learnedLines: _forCoding, shortfalls, leftOut, decim
     busiestVendors: findings.busiestVendors.map((v) => ({ ...v, ref: ref('vendor', v.id) })),
     lookalikeVendors: findings.lookalikeVendors.map((g) => ({ ...g, vendors: g.vendors.map((v) => ({ ...v, ref: ref('vendor', v.id) })) })),
     codedTwoWays: findings.codedTwoWays.map((c) => ({
-      ...c,
+      ...asWritten(c),
       ref: ref('vendor', c.vendorId),
       accounts: c.accounts.map((a) => ({ ...a, ref: ref('category', a.id) })),
     })),
     ...(findings.counts.bills + findings.counts.expenses === 0 ? { noHistory: true } : {}),
     ...(findings.counts.bills === 0 && findings.counts.expenses > 0 ? { expensesOnly: true } : {}),
-    ...(findings.movedLines.length > 0 ? { movedLines: findings.movedLines.map((m) => ({ ...m, refs: [ref('vendor', m.vendorId), ref('category', m.from.id), ref('category', m.to.id)] })) } : {}),
+    ...(findings.movedLines.length > 0 ? { movedLines: findings.movedLines.map((m) => ({ ...asWritten(m), refs: [ref('vendor', m.vendorId), ref('category', m.from.id), ref('category', m.to.id)] })) } : {}),
     learned: {
       ...findings.learned,
-      sample: findings.learned.sample.map((s) => ({ ...s, refs: [ref('vendor', s.vendorId), ref('category', s.categoryId)] })),
+      sample: findings.learned.sample.map((s) => ({ ...asWritten(s), refs: [ref('vendor', s.vendorId), ref('category', s.categoryId)] })),
     },
     // What isn't there isn't shown, so it doesn't get brought up.
     ...(leftOut.length > 0 ? { leftOut: leftOut.map((c) => ({ ...c, sampleRefs: c.sampleBillIds.map((id) => ref('bill', id)) })) } : {}),

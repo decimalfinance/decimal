@@ -756,7 +756,8 @@ test('setup tools: a person says which category in their own words, and the line
   await say(w, setupId, 'Go on');
   const findings = read.seen.results.find((r) => r.tool === 'get_findings')!.output;
   assert.equal(findings.learnedLines, undefined, 'the whole list goes to coding, not to the model');
-  assert.equal(findings.codedTwoWays[0].example, 'Ocean freight');
+  assert.equal(findings.codedTwoWays[0].line, 'Ocean freight', 'a line as it was written, never the key code compares lines by');
+  assert.equal(findings.codedTwoWays[0].example, undefined);
 
   const written = script([{ calls: [{ tool: 'record_answer', args: { key: 'coded', answer: 'Freight', value: { choices: [{ vendor: 'Delta Freight, Inc.', line: 'OCEAN freight', category: 'Freight' }] } } }], say: 'Noted.' }]);
   await say(w, setupId, 'Freight');
@@ -1209,7 +1210,8 @@ test('setup tools: a line the team moved is learned, not asked, and a person who
   await say(w, setupId, 'What did you find?');
   const findings = read.resultOf('get_findings');
   assert.deepEqual(findings.movedLines.map((m: { from: { name: string }; to: { name: string } }) => [m.from.name, m.to.name]), [['Freight', 'Travel']]);
-  assert.ok(!findings.codedTwoWays.some((c: { line: string }) => c.line === 'fees port'), 'not a question');
+  assert.equal(findings.movedLines[0].line, 'Port fees', 'as it was written, so a claim quotes the words on the bill');
+  assert.ok(!findings.codedTwoWays.some((c: { line: string }) => c.line === 'Port fees'), 'not a question');
 
   const offered = script([{ calls: [call('alike', ['vendor:1', 'vendor:2'], 'lookalike_vendors'), { tool: 'record_answer', args: { key: 'alike', answer: 'Apart', value: { same: [] } } }, { tool: 'offer_go' }], say: 'Ready?' }]);
   await say(w, setupId, 'They are two businesses');

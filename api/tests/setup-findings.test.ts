@@ -212,10 +212,73 @@ test('findings: a look-alike group says what its vendors have in common, and sho
     vendor('4', 'Larkspur Tracking'),
   ]) });
   const byIds = (ids: string) => f.lookalikeVendors.find((g) => g.vendors.map((v) => v.id).sort().join(',') === ids);
-  assert.deepEqual(byIds('1,2')?.shared, ['name', 'phone']);
+  assert.deepEqual(byIds('1,2')?.shared, ['name', 'email domain', 'phone']);
   assert.equal(byIds('1,2')?.differentAccounts, false);
   assert.equal(byIds('1,2')?.vendors.find((v) => v.id === '1')?.email, 'a@harbor.test');
   assert.deepEqual(byIds('3,4')?.shared, [], 'only close spelling, and it says so by saying nothing');
+});
+
+test('findings: one business entered three times shows in its details, however they are written: an address, and a domain of its own', () => {
+  const f = study({ vendors: read([
+    vendor('1', "Tania's Nursery", { email: 'plantqueen@taniasnursery.test', phone: '(886) 554-2265', address: '1111 Elm St., Middlefield, CA, 94482, USA' }),
+    vendor('2', 'Tanias Nursery', { phone: '(650) 555-0142', address: '1630 Woodside Road, Redwood City, CA, 94061, USA' }),
+    vendor('3', "TANIA'S NURSERY INC", { email: 'accounts@taniasnursery.test', address: '1630 WOODSIDE RD., Redwood City, CA, 94061' }),
+    vendor('4', 'Garden Help', { email: 'garden.help@gmail.com' }),
+    vendor('5', 'Garden Help LLC', { email: 'gardenhelp.ap@gmail.com' }),
+  ]) });
+  const byIds = (ids: string) => f.lookalikeVendors.find((g) => g.vendors.map((v) => v.id).sort().join(',') === ids);
+  assert.deepEqual(byIds('1,2,3')?.shared, ['name', 'email domain', 'address'], 'Road and Rd., with the country or without, are one address');
+  assert.equal(byIds('1,2,3')?.oneBusiness, true, 'the INC record shares the domain with one and the address with the other');
+  assert.deepEqual(byIds('4,5')?.shared, ['name'], 'everyone has gmail');
+  assert.equal(byIds('4,5')?.oneBusiness, false, 'a name, and two inboxes that differ');
+});
+
+test('findings: a group reads as one business only on a name and a contact detail together, and never across two account numbers', () => {
+  const oneBusiness = (...vendors: BooksVendor[]) => {
+    const groups = study({ vendors: read(vendors) }).lookalikeVendors;
+    assert.equal(groups.length, 1, vendors.map((v) => v.name).join(' / '));
+    return groups[0]!.oneBusiness;
+  };
+  const phone = '(615) 555-0134';
+  assert.equal(oneBusiness(vendor('1', 'Sterling Office Supply, Inc.', { phone }), vendor('2', 'STERLING OFFICE SUPPLY', { phone })), true, 'a name and a phone');
+  assert.equal(oneBusiness(vendor('1', 'Midlnad Diesel Service', { phone }), vendor('2', 'Midland Diesel Service', { phone })), true, 'a typo and a phone');
+  assert.equal(oneBusiness(vendor('1', 'Delta Freight'), vendor('2', 'DELTA FREIGHT LLC', { phone })), true, 'a name and nothing that differs');
+  assert.equal(oneBusiness(vendor('1', 'Ridgeline', { phone, accountNumber: 'RT-1180' }), vendor('2', 'Ridgeline LLC', { phone, accountNumber: 'RTA-2290' })), false, 'two accounts could be two businesses');
+  assert.equal(oneBusiness(vendor('1', 'RJ Hauling', { email: 'billing@sunrisebooks.test' }), vendor('2', 'M&M Transport', { email: 'billing@sunrisebooks.test' })), false, 'a bookkeeper they share');
+  assert.equal(oneBusiness(vendor('1', 'MJ Mobile Repair', { phone }), vendor('2', 'Mark Johnson', { phone })), false, 'a phone under two names is theirs to say');
+  assert.equal(oneBusiness(vendor('1', 'Harbor Fuel', { phone }), vendor('2', 'Harbor Fuel', { phone: '(212) 555-0199' })), false, 'one name and two phones could be two branches');
+  assert.equal(oneBusiness(vendor('1', 'Northwind Traders', { phone }), vendor('2', 'Northwnd Traders', { phone: '(212) 555-0199' })), false, 'a close spelling alone proves nothing');
+});
+
+test('findings: a kind of line written several ways carries the other wordings, newest first, and a change of case is not one', () => {
+  const f = study({
+    vendors: read([vendor('1', 'Gridline Power'), vendor('2', 'Delta')]),
+    bills: read([
+      ...['01', '02'].map((m) => bill('1', [line('7', 1n, 'Electric - Depot 1')], { date: `2026-${m}-01` })),
+      ...['03', '04'].map((m) => bill('1', [line('7', 1n, 'Electric - Depot 2')], { date: `2026-${m}-01` })),
+      ...['05', '06'].map((m) => bill('1', [line('7', 1n, 'Electric - Depot 3')], { date: `2026-${m}-01` })),
+      bill('1', [line('7', 1n, 'ELECTRIC - DEPOT 3.')], { date: '2026-07-01' }),
+      ...['01', '02', '03'].map((m) => bill('2', [line('7', 1n, 'Ocean freight')], { date: `2026-${m}-01` })),
+      bill('2', [line('7', 1n, 'OCEAN FREIGHT.')], { date: '2026-04-01' }),
+    ]),
+  });
+  const sample = (vendorId: string) => f.learned.sample.find((s) => s.vendorId === vendorId);
+  assert.equal(sample('1')?.example, 'ELECTRIC - DEPOT 3.');
+  assert.deepEqual(sample('1')?.alsoWritten, ['Electric - Depot 2', 'Electric - Depot 1'], 'seven lines, three depots');
+  assert.equal(sample('2')?.alsoWritten, undefined, 'one wording, however it was typed');
+});
+
+test('findings: lines with no words are never asked about or said to have moved, because nothing can fill them in', () => {
+  const f = study({
+    vendors: read([vendor('1', 'Delta'), vendor('2', 'Steady'), vendor('3', 'Control')]),
+    bills: read([
+      ...['7', '8', '7', '8'].map((c, i) => bill('1', [line(c, 1n, null)], { date: `2026-0${i + 1}-01` })),
+      ...['7', '7', '8', '8'].map((c, i) => bill('2', [line(c, 1n, ' ')], { date: `2026-0${i + 1}-01` })),
+      ...['7', '8', '7', '8'].map((c, i) => bill('3', [line(c, 1n, 'Ocean freight')], { date: `2026-0${i + 1}-01` })),
+    ]),
+  });
+  assert.deepEqual(f.codedTwoWays.map((c) => c.vendorName), ['Control'], 'the same mix with words is still a question');
+  assert.deepEqual(f.movedLines, []);
 });
 
 test('findings: two ways still mixed in time have not switched', () => {
