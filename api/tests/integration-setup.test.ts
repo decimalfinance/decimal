@@ -275,6 +275,7 @@ test('setup: three turns in a row without an answer and it stops, says so, and a
   const waiting = await view(world, setupId);
   assert.equal(waiting.status, 'open');
   assert.equal(waiting.running, true);
+  assert.deepEqual(waiting.retrying, { failed: 1, of: 3, cause: 'service' }, 'someone waiting can see it is being tried again, and why');
 
   for (let tick = 0; tick < 4; tick += 1) {
     await sweepSetups();
@@ -287,9 +288,10 @@ test('setup: three turns in a row without an answer and it stops, says so, and a
   assert.equal(stopped.status, 'stopped');
   assert.equal(stopped.stopReason, 'failures');
   assert.equal(stopped.running, false);
+  assert.equal(stopped.retrying, null);
   const words = stopped.messages.at(-1);
   assert.equal(words.role, 'assistant');
-  assert.match(words.text, /I've stopped rather than keep trying/);
+  assert.match(words.text, /The AI service I run on isn't answering, so I've stopped rather than keep trying/);
   assert.match(words.text, /nothing has changed in your QuickBooks/);
   assert.deepEqual((await receipt(world, setupId)).events.filter((e: { kind: string }) => e.kind === 'stopped').map((e: { payload: unknown }) => e.payload), [{ reason: 'failures' }]);
 
@@ -299,7 +301,31 @@ test('setup: three turns in a row without an answer and it stops, says so, and a
   const back = await view(world, setupId);
   assert.equal(back.status, 'open');
   assert.equal(back.stopReason, null);
+  assert.equal(back.retrying, null);
   assert.equal(back.messages.at(-1).text, 'Back again.');
+});
+
+test('setup: a model that can\'t manage an answer is told apart from a service that isn\'t answering', async () => {
+  const world = await makeOrg();
+  scriptModel(() => 'Hello.');
+  const setupId = await start(world);
+  setExceptionAgentRuntimeForTests({
+    // Prose, and never the tool that finishes a turn.
+    callModel: async () => ({ message: { role: 'assistant' as const, content: 'Let me think about that.' }, usage: { promptTokens: 1, completionTokens: 1 } }),
+    isConfigured: () => true,
+  });
+
+  await say(world, setupId, 'Carry on');
+  await drainBackgroundWork();
+  assert.deepEqual((await view(world, setupId)).retrying, { failed: 1, of: 3, cause: 'answer' });
+
+  for (let tick = 0; tick < 4; tick += 1) {
+    await sweepSetups();
+    await drainBackgroundWork();
+  }
+  const stopped = await view(world, setupId);
+  assert.equal(stopped.stopReason, 'failures');
+  assert.match(stopped.messages.at(-1).text, /^I keep failing to work this out, so I've stopped rather than keep trying/);
 });
 
 test('setup: at the token limit it stops before asking the model, says so, and takes no more messages', async () => {

@@ -31,7 +31,7 @@ export const SETUP_TOKEN_LIMIT = 6_000_000n;
 export const SETUP_TURN_LIMIT = 200;
 
 /** Turns in a row without an answer before it stops and says so. */
-const MAX_CONSECUTIVE_FAILURES = 3;
+export const MAX_CONSECUTIVE_FAILURES = 3;
 /** The same call failing the same way before the model is told to stop trying it. */
 const MAX_SAME_FAILURE = 3;
 /** The conversation the model sees. Decisions live on the record, not in here. */
@@ -79,12 +79,24 @@ const RESPOND_SCHEMA = {
 
 type StopReason = 'token_limit' | 'turn_limit' | 'failures';
 
+/**
+ * Whether a failed turn's error is the AI service not answering (an error status, no
+ * connection, out of time) rather than the model not managing an answer. They read the
+ * same on the record, and they mean different things to someone waiting.
+ */
+export function serviceFailed(error: string): boolean {
+  return /^(OpenAI|Anthropic) (\d{3}|unreachable)\b/.test(error) || /timed out/.test(error);
+}
+
 /** What a stop says. Fixed words: at a limit the model may not be the one talking. */
-function stopWords(reason: StopReason, playbook: Playbook): string {
+function stopWords(reason: StopReason, playbook: Playbook, serviceDown: boolean): string {
   const safe = `Everything so far is saved, and nothing has changed in your ${playbook.label}.`;
-  return reason === 'failures'
-    ? `I keep failing to work this out, so I've stopped rather than keep trying. ${safe} Send me a message when you'd like me to try again.`
-    : `I've reached the limit on how much work one setup can use, so I've stopped here. ${safe} Someone at Decimal needs to raise the limit before I can carry on.`;
+  if (reason !== 'failures') {
+    return `I've reached the limit on how much work one setup can use, so I've stopped here. ${safe} Someone at Decimal needs to raise the limit before I can carry on.`;
+  }
+  return serviceDown
+    ? `The AI service I run on isn't answering, so I've stopped rather than keep trying. ${safe} Send me a message when you'd like me to try again.`
+    : `I keep failing to work this out, so I've stopped rather than keep trying. ${safe} Send me a message when you'd like me to try again.`;
 }
 
 /** Ask for a turn, in the background. Safe to call any number of times. */
@@ -360,14 +372,14 @@ async function failedTurn(setup: IntegrationSetup, playbook: Playbook, messageId
   if (run.stoppedBy === 'tokens') return stop(setup, 'token_limit', playbook, messageId);
   const failures = setup.consecutiveFailures + 1;
   logger.warn('integration_setup.turn_failed', { setupId: setup.setupId, failures, error: run.error });
-  if (failures >= MAX_CONSECUTIVE_FAILURES) return stop(setup, 'failures', playbook, messageId);
+  if (failures >= MAX_CONSECUTIVE_FAILURES) return stop(setup, 'failures', playbook, messageId, serviceFailed(run.error));
   // The pointer stays, so the same events get another turn when this one lets go.
   await prisma.integrationSetup.update({ where: { setupId: setup.setupId }, data: { consecutiveFailures: failures } });
 }
 
 /** At a limit: say so plainly, and leave the record ready to pick up from. */
-async function stop(setup: IntegrationSetup, reason: StopReason, playbook: Playbook, messageId: string): Promise<void> {
-  await prisma.integrationSetupMessage.update({ where: { messageId }, data: { status: 'done', text: stopWords(reason, playbook) } });
+async function stop(setup: IntegrationSetup, reason: StopReason, playbook: Playbook, messageId: string, serviceDown = false): Promise<void> {
+  await prisma.integrationSetupMessage.update({ where: { messageId }, data: { status: 'done', text: stopWords(reason, playbook, serviceDown) } });
   await prisma.integrationSetup.update({ where: { setupId: setup.setupId }, data: { status: 'stopped', stopReason: reason } });
   await appendEvent(setup.setupId, 'stopped', { reason });
   logger.warn('integration_setup.stopped', { setupId: setup.setupId, reason });

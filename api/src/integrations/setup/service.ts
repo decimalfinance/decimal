@@ -8,7 +8,7 @@ import { connectorFor } from '../connectors.js';
 import { deleteCopy, lookUp, type RecordKind } from '../copy.js';
 import { linesToDecide } from './findings.js';
 import { doneConditions, readyForGo, stillMissing } from './gates.js';
-import { wake } from './harness.js';
+import { MAX_CONSECUTIVE_FAILURES, serviceFailed, wake } from './harness.js';
 import type { SetupOutcome } from './outcome.js';
 import { playbookFor } from './playbooks.js';
 import { appendEvent, liveSetup, type SetupSystem } from './record.js';
@@ -221,11 +221,24 @@ export async function getReceipt(organizationId: string, setupId: string) {
   };
 }
 
+/**
+ * A turn that got no answer and waits to be tried again: how many tries failed, how many
+ * it gets before it stops, and whether the AI service didn't answer or the model didn't
+ * manage to. Without it, someone waiting sees "working" for as long as the retries take.
+ */
+async function retrying(setup: IntegrationSetup) {
+  if (setup.status !== 'open' || setup.consecutiveFailures === 0) return null;
+  const last = await prisma.integrationSetupEvent.findFirst({ where: { setupId: setup.setupId, kind: 'turn' }, orderBy: { seq: 'desc' }, select: { payload: true } });
+  const error = (last?.payload as { error?: unknown } | null)?.error;
+  return { failed: setup.consecutiveFailures, of: MAX_CONSECUTIVE_FAILURES, cause: typeof error === 'string' && serviceFailed(error) ? 'service' : 'answer' };
+}
+
 async function setupView(setup: IntegrationSetup) {
-  const [messages, calls, conditions] = await Promise.all([
+  const [messages, calls, conditions, retry] = await Promise.all([
     prisma.integrationSetupMessage.findMany({ where: { setupId: setup.setupId }, orderBy: { createdAt: 'asc' } }),
     prisma.integrationSetupCall.findMany({ where: { setupId: setup.setupId }, orderBy: { createdAt: 'asc' } }),
     doneConditions(setup),
+    retrying(setup),
   ]);
   return {
     setupId: setup.setupId,
@@ -233,6 +246,7 @@ async function setupView(setup: IntegrationSetup) {
     status: setup.status,
     stopReason: setup.stopReason,
     running: messages.some((m) => m.status === 'running'),
+    retrying: retry,
     company: { name: setup.companyName, confirmedAt: setup.companyConfirmedAt?.toISOString() ?? null },
     study: { status: setup.studyStatus, steps: setup.studySteps, error: setup.studyError },
     calls: calls.map((c) => ({

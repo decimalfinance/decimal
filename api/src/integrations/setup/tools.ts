@@ -449,6 +449,7 @@ export function setupTools(ctx: TurnContext): AgentTool[] {
       parameters: { type: 'object', properties: {} },
       run: async () => {
         if (!ctx.speaker) throw new Error('The person has said nothing this turn, so they have not confirmed anything. Ask them.');
+        await ctx.onThought({ text: 'Confirming the company' });
         const setup = await load(ctx.setupId);
         const reader = await connectorFor(setup.system).reader(setup.organizationId);
         if (!reader) throw new Error('Nobody is signed in. Offer sign-in first.');
@@ -572,6 +573,7 @@ export function setupTools(ctx: TurnContext): AgentTool[] {
         if (existing?.status === 'answered' && (existing.required || given.every((r) => had.includes(r as string)))) return { alreadyAnswered: existing.answer };
         if (existing?.required) return { alreadyOpen: existing.key, note: 'Its words are in the state. Just ask it in your message.' };
         const input = parsed(OPEN_CALL, existing ? { ...args, key: existing.key } : args);
+        await ctx.onThought({ text: 'Writing down a question to ask' });
         const setup = await load(ctx.setupId);
         assertStudied(setup);
         const refs = await realRefs(scopeOf(setup), input.refs, new Set([...ctx.seen, ...decimalRefs(setup.findings)]));
@@ -608,6 +610,7 @@ export function setupTools(ctx: TurnContext): AgentTool[] {
       run: async (args) => {
         if (!ctx.speaker) throw new Error('The person has said nothing this turn, so there is nothing to record.');
         const input = parsed(RECORD_ANSWER, args);
+        await ctx.onThought({ text: 'Saving the answer' });
         const setup = await load(ctx.setupId);
         const call = await prisma.integrationSetupCall.findUnique({ where: { setupId_key: { setupId: ctx.setupId, key: input.key } } });
         if (!call) throw new Error(`There is no call called ${input.key}.`);
@@ -657,6 +660,7 @@ export function setupTools(ctx: TurnContext): AgentTool[] {
         },
       },
       run: async (args) => {
+        await ctx.onThought({ text: 'Checking what Go still needs' });
         const setup = await load(ctx.setupId);
         const conditions = await doneConditions(setup);
         const [calls, told, earlier] = await Promise.all([
