@@ -233,6 +233,24 @@ test('findings: one business entered three times shows in its details, however t
   assert.equal(byIds('4,5')?.oneBusiness, false, 'a name, and two inboxes that differ');
 });
 
+test('findings: look-alikes that read as one business are listed first, so "the first one" means the same group in the message and the list', () => {
+  const phone = '(212) 555-0100';
+  const f = study({
+    vendors: read([
+      vendor('1', 'Blue Oak Logistics', { email: 'AP@blueoak.example' }),
+      vendor('2', 'BOL Shipping', { email: 'ap@blueoak.example' }),
+      vendor('3', 'Sterling Office Supply, Inc.', { phone }),
+      vendor('4', 'STERLING OFFICE SUPPLY', { phone }),
+    ]),
+    bills: read([bill('1', [line('7', 1n)]), bill('1', [line('7', 1n)]), bill('2', [line('7', 1n)]), bill('2', [line('7', 1n)]), bill('3', [line('7', 1n)])]),
+  });
+  assert.deepEqual(
+    f.lookalikeVendors.map((g) => [g.vendors.map((v) => v.id).sort(), g.oneBusiness]),
+    [[['3', '4'], true], [['1', '2'], false]],
+    'one business first, though the other is used more',
+  );
+});
+
 test('findings: a group reads as one business only on a name and a contact detail together, and never across two account numbers', () => {
   const oneBusiness = (...vendors: BooksVendor[]) => {
     const groups = study({ vendors: read(vendors) }).lookalikeVendors;

@@ -161,7 +161,7 @@ const SCENARIOS: Scenario[] = [
   {
     id: 'card-only',
     companies: ['card-only'],
-    behaviour: 'You cooperate. You pay everything by card and you say so if asked.',
+    behaviour: 'You cooperate, and you mean to finish the setup. You pay everything by card, and you say so only if asked.',
     expect: { go: true },
   },
   {

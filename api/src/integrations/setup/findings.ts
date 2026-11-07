@@ -327,7 +327,10 @@ function findLookalikes(vendors: BooksVendor[], activity: Map<string, Activity>)
       oneBusiness: oneBusiness(members),
     }))
     .sort((a, b) => b.vendors.reduce((n, v) => n + v.bills + v.expenses, 0) - a.vendors.reduce((n, v) => n + v.bills + v.expenses, 0))
-    .slice(0, MAX_LISTED);
+    .slice(0, MAX_LISTED)
+    // Those that read as one business go first, so "the first four are one business each, the rest are yours to say"
+    // is true of the list. With them scattered, the first four the agent meant were not the first four shown.
+    .sort((a, b) => Number(b.oneBusiness) - Number(a.oneBusiness));
 }
 
 const later = (a: string | null, b: string | null) => (!a ? b : !b ? a : a > b ? a : b);

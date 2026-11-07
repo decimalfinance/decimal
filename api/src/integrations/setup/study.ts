@@ -5,6 +5,7 @@
 
 import { Prisma, type IntegrationSetup } from '@prisma/client';
 import { approvedBillsNotInTheBooks, someoneElseCanApprove } from '../../approvals/store.js';
+import { isPrimaryAdminRole } from '../../auth/organization-access.js';
 import { listProtections } from '../../approvals/protections.js';
 import { errorToLogFields, logger } from '../../infra/logger.js';
 import { prisma } from '../../infra/prisma.js';
@@ -22,6 +23,8 @@ export type DecimalSide = {
   someoneElseCanApprove: boolean;
   /** No self-approval has been turned off, so they can approve their own. */
   selfApprovalOff: boolean;
+  /** The person setting this up is the primary admin, the only one who can turn No self-approval off. */
+  thePersonIsPrimaryAdmin: boolean;
   /** Bills approved in Decimal that never reached the books, and now never will by themselves. */
   approvedBeforeConnecting: { bills: number; sampleBillIds: string[] };
 };
@@ -33,13 +36,18 @@ export const historySince = (now = new Date()) =>
 
 /** Who can approve, as far as a setup needs to know. Asked fresh each time: a person can join mid-chat. */
 export async function approvalPicture(organizationId: string, userId: string | null) {
-  const [elseCan, protections] = await Promise.all([
+  const [elseCan, protections, membership] = await Promise.all([
     userId ? someoneElseCanApprove(organizationId, userId) : Promise.resolve(false),
     listProtections(organizationId),
+    userId
+      ? prisma.organizationMembership.findUnique({ where: { organizationId_userId: { organizationId, userId } }, select: { role: true, status: true } })
+      : Promise.resolve(null),
   ]);
   return {
     someoneElseCanApprove: elseCan,
     selfApprovalOff: protections.some((p) => p.code === 'R1' && p.relaxed && p.scopedPeople === null),
+    // Told only that the primary admin can turn it off, the model said "as the primary admin, you can" to someone it knew nothing about.
+    thePersonIsPrimaryAdmin: membership?.status === 'active' && isPrimaryAdminRole(membership.role),
   };
 }
 
