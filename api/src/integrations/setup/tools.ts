@@ -495,7 +495,8 @@ export function setupTools(ctx: TurnContext): AgentTool[] {
       run: async () => {
         const setup = await load(ctx.setupId);
         assertStudied(setup);
-        await ctx.onThought({ text: 'Going through their books' });
+        // A step is shown to the person, so it speaks to them: "their books" read as someone else's.
+        await ctx.onThought({ text: 'Going through what I found in your books' });
         return findingsWithRefs(setup.findings as StudyFindings, ctx.seen);
       },
     },
