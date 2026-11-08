@@ -37,9 +37,13 @@ function fakeQuickBooks(initial: Chart = CLOUD) {
     /** The vendor its own exact-name query finds. */
     named: null as Record<string, unknown> | null,
     closedThrough: null as string | null,
+    refuseAttachment: null as Error | null,
   };
   const asked: string[] = [];
-  const calls = { bills: [] as Array<{ body: any; requestId: string }>, payments: [] as Array<{ body: any; requestId: string }>, vendors: [] as any[] };
+  const calls = {
+    bills: [] as Array<{ body: any; requestId: string }>, payments: [] as Array<{ body: any; requestId: string }>, vendors: [] as any[],
+    attachments: [] as Array<{ on: { type: string; id: string }; file: { fileName: string; contentType: string; bytes: Buffer } }>,
+  };
   const qb: any = {
     query: async (q: string) => {
       asked.push(q);
@@ -55,6 +59,11 @@ function fakeQuickBooks(initial: Chart = CLOUD) {
       return { Bill: { Id: `B${calls.bills.length}` } };
     },
     createBillPayment: async (body: any, requestId: string) => { calls.payments.push({ body, requestId }); return { BillPayment: { Id: `P${calls.payments.length}` } }; },
+    uploadAttachment: async (on: { type: string; id: string }, file: { fileName: string; contentType: string; bytes: Buffer }) => {
+      if (state.refuseAttachment) throw state.refuseAttachment;
+      calls.attachments.push({ on, file });
+      return `A${calls.attachments.length}`;
+    },
     readEntity: async (_entity: string, id: string) => {
       const sent = calls.bills[Number(id.slice(1)) - 1]?.body;
       const total = (sent?.Line ?? []).reduce((n: number, l: { Amount: number }) => n + l.Amount, 0);
@@ -147,6 +156,37 @@ test('quickbooks: approving a bill posts it, with a line per confirmed category 
   assert.equal(await syncApprovedBill(w.bills.submitted), 'skipped');
   await sweepUnsyncedSettledOrders();
   assert.equal(calls.bills.length, 1, 'never a second bill');
+});
+
+test('quickbooks: the invoice goes on the bill it posted, once; a file QuickBooks refuses leaves the bill posted', async () => {
+  const w = await makeWorld();
+  const { calls, state } = fakeQuickBooks();
+  await connect(w.orgId);
+  await approve(w);
+
+  assert.equal(calls.attachments.length, 1, 'the invoice, on the bill');
+  const sent = calls.attachments[0]!;
+  assert.deepEqual(sent.on, { type: 'Bill', id: 'B1' });
+  const order = await prisma.paymentOrder.findUniqueOrThrow({ where: { paymentOrderId: w.bills.submitted }, include: { invoiceDocument: true } });
+  assert.equal(sent.file.fileName, order.invoiceDocument!.filename);
+  assert.equal(sent.file.contentType, 'application/pdf');
+  assert.ok(Buffer.from(order.invoiceDocument!.data).equals(sent.file.bytes), 'the file as it was uploaded');
+  assert.deepEqual((await syncOf(w.bills.submitted))?.metadataJson, { attachmentId: 'A1' });
+
+  assert.equal(await syncApprovedBill(w.bills.submitted), 'skipped');
+  await sweepUnsyncedSettledOrders();
+  assert.equal(calls.attachments.length, 1, 'once');
+
+  // The bill is in the books before the file goes: a refused file can't take it out.
+  const other = await makeWorld('Attachment Refused Ltd');
+  await connect(other.orgId);
+  state.refuseAttachment = new QboError(200, { Fault: { Error: [{ code: '5070', Message: 'Unsupported file format' }] } });
+  await approve(other);
+  const sync = await syncOf(other.bills.submitted);
+  assert.equal(sync?.status, 'synced', 'posted all the same');
+  assert.equal(sync?.externalBillId, 'B2');
+  assert.match(String((sync?.metadataJson as { attachmentFailed?: string } | null)?.attachmentFailed), /Unsupported file format/, 'and why the file is not on it');
+  assert.equal(calls.attachments.length, 1);
 });
 
 test('quickbooks: nothing is posted before approval, and an organisation without QuickBooks leaves no trace', async () => {
@@ -394,7 +434,7 @@ test('quickbooks: with posting off Decimal still reads, and nothing goes out: no
   assert.equal(await syncSettledPaymentOrder(w.bills.submitted), 'skipped');
   await sweepUnsyncedSettledOrders();
 
-  assert.deepEqual(calls, { bills: [], payments: [], vendors: [] }, 'not one call that writes');
+  assert.deepEqual(calls, { bills: [], payments: [], vendors: [], attachments: [] }, 'not one call that writes');
   assert.equal(await prisma.accountingSync.count({ where: { organizationId: w.orgId } }), 0, 'not an error, and it leaves no trace');
 });
 

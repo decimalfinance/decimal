@@ -115,6 +115,8 @@ function tokensFromResponse(realmId: string, json: any): QboTokens {
 type RequestOpts = {
   query?: Record<string, string>;
   body?: unknown;
+  /** A body that isn't JSON, sent as it is: a file upload. */
+  raw?: { bytes: Buffer; contentType: string };
   requestId?: string;
 };
 
@@ -248,9 +250,9 @@ export class QuickBooks {
         headers: {
           Authorization: `Bearer ${this.tokens.accessToken}`,
           Accept: 'application/json',
-          ...(opts.body ? { 'Content-Type': 'application/json' } : {}),
+          ...(opts.raw ? { 'Content-Type': opts.raw.contentType } : opts.body ? { 'Content-Type': 'application/json' } : {}),
         },
-        body: opts.body ? JSON.stringify(opts.body) : undefined,
+        body: opts.raw ? new Uint8Array(opts.raw.bytes) : opts.body ? JSON.stringify(opts.body) : undefined,
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
     };
@@ -296,6 +298,31 @@ export class QuickBooks {
 
   createBillPayment<T = any>(body: unknown, requestId: string): Promise<T> {
     return this.request<T>('POST', '/billpayment', { body, requestId });
+  }
+
+  /**
+   * A file on a transaction, the way QuickBooks keeps attachments: one multipart request
+   * carrying what the file is and what it goes on, then the file itself. The answer is the
+   * attachment's id. A refusal comes inside the answer, on a 200.
+   */
+  async uploadAttachment(on: { type: 'Bill'; id: string }, file: { fileName: string; contentType: string; bytes: Buffer }): Promise<string> {
+    const boundary = `decimal-${crypto.randomUUID()}`;
+    const fileName = file.fileName.replace(/["\\\r\n]/g, '').slice(0, 200) || 'invoice';
+    const part = (headers: string, content: Buffer) => Buffer.concat([Buffer.from(`--${boundary}\r\n${headers}\r\n\r\n`), content, Buffer.from('\r\n')]);
+    const bytes = Buffer.concat([
+      part(
+        'Content-Disposition: form-data; name="file_metadata_01"\r\nContent-Type: application/json; charset=UTF-8',
+        Buffer.from(JSON.stringify({ AttachableRef: [{ EntityRef: { type: on.type, value: on.id } }], FileName: fileName, ContentType: file.contentType })),
+      ),
+      part(`Content-Disposition: form-data; name="file_content_01"; filename="${fileName}"\r\nContent-Type: ${file.contentType}`, file.bytes),
+      Buffer.from(`--${boundary}--\r\n`),
+    ]);
+    const answer = await this.request<{ AttachableResponse?: Array<{ Attachable?: { Id?: unknown }; Fault?: unknown }> }>(
+      'POST', '/upload', { raw: { bytes, contentType: `multipart/form-data; boundary=${boundary}` } },
+    );
+    const first = answer.AttachableResponse?.[0];
+    if (!first?.Attachable?.Id) throw new QboError(200, first?.Fault ? { Fault: first.Fault } : answer);
+    return String(first.Attachable.Id);
   }
 
   cdc<T = any>(entities: string[], changedSince: string): Promise<T> {

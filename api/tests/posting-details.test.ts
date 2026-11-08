@@ -73,6 +73,35 @@ test('client: a refusal on a 200 is a refusal', async () => {
   });
 });
 
+test('client: an attachment is one multipart request naming the bill, and a refusal inside the answer is a refusal', async () => {
+  const seen: { url?: string; type?: string | null; body?: Buffer } = {};
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    seen.url = String(input);
+    seen.type = new Headers(init?.headers).get('content-type');
+    seen.body = Buffer.from(init?.body as Uint8Array);
+    return new Response(JSON.stringify({ AttachableResponse: [{ Attachable: { Id: '5000000000000010341', FileName: 'BW-2201.pdf' } }] }), { status: 200 });
+  }) as typeof fetch;
+  const qb = new QuickBooks({ realmId: 'r', accessToken: 'a', refreshToken: 'b', expiresAt: Date.now() + 3_600_000, refreshExpiresAt: Date.now() + 86_400_000 });
+  const file = { fileName: 'BW-2201.pdf', contentType: 'application/pdf', bytes: Buffer.from('%PDF-1.4 the invoice') };
+  assert.equal(await qb.uploadAttachment({ type: 'Bill', id: '1188' }, file), '5000000000000010341');
+
+  assert.match(seen.url ?? '', /\/v3\/company\/r\/upload\?minorversion=\d+$/);
+  const boundary = /^multipart\/form-data; boundary=(.+)$/.exec(seen.type ?? '')?.[1];
+  assert.ok(boundary, 'multipart, with its boundary');
+  const text = seen.body!.toString('latin1');
+  assert.ok(text.startsWith(`--${boundary}\r\nContent-Disposition: form-data; name="file_metadata_01"\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n`));
+  assert.ok(text.includes('{"AttachableRef":[{"EntityRef":{"type":"Bill","value":"1188"}}],"FileName":"BW-2201.pdf","ContentType":"application/pdf"}'), 'what it goes on');
+  assert.ok(text.includes('name="file_content_01"; filename="BW-2201.pdf"\r\nContent-Type: application/pdf\r\n\r\n%PDF-1.4 the invoice\r\n'), 'the file, as it is');
+  assert.ok(text.endsWith(`--${boundary}--\r\n`));
+
+  globalThis.fetch = (async () => new Response(JSON.stringify({ AttachableResponse: [{ Fault: { Error: [{ code: '5070', Message: 'Unsupported file format' }] } }] }), { status: 200 })) as typeof fetch;
+  await assert.rejects(qb.uploadAttachment({ type: 'Bill', id: '1188' }, file), (error: unknown) => {
+    assert.ok(error instanceof QboError);
+    assert.equal(faultOf(error.body)?.message, 'Unsupported file format');
+    return true;
+  });
+});
+
 /** A client whose access token has run out. Each test spends its own refresh token: renewals are shared by it. */
 const expired = (refreshToken: string) => ({ realmId: 'r', accessToken: 'old', refreshToken, expiresAt: Date.now() - 1000, refreshExpiresAt: Date.now() + 86_400_000 });
 const isRenewal = (input: string | URL | Request) => String(input instanceof Request ? input.url : input).includes('/oauth2/v1/tokens/bearer');

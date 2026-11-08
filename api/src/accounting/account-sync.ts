@@ -464,6 +464,7 @@ export async function syncApprovedBill(paymentOrderId: string): Promise<Accounti
       externalBillBalance: posted.billBalance, error: null, syncedAt: new Date(),
     });
     logger.info('accounting_sync.bill_posted', { organizationId: order.organizationId, paymentOrderId, billId: posted.billId });
+    await attachInvoice(qb, order.organizationId, paymentOrderId, order.invoiceDocumentId, posted.billId);
     return 'synced';
   } catch (error) {
     if (error instanceof PostedTotalDiffers) {
@@ -476,6 +477,32 @@ export async function syncApprovedBill(paymentOrderId: string): Promise<Accounti
       return 'error';
     }
     return fail(plainQboReason(error));
+  }
+}
+
+/** What QuickBooks takes as an attachment, of the files Decimal reads. It has no WebP. */
+const ATTACHABLE = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/jpg', 'image/gif']);
+
+/**
+ * The invoice goes on the bill in QuickBooks, the way a bookkeeper staples it on. Only on
+ * a bill Decimal posted: one linked from the books is somebody's own entry, with whatever
+ * they attached. Best effort, because the bill is in the books already: if QuickBooks won't
+ * take the file, the reason is kept on the sync and the posting stands. Once only, since a
+ * posted bill is never posted again.
+ */
+async function attachInvoice(qb: QuickBooks, organizationId: string, paymentOrderId: string, invoiceDocumentId: string | null, billId: string): Promise<void> {
+  if (!invoiceDocumentId) return;
+  const doc = await prisma.invoiceDocument.findUnique({ where: { invoiceDocumentId }, select: { filename: true, mimeType: true, data: true } });
+  if (!doc || !ATTACHABLE.has(doc.mimeType)) return;
+  const where = { paymentOrderId_provider: { paymentOrderId, provider: PROVIDER } };
+  try {
+    const attachmentId = await qb.uploadAttachment({ type: 'Bill', id: billId }, { fileName: doc.filename, contentType: doc.mimeType, bytes: Buffer.from(doc.data) });
+    await prisma.accountingSync.update({ where, data: { metadataJson: { attachmentId } } });
+    logger.info('accounting_sync.invoice_attached', { organizationId, paymentOrderId, billId, attachmentId });
+  } catch (error) {
+    const reason = plainQboReason(error);
+    await prisma.accountingSync.update({ where, data: { metadataJson: { attachmentFailed: reason } } }).catch(() => null);
+    logger.warn('accounting_sync.invoice_not_attached', { organizationId, paymentOrderId, billId, error: reason });
   }
 }
 
