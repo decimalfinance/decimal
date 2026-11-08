@@ -175,12 +175,16 @@ export const callClaude: ModelCall = async ({ model, messages, tools, signal, ma
   if (reply.stop_reason === 'refusal') throw new Error(`Anthropic declined${reply.stop_details?.category ? ` (${reply.stop_details.category})` : ''}`);
   // A reply cut off mid-call would run half a tool call.
   if (reply.stop_reason === 'max_tokens') throw new Error('Anthropic ran out of output tokens');
-  const usage = reply.usage;
+  const read = reply.usage.cache_read_input_tokens ?? 0;
+  const written = reply.usage.cache_creation_input_tokens ?? 0;
   return {
     message: fromClaudeReply(reply.content),
+    // Claude counts cached input apart from the rest. Every prompt token is in promptTokens, as on OpenAI.
     usage: {
-      promptTokens: usage.input_tokens + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0),
-      completionTokens: usage.output_tokens,
+      promptTokens: reply.usage.input_tokens + read + written,
+      completionTokens: reply.usage.output_tokens,
+      cacheReadTokens: read,
+      cacheWriteTokens: written,
     },
   };
 };

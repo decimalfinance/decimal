@@ -6,6 +6,7 @@ import { beforeEach, test } from 'node:test';
 import { prisma } from '../src/infra/prisma.js';
 import { drainBackgroundWork } from '../src/infra/background.js';
 import { setExceptionAgentRuntimeForTests, type ModelCall } from '../src/exceptions/agent.js';
+import { costUsd } from '../src/infra/model-cost.js';
 import { SETUP_TOKEN_LIMIT, SETUP_TURN_LIMIT, sweepSetups, wake, withReceipt } from '../src/integrations/setup/harness.js';
 import { raw, post, get, register } from './helpers/companion-harness.js';
 
@@ -205,6 +206,7 @@ test('setup: the receipt says which words, which model and what each turn cost, 
   assert.match(turn.playbook, /^[0-9a-f]{12}$/);
   assert.equal(turn.modelCalls, 1);
   assert.equal(turn.promptTokens, 1000);
+  assert.equal(turn.costUsd, costUsd(turn.model, { promptTokens: 1000, completionTokens: 50 }), 'at list price, for the model it ran on');
   assert.equal(turnsUsed, 2);
   assert.equal(tokensUsed, 2100);
 });

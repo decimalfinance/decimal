@@ -365,6 +365,10 @@ async function recordTurn(setup: IntegrationSetup, playbook: Playbook, through: 
     latencyMs: run.latencyMs,
     promptTokens: run.promptTokens,
     completionTokens: run.completionTokens,
+    cacheReadTokens: run.cacheReadTokens,
+    cacheWriteTokens: run.cacheWriteTokens,
+    // At list price. Null for a model with no listed price.
+    costUsd: run.costUsd,
   });
 }
 

@@ -36,6 +36,7 @@ const { config } = await import('../src/config.js');
 const { chatCompletionBody } = await import('../src/infra/openai-params.js');
 const { callOpenAi, exceptionAgentModel, setExceptionAgentRuntimeForTests } = await import('../src/exceptions/agent.js');
 const { callClaude } = await import('../src/exceptions/claude.js');
+const { addUsage, costUsd, dollars } = await import('../src/infra/model-cost.js');
 const { default: Anthropic } = await import('@anthropic-ai/sdk');
 /** The agent, the person and the judge all run on Claude when its key is set, as the product does. */
 const onClaude = Boolean(config.anthropicApiKey);
@@ -288,8 +289,16 @@ setConnectorForTests('quickbooks', {
 
 // ─── The real model, with what it was shown kept ──────────────────────────────
 
-type ModelUse = { promptTokens: number; completionTokens: number; calls: number };
-const use: ModelUse = { promptTokens: 0, completionTokens: 0, calls: 0 };
+type ModelUse = { promptTokens: number; completionTokens: number; cacheReadTokens: number; cacheWriteTokens: number; calls: number; costUsd: number | null };
+const unused = (): ModelUse => ({ promptTokens: 0, completionTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, calls: 0, costUsd: 0 });
+/** The setup's own calls, and apart from them the simulated person's and the judge's, so a cheaper agent model can be priced on its own. */
+const use = { agent: unused(), personAndJudge: unused() };
+/** Priced per call: a long prompt's higher rate applies to that call alone. */
+function count(into: ModelUse, model: string, usage: { promptTokens: number; completionTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number }) {
+  const cost = costUsd(model, usage);
+  Object.assign(into, addUsage(into, usage), { calls: into.calls + 1, costUsd: into.costUsd === null || cost === null ? null : into.costUsd + cost });
+}
+const usedLine = (u: ModelUse) => `${u.calls} calls, ${u.promptTokens} prompt (${u.cacheReadTokens} read from cache, ${u.cacheWriteTokens} written to it) + ${u.completionTokens} completion tokens, ${dollars(u.costUsd)}`;
 /** Everything this scenario's model was shown: what it could honestly know. Follows the scenario's async work. */
 const scenarioContext = new AsyncLocalStorage<{ shown: Set<string>; toolOutputs: Set<string> }>();
 
@@ -318,9 +327,7 @@ setExceptionAgentRuntimeForTests({
     for (let attempt = 1; ; attempt += 1) {
       try {
         const reply = await agentCall(request);
-        use.promptTokens += reply.usage.promptTokens;
-        use.completionTokens += reply.usage.completionTokens;
-        use.calls += 1;
+        count(use.agent, request.model, reply.usage);
         const context = scenarioContext.getStore();
         if (context) {
           for (const m of request.messages) {
@@ -338,7 +345,12 @@ setExceptionAgentRuntimeForTests({
   },
 });
 
-const textModel = exceptionAgentModel();
+const agentModel = exceptionAgentModel();
+/**
+ * The simulated person and the judge stay on one model whatever the setup runs on, so runs on two agent models
+ * compare. EVAL_PERSON_MODEL changes it.
+ */
+const textModel = process.env.EVAL_PERSON_MODEL?.trim() || (onClaude ? 'claude-opus-5-5' : agentModel);
 
 async function structured<T>(system: string, user: string, schema: Record<string, unknown>, effort: 'low' | 'medium' = 'low'): Promise<T> {
   if (onClaude) {
@@ -350,9 +362,9 @@ async function structured<T>(system: string, user: string, schema: Record<string
       messages: [{ role: 'user', content: user }],
       output_config: { effort, format: { type: 'json_schema', schema } },
     });
-    use.promptTokens += reply.usage.input_tokens + (reply.usage.cache_read_input_tokens ?? 0) + (reply.usage.cache_creation_input_tokens ?? 0);
-    use.completionTokens += reply.usage.output_tokens;
-    use.calls += 1;
+    const read = reply.usage.cache_read_input_tokens ?? 0;
+    const written = reply.usage.cache_creation_input_tokens ?? 0;
+    count(use.personAndJudge, textModel, { promptTokens: reply.usage.input_tokens + read + written, completionTokens: reply.usage.output_tokens, cacheReadTokens: read, cacheWriteTokens: written });
     if (reply.stop_reason === 'refusal' || reply.stop_reason === 'max_tokens') throw new Error(`Claude stopped: ${reply.stop_reason}`);
     return JSON.parse(reply.content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('') || '{}') as T;
   }
@@ -362,9 +374,7 @@ async function structured<T>(system: string, user: string, schema: Record<string
     response_format: { type: 'json_schema', json_schema: { name: 'reply', strict: true, schema } },
     max_tokens: 3000,
   }, { effort }));
-  use.promptTokens += body.usage?.prompt_tokens ?? 0;
-  use.completionTokens += body.usage?.completion_tokens ?? 0;
-  use.calls += 1;
+  count(use.personAndJudge, textModel, { promptTokens: body.usage?.prompt_tokens ?? 0, completionTokens: body.usage?.completion_tokens ?? 0, cacheReadTokens: body.usage?.prompt_tokens_details?.cached_tokens ?? 0 });
   return JSON.parse(body.choices?.[0]?.message?.content ?? '{}') as T;
 }
 
@@ -657,6 +667,8 @@ type Score = {
   sentBack: number;
   judge: Judged | null;
   tokens: number;
+  /** The setup's own calls at list price; null for a model with no listed price. */
+  costUsd?: number | null;
   turns: number;
   seconds: number;
   calls: number;
@@ -920,7 +932,7 @@ const chosen = wanted.length ? SCENARIOS.filter((s) => wanted.includes(s.id)) : 
 if (chosen.length === 0) { console.error(`No such scenario. There are: ${SCENARIOS.map((s) => s.id).join(', ')}`); process.exit(2); }
 
 await mkdir(OUT, { recursive: true });
-console.log(`Model ${textModel}. ${chosen.length} scenarios, ${CONCURRENCY} at a time.\n${OUT}\n`);
+console.log(`Setup on ${agentModel}, person and judge on ${textModel}. ${chosen.length} scenarios, ${CONCURRENCY} at a time.\n${OUT}\n`);
 
 const scores: Score[] = [];
 const queue = [...chosen];
@@ -937,13 +949,16 @@ async function worker() {
     } catch (e) {
       byCode.notes.push(`the judge failed: ${e instanceof Error ? e.message : String(e)}`);
     }
-    const score: Score = { ...byCode, judge: judged };
+    // What this scenario's setup cost, from its turns: the person and the judge are counted only in the run's total.
+    const turnCosts = result.events.filter((e: any) => e.kind === 'turn').map((e: any) => e.payload?.costUsd);
+    const setupCost = turnCosts.every((c: unknown) => typeof c === 'number') ? turnCosts.reduce((a: number, c: number) => a + c, 0) : null;
+    const score: Score = { ...byCode, judge: judged, costUsd: setupCost };
     if (judged?.wrong.length) score.failures.push(...judged.wrong.map((w) => `confidently wrong: ${w.what}`));
     if (judged?.unsupported.length) score.failures.push(...judged.unsupported.map((w) => `invented: ${w.what}`));
     if (judged?.mishandled.length) score.notes.push(...judged.mishandled.map((w) => `mishandled: ${w.what}`));
     scores.push(score);
     await writeFile(join(OUT, `${scenario.id}.md`), transcriptMd(result, score));
-    console.log(`${score.failures.length ? 'FAIL' : 'pass'}  ${score.id.padEnd(24)} ${String(score.turns).padStart(3)} turns ${String(Math.round(score.tokens / 1000)).padStart(5)}k tokens ${String(score.seconds).padStart(4)}s  calls ${score.calls}  tool errors ${score.toolErrors}  dropped ${score.claimsDropped}  sent back ${score.sentBack}  longest ${score.longestMessage}  raised same ${score.found.sameVendors} two-ways ${score.found.codedTwoWays} changed ${score.found.codingChanged}`);
+    console.log(`${score.failures.length ? 'FAIL' : 'pass'}  ${score.id.padEnd(24)} ${String(score.turns).padStart(3)} turns ${String(Math.round(score.tokens / 1000)).padStart(5)}k tokens ${dollars(score.costUsd).padStart(7)} ${String(score.seconds).padStart(4)}s  calls ${score.calls}  tool errors ${score.toolErrors}  dropped ${score.claimsDropped}  sent back ${score.sentBack}  longest ${score.longestMessage}  raised same ${score.found.sameVendors} two-ways ${score.found.codedTwoWays} changed ${score.found.codingChanged}`);
     for (const f of score.failures) console.log(`        ✗ ${f.slice(0, 220)}`);
     for (const n of score.notes) console.log(`        · ${n.slice(0, 220)}`);
   }
@@ -952,7 +967,8 @@ async function worker() {
 await Promise.all(Array.from({ length: CONCURRENCY }, worker));
 
 const passed = scores.filter((s) => s.failures.length === 0).length;
-console.log(`\n${passed}/${scores.length} passed. ${use.calls} model calls, ${use.promptTokens} prompt + ${use.completionTokens} completion tokens.`);
-await writeFile(join(OUT, 'summary.json'), JSON.stringify({ model: textModel, passed, of: scores.length, use, scores }, null, 2));
+const both = use.agent.costUsd === null || use.personAndJudge.costUsd === null ? null : use.agent.costUsd + use.personAndJudge.costUsd;
+console.log(`\n${passed}/${scores.length} passed.\nSetup: ${usedLine(use.agent)}.\nPerson and judge: ${usedLine(use.personAndJudge)}.\nAll at list price: ${dollars(both)}.`);
+await writeFile(join(OUT, 'summary.json'), JSON.stringify({ model: agentModel, personModel: textModel, passed, of: scores.length, use, costUsd: both, scores }, null, 2));
 await prisma.$disconnect();
 process.exit(passed === scores.length ? 0 : 1);

@@ -19,6 +19,7 @@
 // call for a scripted one, the same seam intake uses for extraction.
 import { config } from '../config.js';
 import { logger } from '../infra/logger.js';
+import { addUsage, costUsd, type Usage } from '../infra/model-cost.js';
 import { chatCompletionBody } from '../infra/openai-params.js';
 import { callClaude } from './claude.js';
 
@@ -45,7 +46,7 @@ export type AgentTool = {
 
 export type ModelReply = {
   message: ChatMessage;
-  usage: { promptTokens: number; completionTokens: number };
+  usage: Usage;
 };
 
 export type ModelCall = (request: {
@@ -56,9 +57,18 @@ export type ModelCall = (request: {
   maxTokens: number;
 }) => Promise<ModelReply>;
 
+/** What a run spent. Cost is null when the model has no listed price. */
+type Spent = Required<Usage> & { costUsd: number | null };
+
 export type AgentRun =
-  | { ok: true; terminal: { name: string; args: Record<string, unknown> }; turns: number; latencyMs: number; promptTokens: number; completionTokens: number; model: string }
-  | { ok: false; error: string; stoppedBy?: 'tokens'; turns: number; latencyMs: number; promptTokens: number; completionTokens: number; model: string };
+  | ({ ok: true; terminal: { name: string; args: Record<string, unknown> }; turns: number; latencyMs: number; model: string } & Spent)
+  | ({ ok: false; error: string; stoppedBy?: 'tokens'; turns: number; latencyMs: number; model: string } & Spent);
+
+/** A call added to a run: priced per call, because a long prompt's higher rate applies to that call alone. */
+function spend(total: Spent, model: string, usage: Usage): Spent {
+  const cost = costUsd(model, usage);
+  return { ...addUsage(total, usage), costUsd: total.costUsd === null || cost === null ? null : total.costUsd + cost };
+}
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const DEFAULT_OUTPUT_TOKENS = 1500;
@@ -87,11 +97,15 @@ export const callOpenAi: ModelCall = async ({ model, messages, tools, signal, ma
   if (!res.ok) throw new Error(`OpenAI ${res.status}`);
   const body = (await res.json()) as {
     choices?: Array<{ message?: ChatMessage }>;
-    usage?: { prompt_tokens?: number; completion_tokens?: number };
+    usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } };
   };
   return {
     message: body.choices?.[0]?.message ?? { role: 'assistant', content: '' },
-    usage: { promptTokens: body.usage?.prompt_tokens ?? 0, completionTokens: body.usage?.completion_tokens ?? 0 },
+    usage: {
+      promptTokens: body.usage?.prompt_tokens ?? 0,
+      completionTokens: body.usage?.completion_tokens ?? 0,
+      cacheReadTokens: body.usage?.prompt_tokens_details?.cached_tokens ?? 0,
+    },
   };
 };
 
@@ -148,21 +162,19 @@ export async function runAgent(args: {
     ...(args.history ?? []),
     { role: 'user', content: args.user },
   ];
-  let promptTokens = 0;
-  let completionTokens = 0;
+  let spent: Spent = { promptTokens: 0, completionTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0 };
   let nudged = false;
   let sendBacks = 0;
   let turn = 0;
-  const done = (turns: number) => ({ turns, latencyMs: Date.now() - started, promptTokens, completionTokens, model });
+  const done = (turns: number) => ({ turns, latencyMs: Date.now() - started, ...spent, model });
 
   try {
     for (turn = 1; turn <= maxTurns; turn += 1) {
-      if (args.tokenLimit !== undefined && promptTokens + completionTokens >= args.tokenLimit) {
+      if (args.tokenLimit !== undefined && spent.promptTokens + spent.completionTokens >= args.tokenLimit) {
         return { ok: false, error: `reached the limit of ${args.tokenLimit} tokens`, stoppedBy: 'tokens', ...done(turn - 1) };
       }
       const reply = await runtime.callModel({ model, messages, tools: args.tools, signal, maxTokens: args.maxOutputTokens ?? DEFAULT_OUTPUT_TOKENS });
-      promptTokens += reply.usage.promptTokens;
-      completionTokens += reply.usage.completionTokens;
+      spent = spend(spent, model, reply.usage);
       messages.push(reply.message);
 
       const calls = reply.message.tool_calls ?? [];
