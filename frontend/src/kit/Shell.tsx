@@ -153,7 +153,8 @@ export function Shell({
     : [];
   const settings: Place[] = base
     ? [
-        { key: 'organisation', label: 'Organisation', to: `${base}/policies`, icon: Icon.organisation, on: (p) => p.startsWith(`${base}/policies`) || p.startsWith(`${base}/organisation`) },
+        // A setup (QuickBooks) is reached from the Organisation page, so it lights Organisation too.
+        { key: 'organisation', label: 'Organisation', to: `${base}/policies`, icon: Icon.organisation, on: (p) => p.startsWith(`${base}/policies`) || p.startsWith(`${base}/organisation`) || p.startsWith(`${base}/integrations`) },
         { key: 'rules', label: 'Approval rules', to: `${base}/approval-flow`, icon: Icon.approvalRules, on: (p) => p.startsWith(`${base}/approval-flow`) },
         { key: 'team', label: 'Team members', to: `${base}/members`, icon: Icon.team, on: (p) => p.startsWith(`${base}/members`) },
       ]

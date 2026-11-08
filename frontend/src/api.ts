@@ -169,6 +169,8 @@ export interface AccountingStatus {
   status: string;
   realmId: string | null;
   environment: string;
+  /** When an admin pressed Go in the setup: approved bills post from then on. Null until then. */
+  postingEnabledAt: string | null;
   accountMap: {
     apAccountId: string | null;
     apAccountName: string | null;
@@ -2220,5 +2222,89 @@ export const accessApi = {
   },
   transferPrimaryAdmin(organizationId: string, userId: string) {
     return request<{ ok: boolean; primaryAdminUserId: string }>(`/organizations/${organizationId}/primary-admin/transfer`, { method: 'POST', body: JSON.stringify({ userId }) });
+  },
+};
+
+/** The accounting systems a setup exists for. Xero joins when its connector does. */
+export type IntegrationSystem = 'quickbooks';
+
+/** A button the setup offers. Built by the API, never by the model: a sign-in, or Go. */
+export type IntegrationSetupAction =
+  | { kind: 'sign_in'; system: string; path: string }
+  | { kind: 'go'; companyName: string | null; path: string };
+
+export interface IntegrationSetupMessage {
+  messageId: string;
+  role: 'user' | 'assistant';
+  /** `running` while Decimal is on it; its `thoughts` say what it is doing. */
+  status: 'running' | 'done' | 'failed';
+  /** Who wrote a person's message. Null for Decimal's. */
+  author: { userId: string; name: string; avatarUrl: string | null } | null;
+  text: string | null;
+  thoughts: Array<{ text: string; detail?: string | null }> | null;
+  /** What Decimal found in the books, each backed by records it read. */
+  claims: Array<{ text: string; refs: string[] }> | null;
+  actions: IntegrationSetupAction[] | null;
+  createdAt: string;
+}
+
+/** A question the setup needs answered: the closing date, or something it found in the books. */
+export interface IntegrationSetupCall {
+  key: string;
+  kind: 'closing_date' | 'lookalike_vendors' | 'coded_two_ways' | 'other';
+  /** Go waits on a required one. */
+  required: boolean;
+  status: 'open' | 'answered';
+  question: string;
+  recommendation: string | null;
+  why: string | null;
+  /** The answer in words, once there is one. */
+  answer: unknown;
+}
+
+export interface IntegrationSetup {
+  setupId: string;
+  system: IntegrationSystem;
+  /** `stopped` at a limit; with `stopReason` `failures`, writing anything starts it again. */
+  status: 'open' | 'stopped' | 'done';
+  stopReason: 'failures' | 'token_limit' | 'turn_limit' | null;
+  running: boolean;
+  /** A turn that failed and is being tried again: the AI service, or an answer that never came. */
+  retrying: { failed: number; of: number; cause: 'service' | 'answer' } | null;
+  company: { name: string | null; confirmedAt: string | null };
+  /** Reading their books: each step as it is done. */
+  study: { status: 'running' | 'finished' | 'failed' | null; steps: Array<{ key: string; text: string }> | null; error: string | null };
+  calls: IntegrationSetupCall[];
+  canGo: boolean;
+  /** What Go waits on, by key: signed_in, company_confirmed, study_finished, closing_date, required_calls. */
+  goConditions: Array<{ key: string; done: boolean }>;
+  /** A finished setup's yes now: on; signed out, where signing in again picks it up; off, where a new setup turns it on. Null before it finishes. */
+  posting: 'on' | 'signed_out' | 'off' | null;
+  /** The sign-in that picks posting up again, while signed out. */
+  signInAgain: string | null;
+  messages: IntegrationSetupMessage[];
+}
+
+/** Setting up an accounting system: a conversation with Decimal, for admins. */
+export const integrationSetupApi = {
+  /** The latest setup, finished or not. Looking starts nothing. */
+  latest(organizationId: string, system: IntegrationSystem) {
+    return request<{ setup: IntegrationSetup | null }>(`/organizations/${organizationId}/integrations/${system}/setups/latest`);
+  },
+  /** Starts one, or returns the one under way. */
+  start(organizationId: string, system: IntegrationSystem) {
+    return request<IntegrationSetup>(`/organizations/${organizationId}/integrations/${system}/setups`, { method: 'POST', body: '{}' });
+  },
+  say(organizationId: string, setupId: string, text: string) {
+    return request<IntegrationSetup>(`/organizations/${organizationId}/integrations/setups/${setupId}/messages`, { method: 'POST', body: JSON.stringify({ text }) });
+  },
+  /** Intuit's sign-in page, for the path a sign-in action carries. Intuit sends the browser back to the setup. */
+  signInLink(path: string) {
+    const q = new URLSearchParams({ frontendOrigin: window.location.origin }).toString();
+    return request<{ authorizeUrl: string }>(`${path}?${q}`);
+  },
+  /** Go, for the path a Go action carries: posting is on from now. */
+  go(path: string) {
+    return request<IntegrationSetup>(path, { method: 'POST', body: '{}' });
   },
 };

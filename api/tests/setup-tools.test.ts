@@ -259,7 +259,7 @@ test('setup tools: the study reads the company into the copy by itself, counts i
   const shown = await view(w, setupId);
   assert.equal(shown.study.status, 'finished');
   assert.deepEqual(shown.study.steps.map((s: { key: string }) => s.key), ['company', 'categories', 'vendors', 'bills', 'expenses', 'findings']);
-  assert.match(shown.study.steps[3].text, /^Read 4 bills since \d{4}-\d{2}-\d{2}$/, 'live steps, and the old bill is outside the 24 months');
+  assert.match(shown.study.steps[3].text, /^Read 4 bills since \d{1,2} [A-Z][a-z]{2} \d{4}$/, 'live steps, and the old bill is outside the 24 months');
   assert.equal(shown.messages.at(-1).text, 'Finished. Ready?', 'the finish woke a turn');
 
   const row = await prisma.integrationSetup.findUniqueOrThrow({ where: { setupId } });

@@ -6,7 +6,7 @@ import { assertOrganizationAdmin } from '../../auth/organization-access.js';
 import { asyncRoute, sendJson } from '../../infra/route-helpers.js';
 import { RECORD_KINDS } from '../copy.js';
 import { SETUP_SYSTEMS } from './record.js';
-import { getReceipt, getRecord, getSetup, goLive, postMessage, startSetup } from './service.js';
+import { getReceipt, getRecord, getSetup, goLive, latestSetup, postMessage, startSetup } from './service.js';
 
 export const integrationSetupRouter = Router();
 
@@ -20,6 +20,12 @@ integrationSetupRouter.post('/organizations/:organizationId/integrations/:system
   const { organizationId, system } = startParams.parse(req.params);
   await assertOrganizationAdmin(organizationId, req.auth!);
   sendJson(res, await startSetup(organizationId, req.auth!.userId, system));
+}));
+
+integrationSetupRouter.get('/organizations/:organizationId/integrations/:system/setups/latest', asyncRoute(async (req, res) => {
+  const { organizationId, system } = startParams.parse(req.params);
+  await assertOrganizationAdmin(organizationId, req.auth!);
+  sendJson(res, { setup: await latestSetup(organizationId, system) });
 }));
 
 integrationSetupRouter.get('/organizations/:organizationId/integrations/setups/:setupId', asyncRoute(async (req, res) => {

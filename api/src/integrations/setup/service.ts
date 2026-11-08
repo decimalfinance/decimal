@@ -4,7 +4,7 @@
 import { Prisma, type IntegrationSetup } from '@prisma/client';
 import { ApiError, conflict, notFound } from '../../infra/api-errors.js';
 import { prisma } from '../../infra/prisma.js';
-import { connectorFor } from '../connectors.js';
+import { connectorFor, type BooksConnection } from '../connectors.js';
 import { deleteCopy, lookUp, type RecordKind } from '../copy.js';
 import { linesToDecide } from './findings.js';
 import { doneConditions, readyForGo, stillMissing } from './gates.js';
@@ -200,6 +200,12 @@ export async function getSetup(organizationId: string, setupId: string) {
   return setupView(await ownSetup(organizationId, setupId));
 }
 
+/** What the setup screen opens on: the latest setup, finished or not, without starting one. Null before the first. */
+export async function latestSetup(organizationId: string, system: SetupSystem) {
+  const setup = await prisma.integrationSetup.findFirst({ where: { organizationId, system }, orderBy: { createdAt: 'desc' } });
+  return setup ? setupView(setup) : null;
+}
+
 /** A record behind a claim or a call, opened. */
 export async function getRecord(organizationId: string, setupId: string, kind: RecordKind, recordId: string) {
   const setup = await ownSetup(organizationId, setupId);
@@ -233,13 +239,32 @@ async function retrying(setup: IntegrationSetup) {
   return { failed: setup.consecutiveFailures, of: MAX_CONSECUTIVE_FAILURES, cause: typeof error === 'string' && serviceFailed(error) ? 'service' : 'answer' };
 }
 
+/**
+ * What a finished setup's yes amounts to now. Signed out keeps it: signing in
+ * again to the same company picks posting up where it left off. Off (a
+ * disconnect, or a sign-in to another company) takes a new setup.
+ */
+function postingNow(setup: IntegrationSetup, connection: BooksConnection | null): 'on' | 'signed_out' | 'off' {
+  if (!connection?.postingSince || connection.companyId !== setup.companyId) return 'off';
+  if (connection.status === 'connected') return 'on';
+  return connection.status === 'needs_reauth' ? 'signed_out' : 'off';
+}
+
 async function setupView(setup: IntegrationSetup) {
-  const [messages, calls, conditions, retry] = await Promise.all([
-    prisma.integrationSetupMessage.findMany({ where: { setupId: setup.setupId }, orderBy: { createdAt: 'asc' } }),
+  const connector = connectorFor(setup.system);
+  const done = setup.status === 'done';
+  const [messages, calls, conditions, retry, connection] = await Promise.all([
+    prisma.integrationSetupMessage.findMany({
+      where: { setupId: setup.setupId },
+      orderBy: { createdAt: 'asc' },
+      include: { authorUser: { select: { userId: true, displayName: true, avatarUrl: true } } },
+    }),
     prisma.integrationSetupCall.findMany({ where: { setupId: setup.setupId }, orderBy: { createdAt: 'asc' } }),
     doneConditions(setup),
     retrying(setup),
+    done ? connector.connection(setup.organizationId) : Promise.resolve(null),
   ]);
+  const posting = done ? postingNow(setup, connection) : null;
   return {
     setupId: setup.setupId,
     system: setup.system,
@@ -262,10 +287,17 @@ async function setupView(setup: IntegrationSetup) {
     })),
     canGo: setup.status !== 'done' && readyForGo(conditions),
     stillNeeded: setup.status === 'done' ? [] : stillMissing(conditions),
+    // The same, by key, for the screen to say in the person's words: stillNeeded is in the model's.
+    goConditions: setup.status === 'done' ? [] : conditions.map((c) => ({ key: c.key, done: c.done })),
+    // For a finished setup only: whether its yes still holds, and the sign-in that picks it up again.
+    posting,
+    signInAgain: posting === 'signed_out' ? connector.signInPath(setup.organizationId) : null,
     messages: messages.map((m) => ({
       messageId: m.messageId,
       role: m.role,
       status: m.status,
+      // Who wrote a person's message: more than one admin can be in a setup.
+      author: m.authorUser ? { userId: m.authorUser.userId, name: m.authorUser.displayName, avatarUrl: m.authorUser.avatarUrl } : null,
       text: m.text,
       thoughts: m.thoughts,
       claims: m.claims,

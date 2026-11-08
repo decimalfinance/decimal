@@ -10,6 +10,8 @@ export type BooksConnection = {
   companyId: string;
   /** connected, needs_reauth or disconnected. */
   status: string;
+  /** When a person's yes turned posting on, kept while signed out; null while it is off. */
+  postingSince?: Date | null;
 };
 
 export type Connector = {
@@ -27,7 +29,7 @@ const CONNECTORS: Record<string, Connector> = {
     system: 'quickbooks',
     connection: async (organizationId) => {
       const row = await getConnection(organizationId);
-      return row ? { companyId: row.realmId, status: row.status } : null;
+      return row ? { companyId: row.realmId, status: row.status, postingSince: row.postingEnabledAt } : null;
     },
     reader: readerForOrganization,
     signInPath: (organizationId) => `/organizations/${organizationId}/accounting/quickbooks/connect`,

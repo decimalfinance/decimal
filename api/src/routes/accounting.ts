@@ -106,11 +106,16 @@ function verifyState(raw: string): OAuthState {
 function finishCallback(
   res: import('express').Response,
   status: string,
-  ctx: { organizationId?: string; frontendOrigin?: string | null },
+  ctx: { organizationId?: string; frontendOrigin?: string | null; setupScreen?: string | null },
   detail?: string,
 ) {
   const base = ctx.frontendOrigin || config.publicFrontendUrl;
-  // Land the operator back on the Accounting page on success.
+  // Back to the setup the sign-in came from, while one is live: its conversation says how it went.
+  if (base && ctx.setupScreen) {
+    res.redirect(`${base}${ctx.setupScreen}`);
+    return;
+  }
+  // Otherwise the Accounting page, on success.
   if (base && ctx.organizationId && status === 'connected') {
     res.redirect(`${base}/organizations/${ctx.organizationId}/accounting?quickbooks=connected`);
     return;
@@ -126,6 +131,12 @@ function finishCallback(
     .status(status === 'connected' ? 200 : 400)
     .type('html')
     .send(`<p>QuickBooks ${status}${detail ? `: ${detail}` : ''}. You can close this tab.</p>`);
+}
+
+/** The setup screen, while a setup is live for the organisation. */
+async function setupScreenFor(organizationId: string): Promise<string | null> {
+  const setup = await prisma.integrationSetup.findFirst({ where: { organizationId, system: PROVIDER }, select: { setupId: true } });
+  return setup ? `/organizations/${organizationId}/integrations/${PROVIDER}` : null;
 }
 
 // ---- public callback (Intuit redirects here; no auth header) ----
@@ -146,7 +157,11 @@ publicAccountingRouter.get(
         state = null;
       }
     }
-    const ctx = { organizationId: state?.organizationId, frontendOrigin: state?.frontendOrigin ?? null };
+    const ctx = {
+      organizationId: state?.organizationId,
+      frontendOrigin: state?.frontendOrigin ?? null,
+      setupScreen: state ? await setupScreenFor(state.organizationId) : null,
+    };
 
     if (req.query.error) {
       if (state) await noteSignInFailed(state.organizationId, PROVIDER, String(req.query.error));

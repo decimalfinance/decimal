@@ -282,6 +282,36 @@ test('quickbooks: the yes belongs to one company: signing in again keeps it, ano
   }
 });
 
+test('quickbooks: the sign-in lands on the setup screen once there has been a setup, and on Accounting before', async () => {
+  const w = await makeWorld();
+  setExceptionAgentRuntimeForTests({
+    callModel: async () => ({ message: { role: 'assistant', content: null, tool_calls: [{ id: 'c1', type: 'function', function: { name: 'respond', arguments: JSON.stringify({ message: 'Noted.', claims: [] }) } }] }, usage: { promptTokens: 1, completionTokens: 1 } }),
+    isConfigured: () => true,
+  });
+  const outside = intuit();
+  try {
+    const landing = async () => {
+      const { authorizeUrl } = await get(`/organizations/${w.orgId}/accounting/quickbooks/connect`, w.owner.token);
+      const state = encodeURIComponent(new URL(authorizeUrl).searchParams.get('state')!);
+      const res = await fetch(`${baseUrl}/accounting/quickbooks/callback?code=c&realmId=realm-a&state=${state}`, { redirect: 'manual' });
+      await res.arrayBuffer();
+      const to = new URL(res.headers.get('location')!);
+      return `${to.pathname}${to.search}`;
+    };
+    assert.equal(await landing(), `/organizations/${w.orgId}/accounting?quickbooks=connected`);
+    const { setupId } = await post(`/organizations/${w.orgId}/integrations/quickbooks/setups`, {}, w.owner.token);
+    await drainBackgroundWork();
+    assert.equal(await landing(), `/organizations/${w.orgId}/integrations/quickbooks`);
+    await drainBackgroundWork();
+    await prisma.integrationSetup.update({ where: { setupId }, data: { status: 'done' } });
+    // Signing in again after Intuit's sign-in expired starts on a finished setup's screen, so it comes back there.
+    assert.equal(await landing(), `/organizations/${w.orgId}/integrations/quickbooks`, 'nor once it is finished');
+    await drainBackgroundWork();
+  } finally {
+    outside.restore();
+  }
+});
+
 test('quickbooks: a setup under way hears the sign-in come back or fail, through the real callback, and disconnecting takes its copy', async () => {
   const w = await makeWorld();
   const heard: string[] = [];
@@ -301,7 +331,9 @@ test('quickbooks: a setup under way hears the sign-in come back or fail, through
     const state = encodeURIComponent(new URL(authorizeUrl).searchParams.get('state')!);
     const callback = (query: string) => fetch(`${baseUrl}/accounting/quickbooks/callback?${query}`, { redirect: 'manual' });
 
-    await (await callback(`error=access_denied&state=${state}`)).arrayBuffer();
+    const cancelled = await callback(`error=access_denied&state=${state}`);
+    await cancelled.arrayBuffer();
+    assert.equal(new URL(cancelled.headers.get('location')!).pathname, `/organizations/${w.orgId}/integrations/quickbooks`, 'back to the setup, whose conversation says it was cancelled');
     await drainBackgroundWork();
     assert.match(heard.at(-1)!, /The sign-in was cancelled/);
 

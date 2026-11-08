@@ -6,12 +6,13 @@
  * record. Everyone else in the organisation reads it.
  */
 import { useMemo, useState, type ReactNode } from 'react';
-import { useParams } from 'react-router';
+import { useNavigate, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   accessApi,
   api,
   inboundEmailApi,
+  integrationSetupApi,
   organizationApi,
   policiesApi,
   protectionsApi,
@@ -225,6 +226,13 @@ export function OrganisationPage() {
         </div>
 
         <section>
+          <Heading title="Accounting" tight />
+          <div className="st-rows">
+            <BooksRow organizationId={organizationId} isAdmin={isAdmin} />
+          </div>
+        </section>
+
+        <section>
           <Heading title="Separation of duties" tight />
           <div className="st-rows">
             {!policyReady ? (
@@ -352,6 +360,58 @@ export function OrganisationPage() {
           onCancel={() => setPolicy(null)}
         />
       ) : null}
+    </div>
+  );
+}
+
+/** QuickBooks: whether approved bills post there, and for admins the way into its setup. */
+function BooksRow({ organizationId, isAdmin }: { organizationId: string; isAdmin: boolean }) {
+  const navigate = useNavigate();
+  const status = useQuery({
+    queryKey: ['accounting-status', organizationId],
+    queryFn: () => api.getAccountingStatus(organizationId),
+    enabled: Boolean(organizationId),
+  });
+  const latest = useQuery({
+    queryKey: ['integration-setup', organizationId, 'quickbooks'],
+    queryFn: () => integrationSetupApi.latest(organizationId, 'quickbooks'),
+    enabled: Boolean(organizationId) && isAdmin,
+  });
+  const setup = latest.data?.setup ?? null;
+  const connected = status.data?.connected ?? false;
+  const posting = connected ? status.data?.postingEnabledAt ?? null : null;
+  // Intuit's sign-in ran out: the yes holds, and signing in again picks posting up.
+  const signedOut = Boolean(status.data?.needsReauth && status.data.postingEnabledAt);
+  const underWay = setup !== null && setup.status !== 'done';
+  const loaded = status.isSuccess && (!isAdmin || !latest.isPending);
+  const line = posting
+    ? `Approved bills post to ${setup?.company.name ?? 'QuickBooks'}.`
+    : underWay
+      ? 'A setup is under way. Nothing posts until an admin presses Go.'
+      : signedOut
+        ? 'Decimal’s sign-in to QuickBooks expired, so nothing posts until an admin signs in again.'
+        : connected
+          ? 'Connected, but nothing posts until it’s set up.'
+          : 'Once it’s set up, approved bills post there.';
+  return (
+    <div className="st-row">
+      <div className="st-left">
+        <div className="st-label">QuickBooks Online</div>
+        {loaded ? <div className="st-line">{line}</div> : null}
+        {status.isError ? <div className="st-line is-error">Its status couldn’t be loaded.</div> : null}
+      </div>
+      <div className="st-right">
+        {loaded ? (
+          <span className={`st-value${posting ? '' : ' is-quiet'}`}>
+            {posting ? `Posting since ${fullDay(posting)}` : underWay ? 'Setting up' : signedOut ? 'Sign-in expired' : 'Not set up'}
+          </span>
+        ) : null}
+        {isAdmin ? (
+          <button type="button" className="st-pill" onClick={() => navigate(`/organizations/${organizationId}/integrations/quickbooks`)}>
+            {posting || signedOut ? 'Open' : underWay ? 'Continue' : 'Set up'}
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }

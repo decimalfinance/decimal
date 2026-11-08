@@ -31,6 +31,7 @@ const TeamPage = lazy(() => import('./pages/Team').then((m) => ({ default: m.Tea
 const ApprovalsPage = lazy(() => import('./pages/Approvals').then((m) => ({ default: m.ApprovalsPage })));
 const OrganisationPage = lazy(() => import('./pages/Organisation').then((m) => ({ default: m.OrganisationPage })));
 const AccountingPage = lazy(() => import('./pages/Accounting').then((m) => ({ default: m.AccountingPage })));
+const IntegrationSetupPage = lazy(() => import('./pages/IntegrationSetup').then((m) => ({ default: m.IntegrationSetupPage })));
 const TreasuryWalletDetailPage = lazy(() => import('./pages/TreasuryWalletDetail').then((m) => ({ default: m.TreasuryWalletDetailPage })));
 const VaultDetailPage = lazy(() => import('./pages/VaultDetail').then((m) => ({ default: m.VaultDetailPage })));
 const OrganizationProposalsPage = lazy(() => import('./pages/OrganizationProposals').then((m) => ({ default: m.OrganizationProposalsPage })));
@@ -238,6 +239,8 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
               <Route path="/organizations/:organizationId/proposals/:decimalProposalId/legacy" element={<Legacy><OrganizationProposalDetailPage session={session} /></Legacy>} />
               <Route path="/organizations/:organizationId/members" element={<TeamPage />} />
               <Route path="/organizations/:organizationId/accounting" element={<Legacy><AccountingPage session={session} /></Legacy>} />
+              {/* Setting up QuickBooks: Intuit's sign-in comes back here while a setup is under way. */}
+              <Route path="/organizations/:organizationId/integrations/:system" element={<IntegrationSetupPage />} />
               {/* The Coding inbox is gone: categories are chosen in review, and approved bills post to QuickBooks. */}
               <Route path="/organizations/:organizationId/accounting/coding" element={<OrgRedirect to="inbox" />} />
               <Route path="/organizations/:organizationId/counterparties" element={<VendorsPage />} />

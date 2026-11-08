@@ -82,6 +82,14 @@ async function step(setupId: string, key: string, text: string) {
     WHERE setup_id = ${setupId}::uuid`;
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** "7 Nov 2024": a day as the person reading the steps says it. */
+function dayInWords(isoDay: string): string {
+  const [year, month, day] = isoDay.split('-').map(Number);
+  return `${day} ${MONTHS[(month ?? 1) - 1]} ${year}`;
+}
+
 function countOf(read: { records: unknown[]; expected: number }, one: string, many = `${one}s`): string {
   const got = read.records.length.toLocaleString('en-US');
   const unit = read.expected === 1 ? one : many;
@@ -109,11 +117,11 @@ async function readEverything(setup: IntegrationSetup, reader: BooksReader): Pro
 
   const bills = await reader.bills(since);
   await replaceRecords(scope, 'bill', bills.records.map(toRows.bill));
-  await step(setupId, 'bills', `${countOf(bills, 'bill')} since ${since}`);
+  await step(setupId, 'bills', `${countOf(bills, 'bill')} since ${dayInWords(since)}`);
 
   const expenses = await reader.expenses(since);
   await replaceRecords(scope, 'expense', expenses.records.map(toRows.expense));
-  await step(setupId, 'expenses', `${countOf(expenses, 'expense')} since ${since}`);
+  await step(setupId, 'expenses', `${countOf(expenses, 'expense')} since ${dayInWords(since)}`);
 
   const [picture, approved] = await Promise.all([
     approvalPicture(organizationId, setup.startedByUserId),

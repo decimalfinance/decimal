@@ -889,6 +889,7 @@ html.app-zoom:has(.ui.bp) .ui.toast { zoom: var(--app-unzoom); --app-zoom: 1; }
 .ui .bp-md p { margin: 0; }
 .ui .bp-md p + p, .ui .bp-md p + ul, .ui .bp-md ul + p { margin-top: 6px; }
 .ui .bp-md ul { margin: 0; padding-left: 16px; list-style: disc; }
+.ui .bp-md p + ul.is-led { margin-top: 2px; }
 .ui .bp-md li + li { margin-top: 2px; }
 .ui .bp-md b { font-weight: 600; }
 .ui .bp-chatcard { margin-top: 8px; padding: 10px 12px; gap: 8px; }

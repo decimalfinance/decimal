@@ -1,7 +1,7 @@
 // Small pieces the bill's page draws in many places: the evidence marks, a
 // face that may be Decimal's, the dark note that sits under something on
 // hover, and figures set in mono inside a sentence.
-import { useState, type ReactNode } from 'react';
+import { Fragment, useState, type ReactNode } from 'react';
 import { Avatar } from '../../kit/Avatar';
 import { Orb } from '../../kit/Orb';
 import { figureParts, type Face } from './model';
@@ -131,13 +131,19 @@ export function dayAndTime(value: string | Date, now = new Date()) {
 export function Markdown({ text }: { text: string }) {
   const inline = (s: string) => s.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
     part.startsWith('**') && part.endsWith('**') ? <b key={i}>{part.slice(2, -2)}</b> : <Figures key={i} text={part} />);
+  const item = (r: string) => /^\s*[-•]\s/.test(r);
+  const list = (rows: string[], className?: string) => (
+    <ul className={className}>{rows.map((r, j) => <li key={j}>{inline(r.replace(/^\s*[-•]\s/, ''))}</li>)}</ul>
+  );
   const blocks = text.trim().split(/\n{2,}/);
   return (
     <div className="bp-md">
       {blocks.map((block, i) => {
         const rows = block.split('\n');
-        if (rows.every((r) => /^\s*[-•]\s/.test(r))) {
-          return <ul key={i}>{rows.map((r, j) => <li key={j}>{inline(r.replace(/^\s*[-•]\s/, ''))}</li>)}</ul>;
+        if (rows.every(item)) return <Fragment key={i}>{list(rows)}</Fragment>;
+        // A line that leads into its list, as "Saved:" and the points under it.
+        if (rows.length > 1 && !item(rows[0]!) && rows.slice(1).every(item)) {
+          return <Fragment key={i}><p>{inline(rows[0]!)}</p>{list(rows.slice(1), 'is-led')}</Fragment>;
         }
         return <p key={i}>{rows.map((r, j) => <span key={j}>{j > 0 ? <br /> : null}{inline(r)}</span>)}</p>;
       })}

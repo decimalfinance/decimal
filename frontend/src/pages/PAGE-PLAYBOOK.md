@@ -62,7 +62,7 @@ Pages the redesign hasn't reached render inside `<Legacy>` in `App.tsx` (`div.de
 
 **Settings page** (`Organisation.tsx`, `Account.tsx`). Root `.ui.page`, then `h1.page-title`, `p.page-sub` and `div.st-blocks` of `<section>`s, each a `Heading` (`pages/settings/parts.tsx`) over `div.st-rows` of `div.st-row`.
 
-**Full-height workspace** (the bill page `pages/bill/BillPage.tsx`, `ApprovalRules.tsx`). The root fills the pane and never scrolls; its parts scroll inside themselves. The bill page is `.ui.bp` with `.bp-crumb` on top and `.bp-foot` along the bottom; Approval rules is `.ui.ar-page`.
+**Full-height workspace** (the bill page `pages/bill/BillPage.tsx`, `ApprovalRules.tsx`, `IntegrationSetup.tsx`). The root fills the pane and never scrolls; its parts scroll inside themselves. The bill page is `.ui.bp` with `.bp-crumb` on top and `.bp-foot` along the bottom; Approval rules is `.ui.ar-page`; the QuickBooks setup is `.ui.su-page`, a conversation with its reply line pinned under it, beside a panel of steps.
 
 **Screens before the app** (`pages/signin/`). `Frame` from `signin/parts.tsx` with `Title`, `Body`, `Field`, `Pill` and `Links`: their own `si-` system, with no sidebar and no toaster.
 
@@ -92,7 +92,7 @@ Pages the redesign hasn't reached render inside `<Legacy>` in `App.tsx` (`div.de
 - `format.ts`: `usd`, `calendarDay` (due and invoice dates), `shortDay`, `when`, `fullDay`, `stamp`, `ago`, `daysPast`, `monthOf`, `fileSize`, `firstName`. Money arrives in minor units; never do arithmetic on floats.
 - `hooks.ts`: `useCopy(text)` (a tick for two seconds), `useDismiss(open, ref, close)`.
 - `people.ts`: `initialsOf`, `orgInitials`, `personTone`, `orgTone`, `roleLabel`.
-- Shared page helpers that aren't in the kit: `pages/bill/parts.tsx` (chat rows, badges, `Markdown`) and `pages/settings/parts.tsx` (`messageOf`, `Heading`, `Failed`, `ChangedBy`, `NameRow`).
+- Shared page helpers that aren't in the kit: `pages/bill/parts.tsx` (chat rows, badges, `Markdown`, which also makes a lead-in line and the "- " points under it a list) and `pages/settings/parts.tsx` (`messageOf`, `Heading`, `Failed`, `ChangedBy`, `NameRow`).
 
 ## Rules
 

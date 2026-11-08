@@ -78,6 +78,53 @@ test('setup: starting one gets the agent talking; starting again comes back to t
   assert.equal(calls.length, 1, 'no second greeting');
 });
 
+test('setup: its screen opens on the latest setup, finished or not, and opening it starts nothing', async () => {
+  const world = await makeOrg();
+  const calls = scriptModel(() => 'Hello.');
+  const latest = `${setupsPath(world.orgId)}/latest`;
+  assert.deepEqual(await get(latest, world.owner.token), { setup: null });
+  await drainBackgroundWork();
+  assert.equal(calls.length, 0, 'looking starts nothing');
+  assert.equal(await prisma.integrationSetup.count({ where: { organizationId: world.orgId } }), 0);
+
+  const setupId = await start(world);
+  const { setup } = await get(latest, world.owner.token);
+  assert.equal(setup.setupId, setupId);
+  assert.deepEqual(setup.messages.map((m: { text: string }) => m.text), ['Hello.']);
+
+  assert.equal(setup.posting, null, 'whether posting holds is said of a finished setup only');
+
+  await prisma.integrationSetup.update({ where: { setupId }, data: { status: 'done', companyId: 'realm-a', companyName: 'Larkspur' } });
+  const finished = async () => (await get(latest, world.owner.token)).setup;
+  assert.equal((await finished()).status, 'done', 'a finished one is still the one it shows');
+  assert.equal((await finished()).posting, 'off', 'with no connection, nothing posts');
+
+  const later = new Date(Date.now() + 3_600_000);
+  const connection = await prisma.accountingConnection.create({ data: {
+    organizationId: world.orgId, realmId: 'realm-a', accessToken: 'a', refreshToken: 'r',
+    accessTokenExpiresAt: later, refreshTokenExpiresAt: later, postingEnabledAt: new Date(), postingEnabledByUserId: world.owner.userId,
+  } });
+  assert.deepEqual([(await finished()).posting, (await finished()).signInAgain], ['on', null]);
+
+  // Intuit's sign-in ran out: the yes holds, and signing in again picks it up.
+  await prisma.accountingConnection.update({ where: { accountingConnectionId: connection.accountingConnectionId }, data: { status: 'needs_reauth' } });
+  assert.deepEqual([(await finished()).posting, (await finished()).signInAgain], ['signed_out', `/organizations/${world.orgId}/accounting/quickbooks/connect`]);
+
+  // Another company holds none of this one's yes.
+  await prisma.accountingConnection.update({ where: { accountingConnectionId: connection.accountingConnectionId }, data: { status: 'connected', realmId: 'realm-b' } });
+  assert.equal((await finished()).posting, 'off');
+
+  // With posting off, the screen offers a new setup: starting one after a finished one starts afresh.
+  const again = await post(setupsPath(world.orgId), {}, world.owner.token);
+  await drainBackgroundWork();
+  assert.notEqual(again.setupId, setupId);
+  assert.equal((await get(latest, world.owner.token)).setup.setupId, again.setupId, 'and the screen opens on the new one');
+
+  const member = await register('Mina Member');
+  await prisma.organizationMembership.create({ data: { organizationId: world.orgId, userId: member.userId, role: 'member', status: 'active' } });
+  assert.equal((await raw('GET', latest, member.token)).status, 403);
+});
+
 test('setup: it is for admins, in their own organisation, and only for systems it knows', async () => {
   const world = await makeOrg();
   scriptModel(() => 'Hello.');
