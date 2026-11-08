@@ -2,7 +2,7 @@
 // back, take the person's yes, show it.
 
 import { Prisma, type IntegrationSetup } from '@prisma/client';
-import { ApiError, conflict, notFound } from '../../infra/api-errors.js';
+import { ApiError, badRequest, conflict, notFound } from '../../infra/api-errors.js';
 import { prisma } from '../../infra/prisma.js';
 import { connectorFor, type BooksConnection } from '../connectors.js';
 import { deleteCopy, lookUp, type RecordKind } from '../copy.js';
@@ -11,7 +11,7 @@ import { doneConditions, readyForGo, stillMissing } from './gates.js';
 import { MAX_CONSECUTIVE_FAILURES, serviceFailed, wake } from './harness.js';
 import type { SetupOutcome } from './outcome.js';
 import { playbookFor } from './playbooks.js';
-import { appendEvent, liveSetup, type SetupSystem } from './record.js';
+import { appendEvent, cardAnswers, liveSetup, type SetupSystem } from './record.js';
 import type { StudyFindings } from './study.js';
 
 /** Start a setup, or come back to the one under way. Only one runs per organisation and system. */
@@ -41,15 +41,19 @@ async function ownSetup(organizationId: string, setupId: string): Promise<Integr
 /**
  * A person's message. Taken while a turn is running too: it waits on the log and
  * gets the next turn, so someone can say "wrong company" without waiting.
+ * Written on a question's card, it says which call it answers (`answering`).
  */
-export async function postMessage(organizationId: string, userId: string, setupId: string, text: string) {
+export async function postMessage(organizationId: string, userId: string, setupId: string, text: string, answering: string | null = null) {
   const setup = await ownSetup(organizationId, setupId);
   if (setup.status === 'done') throw conflict('This setup is finished.');
   if (setup.status === 'stopped' && setup.stopReason !== 'failures') {
     throw conflict('This setup has reached its limit. Someone at Decimal needs to raise it.');
   }
+  if (answering && !(await prisma.integrationSetupCall.findUnique({ where: { setupId_key: { setupId, key: answering } }, select: { key: true } }))) {
+    throw badRequest('That question isn’t in this setup.');
+  }
   const message = await prisma.integrationSetupMessage.create({ data: { setupId, role: 'user', status: 'done', authorUserId: userId, text } });
-  await appendEvent(setupId, 'message', { messageId: message.messageId }, { actorUserId: userId, wakes: true });
+  await appendEvent(setupId, 'message', { messageId: message.messageId, ...(answering ? { answering } : {}) }, { actorUserId: userId, wakes: true });
   if (setup.status === 'stopped') {
     // It stopped because it kept failing. A person asking again is the way back.
     await prisma.integrationSetup.update({ where: { setupId }, data: { status: 'open', stopReason: null, consecutiveFailures: 0 } });
@@ -253,7 +257,7 @@ function postingNow(setup: IntegrationSetup, connection: BooksConnection | null)
 async function setupView(setup: IntegrationSetup) {
   const connector = connectorFor(setup.system);
   const done = setup.status === 'done';
-  const [messages, calls, conditions, retry, connection] = await Promise.all([
+  const [messages, calls, conditions, retry, connection, onCards] = await Promise.all([
     prisma.integrationSetupMessage.findMany({
       where: { setupId: setup.setupId },
       orderBy: { createdAt: 'asc' },
@@ -263,8 +267,15 @@ async function setupView(setup: IntegrationSetup) {
     doneConditions(setup),
     retrying(setup),
     done ? connector.connection(setup.organizationId) : Promise.resolve(null),
+    cardAnswers(setup.setupId),
   ]);
   const posting = done ? postingNow(setup, connection) : null;
+  const questions = new Map(calls.map((c) => [c.key, c.question]));
+  const answering = (messageId: string) => {
+    const key = onCards.get(messageId);
+    const question = key ? questions.get(key) : undefined;
+    return key && question ? { key, question } : null;
+  };
   return {
     setupId: setup.setupId,
     system: setup.system,
@@ -298,6 +309,8 @@ async function setupView(setup: IntegrationSetup) {
       status: m.status,
       // Who wrote a person's message: more than one admin can be in a setup.
       author: m.authorUser ? { userId: m.authorUser.userId, name: m.authorUser.displayName, avatarUrl: m.authorUser.avatarUrl } : null,
+      // Written on a question's card: which question it answers.
+      answering: answering(m.messageId),
       text: m.text,
       thoughts: m.thoughts,
       claims: m.claims,

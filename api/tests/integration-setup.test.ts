@@ -168,6 +168,36 @@ test('setup: each turn is rebuilt from the record: the conversation so far, and 
     ['Answer 1', 'Which company will this connect?', 'Answer 2', 'Larkspur, please', 'Answer 3']);
 });
 
+test('setup: an answer written on a question\'s card says which question it answers, to the model and on screen', async () => {
+  const world = await makeOrg();
+  const calls = scriptModel((_seen, n) => `Answer ${n}`);
+  const setupId = await start(world);
+  const question = 'What date are the books closed through? A bill dated on or before it cannot post.';
+  await prisma.integrationSetupCall.create({ data: { setupId, key: 'closing_date', kind: 'closing_date', question, required: true } });
+  const note = `[Decimal: This was written on the card for closing_date, so it answers that question: "${question}" Nobody typed this line.]`;
+
+  await post(`${setupPath(world.orgId, setupId)}/messages`, { text: '31 December 2025', answering: 'closing_date' }, world.owner.token);
+  await drainBackgroundWork();
+  assert.equal(calls.at(-1)!.messages.at(-1)!.content, `${note}\n31 December 2025`, 'the words alone could answer anything');
+
+  await say(world, setupId, 'Thanks');
+  await drainBackgroundWork();
+  assert.deepEqual(calls.at(-1)!.messages.map((m) => m.content), ['Answer 1', `${note}\n31 December 2025`, 'Answer 2', 'Thanks'], 'and it still does in the history');
+
+  const shown = (await view(world, setupId)).messages as Array<{ text: string; answering: unknown }>;
+  assert.deepEqual(shown.map((m) => [m.text, m.answering]), [
+    ['Answer 1', null],
+    ['31 December 2025', { key: 'closing_date', question }],
+    ['Answer 2', null],
+    ['Thanks', null],
+    ['Answer 3', null],
+  ]);
+
+  const unknown = await raw('POST', `${setupPath(world.orgId, setupId)}/messages`, world.owner.token, { text: 'Yes', answering: 'no_such_question' });
+  assert.equal(unknown.status, 400, 'a card only answers a question this setup has');
+  assert.equal((await view(world, setupId)).messages.length, 5, 'and nothing was said');
+});
+
 test('setup: two wake-ups at once take one turn', async () => {
   const world = await makeOrg();
   const calls = scriptModel(() => 'Hello.');

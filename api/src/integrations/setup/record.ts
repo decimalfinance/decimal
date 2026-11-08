@@ -28,6 +28,25 @@ export async function appendEvent(
   });
 }
 
+/**
+ * The messages that were answers given on a question's card, by message, to the
+ * call each answers. The card says which question it is, so the words alone
+ * needn't: "31 December 2025" is an answer to the closing date.
+ */
+export async function cardAnswers(setupId: string): Promise<Map<string, string>> {
+  const events = await prisma.integrationSetupEvent.findMany({ where: { setupId, kind: 'message' }, select: { payload: true } });
+  const out = new Map<string, string>();
+  for (const event of events) {
+    const { messageId, answering } = (event.payload ?? {}) as { messageId?: unknown; answering?: unknown };
+    if (typeof messageId === 'string' && typeof answering === 'string') out.set(messageId, answering);
+  }
+  return out;
+}
+
+/** What the model reads before an answer given on a question's card. */
+export const cardNote = (key: string, question: string) =>
+  `[Decimal: This was written on the card for ${key}, so it answers that question: "${question}" Nobody typed this line.]`;
+
 /** The events that have not had their turn yet, oldest first. */
 export async function pendingEvents(setup: Pick<IntegrationSetup, 'setupId' | 'handledThroughSeq'>) {
   return prisma.integrationSetupEvent.findMany({

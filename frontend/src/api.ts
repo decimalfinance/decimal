@@ -2240,6 +2240,8 @@ export interface IntegrationSetupMessage {
   status: 'running' | 'done' | 'failed';
   /** Who wrote a person's message. Null for Decimal's. */
   author: { userId: string; name: string; avatarUrl: string | null } | null;
+  /** Written on a question's card: the question it answers. */
+  answering: { key: string; question: string } | null;
   text: string | null;
   thoughts: Array<{ text: string; detail?: string | null }> | null;
   /** What Decimal found in the books, each backed by records it read. */
@@ -2295,8 +2297,12 @@ export const integrationSetupApi = {
   start(organizationId: string, system: IntegrationSystem) {
     return request<IntegrationSetup>(`/organizations/${organizationId}/integrations/${system}/setups`, { method: 'POST', body: '{}' });
   },
-  say(organizationId: string, setupId: string, text: string) {
-    return request<IntegrationSetup>(`/organizations/${organizationId}/integrations/setups/${setupId}/messages`, { method: 'POST', body: JSON.stringify({ text }) });
+  /** `answering`: written on a question's card, the key of the question it answers. */
+  say(organizationId: string, setupId: string, text: string, answering?: string) {
+    return request<IntegrationSetup>(`/organizations/${organizationId}/integrations/setups/${setupId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ text, ...(answering ? { answering } : {}) }),
+    });
   },
   /** Intuit's sign-in page, for the path a sign-in action carries. Intuit sends the browser back to the setup. */
   signInLink(path: string) {

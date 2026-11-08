@@ -14,7 +14,8 @@ const orgParams = z.object({ organizationId: z.string().uuid() });
 const setupParams = orgParams.extend({ setupId: z.string().uuid() });
 const startParams = orgParams.extend({ system: z.enum(SETUP_SYSTEMS) });
 const recordParams = setupParams.extend({ kind: z.enum(RECORD_KINDS), recordId: z.string().min(1).max(100) });
-const messageBody = z.object({ text: z.string().trim().min(1).max(4000) });
+/** `answering`: written on a question's card, the key of the call it answers. */
+const messageBody = z.object({ text: z.string().trim().min(1).max(4000), answering: z.string().min(1).max(100).optional() });
 
 integrationSetupRouter.post('/organizations/:organizationId/integrations/:system/setups', asyncRoute(async (req, res) => {
   const { organizationId, system } = startParams.parse(req.params);
@@ -37,8 +38,8 @@ integrationSetupRouter.get('/organizations/:organizationId/integrations/setups/:
 integrationSetupRouter.post('/organizations/:organizationId/integrations/setups/:setupId/messages', asyncRoute(async (req, res) => {
   const { organizationId, setupId } = setupParams.parse(req.params);
   await assertOrganizationAdmin(organizationId, req.auth!);
-  const { text } = messageBody.parse(req.body);
-  sendJson(res, await postMessage(organizationId, req.auth!.userId, setupId, text));
+  const { text, answering } = messageBody.parse(req.body);
+  sendJson(res, await postMessage(organizationId, req.auth!.userId, setupId, text, answering ?? null));
 }));
 
 // The person's yes. Only a click reaches this, and it checks the done conditions itself.

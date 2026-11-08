@@ -4,10 +4,11 @@
  * what it can't work out, and turns posting on when someone presses Go. Beside
  * it, the steps show how far the setup has got.
  *
- * The question Decimal is waiting on is the last thing in the conversation, on
- * the maroon band a question for you is on in a bill's conversation, until it
- * is answered and the next one takes its place. Decimal also asks it in its own
- * words, in the message above.
+ * While Decimal waits on answers, the last thing in the conversation is a card
+ * on the maroon band a question for you is on in a bill's conversation: one
+ * question, a line to answer it on, and arrows through the others. An answer
+ * written there says which question it answers, so they can go in any order.
+ * Decimal also asks each question in its own words, in its messages.
  *
  * The buttons are built here from what the API returns (a sign-in, Go), never
  * from the model's words. While Decimal is working the page looks again every
@@ -28,6 +29,7 @@ import {
   type IntegrationSystem,
 } from '../api';
 import { Avatar } from '../kit/Avatar';
+import { Icon } from '../kit/icons';
 import { useToaster } from '../kit/Toast';
 import { FaceOf, Figures, Mark, Markdown, TickGlyph, chatTime } from './bill/parts';
 import type { Face } from './bill/model';
@@ -46,8 +48,6 @@ const OPENING_MS = 10_000;
 
 type Busy = null | 'start' | 'sign_in' | 'go';
 type Work = { did: string[]; now: string };
-/** The question Decimal is waiting on, and how far through its questions that is. */
-type Asked = { call: IntegrationSetupCall; n: number; of: number };
 
 export function IntegrationSetupPage() {
   const { organizationId = '', system = '' } = useParams();
@@ -127,9 +127,9 @@ function SetupScreen({ organizationId, system }: { organizationId: string; syste
     }
   }
 
-  async function say(text: string) {
+  async function say(text: string, answering?: string) {
     if (!setup) return;
-    show(await integrationSetupApi.say(organizationId, setup.setupId, text));
+    show(await integrationSetupApi.say(organizationId, setup.setupId, text, answering));
   }
 
   const sub = !setup
@@ -199,15 +199,20 @@ function working(setup: IntegrationSetup): Work | null {
 }
 
 /**
- * The question Decimal is waiting on: the first still open. The view lists them
- * in the order they were raised, which is the order Decimal asks them in, and Go
- * waits on every one.
+ * The question on the card, while any is still open: the one the person turned
+ * to; else, after an answer given on the card, that question again if Decimal
+ * still waits on it, or the next one still open; else the first still open. The
+ * view lists them in the order Decimal asks them, and Go waits on every one.
  */
-function openQuestion(setup: IntegrationSetup): Asked | null {
+function questionOnCard(setup: IntegrationSetup, turnedTo: string | null, answered: string | null): IntegrationSetupCall | null {
   if (setup.status !== 'open') return null;
-  const call = setup.calls.find((c) => c.status !== 'answered');
-  if (!call) return null;
-  return { call, n: setup.calls.filter((c) => c.status === 'answered').length + 1, of: setup.calls.length };
+  const calls = setup.calls;
+  if (!calls.some((c) => c.status !== 'answered')) return null;
+  const chosen = turnedTo ? calls.find((c) => c.key === turnedTo) : undefined;
+  if (chosen) return chosen;
+  const from = answered ? calls.findIndex((c) => c.key === answered) : -1;
+  const order = from >= 0 ? [...calls.slice(from), ...calls.slice(0, from)] : calls;
+  return order.find((c) => c.status !== 'answered') ?? null;
 }
 
 const met = (setup: IntegrationSetup, key: string) => setup.status === 'done' || setup.goConditions.some((c) => c.key === key && c.done);
@@ -289,32 +294,53 @@ function Conversation({ setup, name, me, busy, onSignIn, onGo, onSay }: {
   busy: Busy;
   onSignIn: (path: string) => void;
   onGo: (path: string) => void;
-  onSay: (text: string) => Promise<void>;
+  onSay: (text: string, answering?: string) => Promise<void>;
 }) {
+  const toaster = useToaster();
   const work = working(setup);
-  const [pending, setPending] = useState<string | null>(null);
+  const [pending, setPending] = useState<{ text: string; about: string | null } | null>(null);
+  // The question the person turned the card to, and the last one answered on it.
+  const [turnedTo, setTurnedTo] = useState<string | null>(null);
+  const [answered, setAnswered] = useState<string | null>(null);
+  // What is written on each question's card and not sent yet, kept while turning through them.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const thread = useRef<HTMLDivElement>(null);
   // Follows the end of the conversation, unless the person has scrolled up to read.
   const following = useRef(true);
   const said = setup.messages.filter((m) => !(m.role === 'assistant' && m.status === 'running'));
   const actions = liveActions(setup);
   const canWrite = setup.status === 'open' || (setup.status === 'stopped' && setup.stopReason === 'failures');
-  // Not while Decimal is taking a reply in: the next question, or Go, comes of it.
-  const question = work || pending ? null : openQuestion(setup);
+  // Not while Decimal is taking a reply in: what it asks next comes of it.
+  const card = work || pending ? null : questionOnCard(setup, turnedTo, answered);
 
-  const shape = `${said.length}|${pending ?? ''}|${work ? `${work.did.length}:${work.now}` : ''}|${question?.call.key ?? ''}`;
+  const shape = `${said.length}|${pending?.text ?? ''}|${work ? `${work.did.length}:${work.now}` : ''}|${card?.key ?? ''}`;
   useLayoutEffect(() => {
     const el = thread.current;
     if (el && following.current) el.scrollTop = el.scrollHeight;
   }, [shape]);
 
-  async function send(text: string) {
+  async function send(text: string, call?: IntegrationSetupCall) {
     following.current = true;
-    setPending(text);
+    setTurnedTo(null);
+    if (call) setAnswered(call.key);
+    setPending({ text, about: call?.question ?? null });
     try {
-      await onSay(text);
+      await onSay(text, call?.key);
     } finally {
       setPending(null);
+    }
+  }
+
+  async function answer(call: IntegrationSetupCall) {
+    const words = (drafts[call.key] ?? '').trim();
+    if (!words) return;
+    setDrafts((d) => ({ ...d, [call.key]: '' }));
+    try {
+      await send(words, call);
+    } catch (e) {
+      setDrafts((d) => ({ ...d, [call.key]: d[call.key] || words }));
+      setTurnedTo(call.key);
+      toaster.show(messageOf(e));
     }
   }
 
@@ -331,21 +357,31 @@ function Conversation({ setup, name, me, busy, onSignIn, onGo, onSay }: {
         {said.map((m) => (
           <Said key={m.messageId} m={m} me={me} name={name} actions={actions.get(m.messageId) ?? []} busy={busy} onSignIn={onSignIn} onGo={onGo} />
         ))}
-        {question ? <Asking question={question} /> : null}
-        {pending ? <PersonSaid face={me} text={pending} sending /> : null}
+        {card ? (
+          <QuestionCard
+            calls={setup.calls}
+            call={card}
+            draft={drafts[card.key] ?? ''}
+            onDraft={(text) => setDrafts((d) => ({ ...d, [card.key]: text }))}
+            onTurn={setTurnedTo}
+            onAnswer={() => void answer(card)}
+          />
+        ) : null}
+        {pending ? <PersonSaid face={me} text={pending.text} about={pending.about} sending /> : null}
         {work ? <Working work={work} /> : null}
       </div>
       {/* Stopped or finished, Decimal's last message says why there's nothing to write here. */}
       {canWrite ? (
         <div className="su-foot">
-          <Reply me={me} placeholder={question ? 'Answer Decimal…' : 'Reply to Decimal'} onSend={send} />
+          <Reply me={me} onSend={(text) => send(text)} />
         </div>
       ) : null}
     </div>
   );
 }
 
-function PersonSaid({ face, text, at, sending }: { face: Face; text: string; at?: string; sending?: boolean }) {
+/** A person's message. One written on a question's card has the question it answers above it. */
+function PersonSaid({ face, text, at, about, sending }: { face: Face; text: string; at?: string; about?: string | null; sending?: boolean }) {
   return (
     <div className={`bp-row${sending ? ' is-sending' : ''}`}>
       <span className="bp-face">
@@ -356,6 +392,11 @@ function PersonSaid({ face, text, at, sending }: { face: Face; text: string; at?
           <span className="bp-who-name">{face.name}</span>
           {at ? <span className="bp-who-time num">{chatTime(at)}</span> : null}
         </div>
+        {about ? (
+          <div className="su-about clip" title={about}>
+            {about}
+          </div>
+        ) : null}
         <div className="bp-msg">
           <Figures text={text} />
         </div>
@@ -376,7 +417,7 @@ function Said({ m, me, name, actions, busy, onSignIn, onGo }: {
 }) {
   if (m.role === 'user') {
     const face = m.author ? { name: m.author.name, avatarUrl: m.author.avatarUrl } : me;
-    return <PersonSaid face={face} text={m.text ?? ''} at={m.createdAt} />;
+    return <PersonSaid face={face} text={m.text ?? ''} at={m.createdAt} about={m.answering?.question ?? null} />;
   }
   const found = m.claims ?? [];
   return (
@@ -465,29 +506,89 @@ function Working({ work }: { work: Work }) {
   );
 }
 
-/** The question Decimal is waiting on, on the maroon band at the end of the conversation. */
-function Asking({ question }: { question: Asked }) {
-  const { call, n, of } = question;
+/**
+ * Decimal's questions, one at a time, as the last thing in the conversation:
+ * the question, a line to answer it on, and arrows through the others. A
+ * question already answered shows its answer, and a new one changes it.
+ */
+function QuestionCard({ calls, call, draft, onDraft, onTurn, onAnswer }: {
+  calls: IntegrationSetupCall[];
+  call: IntegrationSetupCall;
+  draft: string;
+  onDraft: (text: string) => void;
+  onTurn: (key: string) => void;
+  onAnswer: () => void;
+}) {
+  const i = calls.findIndex((c) => c.key === call.key);
+  const before = i > 0 ? calls[i - 1] : undefined;
+  const after = i >= 0 ? calls[i + 1] : undefined;
+  const done = call.status === 'answered';
+  const answer = typeof call.answer === 'string' && call.answer.trim() ? call.answer.trim() : null;
   return (
-    <div className="bp-row is-for-you">
+    <div className="bp-row is-for-you su-card">
       <span className="bp-face">
         <FaceOf who="decimal" size={28} bg="page" />
       </span>
       <div className="bp-said">
         <div className="bp-who">
           <span className="bp-who-name">Decimal agent</span>
+          {calls.length > 1 ? (
+            <span className="su-turn">
+              <button type="button" className="su-turn-btn" aria-label="The question before" disabled={!before} onClick={() => before && onTurn(before.key)}>
+                <Icon.chevLeft size={10} />
+              </button>
+              <span className="num">
+                {i + 1} of {calls.length}
+              </span>
+              <button type="button" className="su-turn-btn is-next" aria-label="The next question" disabled={!after} onClick={() => after && onTurn(after.key)}>
+                <Icon.chevLeft size={10} />
+              </button>
+            </span>
+          ) : null}
         </div>
         <div className="bp-msg">
           <Figures text={call.question} />
         </div>
-        <div className="bp-sub">{of > 1 ? `Question for you · ${n} of ${of}` : 'Question for you'}</div>
+        <div className="bp-sub">{done ? <Figures text={answer ? `Answered · ${answer}` : 'Answered'} /> : 'Question for you'}</div>
+        <div className="bp-reply-field su-card-field">
+          <input
+            value={draft}
+            placeholder={done ? 'Change the answer…' : 'Your answer…'}
+            aria-label={`Answer: ${call.question}`}
+            onChange={(e) => onDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                onAnswer();
+              }
+            }}
+          />
+          <button
+            type="button"
+            className="bp-send"
+            aria-label="Send the answer"
+            disabled={!draft.trim()}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={onAnswer}
+          >
+            <SendArrow />
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
+function SendArrow() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M12 19V5M5.5 11.5 12 5l6.5 6.5" />
+    </svg>
+  );
+}
+
 /** The reply line: your face, the field, and send. Decimal takes a message while it's working too. */
-function Reply({ me, placeholder, onSend }: { me: Face; placeholder: string; onSend: (text: string) => Promise<void> }) {
+function Reply({ me, onSend }: { me: Face; onSend: (text: string) => Promise<void> }) {
   const toaster = useToaster();
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -514,7 +615,7 @@ function Reply({ me, placeholder, onSend }: { me: Face; placeholder: string; onS
         <div className="bp-reply-field">
           <input
             value={text}
-            placeholder={placeholder}
+            placeholder="Reply to Decimal"
             aria-label="Write a message"
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
@@ -532,9 +633,7 @@ function Reply({ me, placeholder, onSend }: { me: Face; placeholder: string; onS
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => void send()}
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M12 19V5M5.5 11.5 12 5l6.5 6.5" />
-            </svg>
+            <SendArrow />
           </button>
         </div>
       </div>

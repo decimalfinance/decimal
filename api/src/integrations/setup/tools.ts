@@ -16,7 +16,7 @@ import {
 } from '../copy.js';
 import { companyProblems, linesToDecide } from './findings.js';
 import { doneConditions, notRaised, wordsSaid, readyForGo, stillMissing } from './gates.js';
-import { appendEvent } from './record.js';
+import { appendEvent, cardAnswers } from './record.js';
 import type { StudyFindings } from './study.js';
 
 /** "About seven at most." The rest waits until a bill raises it. */
@@ -617,8 +617,13 @@ export function setupTools(ctx: TurnContext): AgentTool[] {
         if (!call) throw new Error(`There is no call called ${input.key}.`);
         const topic = CAME_UP[call.kind];
         if (topic) {
-          const talked = await prisma.integrationSetupMessage.findMany({ where: { setupId: ctx.setupId, status: 'done' }, select: { text: true } });
-          if (!talked.some((m) => topic.test(m.text ?? ''))) throw new Error('This hasn\'t come up with them yet. Ask it in your message, and record it when they answer.');
+          const [talked, onCards] = await Promise.all([
+            prisma.integrationSetupMessage.findMany({ where: { setupId: ctx.setupId, status: 'done' }, select: { text: true } }),
+            cardAnswers(ctx.setupId),
+          ]);
+          // A question's card puts the question in front of them, so an answer written on it came up with them.
+          const onItsCard = [...onCards.values()].includes(call.key);
+          if (!onItsCard && !talked.some((m) => topic.test(m.text ?? ''))) throw new Error('This hasn\'t come up with them yet. Ask it in your message, and record it when they answer.');
         }
         if (call.kind === 'closing_date' && input.value?.date) {
           // Saying it again changes nothing. Refused, the model told them it couldn't save a date it already had.

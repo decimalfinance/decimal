@@ -17,7 +17,7 @@ import { isExceptionAgentConfigured, runAgent, type AgentRun, type AgentTool, ty
 import { connectorFor } from '../connectors.js';
 import { doneConditions, readyForGo, stillMissing, wordsSaid } from './gates.js';
 import { playbookFor, playbookVersion, type Playbook } from './playbooks.js';
-import { appendEvent, claimTurn, pendingEvents, releaseTurn, setupsOwedATurn } from './record.js';
+import { appendEvent, cardAnswers, cardNote, claimTurn, pendingEvents, releaseTurn, setupsOwedATurn } from './record.js';
 import { approvalPicture, runStudy, studiesOwed, type StudyFindings } from './study.js';
 import { ASK_AT_ONCE, decimalRefs, inWords, leftOutInWords, listFor, realRefs, setupTools, type SetupAction, type Thought, type TurnContext } from './tools.js';
 
@@ -438,19 +438,28 @@ async function systemPrompt(setup: IntegrationSetup, playbook: Playbook, personS
 async function conversation(setupId: string, pendingSeqs: bigint[]): Promise<ChatMessage[]> {
   const pending = await prisma.integrationSetupEvent.findMany({ where: { setupId, seq: { in: pendingSeqs }, kind: 'message' }, select: { payload: true } });
   const answering = new Set(pending.map((e) => (e.payload as { messageId?: string }).messageId));
-  const messages = await prisma.integrationSetupMessage.findMany({
-    where: { setupId, status: 'done' },
-    orderBy: { createdAt: 'desc' },
-    take: HISTORY_MESSAGES + answering.size,
-    select: { messageId: true, role: true, text: true, claims: true },
-  });
+  const [messages, onCards, calls] = await Promise.all([
+    prisma.integrationSetupMessage.findMany({
+      where: { setupId, status: 'done' },
+      orderBy: { createdAt: 'desc' },
+      take: HISTORY_MESSAGES + answering.size,
+      select: { messageId: true, role: true, text: true, claims: true },
+    }),
+    cardAnswers(setupId),
+    prisma.integrationSetupCall.findMany({ where: { setupId }, select: { key: true, question: true } }),
+  ]);
+  const questions = new Map(calls.map((c) => [c.key, c.question]));
   return messages
     .filter((m) => !answering.has(m.messageId))
     .slice(0, HISTORY_MESSAGES)
     .reverse()
     .map((m) => {
       const claims = Array.isArray(m.claims) ? (m.claims as Array<{ text: string }>).map((c) => `- ${c.text}`).join('\n') : '';
-      return { role: m.role === 'user' ? 'user' : 'assistant', content: [m.text, claims].filter(Boolean).join('\n') } as ChatMessage;
+      // An answer written on a question's card keeps saying which question it answered.
+      const key = m.role === 'user' ? onCards.get(m.messageId) : undefined;
+      const question = key ? questions.get(key) : undefined;
+      const note = key && question ? cardNote(key, question) : '';
+      return { role: m.role === 'user' ? 'user' : 'assistant', content: [note, m.text, claims].filter(Boolean).join('\n') } as ChatMessage;
     });
 }
 
@@ -471,9 +480,14 @@ async function whatHappened(pending: Awaited<ReturnType<typeof pendingEvents>>):
   const parts: string[] = [];
   for (const event of pending) {
     if (event.kind === 'message') {
-      const { messageId } = event.payload as { messageId?: string };
-      const message = messageId ? await prisma.integrationSetupMessage.findUnique({ where: { messageId }, select: { text: true } }) : null;
-      if (message) parts.push(message.text);
+      const { messageId, answering } = event.payload as { messageId?: string; answering?: unknown };
+      const message = messageId ? await prisma.integrationSetupMessage.findUnique({ where: { messageId }, select: { setupId: true, text: true } }) : null;
+      if (!message) continue;
+      // Written on a question's card: the card says which question, so the words alone needn't.
+      const call = typeof answering === 'string'
+        ? await prisma.integrationSetupCall.findUnique({ where: { setupId_key: { setupId: message.setupId, key: answering } }, select: { key: true, question: true } })
+        : null;
+      parts.push(call ? `${cardNote(call.key, call.question)}\n${message.text}` : message.text);
     } else {
       parts.push(`[Decimal: ${describeEvent(event.kind, event.payload as Record<string, unknown>)} Nobody typed this.]`);
     }

@@ -959,7 +959,7 @@ test('setup tools: what was passed over stays passed over on a later turn', asyn
   assert.equal(later.resultOf('offer_go').offered, true);
 });
 
-test('setup tools: a required question can\'t be answered before it has come up, and one line can\'t go to two categories', async () => {
+test('setup tools: a required question can\'t be answered before it has come up, or been answered on its card, and one line can\'t go to two categories', async () => {
   const w = await makeOrg();
   const state = pretendSystem(CODED_TWO_WAYS);
   const setupId = await studied(w, state);
@@ -979,6 +979,12 @@ test('setup tools: a required question can\'t be answered before it has come up,
   ] } } }], say: 'Noted?' }]);
   await say(w, setupId, 'Freight for some, Travel for others');
   assert.match(both.seen.results[0]!.output.error, /can't go to two categories/);
+
+  // Its card put the question in front of them, so an answer written there has come up.
+  const onCard = script([{ calls: [{ tool: 'record_answer', args: { key: 'closing_date', answer: '31 December 2025', value: { date: '2025-12-31' } } }], say: 'Saved.' }]);
+  await post(`${pathOf(w, setupId)}/messages`, { text: '31 December 2025', answering: 'closing_date' }, w.owner.token);
+  await drainBackgroundWork();
+  assert.equal(onCard.seen.results[0]!.output.recorded, 'closing_date', 'answered on its card');
 });
 
 test('setup tools: searching goes by word, in any order, whatever punctuation comes with it', async () => {

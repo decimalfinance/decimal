@@ -53,6 +53,7 @@
   --wash-panel: rgba(255, 255, 255, .6);    /* white over a tinted panel: a card in it, a control hovered */
   --wash-compare: rgba(255, 255, 255, .55); /* a duplicate side by side with its bill */
   --wash-hover: rgba(255, 255, 255, .7);
+  --wash-on-maroon: rgba(255, 255, 255, .16); /* white over the maroon band: a control hovered, a field in focus */
   /* A scrollbar on Decimal's pink: a maroon thumb */
   --thumb-pink: rgba(92, 31, 51, .18);
   --thumb-pink-hover: rgba(92, 31, 51, .32);
