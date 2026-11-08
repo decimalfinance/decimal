@@ -13,6 +13,8 @@
 .ui .su-thread { flex: 1; min-height: 0; overflow: auto; padding: 20px 30px 24px; }
 .ui .su-thread > .bp-row + .bp-row { margin-top: 18px; }
 .ui .su-thread .bp-msg { animation: ui-fade-in .18s ease-out; }
+/* The question Decimal is waiting on, last in the thread, is on the band a
+   question for you is on in a bill's conversation (bill.css .is-for-you). */
 /* What Decimal found in the books, under its message. */
 .ui .su-found { margin-top: 8px; }
 .ui .su-found-head { margin-bottom: 3px; }
@@ -20,7 +22,8 @@
 /* While it works: each thing it has done this turn, then what it's on now. */
 .ui .su-did { display: flex; align-items: baseline; gap: 6px; color: var(--ink-3); }
 .ui .su-did > svg { flex: none; color: var(--green-2); }
-.ui .su-foot { flex: none; padding: 12px 30px 16px; border-top: 1px solid var(--line-soft); }
+/* The reply line, pinned under the conversation with nothing between them. */
+.ui .su-foot { flex: none; padding: 12px 30px 16px; }
 .ui .su-foot .bp-reply { margin-top: 0; }
 .ui .su-foot .bp-reply-field { background: var(--grey); }
 
@@ -37,6 +40,3 @@
 .ui .su-step-text > .btn { margin-top: 8px; }
 .ui .su-subs { display: grid; gap: 7px; margin: 8px 0 0; padding: 0; list-style: none; }
 .ui .su-sub { font: 400 10.5px/1.45 var(--font); color: var(--ink-2); }
-.ui .su-sub-q { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; color: var(--ink); }
-.ui .su-sub-a { margin-top: 1px; color: var(--ink-3); }
-.ui .su-sub-a.is-open { color: var(--ink-4); }

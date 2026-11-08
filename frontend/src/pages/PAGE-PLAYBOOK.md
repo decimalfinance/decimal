@@ -62,7 +62,7 @@ Pages the redesign hasn't reached render inside `<Legacy>` in `App.tsx` (`div.de
 
 **Settings page** (`Organisation.tsx`, `Account.tsx`). Root `.ui.page`, then `h1.page-title`, `p.page-sub` and `div.st-blocks` of `<section>`s, each a `Heading` (`pages/settings/parts.tsx`) over `div.st-rows` of `div.st-row`.
 
-**Full-height workspace** (the bill page `pages/bill/BillPage.tsx`, `ApprovalRules.tsx`, `IntegrationSetup.tsx`). The root fills the pane and never scrolls; its parts scroll inside themselves. The bill page is `.ui.bp` with `.bp-crumb` on top and `.bp-foot` along the bottom; Approval rules is `.ui.ar-page`; the QuickBooks setup is `.ui.su-page`, a conversation with its reply line pinned under it, beside a panel of steps.
+**Full-height workspace** (the bill page `pages/bill/BillPage.tsx`, `ApprovalRules.tsx`, `IntegrationSetup.tsx`). The root fills the pane and never scrolls; its parts scroll inside themselves. The bill page is `.ui.bp` with `.bp-crumb` on top and `.bp-foot` along the bottom; Approval rules is `.ui.ar-page`; the QuickBooks setup is `.ui.su-page`, a conversation with its reply line pinned under it, beside a panel of steps. While Decimal waits on an answer there, its question is the last row of the conversation, on the maroon band a question for you is on in a bill's (`.bp-row.is-for-you`).
 
 **Screens before the app** (`pages/signin/`). `Frame` from `signin/parts.tsx` with `Title`, `Body`, `Field`, `Pill` and `Links`: their own `si-` system, with no sidebar and no toaster.
 

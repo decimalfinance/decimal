@@ -4,6 +4,11 @@
  * what it can't work out, and turns posting on when someone presses Go. Beside
  * it, the steps show how far the setup has got.
  *
+ * The question Decimal is waiting on is the last thing in the conversation, on
+ * the maroon band a question for you is on in a bill's conversation, until it
+ * is answered and the next one takes its place. Decimal also asks it in its own
+ * words, in the message above.
+ *
  * The buttons are built here from what the API returns (a sign-in, Go), never
  * from the model's words. While Decimal is working the page looks again every
  * second, and every few seconds otherwise, so each step it takes, and another
@@ -41,6 +46,8 @@ const OPENING_MS = 10_000;
 
 type Busy = null | 'start' | 'sign_in' | 'go';
 type Work = { did: string[]; now: string };
+/** The question Decimal is waiting on, and how far through its questions that is. */
+type Asked = { call: IntegrationSetupCall; n: number; of: number };
 
 export function IntegrationSetupPage() {
   const { organizationId = '', system = '' } = useParams();
@@ -191,6 +198,18 @@ function working(setup: IntegrationSetup): Work | null {
   return null;
 }
 
+/**
+ * The question Decimal is waiting on: the first still open. The view lists them
+ * in the order they were raised, which is the order Decimal asks them in, and Go
+ * waits on every one.
+ */
+function openQuestion(setup: IntegrationSetup): Asked | null {
+  if (setup.status !== 'open') return null;
+  const call = setup.calls.find((c) => c.status !== 'answered');
+  if (!call) return null;
+  return { call, n: setup.calls.filter((c) => c.status === 'answered').length + 1, of: setup.calls.length };
+}
+
 const met = (setup: IntegrationSetup, key: string) => setup.status === 'done' || setup.goConditions.some((c) => c.key === key && c.done);
 
 /**
@@ -280,8 +299,10 @@ function Conversation({ setup, name, me, busy, onSignIn, onGo, onSay }: {
   const said = setup.messages.filter((m) => !(m.role === 'assistant' && m.status === 'running'));
   const actions = liveActions(setup);
   const canWrite = setup.status === 'open' || (setup.status === 'stopped' && setup.stopReason === 'failures');
+  // Not while Decimal is taking a reply in: the next question, or Go, comes of it.
+  const question = work || pending ? null : openQuestion(setup);
 
-  const shape = `${said.length}|${pending ?? ''}|${work ? `${work.did.length}:${work.now}` : ''}`;
+  const shape = `${said.length}|${pending ?? ''}|${work ? `${work.did.length}:${work.now}` : ''}|${question?.call.key ?? ''}`;
   useLayoutEffect(() => {
     const el = thread.current;
     if (el && following.current) el.scrollTop = el.scrollHeight;
@@ -310,13 +331,14 @@ function Conversation({ setup, name, me, busy, onSignIn, onGo, onSay }: {
         {said.map((m) => (
           <Said key={m.messageId} m={m} me={me} name={name} actions={actions.get(m.messageId) ?? []} busy={busy} onSignIn={onSignIn} onGo={onGo} />
         ))}
+        {question ? <Asking question={question} /> : null}
         {pending ? <PersonSaid face={me} text={pending} sending /> : null}
         {work ? <Working work={work} /> : null}
       </div>
       {/* Stopped or finished, Decimal's last message says why there's nothing to write here. */}
       {canWrite ? (
         <div className="su-foot">
-          <Reply me={me} onSend={send} />
+          <Reply me={me} placeholder={question ? 'Answer Decimal…' : 'Reply to Decimal'} onSend={send} />
         </div>
       ) : null}
     </div>
@@ -443,8 +465,29 @@ function Working({ work }: { work: Work }) {
   );
 }
 
+/** The question Decimal is waiting on, on the maroon band at the end of the conversation. */
+function Asking({ question }: { question: Asked }) {
+  const { call, n, of } = question;
+  return (
+    <div className="bp-row is-for-you">
+      <span className="bp-face">
+        <FaceOf who="decimal" size={28} bg="page" />
+      </span>
+      <div className="bp-said">
+        <div className="bp-who">
+          <span className="bp-who-name">Decimal agent</span>
+        </div>
+        <div className="bp-msg">
+          <Figures text={call.question} />
+        </div>
+        <div className="bp-sub">{of > 1 ? `Question for you · ${n} of ${of}` : 'Question for you'}</div>
+      </div>
+    </div>
+  );
+}
+
 /** The reply line: your face, the field, and send. Decimal takes a message while it's working too. */
-function Reply({ me, onSend }: { me: Face; onSend: (text: string) => Promise<void> }) {
+function Reply({ me, placeholder, onSend }: { me: Face; placeholder: string; onSend: (text: string) => Promise<void> }) {
   const toaster = useToaster();
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -471,7 +514,7 @@ function Reply({ me, onSend }: { me: Face; onSend: (text: string) => Promise<voi
         <div className="bp-reply-field">
           <input
             value={text}
-            placeholder="Reply to Decimal"
+            placeholder={placeholder}
             aria-label="Write a message"
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
@@ -499,7 +542,7 @@ function Reply({ me, onSend }: { me: Face; onSend: (text: string) => Promise<voi
   );
 }
 
-/** How far the setup has got, in the order it goes: sign in, confirm, read, answer, Go. */
+/** How far the setup has got, in the order it goes: sign in, confirm, read, answer, Go. The questions themselves are in the conversation. */
 function Steps({ setup, system, busy, onSignIn }: {
   setup: IntegrationSetup;
   system: IntegrationSystem;
@@ -560,15 +603,7 @@ function Steps({ setup, system, busy, onSignIn }: {
           state={met(setup, 'closing_date') && met(setup, 'required_calls') ? 'done' : 'todo'}
           name="Answer Decimal’s questions"
           line={setup.calls.length === 0 ? 'Decimal asks once your books are read.' : `${answered} of ${setup.calls.length} answered`}
-        >
-          {setup.calls.length > 0 ? (
-            <ul className="su-subs">
-              {setup.calls.map((call) => (
-                <Question key={call.key} call={call} />
-              ))}
-            </ul>
-          ) : null}
-        </Step>
+        />
 
         <Step
           state={setup.status === 'done' ? 'done' : setup.canGo ? 'live' : 'todo'}
@@ -597,18 +632,6 @@ function Step({ state, name, line, children }: { state: 'done' | 'live' | 'todo'
         {line ? <div className="su-step-line">{line}</div> : null}
         {children}
       </div>
-    </li>
-  );
-}
-
-function Question({ call }: { call: IntegrationSetupCall }) {
-  const answer = typeof call.answer === 'string' && call.answer.trim() ? call.answer : null;
-  return (
-    <li className="su-sub">
-      <div className="su-sub-q" title={call.question}>
-        {call.question}
-      </div>
-      <div className={`su-sub-a${answer ? '' : ' is-open'}`}>{answer ? <Figures text={answer} /> : 'Not answered yet'}</div>
     </li>
   );
 }
