@@ -12,9 +12,7 @@
 import { config } from '../config.js';
 import { logger } from '../infra/logger.js';
 import { getQuickBooksForOrg } from './connections.js';
-import { chatCompletionBody } from '../infra/openai-params.js';
-
-const OPENAI_CHAT_COMPLETIONS_URL = 'https://api.openai.com/v1/chat/completions';
+import { chat, isAiConfigured } from '../infra/ai.js';
 
 export interface ExpenseAccount {
   id: string;
@@ -105,7 +103,7 @@ export async function matchExpenseAccounts(args: {
   precedents?: Array<{ description: string; category: string }>;
 }): Promise<{ rationale: string | null; suggestions: OcrSuggestion[]; lines: OcrLineCoding[] }> {
   const empty = { rationale: null, suggestions: [] as OcrSuggestion[], lines: [] as OcrLineCoding[] };
-  if (!config.openAiApiKey || args.accounts.length === 0) return empty;
+  if (!isAiConfigured() || args.accounts.length === 0) return empty;
   const hint = args.categoryHint?.trim() || null;
   const all = args.lineItems.map((l) => l.description).filter(Boolean);
   // Ten was far too few and said nothing about it. D1 is a 22-line cloud bill,
@@ -174,34 +172,28 @@ export async function matchExpenseAccounts(args: {
     `- Use the EXACT account name from the list. Omit a line, or return suggestions: [], if nothing fits.`;
 
   try {
-    const response = await fetch(OPENAI_CHAT_COMPLETIONS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.openAiApiKey}` },
-      body: JSON.stringify(chatCompletionBody({
-        model: config.openAiModel,
-        // Sized to the invoice, because the answer grows with it.
-        //
-        // This was a flat 900, chosen for a ten-line invoice — the same ten the
-        // input was capped at. The two numbers were a matched pair and nothing
-        // said so, so lifting the input cap alone truncated the reply mid-array
-        // and the JSON failed to parse. That is worse than the bug it replaced:
-        // ten lines coded became NONE coded.
-        //
-        // A per-line entry — index, account name, weight, a few words of why —
-        // runs about 45 tokens, plus room for the rationale and the bill-level
-        // suggestions.
-        max_tokens: Math.min(4000, 300 + items.length * 45),
-        temperature: 0,
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: 'You map purchases to GL expense accounts. Respond with JSON only, using exact account names from the provided list.' },
-          { role: 'user', content: prompt },
-        ],
-      })),
+    const answer = await chat({
+      model: config.openAiModel,
+      // Sized to the invoice, because the answer grows with it.
+      //
+      // This was a flat 900, chosen for a ten-line invoice — the same ten the
+      // input was capped at. The two numbers were a matched pair and nothing
+      // said so, so lifting the input cap alone truncated the reply mid-array
+      // and the JSON failed to parse. That is worse than the bug it replaced:
+      // ten lines coded became NONE coded.
+      //
+      // A per-line entry — index, account name, weight, a few words of why —
+      // runs about 45 tokens, plus room for the rationale and the bill-level
+      // suggestions.
+      max_tokens: Math.min(4000, 300 + items.length * 45),
+      temperature: 0,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: 'You map purchases to GL expense accounts. Respond with JSON only, using exact account names from the provided list.' },
+        { role: 'user', content: prompt },
+      ],
     });
-    if (!response.ok) return empty;
-    const body = (await response.json()) as { choices?: Array<{ message?: { content?: string | null } }> };
-    const raw = JSON.parse(body.choices?.[0]?.message?.content ?? '{}') as {
+    const raw = JSON.parse(answer.content || '{}') as {
       rationale?: unknown;
       suggestions?: Array<{ account?: unknown; weight?: unknown }>;
       lines?: Array<{ index?: unknown; account?: unknown; weight?: unknown; why?: unknown; like?: unknown }>;

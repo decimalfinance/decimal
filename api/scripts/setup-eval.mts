@@ -39,8 +39,10 @@ const { callClaude } = await import('../src/exceptions/claude.js');
 const { addUsage, costUsd, dollars } = await import('../src/infra/model-cost.js');
 const { default: Anthropic } = await import('@anthropic-ai/sdk');
 /** The agent, the person and the judge all run on Claude when its key is set, as the product does. */
-const onClaude = Boolean(config.anthropicApiKey);
-const agentCall = onClaude ? callClaude : callOpenAi;
+const { aiProvider } = await import('../src/infra/ai.js');
+const onClaude = aiProvider() === 'anthropic';
+// As the product does it: the model a run starts on says whose call it is.
+const agentCall: typeof callClaude = (request) => (request.model.startsWith('claude-') ? callClaude(request) : callOpenAi(request));
 let claude: InstanceType<typeof Anthropic> | null = null;
 const { setConnectorForTests } = await import('../src/integrations/connectors.js');
 const { fixtureReader, failure } = await import('../src/integrations/fixture-reader.js');

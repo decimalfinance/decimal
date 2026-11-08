@@ -18,9 +18,7 @@
 //      attention away from what was asked.
 import { config } from '../config.js';
 import { logger } from '../infra/logger.js';
-import { chatCompletionBody } from '../infra/openai-params.js';
-
-const OPENAI_CHAT_COMPLETIONS_URL = 'https://api.openai.com/v1/chat/completions';
+import { chat, isAiConfigured } from '../infra/ai.js';
 
 /** Every field the draft screen renders and can highlight. */
 export const HIGHLIGHTABLE_FIELDS = [
@@ -89,30 +87,24 @@ export async function fieldsForQuestion(
 ): Promise<{ fields: HighlightableField[]; scope: QuestionScope }> {
   // No flag means nothing could settle it by deed, so there is nothing to judge.
   const unjudged = { fields: [] as HighlightableField[], scope: 'asks_more' as QuestionScope };
-  if (!config.openAiApiKey) return unjudged;
+  if (!isAiConfigured()) return unjudged;
   try {
-    const response = await fetch(OPENAI_CHAT_COMPLETIONS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.openAiApiKey}` },
-      body: JSON.stringify(chatCompletionBody({
-        model: config.openAiModel,
-        max_tokens: 200,
-        temperature: 0,
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: PROMPT },
-          {
-            role: 'user',
-            content: aboutFlag
-              ? `Check raised: ${aboutFlag}\n\nQuestion: ${question.slice(0, 500)}`
-              : `Check raised: none\n\nQuestion: ${question.slice(0, 500)}`,
-          },
-        ],
-      })),
+    const answer = await chat({
+      model: config.openAiModel,
+      max_tokens: 200,
+      temperature: 0,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: PROMPT },
+        {
+          role: 'user',
+          content: aboutFlag
+            ? `Check raised: ${aboutFlag}\n\nQuestion: ${question.slice(0, 500)}`
+            : `Check raised: none\n\nQuestion: ${question.slice(0, 500)}`,
+        },
+      ],
     });
-    if (!response.ok) return unjudged;
-    const body = (await response.json()) as { choices?: Array<{ message?: { content?: string | null } }> };
-    const raw = body.choices?.[0]?.message?.content;
+    const raw = answer.content;
     if (!raw) return unjudged;
     const parsed = JSON.parse(raw) as { fields?: unknown; coveredByFlag?: unknown };
     // The closed vocabulary is enforced HERE, not in the prompt. A prompt is a

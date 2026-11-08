@@ -19,6 +19,7 @@
 // call for a scripted one, the same seam intake uses for extraction.
 import { config } from '../config.js';
 import { logger } from '../infra/logger.js';
+import { accountTurnedAway, aiProvider, isAiConfigured, noteAccountTurnedAway } from '../infra/ai.js';
 import { addUsage, costUsd, type Usage } from '../infra/model-cost.js';
 import { chatCompletionBody } from '../infra/openai-params.js';
 import { callClaude } from './claude.js';
@@ -94,7 +95,11 @@ export const callOpenAi: ModelCall = async ({ model, messages, tools, signal, ma
     body: JSON.stringify(chatCompletionBody({ model, temperature: 0, max_tokens: maxTokens, messages, tools: toOpenAiTools(tools), tool_choice: 'required' })),
     signal,
   });
-  if (!res.ok) throw new Error(`OpenAI ${res.status}`);
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    if (accountTurnedAway('openai', res.status, detail)) noteAccountTurnedAway('openai', res.status);
+    throw new Error(`OpenAI ${res.status}`);
+  }
   const body = (await res.json()) as {
     choices?: Array<{ message?: ChatMessage }>;
     usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } };
@@ -110,10 +115,10 @@ export const callOpenAi: ModelCall = async ({ model, messages, tools, signal, ma
 };
 
 type ExceptionAgentRuntime = { callModel: ModelCall; isConfigured: () => boolean };
-const onClaude = () => Boolean(config.anthropicApiKey);
 const defaultRuntime: ExceptionAgentRuntime = {
-  callModel: (request) => (onClaude() ? callClaude(request) : callOpenAi(request)),
-  isConfigured: () => onClaude() || Boolean(config.openAiApiKey),
+  // A run's model is fixed when it starts, and the model says whose it is, so a run never changes provider halfway.
+  callModel: (request) => (request.model.startsWith('claude-') ? callClaude(request) : callOpenAi(request)),
+  isConfigured: isAiConfigured,
 };
 let runtime: ExceptionAgentRuntime = defaultRuntime;
 
@@ -127,8 +132,9 @@ export function isExceptionAgentConfigured(): boolean {
   return runtime.isConfigured();
 }
 
+/** The model a run starts on: Claude's or OpenAI's, whichever provider a call goes to now. */
 export function exceptionAgentModel(): string {
-  return onClaude() ? config.anthropicAgentModel : config.openAiAgentModel || config.openAiModel;
+  return aiProvider() === 'anthropic' ? config.anthropicAgentModel : config.openAiAgentModel || config.openAiModel;
 }
 
 export async function runAgent(args: {

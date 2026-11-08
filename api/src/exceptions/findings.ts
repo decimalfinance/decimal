@@ -21,7 +21,7 @@ import { prisma } from '../infra/prisma.js';
 import { config } from '../config.js';
 import { logger } from '../infra/logger.js';
 import { trackBackgroundWork } from '../infra/background.js';
-import { chatCompletionBody } from '../infra/openai-params.js';
+import { chat, isAiConfigured } from '../infra/ai.js';
 
 export type FindingPoint = { text: string; tone: 'ok' | 'warn' | 'bad'; billId?: string | null; billState?: string | null };
 
@@ -293,16 +293,15 @@ let checkerOverride: Checker | null = null;
 export function setAddressedCheckForTests(fn: Checker | null) { checkerOverride = fn; }
 
 const askModel: Checker = async ({ billToName, billToAddress, ours }) => {
-  if (!config.openAiApiKey) return null;
+  if (!isAiConfigured()) return null;
   const prompt =
     `An invoice is addressed to: ${JSON.stringify(billToName)}${billToAddress ? `, at ${JSON.stringify(billToAddress)}` : ''}.\n` +
     `Our company is ${JSON.stringify(ours[0])}${ours.length > 1 ? `, also trading as ${ours.slice(1).map((n) => JSON.stringify(n)).join(', ')}` : ''}.\n\n` +
     `Is the invoice addressed to us? Judge the company, not the spelling: a legal suffix (Inc., LLC, Ltd), punctuation, an abbreviation or a typo of our name is us. A different company name is not us, however similar the industry.\n` +
     `Return JSON only: { "verdict": "same" | "different" | "unsure", "reason": "one short sentence a person can check" }`;
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.openAiApiKey}` },
-    body: JSON.stringify(chatCompletionBody({
+  let content: string;
+  try {
+    content = (await chat({
       model: config.openAiModel,
       max_tokens: 200,
       temperature: 0,
@@ -311,12 +310,11 @@ const askModel: Checker = async ({ billToName, billToAddress, ours }) => {
         { role: 'system', content: 'You check whether an invoice is addressed to a given company. Respond with JSON only.' },
         { role: 'user', content: prompt },
       ],
-    })),
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!response.ok) return null;
-  const body = (await response.json()) as { choices?: Array<{ message?: { content?: string | null } }> };
-  const raw = JSON.parse(body.choices?.[0]?.message?.content ?? '{}') as { verdict?: unknown; reason?: unknown };
+    }, { signal: AbortSignal.timeout(30_000) })).content;
+  } catch {
+    return null;
+  }
+  const raw = JSON.parse(content || '{}') as { verdict?: unknown; reason?: unknown };
   const verdict = raw.verdict === 'same' || raw.verdict === 'different' ? raw.verdict : 'unsure';
   return { verdict, reason: typeof raw.reason === 'string' ? raw.reason.slice(0, 240) : '' };
 };

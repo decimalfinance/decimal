@@ -598,6 +598,9 @@ export async function simulatePipeline(organizationId: string, input: {
 import { config } from '../config.js';
 import { logger } from '../infra/logger.js';
 import { chatCompletionBody } from '../infra/openai-params.js';
+import { accountTurnedAway, aiProvider, isAiConfigured, noteAccountTurnedAway } from '../infra/ai.js';
+import type { AgentTool } from '../exceptions/agent.js';
+import { callClaude } from '../exceptions/claude.js';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 
@@ -657,9 +660,11 @@ export async function assistFlow(organizationId: string, message: string, curren
   if (people.length === 0) {
     return { flow: currentFlow, explanation: 'Add teammates as members first — an approval flow needs people to route to.', outcome: null, deadlock: false };
   }
-  if (!config.openAiApiKey) {
+  if (!isAiConfigured()) {
     return { flow: currentFlow, explanation: 'The assistant is unavailable right now. You can still edit the flow directly on the canvas.', outcome: null, deadlock: false };
   }
+  // One provider for the whole conversation: a reply goes back to the model that wrote it.
+  const callWithTools = aiProvider() === 'anthropic' ? callClaudeWithTools : callOpenAiWithTools;
   const validIds = new Set(people.map((p) => p.id));
   const { ROLE_DEFINITIONS } = await import('./permissions.js');
   const rolesList = ROLE_DEFINITIONS.map((d) => ({ role: d.name, holders: people.filter((p) => p.roles.includes(d.name)).map((p) => p.name) }));
@@ -679,7 +684,7 @@ export async function assistFlow(organizationId: string, message: string, curren
   let result: AssistResult | null = null;
   try {
     for (let turn = 0; turn < 6 && !result; turn += 1) {
-      const reply = await callOpenAiWithTools(messages, signal);
+      const reply = await callWithTools(messages, signal);
       messages.push(reply);
       const calls = reply.tool_calls ?? [];
       if (calls.length === 0) {
@@ -747,9 +752,21 @@ async function callOpenAiWithTools(messages: ChatMessage[], signal?: AbortSignal
     body: JSON.stringify(chatCompletionBody({ model: config.openAiModel, temperature: 0, max_tokens: 1500, messages, tools: ASSIST_TOOLS, tool_choice: 'auto' })),
     signal,
   });
-  if (!res.ok) throw new Error(`OpenAI ${res.status}`);
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    if (accountTurnedAway('openai', res.status, detail)) noteAccountTurnedAway('openai', res.status);
+    throw new Error(`OpenAI ${res.status}`);
+  }
   const body = (await res.json()) as { choices?: Array<{ message?: ChatMessage }> };
   return body.choices?.[0]?.message ?? { role: 'assistant', content: '' };
+}
+
+const ASSIST_AGENT_TOOLS: AgentTool[] = ASSIST_TOOLS.map((t) => ({ name: t.function.name, description: t.function.description, parameters: t.function.parameters }));
+
+// The same turn on Claude, through the agent loop's adapter, which keeps each reply as Claude sent it.
+async function callClaudeWithTools(messages: ChatMessage[], signal?: AbortSignal): Promise<ChatMessage> {
+  const reply = await callClaude({ model: config.anthropicAgentModel, messages, tools: ASSIST_AGENT_TOOLS, signal: signal ?? AbortSignal.timeout(120_000), maxTokens: 1500 });
+  return reply.message;
 }
 
 // Trust nothing from the model: coerce to the FlowNode shape, keep only real

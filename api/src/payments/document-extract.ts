@@ -4,7 +4,8 @@
  *
  * Pipeline:
  *   1. If PDF, render pages to PNG.
- *   2. Send the image(s) to OpenAI GPT-4o mini using the same extraction
+ *   2. Send the image(s), or the PDF's text, to the model on whichever
+ *      provider has a key (infra/ai.ts), using the same extraction
  *      contract as decimal_agents/agents/ap-intake.
  *   3. Parse invoice objects, validate with Zod, map into payment rows.
  *
@@ -24,11 +25,10 @@ import { config } from '../config.js';
 import { ungroundedFields, type TextPage } from './doc-provenance.js';
 import { logger } from '../infra/logger.js';
 import { badRequest } from '../infra/api-errors.js';
-import { chatCompletionBody } from '../infra/openai-params.js';
+import { chat, isAiConfigured, type ChatRequest } from '../infra/ai.js';
 
 const execFileAsync = promisify(execFile);
 
-const OPENAI_CHAT_COMPLETIONS_URL = 'https://api.openai.com/v1/chat/completions';
 
 const SYSTEM_PROMPT =
   'You are an invoice field extractor. Respond with JSON matching the provided schema. No explanations, no chain of thought.';
@@ -747,7 +747,7 @@ export function textLayerQuality(pages: TextPage[] | null): 'good' | 'thin' | 'n
 }
 
 export function isDocumentExtractionConfigured() {
-  return Boolean(config.openAiApiKey);
+  return isAiConfigured();
 }
 
 export type DocumentExtractProgressEvent =
@@ -784,7 +784,7 @@ export async function extractPaymentRowsFromDocument(args: {
   onProgress?: (event: DocumentExtractProgressEvent) => void;
 }): Promise<{ rows: ExtractedRow[]; modelLatencyMs: number; pageCount: number }> {
   if (!isDocumentExtractionConfigured()) {
-    throw new Error('OPENAI_API_KEY is not configured on the server.');
+    throw new Error('No AI key is configured on the server: set ANTHROPIC_API_KEY or OPENAI_API_KEY.');
   }
 
   // Read the text when there is text.
@@ -1053,7 +1053,7 @@ async function runExtractionLlm(args: {
   /** What the call actually cost, so the cheap path can be shown to be cheap. */
   usage: { promptTokens: number; completionTokens: number };
 }> {
-  const messages: Array<{ role: string; content: ExtractionUserContent | string }> = [
+  const messages: ChatRequest['messages'] = [
     { role: 'system', content: `${SYSTEM_PROMPT}\n${args.mediumRules ?? VISION_ONLY_RULES}` },
     { role: 'user', content: args.userContent },
   ];
@@ -1062,54 +1062,34 @@ async function runExtractionLlm(args: {
   }
 
   const t0 = Date.now();
-  const response = await fetch(OPENAI_CHAT_COMPLETIONS_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.openAiApiKey}`,
+  // On whichever provider has a key. The model named here is OpenAI's; on Claude, ANTHROPIC_MODEL reads it.
+  const answer = await chat({
+    model: args.model || config.openAiModel,
+    // Multi-page extraction needs more headroom than the provider
+    // default (often 512). 4096 covers ~10 invoice rows comfortably
+    // without bloating cost.
+    max_tokens: 4096,
+    temperature: 0,
+    // Enforced at the sampling layer rather than hoped for and validated
+    // afterwards: the decoder cannot emit a token that breaks this schema.
+    response_format: {
+      type: 'json_schema',
+      json_schema: { name: 'extracted_invoices', strict: true, schema: EXTRACTION_JSON_SCHEMA },
     },
-    body: JSON.stringify(chatCompletionBody({
-      model: args.model || config.openAiModel,
-      // Multi-page extraction needs more headroom than the provider
-      // default (often 512). 4096 covers ~10 invoice rows comfortably
-      // without bloating cost.
-      max_tokens: 4096,
-      temperature: 0,
-      // Enforced at the sampling layer rather than hoped for and validated
-      // afterwards: the decoder cannot emit a token that breaks this schema.
-      response_format: {
-        type: 'json_schema',
-        json_schema: { name: 'extracted_invoices', strict: true, schema: EXTRACTION_JSON_SCHEMA },
-      },
-      messages,
-    })),
+    messages,
   });
   const latencyMs = Date.now() - t0;
 
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '');
-    throw new Error(`OpenAI ${response.status}: ${detail.slice(0, 500)}`);
-  }
-  const body = (await response.json()) as {
-    choices?: Array<{
-      message?: { content?: string | null };
-      finish_reason?: string;
-    }>;
-    usage?: { prompt_tokens?: number; completion_tokens?: number };
-    model?: string;
-    error?: unknown;
-  };
-  const choice = body.choices?.[0];
-  const content = choice?.message?.content || '';
+  const content = answer.content;
   if (!content) {
     logger.error('document_extract.empty_completion', {
-      model: body.model ?? config.openAiModel,
-      finishReason: choice?.finish_reason ?? 'unknown',
-      response: body,
+      provider: answer.provider,
+      model: answer.model,
+      finishReason: answer.finishReason ?? 'unknown',
     });
     throw new Error(
-      `OpenAI returned an empty completion (finish_reason=${choice?.finish_reason ?? 'unknown'}, ` +
-        `model=${body.model ?? config.openAiModel}). See API logs for full response.`,
+      `The model returned an empty completion (provider=${answer.provider}, finish_reason=${answer.finishReason ?? 'unknown'}, ` +
+        `model=${answer.model}). See API logs for full response.`,
     );
   }
 
@@ -1149,11 +1129,8 @@ async function runExtractionLlm(args: {
   return {
     invoices: parsedInvoices.data.invoices,
     latencyMs,
-    model: body.model,
-    usage: {
-      promptTokens: body.usage?.prompt_tokens ?? 0,
-      completionTokens: body.usage?.completion_tokens ?? 0,
-    },
+    model: answer.model,
+    usage: { promptTokens: answer.usage.promptTokens, completionTokens: answer.usage.completionTokens },
   };
 }
 

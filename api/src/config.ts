@@ -103,12 +103,15 @@ type DecimalConfig = {
    */
   openAiAgentModel: string;
   /**
-   * Claude for the agent loop: the exception agent, the integration setup and the
-   * companion chat. With the key set the loop runs on Claude, and without it on OpenAI.
-   * Extraction and the other single calls stay on OpenAI either way.
+   * Every AI feature runs on whichever provider has a key (`infra/ai.ts`). With both set,
+   * `AI_PROVIDER` says which goes first, and unset, Claude does.
    */
+  aiProvider: 'anthropic' | 'openai' | null;
   anthropicApiKey: string;
+  /** Claude for the agent loop: the exception agent, the integration setup and the companion chat. */
   anthropicAgentModel: string;
+  /** Claude for a single answer: extraction, coding, the judges and the Flow Builder's assistant. */
+  anthropicModel: string;
   squadsProgramId: string;
   squadsDefaultVaultIndex: number;
   squadsDefaultTimelockSeconds: number;
@@ -203,8 +206,10 @@ function buildConfig(): DecimalConfig {
     openAiModel: (process.env.OPENAI_MODEL ?? fileConfig.openAiModel ?? 'gpt-6-luna').trim(),
     openAiTextModel: (process.env.OPENAI_TEXT_MODEL ?? '').trim(),
     openAiAgentModel: (process.env.OPENAI_AGENT_MODEL ?? '').trim(),
+    aiProvider: aiProviderFromEnv(process.env.AI_PROVIDER),
     anthropicApiKey: (process.env.ANTHROPIC_API_KEY ?? '').trim(),
     anthropicAgentModel: (process.env.ANTHROPIC_AGENT_MODEL ?? '').trim() || 'claude-opus-5-5',
+    anthropicModel: (process.env.ANTHROPIC_MODEL ?? '').trim() || 'claude-haiku-5-5',
     squadsProgramId:
       (process.env.SQUADS_V4_PROGRAM_ID ?? fileConfig.squadsProgramId ?? 'SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf').trim(),
     squadsDefaultVaultIndex: Number(process.env.SQUADS_DEFAULT_VAULT_INDEX ?? fileConfig.squadsDefaultVaultIndex ?? 0),
@@ -256,6 +261,14 @@ function buildConfig(): DecimalConfig {
   return nextConfig;
 }
 
+
+function aiProviderFromEnv(value: string | undefined): DecimalConfig['aiProvider'] {
+  const normalized = (value ?? '').trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === 'anthropic' || normalized === 'claude') return 'anthropic';
+  if (normalized === 'openai') return 'openai';
+  throw new Error(`Invalid AI_PROVIDER="${value}". Use anthropic or openai, or leave it unset.`);
+}
 
 function getLogLevel(value: string): LogLevel {
   const normalized = value.trim().toLowerCase();

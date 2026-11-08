@@ -13,7 +13,7 @@
 // Luna decides; a plain rule decides when no model is set up or the call fails.
 import { config } from '../config.js';
 import { logger } from '../infra/logger.js';
-import { chatCompletionBody } from '../infra/openai-params.js';
+import { chat, isAiConfigured } from '../infra/ai.js';
 
 export type AskDecision = { decision: 'covered' | 'new'; note: string };
 export type AskInput = { recipientName: string; billLabel: string; existing: string[]; message: string };
@@ -52,28 +52,21 @@ const SCHEMA = {
 
 export async function classifyAsk(input: AskInput): Promise<AskDecision> {
   if (override) return override(input);
-  if (!config.openAiApiKey) return classifyAskByRule(input);
+  if (!isAiConfigured()) return classifyAskByRule(input);
   const existing = input.existing.length ? input.existing.map((e) => `- ${e}`).join('\n') : '- (nothing yet)';
   const prompt = `${input.recipientName}'s inbox item for ${input.billLabel} currently asks them to:\n${existing}\n\nA colleague wants to ask ${input.recipientName}: "${input.message}"\n\nDecide:\n- covered: everything this asks is already in the item (for example asking them to approve when their approval is already waiting). Nothing new would be sent.\n- new: anything else. It goes to them as a question on the bill.\nThen write a one-sentence note for the colleague sending it, in the third person about ${input.recipientName}. For covered, say what ${input.recipientName} already has, e.g. "${input.recipientName}'s approval on this bill is already waiting, so there is nothing new to send." For new, say it goes to them as a question. Never say it holds or stops the bill: nothing does.`;
   try {
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.openAiApiKey}` },
-      body: JSON.stringify(chatCompletionBody({
-        model: config.openAiAgentModel || config.openAiModel,
-        temperature: 0,
-        max_tokens: 200,
-        messages: [
-          { role: 'system', content: 'You keep a colleague\'s inbox free of repeats. Answer with JSON only.' },
-          { role: 'user', content: prompt },
-        ],
-        response_format: { type: 'json_schema', json_schema: { name: 'ask_decision', strict: true, schema: SCHEMA } },
-      })),
-      signal: AbortSignal.timeout(20_000),
-    });
-    if (!res.ok) throw new Error(`OpenAI ${res.status}`);
-    const body = (await res.json()) as { choices?: Array<{ message?: { content?: string | null } }> };
-    const parsed = JSON.parse(body.choices?.[0]?.message?.content ?? '{}') as Partial<AskDecision>;
+    const answer = await chat({
+      model: config.openAiAgentModel || config.openAiModel,
+      temperature: 0,
+      max_tokens: 200,
+      messages: [
+        { role: 'system', content: 'You keep a colleague\'s inbox free of repeats. Answer with JSON only.' },
+        { role: 'user', content: prompt },
+      ],
+      response_format: { type: 'json_schema', json_schema: { name: 'ask_decision', strict: true, schema: SCHEMA } },
+    }, { signal: AbortSignal.timeout(20_000) });
+    const parsed = JSON.parse(answer.content || '{}') as Partial<AskDecision>;
     if (parsed.decision !== 'covered' && parsed.decision !== 'new') throw new Error('bad decision');
     return { decision: parsed.decision, note: String(parsed.note ?? '').slice(0, 240) || classifyAskByRule(input).note };
   } catch (error) {
