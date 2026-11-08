@@ -238,11 +238,8 @@ export async function listFor(kind: unknown, setupId: string): Promise<string> {
     .join('\n');
 }
 
-/**
- * What a posted bill leaves out, in code's words, under the first message once their books are read.
- * Given it to say, the model said "your bills leave out class" in run after run, which is backwards.
- */
-export function leftOutInWords(findings: StudyFindings | null, label: string): string {
+/** What a bill Decimal posts leaves out that their past bills had, a sentence each. */
+export function leftOutLines(findings: StudyFindings | null, label: string): string[] {
   const billsWith = (kind: string) => findings?.leftOut.find((l) => l.kind === kind)?.bills ?? 0;
   const used = [
     [billsWith('item_lines'), 'used products or services'],
@@ -255,6 +252,15 @@ export function leftOutInWords(findings: StudyFindings | null, label: string): s
     ...(used.length > 0 ? [`A bill Decimal posts has Category lines only. Of your past bills, ${used.slice(0, -1).join(', ')}${used.length > 1 ? ' and ' : ''}${used.at(-1)}. You can add those in ${label} once a bill is posted, and none of it stops a bill posting.`] : []),
     ...(other > 0 ? [`${other === 1 ? 'One past bill was' : `${other} past bills were`} in another currency. A bill like that doesn't post, so enter it in ${label} by hand.`] : []),
   ];
+  return lines;
+}
+
+/**
+ * What a posted bill leaves out, in code's words, under the first message once their books are read.
+ * Given it to say, the model said "your bills leave out class" in run after run, which is backwards.
+ */
+export function leftOutInWords(findings: StudyFindings | null, label: string): string {
+  const lines = leftOutLines(findings, label);
   return lines.length > 0 ? `Worth knowing:\n${lines.map((l) => `- ${l}`).join('\n')}` : '';
 }
 

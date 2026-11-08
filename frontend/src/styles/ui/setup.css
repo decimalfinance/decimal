@@ -63,3 +63,16 @@
 .ui .su-step-text > .btn { margin-top: 8px; }
 .ui .su-subs { display: grid; gap: 7px; margin: 8px 0 0; padding: 0; list-style: none; }
 .ui .su-sub { font: 400 10.5px/1.45 var(--font); color: var(--ink-2); }
+
+/* After Go (pages/IntegrationPosting.tsx): a settings page, its title on the line
+   the setup's title sits on, so switching between the two doesn't move it. The
+   bills it posted are a table like Exceptions', each row opening its bill. */
+.ui.page.su-after { padding-top: 15px; }
+.ui .su-posted {
+  display: grid;
+  padding: 0 4px;
+  grid-template-columns:
+    max-content minmax(32px, 1fr) max-content minmax(32px, 1fr) max-content minmax(32px, 1fr) max-content;
+}
+.ui .su-posted .bl-th { height: 26px; }
+.ui .su-more { margin: 8px 0 0; }

@@ -14,9 +14,13 @@
  * from the model's words. While Decimal is working the page looks again every
  * second, and every few seconds otherwise, so each step it takes, and another
  * admin's message, shows without a reload. Intuit's sign-in comes back here.
+ *
+ * Once Go is pressed, and while its yes holds, the page opens on what posting is
+ * doing instead (IntegrationPosting.tsx). The conversation stays a click away
+ * there, read only, at ?view=conversation.
  */
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { Navigate, useParams } from 'react-router';
+import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   accessApi,
@@ -34,6 +38,7 @@ import { useToaster } from '../kit/Toast';
 import { FaceOf, Figures, Mark, Markdown, TickGlyph, chatTime } from './bill/parts';
 import type { Face } from './bill/model';
 import { messageOf } from './settings/parts';
+import { PostingScreen } from './IntegrationPosting';
 
 const SYSTEMS: Record<IntegrationSystem, { name: string; signsIn: string }> = {
   quickbooks: { name: 'QuickBooks', signsIn: 'An admin of your QuickBooks company signs in on Intuit’s site.' },
@@ -59,6 +64,8 @@ function SetupScreen({ organizationId, system }: { organizationId: string; syste
   const { name } = SYSTEMS[system];
   const queryClient = useQueryClient();
   const toaster = useToaster();
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
   const [busy, setBusy] = useState<Busy>(null);
   const [openedAt] = useState(() => Date.now());
 
@@ -88,6 +95,9 @@ function SetupScreen({ organizationId, system }: { organizationId: string; syste
   // off (disconnected, or another company), the way back is a new setup.
   const signInAgain = setup?.posting === 'signed_out' ? setup.signInAgain : null;
   const lapsed = setup?.posting === 'off';
+  // Finished, with its yes holding, it opens on what posting is doing; the conversation is a click away, read only.
+  const settled = setup?.status === 'done' && !lapsed ? setup : null;
+  const reading = settled !== null && params.get('view') === 'conversation';
 
   const user = session.data?.user;
   const me: Face = { name: user?.displayName || user?.email || 'You', avatarUrl: user?.avatarUrl ?? null };
@@ -134,13 +144,15 @@ function SetupScreen({ organizationId, system }: { organizationId: string; syste
 
   const sub = !setup
     ? `Connect your ${name} company so approved bills post there.`
-    : lapsed
-      ? `Nothing posts to ${name} until it’s set up again.`
-      : signInAgain
-        ? `Decimal’s sign-in to ${name} expired, so nothing posts there until an admin signs in again.`
-        : setup.status === 'done'
-          ? `Approved bills post to ${setup.company.name ?? name}.`
-          : 'Decimal reads your books and asks about anything it can’t work out. Nothing is posted until you press Go.';
+    : reading
+      ? 'The setup conversation, as it was.'
+      : lapsed
+        ? `Nothing posts to ${name} until it’s set up again.`
+        : signInAgain
+          ? `Decimal’s sign-in to ${name} expired, so nothing posts there until an admin signs in again.`
+          : setup.status === 'done'
+            ? `Approved bills post to ${setup.company.name ?? name}.`
+            : 'Decimal reads your books and asks about anything it can’t work out. Nothing is posted until you press Go.';
 
   let body: ReactNode = null;
   if (access.isError) {
@@ -160,12 +172,34 @@ function SetupScreen({ organizationId, system }: { organizationId: string; syste
     );
   }
 
+  if (settled?.finished && !reading && isAdmin) {
+    return (
+      <PostingScreen
+        organizationId={organizationId}
+        system={system}
+        name={name}
+        setup={settled}
+        finished={settled.finished}
+        meId={user?.userId ?? null}
+        signingIn={busy === 'sign_in'}
+        onSignIn={(p) => void signIn(p)}
+        onShow={show}
+      />
+    );
+  }
+
   return (
     <div className="ui su-page">
       <header className="su-head">
         <h1 className="page-title">{name}</h1>
         {latest.isSuccess || (access.isSuccess && !isAdmin) ? <p className="page-sub">{sub}</p> : null}
-        {signInAgain ? (
+        {reading ? (
+          <div className="page-actions">
+            <button type="button" className="btn" onClick={() => navigate({ search: '' })}>
+              Back
+            </button>
+          </div>
+        ) : signInAgain ? (
           <div className="page-actions">
             <button
               type="button"

@@ -43,6 +43,10 @@ export function fixtureReader(fixture: BooksFixture, faults: FixtureFault[] = []
       fail('company');
       return fixture.company;
     },
+    closingDate: async () => {
+      fail('company');
+      return fixture.company.closingDate;
+    },
     accounts: async () => read('accounts', fixture.accounts),
     vendors: async () => read('vendors', fixture.vendors),
     bills: async (since) => read('bills', dated(fixture.bills, since)),

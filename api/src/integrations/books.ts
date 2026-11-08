@@ -145,6 +145,8 @@ export interface BooksReader {
   readonly system: string;
   readonly companyId: string;
   company(): Promise<BooksCompany>;
+  /** The date the books are closed through, if they keep one: company().closingDate in one read, where company() takes two. */
+  closingDate(): Promise<string | null>;
   /** Inactive ones included: a bill from two years ago may sit on one. */
   accounts(): Promise<BooksRead<BooksAccount>>;
   vendors(): Promise<BooksRead<BooksVendor>>;

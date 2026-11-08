@@ -34,6 +34,26 @@ const USDC_DECIMALS = 6;
 /** `held`: it may be in the books already, and nothing goes until someone says (books-check.ts). */
 export type AccountingSyncOutcome = 'synced' | 'skipped' | 'error' | 'held';
 
+/**
+ * Where a bill's posting stands, as the bill's page and the books screen say it. `retrying`:
+ * the sweep will try a failed bill again by itself, so nothing promises a retry that isn't coming.
+ * `linked`: it was in the books already, entered by hand, and someone said it's the same bill.
+ */
+export function postingOf(sync: {
+  status: string; externalBillId: string | null; error: string | null; attempts: number; syncedAt: Date | null; updatedAt: Date; metadataJson: unknown;
+}) {
+  const at = sync.updatedAt.toISOString();
+  if (sync.externalBillId) {
+    const meta = sync.metadataJson;
+    const linked = typeof meta === 'object' && meta !== null && (meta as Record<string, unknown>).linkedFromBooks === true;
+    return { status: 'posted' as const, at: (sync.syncedAt ?? sync.updatedAt).toISOString(), error: null, retrying: false, linked };
+  }
+  if (sync.status === 'error') return { status: 'failed' as const, at, error: sync.error, retrying: sync.attempts < MAX_ATTEMPTS, linked: false };
+  // It may be in the books already: nothing goes until someone says.
+  if (sync.status === 'held') return { status: 'held' as const, at, error: sync.error, retrying: false, linked: false };
+  return { status: 'pending' as const, at, error: sync.error, retrying: false, linked: false };
+}
+
 type SyncFields = {
   status: string;
   metadataJson?: Prisma.InputJsonValue;

@@ -2284,7 +2284,59 @@ export interface IntegrationSetup {
   posting: 'on' | 'signed_out' | 'off' | null;
   /** The sign-in that picks posting up again, while signed out. */
   signInAgain: string | null;
+  /** A finished setup, for the screen after it. Null before Go. */
+  finished: IntegrationSetupFinished | null;
   messages: IntegrationSetupMessage[];
+}
+
+type SetupPerson = { userId: string; name: string; avatarUrl: string | null };
+
+/** What a finished setup came to, in words written by the API from what posting reads. */
+export interface IntegrationSetupFinished {
+  postingFrom: string | null;
+  /** Who pressed Go. */
+  by: SetupPerson | null;
+  closingDate: {
+    /** What the person said, in the setup or since. Null: the books have never been closed. The books' own wins when they keep one (`IntegrationBooksClosingDate`). */
+    said: string | null;
+    changed: { at: string; by: SetupPerson | null } | null;
+  };
+  /** What the person decided: vendors that are one business, lines given a Category or left to a person. */
+  decisions: Array<{ title: string; line: string; value: string | null }>;
+  /** What bill coding fills in from their history: kinds of line, and the vendors they come from. */
+  fromHistory: { lines: number; vendors: number };
+  /** What a posted bill leaves out that their past bills had, a sentence each. */
+  worthKnowing: string[];
+}
+
+/** A bill posting has dealt with since Go. `held`: it may be in the books already, and waits for someone to say. */
+export interface IntegrationPostingBill {
+  paymentOrderId: string;
+  vendor: string;
+  invoiceNumber: string | null;
+  amountRaw: string;
+  status: 'posted' | 'pending' | 'failed' | 'held';
+  at: string;
+  error: string | null;
+  /** Failed, and the sweep will try again by itself. */
+  retrying: boolean;
+  /** It was in the books already, and someone said it's the same bill: linked, not posted again. */
+  linked: boolean;
+}
+
+/** The closing date the books keep themselves, read live; posting goes by it when there is one. `read` false: they couldn't be read just now. */
+export interface IntegrationBooksClosingDate {
+  inBooks: string | null;
+  read: boolean;
+}
+
+/** What posting has done since Go. */
+export interface IntegrationPosting {
+  /** Refused, or held: each needs someone. */
+  needYou: IntegrationPostingBill[];
+  /** Still posting first, then the latest posted. */
+  posted: IntegrationPostingBill[];
+  postedCount: number;
 }
 
 /** Setting up an accounting system: a conversation with Decimal, for admins. */
@@ -2312,5 +2364,20 @@ export const integrationSetupApi = {
   /** Go, for the path a Go action carries: posting is on from now. */
   go(path: string) {
     return request<IntegrationSetup>(path, { method: 'POST', body: '{}' });
+  },
+  /** After Go: the bills posting has dealt with. */
+  posting(organizationId: string, system: IntegrationSystem) {
+    return request<IntegrationPosting>(`/organizations/${organizationId}/integrations/${system}/posting`);
+  },
+  /** After Go: the closing date the books keep themselves. Reads the books live, so it takes a second or two. */
+  booksClosingDate(organizationId: string, system: IntegrationSystem) {
+    return request<IntegrationBooksClosingDate>(`/organizations/${organizationId}/integrations/${system}/books-closing-date`);
+  },
+  /** After Go: the date the books are closed through, or null when they have never been closed. */
+  closingDate(organizationId: string, setupId: string, date: string | null) {
+    return request<IntegrationSetup>(`/organizations/${organizationId}/integrations/setups/${setupId}/closing-date`, {
+      method: 'PUT',
+      body: JSON.stringify(date === null ? { neverClosed: true } : { date }),
+    });
   },
 };

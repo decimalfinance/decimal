@@ -75,6 +75,13 @@ test('books reader: a company reads as one shape, with its plan, currency and wh
   });
 });
 
+test('books reader: the closing date on its own is one read, the date company() gives', async () => {
+  const books = fakeBooks();
+  assert.equal(await quickBooksReader(books).closingDate(), '2026-06-30');
+  assert.deepEqual(books.asked, ['SELECT * FROM Preferences'], 'company() takes two: a screen waits on this one');
+  assert.equal(await quickBooksReader(fakeBooks({ Preferences: [{}], CompanyInfo: [{}] })).closingDate(), null);
+});
+
 test('books reader: a company that shares no closing date and tracks nothing says so, not a guess', async () => {
   const books = fakeBooks({ Preferences: [{}], CompanyInfo: [{}] });
   const company = await quickBooksReader(books).company();
@@ -384,7 +391,7 @@ test('books reader: the settings are asked for once, however many reads need the
 
 test('books reader: what the harness holds can read, and has no way to write', async () => {
   const reader = quickBooksReader(fakeBooks()) as unknown as Record<string, unknown>;
-  assert.deepEqual(Object.keys(reader).sort(), ['accounts', 'bills', 'billsLike', 'company', 'companyId', 'expenses', 'system', 'vendors']);
+  assert.deepEqual(Object.keys(reader).sort(), ['accounts', 'bills', 'billsLike', 'closingDate', 'company', 'companyId', 'expenses', 'system', 'vendors']);
   for (const value of Object.values(reader)) {
     assert.ok(typeof value === 'string' || typeof value === 'function', 'no client hanging off it');
   }

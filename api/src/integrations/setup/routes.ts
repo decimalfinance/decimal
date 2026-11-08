@@ -6,7 +6,7 @@ import { assertOrganizationAdmin } from '../../auth/organization-access.js';
 import { asyncRoute, sendJson } from '../../infra/route-helpers.js';
 import { RECORD_KINDS } from '../copy.js';
 import { SETUP_SYSTEMS } from './record.js';
-import { getReceipt, getRecord, getSetup, goLive, latestSetup, postMessage, startSetup } from './service.js';
+import { booksClosingDate, changeClosingDate, getReceipt, getRecord, getSetup, goLive, latestSetup, postingView, postMessage, startSetup } from './service.js';
 
 export const integrationSetupRouter = Router();
 
@@ -16,6 +16,8 @@ const startParams = orgParams.extend({ system: z.enum(SETUP_SYSTEMS) });
 const recordParams = setupParams.extend({ kind: z.enum(RECORD_KINDS), recordId: z.string().min(1).max(100) });
 /** `answering`: written on a question's card, the key of the call it answers. */
 const messageBody = z.object({ text: z.string().trim().min(1).max(4000), answering: z.string().min(1).max(100).optional() });
+/** A date the books are closed through, or never closed. */
+const closingBody = z.union([z.object({ date: z.string().min(1).max(20) }).strict(), z.object({ neverClosed: z.literal(true) }).strict()]);
 
 integrationSetupRouter.post('/organizations/:organizationId/integrations/:system/setups', asyncRoute(async (req, res) => {
   const { organizationId, system } = startParams.parse(req.params);
@@ -59,4 +61,26 @@ integrationSetupRouter.get('/organizations/:organizationId/integrations/setups/:
   const { organizationId, setupId } = setupParams.parse(req.params);
   await assertOrganizationAdmin(organizationId, req.auth!);
   sendJson(res, await getReceipt(organizationId, setupId));
+}));
+
+// After Go: what posting has done, for the screen the setup leaves behind.
+integrationSetupRouter.get('/organizations/:organizationId/integrations/:system/posting', asyncRoute(async (req, res) => {
+  const { organizationId, system } = startParams.parse(req.params);
+  await assertOrganizationAdmin(organizationId, req.auth!);
+  sendJson(res, await postingView(organizationId, system));
+}));
+
+// After Go: the closing date the books keep themselves, read live. Apart, because the books take seconds to answer.
+integrationSetupRouter.get('/organizations/:organizationId/integrations/:system/books-closing-date', asyncRoute(async (req, res) => {
+  const { organizationId, system } = startParams.parse(req.params);
+  await assertOrganizationAdmin(organizationId, req.auth!);
+  sendJson(res, await booksClosingDate(organizationId, system));
+}));
+
+// The closing date moves as months close, so it can change after Go. Nothing else the setup decided can.
+integrationSetupRouter.put('/organizations/:organizationId/integrations/setups/:setupId/closing-date', asyncRoute(async (req, res) => {
+  const { organizationId, setupId } = setupParams.parse(req.params);
+  await assertOrganizationAdmin(organizationId, req.auth!);
+  const body = closingBody.parse(req.body);
+  sendJson(res, await changeClosingDate(organizationId, req.auth!.userId, setupId, 'date' in body ? body.date : null));
 }));

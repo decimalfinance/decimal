@@ -2,17 +2,19 @@
 // back, take the person's yes, show it.
 
 import { Prisma, type IntegrationSetup } from '@prisma/client';
+import { postingOf } from '../../accounting/account-sync.js';
 import { ApiError, badRequest, conflict, notFound } from '../../infra/api-errors.js';
 import { prisma } from '../../infra/prisma.js';
 import { connectorFor, type BooksConnection } from '../connectors.js';
-import { deleteCopy, lookUp, type RecordKind } from '../copy.js';
+import { deleteCopy, isDate, lookUp, type RecordKind } from '../copy.js';
 import { linesToDecide } from './findings.js';
 import { doneConditions, readyForGo, stillMissing } from './gates.js';
 import { MAX_CONSECUTIVE_FAILURES, serviceFailed, wake } from './harness.js';
-import type { SetupOutcome } from './outcome.js';
+import { parseOutcome, type SetupOutcome } from './outcome.js';
 import { playbookFor } from './playbooks.js';
 import { appendEvent, cardAnswers, liveSetup, type SetupSystem } from './record.js';
 import type { StudyFindings } from './study.js';
+import { leftOutLines } from './tools.js';
 
 /** Start a setup, or come back to the one under way. Only one runs per organisation and system. */
 export async function startSetup(organizationId: string, userId: string, system: SetupSystem) {
@@ -254,6 +256,201 @@ function postingNow(setup: IntegrationSetup, connection: BooksConnection | null)
   return connection.status === 'needs_reauth' ? 'signed_out' : 'off';
 }
 
+// ─── After Go ─────────────────────────────────────────────────────────────────
+
+/** Long enough for the books to answer, short enough that the screen doesn't wait on them. */
+const BOOKS_READ_MS = 8000;
+
+/** The latest finished setup: the one posting goes by, and the one the screen after setup shows. */
+const finishedSetup = (organizationId: string, system: string) =>
+  prisma.integrationSetup.findFirst({ where: { organizationId, system, status: 'done' }, orderBy: { createdAt: 'desc' } });
+
+/**
+ * The closing date the books keep themselves, which posting goes by when there is one
+ * (closedThrough in account-sync.ts). Null when they keep none; undefined when they
+ * couldn't be read just now, so nobody is told which date is in force on a guess.
+ */
+async function closingDateInBooks(setup: IntegrationSetup): Promise<string | null | undefined> {
+  let timer: NodeJS.Timeout | undefined;
+  const read = (async () => {
+    const reader = await connectorFor(setup.system).reader(setup.organizationId);
+    if (!reader || reader.companyId !== setup.companyId) return undefined;
+    const date = (await reader.closingDate())?.slice(0, 10) ?? null;
+    return date && isDate(date) ? date : null;
+  })();
+  const late = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), BOOKS_READ_MS);
+    timer.unref?.();
+  });
+  try {
+    return await Promise.race([read, late]);
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const listOf = (names: string[]) => `${names.slice(0, -1).join(', ')}${names.length > 1 ? ' and ' : ''}${names.at(-1) ?? ''}`;
+
+/** Names for the vendors and categories an outcome keeps by id: from what the study found, else from the copy of the books. */
+async function namesFor(setup: IntegrationSetup, outcome: SetupOutcome | null, findings: StudyFindings | null) {
+  const vendors = new Map<string, string>();
+  const categories = new Map<string, string>();
+  for (const group of findings?.lookalikeVendors ?? []) for (const v of group.vendors) vendors.set(v.id, v.name);
+  for (const t of linesToDecide(findings)) {
+    vendors.set(t.vendorId, t.vendorName);
+    for (const a of t.accounts) categories.set(a.id, a.name);
+  }
+  for (const a of findings?.accountsBillsUse ?? []) if (!categories.has(a.id)) categories.set(a.id, a.name);
+  const unknown = (ids: Array<string | null>, known: Map<string, string>) => [...new Set(ids.filter((id): id is string => id !== null && !known.has(id)))];
+  const vendorIds = unknown([...(outcome?.vendorLinks ?? []).flatMap((l) => l.vendorIds), ...(outcome?.lineChoices ?? []).map((c) => c.vendorId)], vendors);
+  const categoryIds = unknown((outcome?.lineChoices ?? []).map((c) => c.categoryId), categories);
+  if (setup.companyId && vendorIds.length + categoryIds.length > 0) {
+    const rows = await prisma.booksRecord.findMany({
+      where: {
+        organizationId: setup.organizationId,
+        system: setup.system,
+        companyId: setup.companyId,
+        OR: [{ kind: 'vendor', recordId: { in: vendorIds } }, { kind: 'category', recordId: { in: categoryIds } }],
+      },
+      select: { kind: true, recordId: true, name: true },
+    });
+    for (const r of rows) if (r.name) (r.kind === 'vendor' ? vendors : categories).set(r.recordId, r.name);
+  }
+  return { vendor: (id: string) => vendors.get(id) ?? `Vendor ${id}`, category: (id: string) => categories.get(id) ?? `Category ${id}` };
+}
+
+/**
+ * A finished setup, for the screen after it: who turned posting on and when, the closing date
+ * the person gave, and what they decided, in words written here from the outcome posting reads.
+ * Nothing here reads the books, so the view stays as quick as the database.
+ */
+async function finishedView(setup: IntegrationSetup) {
+  const outcome = parseOutcome(setup.outcome);
+  const findings = setup.findings as StudyFindings | null;
+  const person = { select: { userId: true, displayName: true, email: true, avatarUrl: true } } as const;
+  const [go, changed, names] = await Promise.all([
+    prisma.integrationSetupEvent.findFirst({ where: { setupId: setup.setupId, kind: 'go' }, orderBy: { seq: 'asc' }, select: { at: true, actorUser: person } }),
+    prisma.integrationSetupEvent.findFirst({ where: { setupId: setup.setupId, kind: 'closing_date_changed' }, orderBy: { seq: 'desc' }, select: { at: true, actorUser: person } }),
+    namesFor(setup, outcome, findings),
+  ]);
+  const face = (u: { userId: string; displayName: string | null; email: string; avatarUrl: string | null } | null) =>
+    u ? { userId: u.userId, name: u.displayName?.trim() || u.email, avatarUrl: u.avatarUrl } : null;
+  const lines = linesToDecide(findings);
+  const learned = outcome?.learnedLines ?? [];
+  return {
+    postingFrom: outcome?.postingFrom ?? go?.at.toISOString() ?? null,
+    by: face(go?.actorUser ?? null),
+    closingDate: {
+      /** What the person said, in the setup or since. Null means never closed. The books' own wins when they keep one: see booksClosingDate. */
+      said: outcome?.closingDate ?? null,
+      changed: changed ? { at: changed.at.toISOString(), by: face(changed.actorUser) } : null,
+    },
+    decisions: [
+      ...(outcome?.vendorLinks ?? []).map((l) => {
+        const keep = names.vendor(l.useVendorId);
+        const others = l.vendorIds.filter((id) => id !== l.useVendorId).map(names.vendor);
+        return { title: keep, line: `Bills for ${listOf(others)} post to ${keep} too. They’re one business.`, value: null };
+      }),
+      ...(outcome?.lineChoices ?? []).map((c) => {
+        const entry = lines.find((t) => t.vendorId === c.vendorId && t.line === c.line);
+        const vendor = names.vendor(c.vendorId);
+        const what = entry?.example ?? c.line;
+        return {
+          title: what ? `“${what}” from ${vendor}` : `${vendor}’s bills`,
+          line: c.categoryId === null
+            ? 'Coded more than one way in the past, so a person picks the Category on each bill.'
+            : `Coded more than one way in the past. It goes to ${names.category(c.categoryId)} from now on.`,
+          value: c.categoryId === null ? 'Picked each time' : names.category(c.categoryId),
+        };
+      }),
+    ],
+    fromHistory: { lines: learned.length, vendors: new Set(learned.map((l) => l.vendorId)).size },
+    worthKnowing: leftOutLines(findings, playbookFor(setup.system).label),
+  };
+}
+
+/**
+ * The closing date moves as the months close, so an admin changes it on the screen after
+ * setup, and posting goes by it from the next bill. Null: the books have never been closed.
+ */
+export async function changeClosingDate(organizationId: string, userId: string, setupId: string, date: string | null) {
+  const setup = await ownSetup(organizationId, setupId);
+  if (setup.status !== 'done') throw conflict('Until Go, the closing date is agreed in the conversation.');
+  // Posting reads the finished setup written last (readOutcome), so changing an earlier one would put its decisions back in force.
+  if ((await finishedSetup(organizationId, setup.system))?.setupId !== setupId) {
+    throw conflict('Only the latest setup’s closing date can change. Posting goes by that one.');
+  }
+  const outcome = parseOutcome(setup.outcome);
+  if (!outcome) throw conflict('This setup’s outcome can’t be read.');
+  if (date !== null) {
+    if (!isDate(date)) throw badRequest('That isn’t a date.');
+    if (date > new Date().toISOString().slice(0, 10)) throw badRequest('A closing date can’t be in the future.');
+  }
+  if (outcome.closingDate === date) return setupView(setup);
+  await prisma.integrationSetup.update({
+    where: { setupId },
+    data: { outcome: { ...(setup.outcome as Prisma.JsonObject), closingDate: date } },
+  });
+  await appendEvent(setupId, 'closing_date_changed', { from: outcome.closingDate, to: date }, { actorUserId: userId });
+  return setupView(await ownSetup(organizationId, setupId));
+}
+
+const BILLS_SHOWN = 50;
+
+/**
+ * The closing date the books keep themselves, read live as posting reads it, for the screen
+ * after setup. A call of its own: the books take seconds to answer, and nothing else waits on it.
+ */
+export async function booksClosingDate(organizationId: string, system: SetupSystem) {
+  const setup = await finishedSetup(organizationId, system);
+  const connection = setup ? await connectorFor(system).connection(organizationId) : null;
+  // Signed out or off, the books can't be read, and the screen isn't told which date is in force on a guess.
+  const inBooks = setup && postingNow(setup, connection) === 'on' ? await closingDateInBooks(setup) : undefined;
+  return { inBooks: inBooks ?? null, read: inBooks !== undefined };
+}
+
+/**
+ * What posting has done since Go, for the screen after setup: the bills that need someone
+ * (refused, or held as maybe in the books already), then the rest, newest first. Rows from
+ * before this setup's Go belong to an earlier connection, maybe to other books, and are left out.
+ */
+export async function postingView(organizationId: string, system: SetupSystem) {
+  const since = parseOutcome((await finishedSetup(organizationId, system))?.outcome)?.postingFrom;
+  if (!since) return { needYou: [], posted: [], postedCount: 0 };
+  return billsSince(organizationId, system, new Date(since));
+}
+
+async function billsSince(organizationId: string, system: SetupSystem, since: Date) {
+  const where = { organizationId, provider: system, createdAt: { gte: since } };
+  const stuck: Prisma.AccountingSyncWhereInput = { ...where, externalBillId: null, status: { in: ['error', 'held'] } };
+  const rest: Prisma.AccountingSyncWhereInput = { ...where, OR: [{ externalBillId: { not: null } }, { status: { notIn: ['error', 'held'] } }] };
+  const select = {
+    status: true, externalBillId: true, error: true, attempts: true, syncedAt: true, updatedAt: true, metadataJson: true,
+    paymentOrder: {
+      select: {
+        paymentOrderId: true, amountRaw: true, invoiceNumber: true,
+        counterparty: { select: { displayName: true } }, counterpartyWallet: { select: { label: true } },
+      },
+    },
+  } as const;
+  const [needYou, posted, postedCount] = await Promise.all([
+    prisma.accountingSync.findMany({ where: stuck, orderBy: { updatedAt: 'desc' }, take: BILLS_SHOWN, select }),
+    // Still posting first (no syncedAt sorts first descending), then the latest posted.
+    prisma.accountingSync.findMany({ where: rest, orderBy: [{ syncedAt: 'desc' }, { updatedAt: 'desc' }], take: BILLS_SHOWN, select }),
+    prisma.accountingSync.count({ where: rest }),
+  ]);
+  const row = (r: (typeof posted)[number]) => ({
+    paymentOrderId: r.paymentOrder.paymentOrderId,
+    vendor: r.paymentOrder.counterparty?.displayName ?? r.paymentOrder.counterpartyWallet.label,
+    invoiceNumber: r.paymentOrder.invoiceNumber,
+    amountRaw: r.paymentOrder.amountRaw.toString(),
+    ...postingOf(r),
+  });
+  return { needYou: needYou.map(row), posted: posted.map(row), postedCount };
+}
+
 async function setupView(setup: IntegrationSetup) {
   const connector = connectorFor(setup.system);
   const done = setup.status === 'done';
@@ -303,6 +500,8 @@ async function setupView(setup: IntegrationSetup) {
     // For a finished setup only: whether its yes still holds, and the sign-in that picks it up again.
     posting,
     signInAgain: posting === 'signed_out' ? connector.signInPath(setup.organizationId) : null,
+    // For a finished setup, the screen after it: who turned posting on, and what Decimal follows since.
+    finished: done ? await finishedView(setup) : null,
     messages: messages.map((m) => ({
       messageId: m.messageId,
       role: m.role,

@@ -4356,20 +4356,8 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
     where: { organizationId, paymentOrderId },
     select: { status: true, externalBillId: true, error: true, attempts: true, syncedAt: true, updatedAt: true, metadataJson: true },
   });
-  // Whether the sweep will still try a failed bill again by itself, so the
-  // page only promises a retry that is coming.
-  const { MAX_ATTEMPTS } = await import('../accounting/account-sync.js');
-  const linked = isRecord(sync?.metadataJson) && sync.metadataJson.linkedFromBooks === true;
-  const posting = sync
-    ? sync.externalBillId
-      ? { status: 'posted' as const, at: (sync.syncedAt ?? sync.updatedAt).toISOString(), error: null, retrying: false, linked }
-      : sync.status === 'error'
-        ? { status: 'failed' as const, at: sync.updatedAt.toISOString(), error: sync.error, retrying: sync.attempts < MAX_ATTEMPTS, linked: false }
-        // It may be in the books already: nothing goes until someone says.
-        : sync.status === 'held'
-          ? { status: 'held' as const, at: sync.updatedAt.toISOString(), error: sync.error, retrying: false, linked: false }
-          : { status: 'pending' as const, at: sync.updatedAt.toISOString(), error: sync.error, retrying: false, linked: false }
-    : null;
+  const { postingOf } = await import('../accounting/account-sync.js');
+  const posting = sync ? postingOf(sync) : null;
 
   // The order's invoice approvable — prefer the live one over dead history
   // (a recalled bill that was resubmitted has several).

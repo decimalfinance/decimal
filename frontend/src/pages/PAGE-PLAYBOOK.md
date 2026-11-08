@@ -60,7 +60,7 @@ Pages the redesign hasn't reached render inside `<Legacy>` in `App.tsx` (`div.de
 
 **The Inbox** (`Inbox.tsx`) is a list page on its own root, `.ui.inbox-page`, with `ib-` rows. **Home** (`Home.tsx`, `.ui.home-page`) is one of a kind.
 
-**Settings page** (`Organisation.tsx`, `Account.tsx`). Root `.ui.page`, then `h1.page-title`, `p.page-sub` and `div.st-blocks` of `<section>`s, each a `Heading` (`pages/settings/parts.tsx`) over `div.st-rows` of `div.st-row`.
+**Settings page** (`Organisation.tsx`, `Account.tsx`). Root `.ui.page`, then `h1.page-title`, `p.page-sub` and `div.st-blocks` of `<section>`s, each a `Heading` (`pages/settings/parts.tsx`) over `div.st-rows` of `div.st-row`. The QuickBooks screen after setup (`IntegrationPosting.tsx`) is one too, as `.ui.page.su-after` so its title doesn't move when it switches to the conversation; its table of posted bills is laid out like the Organisation page's exceptions (`settings/Exceptions.tsx`, `st-ex`): `bl-head` and `bl-row` on a grid of its own, `su-posted`, except that each row opens its bill.
 
 **Full-height workspace** (the bill page `pages/bill/BillPage.tsx`, `ApprovalRules.tsx`, `IntegrationSetup.tsx`). The root fills the pane and never scrolls; its parts scroll inside themselves. The bill page is `.ui.bp` with `.bp-crumb` on top and `.bp-foot` along the bottom; Approval rules is `.ui.ar-page`; the QuickBooks setup is `.ui.su-page`, a conversation with its reply line pinned under it, beside a panel of steps. While Decimal waits on answers there, the last row of the conversation is a card on the maroon band a question for you is on in a bill's (`.bp-row.is-for-you`): one question, its own answer line (`.bp-reply-field`, white on the band), and arrows through the rest (`.su-turn`).
 

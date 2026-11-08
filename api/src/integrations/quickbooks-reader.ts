@@ -307,6 +307,10 @@ export function quickBooksReader(client: QueryClient, options: { wait?: (ms: num
       };
     },
 
+    async closingDate() {
+      return present((await prefs()).AccountingInfoPrefs?.BookCloseDate);
+    },
+
     accounts() {
       return readAll('Account', ' WHERE Active IN (true, false)', accountSchema, (a): BooksAccount => ({
         id: a.Id,

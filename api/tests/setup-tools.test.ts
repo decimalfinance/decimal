@@ -2,6 +2,7 @@
 // a fixture. The order that has to hold, holds here whatever the model does: reading
 // after sign-in, an answer only from a person, Go only from a click.
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, test } from 'node:test';
 import { prisma } from '../src/infra/prisma.js';
 import { drainBackgroundWork } from '../src/infra/background.js';
@@ -12,10 +13,11 @@ import { deleteCopy, lookUp, summarize } from '../src/integrations/copy.js';
 import { fixtureReader, type BooksFixture, type FixtureFault } from '../src/integrations/fixture-reader.js';
 import { sweepSetups, wake, withoutWhatClaimsSay } from '../src/integrations/setup/harness.js';
 import { noteDisconnected, noteSignedIn, noteSignInFailed } from '../src/integrations/setup/service.js';
+import { readOutcome } from '../src/integrations/setup/outcome.js';
 import { setRole } from '../src/approvals/roles.js';
 import { ensureEngineSetup } from '../src/approvals/wiring.js';
 import { drainAsyncIntake } from '../src/payments/invoice-intake.js';
-import { raw, post, get, register, upload, type Person } from './helpers/companion-harness.js';
+import { raw, post, get, makeWorld, register, upload, type Person } from './helpers/companion-harness.js';
 
 // ─── A company, in memory ─────────────────────────────────────────────────────
 
@@ -51,7 +53,7 @@ const LARKSPUR: BooksFixture = {
 
 // ─── A pretend system, and a model that does as it is told ────────────────────
 
-type Connection = { companyId: string; status: string } | null;
+type Connection = { companyId: string; status: string; postingSince?: Date | null } | null;
 
 /** Larkspur, where one vendor's line has also gone into a second category. */
 const CODED_TWO_WAYS: BooksFixture = {
@@ -77,7 +79,10 @@ function pretendSystem(fixture: BooksFixture = LARKSPUR, faults: FixtureFault[] 
     enablePosting: async (_org, userId) => {
       if (state.connection?.status !== 'connected') return null;
       state.goes.push({ userId });
-      return new Date();
+      // As the real connection does: posting is on from now, and stays on while signed out.
+      const since = new Date();
+      state.connection = { ...state.connection, postingSince: since };
+      return since;
     },
   });
   return state;
@@ -1488,6 +1493,126 @@ test('setup tools: only an admin can press Go; it records who, what it came to, 
   const next = await post(`/organizations/${w.orgId}/integrations/quickbooks/setups`, {}, w.owner.token);
   assert.notEqual(next.setupId, setupId, 'a finished setup does not block a new one');
   await drainBackgroundWork();
+});
+
+test('setup tools: after Go the screen says who turned posting on, the closing date in force and what was decided, and an admin can move the closing date', async () => {
+  const w = await makeOrg();
+  const state = pretendSystem(CODED_TWO_WAYS);
+  const setupId = await studied(w, state);
+  await settleWhoApproves(setupId);
+  script([{ calls: [{ tool: 'get_findings' }, call('delta', ['vendor:1', 'vendor:2'], 'lookalike_vendors'), call('coded', ['vendor:1'], 'coded_two_ways')], say: 'Asking.' }]);
+  await say(w, setupId, 'Go on');
+  script([{
+    calls: [
+      { tool: 'record_answer', args: { key: 'delta', answer: 'One vendor', value: { same: [{ keep: 'Delta Freight, Inc.', with: ['DELTA FREIGHT'] }] } } },
+      { tool: 'record_answer', args: { key: 'coded', answer: 'Freight', value: { choices: [{ vendor: 'Delta Freight, Inc.', line: 'ocean freight', category: 'Freight' }] } } },
+    ],
+    say: 'Noted.',
+  }]);
+  await say(w, setupId, 'One vendor, and freight');
+  await answerEverything(w, setupId);
+  const closing = `${pathOf(w, setupId)}/closing-date`;
+  assert.equal((await view(w, setupId)).finished, null, 'nothing to show before Go');
+  assert.equal((await raw('PUT', closing, w.owner.token, { date: '2026-09-30' })).status, 409, 'until Go it is agreed in the conversation');
+
+  const done = await post(`${pathOf(w, setupId)}/go`, {}, w.owner.token);
+  assert.equal(done.posting, 'on');
+  const { finished } = done;
+  assert.equal(finished.by.userId, w.owner.userId);
+  assert.equal(finished.by.name, 'Olive Owner');
+  assert.ok(Date.now() - Date.parse(finished.postingFrom) < 60_000);
+  assert.deepEqual(finished.closingDate, { said: '2025-12-31', changed: null });
+  const booksDate = `/organizations/${w.orgId}/integrations/quickbooks/books-closing-date`;
+  assert.deepEqual(await get(booksDate, w.owner.token), { inBooks: null, read: true }, 'the books keep none of their own');
+  assert.deepEqual(finished.decisions, [
+    { title: 'Delta Freight, Inc.', line: 'Bills for DELTA FREIGHT post to Delta Freight, Inc. too. They’re one business.', value: null },
+    { title: '“Ocean freight” from Delta Freight, Inc.', line: 'Coded more than one way in the past. It goes to Freight from now on.', value: 'Freight' },
+  ], 'in words written by code, with the names from the books');
+
+  // The closing date moves as the months close, and posting goes by the new one.
+  const moved = await raw('PUT', closing, w.owner.token, { date: '2026-09-30' });
+  assert.equal(moved.status, 200);
+  assert.equal(moved.json.finished.closingDate.said, '2026-09-30');
+  assert.equal(moved.json.finished.closingDate.changed.by.userId, w.owner.userId);
+  assert.equal((await readOutcome(w.orgId, 'quickbooks', 'realm-1'))?.closingDate, '2026-09-30', 'what posting reads');
+  const { events } = await get(`${pathOf(w, setupId)}/receipt`, w.owner.token);
+  const change = events.find((e: { kind: string }) => e.kind === 'closing_date_changed');
+  assert.deepEqual([change.actorUserId, change.payload], [w.owner.userId, { from: '2025-12-31', to: '2026-09-30' }], 'on the record');
+  assert.equal((await raw('PUT', closing, w.owner.token, { neverClosed: true })).json.finished.closingDate.said, null);
+  for (const bad of [{ date: '2026-02-30' }, { date: 'yesterday' }, { date: '2999-01-01' }, { date: '2026-09-30', neverClosed: true }, {}]) {
+    assert.equal((await raw('PUT', closing, w.owner.token, bad)).status, 400, JSON.stringify(bad));
+  }
+  assert.equal((await readOutcome(w.orgId, 'quickbooks', 'realm-1'))?.closingDate, null, 'a refusal changes nothing');
+  const member: Person = await register('Mina Member');
+  await prisma.organizationMembership.create({ data: { organizationId: w.orgId, userId: member.userId, role: 'member', status: 'active' } });
+  assert.equal((await raw('PUT', closing, member.token, { date: '2026-09-30' })).status, 403);
+  const other = await makeOrg();
+  assert.equal((await raw('PUT', `/organizations/${other.orgId}/integrations/setups/${setupId}/closing-date`, other.owner.token, { date: '2026-09-30' })).status, 404);
+  // Posting reads the finished setup written last, so only the latest one's date moves: writing an
+  // earlier one would put its decisions back in force.
+  const later = await prisma.integrationSetup.create({
+    data: {
+      organizationId: w.orgId, system: 'quickbooks', status: 'done', companyId: 'realm-1', companyName: 'Larkspur Freight',
+      outcome: { companyId: 'realm-1', postingFrom: new Date().toISOString(), closingDate: '2026-06-30', vendorLinks: [], lineChoices: [], learnedLines: [], categoriesInUse: [], leftOut: [] },
+    },
+  });
+  assert.equal((await raw('PUT', closing, w.owner.token, { date: '2026-09-30' })).status, 409, 'not the setup posting goes by');
+  assert.equal((await readOutcome(w.orgId, 'quickbooks', 'realm-1'))?.closingDate, '2026-06-30', 'posting still goes by the latest');
+  await prisma.integrationSetup.delete({ where: { setupId: later.setupId } });
+
+  // The books' own closing date wins when they keep one, so that is the one in force. It is read live, on its own call.
+  state.fixture = { ...state.fixture, company: { ...state.fixture.company, closingDate: '2026-10-31' } };
+  assert.deepEqual(await get(booksDate, w.owner.token), { inBooks: '2026-10-31', read: true });
+  // When they can't be read, or are signed out, the screen isn't told which date is in force on a guess.
+  state.faults = [{ on: 'company', error: new BooksReadError('unavailable', 'QuickBooks is down') }];
+  assert.deepEqual(await get(booksDate, w.owner.token), { inBooks: null, read: false });
+  state.faults = [];
+  state.connection = { ...state.connection!, status: 'needs_reauth' };
+  assert.equal((await view(w, setupId)).posting, 'signed_out');
+  assert.deepEqual(await get(booksDate, w.owner.token), { inBooks: null, read: false });
+});
+
+test('setup tools: after Go the screen lists what posting has done since, the ones that need someone first, and nothing from before Go', async () => {
+  const w = await makeWorld('Posting List Co');
+  const hour = 3_600_000;
+  await prisma.integrationSetup.create({
+    data: {
+      organizationId: w.orgId, system: 'quickbooks', status: 'done', companyId: 'realm-1', companyName: 'Larkspur Freight',
+      outcome: { companyId: 'realm-1', postingFrom: new Date(Date.now() - hour).toISOString(), closingDate: null, vendorLinks: [], lineChoices: [], learnedLines: [], categoriesInUse: [], leftOut: [] },
+    },
+  });
+  const sync = (paymentOrderId: string, data: Record<string, unknown>) =>
+    prisma.accountingSync.create({ data: { organizationId: w.orgId, paymentOrderId, provider: 'quickbooks', requestId: randomUUID(), ...data } });
+  await sync(w.bills.steady1, { status: 'synced', externalBillId: '101', syncedAt: new Date(Date.now() - 30 * 60_000) });
+  await sync(w.bills.dupOld, { status: 'synced', externalBillId: '102', syncedAt: new Date(Date.now() - 10 * 60_000), metadataJson: { linkedFromBooks: true } });
+  await sync(w.bills.ready, { status: 'error', error: 'QuickBooks refused the category.', attempts: 2 });
+  await sync(w.bills.lonely, { status: 'held', error: 'QuickBooks already has bill 7 from Lonely Co.' });
+  await sync(w.bills.dupNew, { status: 'pending' });
+  // Posted a month ago, before this Go: another connection's, maybe to other books.
+  await sync(w.bills.held, { status: 'synced', externalBillId: '99', syncedAt: new Date(Date.now() - 720 * hour), createdAt: new Date(Date.now() - 720 * hour) });
+
+  const path = `/organizations/${w.orgId}/integrations/quickbooks/posting`;
+  const listed = await get(path, w.owner.token);
+  const pick = (b: any) => [b.paymentOrderId, b.status, b.retrying, b.linked];
+  assert.deepEqual(listed.needYou.map(pick).sort(), [[w.bills.ready, 'failed', true, false], [w.bills.lonely, 'held', false, false]].sort());
+  assert.deepEqual(listed.posted.map(pick), [
+    [w.bills.dupNew, 'pending', false, false],
+    [w.bills.dupOld, 'posted', false, true],
+    [w.bills.steady1, 'posted', false, false],
+  ], 'still posting first, then the latest posted');
+  assert.equal(listed.postedCount, 3);
+  assert.deepEqual(await get(`/organizations/${w.orgId}/integrations/quickbooks/books-closing-date`, w.owner.token), { inBooks: null, read: false }, 'not connected: nothing read');
+  const order = await prisma.paymentOrder.findUniqueOrThrow({ where: { paymentOrderId: w.bills.steady1 }, include: { counterparty: true } });
+  assert.deepEqual(
+    [listed.posted[2].vendor, listed.posted[2].invoiceNumber, listed.posted[2].amountRaw],
+    [order.counterparty?.displayName, order.invoiceNumber, order.amountRaw.toString()],
+  );
+  assert.equal(listed.needYou.find((b: any) => b.status === 'failed').error, 'QuickBooks refused the category.');
+
+  assert.equal((await raw('GET', path, w.viewer.token)).status, 403, 'admins only, like the setup');
+  const fresh = await makeOrg();
+  assert.deepEqual(await get(`/organizations/${fresh.orgId}/integrations/quickbooks/posting`, fresh.owner.token), { needYou: [], posted: [], postedCount: 0 }, 'before any Go');
+  assert.deepEqual(await get(`/organizations/${fresh.orgId}/integrations/quickbooks/books-closing-date`, fresh.owner.token), { inBooks: null, read: false });
 });
 
 test('setup tools: losing the connection takes Go away, even with everything answered', async () => {
