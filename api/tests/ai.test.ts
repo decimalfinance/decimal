@@ -128,6 +128,53 @@ test('ai: a strict schema goes to Claude without the limits its decoder refuses,
   });
 });
 
+test('ai: a schema past what Claude compiles is asked for in words, and what the reply leaves out comes back null', async () => {
+  // Claude refuses a schema with more than 16 fields that may be null (measured on 8 Nov 2026);
+  // extraction's has 35, as OpenAI's strict mode wants them.
+  keys(true, false);
+  const fields = Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`f${i}`, { type: ['string', 'null'] }]));
+  const schema = {
+    type: 'object', additionalProperties: false, required: ['lines', ...Object.keys(fields)],
+    properties: {
+      ...fields,
+      lines: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['what', 'note'], properties: { what: { type: 'string' }, note: { type: ['string', 'null'] } } } },
+    },
+  };
+  const request = {
+    model: 'gpt-6-luna', max_tokens: 300,
+    messages: [{ role: 'system' as const, content: 'Read the bill.' }, { role: 'user' as const, content: 'Go.' }],
+    response_format: { type: 'json_schema' as const, json_schema: { name: 'big', strict: true, schema } },
+  };
+  const shaped = toClaudeChat(request);
+  assert.equal(shaped.format, null, 'no grammar Claude would refuse');
+  assert.match(shaped.system, /^Read the bill\.\n\nReply with only a JSON object that matches this JSON Schema, and nothing else:\n\{/);
+
+  // Within the limit, the grammar stays.
+  const small = toClaudeChat({ ...request, response_format: { type: 'json_schema', json_schema: { name: 'small', strict: true, schema: { type: 'object', additionalProperties: false, required: ['a'], properties: { a: { type: ['string', 'null'] } } } } } });
+  assert.equal(small.format?.type, 'json_schema');
+  assert.equal(small.system, 'Read the bill.');
+
+  let sent: Record<string, unknown> | null = null;
+  setClaudeClientForTests({
+    messages: {
+      create: async (body: Record<string, unknown>) => {
+        sent = body;
+        return {
+          model: 'claude-haiku-5-5', stop_reason: 'end_turn',
+          content: [{ type: 'text', text: 'Here it is:\n```json\n{"f0":"BW-2201","lines":[{"what":"Ads"}]}\n```' }],
+          usage: { input_tokens: 10, output_tokens: 10, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        };
+      },
+    },
+  });
+  const answer = await chat(request);
+  assert.deepEqual((sent as unknown as { output_config: unknown }).output_config, { effort: 'low' });
+  const reply = JSON.parse(answer.content);
+  assert.equal(reply.f0, 'BW-2201');
+  assert.equal(reply.f16, null, 'a field it left out is null, as structured output writes it');
+  assert.deepEqual(reply.lines, [{ what: 'Ads', note: null }], 'inside a list too');
+});
+
 test('ai: an image Claude cannot take is refused before the call', () => {
   assert.throws(
     () => toClaudeChat({ model: 'm', max_tokens: 10, messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/heic;base64,AAAA' } }] }] }),

@@ -189,7 +189,10 @@ export async function runAgent(args: {
         // loop on a model that has decided to chat.
         if (nudged) return { ok: false, error: 'the model stopped calling tools', ...done(turn) };
         nudged = true;
-        messages.push({ role: 'user', content: 'Use the tools. Finish by calling the terminal tool with your finding.' });
+        // By name: told only "the terminal tool", Claude Haiku took it for a tool called that,
+        // and told the person in the setup it didn't have one.
+        const finishers = args.tools.filter((tool) => tool.terminal).map((tool) => tool.name);
+        messages.push({ role: 'user', content: `Text outside a tool call reaches no one. Use the tools, and finish by calling ${finishers.join(' or ')}.` });
         continue;
       }
 

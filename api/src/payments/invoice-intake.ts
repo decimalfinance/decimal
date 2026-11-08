@@ -764,9 +764,11 @@ export async function removeInvoiceDocument(args: { organizationId: string; invo
  */
 function isDocumentDefeatedUs(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  if (/OpenAI \d{3}:/.test(message)) return false;          // provider returned an error status
-  if (/fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND/i.test(message)) return false;
-  if (/is not configured/i.test(message)) return false;      // no API key: our problem
+  // A provider returned an error status. Claude's read "Anthropic 400 invalid_request_error: …",
+  // and missing them made a schema Claude refused into an unreadable bill for every upload.
+  if (/(?:OpenAI|Anthropic) \d{3}\b/.test(message)) return false;
+  if (/Anthropic unreachable|fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND/i.test(message)) return false;
+  if (/is not configured|No AI key is configured|No AI provider has a key/i.test(message)) return false; // no API key: our problem
   return true;
 }
 

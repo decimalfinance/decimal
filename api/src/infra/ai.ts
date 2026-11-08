@@ -152,6 +152,65 @@ export function claudeSchema(schema: unknown, opts: { withoutLimits?: boolean } 
   return { ...(description === undefined ? {} : { description }), anyOf: branches };
 }
 
+/**
+ * How much Claude's structured output compiles, measured on 8 Nov 2026: a schema
+ * with more than 16 fields that may be null (or any other union), or more than 24
+ * optional ones, is refused with a 400. Extraction's has 35 that may be null, as
+ * OpenAI's strict mode wants them. A schema past this is asked for in words.
+ */
+const CLAUDE_GRAMMAR = { unions: 16, optional: 24 };
+
+/** Whether Claude's decoder takes this schema, as claudeSchema gives it. */
+export function fitsClaudeGrammar(schema: unknown): boolean {
+  let unions = 0;
+  let optional = 0;
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (!node || typeof node !== 'object') return;
+    const { properties, required } = node as { properties?: unknown; required?: unknown };
+    if (properties && typeof properties === 'object') {
+      const named = new Set(Array.isArray(required) ? required : []);
+      for (const [name, inner] of Object.entries(properties)) {
+        if (!named.has(name)) optional += 1;
+        if (inner && typeof inner === 'object' && (Array.isArray((inner as { type?: unknown }).type) || 'anyOf' in inner)) unions += 1;
+      }
+    }
+    Object.values(node).forEach(walk);
+  };
+  walk(schema);
+  return unions <= CLAUDE_GRAMMAR.unions && optional <= CLAUDE_GRAMMAR.optional;
+}
+
+const mayBeNull = (schema: unknown): boolean => {
+  const { type, anyOf } = (schema ?? {}) as { type?: unknown; anyOf?: unknown };
+  return type === 'null' || (Array.isArray(type) && type.includes('null')) || (Array.isArray(anyOf) && anyOf.some(mayBeNull));
+};
+
+/**
+ * A reply asked for in words can leave out a field it has nothing for, where
+ * structured output writes null. The schema says which may be null, and they go
+ * back in, so a caller gets the same object from either.
+ */
+export function withNulls(value: unknown, schema: unknown): unknown {
+  if (!schema || typeof schema !== 'object') return value;
+  const { properties, items, anyOf } = schema as { properties?: Record<string, unknown>; items?: unknown; anyOf?: unknown[] };
+  if (Array.isArray(anyOf)) {
+    const branch = anyOf.find((inner) => {
+      const { properties: p, items: i } = (inner ?? {}) as { properties?: unknown; items?: unknown };
+      return Array.isArray(value) ? i !== undefined : value !== null && typeof value === 'object' && p !== undefined;
+    });
+    return branch ? withNulls(value, branch) : value;
+  }
+  if (Array.isArray(value)) return items ? value.map((item) => withNulls(item, items)) : value;
+  if (!value || typeof value !== 'object' || !properties) return value;
+  const out: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+  for (const [name, inner] of Object.entries(properties)) {
+    if (out[name] !== undefined) out[name] = withNulls(out[name], inner);
+    else if (mayBeNull(inner)) out[name] = null;
+  }
+  return out;
+}
+
 // ─── One answer ──────────────────────────────────────────────────────────────
 
 export type ChatPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
@@ -262,10 +321,23 @@ export function toClaudeChat(request: ChatRequest) {
     else messages.push({ role: message.role, content: blocks });
   }
   if (messages[0]?.role !== 'user') messages.unshift({ role: 'user', content: [{ type: 'text', text: '(Earlier in the conversation.)' }] });
-  const format = request.response_format?.type === 'json_schema'
-    ? { type: 'json_schema' as const, schema: claudeSchema(request.response_format.json_schema.schema, { withoutLimits: true }) as Record<string, unknown> }
-    : null;
-  return { system: system.join('\n\n'), messages, format };
+  const asked = request.response_format?.type === 'json_schema' ? request.response_format.json_schema.schema : null;
+  const schema = asked ? claudeSchema(asked, { withoutLimits: true }) as Record<string, unknown> : null;
+  // Past what the decoder compiles, the schema goes in the system prompt instead.
+  const schemaInWords = asked && !fitsClaudeGrammar(schema) ? asked : null;
+  if (schemaInWords) system.push(`Reply with only a JSON object that matches this JSON Schema, and nothing else:\n${JSON.stringify(schemaInWords)}`);
+  const format = schema && !schemaInWords ? { type: 'json_schema' as const, schema } : null;
+  return { system: system.join('\n\n'), messages, format, schemaInWords };
+}
+
+/** The JSON a reply asked for in words, with the nulls it left out. Not JSON, it goes back as it came, for the caller to refuse. */
+function jsonInWords(text: string, schema: Record<string, unknown>): string {
+  const json = jsonObjectIn(text);
+  try {
+    return JSON.stringify(withNulls(JSON.parse(json), schema));
+  } catch {
+    return json;
+  }
 }
 
 /** The JSON object in a reply asked for "JSON only", which may come fenced or with a sentence around it. */
@@ -279,7 +351,7 @@ export function jsonObjectIn(text: string): string {
 }
 
 async function chatOnClaude(request: ChatRequest, opts: ChatOptions): Promise<ChatAnswer> {
-  const { system, messages, format } = toClaudeChat(request);
+  const { system, messages, format, schemaInWords } = toClaudeChat(request);
   let reply: Anthropic.Message;
   try {
     reply = await claudeClient().messages.create({
@@ -299,7 +371,7 @@ async function chatOnClaude(request: ChatRequest, opts: ChatOptions): Promise<Ch
   const read = reply.usage.cache_read_input_tokens ?? 0;
   const written = reply.usage.cache_creation_input_tokens ?? 0;
   return {
-    content: request.response_format?.type === 'json_object' && text ? jsonObjectIn(text) : text,
+    content: !text ? text : schemaInWords ? jsonInWords(text, schemaInWords) : request.response_format?.type === 'json_object' ? jsonObjectIn(text) : text,
     finishReason: reply.stop_reason,
     usage: { promptTokens: reply.usage.input_tokens + read + written, completionTokens: reply.usage.output_tokens, cacheReadTokens: read, cacheWriteTokens: written },
     model: reply.model,

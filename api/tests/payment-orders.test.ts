@@ -549,6 +549,32 @@ test('a document nothing could read still becomes a bill somebody can key in', a
   void up;
 });
 
+test('nor is a Claude error, or no key at all', async () => {
+  // Only OpenAI's error statuses were recognised. A schema Claude refused
+  // ("Anthropic 400 invalid_request_error: …") made every upload an
+  // "Unreadable document" bill, and so did a server with no key.
+  const setup = await createPaymentOrderSetup();
+  const orgId = setup.organization.organizationId;
+  const errors = [
+    'Anthropic 400 invalid_request_error: Schemas contains too many parameters with union types',
+    'Anthropic 529 overloaded_error',
+    'Anthropic unreachable',
+    'No AI key is configured on the server: set ANTHROPIC_API_KEY or OPENAI_API_KEY.',
+  ];
+  for (const message of errors) {
+    setInvoiceIntakeRuntimeForTests({ extractRowsFromDocument: async () => { throw new Error(message); } });
+    await post(
+      `/organizations/${orgId}/invoices/upload-async`,
+      { filename: 'fine-invoice.pdf', mimeType: 'application/pdf', dataBase64: Buffer.from(`%PDF ${crypto.randomUUID()}`).toString('base64') },
+      setup.sessionToken,
+    );
+    await drainAsyncIntake();
+  }
+  const board = await get(`/organizations/${orgId}/bills/workbench`, setup.sessionToken);
+  assert.equal(board.bills.length, 0, 'no junk drafts');
+  assert.deepEqual(board.pending.map((p: { status: string }) => p.status), errors.map(() => 'failed'));
+});
+
 test('a provider outage is not a fact about the invoice', async () => {
   // A network failure will read fine when the provider is back. Turning an
   // outage into a queue of empty drafts somebody has to clear is worse than the

@@ -78,10 +78,12 @@ test('a tool that throws is reported back to the model, not fatal', async () => 
 });
 
 test('a model that keeps talking instead of calling tools gets one reminder, then the run fails', async () => {
-  scripted([reply({ content: 'I think it is a duplicate.' }), reply({ content: 'Really.' })]);
+  const seen = scripted([reply({ content: 'I think it is a duplicate.' }), reply({ content: 'Really.' })]);
   const run = await runAgent({ label: 't', system: 's', user: 'u', tools: [finish] });
   assert.equal(run.ok, false);
   assert.ok(!run.ok && /stopped calling tools/.test(run.error));
+  // The reminder names the tool that finishes: told "the terminal tool", Claude Haiku looked for one called that.
+  assert.match(String(seen[1]!.at(-1)!.content), /finish by calling finish\.$/);
 });
 
 test('running out of turns fails rather than looping', async () => {

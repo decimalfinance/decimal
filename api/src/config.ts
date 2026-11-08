@@ -208,7 +208,9 @@ function buildConfig(): DecimalConfig {
     openAiAgentModel: (process.env.OPENAI_AGENT_MODEL ?? '').trim(),
     aiProvider: aiProviderFromEnv(process.env.AI_PROVIDER),
     anthropicApiKey: (process.env.ANTHROPIC_API_KEY ?? '').trim(),
-    anthropicAgentModel: (process.env.ANTHROPIC_AGENT_MODEL ?? '').trim() || 'claude-opus-5-5',
+    // Haiku, not Opus: on the setup eval (2026-11-08) it passed 16, 17 and 15 of 18, where
+    // Opus passed 15 and 16, for $0.17 a run against about $7.
+    anthropicAgentModel: (process.env.ANTHROPIC_AGENT_MODEL ?? '').trim() || 'claude-haiku-5-5',
     anthropicModel: (process.env.ANTHROPIC_MODEL ?? '').trim() || 'claude-haiku-5-5',
     squadsProgramId:
       (process.env.SQUADS_V4_PROGRAM_ID ?? fileConfig.squadsProgramId ?? 'SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf').trim(),
