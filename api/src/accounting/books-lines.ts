@@ -4,6 +4,7 @@
 // stays a proposal: a person still checks every bill.
 
 import { prisma } from '../infra/prisma.js';
+import { postingSystems } from '../integrations/connectors.js';
 import { cleanName } from '../integrations/setup/findings.js';
 import { parseOutcome } from '../integrations/setup/outcome.js';
 import { playbookFor } from '../integrations/setup/playbooks.js';
@@ -19,8 +20,9 @@ export type FromTheBooks = {
 
 export async function linesFromTheBooks(organizationId: string): Promise<FromTheBooks> {
   const found: FromTheBooks = { precedents: [], askEachTime: new Set() };
+  // A rehearsal (a system Decimal doesn't post to) decides nothing for real bills.
   const setup = await prisma.integrationSetup.findFirst({
-    where: { organizationId, status: 'done' },
+    where: { organizationId, status: 'done', system: { in: postingSystems() } },
     orderBy: { updatedAt: 'desc' },
     select: { system: true, companyId: true, outcome: true },
   });

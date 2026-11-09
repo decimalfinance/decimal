@@ -407,9 +407,11 @@ test('findings: a read that came back short is on the list, so it can be told', 
 });
 
 test('findings: a company that cannot work is named before anyone is asked anything else', () => {
-  assert.deepEqual(companyProblems(COMPANY), []);
-  assert.deepEqual(companyProblems({ ...COMPANY, homeCurrency: null }), [], 'an unknown currency is not a known problem');
-  assert.equal(companyProblems({ ...COMPANY, homeCurrency: 'GBP' })[0]!.code, 'not_usd');
-  assert.equal(companyProblems({ ...COMPANY, subscriptionStatus: 'CANCELLED' })[0]!.code, 'subscription');
-  assert.deepEqual(companyProblems({ ...COMPANY, subscriptionStatus: 'TRIAL' }), []);
+  assert.deepEqual(companyProblems(COMPANY, 'QuickBooks'), []);
+  assert.deepEqual(companyProblems({ ...COMPANY, homeCurrency: null }, 'QuickBooks'), [], 'an unknown currency is not a known problem');
+  assert.equal(companyProblems({ ...COMPANY, homeCurrency: 'GBP' }, 'QuickBooks')[0]!.code, 'not_usd');
+  assert.equal(companyProblems({ ...COMPANY, subscriptionStatus: 'CANCELLED' }, 'QuickBooks')[0]!.code, 'subscription');
+  assert.deepEqual(companyProblems({ ...COMPANY, subscriptionStatus: 'TRIAL' }, 'QuickBooks'), []);
+  // The system's own name, never another's.
+  assert.match(companyProblems({ ...COMPANY, subscriptionStatus: 'CANCELLED' }, 'Xero')[0]!.detail, /^The Xero subscription shows as CANCELLED\./);
 });

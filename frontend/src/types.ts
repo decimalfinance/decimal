@@ -166,6 +166,10 @@ export type CapabilitiesResponse = {
     // Whether "Continue with Google" works on this deployment.
     googleSignIn?: boolean;
   } & Record<string, unknown>;
+  integrations?: {
+    // Xero on a made-up organisation, where a setup is a rehearsal. The bench only.
+    xeroRehearsal?: boolean;
+  };
   apiSurface: Record<string, unknown>;
   workflows: Array<Record<string, unknown>>;
   endpointGroups: Array<Record<string, unknown>>;

@@ -16,6 +16,7 @@ import {
 } from '../copy.js';
 import { companyProblems, linesToDecide } from './findings.js';
 import { doneConditions, notRaised, wordsSaid, readyForGo, stillMissing } from './gates.js';
+import { playbookFor, type Playbook } from './playbooks.js';
 import { appendEvent, cardAnswers } from './record.js';
 import type { StudyFindings } from './study.js';
 
@@ -239,12 +240,13 @@ export async function listFor(kind: unknown, setupId: string): Promise<string> {
 }
 
 /** What a bill Decimal posts leaves out that their past bills had, a sentence each. */
-export function leftOutLines(findings: StudyFindings | null, label: string): string[] {
+export function leftOutLines(findings: StudyFindings | null, playbook: Pick<Playbook, 'label' | 'leftOutWords'>): string[] {
+  const { label, leftOutWords: words } = playbook;
   const billsWith = (kind: string) => findings?.leftOut.find((l) => l.kind === kind)?.bills ?? 0;
   const used = [
-    [billsWith('item_lines'), 'used products or services'],
-    [billsWith('classes'), 'used classes'],
-    [billsWith('locations'), 'used locations'],
+    [billsWith('item_lines'), words.item_lines],
+    [billsWith('classes'), words.classes],
+    [billsWith('locations'), words.locations],
     [billsWith('billable_to_customer'), 'were marked billable to a customer'],
   ].filter(([n]) => Number(n) > 0).map(([n, what]) => `${n} ${what}`);
   const other = billsWith('other_currency');
@@ -259,8 +261,8 @@ export function leftOutLines(findings: StudyFindings | null, label: string): str
  * What a posted bill leaves out, in code's words, under the first message once their books are read.
  * Given it to say, the model said "your bills leave out class" in run after run, which is backwards.
  */
-export function leftOutInWords(findings: StudyFindings | null, label: string): string {
-  const lines = leftOutLines(findings, label);
+export function leftOutInWords(findings: StudyFindings | null, playbook: Pick<Playbook, 'label' | 'leftOutWords'>): string {
+  const lines = leftOutLines(findings, playbook);
   return lines.length > 0 ? `Worth knowing:\n${lines.map((l) => `- ${l}`).join('\n')}` : '';
 }
 
@@ -427,7 +429,7 @@ export function setupTools(ctx: TurnContext): AgentTool[] {
         if (!reader) throw new Error('Nobody is signed in. Offer sign-in first.');
         await ctx.onThought({ text: 'Reading the company\'s settings' });
         const company = await reading(() => reader.company());
-        const problems = companyProblems(company);
+        const problems = companyProblems(company, playbookFor(setup.system).label);
         return { company, problems, canWork: !problems.some((p) => p.blocking) };
       },
     },
@@ -460,7 +462,7 @@ export function setupTools(ctx: TurnContext): AgentTool[] {
         const reader = await connectorFor(setup.system).reader(setup.organizationId);
         if (!reader) throw new Error('Nobody is signed in. Offer sign-in first.');
         const company = await reading(() => reader.company());
-        const blocking = companyProblems(company).filter((p) => p.blocking);
+        const blocking = companyProblems(company, playbookFor(setup.system).label).filter((p) => p.blocking);
         if (blocking.length > 0) throw new Error(`This company cannot work with Decimal: ${blocking.map((p) => p.detail).join(' ')}`);
         await prisma.integrationSetup.update({
           where: { setupId: ctx.setupId },
@@ -660,7 +662,7 @@ export function setupTools(ctx: TurnContext): AgentTool[] {
     },
     {
       name: 'offer_go',
-      description: 'Ask to put the Go button under your message. Code decides: if anything is missing you hear what. Whatever their books show that the person hasn\'t heard from you comes back as notRaised, with its refs: ask them, or, if no question of yours cites it, pass it over here with the reason it can wait. Only the person pressing it turns posting on.',
+      description: 'Ask to put the Go button under your message. Code decides: if anything is missing you hear what. Whatever their books show that the person hasn\'t heard from you comes back as notRaised, with its refs: ask them, or, if no question of yours cites it, pass it over here with the reason it can wait. Only the person can press it.',
       parameters: {
         type: 'object',
         properties: {

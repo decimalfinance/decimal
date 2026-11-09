@@ -5,6 +5,7 @@
 import { enablePosting, getConnection } from '../accounting/connections.js';
 import type { BooksReader } from './books.js';
 import { readerForOrganization } from './quickbooks-reader.js';
+import { xeroConnector } from './xero-connector.js';
 
 export type BooksConnection = {
   companyId: string;
@@ -16,6 +17,13 @@ export type BooksConnection = {
 
 export type Connector = {
   system: string;
+  /**
+   * Whether the person's yes turns posting on. Xero's doesn't: Decimal can't post
+   * there yet, so its Go records the yes, and the setup is a rehearsal.
+   */
+  posts: boolean;
+  /** Whether this deployment has the system at all. Xero is on the bench only. */
+  available?: () => boolean;
   connection(organizationId: string): Promise<BooksConnection | null>;
   reader(organizationId: string): Promise<BooksReader | null>;
   /** The request a sign-in button makes. Built here, so the model never holds a link. */
@@ -27,6 +35,7 @@ export type Connector = {
 const CONNECTORS: Record<string, Connector> = {
   quickbooks: {
     system: 'quickbooks',
+    posts: true,
     connection: async (organizationId) => {
       const row = await getConnection(organizationId);
       return row ? { companyId: row.realmId, status: row.status, postingSince: row.postingEnabledAt } : null;
@@ -35,7 +44,11 @@ const CONNECTORS: Record<string, Connector> = {
     signInPath: (organizationId) => `/organizations/${organizationId}/accounting/quickbooks/connect`,
     enablePosting,
   },
+  xero: xeroConnector,
 };
+
+/** The systems a finished setup posts to. Coding and posting read only setups of these. */
+export const postingSystems = () => Object.keys(CONNECTORS).filter((system) => connectorFor(system).posts);
 
 let overrides: Record<string, Partial<Connector>> = {};
 

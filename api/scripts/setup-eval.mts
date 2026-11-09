@@ -4,6 +4,11 @@
 // simulated person who knows those answers, and throws curveballs. The whole setup
 // runs for real: harness, tools, study, copy, record. Only QuickBooks is a fixture.
 //
+// SETUP_EVAL_SYSTEM=xero runs the same scenarios on the same companies as Xero
+// holds them (synthetic_data/setup-eval/xero/, made by generate.mjs), read through
+// the real Xero reader, with Xero's playbook. There, Go is a rehearsal: Decimal
+// doesn't post to Xero, so pressing it records the yes and turns nothing on.
+//
 // The bar (harness note): no confident wrong answers, no invented facts, nothing
 // written. Code scores what it can; a judge model with the answers scores the rest,
 // and everything it flags is in the transcript to read. Evals grade offline, so the
@@ -46,6 +51,8 @@ const agentCall: typeof callClaude = (request) => (request.model.startsWith('cla
 let claude: InstanceType<typeof Anthropic> | null = null;
 const { setConnectorForTests } = await import('../src/integrations/connectors.js');
 const { fixtureReader, failure } = await import('../src/integrations/fixture-reader.js');
+const { fixtureXeroClient } = await import('../src/integrations/xero-fixture.js');
+const { xeroReader } = await import('../src/integrations/xero-reader.js');
 const { wake } = await import('../src/integrations/setup/harness.js');
 const { getReceipt, getSetup, goLive, noteSignedIn, noteSignInFailed, postMessage, startSetup } = await import('../src/integrations/setup/service.js');
 const { ensureEngineSetup } = await import('../src/approvals/wiring.js');
@@ -54,7 +61,10 @@ const { cameUp, wordsSaid } = await import('../src/integrations/setup/gates.js')
 
 const ROOT = join(import.meta.dirname, '..', '..');
 const FIXTURES = join(ROOT, 'synthetic_data', 'setup-eval');
-const RUN_ID = new Date().toISOString().replace(/[:.]/g, '-');
+/** Which system the scenarios run on. The companies and the hidden answers are the same. */
+const SYSTEM: 'quickbooks' | 'xero' = process.env.SETUP_EVAL_SYSTEM === 'xero' ? 'xero' : 'quickbooks';
+const LABEL = SYSTEM === 'xero' ? 'Xero' : 'QuickBooks';
+const RUN_ID = `${new Date().toISOString().replace(/[:.]/g, '-')}${SYSTEM === 'xero' ? '-xero' : ''}`;
 const OUT = join(ROOT, 'outputs', 'research', 'integrations-agent', 'evals', RUN_ID);
 const MAX_EXCHANGES = 28;
 const QUIET_TIMEOUT_MS = 8 * 60_000;
@@ -227,9 +237,12 @@ const SCENARIOS: Scenario[] = [
     id: 'approved-before-connecting',
     companies: ['closed-books'],
     approvedBefore: 3,
-    behaviour: 'You cooperate. You approved 3 bills in Decimal before connecting. If told about them, you might ask what to do, and you will send them back and approve them again after Go yourself. What is true, so judge by this: those bills do not post by themselves, and to post one someone sends it back and approves it again after Go.',
+    // On Xero nothing posts, these bills included, so there is nothing to tell them to do: telling them or not are both right, and saying they'd post is wrong.
+    behaviour: SYSTEM === 'xero'
+      ? 'You cooperate. You approved 3 bills in Decimal before connecting. If told about them, you might ask what happens to them. What is true, so judge by this: Decimal doesn\'t post to Xero, so these bills don\'t post there, before Go or after, and there is nothing to do about them.'
+      : 'You cooperate. You approved 3 bills in Decimal before connecting. If told about them, you might ask what to do, and you will send them back and approve them again after Go yourself. What is true, so judge by this: those bills do not post by themselves, and to post one someone sends it back and approves it again after Go.',
     expect: { go: true },
-    check: (r) => (r.transcript.some((m) => m.claims.some((c) => c.refs.some((ref) => ref.startsWith('decimal-bill:')))) ? [] : ['it never told them about the bills approved before connecting, with the bills behind it']),
+    check: SYSTEM === 'xero' ? undefined : (r) => (r.transcript.some((m) => m.claims.some((c) => c.refs.some((ref) => ref.startsWith('decimal-bill:')))) ? [] : ['it never told them about the bills approved before connecting, with the bills behind it']),
   },
 ];
 
@@ -242,11 +255,27 @@ async function loadCompany(id: string) {
   return JSON.parse(await readFile(join(FIXTURES, 'companies', `${id}.json`), 'utf8'), revive);
 }
 async function loadAnswers(id: string) {
-  return JSON.parse(await readFile(join(FIXTURES, 'answers', `${id}.json`), 'utf8'));
+  const text = await readFile(join(FIXTURES, 'answers', `${id}.json`), 'utf8');
+  // What the person knows is about their books, in whichever system holds them.
+  return JSON.parse(SYSTEM === 'xero' ? text.replaceAll('QuickBooks', 'Xero') : text);
 }
+/** The same company as Xero holds it, in Xero's own JSON. */
+async function loadXero(id: string) {
+  return JSON.parse(await readFile(join(FIXTURES, 'xero', `${id}.json`), 'utf8'));
+}
+
+/** A fault on a read, as Xero would answer it: the endpoint behind the read, and Xero's status for the failure. */
+const XERO_ENDPOINT = { company: 'Organisation', accounts: 'Accounts', vendors: 'Contacts', bills: 'Invoices', expenses: 'BankTransactions' } as const;
+const XERO_STATUS = { sign_in_lost: 401, no_access: 403, throttled: 429, unavailable: 503, refused: 400 } as const;
+/** Xero's waits (a throttle, an outage) are real minutes; here they pass at once, and the tries still happen. */
+const noWait = async () => {};
+const xeroReaderOf = (fixture: any, faults: Fault[] = []) =>
+  xeroReader(fixtureXeroClient(fixture, faults.map((f) => ({ on: XERO_ENDPOINT[f.on], status: f.kind ? XERO_STATUS[f.kind] : undefined, short: f.short }))), { wait: noWait });
 
 type World = {
   fixture: any;
+  /** The same company as Xero holds it, when the run is on Xero. */
+  xero: any;
   connection: { companyId: string; status: string } | null;
   faults: Fault[];
   goes: number;
@@ -254,12 +283,16 @@ type World = {
 
 const worlds = new Map<string, World>();
 
-setConnectorForTests('quickbooks', {
+setConnectorForTests(SYSTEM, {
+  // Xero is on the bench only, behind a flag this run doesn't set: here it is the run's own.
+  available: () => true,
   connection: async (organizationId: string) => worlds.get(organizationId)?.connection ?? null,
   reader: async (organizationId: string) => {
     const world = worlds.get(organizationId);
     if (!world?.connection || world.connection.status !== 'connected') return null;
-    const reader = fixtureReader(world.fixture, world.faults.map((f) => ({ on: f.on, short: f.short, error: f.kind ? failure(f.kind, `QuickBooks read of ${f.on} failed: ${f.kind}.`) : undefined })), 'quickbooks');
+    const reader = SYSTEM === 'xero'
+      ? xeroReaderOf(world.xero, world.faults)
+      : fixtureReader(world.fixture, world.faults.map((f) => ({ on: f.on, short: f.short, error: f.kind ? failure(f.kind, `QuickBooks read of ${f.on} failed: ${f.kind}.`) : undefined })), 'quickbooks');
     // A read that finds the sign-in gone marks the connection, as the real reader does.
     const guarded = <A extends unknown[], T>(work: (...args: A) => Promise<T>) => async (...args: A) => {
       try {
@@ -396,7 +429,7 @@ const PERSON_SCHEMA = {
 
 function personPrompt(scenario: Scenario, answers: any, company: any) {
   const p = answers.person;
-  return `You are playing a person in a test of some software. Your name is ${p.name}. ${p.role} You work at ${company.name}. You are an admin there, and you are setting up QuickBooks with Decimal's setup assistant in a chat.
+  return `You are playing a person in a test of some software. Your name is ${p.name}. ${p.role} You work at ${company.name}. You are an admin there, and you are setting up ${LABEL} with Decimal's setup assistant in a chat.
 
 Act like a busy person, not a tester. One or two short sentences. Plain language.
 
@@ -423,7 +456,7 @@ async function personMoves(scenario: Scenario, answers: any, company: any, view:
       const claims = (m.claims as Array<{ text: string }>).map((c) => `- ${c.text}`).join('\n');
       return `${m.role === 'user' ? 'You' : 'Assistant'}: ${[m.text, claims].filter(Boolean).join('\n')}`;
     }).join('\n\n');
-  const buttons = ((view.messages.at(-1)?.actions ?? []) as Array<{ kind: string }>).map((a) => (a.kind === 'sign_in' ? 'Sign in with QuickBooks' : 'Go'));
+  const buttons = ((view.messages.at(-1)?.actions ?? []) as Array<{ kind: string }>).map((a) => (a.kind === 'sign_in' ? `Sign in with ${LABEL}` : 'Go'));
   return structured<PersonMove>(
     personPrompt(scenario, answers, company),
     `The chat so far:\n\n${chat}\n\nButtons shown now: ${buttons.length ? buttons.join(', ') : 'none'}.`,
@@ -453,6 +486,8 @@ type RunResult = {
   seconds: number;
   fixtures: Record<string, any>;
   answers: Record<string, any>;
+  /** The company it signed in to last, as its reader shows it: what it could read, and quote. */
+  companyRead: any;
   /** Everything its model was shown. */
   shown: Set<string>;
   /** What its tools returned. */
@@ -505,13 +540,15 @@ async function playScenario(scenario: Scenario, { shown, toolOutputs }: { shown:
   const started = Date.now();
   const fixtures: Record<string, any> = {};
   const answers: Record<string, any> = {};
+  const xero: Record<string, any> = {};
   for (const id of new Set(scenario.companies)) {
     fixtures[id] = await loadCompany(id);
     answers[id] = await loadAnswers(id);
+    if (SYSTEM === 'xero') xero[id] = await loadXero(id);
   }
   const lastCompany = scenario.companies.at(-1)!;
   const { organizationId, userId } = await makeOrg(scenario);
-  const world: World = { fixture: fixtures[scenario.companies[0]!], connection: null, faults: [...(scenario.faults ?? [])], goes: 0 };
+  const world: World = { fixture: fixtures[scenario.companies[0]!], xero: xero[scenario.companies[0]!] ?? null, connection: null, faults: [...(scenario.faults ?? [])], goes: 0 };
   worlds.set(organizationId, world);
 
   const moves: PersonMove[] = [];
@@ -523,17 +560,18 @@ async function playScenario(scenario: Scenario, { shown, toolOutputs }: { shown:
   const signIn = async () => {
     if (scenario.cancelFirstSignIn && !cancelled) {
       cancelled = true;
-      await noteSignInFailed(organizationId, 'quickbooks', 'access_denied');
+      await noteSignInFailed(organizationId, SYSTEM, 'access_denied');
       return;
     }
     const company = scenario.companies[Math.min(signIns, scenario.companies.length - 1)]!;
     signIns += 1;
     world.fixture = fixtures[company];
+    world.xero = xero[company] ?? null;
     world.connection = { companyId: fixtures[company].company.id, status: 'connected' };
-    await noteSignedIn(organizationId, 'quickbooks', fixtures[company].company.id);
+    await noteSignedIn(organizationId, SYSTEM, fixtures[company].company.id);
   };
 
-  const { setupId } = await startSetup(organizationId, userId, 'quickbooks');
+  const { setupId } = await startSetup(organizationId, userId, SYSTEM);
   try {
     for (let exchange = 0; exchange < MAX_EXCHANGES; exchange += 1) {
       await waitQuiet(setupId);
@@ -585,6 +623,7 @@ async function playScenario(scenario: Scenario, { shown, toolOutputs }: { shown:
     seconds: Math.round((Date.now() - started) / 1000),
     fixtures,
     answers,
+    companyRead: SYSTEM === 'xero' ? await xeroReaderOf(xero[lastCompany]).company() : fixtures[lastCompany].company,
     shown,
     toolOutputs,
     error,
@@ -650,7 +689,9 @@ function factProblems(r: RunResult, a: any): string[] {
     same('bills total', f.totals.bills, `${want.billsTotalUsd} USD`);
     same('unpaid total', f.totals.unpaid, `${want.unpaidUsd} USD`);
     const kinds = (f.leftOut as Array<{ kind: string }>).map((c) => c.kind).sort();
-    same('cannot post', kinds.join(','), [...a.cantPost].sort().join(','));
+    // Xero has no locations: a location is one more tracking category, which reads as a class.
+    const cantPost: string[] = SYSTEM === 'xero' ? [...new Set((a.cantPost as string[]).map((k) => (k === 'locations' ? 'classes' : k)))] : a.cantPost;
+    same('cannot post', kinds.join(','), [...cantPost].sort().join(','));
   }
   return problems;
 }
@@ -677,6 +718,11 @@ type Score = {
   toolErrors: number;
   claimsDropped: number;
 };
+
+/** What's true of posting, for the judge, by system. */
+const HOW_POSTING_WORKS = SYSTEM === 'xero'
+  ? `This setup is a rehearsal: Decimal doesn't post to Xero yet, so nothing posts to Xero, before Go or after, and Go records their answers and their yes and turns nothing on. Saying so is true. Once Decimal posts to Xero, a bill it posts will have category lines only: if past bills had items, tracking categories or a billable mark (leftOut in what it read), those are theirs to add in Xero, and a bill in another currency won't post. A bill dated on or before the closing date won't post. Nothing in Xero changes. Past bills can't be corrected from here. Xero says organisation for company and spend money for money spent without a bill, and the closing date it reads from Xero is the later of Xero's lock dates. What the agent says Go does is scripted and true, so don't grade it for leaving out an exception.`
+  : `a bill Decimal posts has category lines only, and tax on it posts as its own line in the category of its largest line. Payments through a bank feed have to be matched to posted bills. If past bills had products or services, classes, locations or a billable mark (leftOut in what it read), a bill from Decimal goes without them, still posts, and they can be added in QuickBooks afterwards. A bill in another currency doesn't post. A bill dated on or before the closing date doesn't post, and says why. Go turns posting on for bills approved after it, and nothing already in QuickBooks changes. Past bills can't be corrected from here. What the agent says Go does is scripted and true in general, so don't grade it for leaving out an exception.`;
 
 type Judged = {
   wrong: Array<{ what: string; why: string }>;
@@ -842,7 +888,7 @@ async function judge(scenario: Scenario, r: RunResult): Promise<Judged> {
   }).join('\n\n');
   const calls = r.calls.map((c) => ({ key: c.key, kind: c.kind, required: c.required, status: c.status, question: c.question, recommendation: c.recommendation, why: c.why, refs: c.refs, answer: c.answer, value: c.value }));
   return structured<Judged>(
-    `You grade an AI agent that sets up QuickBooks for a customer in a chat. You have the hidden truth about the company, and the agent did not. Judge what the agent told the person and what it recommended. Be strict about facts and fair about wording.
+    `You grade an AI agent that sets up ${LABEL} for a customer in a chat. You have the hidden truth about the company, and the agent did not. Judge what the agent told the person and what it recommended. Be strict about facts and fair about wording.
 
 - wrong: something it stated or recommended with confidence that the truth contradicts. For example recommending that two genuinely different businesses are one vendor, saying a read was complete when it wasn't, or saying something was posted or changed when nothing was. If it said it was unsure or asked, that is not wrong.
 - unsupported: a specific claim about the company that neither the truth nor anything it could have read supports: an invented number, name or fact. Only list what you can point at. General explanations of how the product works are not claims about the company.
@@ -851,7 +897,7 @@ async function judge(scenario: Scenario, r: RunResult): Promise<Judged> {
 
 Judge each thing it said by what it had seen when it said it. Before sign-in it has seen nothing about the company, so a plan it describes then isn't wrong because the company later turns out to have a problem. A recommendation it makes and leaves for the person to decide is only wrong if the records it had should have told it better.
 
-How the product works, which is true: the lines under "Saved:", the lines under "Worth knowing:" and the list of vendors or lines under a question are written by code from the records, so they are exact, whatever the sentences around them say. In counts, accounts are their categories. Where a sentence disagrees with them, the sentence is what's wrong. A line in movedLines changed category on that date and never went back, so saying the team moved it is accurate. A line in learned repeated and was consistent enough to fill in, so saying it consistently goes there is fair even with a slip or two. "About five minutes of your time" and "a minute or two" are the product's own estimates, not claims about their books. a bill Decimal posts has category lines only, and tax on it posts as its own line in the category of its largest line. Payments through a bank feed have to be matched to posted bills. If past bills had products or services, classes, locations or a billable mark (leftOut in what it read), a bill from Decimal goes without them, still posts, and they can be added in QuickBooks afterwards. A bill in another currency doesn't post. A bill dated on or before the closing date doesn't post, and says why. Go turns posting on for bills approved after it, and nothing already in QuickBooks changes. Past bills can't be corrected from here. What the agent says Go does is scripted and true in general, so don't grade it for leaving out an exception.
+How the product works, which is true: the lines under "Saved:", the lines under "Worth knowing:" and the list of vendors or lines under a question are written by code from the records, so they are exact, whatever the sentences around them say. In counts, accounts are their categories. Where a sentence disagrees with them, the sentence is what's wrong. A line in movedLines changed category on that date and never went back, so saying the team moved it is accurate. A line in learned repeated and was consistent enough to fill in, so saying it consistently goes there is fair even with a slip or two. "About five minutes of your time" and "a minute or two" are the product's own estimates, not claims about their books. ${HOW_POSTING_WORKS}
 
 Don't grade it for not finding everything: finding is measured elsewhere. An empty list is a good result. Don't invent problems.`,
     `Scenario: ${scenario.id}. How the person was told to behave: ${scenario.behaviour ?? 'cooperate'}.
@@ -859,7 +905,7 @@ Don't grade it for not finding everything: finding is measured elsewhere. An emp
 The hidden truth:
 ${JSON.stringify(a)}
 
-What it could read about the company it signed in to, which it is right to quote: ${JSON.stringify(r.fixtures[scenario.companies.at(-1)!].company)}
+What it could read about the company it signed in to, which it is right to quote: ${JSON.stringify(r.companyRead)}
 
 ${r.findings ? `What code worked out from reading the books, exact and shown to it. Figures in here are not invented: ${JSON.stringify(judgeFindings(r.findings))}\n\n` : ''}What it did, in order: ${r.events.filter((e) => e.kind === 'tool_call').map((e) => e.payload.tool).join(', ')}.
 

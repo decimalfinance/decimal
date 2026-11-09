@@ -199,7 +199,7 @@ async function takeTurn(setup: IntegrationSetup): Promise<boolean> {
     label: 'integration_setup',
     system: await systemPrompt(setup, playbook, Boolean(heard)),
     history: await conversation(setup.setupId, pending.map((e) => e.seq)),
-    user: await whatHappened(pending),
+    user: await whatHappened(pending, playbook),
     tools,
     maxTurns: MODEL_CALLS_PER_TURN,
     timeoutMs: TURN_TIMEOUT_MS,
@@ -224,7 +224,7 @@ async function takeTurn(setup: IntegrationSetup): Promise<boolean> {
   if (next && !next.call) await tools.find((t) => t.name === 'offer_go')?.run?.({}).catch(() => null);
 
   // Once, on the message that tells them their books are read.
-  const worthKnowing = pending.some((e) => e.kind === 'study_finished') ? leftOutInWords(setup.findings as StudyFindings | null, playbook.label) : '';
+  const worthKnowing = pending.some((e) => e.kind === 'study_finished') ? leftOutInWords(setup.findings as StudyFindings | null, playbook) : '';
   const { text, claims, dropped } = await spoken(next?.call ? { ...run.terminal.args, list: null } : run.terminal.args, seen, setup, [...ctx.saved.values()].flat(), worthKnowing);
   if (dropped.length > 0) await appendEvent(setup.setupId, 'claims_dropped', { claims: dropped });
   await prisma.integrationSetupMessage.update({
@@ -464,11 +464,11 @@ async function conversation(setupId: string, pendingSeqs: bigint[]): Promise<Cha
 }
 
 /** Things that happen besides a person typing, and only what code wrote about them. */
-function describeEvent(kind: string, payload: Record<string, unknown>): string {
+function describeEvent(kind: string, payload: Record<string, unknown>, playbook: Playbook): string {
   switch (kind) {
     case 'started': return 'The person has just opened the setup.';
     case 'signed_in': return `The sign-in came back${payload.companyChanged ? ', to a different company than before: start again from reading it' : ''}.`;
-    case 'sign_in_failed': return payload.reason === 'access_denied' ? 'The sign-in was cancelled on Intuit\'s screen.' : 'The sign-in failed.';
+    case 'sign_in_failed': return payload.reason === 'access_denied' ? `The sign-in was cancelled on ${playbook.signsInAt}'s screen.` : 'The sign-in failed.';
     case 'study_finished': return 'Reading their books has finished.';
     case 'study_failed': return `Reading their books failed: ${String(payload.kind)}. ${String(payload.message)}`;
     default: return kind.replace(/_/g, ' ');
@@ -476,7 +476,7 @@ function describeEvent(kind: string, payload: Record<string, unknown>): string {
 }
 
 /** This turn's prompt: what the person said, and what else happened, in order. */
-async function whatHappened(pending: Awaited<ReturnType<typeof pendingEvents>>): Promise<string> {
+async function whatHappened(pending: Awaited<ReturnType<typeof pendingEvents>>, playbook: Playbook): Promise<string> {
   const parts: string[] = [];
   for (const event of pending) {
     if (event.kind === 'message') {
@@ -489,7 +489,7 @@ async function whatHappened(pending: Awaited<ReturnType<typeof pendingEvents>>):
         : null;
       parts.push(call ? `${cardNote(call.key, call.question)}\n${message.text}` : message.text);
     } else {
-      parts.push(`[Decimal: ${describeEvent(event.kind, event.payload as Record<string, unknown>)} Nobody typed this.]`);
+      parts.push(`[Decimal: ${describeEvent(event.kind, event.payload as Record<string, unknown>, playbook)} Nobody typed this.]`);
     }
   }
   return parts.join('\n\n');

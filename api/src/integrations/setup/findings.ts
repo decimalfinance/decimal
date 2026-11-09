@@ -538,14 +538,14 @@ export function computeFindings(input: StudyInput): Findings {
 export type CompanyProblem = { code: 'not_usd' | 'subscription' ; blocking: boolean; detail: string };
 
 /** What stops a company working with Decimal at all, checked before anyone is asked anything else. */
-export function companyProblems(company: BooksCompany): CompanyProblem[] {
+export function companyProblems(company: BooksCompany, label: string): CompanyProblem[] {
   const problems: CompanyProblem[] = [];
   if (company.homeCurrency && company.homeCurrency !== 'USD') {
     problems.push({ code: 'not_usd', blocking: true, detail: `The books are in ${company.homeCurrency}. Decimal works in USD for now.` });
   }
   const status = company.subscriptionStatus?.toUpperCase() ?? '';
   if (/(CANCEL|EXPIRED|SUSPEND|LAPSED|INACTIVE)/.test(status)) {
-    problems.push({ code: 'subscription', blocking: true, detail: `The QuickBooks subscription shows as ${company.subscriptionStatus}. A company in that state can be looked at but not changed, so Decimal could never post to it. Once the subscription is active again, setup can carry on from here.` });
+    problems.push({ code: 'subscription', blocking: true, detail: `The ${label} subscription shows as ${company.subscriptionStatus}. A company in that state can be looked at but not changed, so Decimal could never post to it. Once the subscription is active again, setup can carry on from here.` });
   }
   return problems;
 }

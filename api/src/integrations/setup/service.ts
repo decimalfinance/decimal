@@ -18,6 +18,8 @@ import { leftOutLines } from './tools.js';
 
 /** Start a setup, or come back to the one under way. Only one runs per organisation and system. */
 export async function startSetup(organizationId: string, userId: string, system: SetupSystem) {
+  const connector = connectorFor(system);
+  if (connector.available && !connector.available()) throw notFound(`${playbookFor(system).label} isn't available here.`);
   const existing = await liveSetup(organizationId, system);
   if (existing) return setupView(existing);
   const setup = await prisma.$transaction(async (tx) => {
@@ -180,7 +182,8 @@ export async function goLive(organizationId: string, userId: string, setupId: st
   if (!readyForGo(conditions)) {
     throw new ApiError(409, 'setup_not_ready', 'This setup is not ready to go.', { stillNeeded: stillMissing(conditions) });
   }
-  const postingFrom = await connectorFor(setup.system).enablePosting(organizationId, userId);
+  const connector = connectorFor(setup.system);
+  const postingFrom = await connector.enablePosting(organizationId, userId);
   if (!postingFrom) throw new ApiError(409, 'not_connected', 'The connection is no longer live.');
   const outcome = await outcomeOf(setup, postingFrom);
   const label = playbookFor(setup.system).label;
@@ -195,7 +198,9 @@ export async function goLive(organizationId: string, userId: string, setupId: st
       setupId,
       role: 'assistant',
       status: 'done',
-      text: `Done. Posting is on. Nothing already in ${label} changed.`,
+      text: connector.posts
+        ? `Done. Posting is on. Nothing already in ${label} changed.`
+        : `Done. That was a rehearsal: Decimal doesn't post to ${label} yet, so nothing will post there. Nothing in ${label} changed.`,
     },
   });
   await appendEvent(setupId, 'go', { companyId: setup.companyId, companyName: setup.companyName, postingFrom: postingFrom.toISOString() }, { actorUserId: userId });
@@ -367,7 +372,7 @@ async function finishedView(setup: IntegrationSetup) {
       }),
     ],
     fromHistory: { lines: learned.length, vendors: new Set(learned.map((l) => l.vendorId)).size },
-    worthKnowing: leftOutLines(findings, playbookFor(setup.system).label),
+    worthKnowing: leftOutLines(findings, playbookFor(setup.system)),
   };
 }
 

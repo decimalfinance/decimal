@@ -229,6 +229,7 @@ export function OrganisationPage() {
           <Heading title="Accounting" tight />
           <div className="st-rows">
             <BooksRow organizationId={organizationId} isAdmin={isAdmin} />
+            {isAdmin ? <XeroRow organizationId={organizationId} /> : null}
           </div>
         </section>
 
@@ -411,6 +412,46 @@ function BooksRow({ organizationId, isAdmin }: { organizationId: string; isAdmin
             {posting || signedOut ? 'Open' : underWay ? 'Continue' : 'Set up'}
           </button>
         ) : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Xero, on the test bench only: a rehearsal of the setup on a made-up organisation,
+ * behind a pretend sign-in. Decimal doesn't post to Xero, so nothing does. Shown
+ * where the API says this deployment has it, and only to admins, who run setups.
+ */
+function XeroRow({ organizationId }: { organizationId: string }) {
+  const navigate = useNavigate();
+  const capabilities = useQuery({ queryKey: ['capabilities'] as const, queryFn: () => api.getCapabilities(), staleTime: 60_000 });
+  const rehearsal = capabilities.data?.integrations?.xeroRehearsal === true;
+  const latest = useQuery({
+    queryKey: ['integration-setup', organizationId, 'xero'],
+    queryFn: () => integrationSetupApi.latest(organizationId, 'xero'),
+    enabled: Boolean(organizationId) && rehearsal,
+  });
+  if (!rehearsal) return null;
+  const setup = latest.data?.setup ?? null;
+  const done = setup?.status === 'done' && setup.posting !== 'off';
+  const underWay = setup !== null && setup.status !== 'done';
+  const line = done
+    ? `Rehearsed on ${setup.company.name ?? 'a made-up organisation'}. Nothing posts to Xero.`
+    : underWay
+      ? 'A rehearsal is under way. Nothing posts to Xero.'
+      : 'On this test bench only: the setup, rehearsed on a made-up organisation. Nothing posts to Xero.';
+  return (
+    <div className="st-row">
+      <div className="st-left">
+        <div className="st-label">Xero</div>
+        {latest.isSuccess ? <div className="st-line">{line}</div> : null}
+        {latest.isError ? <div className="st-line is-error">Its status couldn’t be loaded.</div> : null}
+      </div>
+      <div className="st-right">
+        {latest.isSuccess ? <span className="st-value is-quiet">{done ? 'Rehearsed' : underWay ? 'Rehearsing' : 'Not set up'}</span> : null}
+        <button type="button" className="st-pill" onClick={() => navigate(`/organizations/${organizationId}/integrations/xero`)}>
+          {done ? 'Open' : underWay ? 'Continue' : 'Rehearse'}
+        </button>
       </div>
     </div>
   );

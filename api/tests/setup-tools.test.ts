@@ -3,7 +3,13 @@
 // after sign-in, an answer only from a person, Go only from a click.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
+import { linesFromTheBooks } from '../src/accounting/books-lines.js';
+import { getConnection } from '../src/accounting/connections.js';
+import { config } from '../src/config.js';
 import { prisma } from '../src/infra/prisma.js';
 import { drainBackgroundWork } from '../src/infra/background.js';
 import { setExceptionAgentRuntimeForTests, type ChatMessage, type ModelCall } from '../src/exceptions/agent.js';
@@ -11,6 +17,7 @@ import { BooksReadError, type BooksAccount, type BooksBill, type BooksCompany, t
 import { setConnectorForTests } from '../src/integrations/connectors.js';
 import { deleteCopy, lookUp, summarize } from '../src/integrations/copy.js';
 import { fixtureReader, type BooksFixture, type FixtureFault } from '../src/integrations/fixture-reader.js';
+import { xeroDate, type XeroFixture } from '../src/integrations/xero-fixture.js';
 import { sweepSetups, wake, withoutWhatClaimsSay } from '../src/integrations/setup/harness.js';
 import { noteDisconnected, noteSignedIn, noteSignInFailed } from '../src/integrations/setup/service.js';
 import { readOutcome } from '../src/integrations/setup/outcome.js';
@@ -1803,4 +1810,132 @@ test("bill coding: after Go, a vendor's first bill fills in from its history in 
 
   await noteDisconnected(w.orgId, 'quickbooks');
   assert.notEqual((await lineOf(await uploaded('Brightwave Media', 'BW-5', 'Stock photography licenses'))).categoryFrom?.kind, 'memory', 'disconnecting stops it, as the copy goes');
+});
+
+// ─── Xero: a rehearsal, on the bench only ─────────────────────────────────────
+
+const XERO_TENANT = '6f1c0d2a-1b7e-4c55-9a51-2f0a3c9e7d10';
+
+/** Larkspur as Xero holds it, in Xero's own JSON, in a file as the bench has one. */
+function xeroOrganisationFile(): string {
+  const xeroBill = (id: string, contactId: string, name: string, days: number, code: string, amount: number, description: string) => ({
+    InvoiceID: id, Type: 'ACCPAY', Status: 'PAID', InvoiceNumber: `N-${id}`, Contact: { ContactID: contactId, Name: name },
+    Date: xeroDate(daysAgo(days)), DueDate: xeroDate(daysAgo(days)), LineAmountTypes: 'NoTax',
+    LineItems: [{ LineItemID: `${id}-1`, Description: description, AccountCode: code, TaxAmount: 0, LineAmount: amount }],
+    SubTotal: amount, TotalTax: 0, Total: amount, AmountDue: 0, CurrencyCode: 'USD', UpdatedDateUTC: xeroDate(daysAgo(days)),
+  });
+  const fixture: XeroFixture = {
+    Organisation: {
+      OrganisationID: XERO_TENANT, Name: 'Larkspur Freight', BaseCurrency: 'USD', CountryCode: 'US', OrganisationStatus: 'ACTIVE',
+      Class: 'PREMIUM', FinancialYearEndMonth: 12, FinancialYearEndDay: 31, PeriodLockDate: xeroDate('2025-12-31'),
+    },
+    Currencies: [{ Code: 'USD' }],
+    TrackingCategories: [],
+    Accounts: [
+      { AccountID: 'a-7', Code: '610', Name: 'Freight', Type: 'DIRECTCOSTS', Class: 'EXPENSE', Status: 'ACTIVE' },
+      { AccountID: 'a-8', Code: '620', Name: 'Travel', Type: 'EXPENSE', Class: 'EXPENSE', Status: 'ACTIVE' },
+    ],
+    Contacts: [
+      { ContactID: 'c-1', Name: 'Delta Freight, Inc.', ContactStatus: 'ACTIVE', IsSupplier: true, IsCustomer: false },
+      { ContactID: 'c-2', Name: 'Harbor Cargo', ContactStatus: 'ACTIVE', IsSupplier: true, IsCustomer: false },
+    ],
+    Invoices: [
+      xeroBill('b-1', 'c-1', 'Delta Freight, Inc.', 30, '610', 1000.07, 'Ocean freight'),
+      xeroBill('b-2', 'c-1', 'Delta Freight, Inc.', 60, '610', 2000, 'Ocean freight'),
+      xeroBill('b-3', 'c-1', 'Delta Freight, Inc.', 90, '610', 1500, 'Ocean freight'),
+      xeroBill('b-4', 'c-2', 'Harbor Cargo', 120, '620', 300, 'Crew travel'),
+    ],
+    BankTransactions: [],
+    LinkedTransactions: [],
+  };
+  const file = join(mkdtempSync(join(tmpdir(), 'decimal-xero-')), 'organisation.json');
+  writeFileSync(file, JSON.stringify(fixture));
+  return file;
+}
+
+/** The bench flag, for the length of a test. */
+async function withXero(file: string, run: () => Promise<void>) {
+  const saved = config.xeroFixtureFile;
+  config.xeroFixtureFile = file;
+  try {
+    await run();
+  } finally {
+    config.xeroFixtureFile = saved;
+  }
+}
+
+test('setup tools: without the bench flag there is no Xero: no setup, no sign-in, no disconnect, and the screen is told so', async () => {
+  await withXero('', async () => {
+    const w = await makeOrg();
+    assert.equal((await raw('POST', `/organizations/${w.orgId}/integrations/xero/setups`, w.owner.token, {})).status, 404);
+    assert.equal((await raw('GET', `/organizations/${w.orgId}/integrations/xero/sign-in`, w.owner.token)).status, 404);
+    assert.equal((await raw('DELETE', `/organizations/${w.orgId}/integrations/xero`, w.owner.token)).status, 404);
+    assert.equal((await raw('GET', '/capabilities')).json.integrations.xeroRehearsal, false);
+    assert.equal(await prisma.accountingConnection.count({ where: { organizationId: w.orgId } }), 0);
+  });
+});
+
+test('setup tools: Xero on the bench is a rehearsal: a pretend sign-in, the real Xero reader, and a Go that turns nothing on', async () => {
+  await withXero(xeroOrganisationFile(), async () => {
+    const w = await makeOrg();
+    assert.equal((await raw('GET', '/capabilities')).json.integrations.xeroRehearsal, true);
+    script([
+      { calls: [{ tool: 'offer_sign_in' }], say: 'Sign in on Xero.' },
+      { say: 'Is Larkspur Freight the right organisation?' },
+      { calls: [{ tool: 'confirm_company' }, { tool: 'start_reading' }], say: 'Reading.' },
+      { say: 'Finished. Ready?' },
+    ]);
+    const { setupId } = await post(`/organizations/${w.orgId}/integrations/xero/setups`, {}, w.owner.token);
+    await drainBackgroundWork();
+    const signIn = (await view(w, setupId)).messages.flatMap((m: { actions: any[] }) => m.actions).find((a: any) => a.kind === 'sign_in');
+    assert.deepEqual(signIn, { kind: 'sign_in', system: 'xero', path: `/organizations/${w.orgId}/integrations/xero/sign-in` });
+
+    const member: Person = await register('Mina Member');
+    await prisma.organizationMembership.create({ data: { organizationId: w.orgId, userId: member.userId, role: 'member', status: 'active' } });
+    assert.equal((await raw('GET', signIn.path, member.token)).status, 403, 'only an admin signs in');
+
+    const link = await get(`${signIn.path}?frontendOrigin=${encodeURIComponent('https://elsewhere.example')}`, w.owner.token);
+    assert.deepEqual(link, { authorizeUrl: `/organizations/${w.orgId}/integrations/xero` }, 'straight back to the setup, never to another origin');
+    await drainBackgroundWork();
+    assert.equal((await lastMessage(w, setupId)).text, 'Is Larkspur Freight the right organisation?', 'the sign-in woke it');
+    assert.equal(await getConnection(w.orgId), null, 'QuickBooks never sees it');
+
+    await say(w, setupId, 'Yes, that one');
+    assert.equal((await view(w, setupId)).study.status, 'finished');
+    const findings = (await prisma.integrationSetup.findUniqueOrThrow({ where: { setupId } })).findings as any;
+    assert.equal(findings.counts.bills, 4, 'read through the Xero reader');
+    assert.equal(findings.totals.bills, '4,800.07 USD');
+    assert.deepEqual(findings.shortfalls, []);
+
+    await answerEverything(w, setupId);
+    const ready = script([{ calls: [{ tool: 'offer_go' }], say: 'Press Go when you are ready.' }]);
+    await say(w, setupId, 'Ready');
+    assert.equal(ready.resultOf('offer_go').offered, true, JSON.stringify(ready.resultOf('offer_go')));
+
+    const done = await post(`${pathOf(w, setupId)}/go`, {}, w.owner.token);
+    assert.equal(done.status, 'done');
+    assert.equal(done.messages.at(-1).text, 'Done. That was a rehearsal: Decimal doesn\'t post to Xero yet, so nothing will post there. Nothing in Xero changed.');
+    const connection = await prisma.accountingConnection.findUniqueOrThrow({ where: { organizationId_provider: { organizationId: w.orgId, provider: 'xero' } } });
+    assert.equal(connection.realmId, XERO_TENANT);
+    assert.equal(connection.postingEnabledByUserId, w.owner.userId, 'the yes is kept, as with QuickBooks');
+    assert.equal(await getConnection(w.orgId), null);
+
+    // A bill from a vendor the books know is coded from what a setup decided: only a setup of a system Decimal posts to.
+    await prisma.counterparty.create({ data: { organizationId: w.orgId, displayName: 'Delta Freight, Inc.', category: 'vendor' } });
+    assert.deepEqual((await linesFromTheBooks(w.orgId)).precedents, [], 'a rehearsal decides nothing for real bills');
+    setConnectorForTests('xero', { posts: true });
+    try {
+      const would = await linesFromTheBooks(w.orgId);
+      assert.deepEqual(would.precedents.map((p) => [p.vendorName, p.category, p.books]), [['Delta Freight, Inc.', 'Freight', 'Xero']], 'as it would, were it one');
+    } finally {
+      setConnectorForTests('xero', null);
+    }
+
+    assert.equal((await raw('DELETE', `/organizations/${w.orgId}/integrations/xero`, member.token)).status, 403);
+    assert.equal((await raw('DELETE', `/organizations/${w.orgId}/integrations/xero`, w.owner.token)).status, 204);
+    const after = await prisma.accountingConnection.findUniqueOrThrow({ where: { organizationId_provider: { organizationId: w.orgId, provider: 'xero' } } });
+    assert.equal(after.status, 'disconnected');
+    assert.equal(after.postingEnabledAt, null);
+    assert.equal((await view(w, setupId)).posting, 'off');
+  });
 });

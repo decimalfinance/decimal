@@ -2225,8 +2225,8 @@ export const accessApi = {
   },
 };
 
-/** The accounting systems a setup exists for. Xero joins when its connector does. */
-export type IntegrationSystem = 'quickbooks';
+/** The accounting systems a setup exists for. Xero is a rehearsal on the bench: Decimal doesn't post there. */
+export type IntegrationSystem = 'quickbooks' | 'xero';
 
 /** A button the setup offers. Built by the API, never by the model: a sign-in, or Go. */
 export type IntegrationSetupAction =
@@ -2341,6 +2341,10 @@ export interface IntegrationPosting {
 
 /** Setting up an accounting system: a conversation with Decimal, for admins. */
 export const integrationSetupApi = {
+  /** Ends the bench's pretend Xero connection. QuickBooks disconnects through api.disconnectQuickBooks. */
+  disconnectXero(organizationId: string) {
+    return request<void>(`/organizations/${organizationId}/integrations/xero`, { method: 'DELETE' });
+  },
   /** The latest setup, finished or not. Looking starts nothing. */
   latest(organizationId: string, system: IntegrationSystem) {
     return request<{ setup: IntegrationSetup | null }>(`/organizations/${organizationId}/integrations/${system}/setups/latest`);

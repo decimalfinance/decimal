@@ -12,6 +12,10 @@
  *   for it, which takes a second or two, so only that row waits on them.
  * - The bills posting has dealt with since Go: those that need someone first, then
  *   what posted. Each opens its bill, where it is acted on.
+ *
+ * For a system Decimal doesn't post to (Xero, a rehearsal on the bench), the same
+ * page says so: Go was pressed and nothing posts, what was decided is shown and
+ * changes nothing, and there are no bills to list.
  */
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
@@ -36,10 +40,12 @@ import { ChangedBy, Failed, Heading, messageOf } from './settings/parts';
 const amount = (bill: IntegrationPostingBill) => usd(Number(bill.amountRaw) / 1_000_000);
 const billPath = (organizationId: string, bill: IntegrationPostingBill) => `/organizations/${organizationId}/bills/${bill.paymentOrderId}`;
 
-export function PostingScreen({ organizationId, system, name, setup, finished, meId, signingIn, onSignIn, onShow }: {
+export function PostingScreen({ organizationId, system, name, posts, setup, finished, meId, signingIn, onSignIn, onShow }: {
   organizationId: string;
   system: IntegrationSystem;
   name: string;
+  /** False for a rehearsal: Go recorded the yes, and nothing posts. */
+  posts: boolean;
   setup: IntegrationSetup;
   finished: IntegrationSetupFinished;
   meId: string | null;
@@ -54,6 +60,7 @@ export function PostingScreen({ organizationId, system, name, setup, finished, m
   const posting = useQuery({
     queryKey: ['integration-posting', organizationId, system],
     queryFn: () => integrationSetupApi.posting(organizationId, system),
+    enabled: posts,
   });
   const booksDate = useQuery({
     queryKey: ['integration-books-closing-date', organizationId, system],
@@ -63,22 +70,24 @@ export function PostingScreen({ organizationId, system, name, setup, finished, m
   const company = setup.company.name ?? name;
   const signInAgain = setup.posting === 'signed_out' ? setup.signInAgain : null;
   const needYou = posting.data?.needYou ?? [];
-  const sub = signInAgain
-    ? `Decimal’s sign-in to ${name} expired, so nothing posts there until an admin signs in again.`
-    : `Approved bills post to ${company}.${needYou.length === 0 ? '' : needYou.length === 1 ? ' One needs attention.' : ` ${needYou.length} need attention.`}`;
+  const sub = !posts
+    ? `Rehearsed on ${company}. Decimal doesn’t post to ${name} yet, so approved bills don’t go there.`
+    : signInAgain
+      ? `Decimal’s sign-in to ${name} expired, so nothing posts there until an admin signs in again.`
+      : `Approved bills post to ${company}.${needYou.length === 0 ? '' : needYou.length === 1 ? ' One needs attention.' : ` ${needYou.length} need attention.`}`;
+  const shown = posts ? posting.isSuccess : true;
 
   async function disconnectNow() {
     setDisconnect('busy');
     try {
-      // QuickBooks is the only system so far.
-      await api.disconnectQuickBooks(organizationId);
+      await (system === 'quickbooks' ? api.disconnectQuickBooks(organizationId) : integrationSetupApi.disconnectXero(organizationId));
       queryClient.removeQueries({ queryKey: ['integration-posting', organizationId, system] });
       queryClient.removeQueries({ queryKey: ['integration-books-closing-date', organizationId, system] });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['integration-setup', organizationId, system] }),
         queryClient.invalidateQueries({ queryKey: ['accounting-status', organizationId] }),
       ]);
-      toaster.show(`Disconnected. Nothing posts to ${name} now, and nothing already there changed.`);
+      toaster.show(posts ? `Disconnected. Nothing posts to ${name} now, and nothing already there changed.` : `Disconnected. Nothing in ${name} changed.`);
       setDisconnect(null);
     } catch (e) {
       toaster.show(messageOf(e));
@@ -90,13 +99,13 @@ export function PostingScreen({ organizationId, system, name, setup, finished, m
     <div className="ui page su-after">
       <h1 className="page-title">{name}</h1>
       <p className="page-sub">{sub}</p>
-      {posting.isError ? (
+      {posts && posting.isError ? (
         <div className="st-blocks">
           <div className="st-rows">
             <Failed what="This page" retry={() => void posting.refetch()} />
           </div>
         </div>
-      ) : posting.isSuccess ? (
+      ) : shown ? (
         <div className="st-blocks">
           <section>
             <Heading title="Connection" tight />
@@ -105,9 +114,11 @@ export function PostingScreen({ organizationId, system, name, setup, finished, m
                 <div className="st-left">
                   <div className="st-label">{company}</div>
                   <div className="st-line">
-                    {signInAgain
-                      ? 'Intuit’s sign-in ran out, so approved bills wait. Sign in again to this company and they post.'
-                      : `${finished.by ? `Turned on by ${finished.by.name}. ` : ''}Each bill posts as soon as it’s approved.`}
+                    {!posts
+                      ? `${finished.by ? `Go pressed by ${finished.by.name}. ` : ''}A rehearsal: nothing posts to ${name}.`
+                      : signInAgain
+                        ? 'Intuit’s sign-in ran out, so approved bills wait. Sign in again to this company and they post.'
+                        : `${finished.by ? `Turned on by ${finished.by.name}. ` : ''}Each bill posts as soon as it’s approved.`}
                   </div>
                 </div>
                 <div className="st-right">
@@ -116,7 +127,9 @@ export function PostingScreen({ organizationId, system, name, setup, finished, m
                       Sign in again
                     </button>
                   ) : finished.postingFrom ? (
-                    <span className="st-value num">Posting since {fullDay(finished.postingFrom)}</span>
+                    <span className="st-value num">
+                      {posts ? 'Posting since' : 'Rehearsed'} {fullDay(finished.postingFrom)}
+                    </span>
                   ) : null}
                 </div>
               </div>
@@ -134,7 +147,11 @@ export function PostingScreen({ organizationId, system, name, setup, finished, m
               <div className="st-row">
                 <div className="st-left">
                   <div className="st-label">Disconnect</div>
-                  <div className="st-line">Approved bills stop posting to {name}. Nothing already there changes.</div>
+                  <div className="st-line">
+                    {posts
+                      ? `Approved bills stop posting to ${name}. Nothing already there changes.`
+                      : `Decimal stops reading this ${name} organisation. To rehearse again, it’s set up again.`}
+                  </div>
                 </div>
                 <div className="st-right">
                   <button type="button" className="st-pill" onClick={() => setDisconnect('asking')}>
@@ -146,13 +163,18 @@ export function PostingScreen({ organizationId, system, name, setup, finished, m
           </section>
 
           <section>
-            <Heading title="What Decimal follows" tight />
-            <p className="st-sub">Agreed in the setup conversation. The closing date can change here as you close each month.</p>
+            <Heading title={posts ? 'What Decimal follows' : 'What the setup decided'} tight />
+            <p className="st-sub">
+              {posts
+                ? 'Agreed in the setup conversation. The closing date can change here as you close each month.'
+                : 'Agreed in the setup conversation. A rehearsal, so none of it is in force.'}
+            </p>
             <div className="st-rows">
               <ClosingDateRow
                 organizationId={organizationId}
                 setupId={setup.setupId}
                 name={name}
+                posts={posts}
                 said={finished.closingDate}
                 inBooks={booksDate.isError ? { inBooks: null, read: false } : booksDate.data}
                 meId={meId}
@@ -197,7 +219,7 @@ export function PostingScreen({ organizationId, system, name, setup, finished, m
             </div>
           </section>
 
-          {needYou.length > 0 ? (
+          {posts && needYou.length > 0 ? (
             <section>
               <Heading title="Needs attention" count={needYou.length} tight />
               <div className="st-rows">
@@ -226,14 +248,18 @@ export function PostingScreen({ organizationId, system, name, setup, finished, m
             </section>
           ) : null}
 
-          <Posted organizationId={organizationId} name={name} posting={posting.data} />
+          {posts && posting.data ? <Posted organizationId={organizationId} name={name} posting={posting.data} /> : null}
         </div>
       ) : null}
 
       {disconnect ? (
         <ConfirmDialog
           title={`Disconnect ${name}?`}
-          line={`Approved bills stop posting to ${company}. Nothing already in ${name} changes. To post there again, it’s set up again.`}
+          line={
+            posts
+              ? `Approved bills stop posting to ${company}. Nothing already in ${name} changes. To post there again, it’s set up again.`
+              : `Decimal stops reading ${company}. Nothing in ${name} changes. To rehearse again, it’s set up again.`
+          }
           confirmLabel="Disconnect"
           cancelLabel="Keep it"
           tone="remove"
@@ -252,10 +278,12 @@ export function PostingScreen({ organizationId, system, name, setup, finished, m
  * shown. Otherwise it is Decimal's, changed here: empty means never closed. Until
  * the books have answered, the value is blank: which date is in force isn't known.
  */
-function ClosingDateRow({ organizationId, setupId, name, said, inBooks, meId, onShow }: {
+function ClosingDateRow({ organizationId, setupId, name, posts, said, inBooks, meId, onShow }: {
   organizationId: string;
   setupId: string;
   name: string;
+  /** False for a rehearsal: the date is only shown, as nothing posts by it. */
+  posts: boolean;
   said: IntegrationSetupFinished['closingDate'];
   /** Undefined until the books have answered. */
   inBooks: IntegrationBooksClosingDate | undefined;
@@ -272,6 +300,23 @@ function ClosingDateRow({ organizationId, setupId, name, said, inBooks, meId, on
   useEffect(() => {
     if (editing) field.current?.focus({ preventScroll: true });
   }, [editing]);
+
+  if (!posts) {
+    const date = inBooks?.read && inBooks.inBooks ? inBooks.inBooks : said.said;
+    return (
+      <div className="st-row">
+        <div className="st-left">
+          <div className="st-label">Closing date</div>
+          <div className="st-line">{inBooks?.read && inBooks.inBooks ? `Set in ${name}.` : 'Agreed in the setup conversation.'}</div>
+        </div>
+        {inBooks ? (
+          <div className="st-right">
+            <span className={`st-value num${date ? '' : ' is-quiet'}`}>{date ? calendarDay(date) : 'Never closed'}</span>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
 
   if (!inBooks) {
     return (

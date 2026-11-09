@@ -5,7 +5,7 @@
 import { Prisma, type IntegrationSetup } from '@prisma/client';
 import { prisma } from '../../infra/prisma.js';
 
-export const SETUP_SYSTEMS = ['quickbooks'] as const;
+export const SETUP_SYSTEMS = ['quickbooks', 'xero'] as const;
 export type SetupSystem = (typeof SETUP_SYSTEMS)[number];
 
 /** Longer than a turn can take, so only a dead process ever loses one. */

@@ -74,6 +74,12 @@ start_api() {
     # The bench emails nobody. Testers make accounts for addresses no one
     # reads, so Check your email shows the code on the page instead.
     export SEND_EMAIL=false
+    # Xero as a rehearsal: a made-up organisation behind a pretend sign-in,
+    # where Go posts nothing. Made by synthetic_data/setup-eval/generate.mjs;
+    # without it, the bench has no Xero.
+    if [[ -f "$ROOT/synthetic_data/setup-eval/xero/demo.json" ]]; then
+      export XERO_FIXTURE_FILE="$ROOT/synthetic_data/setup-eval/xero/demo.json"
+    fi
     nohup npm run dev >"$RUN/api.log" 2>&1 &
     echo $! >"$RUN/api.pid"
   )

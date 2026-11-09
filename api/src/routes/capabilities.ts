@@ -29,6 +29,11 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
       // button without it, rather than sending the browser to a JSON 501.
       googleSignIn: Boolean(config.googleOAuthClientId && config.googleOAuthClientSecret),
     },
+    integrations: {
+      // Xero on a made-up organisation, where setting it up is a rehearsal: nothing posts.
+      // On the bench only (XERO_FIXTURE_FILE), and never in production.
+      xeroRehearsal: Boolean(config.xeroFixtureFile),
+    },
     onboarding: {
       autoProvisionWallets: config.autoProvisionWallets,
       managedWalletProvider: config.privyAppId && config.privyAppSecret ? 'privy' : null,

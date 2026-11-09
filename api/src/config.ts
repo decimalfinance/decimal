@@ -71,6 +71,13 @@ type DecimalConfig = {
    * no real USDC. Validation refuses it in production.
    */
   squadsFakeChain: boolean;
+  /**
+   * Bench-only Xero: a made-up organisation in Xero's own JSON (made by
+   * synthetic_data/setup-eval/xero.mjs), read through the real Xero reader, with a
+   * pretend sign-in. Decimal has no Xero app, so this is the only Xero there is,
+   * and a setup on it is a rehearsal: nothing posts. Validation refuses it in production.
+   */
+  xeroFixtureFile: string;
   privyAppId: string;
   privyAppSecret: string;
   privyApiBaseUrl: string;
@@ -195,6 +202,7 @@ function buildConfig(): DecimalConfig {
     oauthStateSecret: (process.env.OAUTH_STATE_SECRET ?? '').trim(),
     devAuthSecret: (process.env.DEV_AUTH_SECRET ?? '').trim(),
     squadsFakeChain: (process.env.SQUADS_FAKE_CHAIN ?? '').trim().toLowerCase() === 'true',
+    xeroFixtureFile: (process.env.XERO_FIXTURE_FILE ?? '').trim(),
     privyAppId: (process.env.PRIVY_APP_ID ?? '').trim(),
     privyAppSecret: (process.env.PRIVY_APP_SECRET ?? '').trim(),
     privyApiBaseUrl: normalizeOptionalUrl(process.env.PRIVY_API_BASE_URL) ?? 'https://api.privy.io',
@@ -337,6 +345,10 @@ function validateConfig(nextConfig: DecimalConfig) {
 
   if (nextConfig.squadsFakeChain && nextConfig.isProduction) {
     throw new Error('SQUADS_FAKE_CHAIN is a test-bench flag and can never be enabled in production.');
+  }
+
+  if (nextConfig.xeroFixtureFile && nextConfig.isProduction) {
+    throw new Error('XERO_FIXTURE_FILE is a test-bench flag and can never be set in production.');
   }
 
   if (!nextConfig.sendEmail && nextConfig.isProduction) {
