@@ -444,6 +444,9 @@ export function AgentBox({
 }) {
   const draft = detail.draft;
   const billId = draft.paymentOrderId;
+  // The books this bill posts to, by name, for what is said about them.
+  const books = detail.books ?? 'the books';
+  const Books = detail.books ?? 'The books';
   const toaster = useToaster();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -556,7 +559,7 @@ export function AgentBox({
       setBusy(true);
       try {
         await billsApi.answerInBooks(organizationId, billId, pill.targetId, false);
-        toaster.show('Kept as two bills. This one posts to QuickBooks as its own once it’s approved.');
+        toaster.show(`Kept as two bills. This one posts to ${books} as its own once it’s approved.`);
         await refresh();
       } catch (e) {
         toaster.show(e instanceof Error ? e.message : 'That didn’t go through. Try again.');
@@ -593,13 +596,13 @@ export function AgentBox({
         await billsApi.resolveSimilarVendor(organizationId, billId, card.targetId, true);
         toaster.show('Moved onto the vendor you already pay. The next bill under that name will match.');
       } else if (card.action === 'same_bill') {
-        if (!card.targetId) throw new Error('That bill is no longer in QuickBooks.');
+        if (!card.targetId) throw new Error(`That bill is no longer in ${books}.`);
         // Approved and held for this answer, it links now; in review, at approval.
         const { posting, linked } = await billsApi.answerInBooks(organizationId, billId, card.targetId, true);
-        toaster.show(posting === null || posting === 'skipped' ? 'Noted. Decimal links to that bill instead of posting this one to QuickBooks.'
-          : !linked && posting === 'synced' ? 'That bill has gone from QuickBooks since, so Decimal posted this one.'
-          : posting === 'synced' ? 'Linked to the bill already in QuickBooks.'
-          : 'QuickBooks has a problem with it. The bill says what.');
+        toaster.show(posting === null || posting === 'skipped' ? `Noted. Decimal links to that bill instead of posting this one to ${books}.`
+          : !linked && posting === 'synced' ? `That bill has gone from ${books} since, so Decimal posted this one.`
+          : posting === 'synced' ? `Linked to the bill already in ${books}.`
+          : `${Books} has a problem with it. The bill says what.`);
       }
       setCard(null);
       await refresh();

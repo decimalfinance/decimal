@@ -31,8 +31,9 @@ const TYPE: Record<InboxLineKind, string> = {
   question: 'Question',
   reply: 'Reply',
   sent_back: 'Sent back',
-  sync_failed: 'QuickBooks',
-  sync_held: 'QuickBooks',
+  // Named for the books the line is about, QuickBooks or Xero (`line.books`), when it says.
+  sync_failed: 'Books',
+  sync_held: 'Books',
   review: 'Review',
   unreadable: 'Can’t read',
   sign_off: 'Sign off',
@@ -62,7 +63,7 @@ function rowsOf(items: InboxItem[], organizationId: string): Row[] {
         line,
         to,
         late: item.dueAt ? daysPast(item.dueAt) : 0,
-        search: [item.vendorName, item.description, item.invoiceNumber, amount, line.text, TYPE[line.kind]]
+        search: [item.vendorName, item.description, item.invoiceNumber, amount, line.text, line.books ?? TYPE[line.kind]]
           .filter(Boolean)
           .join(' ')
           .toLowerCase(),
@@ -282,7 +283,7 @@ function InboxRow({ row, picked, onPick }: { row: Row; picked: boolean; onPick: 
           )}
         </span>
         <span className="ib-td">
-          <span className={`chip k-${line.kind}`}>{TYPE[line.kind]}</span>
+          <span className={`chip k-${line.kind}`}>{line.books ?? TYPE[line.kind]}</span>
         </span>
         <span className="ib-td ib-what" title={line.text}>
           {line.who ? (

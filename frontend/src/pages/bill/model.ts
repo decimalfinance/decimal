@@ -343,7 +343,7 @@ export function stepGroups(detail: BillDetail): Array<{ index: number; steps: Bi
 }
 
 /**
- * What QuickBooks objected to, as one clause: the first sentence of the
+ * What the books objected to, as one clause: the first sentence of the
  * sync's error, names in curly quotes. The rest is the old screens' remedy,
  * which this page gives in its own words.
  */
@@ -407,7 +407,7 @@ export function headerOf(detail: BillDetail, fields: Fields): { stage: Stage; st
     if (people.length > 0) return approval(`Waiting on ${people.map((p) => (people.length > 1 ? firstName(p.name) : p.name)).join(' or ')}`, 'waiting');
     return approval(detail.status.subStatus.text, 'finished');
   }
-  // QuickBooks says how far it got in a tag of its own, not a chip.
+  // The books say how far they got in a tag of their own, not a chip.
   if (detail.posting) return { stage: 'done', stageText: 'Done', chip: null };
   if (draft.state === 'executed' || draft.state === 'settled') return { stage: 'done', stageText: 'Done', chip: { text: 'Paid', tone: 'finished' } };
   return { stage: 'done', stageText: 'Done', chip: { text: 'Approved', tone: 'finished' } };

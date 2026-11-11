@@ -1915,7 +1915,7 @@ test('setup tools: without the bench flag there is no Xero: no setup, no sign-in
     assert.equal((await raw('POST', `/organizations/${w.orgId}/integrations/xero/setups`, w.owner.token, {})).status, 404);
     assert.equal((await raw('GET', `/organizations/${w.orgId}/integrations/xero/sign-in`, w.owner.token)).status, 404);
     assert.equal((await raw('DELETE', `/organizations/${w.orgId}/integrations/xero`, w.owner.token)).status, 404);
-    assert.equal((await raw('GET', '/capabilities')).json.integrations.xeroRehearsal, false);
+    assert.equal((await raw('GET', '/capabilities')).json.integrations.xero, false);
     assert.equal(await prisma.accountingConnection.count({ where: { organizationId: w.orgId } }), 0);
   });
 });
@@ -1923,7 +1923,7 @@ test('setup tools: without the bench flag there is no Xero: no setup, no sign-in
 test('setup tools: Xero on the bench: a pretend sign-in to a made-up organisation, the real Xero reader, and a Go that turns posting on', async () => {
   await withXero(xeroOrganisationFile(), async () => {
     const w = await makeOrg();
-    assert.equal((await raw('GET', '/capabilities')).json.integrations.xeroRehearsal, true);
+    assert.equal((await raw('GET', '/capabilities')).json.integrations.xero, true);
     script([
       { calls: [{ tool: 'offer_sign_in' }], say: 'Sign in on Xero.' },
       { say: 'Is Larkspur Freight the right organisation?' },
@@ -2049,7 +2049,7 @@ test('setup tools: with Decimal\'s Xero app the sign-in is Xero\'s own, and the 
   try {
     const w = await makeOrg();
     const { integrations } = (await raw('GET', '/capabilities')).json;
-    assert.deepEqual([integrations.xeroRehearsal, integrations.xeroMadeUp], [true, false]);
+    assert.deepEqual([integrations.xero, integrations.xeroMadeUp], [true, false]);
     const model = script([
       { calls: [{ tool: 'offer_sign_in' }], say: 'Sign in on Xero.' },
       { say: 'That was cancelled. Sign in when you are ready.' },

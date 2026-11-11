@@ -252,7 +252,7 @@ export function BillsPage() {
       <div className="list-head">
         <div style={{ minWidth: 0 }}>
           <h1 className="list-title">Bills</h1>
-          <div className="list-sub">Every incoming bill, from inbox to QuickBooks. You review and approve.</div>
+          <div className="list-sub">Every incoming bill, from inbox to your books. You review and approve.</div>
         </div>
         {canAdd ? <AddBill address={inboundAddress} onUpload={() => openUpload()} /> : null}
       </div>

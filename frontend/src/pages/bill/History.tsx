@@ -309,26 +309,27 @@ export function historyItems(detail: BillDetail, note: BillCompanionNote | null 
     }
   }
 
-  // QuickBooks, once the bill is approved: Decimal posts it, or says why it couldn't.
+  // The books, QuickBooks or Xero, once the bill is approved: Decimal posts it, or says why it couldn't.
   const posting = detail.posting;
+  const books = posting?.books;
   if (posting?.status === 'posted' && posting.linked) {
     // It was there already, entered by hand: linked to that bill, not posted again.
-    push({ id: 'h-qb', at: new Date(posting.at), who: 'decimal', badge: 'good', line: <><b>Decimal agent</b> linked it to the bill already in QuickBooks</>, plain: 'Decimal agent linked it to the bill already in QuickBooks' });
+    push({ id: 'h-qb', at: new Date(posting.at), who: 'decimal', badge: 'good', line: <><b>Decimal agent</b> linked it to the bill already in {books}</>, plain: `Decimal agent linked it to the bill already in ${books}` });
   } else if (posting?.status === 'posted') {
-    push({ id: 'h-qb', at: new Date(posting.at), who: 'decimal', badge: 'good', line: <><b>Decimal agent</b> synced it to QuickBooks</>, plain: 'Decimal agent synced it to QuickBooks' });
+    push({ id: 'h-qb', at: new Date(posting.at), who: 'decimal', badge: 'good', line: <><b>Decimal agent</b> synced it to {books}</>, plain: `Decimal agent synced it to ${books}` });
   } else if (posting?.status === 'held') {
     push({
       id: 'h-qb', at: new Date(posting.at), who: 'decimal',
-      line: <><b>Decimal agent</b> held it back from QuickBooks, which may have it already</>,
-      plain: 'Decimal agent held it back from QuickBooks, which may have it already',
+      line: <><b>Decimal agent</b> held it back from {books}, which may have it already</>,
+      plain: `Decimal agent held it back from ${books}, which may have it already`,
       sub: 'Waits for someone to say whether it’s the same bill',
     });
   } else if (posting?.status === 'failed') {
     const why = syncProblem(posting.error);
     push({
       id: 'h-qb', at: new Date(posting.at), who: 'decimal', badge: 'bad',
-      line: <><b>Decimal agent</b> couldn’t sync it to QuickBooks{why ? `: ${why}` : null}</>,
-      plain: 'Decimal agent couldn’t sync it to QuickBooks',
+      line: <><b>Decimal agent</b> couldn’t sync it to {books}{why ? `: ${why}` : null}</>,
+      plain: `Decimal agent couldn’t sync it to ${books}`,
       sub: posting.retrying ? 'Tries again by itself' : undefined,
     });
   }

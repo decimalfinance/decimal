@@ -58,16 +58,18 @@ function Num({ children }: { children: ReactNode }) {
   return <span className="num">{children}</span>;
 }
 
-/** How far QuickBooks got with it, after the stage word. Not a link: there's no address for the bill there. */
-function QuickBooksTag({ posting }: { posting: NonNullable<BillDetail['posting']> }) {
+/** How far the books got with it, after the stage word. Not a link: there's no address for the bill there. */
+function BooksTag({ posting }: { posting: NonNullable<BillDetail['posting']> }) {
+  const { books } = posting;
   const held = posting.status === 'held';
   const failed = posting.status === 'failed' || held;
   const word = posting.status === 'posted' ? 'Synced' : held ? 'On hold' : failed ? 'Couldn’t sync' : 'Syncing';
-  const title = held ? 'QuickBooks may have it already' : failed ? 'Couldn’t sync to QuickBooks' : posting.status === 'posted' ? 'In QuickBooks' : 'On its way to QuickBooks';
+  const title = held ? `${books} may have it already` : failed ? `Couldn’t sync to ${books}` : posting.status === 'posted' ? `In ${books}` : `On its way to ${books}`;
   return (
     <>
       <span className="bp-qb" title={title}>
-        <img src="/quickbooks.svg" alt="QuickBooks" />
+        {/* QuickBooks by its mark; other books by name. */}
+        {books === 'QuickBooks' ? <img src="/quickbooks.svg" alt="QuickBooks" /> : <span className="bp-qb-word is-pending">{books}</span>}
         <span className={`bp-qb-word${failed ? ' is-failed' : posting.status === 'pending' ? ' is-pending' : ''}`}>{word}</span>
       </span>
       {posting.at ? (
@@ -614,7 +616,7 @@ function Bar({
     );
   }
 
-  // Approved and not in QuickBooks yet: an admin can still send it back to be put right.
+  // Approved and not in the books yet: an admin can still send it back to be put right.
   const approved = ['approved', 'auto_approved'].includes(detail.approval?.macroState ?? '');
   const mayUnwind = access.isAdmin && draft.state === 'submitted' && approved && (!detail.posting || detail.posting.status === 'failed' || detail.posting.status === 'held');
   if (!mayUnwind) return null;
@@ -676,14 +678,18 @@ export function Record({
     ]);
   };
 
+  // The books this bill posts to, by name, for what is said about them.
+  const books = detail.books ?? 'the books';
+  const Books = detail.books ?? 'The books';
+
   const retrySync = async () => {
     if (retrying) return;
     setRetrying(true);
     try {
       const { outcome } = await api.syncPaymentOrderAccounting(organizationId, billId);
-      toaster.show(outcome === 'synced' ? 'Synced to QuickBooks.' : outcome === 'error' ? 'QuickBooks refused it again.'
-        : outcome === 'held' ? 'QuickBooks still has a bill like it. Say whether it’s the same one.'
-        : 'Nothing was sent to QuickBooks.');
+      toaster.show(outcome === 'synced' ? `Synced to ${books}.` : outcome === 'error' ? `${Books} refused it again.`
+        : outcome === 'held' ? `${Books} still has a bill like it. Say whether it’s the same one.`
+        : `Nothing was sent to ${books}.`);
       await refreshAround();
     } catch (e) {
       toaster.show(e instanceof Error ? e.message : 'That didn’t go through. Try again.');
@@ -698,9 +704,9 @@ export function Record({
     setRetrying(true);
     try {
       const { posting } = await billsApi.answerInBooks(organizationId, billId, recordId, false);
-      toaster.show(posting === 'synced' ? 'Kept as two bills. This one is in QuickBooks now.'
-        : posting === 'held' ? 'Kept as two bills. QuickBooks has another one like it.'
-        : posting === 'error' ? 'Kept as two bills, but QuickBooks refused this one. The bill says why.'
+      toaster.show(posting === 'synced' ? `Kept as two bills. This one is in ${books} now.`
+        : posting === 'held' ? `Kept as two bills. ${Books} has another one like it.`
+        : posting === 'error' ? `Kept as two bills, but ${books} refused this one. The bill says why.`
         : 'Kept as two bills.');
       await refreshAround();
     } catch (e) {
@@ -718,7 +724,7 @@ export function Record({
   const heldWhat = heldSync ? inBooksWhat(inBooks?.message ?? heldSync.error) : null;
   const lead: Lead = closed ? closedWords(detail)
     : heldSync ? {
-      text: `${heldWhat ?? 'QuickBooks may have this bill already.'} I’ve held this one back so it isn’t in QuickBooks twice. Is it the same bill?`,
+      text: `${heldWhat ?? `${Books} may have this bill already.`} I’ve held this one back so it isn’t in ${books} twice. Is it the same bill?`,
       working: false,
       at: heldSync.at,
       actions: !access.canEdit ? null : sameId && differentId ? (
@@ -734,12 +740,12 @@ export function Record({
           <button type="button" className="bp-pill is-white" disabled={retrying} onClick={() => void differentBill(differentId)}>Different bill</button>
         </>
       ) : (
-        // Nothing on file to answer about: look in QuickBooks again.
+        // Nothing on file to answer about: look in the books again.
         <button type="button" className="bp-pill is-white" disabled={retrying} onClick={() => void retrySync()}>Look again</button>
       ),
     }
     : failedSync ? {
-      text: `QuickBooks refused it: ${syncProblem(failedSync.error) ?? 'it gave no reason'}.${failedSync.retrying ? ' I’ll try again by itself a few times.' : ''}`,
+      text: `${failedSync.books} refused it: ${syncProblem(failedSync.error) ?? 'it gave no reason'}.${failedSync.retrying ? ' I’ll try again by itself a few times.' : ''}`,
       working: false,
       at: failedSync.at,
       actions: access.canEdit ? (
@@ -775,7 +781,7 @@ export function Record({
                 {detail.posting && !closed ? (
                   <>
                     <span className="bp-dot">·</span>
-                    <QuickBooksTag posting={detail.posting} />
+                    <BooksTag posting={detail.posting} />
                   </>
                 ) : null}
               </div>

@@ -100,12 +100,12 @@ export function classify(bill: WorkbenchBill, viewer: { userId: string; canRevie
     return { stage, part: part('closed', 'done', 'Closed', 'finished', 5), chip: why ? `Closed · ${why}` : 'Closed' };
   }
   if (bill.posting?.status === 'failed') return { stage, part: part('failed', 'done', 'Couldn’t post', 'blocking', 0), chip: 'Couldn’t post' };
-  // QuickBooks may have it already: it waits for someone to say on the bill.
-  if (bill.posting?.status === 'held') return { stage, part: part('held-books', 'done', 'Already in QuickBooks?', 'blocking', 0), chip: 'Already in QuickBooks?' };
+  // The books may have it already: it waits for someone to say on the bill.
+  if (bill.posting?.status === 'held') return { stage, part: part('held-books', 'done', `Already in ${bill.posting.books}?`, 'blocking', 0), chip: `Already in ${bill.posting.books}?` };
   if (bill.posting?.status === 'posted') {
-    return { stage, part: part('posted', 'done', 'Synced to QuickBooks', 'finished', 1), chip: `Posted ${when(bill.posting.at)}` };
+    return { stage, part: part('posted', 'done', `Synced to ${bill.posting.books}`, 'finished', 1), chip: `Posted ${when(bill.posting.at)}` };
   }
-  if (bill.posting?.status === 'pending') return { stage, part: part('posting', 'done', 'Posting to QuickBooks', 'finished', 2), chip: 'Posting' };
+  if (bill.posting?.status === 'pending') return { stage, part: part('posting', 'done', `Posting to ${bill.posting.books}`, 'finished', 2), chip: 'Posting' };
   if (bill.state === 'executed' || bill.state === 'settled') return { stage, part: part('paid', 'done', 'Paid', 'finished', 4), chip: 'Paid' };
   return { stage, part: part('approved', 'done', 'Approved', 'finished', 3), chip: 'Approved' };
 }

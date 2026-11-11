@@ -101,8 +101,8 @@ function reasonOf(line: InboxLine): string {
     case 'question': return `${first} asked you a question`;
     case 'reply': return `${first} ${line.lead.includes('couldn’t answer') ? 'couldn’t answer' : 'answered'} your question`;
     case 'sent_back': return name ? `${first} sent it back` : line.lead;
-    case 'sync_failed': return 'QuickBooks refused it';
-    case 'sync_held': return 'Already in QuickBooks?';
+    case 'sync_failed': return `${line.books ?? 'The books'} refused it`;
+    case 'sync_held': return `Already in ${line.books ?? 'the books'}?`;
     default: return line.lead;
   }
 }

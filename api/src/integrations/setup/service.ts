@@ -432,7 +432,7 @@ async function billsSince(organizationId: string, system: SetupSystem, since: Da
   const stuck: Prisma.AccountingSyncWhereInput = { ...where, externalBillId: null, status: { in: ['error', 'held'] } };
   const rest: Prisma.AccountingSyncWhereInput = { ...where, OR: [{ externalBillId: { not: null } }, { status: { notIn: ['error', 'held'] } }] };
   const select = {
-    status: true, externalBillId: true, error: true, attempts: true, syncedAt: true, updatedAt: true, metadataJson: true,
+    provider: true, status: true, externalBillId: true, error: true, attempts: true, syncedAt: true, updatedAt: true, metadataJson: true,
     paymentOrder: {
       select: {
         paymentOrderId: true, amountRaw: true, invoiceNumber: true,

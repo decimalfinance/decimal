@@ -2,9 +2,9 @@
  * Setting up an accounting system, for admins: a conversation with Decimal, which
  * has an admin sign in, reads the books, asks what it can't work out, and turns
  * posting on when someone presses Go. Beside it, the steps show how far the setup
- * has got. QuickBooks is real; Xero is a rehearsal, whose Go posts nothing
- * (SYSTEMS.posts). On the bench without Decimal's Xero app, its sign-in is pretend
- * and connects a made-up organisation.
+ * has got. After Go, approved bills post to QuickBooks or Xero. On the bench
+ * without Decimal's Xero app, Xero's sign-in is pretend and connects a made-up
+ * organisation, which nothing posts to.
  *
  * While Decimal waits on answers, the last thing in the conversation is a card
  * on the maroon band a question for you is on in a bill's conversation: one
@@ -43,15 +43,15 @@ import { messageOf } from './settings/parts';
 import { PostingScreen } from './IntegrationPosting';
 
 /**
- * `posts`: whether Go turns posting on. Decimal doesn't post to Xero yet, so a Xero setup is a rehearsal.
  * `books`: what the system calls the books' owner.
+ * `signInBy`: whose site the sign-in is on.
  */
-const SYSTEMS: Record<IntegrationSystem, { name: string; signsIn: string; posts: boolean; books: string }> = {
-  quickbooks: { name: 'QuickBooks', signsIn: 'An admin of your QuickBooks company signs in on Intuit’s site.', posts: true, books: 'company' },
-  xero: { name: 'Xero', signsIn: 'Someone with the Adviser or Standard role signs in on Xero’s site.', posts: false, books: 'organisation' },
+const SYSTEMS: Record<IntegrationSystem, { name: string; signsIn: string; books: string; signInBy: string }> = {
+  quickbooks: { name: 'QuickBooks', signsIn: 'An admin of your QuickBooks company signs in on Intuit’s site.', books: 'company', signInBy: 'Intuit' },
+  xero: { name: 'Xero', signsIn: 'Someone with the Adviser or Standard role signs in on Xero’s site.', books: 'organisation', signInBy: 'Xero' },
 };
-/** Xero on the bench without Decimal's Xero app: the sign-in connects a made-up organisation. */
-const MADE_UP_SIGN_IN = 'On this test bench, signing in connects a made-up Xero organisation.';
+/** Xero on the bench without Decimal's Xero app: the sign-in connects a made-up organisation, which nothing posts to. */
+const MADE_UP_SIGN_IN = 'On this test bench, signing in connects a made-up Xero organisation, which nothing posts to.';
 const isSystem = (s: string): s is IntegrationSystem => Object.hasOwn(SYSTEMS, s);
 
 /** Look again every second while Decimal is working, and every few seconds while it waits on someone. */
@@ -70,7 +70,7 @@ export function IntegrationSetupPage() {
 }
 
 function SetupScreen({ organizationId, system }: { organizationId: string; system: IntegrationSystem }) {
-  const { name, posts } = SYSTEMS[system];
+  const { name, books, signInBy } = SYSTEMS[system];
   const capabilities = useQuery({ queryKey: ['capabilities'] as const, queryFn: () => api.getCapabilities(), staleTime: 60_000 });
   const madeUp = system === 'xero' && capabilities.data?.integrations?.xeroMadeUp === true;
   const queryClient = useQueryClient();
@@ -139,7 +139,7 @@ function SetupScreen({ organizationId, system }: { organizationId: string; syste
     setBusy('go');
     try {
       show(await integrationSetupApi.go(path));
-      toaster.show(posts ? `Posting to ${name} is on.` : `Done. A rehearsal, so nothing posts to ${name}.`);
+      toaster.show(madeUp ? 'Done. Nothing posts to a made-up organisation.' : `Posting to ${name} is on.`);
       void queryClient.invalidateQueries({ queryKey: ['accounting-status', organizationId] });
     } catch (e) {
       toaster.show(messageOf(e));
@@ -153,27 +153,19 @@ function SetupScreen({ organizationId, system }: { organizationId: string; syste
     show(await integrationSetupApi.say(organizationId, setup.setupId, text, answering));
   }
 
-  const sub = !posts
-    ? !setup
-      ? `A rehearsal of setting up ${name}, on ${madeUp ? 'a made-up organisation' : `your ${name} organisation`}. Decimal doesn’t post to ${name} yet, so nothing posts.`
-      : reading
-        ? 'The setup conversation, as it was.'
-        : lapsed
-          ? `Disconnected. To rehearse again, start a new setup.`
+  const sub = !setup
+    ? madeUp
+      ? `On this test bench, setting up ${name} on a made-up organisation, which nothing posts to.`
+      : `Connect your ${name} ${books} so approved bills post there.`
+    : reading
+      ? 'The setup conversation, as it was.'
+      : lapsed
+        ? `Nothing posts to ${name} until it’s set up again.`
+        : signInAgain
+          ? `Decimal’s sign-in to ${name} expired, so nothing posts there until an admin signs in again.`
           : setup.status === 'done'
-            ? `Rehearsed on ${setup.company.name ?? name}. Nothing posts to ${name}.`
-            : 'Decimal reads the books and asks about anything it can’t work out. A rehearsal: nothing posts, Go included.'
-    : !setup
-      ? `Connect your ${name} company so approved bills post there.`
-      : reading
-        ? 'The setup conversation, as it was.'
-        : lapsed
-          ? `Nothing posts to ${name} until it’s set up again.`
-          : signInAgain
-            ? `Decimal’s sign-in to ${name} expired, so nothing posts there until an admin signs in again.`
-            : setup.status === 'done'
-              ? `Approved bills post to ${setup.company.name ?? name}.`
-              : 'Decimal reads your books and asks about anything it can’t work out. Nothing is posted until you press Go.';
+            ? madeUp ? 'Set up on a made-up organisation, which nothing posts to.' : `Approved bills post to ${setup.company.name ?? name}.`
+            : 'Decimal reads your books and asks about anything it can’t work out. Nothing is posted until you press Go.';
 
   let body: ReactNode = null;
   if (access.isError) {
@@ -183,7 +175,7 @@ function SetupScreen({ organizationId, system }: { organizationId: string; syste
   } else if (latest.isError) {
     body = <Failed what="The setup" retry={() => void latest.refetch()} />;
   } else if (latest.isSuccess && (!setup || lapsed)) {
-    body = <Start name={name} posts={posts} madeUp={madeUp} again={lapsed} busy={busy === 'start'} onStart={() => void start()} />;
+    body = <Start name={name} books={books} madeUp={madeUp} again={lapsed} busy={busy === 'start'} onStart={() => void start()} />;
   } else if (setup) {
     body = (
       <>
@@ -199,7 +191,8 @@ function SetupScreen({ organizationId, system }: { organizationId: string; syste
         organizationId={organizationId}
         system={system}
         name={name}
-        posts={posts}
+        books={books}
+        signInBy={signInBy}
         setup={settled}
         finished={settled.finished}
         meId={user?.userId ?? null}
@@ -314,7 +307,7 @@ function Failed({ what, retry }: { what: string; retry: () => void }) {
 }
 
 /** Before the first setup, or once the last one's yes no longer holds: what will happen, and the button that starts it. */
-function Start({ name, posts, madeUp, again, busy, onStart }: { name: string; posts: boolean; madeUp: boolean; again: boolean; busy: boolean; onStart: () => void }) {
+function Start({ name, books, madeUp, again, busy, onStart }: { name: string; books: string; madeUp: boolean; again: boolean; busy: boolean; onStart: () => void }) {
   return (
     <div className="su-talk">
       <div className="su-thread">
@@ -327,15 +320,11 @@ function Start({ name, posts, madeUp, again, busy, onStart }: { name: string; po
               <span className="bp-who-name">Decimal agent</span>
             </div>
             <div className="bp-msg">
-              {!posts
-                ? again
-                  ? `That ${name} rehearsal was disconnected. To rehearse again, start a new setup: you sign in, I read the books, and you press Go.`
-                  : madeUp
-                    ? `This is a rehearsal. On this test bench, signing in connects a made-up ${name} organisation. I read how its books are kept and ask you about anything I can’t work out. Decimal doesn’t post to ${name} yet, so nothing posts, even after Go.`
-                    : `This is a rehearsal. You sign in to your ${name} organisation, I read how its books are kept, and I ask you about anything I can’t work out. Decimal doesn’t post to ${name} yet, so nothing posts, even after Go.`
-                : again
-                  ? `Posting to ${name} is off, so nothing posts there. To turn it on again, start a new setup: you sign in, I read your books, and you press Go.`
-                  : `You sign in to your ${name} company, I read how your books are kept, and I ask you about anything I can’t work out. Nothing is posted until you press Go.`}
+              {again
+                ? `Posting to ${name} is off, so nothing posts there. To turn it on again, start a new setup: you sign in, I read your books, and you press Go.`
+                : madeUp
+                  ? `On this test bench, signing in connects a made-up ${name} organisation. I read how its books are kept and ask you about anything I can’t work out. Nothing posts to it, even after Go.`
+                  : `You sign in to your ${name} ${books}, I read how your books are kept, and I ask you about anything I can’t work out. Nothing is posted until you press Go.`}
             </div>
             <div className="su-acts">
               <button type="button" className={`btn is-primary${busy ? ' is-busy' : ''}`} disabled={busy} onClick={onStart}>
@@ -711,7 +700,7 @@ function Steps({ setup, system, madeUp, busy, onSignIn }: {
   busy: Busy;
   onSignIn: (path: string) => void;
 }) {
-  const { name, posts, books } = SYSTEMS[system];
+  const { name, books } = SYSTEMS[system];
   const signsIn = madeUp ? MADE_UP_SIGN_IN : SYSTEMS[system].signsIn;
   const company = setup.company.name;
   const signedIn = met(setup, 'signed_in');
@@ -770,19 +759,17 @@ function Steps({ setup, system, madeUp, busy, onSignIn }: {
 
         <Step
           state={setup.status === 'done' ? 'done' : setup.canGo ? 'live' : 'todo'}
-          name={setup.status === 'done' ? (expired || !posts ? 'Go pressed' : 'Posting is on') : 'Press Go'}
+          name={setup.status === 'done' ? (expired || madeUp ? 'Go pressed' : 'Posting is on') : 'Press Go'}
           line={
             setup.status === 'done'
-              ? !posts
-                ? `A rehearsal, so nothing posts to ${name}.`
+              ? madeUp
+                ? 'Nothing posts to a made-up organisation.'
                 : expired
                   ? 'Posting picks up where it left off once an admin signs in again.'
                   : `Approved bills post to ${company ?? name}.`
               : setup.canGo
                 ? 'Everything’s ready. Go is in the conversation.'
-                : posts
-                  ? 'Turns posting on once the steps above are done.'
-                  : 'Records your answers once the steps above are done. Nothing posts.'
+                : 'Turns posting on once the steps above are done.'
           }
         />
       </ol>

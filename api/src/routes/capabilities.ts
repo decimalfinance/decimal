@@ -32,8 +32,8 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
     },
     integrations: {
       // Whether Xero can be set up here: with Decimal's Xero app (XERO_CLIENT_ID), or on
-      // the bench with a made-up organisation. The name is from when its setup was a rehearsal.
-      xeroRehearsal: xeroAppConfigured() || Boolean(config.xeroFixtureFile),
+      // the bench with a made-up organisation.
+      xero: xeroAppConfigured() || Boolean(config.xeroFixtureFile),
       // The bench without the app: signing in connects the made-up organisation (XERO_FIXTURE_FILE, never in production).
       xeroMadeUp: !xeroAppConfigured() && Boolean(config.xeroFixtureFile),
     },

@@ -46,6 +46,8 @@ export type InboxLine = {
   from?: string | null;
   /** For a reply to your question: the question it answers. */
   questionId?: string;
+  /** For a line about the books: which, by name. */
+  books?: string;
 };
 
 export type InboxItem = {
@@ -247,7 +249,7 @@ export async function getInbox(organizationId: string, viewerUserId: string, opt
     for (const f of failed) {
       const why = f.error?.trim() ? firstSentence(f.error).replace(/"([^"]*)"/g, '“$1”') : null;
       const books = systemName(f.provider);
-      add(itemFor(f.paymentOrderId), { kind: 'sync_failed', ...said(why ? `${books} refused it: ${why}` : `${books} refused it`, null), who: null, at: f.updatedAt.toISOString() });
+      add(itemFor(f.paymentOrderId), { kind: 'sync_failed', ...said(why ? `${books} refused it: ${why}` : `${books} refused it`, null), who: null, at: f.updatedAt.toISOString(), books });
     }
   }
   // Approved, and held back: the books may have it already (accounting/books-check.ts).
@@ -261,7 +263,7 @@ export async function getInbox(organizationId: string, viewerUserId: string, opt
     for (const h of held) {
       // Up to "outside Decimal", never by sentence: a vendor's name can have a full stop in it.
       const what = /^(.+?, entered there outside Decimal)\./.exec(h.error ?? '')?.[1] ?? `${systemName(h.provider)} may have it already`;
-      add(itemFor(h.paymentOrderId), { kind: 'sync_held', ...said(`${what}. Is it the same bill?`, null), who: null, at: h.updatedAt.toISOString() });
+      add(itemFor(h.paymentOrderId), { kind: 'sync_held', ...said(`${what}. Is it the same bill?`, null), who: null, at: h.updatedAt.toISOString(), books: systemName(h.provider) });
     }
   }
 

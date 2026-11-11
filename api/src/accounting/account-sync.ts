@@ -29,6 +29,7 @@ import { PostedTotalDiffers, recordBillPaymentInQuickBooks, syncPaymentToQuickBo
 import { BUILTIN_ACCOUNT_PREFIX } from './default-chart.js';
 import { vendorForBill } from './vendor-match.js';
 import { xeroBooks } from './xero-books.js';
+import { systemName } from '../payments/bill-flags.js';
 
 /** Where paid bills record their payment: QuickBooks only, while payments are frozen. */
 const PROVIDER = 'quickbooks';
@@ -45,18 +46,20 @@ export type AccountingSyncOutcome = 'synced' | 'skipped' | 'error' | 'held';
  * `linked`: it was in the books already, entered by hand, and someone said it's the same bill.
  */
 export function postingOf(sync: {
-  status: string; externalBillId: string | null; error: string | null; attempts: number; syncedAt: Date | null; updatedAt: Date; metadataJson: unknown;
+  provider: string; status: string; externalBillId: string | null; error: string | null; attempts: number; syncedAt: Date | null; updatedAt: Date; metadataJson: unknown;
 }) {
   const at = sync.updatedAt.toISOString();
+  // Which books, by name: QuickBooks or Xero.
+  const books = systemName(sync.provider);
   if (sync.externalBillId) {
     const meta = sync.metadataJson;
     const linked = typeof meta === 'object' && meta !== null && (meta as Record<string, unknown>).linkedFromBooks === true;
-    return { status: 'posted' as const, at: (sync.syncedAt ?? sync.updatedAt).toISOString(), error: null, retrying: false, linked };
+    return { status: 'posted' as const, books, at: (sync.syncedAt ?? sync.updatedAt).toISOString(), error: null, retrying: false, linked };
   }
-  if (sync.status === 'error') return { status: 'failed' as const, at, error: sync.error, retrying: sync.attempts < MAX_ATTEMPTS, linked: false };
+  if (sync.status === 'error') return { status: 'failed' as const, books, at, error: sync.error, retrying: sync.attempts < MAX_ATTEMPTS, linked: false };
   // It may be in the books already: nothing goes until someone says.
-  if (sync.status === 'held') return { status: 'held' as const, at, error: sync.error, retrying: false, linked: false };
-  return { status: 'pending' as const, at, error: sync.error, retrying: false, linked: false };
+  if (sync.status === 'held') return { status: 'held' as const, books, at, error: sync.error, retrying: false, linked: false };
+  return { status: 'pending' as const, books, at, error: sync.error, retrying: false, linked: false };
 }
 
 type SyncFields = {

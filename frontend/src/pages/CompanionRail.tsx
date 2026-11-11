@@ -236,7 +236,7 @@ function JobDrawer({ organizationId, selection, onClose, onOpenBill }: {
 
 /** What each kind of inbox line is called, in a word. */
 const LINE_LABEL: Record<InboxItem['lines'][number]['kind'], string> = {
-  question: 'Question', reply: 'Reply', approval: 'Approve', sent_back: 'Sent back', review: 'Review', sign_off: 'Sign off', unreadable: "Can't read", sync_failed: 'QuickBooks', sync_held: 'QuickBooks',
+  question: 'Question', reply: 'Reply', approval: 'Approve', sent_back: 'Sent back', review: 'Review', sign_off: 'Sign off', unreadable: "Can't read", sync_failed: 'Books', sync_held: 'Books',
 };
 
 /**
@@ -296,7 +296,7 @@ function InboxSection({ organizationId, onOpenJob }: { organizationId: string; o
           <div className="ib-lines">
             {item.lines.map((l, i) => (
               <div key={l.questionId ?? `${l.kind}:${i}`} className={`ib-line is-${l.kind}`}>
-                <span className="ib-kind">{LINE_LABEL[l.kind]}</span>
+                <span className="ib-kind">{l.books ?? LINE_LABEL[l.kind]}</span>
                 <span className="ib-text">{l.text}</span>
                 {l.questionId ? (
                   <button type="button" className="ib-tick" onClick={(e) => { e.stopPropagation(); void tickReply(l.questionId!); }}>Done</button>

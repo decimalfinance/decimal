@@ -418,32 +418,38 @@ function BooksRow({ organizationId, isAdmin }: { organizationId: string; isAdmin
 }
 
 /**
- * Xero: a rehearsal of the setup. Decimal reads the organisation and doesn't post
- * to Xero, so nothing does. On the bench without Decimal's Xero app, the sign-in is
- * pretend and connects a made-up organisation. Shown where the API says this
- * deployment has Xero, and only to admins, who run setups.
+ * Xero: whether approved bills post there, and the way into its setup, as for
+ * QuickBooks. On the bench without Decimal's Xero app, the sign-in is pretend and
+ * connects a made-up organisation, which nothing posts to. Shown where the API says
+ * this deployment has Xero, and only to admins, who run setups.
  */
 function XeroRow({ organizationId }: { organizationId: string }) {
   const navigate = useNavigate();
   const capabilities = useQuery({ queryKey: ['capabilities'] as const, queryFn: () => api.getCapabilities(), staleTime: 60_000 });
-  const rehearsal = capabilities.data?.integrations?.xeroRehearsal === true;
+  const available = capabilities.data?.integrations?.xero === true;
   const madeUp = capabilities.data?.integrations?.xeroMadeUp === true;
   const latest = useQuery({
     queryKey: ['integration-setup', organizationId, 'xero'],
     queryFn: () => integrationSetupApi.latest(organizationId, 'xero'),
-    enabled: Boolean(organizationId) && rehearsal,
+    enabled: Boolean(organizationId) && available,
   });
-  if (!rehearsal) return null;
+  if (!available) return null;
   const setup = latest.data?.setup ?? null;
-  const done = setup?.status === 'done' && setup.posting !== 'off';
+  const done = setup?.status === 'done' ? setup : null;
+  // Finished, and its yes holds: posting, or waiting on a sign-in to pick it up again.
+  const on = done?.posting === 'on';
+  const since = on ? done?.finished?.postingFrom ?? null : null;
+  const signedOut = done?.posting === 'signed_out';
   const underWay = setup !== null && setup.status !== 'done';
-  const line = done
-    ? `Rehearsed on ${setup.company.name ?? (madeUp ? 'a made-up organisation' : 'your Xero organisation')}. Nothing posts to Xero.`
-    : underWay
-      ? 'A rehearsal is under way. Nothing posts to Xero.'
-      : madeUp
-        ? 'On this test bench only: the setup, rehearsed on a made-up organisation. Nothing posts to Xero.'
-        : 'The setup, rehearsed on your Xero organisation: Decimal reads it, and nothing posts to Xero.';
+  const line = madeUp
+    ? 'On this test bench, a made-up organisation, which nothing posts to.'
+    : on
+      ? `Approved bills post to ${done?.company.name ?? 'Xero'}.`
+      : underWay
+        ? 'A setup is under way. Nothing posts until an admin presses Go.'
+        : signedOut
+          ? 'Decimal’s sign-in to Xero expired, so nothing posts until an admin signs in again.'
+          : 'Once it’s set up, approved bills post there.';
   return (
     <div className="st-row">
       <div className="st-left">
@@ -452,9 +458,13 @@ function XeroRow({ organizationId }: { organizationId: string }) {
         {latest.isError ? <div className="st-line is-error">Its status couldn’t be loaded.</div> : null}
       </div>
       <div className="st-right">
-        {latest.isSuccess ? <span className="st-value is-quiet">{done ? 'Rehearsed' : underWay ? 'Rehearsing' : 'Not set up'}</span> : null}
+        {latest.isSuccess ? (
+          <span className={`st-value${on && !madeUp ? '' : ' is-quiet'}`}>
+            {on ? (madeUp ? 'Set up' : since ? `Posting since ${fullDay(since)}` : 'Posting') : underWay ? 'Setting up' : signedOut ? 'Sign-in expired' : 'Not set up'}
+          </span>
+        ) : null}
         <button type="button" className="st-pill" onClick={() => navigate(`/organizations/${organizationId}/integrations/xero`)}>
-          {done ? 'Open' : underWay ? 'Continue' : 'Rehearse'}
+          {on || signedOut ? 'Open' : underWay ? 'Continue' : 'Set up'}
         </button>
       </div>
     </div>

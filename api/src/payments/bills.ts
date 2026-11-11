@@ -27,7 +27,7 @@ import { findDuplicateBills, readDuplicateOverride, describeDuplicate, matchDupl
 import { companionReadiness } from '../companion/readiness.js';
 import { readCeilingException, activeCeilingException } from './ceiling-exception.js';
 import { readPayableHold, describePayableHold } from './vendor-payable.js';
-import { evaluateBillFlags, summarizeBillFlags, displayOrgName } from './bill-flags.js';
+import { evaluateBillFlags, summarizeBillFlags, displayOrgName, systemName } from './bill-flags.js';
 import { HIGHLIGHTABLE_FIELDS } from './question-fields.js';
 import type { BillFlag } from './bill-flags.js';
 import { getBillCeilingMinor } from '../approvals/store.js';
@@ -1130,20 +1130,23 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
     });
   }
 
-  // What QuickBooks has done with each approved bill. Read only: the posting
-  // itself happens elsewhere, and this says where it got to.
+  // What the books, QuickBooks or Xero, have done with each approved bill. Read
+  // only: the posting itself happens elsewhere, and this says where it got to.
   const syncs = orders.length === 0 ? [] : await prisma.accountingSync.findMany({
     where: { organizationId, paymentOrderId: { in: orders.map((o) => o.paymentOrderId) } },
-    select: { paymentOrderId: true, status: true, externalBillId: true, syncedAt: true, updatedAt: true },
+    select: { paymentOrderId: true, provider: true, status: true, externalBillId: true, syncedAt: true, updatedAt: true },
   });
-  const postingByOrder = new Map<string, { status: 'posted' | 'failed' | 'pending' | 'held'; at: Date }>();
+  const postingByOrder = new Map<string, { status: 'posted' | 'failed' | 'pending' | 'held'; books: string; at: Date }>();
   for (const sync of syncs) {
+    const books = systemName(sync.provider);
+    // One bill posts to one set of books: a row it posted under is never replaced by another.
+    if (postingByOrder.get(sync.paymentOrderId)?.status === 'posted') continue;
     postingByOrder.set(
       sync.paymentOrderId,
       sync.externalBillId
-        ? { status: 'posted', at: sync.syncedAt ?? sync.updatedAt }
+        ? { status: 'posted', books, at: sync.syncedAt ?? sync.updatedAt }
         // Held: it may be in the books already, and waits for someone to say.
-        : { status: sync.status === 'error' ? 'failed' : sync.status === 'held' ? 'held' : 'pending', at: sync.updatedAt },
+        : { status: sync.status === 'error' ? 'failed' : sync.status === 'held' ? 'held' : 'pending', books, at: sync.updatedAt },
     );
   }
 
@@ -4355,10 +4358,18 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
     : null;
   const sync = await prisma.accountingSync.findFirst({
     where: { organizationId, paymentOrderId },
-    select: { status: true, externalBillId: true, error: true, attempts: true, syncedAt: true, updatedAt: true, metadataJson: true },
+    // One bill posts to one set of books. Were there two rows, the one it posted to.
+    orderBy: [{ syncedAt: { sort: 'desc', nulls: 'last' } }, { updatedAt: 'desc' }],
+    select: { provider: true, status: true, externalBillId: true, error: true, attempts: true, syncedAt: true, updatedAt: true, metadataJson: true },
   });
   const { postingOf } = await import('../accounting/account-sync.js');
   const posting = sync ? postingOf(sync) : null;
+  // The books this bill posts to, by name: where it went, else where the team's bills go now.
+  const books = posting?.books ?? await (async () => {
+    const { postingTarget } = await import('../accounting/connections.js');
+    const target = await postingTarget(organizationId);
+    return target ? systemName(target.system) : null;
+  })();
 
   // The order's invoice approvable — prefer the live one over dead history
   // (a recalled bill that was resubmitted has several).
@@ -4394,6 +4405,7 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
       status: { macroState: null, subStatus },
       closed,
       posting,
+      books,
       approval: null,
       viewer: { personId: null, name: null, isRequester: false, openTaskId: null, anyTaskId: null },
       requester: null,
@@ -4581,6 +4593,7 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
     status: { macroState: approvable.macro_state, subStatus },
     closed,
     posting,
+    books,
     approval: {
       approvableId: approvable.id,
       macroState: approvable.macro_state,

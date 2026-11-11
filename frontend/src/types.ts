@@ -167,8 +167,8 @@ export type CapabilitiesResponse = {
     googleSignIn?: boolean;
   } & Record<string, unknown>;
   integrations?: {
-    // Xero, where a setup is a rehearsal: Decimal reads the books and nothing posts.
-    xeroRehearsal?: boolean;
+    // Whether Xero can be set up here: with Decimal's Xero app, or on the bench.
+    xero?: boolean;
     // The bench without Decimal's Xero app: signing in connects a made-up organisation.
     xeroMadeUp?: boolean;
   };

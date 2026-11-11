@@ -1163,8 +1163,8 @@ export interface WorkbenchBill {
   sentBackBy: { name: string | null; reason: string | null } | null;
   /** Everyone who could act on it now: "Tom or Ines" when either may. */
   waitingOn: Array<{ userId: string | null; name: string }>;
-  /** Where QuickBooks has got to with it, once approved. `held`: it may be there already, and waits for an answer. */
-  posting: { status: 'posted' | 'failed' | 'pending' | 'held'; at: string } | null;
+  /** Where the books have got to with it, once approved; `books` says which, QuickBooks or Xero. `held`: it may be there already, and waits for an answer. */
+  posting: { status: 'posted' | 'failed' | 'pending' | 'held'; books: string; at: string } | null;
   /** Why a closed bill was closed. */
   closedReason: 'duplicate' | 'statement' | 'credit_note' | 'not_ours' | 'unreadable' | 'other' | null;
 }
@@ -1702,10 +1702,12 @@ export interface BillDetail {
     by: { name: string; avatarUrl: string | null } | null;
     at: string | null;
   } | null;
-  /** How far QuickBooks got with an approved bill. */
+  /** How far the books got with an approved bill; `books` says which, QuickBooks or Xero. */
   /** `retrying`: a failed post the sweep will still try again by itself. */
-  /** `held`: QuickBooks may have it already, and nothing goes until someone says. `linked`: it was there, and Decimal linked to it. */
-  posting: { status: 'posted' | 'failed' | 'pending' | 'held'; at: string; error: string | null; retrying: boolean; linked?: boolean } | null;
+  /** `held`: the books may have it already, and nothing goes until someone says. `linked`: it was there, and Decimal linked to it. */
+  posting: { status: 'posted' | 'failed' | 'pending' | 'held'; books: string; at: string; error: string | null; retrying: boolean; linked?: boolean } | null;
+  /** The books this bill posts to, by name: where it went, else where the team's bills go now. Null when they go nowhere. */
+  books: string | null;
   approval: {
     approvableId: string;
     macroState: string;
@@ -2126,6 +2128,8 @@ export interface InboxLine {
   at: string;
   /** Since this person last opened the bill. */
   isNew: boolean;
+  /** For a line about the books: which, by name. */
+  books?: string;
   from?: string | null;
   questionId?: string;
 }
@@ -2225,7 +2229,7 @@ export const accessApi = {
   },
 };
 
-/** The accounting systems a setup exists for. Xero is a rehearsal on the bench: Decimal doesn't post there. */
+/** The accounting systems a setup exists for, and that approved bills post to. */
 export type IntegrationSystem = 'quickbooks' | 'xero';
 
 /** A button the setup offers. Built by the API, never by the model: a sign-in, or Go. */
@@ -2278,7 +2282,7 @@ export interface IntegrationSetup {
   study: { status: 'running' | 'finished' | 'failed' | null; steps: Array<{ key: string; text: string }> | null; error: string | null };
   calls: IntegrationSetupCall[];
   canGo: boolean;
-  /** What Go waits on, by key: signed_in, company_confirmed, study_finished, closing_date, required_calls. */
+  /** What Go waits on, by key: signed_in, company_confirmed, study_finished, closing_date, required_calls, one_set_of_books. */
   goConditions: Array<{ key: string; done: boolean }>;
   /** A finished setup's yes now: on; signed out, where signing in again picks it up; off, where a new setup turns it on. Null before it finishes. */
   posting: 'on' | 'signed_out' | 'off' | null;

@@ -400,7 +400,7 @@ export function ConfirmCard({ card, flag, draft, totals, busy, onConfirm, onCanc
   }
   if (action === 'same_bill') {
     const m = flag ? /^(\S+) already has (.+?), entered there outside Decimal/.exec(flag.message) : null;
-    const books = m?.[1] ?? 'QuickBooks';
+    const books = m?.[1] ?? 'the books';
     return (
       <div ref={boxRef} className="bp-card">
         <div className="bp-card-text">

@@ -1,7 +1,7 @@
 // The route a bill takes once it leaves review (5d, 60e, 62a/b, 5e, 5f): who
 // brought it in, who sent it for approval, then each approval step, as beads
 // on a line. The line is solid as far as the bill has got and dotted beyond.
-// Decimal and QuickBooks are never on it, and only the latest round shows: a
+// Decimal and the books are never on it, and only the latest round shows: a
 // bill sent again starts its route afresh, and History keeps the rest.
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import type { BillDetail, BillDetailStepNode } from '../../api';
