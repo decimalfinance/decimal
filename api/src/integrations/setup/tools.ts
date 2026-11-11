@@ -41,9 +41,28 @@ export type TurnContext = {
   actions: SetupAction[];
   /** What was saved this turn on vendors and lines, in code's words, by call. It goes above the message. */
   saved: Map<string, string[]>;
+  /** Answers that failed to save this turn, by call, with why. One that saves later comes off. */
+  unsaved: Map<string, string>;
   onThought(thought: Thought): Promise<void>;
   startStudy(): void;
 };
+
+/**
+ * A save that fails is kept on the turn until one saves. A reply sent in the same
+ * breath as the save never saw it fail, and on the Demo Company in Xero it told
+ * the person their closing date was saved when it wasn't.
+ */
+async function noteUnsaved<T>(ctx: TurnContext, args: unknown, save: () => Promise<T>): Promise<T> {
+  const key = (args as { key?: unknown } | null)?.key;
+  try {
+    const out = await save();
+    if (typeof key === 'string') ctx.unsaved.delete(key);
+    return out;
+  } catch (error) {
+    if (typeof key === 'string') ctx.unsaved.set(key, error instanceof Error ? error.message : String(error));
+    throw error;
+  }
+}
 
 function parsed<T>(schema: z.ZodType<T>, args: unknown): T {
   const result = schema.safeParse(args);
@@ -267,6 +286,19 @@ export function leftOutInWords(findings: StudyFindings | null, playbook: Pick<Pl
 }
 
 const OFFER_GO = z.object({ passedOver: z.array(z.object({ id: z.string(), why: z.string().trim().min(3).max(500) })).max(40).optional() });
+
+/**
+ * The value as its call's kind has it. The model sometimes wraps it in the call's
+ * own name, {closing_date: {date}} for {date}, and on the Demo Company in Xero that
+ * refused the date the person had given, twice. The wrapper says nothing more, so
+ * it comes off.
+ */
+export function unwrapped(call: { key: string; kind: string }, value: Record<string, unknown> | null | undefined): Record<string, unknown> | null | undefined {
+  const names = value ? Object.keys(value) : [];
+  if (names.length !== 1 || (names[0] !== call.kind && names[0] !== call.key)) return value;
+  const inner = value![names[0]!];
+  return inner !== null && typeof inner === 'object' && !Array.isArray(inner) ? (inner as Record<string, unknown>) : value;
+}
 
 /**
  * The part of an answer fixed code will use later, checked against what was asked.
@@ -616,7 +648,7 @@ export function setupTools(ctx: TurnContext): AgentTool[] {
           value: { type: 'object' },
         },
       },
-      run: async (args) => {
+      run: (args) => noteUnsaved(ctx, args, async () => {
         if (!ctx.speaker) throw new Error('The person has said nothing this turn, so there is nothing to record.');
         const input = parsed(RECORD_ANSWER, args);
         await ctx.onThought({ text: 'Saving the answer' });
@@ -633,15 +665,16 @@ export function setupTools(ctx: TurnContext): AgentTool[] {
           const onItsCard = [...onCards.values()].includes(call.key);
           if (!onItsCard && !talked.some((m) => topic.test(m.text ?? ''))) throw new Error('This hasn\'t come up with them yet. Ask it in your message, and record it when they answer.');
         }
-        if (call.kind === 'closing_date' && input.value?.date) {
+        const given = unwrapped(call, input.value);
+        if (call.kind === 'closing_date' && given?.date) {
           // Saying it again changes nothing. Refused, the model told them it couldn't save a date it already had.
-          if (call.status === 'answered' && (call.value as { date?: unknown } | null)?.date === input.value.date) {
+          if (call.status === 'answered' && (call.value as { date?: unknown } | null)?.date === given.date) {
             return { recorded: input.key, means: await inWords(call, call.value, setup) };
           }
           const message = await prisma.integrationSetupMessage.findUnique({ where: { messageId: ctx.speaker.messageId }, select: { text: true } });
           if (!GAVE_OR_AGREED.test(message?.text ?? '')) throw new Error('They haven\'t given a date or agreed to one. Ask them, and record it when they do.');
         }
-        const value = await answerValue(call, input.value, setup);
+        const value = await answerValue(call, given, setup);
         await prisma.integrationSetupCall.update({
           where: { setupId_key: { setupId: ctx.setupId, key: input.key } },
           data: {
@@ -658,7 +691,7 @@ export function setupTools(ctx: TurnContext): AgentTool[] {
         // A mapping has to be exact, so they read what was saved rather than what the model makes of it.
         if (means && (call.kind === 'lookalike_vendors' || call.kind === 'coded_two_ways')) ctx.saved.set(input.key, means);
         return { recorded: input.key, means };
-      },
+      }),
     },
     {
       name: 'offer_go',

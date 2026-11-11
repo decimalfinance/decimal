@@ -118,6 +118,11 @@ const report = {
     bills: { reader: bills?.records.length ?? null, readerExpected: bills?.expected ?? null, readerMissing: bills?.missing ?? null, plain: studiedBills.length },
     expenses: { reader: expenses?.records.length ?? null, readerExpected: expenses?.expected ?? null, readerMissing: expenses?.missing ?? null, plain: studiedExpenses.length },
   },
+  // In cents, summed apart: the reader's from its records, the plain one from Xero's own Total on each.
+  totals: {
+    bills: { reader: String((bills?.records ?? []).reduce((n, b) => n + b.totalMinor, 0n)), plain: String(studiedBills.reduce((n, r) => n + BigInt(Math.round(Number(r.Total) * 100)), 0n)) },
+    expenses: { reader: String((expenses?.records ?? []).reduce((n, e) => n + e.totalMinor, 0n)), plain: String(studiedExpenses.reduce((n, r) => n + BigInt(Math.round(Number(r.Total) * 100)), 0n)) },
+  },
   problems: { vendors: vendors?.problems ?? [], bills: bills?.problems ?? [], expenses: expenses?.problems ?? [] },
   paged: { contacts: contacts.paged, invoices: invoices.paged, bankTransactions: bank.paged },
   invoices: { all: invoices.rows.length, byType: tally(invoices.rows.map((r) => r.Type)), billsByStatus: tally(invoices.rows.filter((r) => r.Type === 'ACCPAY').map((r) => r.Status)) },

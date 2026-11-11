@@ -187,6 +187,7 @@ async function takeTurn(setup: IntegrationSetup): Promise<boolean> {
     seen,
     actions,
     saved: new Map(),
+    unsaved: new Map(),
     onThought,
     startStudy: () => startStudy(setup.setupId),
   };
@@ -195,6 +196,8 @@ async function takeTurn(setup: IntegrationSetup): Promise<boolean> {
     { name: 'respond', description: 'Finish this turn: say something to the person.', terminal: true, parameters: RESPOND_SCHEMA },
   ];
 
+  // The question whose card this turn's message was written on, if it was.
+  const onCard = ctx.speaker ? (await cardAnswers(setup.setupId)).get(ctx.speaker.messageId) ?? null : null;
   const run = await runAgent({
     label: 'integration_setup',
     system: await systemPrompt(setup, playbook, Boolean(heard)),
@@ -206,7 +209,7 @@ async function takeTurn(setup: IntegrationSetup): Promise<boolean> {
     maxOutputTokens: OUTPUT_TOKENS_PER_CALL,
     tokenLimit: Number(SETUP_TOKEN_LIMIT - setup.tokensUsed),
     checkTerminal: async (args) => {
-      const problem = await notRightYet(args, seen, setup, actions);
+      const problem = await notRightYet(args, seen, setup, actions, onCard, ctx.unsaved);
       if (problem) await appendEvent(setup.setupId, 'sent_back', { problem });
       return problem;
     },
@@ -281,10 +284,16 @@ async function whatsNext(setup: IntegrationSetup): Promise<{ call: { key: string
 }
 
 /** The rules of a good answer that code can check. What this says goes back to the model, which says it again. */
-async function notRightYet(args: Record<string, unknown>, seen: Set<string>, setup: IntegrationSetup, actions: SetupAction[]): Promise<string | null> {
+async function notRightYet(args: Record<string, unknown>, seen: Set<string>, setup: IntegrationSetup, actions: SetupAction[], onCard: string | null, unsaved: Map<string, string>): Promise<string | null> {
   const claims: Array<{ text?: unknown; refs?: unknown }> = Array.isArray(args.claims) ? args.claims : [];
   const message = withoutWhatClaimsSay(typeof args.message === 'string' ? args.message.trim() : '', claims);
   const problems: string[] = [];
+  // They answered on the question's card and it didn't save. Once a turn, so it can't loop.
+  const unsavedBecause = onCard ? unsaved.get(onCard) : undefined;
+  if (onCard && unsavedBecause !== undefined) {
+    unsaved.delete(onCard);
+    problems.push(`Their answer to ${onCard} is not saved: ${unsavedBecause} Fix it and record_answer again, or ask them for what is missing. Don't tell them it is saved until it is.`);
+  }
   if (message.length > LONGEST_MESSAGE) {
     problems.push(`Your message is ${message.length} characters. A busy person is reading this. Say it in under ${LONGEST_MESSAGE}, and leave the rest for your next message.`);
   }

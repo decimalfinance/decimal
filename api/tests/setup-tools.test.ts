@@ -21,6 +21,7 @@ import { fixtureXeroClient, xeroDate, type XeroFixture } from '../src/integratio
 import { XeroApiError } from '../src/integrations/xero-reader.js';
 import { signState } from '../src/accounting/oauth-state.js';
 import { sweepSetups, wake, withoutWhatClaimsSay } from '../src/integrations/setup/harness.js';
+import { unwrapped } from '../src/integrations/setup/tools.js';
 import { noteDisconnected, noteSignedIn, noteSignInFailed } from '../src/integrations/setup/service.js';
 import { readOutcome } from '../src/integrations/setup/outcome.js';
 import { setRole } from '../src/approvals/roles.js';
@@ -999,6 +1000,48 @@ test('setup tools: a required question can\'t be answered before it has come up,
   await post(`${pathOf(w, setupId)}/messages`, { text: '31 December 2025', answering: 'closing_date' }, w.owner.token);
   await drainBackgroundWork();
   assert.equal(onCard.seen.results[0]!.output.recorded, 'closing_date', 'answered on its card');
+});
+
+test('setup tools: an answer wrapped in its question\'s name is saved, as Haiku sent the Demo Company\'s closing date', async () => {
+  const w = await makeOrg();
+  const setupId = await studied(w, pretendSystem());
+  const wrapped = script([{ calls: [{ tool: 'record_answer', args: { key: 'closing_date', answer: '30 September 2008', value: { closing_date: { date: '2008-09-30' } } } }], say: 'Saved.' }]);
+  await post(`${pathOf(w, setupId)}/messages`, { text: 'Yes, 30 September 2008 is right.', answering: 'closing_date' }, w.owner.token);
+  await drainBackgroundWork();
+  assert.equal(wrapped.seen.results[0]!.output.recorded, 'closing_date', wrapped.seen.results[0]!.output.error);
+  const saved = await prisma.integrationSetupCall.findUnique({ where: { setupId_key: { setupId, key: 'closing_date' } } });
+  assert.deepEqual(saved?.value, { date: '2008-09-30' });
+
+  assert.deepEqual(unwrapped({ key: 'alike', kind: 'lookalike_vendors' }, { alike: { same: [] } }), { same: [] }, 'by the call\'s key too');
+  assert.deepEqual(unwrapped({ key: 'closing_date', kind: 'closing_date' }, { closing_date: '2008-09-30' }), { closing_date: '2008-09-30' }, 'only an object comes off');
+  assert.deepEqual(unwrapped({ key: 'closing_date', kind: 'closing_date' }, { closing_date: { date: '2008-09-30' }, neverClosed: true }), { closing_date: { date: '2008-09-30' }, neverClosed: true }, 'only a wrapper on its own');
+  assert.deepEqual(unwrapped({ key: 'coded', kind: 'coded_two_ways' }, { choices: [] }), { choices: [] });
+});
+
+test('setup tools: an answer on its card that doesn\'t save sends the reply back once, so it can\'t say it\'s saved', async () => {
+  const w = await makeOrg();
+  const setupId = await studied(w, pretendSystem());
+  // Only this check's: the other checks send these scripted replies back too, for what they leave out.
+  const notSaved = async () => (await prisma.integrationSetupEvent.findMany({ where: { setupId, kind: 'sent_back' }, select: { payload: true } }))
+    .map((e) => String((e.payload as { problem?: string }).problem))
+    .filter((problem) => problem.includes('is not saved'));
+  const turn = script([
+    { calls: [{ tool: 'record_answer', args: { key: 'closing_date', answer: '31 December 2999', value: { date: '2999-12-31' } } }], say: 'Saved, thanks.' },
+    { say: 'That date is still to come. What date are your books closed through?' },
+  ]);
+  await post(`${pathOf(w, setupId)}/messages`, { text: '31 December 2999', answering: 'closing_date' }, w.owner.token);
+  await drainBackgroundWork();
+  assert.match(turn.seen.results[0]!.output.error, /cannot be in the future/);
+  const backs = await notSaved();
+  assert.equal(backs.length, 1, backs.join(' | '));
+  assert.match(backs[0]!, /^Their answer to closing_date is not saved: A closing date cannot be in the future/);
+  assert.equal((await lastMessage(w, setupId)).text, 'That date is still to come. What date are your books closed through?');
+
+  // Typed, not on its card: the model says which question it answers, and nothing is sent back.
+  const typed = script([{ calls: [{ tool: 'record_answer', args: { key: 'closing_date', answer: '31 December 2999', value: { date: '2999-12-31' } } }], say: 'What date are your books closed through?' }]);
+  await say(w, setupId, '31 December 2999');
+  assert.match(typed.seen.results[0]!.output.error, /cannot be in the future/);
+  assert.equal((await notSaved()).length, 1);
 });
 
 test('setup tools: searching goes by word, in any order, whatever punctuation comes with it', async () => {
