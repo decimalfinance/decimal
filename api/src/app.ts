@@ -27,7 +27,7 @@ import { proposalsRouter } from './routes/proposals.js';
 import { approvalsRouter } from './approvals/routes.js';
 import { companionRouter } from './companion/routes.js';
 import { integrationSetupRouter } from './integrations/setup/routes.js';
-import { xeroBenchRouter } from './integrations/xero-bench.js';
+import { publicXeroRouter, xeroRouter } from './integrations/xero-sign-in.js';
 import { publicRateLimitMiddleware } from './infra/rate-limit.js';
 import { solanaRpcRouter } from './routes/solana-rpc.js';
 import { treasuryWalletsRouter } from './routes/treasury-wallets.js';
@@ -97,8 +97,9 @@ export function createApp() {
   app.use(openApiRouter);
   app.use(authRouter);
   app.use(publicOrganizationInvitesRouter);
-  // QuickBooks OAuth callback — Intuit redirects here with no auth header.
+  // QuickBooks' and Xero's OAuth callbacks — Intuit and Xero redirect here with no auth header.
   app.use(publicAccountingRouter);
+  app.use(publicXeroRouter);
   // Inbound invoice email — Resend posts here with a Svix signature, no session.
   app.use(publicInboundEmailRouter);
   app.use(requireAuth());
@@ -128,7 +129,7 @@ export function createApp() {
   app.use(companionRouter);
   app.use(accountingRouter);
   app.use(integrationSetupRouter);
-  app.use(xeroBenchRouter);
+  app.use(xeroRouter);
 
   app.use((error: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
     if (error instanceof ZodError) {

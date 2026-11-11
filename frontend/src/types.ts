@@ -167,8 +167,10 @@ export type CapabilitiesResponse = {
     googleSignIn?: boolean;
   } & Record<string, unknown>;
   integrations?: {
-    // Xero on a made-up organisation, where a setup is a rehearsal. The bench only.
+    // Xero, where a setup is a rehearsal: Decimal reads the books and nothing posts.
     xeroRehearsal?: boolean;
+    // The bench without Decimal's Xero app: signing in connects a made-up organisation.
+    xeroMadeUp?: boolean;
   };
   apiSurface: Record<string, unknown>;
   workflows: Array<Record<string, unknown>>;

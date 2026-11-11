@@ -3,7 +3,7 @@
 // after sign-in, an answer only from a person, Go only from a click.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
@@ -17,14 +17,16 @@ import { BooksReadError, type BooksAccount, type BooksBill, type BooksCompany, t
 import { setConnectorForTests } from '../src/integrations/connectors.js';
 import { deleteCopy, lookUp, summarize } from '../src/integrations/copy.js';
 import { fixtureReader, type BooksFixture, type FixtureFault } from '../src/integrations/fixture-reader.js';
-import { xeroDate, type XeroFixture } from '../src/integrations/xero-fixture.js';
+import { fixtureXeroClient, xeroDate, type XeroFixture } from '../src/integrations/xero-fixture.js';
+import { XeroApiError } from '../src/integrations/xero-reader.js';
+import { signState } from '../src/accounting/oauth-state.js';
 import { sweepSetups, wake, withoutWhatClaimsSay } from '../src/integrations/setup/harness.js';
 import { noteDisconnected, noteSignedIn, noteSignInFailed } from '../src/integrations/setup/service.js';
 import { readOutcome } from '../src/integrations/setup/outcome.js';
 import { setRole } from '../src/approvals/roles.js';
 import { ensureEngineSetup } from '../src/approvals/wiring.js';
 import { drainAsyncIntake } from '../src/payments/invoice-intake.js';
-import { raw, post, get, makeWorld, register, upload, type Person } from './helpers/companion-harness.js';
+import { raw, post, get, makeWorld, register, upload, baseUrl, type Person } from './helpers/companion-harness.js';
 
 // ─── A company, in memory ─────────────────────────────────────────────────────
 
@@ -1938,4 +1940,142 @@ test('setup tools: Xero on the bench is a rehearsal: a pretend sign-in, the real
     assert.equal(after.postingEnabledAt, null);
     assert.equal((await view(w, setupId)).posting, 'off');
   });
+});
+
+// ─── Xero for real: Decimal's Xero app ────────────────────────────────────────
+
+type XeroRequest = { method: string; url: string; headers: Headers; body: string };
+
+/**
+ * Decimal's Xero app for the length of a test, and Xero answering from memory: its
+ * sign-in, its list of connections, and the organisation's API, answered from the
+ * fixture as Xero's would be. Every request that leaves Decimal is kept.
+ */
+function xeroApp(fixture: XeroFixture) {
+  const realFetch = globalThis.fetch;
+  const saved = { id: config.xeroClientId, secret: config.xeroClientSecret, state: config.oauthStateSecret, file: config.xeroFixtureFile };
+  config.xeroClientId = 'test-client';
+  config.xeroClientSecret = 'test-secret';
+  config.oauthStateSecret = 'test-state-secret';
+  config.xeroFixtureFile = '';
+  const organisation = fixtureXeroClient(fixture);
+  const seen: XeroRequest[] = [];
+  let issued = 0;
+  const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (url.startsWith(baseUrl)) return realFetch(input, init);
+    const request: XeroRequest = { method: init?.method ?? 'GET', url, headers: new Headers(init?.headers), body: init?.body ? String(init.body) : '' };
+    seen.push(request);
+    if (url === 'https://identity.xero.com/connect/token') {
+      issued += 1;
+      const accessToken = `h.${Buffer.from(JSON.stringify({ authentication_event_id: 'evt-1', n: issued })).toString('base64url')}.s`;
+      return reply({ access_token: accessToken, refresh_token: `refresh-${issued}`, expires_in: 1800, token_type: 'Bearer' });
+    }
+    if (url === 'https://identity.xero.com/connect/revocation') return new Response('', { status: 200 });
+    if (url === 'https://api.xero.com/connections') {
+      return reply([{ id: 'conn-1', authEventId: 'evt-1', tenantId: XERO_TENANT, tenantType: 'ORGANISATION', tenantName: 'Larkspur Freight', updatedDateUtc: '2026-11-11T10:00:00.0000000' }]);
+    }
+    if (url.startsWith('https://api.xero.com/connections/')) return new Response(null, { status: 204 });
+    const api = new URL(url);
+    if (url.startsWith('https://api.xero.com/api.xro/2.0/')) {
+      if (request.headers.get('xero-tenant-id') !== XERO_TENANT) return reply({ Title: 'Forbidden', Detail: 'AuthenticationUnsuccessful' }, 403);
+      try {
+        return reply(await organisation.get(api.pathname.slice('/api.xro/2.0/'.length), Object.fromEntries(api.searchParams)));
+      } catch (error) {
+        return reply({ Message: String(error) }, error instanceof XeroApiError ? error.status : 500);
+      }
+    }
+    return new Response('not Xero', { status: 599 });
+  }) as typeof fetch;
+  return {
+    seen,
+    restore() {
+      globalThis.fetch = realFetch;
+      config.xeroClientId = saved.id;
+      config.xeroClientSecret = saved.secret;
+      config.oauthStateSecret = saved.state;
+      config.xeroFixtureFile = saved.file;
+    },
+  };
+}
+
+test('setup tools: with Decimal\'s Xero app the sign-in is Xero\'s own, and the organisation picked there is read through Xero\'s API', async () => {
+  const xero = xeroApp(JSON.parse(readFileSync(xeroOrganisationFile(), 'utf8')) as XeroFixture);
+  try {
+    const w = await makeOrg();
+    const { integrations } = (await raw('GET', '/capabilities')).json;
+    assert.deepEqual([integrations.xeroRehearsal, integrations.xeroMadeUp], [true, false]);
+    const model = script([
+      { calls: [{ tool: 'offer_sign_in' }], say: 'Sign in on Xero.' },
+      { say: 'That was cancelled. Sign in when you are ready.' },
+      { say: 'Is Larkspur Freight the right organisation?' },
+      { calls: [{ tool: 'confirm_company' }, { tool: 'start_reading' }], say: 'Reading.' },
+      { say: 'Finished. Ready?' },
+    ]);
+    const { setupId } = await post(`/organizations/${w.orgId}/integrations/xero/setups`, {}, w.owner.token);
+    await drainBackgroundWork();
+    const signIn = (await view(w, setupId)).messages.flatMap((m: { actions: any[] }) => m.actions).find((a: any) => a.kind === 'sign_in');
+    const { authorizeUrl } = await get(`${signIn.path}?frontendOrigin=${encodeURIComponent('http://127.0.0.1:5274')}`, w.owner.token);
+    const to = new URL(authorizeUrl);
+    assert.equal(`${to.origin}${to.pathname}`, 'https://login.xero.com/identity/connect/authorize', 'to Xero’s own sign-in');
+    const redirectUri = `${baseUrl.replace('127.0.0.1', 'localhost')}/accounting/xero/callback`;
+    assert.equal(to.searchParams.get('redirect_uri'), redirectUri, 'Xero takes no IP address');
+    assert.equal(xero.seen.length, 0, 'nothing reaches Xero before the person signs in there');
+
+    const callback = async (query: string) => {
+      const res = await fetch(`${baseUrl}/accounting/xero/callback?${query}`, { redirect: 'manual' });
+      await res.arrayBuffer();
+      return { status: res.status, location: res.headers.get('location') };
+    };
+    const state = encodeURIComponent(to.searchParams.get('state')!);
+    const setupScreen = `http://127.0.0.1:5274/organizations/${w.orgId}/integrations/xero`;
+
+    // Cancelled on Xero's screen: back to the setup, which hears it.
+    assert.deepEqual(await callback(`error=access_denied&state=${state}`), { status: 302, location: setupScreen });
+    await drainBackgroundWork();
+    assert.match(model.seen.users.at(-1)!, /The sign-in was cancelled on Xero's screen/);
+    const heard = model.seen.users.length;
+
+    // One nobody signed for, or signed for another system, finishes nothing and tells nobody.
+    assert.equal((await callback('code=c&state=forged')).status, 400);
+    const quickbooks = encodeURIComponent(signState(w.orgId, 'http://127.0.0.1:5274', redirectUri, 'quickbooks'));
+    assert.equal((await callback(`code=c&state=${quickbooks}`)).status, 400);
+    await drainBackgroundWork();
+    assert.equal(model.seen.users.length, heard);
+    assert.equal(xero.seen.length, 0);
+
+    assert.deepEqual(await callback(`code=the-code&state=${state}`), { status: 302, location: setupScreen });
+    await drainBackgroundWork();
+    assert.deepEqual(xero.seen.map((r) => `${r.method} ${r.url}`), ['POST https://identity.xero.com/connect/token', 'GET https://api.xero.com/connections'], 'signing in learns which organisation it reached, and reads nothing of its books');
+    const exchange = new URLSearchParams(xero.seen[0]!.body);
+    assert.deepEqual([exchange.get('grant_type'), exchange.get('code'), exchange.get('redirect_uri')], ['authorization_code', 'the-code', redirectUri]);
+    const row = await prisma.accountingConnection.findUniqueOrThrow({ where: { organizationId_provider: { organizationId: w.orgId, provider: 'xero' } } });
+    assert.deepEqual([row.realmId, row.environment, row.status, row.refreshToken], [XERO_TENANT, 'live', 'connected', 'refresh-1']);
+    assert.equal(await getConnection(w.orgId), null, 'QuickBooks never sees it');
+    assert.equal((await lastMessage(w, setupId)).text, 'Is Larkspur Freight the right organisation?', 'the sign-in woke it');
+
+    await say(w, setupId, 'Yes, that one');
+    assert.equal((await view(w, setupId)).study.status, 'finished');
+    const findings = (await prisma.integrationSetup.findUniqueOrThrow({ where: { setupId } })).findings as any;
+    assert.equal(findings.counts.bills, 4, 'read through Xero’s API');
+    assert.equal(findings.totals.bills, '4,800.07 USD');
+    assert.deepEqual(findings.shortfalls, []);
+    const reads = xero.seen.filter((r) => r.url.startsWith('https://api.xero.com/api.xro/2.0/'));
+    assert.ok(reads.length > 0, 'the books were read over Xero’s API');
+    assert.ok(reads.every((r) => r.method === 'GET' && r.headers.get('xero-tenant-id') === XERO_TENANT), 'reads only, of the organisation signed in to');
+
+    const before = xero.seen.length;
+    assert.equal((await raw('DELETE', `/organizations/${w.orgId}/integrations/xero`, w.owner.token)).status, 204);
+    assert.deepEqual(
+      xero.seen.slice(before).map((r) => `${r.method} ${r.url}`),
+      ['GET https://api.xero.com/connections', 'DELETE https://api.xero.com/connections/conn-1', 'POST https://identity.xero.com/connect/revocation'],
+      'the organisation is disconnected from Decimal’s app, and the sign-in ended',
+    );
+    assert.equal(new URLSearchParams(xero.seen.at(-1)!.body).get('token'), 'refresh-1');
+    const after = await prisma.accountingConnection.findUniqueOrThrow({ where: { organizationId_provider: { organizationId: w.orgId, provider: 'xero' } } });
+    assert.equal(after.status, 'disconnected');
+  } finally {
+    xero.restore();
+  }
 });

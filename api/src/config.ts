@@ -74,10 +74,18 @@ type DecimalConfig = {
   /**
    * Bench-only Xero: a made-up organisation in Xero's own JSON (made by
    * synthetic_data/setup-eval/xero.mjs), read through the real Xero reader, with a
-   * pretend sign-in. Decimal has no Xero app, so this is the only Xero there is,
-   * and a setup on it is a rehearsal: nothing posts. Validation refuses it in production.
+   * pretend sign-in. Without Decimal's Xero app (xeroClientId) it is the bench's
+   * only Xero. Either way a Xero setup is a rehearsal: nothing posts. Validation
+   * refuses it in production.
    */
   xeroFixtureFile: string;
+  /**
+   * Decimal's Xero app, from developer.xero.com: the sign-in on Xero's own site, and
+   * reading the organisation picked there. Read only: nothing posts to Xero yet.
+   * Its redirect URIs are http://localhost:3100/accounting/xero/callback and :3200's.
+   */
+  xeroClientId: string;
+  xeroClientSecret: string;
   privyAppId: string;
   privyAppSecret: string;
   privyApiBaseUrl: string;
@@ -203,6 +211,8 @@ function buildConfig(): DecimalConfig {
     devAuthSecret: (process.env.DEV_AUTH_SECRET ?? '').trim(),
     squadsFakeChain: (process.env.SQUADS_FAKE_CHAIN ?? '').trim().toLowerCase() === 'true',
     xeroFixtureFile: (process.env.XERO_FIXTURE_FILE ?? '').trim(),
+    xeroClientId: (process.env.XERO_CLIENT_ID ?? '').trim(),
+    xeroClientSecret: (process.env.XERO_CLIENT_SECRET ?? '').trim(),
     privyAppId: (process.env.PRIVY_APP_ID ?? '').trim(),
     privyAppSecret: (process.env.PRIVY_APP_SECRET ?? '').trim(),
     privyApiBaseUrl: normalizeOptionalUrl(process.env.PRIVY_API_BASE_URL) ?? 'https://api.privy.io',
@@ -337,6 +347,10 @@ function validateConfig(nextConfig: DecimalConfig) {
     Boolean(nextConfig.quickbooksClientId) !== Boolean(nextConfig.quickbooksClientSecret);
   if (hasPartialQuickbooksConfig) {
     throw new Error('QUICKBOOKS_CLIENT_ID and QUICKBOOKS_CLIENT_SECRET must be configured together.');
+  }
+
+  if (Boolean(nextConfig.xeroClientId) !== Boolean(nextConfig.xeroClientSecret)) {
+    throw new Error('XERO_CLIENT_ID and XERO_CLIENT_SECRET must be configured together.');
   }
 
   if (nextConfig.autoProvisionWallets && (!nextConfig.privyAppId || !nextConfig.privyAppSecret)) {

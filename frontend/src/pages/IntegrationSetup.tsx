@@ -2,8 +2,9 @@
  * Setting up an accounting system, for admins: a conversation with Decimal, which
  * has an admin sign in, reads the books, asks what it can't work out, and turns
  * posting on when someone presses Go. Beside it, the steps show how far the setup
- * has got. QuickBooks is real; Xero is a rehearsal on the bench, on a made-up
- * organisation behind a pretend sign-in, and its Go posts nothing (SYSTEMS.posts).
+ * has got. QuickBooks is real; Xero is a rehearsal, whose Go posts nothing
+ * (SYSTEMS.posts). On the bench without Decimal's Xero app, its sign-in is pretend
+ * and connects a made-up organisation.
  *
  * While Decimal waits on answers, the last thing in the conversation is a card
  * on the maroon band a question for you is on in a bill's conversation: one
@@ -47,8 +48,10 @@ import { PostingScreen } from './IntegrationPosting';
  */
 const SYSTEMS: Record<IntegrationSystem, { name: string; signsIn: string; posts: boolean; books: string }> = {
   quickbooks: { name: 'QuickBooks', signsIn: 'An admin of your QuickBooks company signs in on Intuit’s site.', posts: true, books: 'company' },
-  xero: { name: 'Xero', signsIn: 'On this test bench, signing in connects a made-up Xero organisation.', posts: false, books: 'organisation' },
+  xero: { name: 'Xero', signsIn: 'Someone with the Adviser or Standard role signs in on Xero’s site.', posts: false, books: 'organisation' },
 };
+/** Xero on the bench without Decimal's Xero app: the sign-in connects a made-up organisation. */
+const MADE_UP_SIGN_IN = 'On this test bench, signing in connects a made-up Xero organisation.';
 const isSystem = (s: string): s is IntegrationSystem => Object.hasOwn(SYSTEMS, s);
 
 /** Look again every second while Decimal is working, and every few seconds while it waits on someone. */
@@ -68,6 +71,8 @@ export function IntegrationSetupPage() {
 
 function SetupScreen({ organizationId, system }: { organizationId: string; system: IntegrationSystem }) {
   const { name, posts } = SYSTEMS[system];
+  const capabilities = useQuery({ queryKey: ['capabilities'] as const, queryFn: () => api.getCapabilities(), staleTime: 60_000 });
+  const madeUp = system === 'xero' && capabilities.data?.integrations?.xeroMadeUp === true;
   const queryClient = useQueryClient();
   const toaster = useToaster();
   const navigate = useNavigate();
@@ -150,7 +155,7 @@ function SetupScreen({ organizationId, system }: { organizationId: string; syste
 
   const sub = !posts
     ? !setup
-      ? `A rehearsal of setting up ${name}, on a made-up organisation. Decimal doesn’t post to ${name} yet, so nothing posts.`
+      ? `A rehearsal of setting up ${name}, on ${madeUp ? 'a made-up organisation' : `your ${name} organisation`}. Decimal doesn’t post to ${name} yet, so nothing posts.`
       : reading
         ? 'The setup conversation, as it was.'
         : lapsed
@@ -178,12 +183,12 @@ function SetupScreen({ organizationId, system }: { organizationId: string; syste
   } else if (latest.isError) {
     body = <Failed what="The setup" retry={() => void latest.refetch()} />;
   } else if (latest.isSuccess && (!setup || lapsed)) {
-    body = <Start name={name} posts={posts} again={lapsed} busy={busy === 'start'} onStart={() => void start()} />;
+    body = <Start name={name} posts={posts} madeUp={madeUp} again={lapsed} busy={busy === 'start'} onStart={() => void start()} />;
   } else if (setup) {
     body = (
       <>
         <Conversation setup={setup} name={name} me={me} busy={busy} onSignIn={(p) => void signIn(p)} onGo={(p) => void go(p)} onSay={say} />
-        <Steps setup={setup} system={system} busy={busy} onSignIn={(p) => void signIn(p)} />
+        <Steps setup={setup} system={system} madeUp={madeUp} busy={busy} onSignIn={(p) => void signIn(p)} />
       </>
     );
   }
@@ -309,7 +314,7 @@ function Failed({ what, retry }: { what: string; retry: () => void }) {
 }
 
 /** Before the first setup, or once the last one's yes no longer holds: what will happen, and the button that starts it. */
-function Start({ name, posts, again, busy, onStart }: { name: string; posts: boolean; again: boolean; busy: boolean; onStart: () => void }) {
+function Start({ name, posts, madeUp, again, busy, onStart }: { name: string; posts: boolean; madeUp: boolean; again: boolean; busy: boolean; onStart: () => void }) {
   return (
     <div className="su-talk">
       <div className="su-thread">
@@ -325,7 +330,9 @@ function Start({ name, posts, again, busy, onStart }: { name: string; posts: boo
               {!posts
                 ? again
                   ? `That ${name} rehearsal was disconnected. To rehearse again, start a new setup: you sign in, I read the books, and you press Go.`
-                  : `This is a rehearsal. On this test bench, signing in connects a made-up ${name} organisation. I read how its books are kept and ask you about anything I can’t work out. Decimal doesn’t post to ${name} yet, so nothing posts, even after Go.`
+                  : madeUp
+                    ? `This is a rehearsal. On this test bench, signing in connects a made-up ${name} organisation. I read how its books are kept and ask you about anything I can’t work out. Decimal doesn’t post to ${name} yet, so nothing posts, even after Go.`
+                    : `This is a rehearsal. You sign in to your ${name} organisation, I read how its books are kept, and I ask you about anything I can’t work out. Decimal doesn’t post to ${name} yet, so nothing posts, even after Go.`
                 : again
                   ? `Posting to ${name} is off, so nothing posts there. To turn it on again, start a new setup: you sign in, I read your books, and you press Go.`
                   : `You sign in to your ${name} company, I read how your books are kept, and I ask you about anything I can’t work out. Nothing is posted until you press Go.`}
@@ -697,13 +704,15 @@ function Reply({ me, onSend }: { me: Face; onSend: (text: string) => Promise<voi
 }
 
 /** How far the setup has got, in the order it goes: sign in, confirm, read, answer, Go. The questions themselves are in the conversation. */
-function Steps({ setup, system, busy, onSignIn }: {
+function Steps({ setup, system, madeUp, busy, onSignIn }: {
   setup: IntegrationSetup;
   system: IntegrationSystem;
+  madeUp: boolean;
   busy: Busy;
   onSignIn: (path: string) => void;
 }) {
-  const { name, signsIn, posts, books } = SYSTEMS[system];
+  const { name, posts, books } = SYSTEMS[system];
+  const signsIn = madeUp ? MADE_UP_SIGN_IN : SYSTEMS[system].signsIn;
   const company = setup.company.name;
   const signedIn = met(setup, 'signed_in');
   // Finished, but Intuit's sign-in has since run out: the yes holds and waits on a sign-in.

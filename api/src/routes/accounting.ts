@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
 import { config } from '../config.js';
@@ -10,6 +9,7 @@ import { QuickBooks } from '../accounting/quickbooks.js';
 import { disconnect, getConnection, getQuickBooksForOrg, saveConnection } from '../accounting/connections.js';
 import { resetSyncForRetry, syncBillNow } from '../accounting/account-sync.js';
 import { noteDisconnected, noteSignedIn, noteSignInFailed } from '../integrations/setup/service.js';
+import { callbackRedirectUri, safeFrontendOrigin, signState, verifyState, type OAuthState } from '../accounting/oauth-state.js';
 
 const PROVIDER = 'quickbooks';
 
@@ -25,83 +25,10 @@ const accountMapSchema = z.object({
   defaultExpenseAccountName: z.string().nullish(),
 });
 
-// ---- signed OAuth state (carries the orgId across the Intuit redirect) ----
+// ---- signed OAuth state (carries the orgId across the Intuit redirect): oauth-state.ts ----
 
-function requireStateSecret(): string {
-  if (!config.oauthStateSecret) {
-    throw new ApiError(501, 'oauth_state_not_configured', 'OAuth state signing is not configured.');
-  }
-  return config.oauthStateSecret;
-}
-
-interface OAuthState {
-  organizationId: string;
-  frontendOrigin: string | null;
-  // The exact redirect_uri used at the authorize step — the token exchange
-  // must repeat it verbatim, so it rides in the signed state.
-  redirectUri: string | null;
-}
-
-// Only redirect back to an origin we trust (an allowed CORS origin, or a
-// localhost dev origin outside production) — never an arbitrary URL.
-function safeFrontendOrigin(raw: string | undefined | null): string | null {
-  if (!raw) return null;
-  try {
-    const origin = new URL(raw).origin;
-    if (config.corsOrigins.includes(origin)) return origin;
-    if (!config.isProduction && /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) return origin;
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-// The OAuth redirect URI, derived from the request host so local dev
-// (localhost) and prod (api.decimal.finance) both work without ever touching
-// the Intuit app settings again — BOTH URIs must be registered once on the
-// Intuit app (it accepts multiple). Intuit requires the token exchange to use
-// the exact URI from the authorize step; since the browser lands on that very
-// URL, deriving from the callback request's host reproduces it.
-function callbackRedirectUri(req: import('express').Request): string | undefined {
-  const host = req.get('host');
-  if (!host) return config.quickbooksRedirectUri ?? undefined;
-  // Intuit rejects IP-address redirect URIs, so the loopback IP the dev
-  // frontend uses (127.0.0.1) must be presented as localhost.
-  const normalized = host.replace(/^127\.0\.0\.1(?=[:/]|$)/, 'localhost').replace(/^\[::1\](?=[:/]|$)/, 'localhost');
-  return `${req.protocol}://${normalized}/accounting/quickbooks/callback`;
-}
-
-function signState(organizationId: string, frontendOrigin: string | null, redirectUri: string | null): string {
-  const secret = requireStateSecret();
-  const payload = Buffer.from(
-    JSON.stringify({ organizationId, frontendOrigin, redirectUri, n: crypto.randomBytes(8).toString('hex') }),
-    'utf8',
-  ).toString('base64url');
-  const sig = crypto.createHmac('sha256', secret).update(payload).digest();
-  return `${payload}.${sig.toString('base64url')}`;
-}
-
-function verifyState(raw: string): OAuthState {
-  const secret = requireStateSecret();
-  const [payload, sig] = (raw ?? '').split('.');
-  if (!payload || !sig) {
-    throw new ApiError(400, 'invalid_oauth_state', 'OAuth state is invalid.');
-  }
-  const expected = crypto.createHmac('sha256', secret).update(payload).digest();
-  const actual = Buffer.from(sig, 'base64url');
-  if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) {
-    throw new ApiError(400, 'invalid_oauth_state', 'OAuth state signature is invalid.');
-  }
-  const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-  if (typeof decoded?.organizationId !== 'string') {
-    throw new ApiError(400, 'invalid_oauth_state', 'OAuth state payload is invalid.');
-  }
-  return {
-    organizationId: decoded.organizationId,
-    frontendOrigin: typeof decoded.frontendOrigin === 'string' ? decoded.frontendOrigin : null,
-    redirectUri: typeof decoded.redirectUri === 'string' ? decoded.redirectUri : null,
-  };
-}
+const CALLBACK_PATH = '/accounting/quickbooks/callback';
+const callbackUri = (req: import('express').Request) => callbackRedirectUri(req, CALLBACK_PATH, config.quickbooksRedirectUri);
 
 function finishCallback(
   res: import('express').Response,
@@ -144,7 +71,7 @@ async function setupScreenFor(organizationId: string): Promise<string | null> {
 export const publicAccountingRouter = Router();
 
 publicAccountingRouter.get(
-  '/accounting/quickbooks/callback',
+  CALLBACK_PATH,
   asyncRoute(async (req, res) => {
     const rawState = String(req.query.state ?? '');
     // Recover the redirect target (org + frontend origin) from state, even on
@@ -157,6 +84,8 @@ publicAccountingRouter.get(
         state = null;
       }
     }
+    // Another system's sign-in is not this one's to finish.
+    if (state && state.system !== PROVIDER) state = null;
     const ctx = {
       organizationId: state?.organizationId,
       frontendOrigin: state?.frontendOrigin ?? null,
@@ -174,7 +103,7 @@ publicAccountingRouter.get(
       finishCallback(res, 'error', ctx, 'missing_parameters');
       return;
     }
-    const tokens = await QuickBooks.exchangeCode(code, realmId, state?.redirectUri ?? callbackRedirectUri(req));
+    const tokens = await QuickBooks.exchangeCode(code, realmId, state?.redirectUri ?? callbackUri(req) ?? undefined);
     // Only the tokens. Signing in writes nothing to the customer's books.
     await saveConnection(state.organizationId, tokens);
     await noteSignedIn(state.organizationId, PROVIDER, tokens.realmId);
@@ -198,8 +127,8 @@ accountingRouter.get(
     const frontendOrigin = safeFrontendOrigin(
       typeof req.query.frontendOrigin === 'string' ? req.query.frontendOrigin : req.get('origin'),
     );
-    const redirectUri = callbackRedirectUri(req) ?? null;
-    sendJson(res, { authorizeUrl: QuickBooks.authorizeUrl(signState(organizationId, frontendOrigin, redirectUri), redirectUri ?? undefined) });
+    const redirectUri = callbackUri(req);
+    sendJson(res, { authorizeUrl: QuickBooks.authorizeUrl(signState(organizationId, frontendOrigin, redirectUri, PROVIDER), redirectUri ?? undefined) });
   }),
 );
 

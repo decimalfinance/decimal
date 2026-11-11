@@ -418,14 +418,16 @@ function BooksRow({ organizationId, isAdmin }: { organizationId: string; isAdmin
 }
 
 /**
- * Xero, on the test bench only: a rehearsal of the setup on a made-up organisation,
- * behind a pretend sign-in. Decimal doesn't post to Xero, so nothing does. Shown
- * where the API says this deployment has it, and only to admins, who run setups.
+ * Xero: a rehearsal of the setup. Decimal reads the organisation and doesn't post
+ * to Xero, so nothing does. On the bench without Decimal's Xero app, the sign-in is
+ * pretend and connects a made-up organisation. Shown where the API says this
+ * deployment has Xero, and only to admins, who run setups.
  */
 function XeroRow({ organizationId }: { organizationId: string }) {
   const navigate = useNavigate();
   const capabilities = useQuery({ queryKey: ['capabilities'] as const, queryFn: () => api.getCapabilities(), staleTime: 60_000 });
   const rehearsal = capabilities.data?.integrations?.xeroRehearsal === true;
+  const madeUp = capabilities.data?.integrations?.xeroMadeUp === true;
   const latest = useQuery({
     queryKey: ['integration-setup', organizationId, 'xero'],
     queryFn: () => integrationSetupApi.latest(organizationId, 'xero'),
@@ -436,10 +438,12 @@ function XeroRow({ organizationId }: { organizationId: string }) {
   const done = setup?.status === 'done' && setup.posting !== 'off';
   const underWay = setup !== null && setup.status !== 'done';
   const line = done
-    ? `Rehearsed on ${setup.company.name ?? 'a made-up organisation'}. Nothing posts to Xero.`
+    ? `Rehearsed on ${setup.company.name ?? (madeUp ? 'a made-up organisation' : 'your Xero organisation')}. Nothing posts to Xero.`
     : underWay
       ? 'A rehearsal is under way. Nothing posts to Xero.'
-      : 'On this test bench only: the setup, rehearsed on a made-up organisation. Nothing posts to Xero.';
+      : madeUp
+        ? 'On this test bench only: the setup, rehearsed on a made-up organisation. Nothing posts to Xero.'
+        : 'The setup, rehearsed on your Xero organisation: Decimal reads it, and nothing posts to Xero.';
   return (
     <div className="st-row">
       <div className="st-left">

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { DEVNET_RPC_URL, config } from '../config.js';
 import { USDC_MINT } from '../solana.js';
+import { xeroAppConfigured } from '../integrations/xero-app.js';
 
 export const capabilitiesRouter = Router();
 
@@ -30,9 +31,11 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
       googleSignIn: Boolean(config.googleOAuthClientId && config.googleOAuthClientSecret),
     },
     integrations: {
-      // Xero on a made-up organisation, where setting it up is a rehearsal: nothing posts.
-      // On the bench only (XERO_FIXTURE_FILE), and never in production.
-      xeroRehearsal: Boolean(config.xeroFixtureFile),
+      // Xero, where setting it up is a rehearsal: Decimal reads the books, and nothing posts.
+      // With Decimal's Xero app (XERO_CLIENT_ID), or on the bench with a made-up organisation.
+      xeroRehearsal: xeroAppConfigured() || Boolean(config.xeroFixtureFile),
+      // The bench without the app: signing in connects the made-up organisation (XERO_FIXTURE_FILE, never in production).
+      xeroMadeUp: !xeroAppConfigured() && Boolean(config.xeroFixtureFile),
     },
     onboarding: {
       autoProvisionWallets: config.autoProvisionWallets,

@@ -37,7 +37,7 @@ Run from the repo root. These are the whole surface. Check `make help` if in dou
 
 `make bench-stop` stops only the bench and leaves `:3100` and `:5174` alone. `dev` and `bench` run side by side on purpose.
 
-**Never run `tsx --test` or `npm test` directly inside `api/`.** It inherits the dev database URL, and the tests truncate every table. This wiped the dev database once. Always use `make test` or `make test-one`. They also blank `OPENAI_API_KEY` and `ANTHROPIC_API_KEY`: Prisma loads `api/.env` into the test process, so a test that doesn't script the model would otherwise call the real one and spend money.
+**Never run `tsx --test` or `npm test` directly inside `api/`.** It inherits the dev database URL, and the tests truncate every table. This wiped the dev database once. Always use `make test` or `make test-one`. They also blank `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` and the Xero app's keys: Prisma loads `api/.env` into the test process, so a test that doesn't script the model would otherwise call the real one and spend money, and one about Xero would use the real app.
 
 **Never touch `:3100`, `:5174` or `usdc_ops_local` from an agent session.** That is the human's stack. Use the bench.
 
