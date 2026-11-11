@@ -11,7 +11,8 @@
 
 import { config } from '../config.js';
 import { logger } from '../infra/logger.js';
-import { getQuickBooksForOrg } from './connections.js';
+import { prisma } from '../infra/prisma.js';
+import { getQuickBooksForOrg, postingTarget } from './connections.js';
 import { chat, isAiConfigured } from '../infra/ai.js';
 
 export interface ExpenseAccount {
@@ -53,8 +54,51 @@ export type OcrCoding = {
   lines: OcrLineCoding[];
 };
 
-/** The org's FULL active chart of accounts from QuickBooks; [] if not connected. */
+/**
+ * Whose chart a bill's lines are coded against: the books the team posts to. Before
+ * anyone has said go, QuickBooks when it is signed in, else Xero when it is.
+ */
+export async function chartSystem(organizationId: string): Promise<string> {
+  const target = await postingTarget(organizationId);
+  if (target) return target.system;
+  const signedIn = await prisma.accountingConnection.findMany({ where: { organizationId, status: 'connected' }, select: { provider: true } });
+  return signedIn.some((c) => c.provider === 'xero') && !signedIn.some((c) => c.provider === 'quickbooks') ? 'xero' : 'quickbooks';
+}
+
+/** Xero's account types, as its own screens name them, so the picker groups them the same. */
+const XERO_TYPES: Record<string, string> = {
+  EXPENSE: 'Expense', DIRECTCOSTS: 'Direct Costs', OVERHEADS: 'Overhead', DEPRECIATN: 'Depreciation',
+  CURRENT: 'Current Asset', FIXED: 'Fixed Asset', NONCURRENT: 'Non-current Asset', INVENTORY: 'Inventory', PREPAYMENT: 'Prepayment',
+  CURRLIAB: 'Current Liability', LIABILITY: 'Liability', TERMLIAB: 'Non-current Liability',
+  REVENUE: 'Revenue', SALES: 'Sales', OTHERINCOME: 'Other Income', EQUITY: 'Equity',
+};
+const XERO_CLASSES: Record<string, string> = { EXPENSE: 'Expense', ASSET: 'Asset', LIABILITY: 'Liability', EQUITY: 'Equity', REVENUE: 'Revenue' };
+
+/** Xero's chart, as a bill line can use it: active, and neither a bank account nor one Xero keeps for itself. */
+async function xeroChart(organizationId: string): Promise<ChartAccount[]> {
+  const { connectorFor } = await import('../integrations/connectors.js');
+  try {
+    const reader = await connectorFor('xero').reader(organizationId);
+    if (!reader) return [];
+    return (await reader.accounts()).records
+      .filter((a) => a.active && !a.reserved && a.type !== 'BANK')
+      .map((a) => ({
+        id: a.id,
+        name: a.name,
+        acctNum: a.number,
+        fullyQualifiedName: a.name,
+        accountType: XERO_TYPES[a.type ?? ''] ?? 'Other',
+        classification: XERO_CLASSES[a.group ?? ''] ?? 'Other',
+      }));
+  } catch (error) {
+    logger.warn('ocr_coding.list_accounts_failed', { organizationId, system: 'xero', error: error instanceof Error ? error.message : String(error) });
+    return [];
+  }
+}
+
+/** The org's FULL active chart of accounts from the books it codes against (chartSystem); [] if not connected. */
 export async function listChartOfAccounts(organizationId: string): Promise<ChartAccount[]> {
+  if ((await chartSystem(organizationId)) === 'xero') return xeroChart(organizationId);
   const qb = await getQuickBooksForOrg(organizationId);
   if (!qb) return [];
   try {

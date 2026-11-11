@@ -1,7 +1,8 @@
 // Which vendor in the books a bill belongs to, as far as the setup can say. Nothing
 // here guesses: the same name, once case, punctuation and legal form are gone, or
-// a link the person made in setup. Anything else falls through to QuickBooks' own
-// exact match, and then to creating the vendor the bill names.
+// a link the person made in setup. Anything else falls through to the books' own
+// exact match, and then to creating the vendor the bill names. In Xero a vendor is
+// a contact, and one it no longer uses is archived rather than inactive.
 
 import { prisma } from '../infra/prisma.js';
 import { cleanName } from '../integrations/setup/findings.js';
@@ -20,13 +21,14 @@ export function nameBeforeInactive(name: string): string {
   return name.replace(/ \(deleted(-\d+)?\)$/, '');
 }
 
-/** What to tell a person when the vendor a bill is for is inactive in QuickBooks. */
-export function inactiveVendor(name: string, shownAs?: string | null): string {
+/** What to tell a person when the vendor a bill is for is inactive in QuickBooks, or archived in Xero. */
+export function inactiveVendor(name: string, shownAs?: string | null, system = 'quickbooks'): string {
+  if (system === 'xero') return `"${name}" is archived in Xero. Restore the contact there, then retry.`;
   const shown = shownAs && shownAs !== name ? `, where it shows as "${shownAs}"` : '';
   return `"${name}" is inactive in QuickBooks${shown}. Make it active there, then retry.`;
 }
 
-export function matchVendor(name: string, vendors: KnownVendor[], links: SetupOutcome['vendorLinks']): VendorMatch {
+export function matchVendor(name: string, vendors: KnownVendor[], links: SetupOutcome['vendorLinks'], system = 'quickbooks'): VendorMatch {
   const clean = cleanName(name);
   const same = vendors.filter((v) => cleanName(v.active ? v.name : nameBeforeInactive(v.name)) === clean);
   if (same.length === 0) return null;
@@ -39,9 +41,10 @@ export function matchVendor(name: string, vendors: KnownVendor[], links: SetupOu
   if (active.length === 1) return { vendorId: active[0]!.id };
   if (active.length > 1) {
     const names = active.map((v) => `"${v.name}"`).join(' and ');
-    return { problem: `QuickBooks has more than one vendor this bill could be for: ${names}. Change the vendor's name on the bill to match one of them exactly, then retry.` };
+    const books = system === 'xero' ? 'Xero has more than one contact' : 'QuickBooks has more than one vendor';
+    return { problem: `${books} this bill could be for: ${names}. Change the vendor's name on the bill to match one of them exactly, then retry.` };
   }
-  return { problem: inactiveVendor(nameBeforeInactive(same[0]!.name), same[0]!.name) };
+  return { problem: inactiveVendor(nameBeforeInactive(same[0]!.name), same[0]!.name, system) };
 }
 
 /** The vendors in the copy the study read. Disconnecting, or signing in to another company, deletes it. */
@@ -57,7 +60,7 @@ export async function vendorsInCopy(organizationId: string, system: string, comp
   }));
 }
 
-/** From the copy. A vendor added since is found by QuickBooks' own exact match. */
+/** From the copy. A vendor added since is found by the books' own exact match. */
 export async function vendorForBill(organizationId: string, system: string, companyId: string, name: string, outcome: SetupOutcome | null): Promise<VendorMatch> {
-  return matchVendor(name, await vendorsInCopy(organizationId, system, companyId), outcome?.vendorLinks ?? []);
+  return matchVendor(name, await vendorsInCopy(organizationId, system, companyId), outcome?.vendorLinks ?? [], system);
 }

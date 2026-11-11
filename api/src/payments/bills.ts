@@ -13,7 +13,7 @@ import { prisma } from '../infra/prisma.js';
 import { logger } from '../infra/logger.js';
 import { USDC_DECIMALS } from '../solana.js';
 import { markBillSubmitted, cancelPaymentOrder, getPaymentOrderDetail } from './orders.js';
-import { listChartOfAccounts } from '../accounting/ocr-coding.js';
+import { chartSystem, listChartOfAccounts } from '../accounting/ocr-coding.js';
 import {
   extractPdfTextLayer, extractImageTextLayer, refineInvoiceSources, stripUnmeasuredSources,
   ungroundedFields, splitPostalAddress, PROVENANCE_VERSION,
@@ -1672,10 +1672,11 @@ const DOUBTFUL_STATUS_REASON: Record<string, string> = {
 // The order a bookkeeper expects: spend accounts first, then assets,
 // liabilities, and the rest. Within a group, account number order.
 const ACCOUNT_TYPE_ORDER = [
-  'Expense', 'Cost of Goods Sold', 'Other Expense',
-  'Fixed Asset', 'Other Current Asset', 'Other Asset', 'Bank',
-  'Credit Card', 'Other Current Liability', 'Long Term Liability',
-  'Income', 'Other Income', 'Equity',
+  // QuickBooks' types and Xero's (ocr-coding.ts XERO_TYPES), each system's in its own order.
+  'Expense', 'Cost of Goods Sold', 'Direct Costs', 'Overhead', 'Other Expense', 'Depreciation',
+  'Fixed Asset', 'Other Current Asset', 'Current Asset', 'Inventory', 'Prepayment', 'Other Asset', 'Non-current Asset', 'Bank',
+  'Credit Card', 'Other Current Liability', 'Current Liability', 'Liability', 'Long Term Liability', 'Non-current Liability',
+  'Income', 'Revenue', 'Sales', 'Other Income', 'Equity',
 ];
 
 // QuickBooks refuses a bill line on either ("You can't use an Accounts Payable
@@ -1704,7 +1705,7 @@ function buildChartOptions(chart: Awaited<ReturnType<typeof listChartOfAccounts>
 
 /**
  * The categories a bill line can be coded to, by name: the chart of accounts
- * when QuickBooks is connected, the built-in one otherwise (as the bill page
+ * when the books are connected, the built-in one otherwise (as the bill page
  * offers them). Nothing when the chart can't be read just now.
  */
 export async function categoryNamesFor(organizationId: string): Promise<string[]> {
@@ -1882,12 +1883,12 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
 
   const verifiedLines = verification && Array.isArray(verification.lines) ? verification.lines : null;
   const extractedLines = Array.isArray(extracted.lineItems) ? (extracted.lineItems as unknown[]) : [];
-  // Category picker: the org's FULL numbered chart of accounts when QuickBooks
-  // is connected ("7410 · Accounting", grouped by account type — a bill line
-  // can code to an asset or COGS account, not just Expense, but never to
-  // Accounts Payable or Receivable, which QuickBooks refuses on a bill), the builtin
-  // standard chart otherwise, so the picker is never empty.
-  const chart = await listChartOfAccounts(organizationId);
+  // Category picker: the org's FULL numbered chart of accounts when its books are
+  // connected ("7410 · Accounting", grouped by account type — a bill line can code
+  // to an asset or COGS account, not just Expense, but never to Accounts Payable or
+  // Receivable, which QuickBooks refuses on a bill, nor to a bank account or one Xero
+  // keeps for itself), the builtin standard chart otherwise, so the picker is never empty.
+  const [chart, chartFrom] = await Promise.all([listChartOfAccounts(organizationId), chartSystem(organizationId)]);
   const { DEFAULT_EXPENSE_ACCOUNTS } = await import('../accounting/default-chart.js');
   const categoryOptions = chart.length > 0
     ? buildChartOptions(chart)
@@ -1905,7 +1906,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   // QuickBooks arrived. Asking once fixes them; the answer is written back with
   // a `lines` array either way, so it is asked once and not on every view.
   const missingLineCoding = ocrCoding != null && !Array.isArray(ocrCoding.lines);
-  const chartArrived = chart.length > 0 && metadata.ocrCodingChart !== 'quickbooks';
+  const chartArrived = chart.length > 0 && metadata.ocrCodingChart !== chartFrom;
   if (!opts.readOnly && order.state === 'draft' && (chartArrived || missingLineCoding)) {
     const top = ocrCoding && Array.isArray(ocrCoding.suggestions) && isRecord(ocrCoding.suggestions[0])
       ? (ocrCoding.suggestions[0] as Record<string, unknown>)
@@ -1935,7 +1936,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
               ...metadata,
               ocrCoding: settled ? { lines: [], ...settled } : { categoryHint: null, rationale: null, suggestions: [], lines: [] },
               // Only claim the suggestion came from the real chart when it did.
-              ...(chartArrived ? { ocrCodingChart: 'quickbooks' } : {}),
+              ...(chartArrived ? { ocrCodingChart: chartFrom } : {}),
             } as unknown as Prisma.InputJsonValue,
           },
         });

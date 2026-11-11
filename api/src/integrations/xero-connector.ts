@@ -1,17 +1,17 @@
-// Xero, as far as Decimal goes with it today: a setup that reads the books and
-// asks its questions, where Go records the person's yes and nothing posts. A
-// rehearsal of the setup, until posting to Xero is built.
+// Xero: a setup that reads the books and asks its questions, and a Go that turns
+// posting on. From then, approved bills post there (accounting/xero-books.ts).
 //
 // Two kinds of connection, by the row's environment:
 // - live: Decimal's Xero app (xero-app.ts). The person signs in on Xero's site and
 //   picks their organisation; the reader reads it through Xero's API.
 // - fixture: on the bench without the app, a made-up organisation in Xero's own
 //   JSON (config.xeroFixtureFile), behind a pretend sign-in, read through the same
-//   reader. Rows made this way keep reading the made-up organisation.
+//   reader. Rows made this way keep reading the made-up organisation. Nothing can
+//   post to it: there is no Xero behind it to write to.
 //
 // The connection is a row in accounting_connections like QuickBooks', under
-// provider 'xero'. Everything that posts or syncs reads provider 'quickbooks' only,
-// so it never sees this one.
+// provider 'xero'. A team posts to one of the two (accounting/connections.ts
+// postingTarget).
 
 import { readFileSync } from 'node:fs';
 import type { AccountingConnection } from '@prisma/client';
@@ -27,6 +27,7 @@ import {
   xeroConnections,
   XeroSession,
   type XeroTokens,
+  type XeroWriteClient,
 } from './xero-app.js';
 import { fixtureXeroClient, type XeroFixture } from './xero-fixture.js';
 import { xeroReader, type XeroClient } from './xero-reader.js';
@@ -127,15 +128,27 @@ function sessionOf(organizationId: string, row: AccountingConnection): XeroSessi
 }
 
 /** The live connection's client, keeping its sign-in. Null for a made-up organisation, or without the app. */
-function liveClient(organizationId: string, row: AccountingConnection): XeroClient | null {
+function liveClient(organizationId: string, row: AccountingConnection): XeroWriteClient | null {
   if (row.status !== 'connected' || row.environment === FIXTURE || !xeroAppConfigured()) return null;
   return httpXeroClient(row.realmId, sessionOf(organizationId, row));
 }
 
-/** For a check run by hand (scripts/xero-read-check.mts): Xero's API for the organisation signed in to, read only. */
+/** For a check run by hand (scripts/xero-read-check.mts): Xero's API for the organisation signed in to. */
 export async function xeroClientFor(organizationId: string): Promise<XeroClient | null> {
   const row = await rowOf(organizationId);
   return row ? liveClient(organizationId, row) : null;
+}
+
+/** What posting writes through: the organisation signed in to for real. Null while it isn't, and for the made-up one. */
+export async function xeroWriteClientFor(organizationId: string): Promise<XeroWriteClient | null> {
+  const row = await rowOf(organizationId);
+  return row ? liveClient(organizationId, row) : null;
+}
+
+/** Signed in to the bench's made-up organisation, which nothing can post to. */
+export async function xeroIsMadeUp(organizationId: string): Promise<boolean> {
+  const row = await rowOf(organizationId);
+  return row?.environment === FIXTURE && row.status === 'connected';
 }
 
 /** Best effort, on Xero's side: this organisation's connection to Decimal's app goes, then the sign-in. */
@@ -163,7 +176,7 @@ export async function disconnectXero(organizationId: string): Promise<void> {
 
 export const xeroConnector: Connector = {
   system: PROVIDER,
-  posts: false,
+  posts: true,
   available: xeroAvailable,
   connection: async (organizationId) => {
     const row = await rowOf(organizationId);
@@ -180,7 +193,7 @@ export const xeroConnector: Connector = {
     return client ? xeroReader(client) : null;
   },
   signInPath: (organizationId) => `/organizations/${organizationId}/integrations/xero/sign-in`,
-  // The yes, kept as QuickBooks keeps it, the first moment only. Nothing reads it to post.
+  // The yes, kept as QuickBooks keeps it, the first moment only: bills approved from then post.
   enablePosting: async (organizationId, userId) => {
     await prisma.accountingConnection.updateMany({
       where: { organizationId, provider: PROVIDER, status: 'connected', postingEnabledAt: null },

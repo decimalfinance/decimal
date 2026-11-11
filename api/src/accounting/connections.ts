@@ -130,7 +130,27 @@ export async function enablePosting(organizationId: string, userId: string): Pro
   return row?.status === 'connected' ? row.postingEnabledAt : null;
 }
 
-/** When posting was turned on for this organisation's books, or null while it is off. */
+/** The books a team's bills post to, and since when. `live`: signed in now; a lapsed sign-in still counts, and posts once someone signs in again. */
+export type PostingTarget = { system: string; companyId: string; since: Date; live: boolean };
+
+/**
+ * Where this organisation's approved bills post: the books a person said yes to,
+ * QuickBooks or Xero, until someone disconnects them. One at a time: a setup's Go
+ * is refused while another system posts (integrations/setup/gates.ts). Should two
+ * ever hold a yes, the later one is the team's latest word.
+ */
+export async function postingTarget(organizationId: string): Promise<PostingTarget | null> {
+  const row = await prisma.accountingConnection.findFirst({
+    where: { organizationId, postingEnabledAt: { not: null }, status: { not: 'disconnected' } },
+    orderBy: { postingEnabledAt: 'desc' },
+    select: { provider: true, realmId: true, status: true, postingEnabledAt: true },
+  });
+  return row?.postingEnabledAt
+    ? { system: row.provider, companyId: row.realmId, since: row.postingEnabledAt, live: row.status === 'connected' }
+    : null;
+}
+
+/** When posting was turned on for this organisation's QuickBooks, or null while it is off. Paid bills record their payment there only. */
 export async function postingEnabledSince(organizationId: string): Promise<Date | null> {
   const row = await prisma.accountingConnection.findUnique({
     where: { organizationId_provider: { organizationId, provider: PROVIDER } },

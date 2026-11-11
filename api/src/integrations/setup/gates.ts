@@ -4,15 +4,22 @@
 import type { IntegrationSetup } from '@prisma/client';
 import { prisma } from '../../infra/prisma.js';
 import { connectorFor } from '../connectors.js';
+import { playbookFor } from './playbooks.js';
 import type { StudyFindings } from './study.js';
 
 export type DoneCondition = { key: string; done: boolean; missing: string };
 
 export async function doneConditions(setup: IntegrationSetup): Promise<DoneCondition[]> {
-  const [connection, calls] = await Promise.all([
+  const [connection, calls, postingElsewhere] = await Promise.all([
     connectorFor(setup.system).connection(setup.organizationId),
     prisma.integrationSetupCall.findMany({ where: { setupId: setup.setupId }, select: { key: true, status: true } }),
+    // A team's bills post to one set of books: while another posts, Go here would send them to two.
+    prisma.accountingConnection.findFirst({
+      where: { organizationId: setup.organizationId, provider: { not: setup.system }, postingEnabledAt: { not: null }, status: { not: 'disconnected' } },
+      select: { provider: true },
+    }),
   ]);
+  const elsewhere = postingElsewhere ? playbookFor(postingElsewhere.provider).label : null;
   const signedIn = connection?.status === 'connected' && connection.companyId === setup.companyId;
   const closing = calls.find((c) => c.key === 'closing_date');
   // A question the model thought worth asking is one the person sees through: Go doesn't drop it.
@@ -23,6 +30,11 @@ export async function doneConditions(setup: IntegrationSetup): Promise<DoneCondi
     { key: 'study_finished', done: setup.studyStatus === 'finished', missing: 'Reading their books has not finished.' },
     { key: 'closing_date', done: closing?.status === 'answered', missing: 'The person has not answered the closing date.' },
     { key: 'required_calls', done: open.length === 0, missing: `Still open: ${open.map((c) => c.key).join(', ')}.` },
+    {
+      key: 'one_set_of_books',
+      done: elsewhere === null,
+      missing: `Bills already post to ${elsewhere} for this team, and Decimal posts to one set of books. Someone has to disconnect ${elsewhere} first, from its row in Organisation, under Accounting.`,
+    },
   ];
 }
 

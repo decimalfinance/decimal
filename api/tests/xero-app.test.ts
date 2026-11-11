@@ -84,7 +84,7 @@ function kept(start: XeroTokens) {
 /** An access token as Xero writes one: a JWT whose claims name the sign-in it came from. */
 const jwt = (claims: Record<string, unknown>) => `h.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.s`;
 
-test('xero app: the sign-in asks to read, and for nothing else', () => {
+test('xero app: the sign-in asks to read what Decimal reads, and to write only bills, their contacts and their files', () => {
   const url = new URL(xeroAuthorizeUrl('pay.load', 'http://localhost:3200/accounting/xero/callback'));
   assert.equal(`${url.origin}${url.pathname}`, 'https://login.xero.com/identity/connect/authorize');
   assert.equal(url.searchParams.get('client_id'), 'test-client');
@@ -93,8 +93,8 @@ test('xero app: the sign-in asks to read, and for nothing else', () => {
   assert.equal(url.searchParams.get('state'), 'pay.load');
   const scopes = url.searchParams.get('scope')!.split(' ');
   assert.ok(scopes.includes('offline_access'), 'a refresh token, or the sign-in dies in half an hour');
-  assert.ok(scopes.every((s) => s === 'offline_access' || s.endsWith('.read')), `read only: ${scopes.join(' ')}`);
-  assert.deepEqual(scopes.filter((s) => s.endsWith('.read')).sort(), ['accounting.banktransactions.read', 'accounting.contacts.read', 'accounting.invoices.read', 'accounting.settings.read']);
+  assert.deepEqual(scopes.filter((s) => s.endsWith('.read')).sort(), ['accounting.banktransactions.read', 'accounting.settings.read'], 'settings and spend money: read only');
+  assert.deepEqual(scopes.filter((s) => s !== 'offline_access' && !s.endsWith('.read')).sort(), ['accounting.attachments', 'accounting.contacts', 'accounting.invoices'], 'what posting a bill writes');
   assert.ok(!url.search.includes('+'), 'a space goes as %20');
 });
 
@@ -188,6 +188,45 @@ test('xero app: a refresh token another read spent first is no loss: what that r
   await httpXeroClient('t', session).get('Accounts');
   assert.deepEqual(row.lost, []);
   assert.equal(seen.at(-1)!.headers.authorization, 'Bearer access-of-refresh-newer');
+});
+
+test('xero app: a write carries its key, a file goes as its bytes, and a sign-in that only reads says to sign in again', async () => {
+  const { session } = kept(signIn('refresh-writes'));
+  const client = httpXeroClient('tenant-w', session);
+  const sent: Array<{ url: string; method: string; headers: Headers; body: unknown }> = [];
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    sent.push({ url: String(input), method: init?.method ?? 'GET', headers: new Headers(init?.headers), body: init?.body });
+    return json({ Invoices: [{ InvoiceID: 'inv-1' }] });
+  }) as typeof fetch;
+
+  assert.deepEqual(await client.put('Invoices', { Invoices: [{ Type: 'ACCPAY' }] }, 'decimal_x_bill_1'), { Invoices: [{ InvoiceID: 'inv-1' }] });
+  const put = sent[0]!;
+  assert.equal(put.method, 'PUT');
+  assert.equal(put.url, 'https://api.xero.com/api.xro/2.0/Invoices');
+  assert.equal(put.headers.get('idempotency-key'), 'decimal_x_bill_1');
+  assert.equal(put.headers.get('content-type'), 'application/json');
+  assert.equal(put.headers.get('xero-tenant-id'), 'tenant-w');
+  assert.deepEqual(JSON.parse(String(put.body)), { Invoices: [{ Type: 'ACCPAY' }] });
+
+  const bytes = Buffer.from('%PDF-1.4 the invoice');
+  await client.upload('Invoices/inv-1/Attachments/bill%201.pdf', bytes, 'application/pdf', 'decimal_file_inv-1');
+  const upload = sent[1]!;
+  assert.equal(upload.url, 'https://api.xero.com/api.xro/2.0/Invoices/inv-1/Attachments/bill%201.pdf');
+  assert.equal(upload.headers.get('content-type'), 'application/pdf');
+  assert.equal(upload.headers.get('idempotency-key'), 'decimal_file_inv-1');
+  assert.ok(Buffer.from(upload.body as Uint8Array).equals(bytes), 'the file as it is');
+  assert.equal(sent.filter((r) => r.method === 'GET').length, 0);
+
+  // A sign-in from before Decimal posted to Xero only reads: posting asks for a new one.
+  fakeXero(() => new Response('', { status: 401, headers: { 'WWW-Authenticate': 'Bearer error="insufficent_scope"' } }));
+  await assert.rejects(client.put('Invoices', {}, 'k'), (e: unknown) => e instanceof XeroApiError && e.status === 403 && /sign in to Xero again/.test(e.message));
+
+  // A bill refused for several reasons says each.
+  fakeXero(() => json({ ErrorNumber: 10, Type: 'ValidationException', Message: 'A validation exception occurred', Elements: [
+    { ValidationErrors: [{ Message: 'Account code \'485\' has been archived, or deleted.' }, { Message: 'The TaxType code \'X\' does not exist.' }] },
+  ] }, { status: 400 }));
+  await assert.rejects(client.put('Invoices', {}, 'k'), (e: unknown) => e instanceof XeroApiError && e.status === 400
+    && e.message === 'Xero said: Account code \'485\' has been archived, or deleted. The TaxType code \'X\' does not exist.');
 });
 
 test('xero app: what Xero refuses reaches the reader named', async () => {

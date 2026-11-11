@@ -75,14 +75,15 @@ type DecimalConfig = {
    * Bench-only Xero: a made-up organisation in Xero's own JSON (made by
    * synthetic_data/setup-eval/xero.mjs), read through the real Xero reader, with a
    * pretend sign-in. Without Decimal's Xero app (xeroClientId) it is the bench's
-   * only Xero. Either way a Xero setup is a rehearsal: nothing posts. Validation
+   * only Xero. Nothing can post to it: there is no Xero behind it. Validation
    * refuses it in production.
    */
   xeroFixtureFile: string;
   /**
-   * Decimal's Xero app, from developer.xero.com: the sign-in on Xero's own site, and
-   * reading the organisation picked there. Read only: nothing posts to Xero yet.
-   * Its redirect URIs are http://localhost:3100/accounting/xero/callback and :3200's.
+   * Decimal's Xero app, from developer.xero.com: the sign-in on Xero's own site,
+   * reading the organisation picked there, and posting approved bills to it once a
+   * person says go. Its redirect URIs are http://localhost:3100/accounting/xero/callback
+   * and :3200's.
    */
   xeroClientId: string;
   xeroClientSecret: string;
@@ -262,9 +263,10 @@ function buildConfig(): DecimalConfig {
     quickbooksRedirectUri: normalizeOptionalUrl(process.env.QUICKBOOKS_REDIRECT_URI),
     quickbooksEnvironment:
       process.env.QUICKBOOKS_ENVIRONMENT?.trim() === 'production' ? 'production' : 'sandbox',
+    // On wherever bills can post: QuickBooks' app or Xero's.
     accountingSyncEnabled: getBooleanConfig(
       process.env.ACCOUNTING_SYNC_ENABLED,
-      nodeEnv !== 'test' && Boolean((process.env.QUICKBOOKS_CLIENT_ID ?? '').trim()),
+      nodeEnv !== 'test' && Boolean((process.env.QUICKBOOKS_CLIENT_ID ?? '').trim() || (process.env.XERO_CLIENT_ID ?? '').trim()),
     ),
     accountingSyncIntervalMs: Number(process.env.ACCOUNTING_SYNC_INTERVAL_MS ?? 30_000),
     inboundEmailDomain,

@@ -108,6 +108,7 @@ const accountSchema = z.object({
   Status: z.string().nullish(),
   BankAccountType: z.string().nullish(),
   CurrencyCode: z.string().nullish(),
+  SystemAccount: z.string().nullish(),
 });
 
 const contactSchema = z.object({
@@ -474,6 +475,7 @@ export function xeroReader(client: XeroClient, options: { wait?: (ms: number) =>
         parentId: null,
         currency: a.CurrencyCode ?? null,
         active: (a.Status ?? 'ACTIVE') === 'ACTIVE',
+        reserved: Boolean(a.SystemAccount),
       }));
       // One answer holds the whole chart, so the only missing accounts are ones that couldn't be read.
       return { records, expected: read.rows, missing: read.rows - records.length, problems: read.problems };

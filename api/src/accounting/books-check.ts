@@ -2,14 +2,15 @@
 //
 // Someone may have entered it there by hand. QuickBooks takes a second bill with
 // the same number from the same vendor without a word (tried on a sandbox, 5 Nov
-// 2026), so posting it as well would put it in the books twice.
+// 2026), and Xero isn't trusted to refuse one either, so posting it as well would put
+// it in the books twice.
 //
 // Looked for live, through the reader, never in the copy the setup study made: the
 // bill that matters is the one keyed in after that. Twice: in the background while
 // the bill is open in review, so the people deciding it see it, and again just
 // before it posts, because approval can take days. Code decides what could be the
 // same bill; a person says whether it is. Until someone does, the bill is reviewed
-// and approved as usual and only its posting waits: QuickBooks is never a step in
+// and approved as usual and only its posting waits: the books are never a step in
 // the approval chain.
 
 import crypto from 'node:crypto';
@@ -22,9 +23,9 @@ import type { BooksBill, BooksReader } from '../integrations/books.js';
 import { connectorFor } from '../integrations/connectors.js';
 import { readOutcome } from '../integrations/setup/outcome.js';
 import { describeBooksBill, namesLookRelated, systemName } from '../payments/bill-flags.js';
+import { postingTarget } from './connections.js';
 import { vendorForBill } from './vendor-match.js';
 
-const SYSTEM = 'quickbooks';
 const DAY_MS = 86_400_000;
 /** A bill keyed in by hand is dated as the invoice is, give or take a few days. */
 export const SAME_AMOUNT_WITHIN_DAYS = 7;
@@ -222,12 +223,8 @@ export function answersOf(value: unknown): BooksAnswer[] {
 
 /** The books a bill would post to, once posting is on. A lapsed sign-in still counts: it posts after. */
 async function postingScope(organizationId: string): Promise<(Scope & { live: boolean }) | null> {
-  const connection = await prisma.accountingConnection.findUnique({
-    where: { organizationId_provider: { organizationId, provider: SYSTEM } },
-    select: { realmId: true, status: true, postingEnabledAt: true },
-  });
-  if (!connection?.postingEnabledAt || connection.status === 'disconnected') return null;
-  return { system: SYSTEM, companyId: connection.realmId, live: connection.status === 'connected' };
+  const target = await postingTarget(organizationId);
+  return target ? { system: target.system, companyId: target.companyId, live: target.live } : null;
 }
 
 /** The bill as it stands in review: what the posting would send if it were approved now. */

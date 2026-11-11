@@ -51,16 +51,27 @@ export interface PostedBill {
   billBalance: number;
 }
 
-/** QuickBooks has the bill, and recorded a different total. It stays there, so it can't be posted again. */
+/**
+ * The books have the bill, and recorded a different total. It stays there, so it can't be
+ * posted again. `shownAs`: how the bill is found there. QuickBooks' own id, or Xero's
+ * Reference (its id is a long code nobody types), or nothing when it has none.
+ */
 export class PostedTotalDiffers extends Error {
-  constructor(public readonly vendorId: string, public readonly billId: string, recorded: bigint | null, expected: bigint) {
-    super(`QuickBooks recorded this bill at ${recorded === null ? 'no total' : dollars(recorded)}, and it was approved at ${dollars(expected)}. Correct bill ${billId} in QuickBooks, then retry to check it again.`);
+  constructor(
+    public readonly vendorId: string,
+    public readonly billId: string,
+    recorded: bigint | null,
+    expected: bigint,
+    label = 'QuickBooks',
+    shownAs: string | null = billId,
+  ) {
+    super(`${label} recorded this bill at ${recorded === null ? 'no total' : dollars(recorded)}, and it was approved at ${dollars(expected)}. Correct ${shownAs ? `bill ${shownAs}` : 'the bill'} in ${label}, then retry to check it again.`);
     this.name = 'PostedTotalDiffers';
   }
 }
 
-const toCents = (amount: number): bigint => BigInt(Math.round(amount * 100));
-const fromCents = (cents: bigint): number => Number(cents) / 100;
+export const toCents = (amount: number): bigint => BigInt(Math.round(amount * 100));
+export const fromCents = (cents: bigint): number => Number(cents) / 100;
 
 function dollars(cents: bigint): string {
   const sign = cents < 0n ? '-' : '';
@@ -86,7 +97,7 @@ export type PostedLine = { accountId: string; cents: bigint; description: string
  * visible and the total holds. Cents lost to rounding go on the largest line. Any
  * other gap is refused rather than guessed at: nothing says where that money belongs.
  */
-export function linesToPost(lines: PostableLine[], totalCents: bigint, taxCents: bigint | null): { lines: PostedLine[] } | { problem: string } {
+export function linesToPost(lines: PostableLine[], totalCents: bigint, taxCents: bigint | null, label = 'QuickBooks'): { lines: PostedLine[] } | { problem: string } {
   const posted: PostedLine[] = lines.map((l) => ({ accountId: l.accountId, cents: toCents(Number(l.amount) || 0), description: l.description ? String(l.description).slice(0, 4000) : null }));
   const sum = posted.reduce((n, l) => n + l.cents, 0n);
   const largest = posted.reduce((best, l) => (l.cents > best.cents ? l : best), posted[0]!);
@@ -105,7 +116,7 @@ export function linesToPost(lines: PostableLine[], totalCents: bigint, taxCents:
     return { lines: [...posted, { accountId: largest.accountId, cents: tax, description: 'Tax' }] };
   }
   const parts = tax !== null ? 'lines and tax' : 'lines';
-  return { problem: `Its ${parts} come to ${dollars(sum + (tax ?? 0n))}, and it was approved at ${dollars(totalCents)}, so QuickBooks would show the wrong amount. Send it back to correct the figures.` };
+  return { problem: `Its ${parts} come to ${dollars(sum + (tax ?? 0n))}, and it was approved at ${dollars(totalCents)}, so ${label} would show the wrong amount. Send it back to correct the figures.` };
 }
 
 /**

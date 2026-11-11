@@ -11,6 +11,7 @@ import { prisma } from '../infra/prisma.js';
 import { peekDuplicateBrief } from '../exceptions/briefs.js';
 import { getApprovalsInbox, getBillsWorkbench } from '../payments/bills.js';
 import { readPayableHold } from '../payments/vendor-payable.js';
+import { systemName } from '../payments/bill-flags.js';
 import type { AgentTool } from '../exceptions/agent.js';
 import { getCompanionConsole } from './today.js';
 import { plural } from './steps.js';
@@ -198,9 +199,10 @@ export function chatTools(args: {
         const [coding, order, sync, investigation] = await Promise.all([
           prisma.paymentOrderGlCoding.findUnique({ where: { paymentOrderId: row.paymentOrderId }, select: { lines: true } }),
           prisma.paymentOrder.findUnique({ where: { paymentOrderId: row.paymentOrderId }, select: { metadataJson: true } }),
-          prisma.accountingSync.findUnique({
-            where: { paymentOrderId_provider: { paymentOrderId: row.paymentOrderId, provider: 'quickbooks' } },
-            select: { status: true, syncedAt: true, error: true },
+          prisma.accountingSync.findFirst({
+            where: { paymentOrderId: row.paymentOrderId },
+            orderBy: { createdAt: 'desc' },
+            select: { provider: true, status: true, syncedAt: true, error: true },
           }).catch(() => null),
           row.flags.some((f) => f.kind === 'possible_duplicate')
             ? peekDuplicateBrief(args.organizationId, row.paymentOrderId).catch(() => null)
@@ -232,7 +234,7 @@ export function chatTools(args: {
             thisBillIs: investigation.side === 'newer' ? 'the newer upload of the pair' : 'the older upload of the pair',
             otherBillId: investigation.otherBill.paymentOrderId,
           } : null,
-          quickBooks: sync ? { status: sync.status, syncedAt: sync.syncedAt?.toISOString() ?? null, error: sync.error } : 'not synced yet',
+          books: sync ? { system: systemName(sync.provider), status: sync.status, syncedAt: sync.syncedAt?.toISOString() ?? null, error: sync.error } : 'not posted yet',
         };
       },
     },

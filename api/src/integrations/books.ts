@@ -63,6 +63,8 @@ export interface BooksAccount {
   parentId: string | null;
   currency: string | null;
   active: boolean;
+  /** Kept by the system for itself, so no bill line can use it: Xero's accounts payable, sales tax, retained earnings. */
+  reserved?: boolean;
 }
 
 export interface BooksVendor {

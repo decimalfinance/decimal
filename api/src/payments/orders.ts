@@ -962,8 +962,8 @@ const paymentOrderInclude = {
       },
     },
   },
+  // One bill goes into one set of books, QuickBooks or Xero: the latest is the one.
   accountingSyncs: {
-    where: { provider: 'quickbooks' },
     take: 1,
     orderBy: { createdAt: 'desc' as const },
   },

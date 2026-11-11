@@ -1,8 +1,9 @@
 // Decimal's Xero app (XERO_CLIENT_ID, XERO_CLIENT_SECRET): the sign-in on Xero's
-// own site, and a client that reads one organisation through Xero's Accounting
-// API for the reader (xero-reader.ts). Read only. The sign-in asks to read the
-// organisation's settings, contacts, bills and spend money, and nothing else.
-// Posting, when it comes, asks for more, and that takes a new sign-in.
+// own site, and a client for one organisation on Xero's Accounting API: reads for
+// the reader (xero-reader.ts), and the writes posting makes (accounting/xero-books.ts).
+// The sign-in asks to read the organisation's settings and spend money, and to read
+// and write its contacts, bills and their files. Signing in only lets Decimal read
+// in practice: nothing is written until a person says go (accounting/books-target.ts).
 //
 // A sign-in lasts 30 minutes. Its refresh token lasts 60 days unused and is
 // replaced every time it is spent, so each renewal is stored at once, and renewals
@@ -20,12 +21,13 @@ const CONNECTIONS_URL = 'https://api.xero.com/connections';
 const API_BASE = 'https://api.xero.com/api.xro/2.0';
 
 /**
- * Read only, area by area: apps made after 2 March 2026 get Xero's granular scopes.
- * The organisation, accounts, currencies and tracking categories are settings; bills
- * and linked transactions are invoices; spend money is bank transactions.
- * offline_access is what brings a refresh token.
+ * Area by area: apps made after 2 March 2026 get Xero's granular scopes. Read only
+ * where Decimal only reads: the organisation, accounts, currencies and tracking
+ * categories are settings, and spend money is bank transactions. Posting a bill
+ * writes a bill (invoices, which also covers linked transactions), sometimes a
+ * contact, and the invoice's file (attachments). offline_access brings a refresh token.
  */
-export const XERO_SCOPES = 'offline_access accounting.settings.read accounting.contacts.read accounting.invoices.read accounting.banktransactions.read';
+export const XERO_SCOPES = 'offline_access accounting.settings.read accounting.banktransactions.read accounting.contacts accounting.invoices accounting.attachments';
 
 const ACCESS_SECONDS = 1800;
 const REFRESH_LIFETIME_MS = 60 * 24 * 60 * 60 * 1000;
@@ -281,12 +283,15 @@ function queryOf(query: Record<string, string>): string {
   return pairs.length > 0 ? `?${pairs.join('&')}` : '';
 }
 
-/** Xero's own words for a refusal, when it sends some. */
+/** Xero's own words for a refusal, when it sends some. A bill can be refused for several reasons at once: each is kept. */
 function saidIn(text: string): string | null {
   try {
     const body = JSON.parse(text) as { Detail?: unknown; Message?: unknown; Title?: unknown; Elements?: Array<{ ValidationErrors?: Array<{ Message?: unknown }> }> };
-    const said = [body.Detail, body.Elements?.[0]?.ValidationErrors?.[0]?.Message, body.Message, body.Title].find((w) => typeof w === 'string' && w.trim());
-    return typeof said === 'string' ? said.trim().slice(0, 300) : null;
+    const validation = [...new Set((body.Elements ?? []).flatMap((e) => (e?.ValidationErrors ?? [])
+      .map((v) => (typeof v?.Message === 'string' ? v.Message.trim() : ''))
+      .filter(Boolean)))];
+    const said = [body.Detail, validation.join(' '), body.Message, body.Title].find((w) => typeof w === 'string' && w.trim());
+    return typeof said === 'string' ? said.trim().slice(0, 500) : null;
   } catch {
     return null;
   }
@@ -295,47 +300,72 @@ function saidIn(text: string): string | null {
 /** A 401 for a scope the sign-in never asked for. Xero spells it insufficent_scope. */
 const scopeMissing = (res: Response) => /insuf+ici?ent_scope/i.test(res.headers.get('www-authenticate') ?? '');
 
-/** One organisation, read through Xero's API on a kept sign-in. */
-export function httpXeroClient(tenantId: string, session: XeroSession): XeroClient {
+/** What a write sends: JSON, or a file's bytes as they are. */
+type Sent = { json: unknown } | { bytes: Buffer; contentType: string };
+
+/** One organisation, read and written through Xero's API on a kept sign-in. */
+export type XeroWriteClient = XeroClient & {
+  /** Creates something (PUT). The key makes a retry the same request, so nothing is made twice. */
+  put(endpoint: string, json: unknown, idempotencyKey: string, query?: Record<string, string>): Promise<unknown>;
+  /** A file's bytes, as they are: an attachment. */
+  upload(endpoint: string, bytes: Buffer, contentType: string, idempotencyKey: string): Promise<unknown>;
+};
+
+/** One organisation, on a kept sign-in. Reads and writes share its turns and its renewals. */
+export function httpXeroClient(tenantId: string, session: XeroSession): XeroWriteClient {
+  const request = (method: 'GET' | 'PUT', endpoint: string, query: Record<string, string>, sent: Sent | null, idempotencyKey: string | null) => inTurn(tenantId, async () => {
+    const writing = method !== 'GET';
+    const ask = async (accessToken: string) => fetch(`${API_BASE}/${endpoint}${queryOf(query)}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'xero-tenant-id': tenantId,
+        Accept: 'application/json',
+        ...(sent ? { 'Content-Type': 'json' in sent ? 'application/json' : sent.contentType } : {}),
+        ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+      },
+      ...(sent ? { body: 'json' in sent ? JSON.stringify(sent.json) : new Uint8Array(sent.bytes) } : {}),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    let used = await session.accessToken();
+    let res = await ask(used);
+    if (res.status === 401 && !scopeMissing(res)) {
+      await res.arrayBuffer();
+      await session.turnedAway(used);
+      used = await session.accessToken();
+      res = await ask(used);
+    }
+    const text = await res.text();
+    if (res.ok) {
+      try {
+        return JSON.parse(text) as unknown;
+      } catch {
+        throw new XeroApiError(502, `Xero answered ${endpoint} in a form Decimal can’t read.`);
+      }
+    }
+    if (res.status === 401 && scopeMissing(res)) {
+      // A sign-in from before Decimal posted to Xero only lets it read. Signing in again asks for the rest.
+      if (writing) throw new XeroApiError(403, 'The Xero sign-in only lets Decimal read. Someone has to sign in to Xero again, to let Decimal post bills.');
+      // Decimal's mistake, not the person's: signing in again asks for the same.
+      throw new BooksReadError('refused', `Xero won’t let Decimal read ${endpoint}: the sign-in doesn’t ask for it.`);
+    }
+    if (res.status === 401) throw new XeroApiError(401, 'Xero no longer accepts this sign-in. Someone has to sign in to Xero again.');
+    // The organisation was disconnected from Decimal's app on Xero's side.
+    if (res.status === 403 && /Authentication ?Unsuccessful|Authorization ?Unsuccessful/i.test(text)) {
+      throw new XeroApiError(401, 'This organisation isn’t connected to Decimal in Xero any more. Someone has to sign in to Xero again.');
+    }
+    if (res.status === 429) {
+      const after = Number(res.headers.get('retry-after') ?? NaN);
+      const problem = res.headers.get('x-rate-limit-problem');
+      throw new XeroApiError(429, `Xero asked Decimal to slow down${problem ? ` (its ${problem} limit)` : ''}.`, Number.isFinite(after) && after >= 0 ? after : null);
+    }
+    const said = saidIn(text);
+    throw new XeroApiError(res.status, said ? `Xero said: ${said}` : `Xero answered ${res.status} for ${endpoint}.`);
+  });
   return {
     tenantId,
-    get: (endpoint, query = {}) => inTurn(tenantId, async () => {
-      const ask = async (accessToken: string) => fetch(`${API_BASE}/${endpoint}${queryOf(query)}`, {
-        headers: { Authorization: `Bearer ${accessToken}`, 'xero-tenant-id': tenantId, Accept: 'application/json' },
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      });
-      let used = await session.accessToken();
-      let res = await ask(used);
-      if (res.status === 401 && !scopeMissing(res)) {
-        await res.arrayBuffer();
-        await session.turnedAway(used);
-        used = await session.accessToken();
-        res = await ask(used);
-      }
-      const text = await res.text();
-      if (res.ok) {
-        try {
-          return JSON.parse(text) as unknown;
-        } catch {
-          throw new XeroApiError(502, `Xero answered ${endpoint} in a form Decimal can’t read.`);
-        }
-      }
-      if (res.status === 401 && scopeMissing(res)) {
-        // Decimal's mistake, not the person's: signing in again asks for the same.
-        throw new BooksReadError('refused', `Xero won’t let Decimal read ${endpoint}: the sign-in doesn’t ask for it.`);
-      }
-      if (res.status === 401) throw new XeroApiError(401, 'Xero no longer accepts this sign-in. Someone has to sign in to Xero again.');
-      // The organisation was disconnected from Decimal's app on Xero's side.
-      if (res.status === 403 && /Authentication ?Unsuccessful|Authorization ?Unsuccessful/i.test(text)) {
-        throw new XeroApiError(401, 'This organisation isn’t connected to Decimal in Xero any more. Someone has to sign in to Xero again.');
-      }
-      if (res.status === 429) {
-        const after = Number(res.headers.get('retry-after') ?? NaN);
-        const problem = res.headers.get('x-rate-limit-problem');
-        throw new XeroApiError(429, `Xero asked Decimal to slow down${problem ? ` (its ${problem} limit)` : ''}.`, Number.isFinite(after) && after >= 0 ? after : null);
-      }
-      const said = saidIn(text);
-      throw new XeroApiError(res.status, said ? `Xero said: ${said}` : `Xero answered ${res.status} for ${endpoint}.`);
-    }),
+    get: (endpoint, query = {}) => request('GET', endpoint, query, null, null),
+    put: (endpoint, json, idempotencyKey, query = {}) => request('PUT', endpoint, query, { json }, idempotencyKey),
+    upload: (endpoint, bytes, contentType, idempotencyKey) => request('PUT', endpoint, {}, { bytes, contentType }, idempotencyKey),
   };
 }

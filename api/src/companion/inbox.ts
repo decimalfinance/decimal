@@ -23,6 +23,7 @@ import { notFound } from '../infra/api-errors.js';
 import { getApprovalsInbox, getBillsWorkbench } from '../payments/bills.js';
 import { involvedBillIds } from '../payments/bill-visibility.js';
 import { getOrgAccess } from '../approvals/permissions.js';
+import { systemName } from '../payments/bill-flags.js';
 
 export type InboxLineKind = 'approval' | 'question' | 'reply' | 'review' | 'sign_off' | 'sent_back' | 'unreadable' | 'sync_failed' | 'sync_held';
 
@@ -235,30 +236,31 @@ export async function getInbox(organizationId: string, viewerUserId: string, opt
       }
     }
   }
-  // A bill QuickBooks would not take, for whoever manages accounting. It
-  // clears itself the moment a retry (or the sweep) gets it through.
+  // A bill the books would not take, QuickBooks or Xero, for whoever manages
+  // accounting. It clears itself the moment a retry (or the sweep) gets it through.
   const managesAccounting = isAdmin || (access?.capabilities.includes('accounting.manage') ?? false);
   if (managesAccounting) {
     const failed = await prisma.accountingSync.findMany({
-      where: { organizationId, provider: 'quickbooks', status: 'error', paymentOrder: { state: { not: 'cancelled' } } },
-      select: { paymentOrderId: true, error: true, updatedAt: true },
+      where: { organizationId, status: 'error', paymentOrder: { state: { not: 'cancelled' } } },
+      select: { paymentOrderId: true, provider: true, error: true, updatedAt: true },
     });
     for (const f of failed) {
       const why = f.error?.trim() ? firstSentence(f.error).replace(/"([^"]*)"/g, '“$1”') : null;
-      add(itemFor(f.paymentOrderId), { kind: 'sync_failed', ...said(why ? `QuickBooks refused it: ${why}` : 'QuickBooks refused it', null), who: null, at: f.updatedAt.toISOString() });
+      const books = systemName(f.provider);
+      add(itemFor(f.paymentOrderId), { kind: 'sync_failed', ...said(why ? `${books} refused it: ${why}` : `${books} refused it`, null), who: null, at: f.updatedAt.toISOString() });
     }
   }
-  // Approved, and held back: QuickBooks may have it already (accounting/books-check.ts).
+  // Approved, and held back: the books may have it already (accounting/books-check.ts).
   // For whoever reviews bills, since they're who can say whether it's the same one;
   // it stays until someone does.
   if (canReview) {
     const held = await prisma.accountingSync.findMany({
-      where: { organizationId, provider: 'quickbooks', status: 'held', paymentOrder: { state: { not: 'cancelled' } } },
-      select: { paymentOrderId: true, error: true, updatedAt: true },
+      where: { organizationId, status: 'held', paymentOrder: { state: { not: 'cancelled' } } },
+      select: { paymentOrderId: true, provider: true, error: true, updatedAt: true },
     });
     for (const h of held) {
       // Up to "outside Decimal", never by sentence: a vendor's name can have a full stop in it.
-      const what = /^(.+?, entered there outside Decimal)\./.exec(h.error ?? '')?.[1] ?? 'QuickBooks may have it already';
+      const what = /^(.+?, entered there outside Decimal)\./.exec(h.error ?? '')?.[1] ?? `${systemName(h.provider)} may have it already`;
       add(itemFor(h.paymentOrderId), { kind: 'sync_held', ...said(`${what}. Is it the same bill?`, null), who: null, at: h.updatedAt.toISOString() });
     }
   }

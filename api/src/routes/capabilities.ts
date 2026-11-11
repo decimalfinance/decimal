@@ -31,8 +31,8 @@ capabilitiesRouter.get('/capabilities', (_req, res) => {
       googleSignIn: Boolean(config.googleOAuthClientId && config.googleOAuthClientSecret),
     },
     integrations: {
-      // Xero, where setting it up is a rehearsal: Decimal reads the books, and nothing posts.
-      // With Decimal's Xero app (XERO_CLIENT_ID), or on the bench with a made-up organisation.
+      // Whether Xero can be set up here: with Decimal's Xero app (XERO_CLIENT_ID), or on
+      // the bench with a made-up organisation. The name is from when its setup was a rehearsal.
       xeroRehearsal: xeroAppConfigured() || Boolean(config.xeroFixtureFile),
       // The bench without the app: signing in connects the made-up organisation (XERO_FIXTURE_FILE, never in production).
       xeroMadeUp: !xeroAppConfigured() && Boolean(config.xeroFixtureFile),

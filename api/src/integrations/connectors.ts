@@ -18,11 +18,12 @@ export type BooksConnection = {
 export type Connector = {
   system: string;
   /**
-   * Whether the person's yes turns posting on. Xero's doesn't: Decimal can't post
-   * there yet, so its Go records the yes, and the setup is a rehearsal.
+   * Whether the person's yes turns posting on. Both do. A system Decimal can't post
+   * to yet comes in with false: its Go records the yes, and the setup is a rehearsal,
+   * as Xero's was until it posted.
    */
   posts: boolean;
-  /** Whether this deployment has the system at all. Xero is on the bench only. */
+  /** Whether this deployment has the system at all. Xero needs Decimal's Xero app, or the bench's made-up organisation. */
   available?: () => boolean;
   connection(organizationId: string): Promise<BooksConnection | null>;
   reader(organizationId: string): Promise<BooksReader | null>;

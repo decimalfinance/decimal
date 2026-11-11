@@ -1,31 +1,36 @@
-// Per-bill QuickBooks sync + the background sweep, in two moments:
+// Per-bill posting to the team's books + the background sweep, in two moments:
 //
-//   - APPROVED: the bill is posted to QuickBooks as a Bill, with a line per
-//     category confirmed in review. That is when the books learn the money is
-//     owed — the standard accounts-payable order.
-//   - PAID (settled): a BillPayment is recorded against that Bill. A bill paid
-//     before it was ever posted gets both at once, as it always did.
+//   - APPROVED: the bill is posted to the books the team posts to, QuickBooks or
+//     Xero (connections.ts postingTarget), with a line per category confirmed in
+//     review. That is when the books learn the money is owed — the standard
+//     accounts-payable order. How each system takes it is books-poster.ts.
+//   - PAID (settled): a BillPayment is recorded against that Bill, in QuickBooks
+//     only: payments are frozen. A bill paid before it was ever posted gets both at
+//     once, as it always did.
 //
-// One accounting_syncs row per bill carries both: externalBillId once posted,
-// externalBillPaymentId once paid. Idempotent at two layers: the QBO requestid
-// and that unique row.
+// One accounting_syncs row per bill and system carries both: externalBillId once
+// posted, externalBillPaymentId once paid. Idempotent at two layers: the system's
+// own (QuickBooks' requestid, Xero's Idempotency-Key) and that unique row. One bill
+// goes into one set of books.
 //
-// Nothing here writes until a person has turned posting on (`enablePosting`), and
-// a bill approved before that moment is not posted by itself. Connecting alone
-// only lets Decimal read.
+// Nothing here writes until a person has turned posting on (a setup's Go), and a
+// bill approved before that moment is not posted by itself. Connecting alone only
+// lets Decimal read.
 
 import type { Prisma } from '@prisma/client';
 import { billsApprovedSince } from '../approvals/store.js';
 import { logger } from '../infra/logger.js';
 import { prisma } from '../infra/prisma.js';
-import { isDate } from '../integrations/copy.js';
-import { readOutcome, type SetupOutcome } from '../integrations/setup/outcome.js';
-import { getQuickBooksForOrg, postingEnabledSince } from './connections.js';
-import { faultOf, plainQboReason, QboError, type QuickBooks } from './quickbooks.js';
-import { postBillToQuickBooks, PostedTotalDiffers, recordBillPaymentInQuickBooks, recordedCents, syncPaymentToQuickBooks } from './sync.js';
+import { readOutcome } from '../integrations/setup/outcome.js';
+import { xeroIsMadeUp, xeroWriteClientFor } from '../integrations/xero-connector.js';
+import { BillGone, PostedUnchecked, quickBooksBooks, type Books } from './books-poster.js';
+import { getQuickBooksForOrg, postingEnabledSince, postingTarget, type PostingTarget } from './connections.js';
+import { PostedTotalDiffers, recordBillPaymentInQuickBooks, syncPaymentToQuickBooks } from './sync.js';
 import { BUILTIN_ACCOUNT_PREFIX } from './default-chart.js';
 import { vendorForBill } from './vendor-match.js';
+import { xeroBooks } from './xero-books.js';
 
+/** Where paid bills record their payment: QuickBooks only, while payments are frozen. */
 const PROVIDER = 'quickbooks';
 export const MAX_ATTEMPTS = 5;
 const SWEEP_BATCH = 20;
@@ -72,12 +77,12 @@ function isLinkedFromBooks(metadata: unknown): boolean {
   return typeof metadata === 'object' && metadata !== null && (metadata as Record<string, unknown>).linkedFromBooks === true;
 }
 
-async function upsertSync(organizationId: string, paymentOrderId: string, fields: SyncFields): Promise<void> {
+async function upsertSync(provider: string, organizationId: string, paymentOrderId: string, fields: SyncFields): Promise<void> {
   const { incrementAttempts, requestId, ...rest } = fields;
   const base = { ...rest, requestId: requestId ?? `decimal_${paymentOrderId}` };
   await prisma.accountingSync.upsert({
-    where: { paymentOrderId_provider: { paymentOrderId, provider: PROVIDER } },
-    create: { organizationId, paymentOrderId, provider: PROVIDER, attempts: incrementAttempts ? 1 : 0, ...base },
+    where: { paymentOrderId_provider: { paymentOrderId, provider } },
+    create: { organizationId, paymentOrderId, provider, attempts: incrementAttempts ? 1 : 0, ...base },
     update: { ...base, ...(incrementAttempts ? { attempts: { increment: 1 } } : {}) },
   });
 }
@@ -90,7 +95,7 @@ async function upsertSync(organizationId: string, paymentOrderId: string, fields
  */
 export async function resetSyncForRetry(paymentOrderId: string): Promise<void> {
   await prisma.accountingSync.updateMany({
-    where: { paymentOrderId, provider: PROVIDER, status: { in: ['error', 'held'] } },
+    where: { paymentOrderId, status: { in: ['error', 'held'] } },
     data: { attempts: 0, status: 'pending', error: null },
   });
 }
@@ -144,10 +149,10 @@ export async function syncSettledPaymentOrder(paymentOrderId: string): Promise<A
   if (!postedAlready && !map?.defaultExpenseAccountId && !order.glCoding) missing.push('default_expense_account');
   if (!qb || !map?.clearingAccountId || missing.length > 0) {
     if (postedAlready) {
-      await upsertSync(order.organizationId, paymentOrderId, { status: 'synced', error: `payment not recorded yet: missing ${missing.join(', ')}` });
+      await upsertSync(PROVIDER, order.organizationId, paymentOrderId, { status: 'synced', error: `payment not recorded yet: missing ${missing.join(', ')}` });
       return 'skipped';
     }
-    await upsertSync(order.organizationId, paymentOrderId, {
+    await upsertSync(PROVIDER, order.organizationId, paymentOrderId, {
       status: 'pending',
       error: `not ready: missing ${missing.join(', ')}`,
     });
@@ -168,14 +173,14 @@ export async function syncSettledPaymentOrder(paymentOrderId: string): Promise<A
         { id: requestId, vendorId: existing.externalVendorId, billId: existing.externalBillId, total: amountUsdc, txSignature: signature },
         map.clearingAccountId,
       );
-      await upsertSync(order.organizationId, paymentOrderId, {
+      await upsertSync(PROVIDER, order.organizationId, paymentOrderId, {
         status: 'synced', requestId, externalBillPaymentId: paid.billPaymentId, externalBillBalance: paid.billBalance, error: null, syncedAt: new Date(),
       });
       logger.info('accounting_sync.payment_recorded', { organizationId: order.organizationId, paymentOrderId, billPaymentId: paid.billPaymentId });
       return 'synced';
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      await upsertSync(order.organizationId, paymentOrderId, { status: 'error', requestId, error: `Recording the payment: ${message}`, incrementAttempts: true });
+      await upsertSync(PROVIDER, order.organizationId, paymentOrderId, { status: 'error', requestId, error: `Recording the payment: ${message}`, incrementAttempts: true });
       logger.warn('accounting_sync.payment_failed', { organizationId: order.organizationId, paymentOrderId, error: message });
       return 'error';
     }
@@ -208,7 +213,7 @@ export async function syncSettledPaymentOrder(paymentOrderId: string): Promise<A
         apAccountId: map.apAccountId,
       },
     );
-    await upsertSync(order.organizationId, paymentOrderId, {
+    await upsertSync(PROVIDER, order.organizationId, paymentOrderId, {
       status: 'synced',
       requestId,
       externalVendorId: result.vendorId,
@@ -227,7 +232,7 @@ export async function syncSettledPaymentOrder(paymentOrderId: string): Promise<A
     return 'synced';
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    await upsertSync(order.organizationId, paymentOrderId, {
+    await upsertSync(PROVIDER, order.organizationId, paymentOrderId, {
       status: 'error',
       requestId,
       error: message,
@@ -240,35 +245,41 @@ export async function syncSettledPaymentOrder(paymentOrderId: string): Promise<A
 
 export type AccountingSweepSummary = { synced: number; skipped: number; error: number; held: number };
 
-/** Find settled, not-yet-synced payment orders for connected orgs and sync them. */
+/** Find approved bills not in the books yet, and settled payment orders not synced, for connected orgs, and post them. */
 export async function sweepUnsyncedSettledOrders(): Promise<AccountingSweepSummary> {
   const summary: AccountingSweepSummary = { synced: 0, skipped: 0, error: 0, held: 0 };
 
   const connected = await prisma.accountingConnection.findMany({
-    where: { provider: PROVIDER, status: 'connected', postingEnabledAt: { not: null } },
-    select: { organizationId: true, postingEnabledAt: true },
+    where: { status: 'connected', postingEnabledAt: { not: null } },
+    select: { organizationId: true, provider: true, postingEnabledAt: true },
   });
   if (connected.length === 0) {
     return summary;
   }
 
-  const orgIds = connected.map((c) => c.organizationId);
-
-  // Bills approved since posting was turned on and not yet in QuickBooks: posted
+  // Bills approved since posting was turned on and not yet in the books: posted
   // now. Catches a post the approval hook could not make, such as while the
   // connection had lapsed, and retries of one that failed (until MAX_ATTEMPTS; a
   // person can retry). A bill approved before that moment is left alone, and so
   // is one held for an answer: looking again every 30 seconds changes nothing.
-  const approved: string[] = [];
+  // Per organisation, the books it posts to: the latest yes (postingTarget).
+  const targets = new Map<string, { provider: string; since: Date }>();
   for (const c of connected) {
-    approved.push(...await billsApprovedSince(c.organizationId, c.postingEnabledAt!));
+    const seen = targets.get(c.organizationId);
+    if (!seen || c.postingEnabledAt! > seen.since) targets.set(c.organizationId, { provider: c.provider, since: c.postingEnabledAt! });
   }
-  if (approved.length > 0) {
+  const approvedFor = new Map<string, string[]>();
+  for (const [organizationId, t] of targets) {
+    approvedFor.set(t.provider, [...(approvedFor.get(t.provider) ?? []), ...await billsApprovedSince(organizationId, t.since)]);
+  }
+  for (const [provider, approved] of approvedFor) {
+    if (approved.length === 0) continue;
     const due = await prisma.paymentOrder.findMany({
       where: {
         paymentOrderId: { in: approved },
         state: { notIn: ['draft', 'cancelled', 'settled'] },
-        NOT: { accountingSyncs: { some: { provider: PROVIDER, OR: [{ externalBillId: { not: null } }, { status: 'error', attempts: { gte: MAX_ATTEMPTS } }, { status: 'held' }] } } },
+        // In any books already: one bill goes into one set of books.
+        NOT: { accountingSyncs: { some: { OR: [{ externalBillId: { not: null } }, { provider, status: 'error', attempts: { gte: MAX_ATTEMPTS } }, { provider, status: 'held' }] } } },
       },
       orderBy: { updatedAt: 'asc' },
       take: SWEEP_BATCH,
@@ -279,6 +290,9 @@ export async function sweepUnsyncedSettledOrders(): Promise<AccountingSweepSumma
       summary[outcome] += 1;
     }
   }
+
+  const orgIds = connected.filter((c) => c.provider === PROVIDER).map((c) => c.organizationId);
+  if (orgIds.length === 0) return summary;
 
   // Paid bills: record the payment against a bill posted at approval, and
   // retry any settled sync that errored.
@@ -308,72 +322,105 @@ export async function sweepUnsyncedSettledOrders(): Promise<AccountingSweepSumma
   return summary;
 }
 
-/**
- * The date the books are closed through. QuickBooks' own, when it shares one: that
- * moves as they close each month. Else what the person said in setup.
- */
-async function closedThrough(qb: QuickBooks, outcome: SetupOutcome | null): Promise<string | null> {
-  const answer = await qb.query('SELECT * FROM Preferences').catch(() => null);
-  const live = answer?.QueryResponse?.Preferences?.[0]?.AccountingInfoPrefs?.BookCloseDate;
-  const date = typeof live === 'string' ? live.slice(0, 10) : null;
-  return date && isDate(date) ? date : outcome?.closingDate ?? null;
+/** How long a send whose answer never came is replayed with its key. Past it, Decimal looks in the books first. */
+const REPLAY_WITHIN_MS = 10 * 60_000;
+
+/** A send to the books whose answer never came, kept on the sync until one does (Books.replaysSends). */
+type Sending = { key: string; at: string };
+
+function sendingOf(metadata: unknown): Sending | null {
+  const sending = typeof metadata === 'object' && metadata !== null ? (metadata as Record<string, unknown>).sending : null;
+  if (typeof sending !== 'object' || sending === null) return null;
+  const { key, at } = sending as Record<string, unknown>;
+  return typeof key === 'string' && typeof at === 'string' ? { key, at } : null;
+}
+
+/** The books a team posts to, ready to post: null while there's no live sign-in to post through. */
+async function booksFor(organizationId: string, target: PostingTarget): Promise<Books | null> {
+  if (target.system === 'quickbooks') {
+    const qb = await getQuickBooksForOrg(organizationId);
+    if (!qb) return null;
+    const map = await prisma.accountingAccountMap.findUnique({
+      where: { organizationId_provider: { organizationId, provider: 'quickbooks' } },
+      select: { apAccountId: true },
+    });
+    return quickBooksBooks(qb, map?.apAccountId ?? null);
+  }
+  if (target.system === 'xero') {
+    const client = await xeroWriteClientFor(organizationId);
+    return client ? xeroBooks(client) : null;
+  }
+  return null;
 }
 
 /**
- * Post one approved bill to QuickBooks as a Bill. Idempotent: a bill already
- * posted is skipped, and QuickBooks itself dedupes on the requestid.
+ * Post one approved bill to the team's books: QuickBooks as a Bill, Xero as a bill
+ * awaiting payment. Idempotent: a bill already posted is skipped, and the system
+ * itself dedupes a send made twice.
  *
- * An organisation without QuickBooks is not an error and leaves no trace, and
- * neither is one that hasn't turned posting on, or a bill approved before it did.
- * One that is connected but cannot take the bill — a category missing from its
- * chart, no categories at all — records the reason as an error, which lands in
- * the inbox of whoever manages accounting.
+ * An organisation without books is not an error and leaves no trace, and neither
+ * is one that hasn't turned posting on, or a bill approved before it did. One that
+ * is connected but cannot take the bill — a category missing from its chart, no
+ * categories at all — records the reason as an error, which lands in the inbox of
+ * whoever manages accounting.
  */
 export async function syncApprovedBill(paymentOrderId: string): Promise<AccountingSyncOutcome> {
   const order = await prisma.paymentOrder.findUnique({
     where: { paymentOrderId },
-    include: { counterparty: true, counterpartyWallet: true, accountingSyncs: { where: { provider: PROVIDER } }, glCoding: true },
+    include: { counterparty: true, counterpartyWallet: true, accountingSyncs: true, glCoding: true },
   });
   if (!order || order.state === 'draft' || order.state === 'cancelled') return 'skipped';
-  const since = await postingEnabledSince(order.organizationId);
-  if (!since) return 'skipped';
-  const approved = await billsApprovedSince(order.organizationId, since);
+  const target = await postingTarget(order.organizationId);
+  if (!target) return 'skipped';
+  const approved = await billsApprovedSince(order.organizationId, target.since);
   if (!approved.includes(paymentOrderId)) return 'skipped';
-  const existing = order.accountingSyncs[0] ?? null;
+  // One bill goes into one set of books: a team that moved keeps what it posted where it posted it.
+  if (order.accountingSyncs.some((s) => s.provider !== target.system && s.externalBillId)) return 'skipped';
+  const existing = order.accountingSyncs.find((s) => s.provider === target.system) ?? null;
   if (existing?.externalBillId && existing.status === 'synced') return 'skipped';
   if (existing?.status === 'error' && existing.attempts >= MAX_ATTEMPTS) return 'skipped';
 
-  const qb = await getQuickBooksForOrg(order.organizationId);
-  if (!qb) return 'skipped';
+  const system = target.system;
   const requestId = `decimal_${paymentOrderId}`;
-  const fail = async (message: string): Promise<AccountingSyncOutcome> => {
-    await upsertSync(order.organizationId, paymentOrderId, { status: 'error', requestId, error: message, incrementAttempts: true });
-    logger.warn('accounting_sync.bill_failed', { organizationId: order.organizationId, paymentOrderId, error: message });
+  const save = (fields: SyncFields) => upsertSync(system, order.organizationId, paymentOrderId, fields);
+  const fail = async (message: string, metadataJson?: Prisma.InputJsonValue): Promise<AccountingSyncOutcome> => {
+    await save({ status: 'error', requestId, error: message, incrementAttempts: true, ...(metadataJson ? { metadataJson } : {}) });
+    logger.warn('accounting_sync.bill_failed', { organizationId: order.organizationId, paymentOrderId, system, error: message });
     return 'error';
   };
+  const books = await booksFor(order.organizationId, target);
+  if (!books) {
+    // The bench's made-up Xero organisation has no Xero behind it. Said, rather than left waiting.
+    if (system === 'xero' && await xeroIsMadeUp(order.organizationId)) {
+      return fail('This team’s Xero is the bench’s made-up organisation, which nothing posts to. Sign in to a real Xero organisation to post.');
+    }
+    return 'skipped';
+  }
+  const { label } = books;
   const approvedCents = (order.amountRaw + 5_000n) / 10_000n;
 
-  // In QuickBooks already, with a total that didn't match: a retry looks again.
+  // In the books already, with a total that didn't match: a retry looks again.
   if (existing?.externalBillId) {
     try {
-      const after = (await qb.readEntity('bill', existing.externalBillId)).Bill;
-      const recorded = recordedCents(after);
-      if (recorded !== approvedCents) throw new PostedTotalDiffers(existing.externalVendorId ?? '', existing.externalBillId, recorded, approvedCents);
-      await upsertSync(order.organizationId, paymentOrderId, { status: 'synced', requestId, externalBillBalance: Number(after.Balance), error: null, syncedAt: new Date() });
+      const after = await books.readBack(existing.externalBillId);
+      if (after.cents !== approvedCents) {
+        throw new PostedTotalDiffers(existing.externalVendorId ?? '', existing.externalBillId, after.cents, approvedCents, label, after.shownAs);
+      }
+      await save({ status: 'synced', requestId, externalBillBalance: after.balance, error: null, syncedAt: new Date() });
       return 'synced';
     } catch (error) {
       // Linked to a bill someone entered there by hand, and since deleted it: unlinked,
       // so the next try looks in the books again (books-check.ts) and posts or asks.
       const linked = isLinkedFromBooks(existing.metadataJson);
-      if (linked && error instanceof QboError && faultOf(error.body)?.code === '610') {
-        await upsertSync(order.organizationId, paymentOrderId, {
+      if (linked && error instanceof BillGone) {
+        await save({
           status: 'error', requestId, externalBillId: null, externalVendorId: null, metadataJson: {}, incrementAttempts: true,
-          error: 'The bill in QuickBooks this was linked to has been deleted there, so it isn\'t linked any more. Decimal will look in QuickBooks again.',
+          error: `The bill in ${label} this was linked to has been ${system === 'xero' ? 'deleted or voided' : 'deleted'} there, so it isn't linked any more. Decimal will look in ${label} again.`,
         });
-        logger.warn('accounting_sync.linked_bill_gone', { organizationId: order.organizationId, paymentOrderId, billId: existing.externalBillId });
+        logger.warn('accounting_sync.linked_bill_gone', { organizationId: order.organizationId, paymentOrderId, system, billId: existing.externalBillId });
         return 'error';
       }
-      return fail(plainQboReason(error));
+      return fail(books.plainReason(error));
     }
   }
 
@@ -388,7 +435,7 @@ export async function syncApprovedBill(paymentOrderId: string): Promise<Accounti
   type Line = { accountId?: string; accountName?: string | null; amount?: number; description?: string | null };
   let lines = (Array.isArray(coding?.lines) ? coding!.lines : []) as Line[];
   const outsideChart = (ls: Line[]) => ls.filter((l) => !l.accountId || l.accountId.startsWith(BUILTIN_ACCOUNT_PREFIX));
-  // Categories recorded against the standard list (before QuickBooks was
+  // Categories recorded against the standard list (before the books were
   // connected) or missing from the chart then: look again against the chart
   // as it is now, so a retry after fixing the chart goes through.
   if (outsideChart(lines).length > 0) {
@@ -401,128 +448,135 @@ export async function syncApprovedBill(paymentOrderId: string): Promise<Accounti
   const notInChart = outsideChart(lines);
   if (notInChart.length > 0) {
     const names = [...new Set(notInChart.map((l) => l.accountName ?? 'Uncategorized'))];
-    return fail(`${names.map((n) => `"${n}"`).join(', ')} ${names.length === 1 ? 'is' : 'are'} not in your QuickBooks chart of accounts. Pick a QuickBooks category on the bill, then retry.`);
+    return fail(`${names.map((n) => `"${n}"`).join(', ')} ${names.length === 1 ? 'is' : 'are'} not in your ${label} chart of accounts. Pick a ${label} category on the bill, then retry.`);
   }
 
-  const map = await prisma.accountingAccountMap.findUnique({
-    where: { organizationId_provider: { organizationId: order.organizationId, provider: PROVIDER } },
-  });
   const billHeader = (coding?.billHeader ?? {}) as { vendorName?: string | null; invoiceNumber?: string | null; billDate?: string | null };
   const vendorLabel = billHeader.vendorName?.trim() || order.counterparty?.displayName || order.counterpartyWallet.label;
-  const outcome = await readOutcome(order.organizationId, PROVIDER, qb.realmId);
+  const outcome = await readOutcome(order.organizationId, system, books.companyId);
+  // A send whose answer never came, a moment ago: sent again with its key, so a bill
+  // that landed comes back rather than a second. The look in the books was made
+  // before it, and finding the bill that landed would only hold it as someone else's.
+  const sending = books.replaysSends ? sendingOf(existing?.metadataJson) : null;
+  const replay = sending !== null && Date.now() - Date.parse(sending.at) < REPLAY_WITHIN_MS;
+  let sent: Sending | null = null;
   try {
     // Its figures are that currency's. Posted as they are, they'd read as dollars.
     const { amountsOfBill, currencyOfBill } = await import('../payments/bills.js');
     const currency = currencyOfBill(order.metadataJson);
     if (currency !== 'USD') {
-      return await fail(`This bill is in ${currency}, and Decimal posts in USD only. Enter it in QuickBooks by hand.`);
+      return await fail(`This bill is in ${currency}, and Decimal posts in USD only. Enter it in ${label} by hand.`);
     }
-    // A closed period stays closed, whether or not QuickBooks would only have warned.
+    // A closed period stays closed, whether or not the books would only have warned.
     const billDate = billHeader.billDate?.trim() || null;
-    const closed = billDate ? await closedThrough(qb, outcome) : null;
+    const closed = billDate ? await books.closedThrough(outcome) : null;
     if (billDate && closed && billDate <= closed) {
-      return await fail(`This bill is dated ${billDate}, and the books are closed through ${closed}. Send it back to change the date, or reopen the period in QuickBooks, then retry.`);
+      return await fail(`This bill is dated ${billDate}, and the books are closed through ${closed}. Send it back to change the date, or reopen the period in ${label}, then retry.`);
     }
-    const vendor = await vendorForBill(order.organizationId, PROVIDER, qb.realmId, vendorLabel, outcome);
+    const vendor = await vendorForBill(order.organizationId, system, books.companyId, vendorLabel, outcome) ?? await books.vendorNamed(vendorLabel);
     if (vendor && 'problem' in vendor) return await fail(vendor.problem);
 
-    // Is it in the books already? QuickBooks takes the same bill twice without a
-    // word, so look, live, right before posting (books-check.ts).
     const docNumber = billHeader.invoiceNumber ?? order.invoiceNumber;
-    const { checkBeforePosting, knownVendorIds } = await import('./books-check.js');
-    const { quickBooksReader } = await import('../integrations/quickbooks-reader.js');
-    const scope = { system: PROVIDER, companyId: qb.realmId };
-    const vendorIds = await knownVendorIds(order.organizationId, scope, vendorLabel, order.counterpartyId);
-    const inBooks = await checkBeforePosting({
-      organizationId: order.organizationId,
-      paymentOrderId,
-      reader: quickBooksReader(qb),
-      bill: {
-        vendorName: vendorLabel,
-        vendorIds: [...new Set([...(vendor?.vendorId ? [vendor.vendorId] : []), ...vendorIds])],
-        number: docNumber,
-        totalMinor: approvedCents,
-        currency,
-        date: billDate,
-      },
-    });
-    if (inBooks.kind === 'held') {
-      await upsertSync(order.organizationId, paymentOrderId, { status: 'held', requestId, error: inBooks.message });
-      logger.info('accounting_sync.bill_held', { organizationId: order.organizationId, paymentOrderId });
-      return 'held';
-    }
-    if (inBooks.kind === 'same') {
-      // A person said it is that bill: link to it rather than post, then check it
-      // the way a posted bill is checked, its total against the approved one.
-      await upsertSync(order.organizationId, paymentOrderId, {
-        status: 'pending', requestId, externalVendorId: inBooks.vendorId, externalBillId: inBooks.recordId, externalBillPaymentId: null,
-        error: null, metadataJson: { linkedFromBooks: true, number: inBooks.number },
+    if (!replay) {
+      // Is it in the books already? Neither system minds the same bill twice, so
+      // look, live, right before posting (books-check.ts).
+      const { checkBeforePosting, knownVendorIds } = await import('./books-check.js');
+      const vendorIds = await knownVendorIds(order.organizationId, { system, companyId: books.companyId }, vendorLabel, order.counterpartyId);
+      const inBooks = await checkBeforePosting({
+        organizationId: order.organizationId,
+        paymentOrderId,
+        reader: books.reader,
+        bill: {
+          vendorName: vendorLabel,
+          vendorIds: [...new Set([...(vendor?.vendorId ? [vendor.vendorId] : []), ...vendorIds])],
+          number: docNumber,
+          totalMinor: approvedCents,
+          currency,
+          date: billDate,
+        },
       });
-      logger.info('accounting_sync.bill_linked', { organizationId: order.organizationId, paymentOrderId, billId: inBooks.recordId });
-      return await syncApprovedBill(paymentOrderId);
+      if (inBooks.kind === 'held') {
+        await save({ status: 'held', requestId, error: inBooks.message });
+        logger.info('accounting_sync.bill_held', { organizationId: order.organizationId, paymentOrderId, system });
+        return 'held';
+      }
+      if (inBooks.kind === 'same') {
+        // A person said it is that bill: link to it rather than post, then check it
+        // the way a posted bill is checked, its total against the approved one.
+        await save({
+          status: 'pending', requestId, externalVendorId: inBooks.vendorId, externalBillId: inBooks.recordId, externalBillPaymentId: null,
+          error: null, metadataJson: { linkedFromBooks: true, number: inBooks.number },
+        });
+        logger.info('accounting_sync.bill_linked', { organizationId: order.organizationId, paymentOrderId, system, billId: inBooks.recordId });
+        return await syncApprovedBill(paymentOrderId);
+      }
     }
 
-    const posted = await postBillToQuickBooks(
-      qb,
-      {
-        id: requestId,
-        vendorLabel,
-        vendorId: vendor?.vendorId ?? null,
-        amountUsdc: Number(approvedCents) / 100,
-        invoiceNumber: order.invoiceNumber,
-        reference: order.externalReference,
-        codedLines: lines.map((l) => ({ accountId: l.accountId!, amount: Number(l.amount) || 0, description: l.description ?? null })),
-        taxAmount: amountsOfBill(order.metadataJson).tax,
-        docNumber,
-        txnDate: billHeader.billDate ?? null,
-        dueDate: order.dueAt?.toISOString().slice(0, 10) ?? null,
-      },
-      { apAccountId: map?.apAccountId ?? null },
-    );
-    await upsertSync(order.organizationId, paymentOrderId, {
+    // Kept until an answer comes, for a system that replays a send (above).
+    if (books.replaysSends) {
+      sent = replay ? sending : { key: `${requestId}_bill_${Date.now().toString(36)}`, at: new Date().toISOString() };
+      await save({ status: 'pending', requestId, metadataJson: { sending: sent } });
+    }
+    const posted = await books.post({
+      id: requestId,
+      vendorLabel,
+      vendorId: vendor?.vendorId ?? null,
+      amountUsdc: Number(approvedCents) / 100,
+      invoiceNumber: order.invoiceNumber,
+      reference: order.externalReference,
+      codedLines: lines.map((l) => ({ accountId: l.accountId!, amount: Number(l.amount) || 0, description: l.description ?? null })),
+      taxAmount: amountsOfBill(order.metadataJson).tax,
+      docNumber,
+      txnDate: billHeader.billDate ?? null,
+      dueDate: order.dueAt?.toISOString().slice(0, 10) ?? null,
+    }, sent?.key ?? `${requestId}_bill`);
+    await save({
       status: 'synced', requestId, externalVendorId: posted.vendorId, externalBillId: posted.billId, externalBillPaymentId: null,
-      externalBillBalance: posted.billBalance, error: null, syncedAt: new Date(),
+      externalBillBalance: posted.billBalance, error: null, syncedAt: new Date(), ...(sent ? { metadataJson: {} } : {}),
     });
-    logger.info('accounting_sync.bill_posted', { organizationId: order.organizationId, paymentOrderId, billId: posted.billId });
-    await attachInvoice(qb, order.organizationId, paymentOrderId, order.invoiceDocumentId, posted.billId);
+    logger.info('accounting_sync.bill_posted', { organizationId: order.organizationId, paymentOrderId, system, billId: posted.billId });
+    await attachInvoice(books, order.organizationId, paymentOrderId, order.invoiceDocumentId, posted.billId);
     return 'synced';
   } catch (error) {
-    if (error instanceof PostedTotalDiffers) {
+    if (error instanceof PostedTotalDiffers || error instanceof PostedUnchecked) {
       // It is in the books, so it must never post again. A person looks at it.
-      await upsertSync(order.organizationId, paymentOrderId, {
+      await save({
         status: 'error', requestId, externalVendorId: error.vendorId, externalBillId: error.billId, externalBillPaymentId: null,
-        error: error.message, incrementAttempts: true,
+        error: error.message, incrementAttempts: true, ...(sent ? { metadataJson: {} } : {}),
       });
-      logger.warn('accounting_sync.posted_total_differs', { organizationId: order.organizationId, paymentOrderId, billId: error.billId });
+      logger.warn('accounting_sync.posted_total_differs', { organizationId: order.organizationId, paymentOrderId, system, billId: error.billId });
       return 'error';
     }
-    return fail(plainQboReason(error));
+    // Sent, and no answer came: it may be there, so the next try sends it again with
+    // its key. Xero answered, so nothing was made: the next try gets a key of its own.
+    if (sent) return fail(books.plainReason(error), books.mayHaveLanded(error) ? { sending: sent } : {});
+    return fail(books.plainReason(error));
   }
 }
 
-/** What QuickBooks takes as an attachment, of the files Decimal reads. It has no WebP. */
+/** What both systems take as an attachment, of the files Decimal reads. QuickBooks has no WebP. */
 const ATTACHABLE = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/jpg', 'image/gif']);
 
 /**
- * The invoice goes on the bill in QuickBooks, the way a bookkeeper staples it on. Only on
+ * The invoice goes on the bill in the books, the way a bookkeeper staples it on. Only on
  * a bill Decimal posted: one linked from the books is somebody's own entry, with whatever
- * they attached. Best effort, because the bill is in the books already: if QuickBooks won't
+ * they attached. Best effort, because the bill is in the books already: if the books won't
  * take the file, the reason is kept on the sync and the posting stands. Once only, since a
  * posted bill is never posted again.
  */
-async function attachInvoice(qb: QuickBooks, organizationId: string, paymentOrderId: string, invoiceDocumentId: string | null, billId: string): Promise<void> {
+async function attachInvoice(books: Books, organizationId: string, paymentOrderId: string, invoiceDocumentId: string | null, billId: string): Promise<void> {
   if (!invoiceDocumentId) return;
   const doc = await prisma.invoiceDocument.findUnique({ where: { invoiceDocumentId }, select: { filename: true, mimeType: true, data: true } });
   if (!doc || !ATTACHABLE.has(doc.mimeType)) return;
-  const where = { paymentOrderId_provider: { paymentOrderId, provider: PROVIDER } };
+  const where = { paymentOrderId_provider: { paymentOrderId, provider: books.system } };
   try {
-    const attachmentId = await qb.uploadAttachment({ type: 'Bill', id: billId }, { fileName: doc.filename, contentType: doc.mimeType, bytes: Buffer.from(doc.data) });
+    const attachmentId = await books.attach(billId, { fileName: doc.filename, contentType: doc.mimeType, bytes: Buffer.from(doc.data) });
     await prisma.accountingSync.update({ where, data: { metadataJson: { attachmentId } } });
-    logger.info('accounting_sync.invoice_attached', { organizationId, paymentOrderId, billId, attachmentId });
+    logger.info('accounting_sync.invoice_attached', { organizationId, paymentOrderId, system: books.system, billId, attachmentId });
   } catch (error) {
-    const reason = plainQboReason(error);
+    const reason = books.plainReason(error);
     await prisma.accountingSync.update({ where, data: { metadataJson: { attachmentFailed: reason } } }).catch(() => null);
-    logger.warn('accounting_sync.invoice_not_attached', { organizationId, paymentOrderId, billId, error: reason });
+    logger.warn('accounting_sync.invoice_not_attached', { organizationId, paymentOrderId, system: books.system, billId, error: reason });
   }
 }
 

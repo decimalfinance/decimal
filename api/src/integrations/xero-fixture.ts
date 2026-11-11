@@ -74,8 +74,13 @@ export function fixtureXeroClient(fixture: XeroFixture, faults: XeroFixtureFault
           return { TrackingCategories: fixture.TrackingCategories.filter((t) => query.includeArchived === 'true' || t.Status === 'ACTIVE') };
         case 'Accounts':
           return paged('Accounts', fixture.Accounts.filter(where), {});
-        case 'Contacts':
-          return paged('Contacts', fixture.Contacts.filter((c) => (query.includeArchived === 'true' || c.ContactStatus === 'ACTIVE') && where(c)), query);
+        case 'Contacts': {
+          // searchTerm: Xero's own, case-insensitive, anywhere in these fields.
+          const term = query.searchTerm?.toLowerCase();
+          const found = (c: Row) => !term || ['Name', 'FirstName', 'LastName', 'ContactNumber', 'EmailAddress']
+            .some((field) => typeof c[field] === 'string' && (c[field] as string).toLowerCase().includes(term));
+          return paged('Contacts', fixture.Contacts.filter((c) => (query.includeArchived === 'true' || c.ContactStatus === 'ACTIVE') && where(c) && found(c)), query);
+        }
         case 'Invoices': {
           const statuses = listParam(query.Statuses);
           const numbers = listParam(query.InvoiceNumbers);

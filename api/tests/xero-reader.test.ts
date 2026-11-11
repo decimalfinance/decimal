@@ -114,7 +114,7 @@ test('xero reader: accounts keep their codes as numbers, archived ones read as i
   assert.equal(expected, 4);
   assert.equal(missing, 0);
   assert.deepEqual(records.find((a) => a.id === 'a-fuel'), {
-    id: 'a-fuel', name: 'Fuel', fullName: 'Fuel', number: '610', type: 'DIRECTCOSTS', subType: null, group: 'EXPENSE', parentId: null, currency: null, active: true,
+    id: 'a-fuel', name: 'Fuel', fullName: 'Fuel', number: '610', type: 'DIRECTCOSTS', subType: null, group: 'EXPENSE', parentId: null, currency: null, active: true, reserved: false,
   });
   assert.equal(records.find((a) => a.id === 'a-old')!.active, false);
   assert.equal(records.find((a) => a.id === 'a-card')!.subType, 'CREDITCARD');

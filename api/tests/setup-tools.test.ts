@@ -1857,7 +1857,7 @@ test("bill coding: after Go, a vendor's first bill fills in from its history in 
   assert.notEqual((await lineOf(await uploaded('Brightwave Media', 'BW-5', 'Stock photography licenses'))).categoryFrom?.kind, 'memory', 'disconnecting stops it, as the copy goes');
 });
 
-// ─── Xero: a rehearsal, on the bench only ─────────────────────────────────────
+// ─── Xero on the bench: a made-up organisation ────────────────────────────────
 
 const XERO_TENANT = '6f1c0d2a-1b7e-4c55-9a51-2f0a3c9e7d10';
 
@@ -1920,7 +1920,7 @@ test('setup tools: without the bench flag there is no Xero: no setup, no sign-in
   });
 });
 
-test('setup tools: Xero on the bench is a rehearsal: a pretend sign-in, the real Xero reader, and a Go that turns nothing on', async () => {
+test('setup tools: Xero on the bench: a pretend sign-in to a made-up organisation, the real Xero reader, and a Go that turns posting on', async () => {
   await withXero(xeroOrganisationFile(), async () => {
     const w = await makeOrg();
     assert.equal((await raw('GET', '/capabilities')).json.integrations.xeroRehearsal, true);
@@ -1959,19 +1959,20 @@ test('setup tools: Xero on the bench is a rehearsal: a pretend sign-in, the real
 
     const done = await post(`${pathOf(w, setupId)}/go`, {}, w.owner.token);
     assert.equal(done.status, 'done');
-    assert.equal(done.messages.at(-1).text, 'Done. That was a rehearsal: Decimal doesn\'t post to Xero yet, so nothing will post there. Nothing in Xero changed.');
+    assert.equal(done.messages.at(-1).text, 'Done. Posting is on. Nothing already in Xero changed.');
     const connection = await prisma.accountingConnection.findUniqueOrThrow({ where: { organizationId_provider: { organizationId: w.orgId, provider: 'xero' } } });
     assert.equal(connection.realmId, XERO_TENANT);
     assert.equal(connection.postingEnabledByUserId, w.owner.userId, 'the yes is kept, as with QuickBooks');
     assert.equal(await getConnection(w.orgId), null);
 
-    // A bill from a vendor the books know is coded from what a setup decided: only a setup of a system Decimal posts to.
+    // A bill from a vendor the books know is coded from what the setup decided. Only a setup of a
+    // system Decimal posts to does that: a rehearsal decides nothing for real bills.
     await prisma.counterparty.create({ data: { organizationId: w.orgId, displayName: 'Delta Freight, Inc.', category: 'vendor' } });
-    assert.deepEqual((await linesFromTheBooks(w.orgId)).precedents, [], 'a rehearsal decides nothing for real bills');
-    setConnectorForTests('xero', { posts: true });
+    const coded = await linesFromTheBooks(w.orgId);
+    assert.deepEqual(coded.precedents.map((p) => [p.vendorName, p.category, p.books]), [['Delta Freight, Inc.', 'Freight', 'Xero']]);
+    setConnectorForTests('xero', { posts: false });
     try {
-      const would = await linesFromTheBooks(w.orgId);
-      assert.deepEqual(would.precedents.map((p) => [p.vendorName, p.category, p.books]), [['Delta Freight, Inc.', 'Freight', 'Xero']], 'as it would, were it one');
+      assert.deepEqual((await linesFromTheBooks(w.orgId)).precedents, [], 'a rehearsal decides nothing');
     } finally {
       setConnectorForTests('xero', null);
     }
