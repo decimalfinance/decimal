@@ -25,6 +25,7 @@ import { readOutcome } from '../integrations/setup/outcome.js';
 import { xeroIsMadeUp, xeroWriteClientFor } from '../integrations/xero-connector.js';
 import { BillGone, PostedUnchecked, quickBooksBooks, type Books } from './books-poster.js';
 import { getQuickBooksForOrg, postingEnabledSince, postingTarget, type PostingTarget } from './connections.js';
+import { postingDateChoiceOf, postingDateFor } from './closed-period.js';
 import { PostedTotalDiffers, recordBillPaymentInQuickBooks, syncPaymentToQuickBooks } from './sync.js';
 import { BUILTIN_ACCOUNT_PREFIX } from './default-chart.js';
 import { vendorForBill } from './vendor-match.js';
@@ -207,7 +208,8 @@ export async function syncSettledPaymentOrder(paymentOrderId: string): Promise<A
         txSignature: signature,
         codedLines: codedLines && codedLines.length > 0 ? codedLines : undefined,
         docNumber: billHeader.invoiceNumber ?? order.invoiceNumber,
-        txnDate: billHeader.billDate ?? null,
+        // The first open day, when one was chosen in review for a closed period (closed-period.ts).
+        txnDate: postingDateFor(billHeader.billDate ?? null, postingDateChoiceOf(order.metadataJson)),
       },
       {
         clearingAccountId: map.clearingAccountId,
@@ -470,11 +472,14 @@ export async function syncApprovedBill(paymentOrderId: string): Promise<Accounti
     if (currency !== 'USD') {
       return await fail(`This bill is in ${currency}, and Decimal posts in USD only. Enter it in ${label} by hand.`);
     }
-    // A closed period stays closed, whether or not the books would only have warned.
+    // A closed period stays closed, whether or not the books would only have warned. A
+    // bill chosen in review to post on the first open day (closed-period.ts) posts dated
+    // that day while it still has the date it was chosen for, and keeps its own date.
     const billDate = billHeader.billDate?.trim() || null;
-    const closed = billDate ? await books.closedThrough(outcome) : null;
-    if (billDate && closed && billDate <= closed) {
-      return await fail(`This bill is dated ${billDate}, and the books are closed through ${closed}. Send it back to change the date, or reopen the period in ${label}, then retry.`);
+    const postOn = postingDateFor(billDate, postingDateChoiceOf(order.metadataJson));
+    const closed = postOn ? await books.closedThrough(outcome) : null;
+    if (postOn && closed && postOn <= closed) {
+      return await fail(`This bill is dated ${billDate}${postOn !== billDate ? ` (to post on ${postOn})` : ''}, and the books are closed through ${closed}. Send it back to post it in the open period, or reopen the period in ${label}, then retry.`);
     }
     const vendor = await vendorForBill(order.organizationId, system, books.companyId, vendorLabel, outcome) ?? await books.vendorNamed(vendorLabel);
     if (vendor && 'problem' in vendor) return await fail(vendor.problem);
@@ -533,8 +538,9 @@ export async function syncApprovedBill(paymentOrderId: string): Promise<Accounti
       codedLines: lines.map((l) => ({ accountId: l.accountId!, amount: Number(l.amount) || 0, description: l.description ?? null })),
       taxAmount: amountsOfBill(order.metadataJson).tax,
       docNumber,
-      txnDate: billHeader.billDate ?? null,
+      txnDate: postOn,
       dueDate: order.dueAt?.toISOString().slice(0, 10) ?? null,
+      note: postOn !== billDate ? `Invoice dated ${billDate}. Posted on ${postOn}, the first open day: the books were closed through its date.` : null,
     }, sent?.key ?? `${requestId}_bill`);
     await save({
       status: 'synced', requestId, externalVendorId: posted.vendorId, externalBillId: posted.billId, externalBillPaymentId: null,

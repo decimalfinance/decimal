@@ -104,6 +104,10 @@ export function historyItems(detail: BillDetail, note: BillCompanionNote | null 
     } else if (e.rule === 'bill_ceiling') {
       line = <><b>{name}</b> allowed it over the bill limit, this bill only{reason ? ',' : null}{because}</>;
       plain = `${name} allowed it over the bill limit`;
+    } else if (e.rule === 'posting_date') {
+      const what = m ? m[1]! : e.text;
+      line = <><b>{name}</b> <Figures text={what} />{reason ? ',' : null}{because}</>;
+      plain = `${name} ${what}`;
     } else if ((e.rule === 'similar_vendor' || e.rule === 'in_books') && reason && e.byName && reason.startsWith(`${e.byName} `)) {
       const rest = reason.slice(e.byName.length + 1);
       line = <><b>{name}</b> <Figures text={rest} /></>;

@@ -386,6 +386,14 @@ export function ConfirmCard({ card, flag, draft, totals, busy, onConfirm, onCanc
       'Allow this bill',
     );
   }
+  if (action === 'keep_date') {
+    const m = flag ? /, and (\S+) is closed through ([^.]+)\./.exec(flag.message) : null;
+    return reasonCard(
+      `Keep the date it has? ${m?.[1] ?? 'The books'} won’t take it until someone reopens the period there${m ? `, closed through ${m[2]}` : ''}. Why keep it? The approvers will read your reason.`,
+      'Your reason, in one line',
+      'Keep its date',
+    );
+  }
   if (action === 'this_is_us') {
     const ready = text.trim().length >= 2;
     return (

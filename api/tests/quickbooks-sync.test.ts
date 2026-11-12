@@ -19,6 +19,7 @@ import { enablePosting, setQuickBooksForTests } from '../src/accounting/connecti
 import { QboError } from '../src/accounting/quickbooks.js';
 import { syncApprovedBill, syncSettledPaymentOrder, sweepUnsyncedSettledOrders } from '../src/accounting/account-sync.js';
 import { drainBackgroundWork } from '../src/infra/background.js';
+import { forgetClosedBooksForTests } from '../src/accounting/closed-period.js';
 import { setExceptionAgentRuntimeForTests } from '../src/exceptions/agent.js';
 import { baseUrl, raw, post, get, makeWorld, confirmBody } from './helpers/companion-harness.js';
 
@@ -638,12 +639,66 @@ test('quickbooks: a bill dated in a closed period does not post, and the date in
   assert.equal((await retry()).outcome, 'synced');
   assert.equal(qb.calls.bills.length, 1);
 
-  // They closed a later month in QuickBooks. What setup was told is out of date, and this one is caught.
-  qb.state.closedThrough = '2026-08-31';
+  // Review goes by the books' date too, so with August open the next bill passes review...
+  forgetClosedBooksForTests();
   await post(`/organizations/${w.orgId}/bills/${w.bills.ready}/confirm`, confirmBody('SS-2', 310), w.owner.token);
+  // ...and then they closed August in QuickBooks. What setup was told is out of date, and posting looks again.
+  qb.state.closedThrough = '2026-08-31';
   await approve(w, w.bills.ready);
-  assert.match((await syncOf(w.bills.ready))?.error ?? '', /closed through 2026-08-31/);
+  assert.match((await syncOf(w.bills.ready))?.error ?? '', /dated 2026-08-02, and the books are closed through 2026-08-31\. Send it back to post it in the open period/);
   assert.equal(qb.calls.bills.length, 1);
+});
+
+test('quickbooks: a bill dated in a closed period is held at review, and posts on the first open day with its own date in the memo', async () => {
+  const w = await makeWorld();
+  const qb = fakeQuickBooks();
+  qb.state.closedThrough = '2026-08-31';
+  await connect(w.orgId);
+  const bill = `/organizations/${w.orgId}/bills/${w.bills.ready}`;
+  const flagOf = async () => ((await get(`${bill}/draft`, w.owner.token)).flags as Array<any>).find((f) => f.kind === 'dated_in_closed_period');
+  const choose = (token: string, body: unknown) => raw('POST', `${bill}/posting-date`, token, body);
+
+  const held = await flagOf();
+  assert.equal(held?.blocking, true, 'the books are read before anyone approves it');
+  assert.equal(held?.resolutions[0]?.label, 'Post it on 1 Sep 2026');
+  assert.notEqual((await raw('POST', `${bill}/confirm`, w.owner.token, confirmBody('SS-2', 310))).status, 200, 'review holds it');
+
+  // The first open day is anyone's fix. Keeping a closed date waits on reopening the period, an admin's call.
+  assert.equal((await choose(w.clerk.token, { choice: 'keep', reason: 'We will reopen August' })).status, 403);
+  const chosen = await choose(w.clerk.token, { choice: 'open_period' });
+  assert.equal(chosen.status, 200, chosen.text);
+  assert.equal(chosen.json.postOn, '2026-09-01');
+  assert.equal((await flagOf())?.short, 'Posts on 1 Sep 2026');
+
+  // Undo puts the hold back; an admin keeping the date lifts it, still a warning.
+  assert.equal((await choose(w.clerk.token, { choice: 'clear' })).status, 200);
+  assert.equal((await flagOf())?.blocking, true);
+  assert.equal((await choose(w.owner.token, { choice: 'keep', reason: 'Reopening August for the audit' })).status, 200);
+  const kept = await flagOf();
+  assert.deepEqual([kept?.short, kept?.blocking, kept?.severity], ['Kept a closed date', false, 'warning']);
+
+  // Posted on the first open day after all: QuickBooks gets that date, and the memo keeps the invoice's.
+  assert.equal((await choose(w.clerk.token, { choice: 'open_period' })).status, 200);
+  await post(`${bill}/confirm`, confirmBody('SS-2', 310), w.owner.token);
+  await approve(w, w.bills.ready);
+  assert.equal((await syncOf(w.bills.ready))?.status, 'synced');
+  const sent = qb.calls.bills[0]!.body;
+  assert.equal(sent.TxnDate, '2026-09-01');
+  assert.equal(sent.DueDate, '2026-08-30', 'when it is due is the vendor\'s, unchanged');
+  assert.match(sent.PrivateNote, /^Decimal decimal_\S+ \| SS-2 \| Invoice dated 2026-08-02\. Posted on 2026-09-01, the first open day/);
+
+  // Every choice is on the bill's record, with who made it.
+  const events = await prisma.paymentOrderEvent.findMany({
+    where: { paymentOrderId: w.bills.ready, eventType: 'policy_overridden' }, orderBy: { createdAt: 'asc' }, select: { actorId: true, payloadJson: true },
+  });
+  assert.deepEqual(events.map((e) => [(e.payloadJson as any).rule, (e.payloadJson as any).choice, e.actorId]), [
+    ['posting_date', 'open_period', w.clerk.userId],
+    ['posting_date', 'clear', w.clerk.userId],
+    ['posting_date', 'keep', w.owner.userId],
+    ['posting_date', 'open_period', w.clerk.userId],
+  ]);
+  // Once it is in the books its date is settled there, and the flag has nothing more to say.
+  assert.equal(await flagOf(), undefined);
 });
 
 test('quickbooks: a bill in another currency does not post its figures as dollars', async () => {

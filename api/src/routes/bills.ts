@@ -266,6 +266,36 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/pay-itemi
   }));
 }));
 
+// A bill dated in a period the books have closed: post it on the first open day,
+// keep its date, or take that back (choosePostingDate). Posting on the first open
+// day is the ordinary fix and anyone reviewing may make it; keeping the date waits
+// on someone reopening the period in the books, which is an admin's to plan.
+const postingDateSchema = z.discriminatedUnion('choice', [
+  z.object({ choice: z.literal('open_period') }),
+  z.object({ choice: z.literal('keep'), reason: z.string().trim().min(3).max(300) }),
+  z.object({ choice: z.literal('clear') }),
+]);
+
+billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/posting-date', asyncRoute(async (req, res) => {
+  const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
+  const { membership } = await assertOrganizationAccess(organizationId, req.auth!);
+  await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
+  const input = postingDateSchema.parse(req.body);
+  if (input.choice === 'keep' && !isAdminRole(membership?.role)) {
+    throw forbidden('Only an admin can keep a date the books have closed: reopening the period is theirs to plan.');
+  }
+  const user = await prisma.user.findUniqueOrThrow({ where: { userId: req.auth!.userId }, select: { displayName: true } });
+  const { choosePostingDate } = await import('../payments/bills.js');
+  res.json(await choosePostingDate({
+    organizationId,
+    paymentOrderId,
+    actorUserId: req.auth!.userId,
+    actorName: user.displayName,
+    choice: input.choice,
+    reason: input.choice === 'keep' ? input.reason : null,
+  }));
+}));
+
 // "This is us" — record a name the organization also trades under, resolving
 // the addressed_elsewhere flag for it permanently rather than dismissing it
 // once. Authority lives in addOrganizationTradingName; the route reports its

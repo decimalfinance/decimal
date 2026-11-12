@@ -27,7 +27,7 @@ import { findDuplicateBills, readDuplicateOverride, describeDuplicate, matchDupl
 import { companionReadiness } from '../companion/readiness.js';
 import { readCeilingException, activeCeilingException } from './ceiling-exception.js';
 import { readPayableHold, describePayableHold } from './vendor-payable.js';
-import { evaluateBillFlags, summarizeBillFlags, displayOrgName, systemName } from './bill-flags.js';
+import { evaluateBillFlags, summarizeBillFlags, dayText, displayOrgName, systemName } from './bill-flags.js';
 import { HIGHLIGHTABLE_FIELDS } from './question-fields.js';
 import type { BillFlag } from './bill-flags.js';
 import { getBillCeilingMinor } from '../approvals/store.js';
@@ -641,6 +641,32 @@ function priorBillsIn(
   return Math.max(0, (found?.billCount ?? 0) - 1);
 }
 
+/**
+ * The closed-period facts for the flag rules (accounting/closed-period.ts), loaded
+ * on first use: the date the books are closed through, read once per call, and each
+ * bill's own date and any posting date someone chose for it.
+ */
+async function closedPeriodLookup() {
+  const { closedBooksFor, dateOnly, postingDateChoiceOf } = await import('../accounting/closed-period.js');
+  return {
+    of: closedBooksFor,
+    factsFor(books: Awaited<ReturnType<typeof closedBooksFor>>, state: string, metadata: unknown, billDate: unknown, posted: boolean) {
+      // Once it is in the books, or past approval, its date is settled there.
+      if (!books || posted || (state !== 'draft' && state !== 'submitted')) return null;
+      return { ...books, billDate: dateOnly(billDate), inReview: state === 'draft', choice: postingDateChoiceOf(metadata) };
+    },
+    /** Which of these bills are in the books already. */
+    async postedOf(ids: string[]): Promise<Set<string>> {
+      if (ids.length === 0) return new Set();
+      const rows = await prisma.accountingSync.findMany({
+        where: { paymentOrderId: { in: ids }, externalBillId: { not: null } },
+        select: { paymentOrderId: true },
+      });
+      return new Set(rows.map((r) => r.paymentOrderId));
+    },
+  };
+}
+
 export async function flagsForOrder(
   organizationId: string,
   paymentOrderId: string,
@@ -687,8 +713,13 @@ export async function flagsForOrder(
   const directory = await loadVendorDirectory(organizationId);
   const similarVendors = similarVendorsIn(directory, vendorNameForFlags, order.counterpartyId);
   const { booksFactsFor } = await import('../accounting/books-check.js');
+  const closedBooks = await closedPeriodLookup();
+  const closedNow = await closedBooks.of(organizationId);
+  const posted = closedNow !== null && order.state === 'submitted' && (await closedBooks.postedOf([order.paymentOrderId])).size > 0;
   return evaluateBillFlags({
     inBooks: (await booksFactsFor(organizationId, [order.paymentOrderId])).get(order.paymentOrderId) ?? null,
+    closedPeriod: closedBooks.factsFor(closedNow, order.state, metadata,
+      (verifiedFields ? verifiedFields.invoiceDate : null) ?? extracted.invoiceDate, posted),
     similarVendors,
     priorBillsFromVendor: priorBillsIn(directory, order.counterpartyId),
     vendorName: order.counterparty?.displayName ?? order.counterpartyWallet.label,
@@ -1136,6 +1167,7 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
     where: { organizationId, paymentOrderId: { in: orders.map((o) => o.paymentOrderId) } },
     select: { paymentOrderId: true, provider: true, status: true, externalBillId: true, syncedAt: true, updatedAt: true },
   });
+  const postedOnBoard = new Set(syncs.filter((x) => x.externalBillId).map((x) => x.paymentOrderId));
   const postingByOrder = new Map<string, { status: 'posted' | 'failed' | 'pending' | 'held'; books: string; at: Date }>();
   for (const sync of syncs) {
     const books = systemName(sync.provider);
@@ -1159,6 +1191,9 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
   // up live from here: that happens when a bill is opened, and before it posts.
   const { booksFactsFor } = await import('../accounting/books-check.js');
   const booksByOrder = await booksFactsFor(organizationId, orders.map((o) => o.paymentOrderId));
+  const closedBooks = await closedPeriodLookup();
+  const closedOnBoard = await closedBooks.of(organizationId);
+
   const liveOrders = orders.filter((o) => o.state !== 'cancelled');
   // Once for the whole board, not once per row.
   const vendorDirectory = await loadVendorDirectory(organizationId);
@@ -1278,8 +1313,12 @@ export async function getBillsWorkbench(organizationId: string, viewerUserId: st
       ),
       (id) => liveById.get(id)?.metadataJson,
     );
+    const rowVerification = isRecord(metadataRecord.verification) ? metadataRecord.verification : null;
+    const rowVerified = rowVerification && isRecord(rowVerification.fields) ? rowVerification.fields : null;
     const flags = evaluateBillFlags({
       inBooks: booksByOrder.get(order.paymentOrderId) ?? null,
+      closedPeriod: closedBooks.factsFor(closedOnBoard, order.state, metadataRecord,
+        (rowVerified ? rowVerified.invoiceDate : null) ?? extracted?.invoiceDate, postedOnBoard.has(order.paymentOrderId)),
       // Matched against a directory loaded once for the whole board. Looking it
       // up per row would be a query per bill on the one screen built to show
       // many of them.
@@ -2183,8 +2222,13 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   const booksCheck = await import('../accounting/books-check.js');
   if (!opts.readOnly) await booksCheck.ensureBooksCheck(organizationId, order.paymentOrderId);
   const inBooks = (await booksCheck.booksFactsFor(organizationId, [order.paymentOrderId])).get(order.paymentOrderId) ?? null;
+  const closedBooks = await closedPeriodLookup();
+  const closedNow = await closedBooks.of(organizationId);
+  const postedNow = closedNow !== null && order.state === 'submitted' && (await closedBooks.postedOf([order.paymentOrderId])).size > 0;
   const flags = evaluateBillFlags({
     inBooks,
+    closedPeriod: closedBooks.factsFor(closedNow, order.state, metadata,
+      (verifiedFields ? verifiedFields.invoiceDate : null) ?? extracted.invoiceDate, postedNow),
     similarVendors: similarVendorsIn(
       draftDirectory,
       order.counterparty?.displayName ?? order.counterpartyWallet.label,
@@ -4181,6 +4225,98 @@ export async function payItemisedTotal(args: {
   });
 
   return getBillDraft(args.organizationId, args.paymentOrderId, args.actorUserId);
+}
+
+// A bill dated in a period the books have closed (accounting/closed-period.ts):
+// post it on the first open day, keep its date for a period someone will reopen,
+// or take that choice back. Chosen in review, where the flag is, and never moving
+// the bill's own date, which stays for when it is due and for spotting duplicates.
+// The first open day is worked out here from the books' date, not taken from the
+// screen. Who chose, and what, goes on the bill's history.
+export async function choosePostingDate(args: {
+  organizationId: string;
+  paymentOrderId: string;
+  actorUserId: string;
+  actorName: string;
+  choice: 'open_period' | 'keep' | 'clear';
+  reason?: string | null;
+}) {
+  const order = await prisma.paymentOrder.findFirst({
+    where: { organizationId: args.organizationId, paymentOrderId: args.paymentOrderId },
+    select: { paymentOrderId: true, state: true, metadataJson: true },
+  });
+  if (!order) throw notFound('Bill not found');
+  if (order.state !== 'draft') throw conflict('A bill’s posting date is chosen in review. Send it back to change it.');
+
+  const { closedBooksFor, dateOnly, firstOpenDay, postingDateChoiceOf } = await import('../accounting/closed-period.js');
+  const metadata = isRecord(order.metadataJson) ? order.metadataJson : {};
+  const verification = isRecord(metadata.verification) ? metadata.verification : null;
+  const fields = verification && isRecord(verification.fields) ? verification.fields : null;
+  const billDate = dateOnly(fields?.invoiceDate) ?? dateOnly(extractedOf(order.metadataJson)?.invoiceDate);
+  const previous = postingDateChoiceOf(metadata);
+  const at = new Date();
+
+  let next: import('../accounting/closed-period.js').PostingDateChoice | null = null;
+  if (args.choice !== 'clear') {
+    const books = await closedBooksFor(args.organizationId);
+    if (!books || !billDate || billDate > books.closedThrough) {
+      throw conflict('The books aren’t closed through this bill’s date, so there’s nothing to choose.');
+    }
+    next = {
+      kind: args.choice,
+      postOn: args.choice === 'open_period' ? firstOpenDay(books.closedThrough) : null,
+      billDate,
+      closedThrough: books.closedThrough,
+      system: books.system,
+      byUserId: args.actorUserId,
+      byName: args.actorName,
+      reason: args.choice === 'keep' ? args.reason?.trim() || null : null,
+      at: at.toISOString(),
+    };
+  } else if (!previous) {
+    return { postOn: null, draft: await getBillDraft(args.organizationId, args.paymentOrderId, args.actorUserId) };
+  }
+
+  const short = next?.kind === 'open_period' ? `chose to post it on ${dayText(next.postOn!)}, the first open day`
+    : next?.kind === 'keep' ? 'kept its date, in a closed period'
+    : 'took back the posting date chosen for it';
+  const flagsBefore = await flagsForOrder(args.organizationId, order.paymentOrderId);
+  const { postingDate: _dropped, ...rest } = metadata;
+  await prisma.$transaction([
+    prisma.paymentOrder.update({
+      where: { paymentOrderId: order.paymentOrderId },
+      data: { metadataJson: (next ? { ...rest, postingDate: next } : rest) as Prisma.InputJsonValue },
+    }),
+    prisma.paymentOrderEvent.create({
+      data: {
+        organizationId: args.organizationId,
+        paymentOrderId: order.paymentOrderId,
+        eventType: 'policy_overridden',
+        actorType: 'user',
+        actorId: args.actorUserId,
+        beforeState: order.state,
+        afterState: order.state,
+        payloadJson: {
+          rule: 'posting_date',
+          short,
+          choice: args.choice,
+          ...(next ? { postOn: next.postOn, billDate: next.billDate, closedThrough: next.closedThrough } : {}),
+          ...(next?.reason ? { reason: next.reason } : {}),
+        },
+        createdAt: at,
+      },
+    }),
+  ]);
+  await recordFlagChanges({
+    organizationId: args.organizationId,
+    paymentOrderId: order.paymentOrderId,
+    actorUserId: args.actorUserId,
+    before: flagsBefore,
+    after: await flagsForOrder(args.organizationId, order.paymentOrderId),
+    state: order.state,
+    at,
+  });
+  return { postOn: next?.postOn ?? null, draft: await getBillDraft(args.organizationId, args.paymentOrderId, args.actorUserId) };
 }
 
 // Send an already-APPROVED (but unpaid) bill back to draft — the recovery

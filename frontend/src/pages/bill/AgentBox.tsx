@@ -27,7 +27,7 @@ import {
 import { Avatar } from '../../kit/Avatar';
 import { useDismiss } from '../../kit/hooks';
 import { useToaster } from '../../kit/Toast';
-import { firstName } from '../../kit/format';
+import { calendarDay, firstName } from '../../kit/format';
 import { ActionPills, ConfirmCard, FindingText, pillsFor, type Access, type CardResult, type OpenCard, type Pill } from './Findings';
 import { closeReasonFor, findingsOf, linesSum, notesOf, parseMoney, restingMessage, type Face, type Fields, type Flag, type LineEntry } from './model';
 import { Chevron, FaceOf, Figures, Mark, Markdown, WaitBadge, chatTime } from './parts';
@@ -554,6 +554,23 @@ export function AgentBox({
       }
       return;
     }
+    if (pill.action === 'post_in_open_period') {
+      // Reversible, so it happens at once and the toast offers Undo.
+      setBusy(true);
+      try {
+        const { postOn } = await billsApi.setPostingDate(organizationId, billId, { choice: 'open_period' });
+        const undo = () => void billsApi.setPostingDate(organizationId, billId, { choice: 'clear' })
+          .then(() => refresh())
+          .catch((e) => toaster.show(e instanceof Error ? e.message : 'That didn’t go through. Try again.'));
+        toaster.show(`It posts to ${books} on ${postOn ? calendarDay(postOn) : 'the first open day'}. The bill keeps its own date.`, { undo });
+        await refresh();
+      } catch (e) {
+        toaster.show(e instanceof Error ? e.message : 'That didn’t go through. Try again.');
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     if (pill.action === 'different_bill') {
       if (!pill.targetId) return;
       setBusy(true);
@@ -588,6 +605,9 @@ export function AgentBox({
         await billsApi.overrideDuplicate(organizationId, billId, result.reason ?? '');
       } else if (card.action === 'allow_over_ceiling') {
         await billsApi.allowOverCeiling(organizationId, billId, result.reason ?? '');
+      } else if (card.action === 'keep_date') {
+        await billsApi.setPostingDate(organizationId, billId, { choice: 'keep', reason: result.reason ?? '' });
+        toaster.show(`Kept its date. ${Books} won’t take it until that period is reopened there.`);
       } else if (card.action === 'this_is_us') {
         await billsApi.thisIsUs(organizationId, billId, { name: result.name ?? '' });
         toaster.show('Recorded. Bills addressed to that name won’t be flagged again.');

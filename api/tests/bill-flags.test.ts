@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { namesLookRelated, evaluateBillFlags, summarizeBillFlags } from '../src/payments/bill-flags.js';
 import { activeCeilingException, readCeilingException } from '../src/payments/ceiling-exception.js';
 import { pickAddressConfidenceKey } from '../src/payments/bills.js';
+import { firstOpenDay, postingDateChoiceOf, postingDateFor, type PostingDateChoice } from '../src/accounting/closed-period.js';
 
 // The "addressed to someone else" gate. Getting this wrong in the permissive
 // direction means a bill made out to another company passes review silently,
@@ -796,4 +797,93 @@ test('an unsettled pair still blocks even when another pair on the same bill was
     duplicateClearances: [{ match: settled, clearance: { byName: 'Zara', reason: 'ok ok', at: '', onThisBill: true } }],
   }).find((f) => f.kind === 'possible_duplicate')!;
   assert.equal(flag.blocking, true);
+});
+
+// ─── Dated in a closed period ────────────────────────────────────────────────
+// QuickBooks and Xero refuse a bill dated on or before the date the books are
+// closed through. Review says so before the approval chain, not posting after it.
+
+const closed = (over: Partial<NonNullable<Parameters<typeof evaluateBillFlags>[0]['closedPeriod']>> = {}) => ({
+  ...baseFacts,
+  closedPeriod: { system: 'quickbooks', closedThrough: '2026-09-30', billDate: '2026-09-14', inReview: true, choice: null, ...over },
+});
+const choice = (over: Partial<PostingDateChoice> = {}): PostingDateChoice => ({
+  kind: 'open_period', postOn: '2026-10-01', billDate: '2026-09-14', closedThrough: '2026-09-30', system: 'quickbooks',
+  byUserId: 'u1', byName: 'Ines Park', reason: null, at: '2026-11-12T10:00:00.000Z', ...over,
+});
+const closedFlag = (facts: Parameters<typeof evaluateBillFlags>[0]) => evaluateBillFlags(facts).find((f) => f.kind === 'dated_in_closed_period');
+
+test('a bill dated in a closed period is held at review: the first open day is anyone\'s fix, keeping the date an admin\'s', () => {
+  const flag = closedFlag(closed());
+  assert.ok(flag);
+  assert.equal(flag.severity, 'warning');
+  assert.equal(flag.blocking, true);
+  assert.equal(flag.short, 'In a closed period');
+  assert.equal(flag.message, 'This bill is dated 14 Sep 2026, and QuickBooks is closed through 30 Sep 2026. QuickBooks won\'t take a bill dated in a closed period.');
+  assert.deepEqual(flag.resolutions.map((r) => [r.action, r.requires, r.noReason ?? false]), [
+    ['post_in_open_period', 'anyone', true],
+    ['keep_date', 'admin', false],
+    ['ask_someone', 'anyone', false],
+  ]);
+  assert.equal(flag.resolutions[0]!.label, 'Post it on 1 Oct 2026');
+});
+
+test('the day the books are closed through is closed; the day after is open', () => {
+  assert.ok(closedFlag(closed({ billDate: '2026-09-30' })));
+  assert.equal(closedFlag(closed({ billDate: '2026-10-01' })), undefined);
+  assert.equal(closedFlag(closed({ billDate: null })), undefined, 'no date, nothing to say');
+  assert.equal(closedFlag({ ...baseFacts, closedPeriod: null }), undefined);
+  assert.equal(closedFlag(closed({ system: 'xero' }))?.message.includes('Xero is closed through 30 Sep 2026'), true);
+});
+
+test('posting on the first open day settles it, and approvers read who chose it', () => {
+  const flag = closedFlag(closed({ choice: choice() }));
+  assert.ok(flag);
+  assert.equal(flag.severity, 'info');
+  assert.equal(flag.blocking, false);
+  assert.equal(flag.short, 'Posts on 1 Oct 2026');
+  assert.deepEqual(flag.resolutions, []);
+  assert.match(flag.message, /Ines Park chose to post it on 1 Oct 2026, the first open day/);
+});
+
+test('a choice stands only for the date it was made for, and the books it was made against', () => {
+  // The bill's date was corrected since.
+  assert.equal(closedFlag(closed({ billDate: '2026-09-20', choice: choice() }))?.blocking, true);
+  // The books closed October too: the first open day it chose is closed now.
+  const later = closedFlag(closed({ closedThrough: '2026-10-31', choice: choice() }));
+  assert.equal(later?.blocking, true);
+  assert.equal(later?.resolutions[0]?.label, 'Post it on 1 Nov 2026');
+});
+
+test('keeping its date clears the hold but stays a warning, and a later close raises it again', () => {
+  const kept = closedFlag(closed({ choice: choice({ kind: 'keep', postOn: null, reason: 'Reopening September for the audit' }) }));
+  assert.ok(kept);
+  assert.equal(kept.severity, 'warning');
+  assert.equal(kept.blocking, false);
+  assert.equal(kept.short, 'Kept a closed date');
+  assert.deepEqual(kept.resolutions.map((r) => r.action), ['post_in_open_period', 'ask_someone'], 'the first open day stays on offer');
+  assert.match(kept.message, /Ines Park kept its date: "Reopening September for the audit"\. QuickBooks won't take it until the period is reopened there\./);
+  assert.equal(closedFlag(closed({ closedThrough: '2026-10-31', choice: choice({ kind: 'keep', postOn: null }) }))?.blocking, true);
+});
+
+test('past review it holds nothing and its only answer is a question: the date is changed by sending it back', () => {
+  const flag = closedFlag(closed({ inReview: false }));
+  assert.ok(flag);
+  assert.equal(flag.blocking, false);
+  assert.deepEqual(flag.resolutions.map((r) => r.action), ['ask_someone']);
+  assert.match(flag.message, /send it back to post it in the open period\.$/);
+  const kept = closedFlag(closed({ inReview: false, choice: choice({ kind: 'keep', postOn: null }) }));
+  assert.deepEqual(kept?.resolutions.map((r) => r.action), ['ask_someone']);
+});
+
+test('posting goes by the chosen first open day only while the bill keeps the date it was chosen for', () => {
+  assert.equal(postingDateFor('2026-09-14', choice()), '2026-10-01');
+  assert.equal(postingDateFor('2026-09-20', choice()), '2026-09-20');
+  assert.equal(postingDateFor('2026-09-14', choice({ kind: 'keep', postOn: null })), '2026-09-14');
+  assert.equal(postingDateFor('2026-09-14', null), '2026-09-14');
+  assert.equal(postingDateFor(null, choice()), null);
+  assert.equal(firstOpenDay('2026-12-31'), '2027-01-01');
+  assert.equal(firstOpenDay('2028-02-28'), '2028-02-29');
+  assert.deepEqual(postingDateChoiceOf({ postingDate: { ...choice(), postOn: 'soon' } }), null, 'a malformed choice is no choice');
+  assert.equal(postingDateChoiceOf({ postingDate: choice() })?.postOn, '2026-10-01');
 });

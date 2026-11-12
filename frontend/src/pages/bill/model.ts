@@ -230,7 +230,7 @@ export function bodyOf(fields: Fields, lines: LineEntry[], note: string | null):
 const FINDING_ORDER = [
   'looks_like_statement', 'looks_like_credit_note', 'possible_duplicate', 'addressed_elsewhere',
   'vendor_blocked', 'vendor_held', 'over_ceiling', 'lines_do_not_sum', 'total_does_not_reconcile',
-  'payee_mismatch', 'unreadable_payment_details', 'similar_vendor', 'in_books', 'approval_weakened',
+  'payee_mismatch', 'unreadable_payment_details', 'similar_vendor', 'in_books', 'dated_in_closed_period', 'approval_weakened',
 ];
 const orderOf = (kind: string) => {
   const i = FINDING_ORDER.indexOf(kind);

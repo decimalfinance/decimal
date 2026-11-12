@@ -16,6 +16,7 @@
 // the workbench batches across all rows) and the verdict cannot diverge
 // between them, because there is only one copy of the reasoning.
 import type { BooksFlagFacts, BooksMatch } from '../accounting/books-check.js';
+import type { PostingDateChoice } from '../accounting/closed-period.js';
 import type { DuplicateClearance, DuplicateMatch } from './duplicate-check.js';
 import { ceilingExceptionCovers, type CeilingException } from './ceiling-exception.js';
 import { describeDuplicate } from './duplicate-check.js';
@@ -37,6 +38,7 @@ export const BILL_FLAG_KINDS = [
   'approval_weakened',
   'similar_vendor',
   'in_books',
+  'dated_in_closed_period',
   'lines_do_not_sum',
   'total_does_not_reconcile',
   'short_paid',
@@ -49,7 +51,8 @@ export type BillFlagKind = (typeof BILL_FLAG_KINDS)[number];
 export type FlagResolution = {
   /** Stable identifier the UI posts back. */
   action: 'this_is_us' | 'not_ours' | 'ask_someone' | 'clear_duplicate' | 'fix_fields' | 'raise_ceiling' | 'release_vendor' | 'pay_the_lines'
-    | 'same_vendor' | 'different_vendor' | 'allow_over_ceiling' | 'same_bill' | 'different_bill';
+    | 'same_vendor' | 'different_vendor' | 'allow_over_ceiling' | 'same_bill' | 'different_bill'
+    | 'post_in_open_period' | 'keep_date';
   label: string;
   /**
    * Who may take it. The UI greys what the viewer cannot do and says why.
@@ -153,6 +156,19 @@ export type BillFlagFacts = {
    */
   inBooks?: BooksFlagFacts | null;
   /**
+   * The date the books this team posts to are closed through, and this bill's own
+   * date as reviewed (accounting/closed-period.ts). Absent when it posts nowhere, the
+   * books keep no closing date, or the bill is past posting.
+   */
+  closedPeriod?: {
+    system: string;
+    closedThrough: string;
+    billDate: string | null;
+    /** Still in review, where its posting date can be chosen. */
+    inReview: boolean;
+    choice: PostingDateChoice | null;
+  } | null;
+  /**
    * Bills this org has had from this vendor BEFORE this one — counted now,
    * not when the document was uploaded.
    */
@@ -243,10 +259,19 @@ export function systemName(system: string): string {
   return system === 'quickbooks' ? 'QuickBooks' : system === 'xero' ? 'Xero' : system;
 }
 
-/** "8 Oct 2026" from "2026-10-08". */
-function dayText(date: string): string {
+/** The day after the books' closing date. Kept here, not imported, so the rules stay free of the database. */
+function firstOpenDayOf(closedThrough: string): string {
+  return new Date(Date.parse(`${closedThrough}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** "8 Oct 2026" from "2026-10-08". Spelled out by hand, as the pages do: en-GB now prints "Sept". */
+export function dayText(date: string): string {
   const at = Date.parse(`${date.slice(0, 10)}T00:00:00Z`);
-  return Number.isNaN(at) ? date : new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  if (Number.isNaN(at)) return date;
+  const d = new Date(at);
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 }
 
 /** A bill in the books, in words: "bill CT-41822 from Cal Telephone for $193.60, dated 8 Oct 2026". */
@@ -468,6 +493,56 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
         short: `Checked in ${system}`,
         resolutions: [],
         message: `${system} also has ${describeBooksBill(m)}. ${said?.byName ?? 'Someone'} said it's a different bill, so this one posts as its own.`,
+      });
+    }
+  }
+
+  // Dated in a period the books have closed.
+  //
+  // QuickBooks and Xero both refuse a bill dated on or before the date the books are
+  // closed through. Found only at posting, the bill has had its whole approval chain
+  // first, so review says so and offers the ordinary fix, which anyone may take: post
+  // it on the first open day, the bill keeping its own date for when it is due.
+  // Keeping the date instead waits on someone reopening the period, the books'
+  // owner's call, so it is an admin's. Either choice stands while the bill keeps the
+  // date it was made for and the books stay closed where they were.
+  const cp = facts.closedPeriod;
+  if (cp?.billDate && cp.billDate <= cp.closedThrough) {
+    const system = systemName(cp.system);
+    const choice = cp.choice && cp.choice.billDate === cp.billDate ? cp.choice : null;
+    const open = firstOpenDayOf(cp.closedThrough);
+    const postOnOpen: FlagResolution = { action: 'post_in_open_period', label: `Post it on ${dayText(open)}`, requires: 'anyone', noReason: true, detail: `${system} gets it dated ${dayText(open)}, the first open day. The bill keeps its own date for when it's due.` };
+    // Past review nothing here is a button: the page shows findings with no actions
+    // outside review, and a warning with none at all would show nowhere.
+    if (choice?.kind === 'open_period' && choice.postOn && choice.postOn > cp.closedThrough) {
+      // Settled: a note, for the approvers as much as anyone.
+      flags.push({
+        kind: 'dated_in_closed_period',
+        severity: 'info',
+        blocking: false,
+        short: `Posts on ${dayText(choice.postOn)}`,
+        resolutions: [],
+        message: `Dated ${dayText(cp.billDate)}, in a period ${system} is closed through. ${choice.byName} chose to post it on ${dayText(choice.postOn)}, the first open day. The bill keeps its own date for when it's due.`,
+      });
+    } else if (choice?.kind === 'keep' && choice.closedThrough === cp.closedThrough) {
+      flags.push({
+        kind: 'dated_in_closed_period',
+        severity: 'warning',
+        blocking: false,
+        short: 'Kept a closed date',
+        resolutions: cp.inReview ? [postOnOpen, ASK] : [ASK],
+        message: `Dated ${dayText(cp.billDate)}, and ${system} is closed through ${dayText(cp.closedThrough)}. ${choice.byName} kept its date${choice.reason ? `: "${choice.reason}"` : ''}. ${system} won't take it until the period is reopened there.`,
+      });
+    } else {
+      flags.push({
+        kind: 'dated_in_closed_period',
+        severity: 'warning',
+        blocking: cp.inReview,
+        short: 'In a closed period',
+        resolutions: cp.inReview
+          ? [postOnOpen, { action: 'keep_date', label: 'Keep its date', requires: 'admin', detail: `${system} won't take it until someone reopens the period there. Only when that's planned.` }, ASK]
+          : [ASK],
+        message: `This bill is dated ${dayText(cp.billDate)}, and ${system} is closed through ${dayText(cp.closedThrough)}. ${system} won't take a bill dated in a closed period${cp.inReview ? '.' : ': send it back to post it in the open period.'}`,
       });
     }
   }

@@ -31,6 +31,8 @@ export interface SyncablePayment {
   txnDate?: string | null;
   /** When it is due (YYYY-MM-DD). Absent, QuickBooks works it out from the vendor's terms. */
   dueDate?: string | null;
+  /** Added to the bill's memo in QuickBooks, after Decimal's own reference: why its date isn't the invoice's, when it isn't. */
+  note?: string | null;
   /** The tax on the bill, in dollars. Only ever a figure a person confirmed or the document printed. */
   taxAmount?: number | null;
   /** The vendor in the books, when something has already said which it is. */
@@ -177,6 +179,7 @@ export async function postBillToQuickBooks(
   if (docNumber) billBody.DocNumber = docNumber.slice(0, 21);
   if (payment.txnDate?.trim()) billBody.TxnDate = payment.txnDate.trim();
   if (payment.dueDate && isDate(payment.dueDate)) billBody.DueDate = payment.dueDate;
+  if (payment.note?.trim()) billBody.PrivateNote = `${billBody.PrivateNote} | ${payment.note.trim()}`.slice(0, 4000);
 
   const bill = (await qb.createBill(billBody, `${payment.id}_bill`)).Bill;
   // Read it back: what QuickBooks recorded is what counts, whatever was sent.

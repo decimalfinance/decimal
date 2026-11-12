@@ -315,7 +315,7 @@ test('xero: a bill dated on or before Xero\'s lock date doesn\'t post, and says 
   await approve(w);
   const sync = await syncOf(w.bills.submitted);
   assert.equal(sync?.status, 'error');
-  assert.equal(sync?.error, 'This bill is dated 2026-08-02, and the books are closed through 2026-08-31. Send it back to change the date, or reopen the period in Xero, then retry.');
+  assert.equal(sync?.error, 'This bill is dated 2026-08-02, and the books are closed through 2026-08-31. Send it back to post it in the open period, or reopen the period in Xero, then retry.');
   assert.equal(books.sent.filter((r) => r.method === 'PUT').length, 0);
 });
 

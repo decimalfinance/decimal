@@ -1369,7 +1369,8 @@ export interface BillDraft {
       action: 'this_is_us' | 'not_ours' | 'ask_someone' | 'clear_duplicate' | 'fix_fields' | 'raise_ceiling' | 'release_vendor' | 'pay_the_lines'
         | 'allow_over_ceiling'
         | 'same_vendor' | 'different_vendor'
-        | 'same_bill' | 'different_bill';
+        | 'same_bill' | 'different_bill'
+        | 'post_in_open_period' | 'keep_date';
       /** The answer is a determination, so the composer asks for no reason. */
       noReason?: boolean;
       /** The other record the answer is about. */
@@ -1564,6 +1565,19 @@ export const billsApi = {
     return request<BillDraft>(`/organizations/${organizationId}/bills/${paymentOrderId}/pay-itemised`, {
       method: 'POST',
       body: JSON.stringify({ reason }),
+    });
+  },
+  // A bill dated in a period the books have closed: post it on the first open
+  // day (anyone), keep its date (an admin, with a reason), or take that back.
+  // The bill's own date never moves; only the date the books get.
+  setPostingDate(
+    organizationId: string,
+    paymentOrderId: string,
+    body: { choice: 'open_period' } | { choice: 'keep'; reason: string } | { choice: 'clear' },
+  ) {
+    return request<{ postOn: string | null; draft: BillDraft }>(`/organizations/${organizationId}/bills/${paymentOrderId}/posting-date`, {
+      method: 'POST',
+      body: JSON.stringify(body),
     });
   },
   // Admin-only: clear the duplicate-bill flag with a logged reason.
