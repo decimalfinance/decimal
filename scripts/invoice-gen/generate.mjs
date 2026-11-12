@@ -1,6 +1,6 @@
 // Decimal — synthetic invoice generator v3.
 //
-// Renders the 22 cases from TESTING-INVOICES.md (cases.mjs) through headless
+// Renders every case from TESTING-INVOICES.md (cases.mjs) through headless
 // Brave driven by puppeteer-core (Brave's own --print-to-pdf CLI hangs and
 // never exits), with sips for image conversion. Output is deterministic apart
 // from PDF metadata timestamps (which is what keeps B4 byte-different from A2).
@@ -238,13 +238,19 @@ console.log('\nAll self-checks passed.');
 // ---- catalog + README ------------------------------------------------------
 fs.writeFileSync(path.join(OUT, 'catalog.json'), JSON.stringify(catalog, null, 2) + '\n');
 
+const xPairs = catalog.filter((c) => c.pairWith);
+const xVerdicts = xPairs.map((c) => `${c.pairWith.slice(0, -1)} ${c.expectedVerdict}`).join(', ');
+const nSeries = (letter) => catalog.filter((c) => c.id.startsWith(letter)).length;
+const seriesList = [['A', 'routing'], ['B', 'draft gates'], ['C', 'extraction'], ['D', 'shape variety'], ['E', 'payment path'], ['F', 'companion'], ['X', 'duplicate pairs']]
+  .map(([l, n]) => `${l} ${n} (${nSeries(l)})`).join(' · ');
+
 const tableRows = catalog.map((c) =>
   `| ${c.id} | \`${c.file}\` | ${c.vendor} | ${c.documentTotal ?? '—'} | ${c.expect} |`).join('\n');
 
 fs.writeFileSync(path.join(OUT, 'README.md'), `# Testing Labs — synthetic invoice set v3
 
-22 invoices, one per branch or gate of the Draft → Approval → Pay pipeline.
-Spec: \`TESTING-INVOICES.md\` (repo root). Regenerate with:
+${catalog.length} invoices in six upload series (A–F) and one eval series (X), one per branch or gate of the
+Draft → Approval → Pay pipeline. Spec: \`TESTING-INVOICES.md\` (repo root). Regenerate with:
 
 \`\`\`
 node scripts/invoice-gen/generate.mjs
@@ -275,6 +281,26 @@ proving the split is vendor history, not amount.
 | # | File | Vendor | Doc total | What it proves |
 |---|---|---|---|---|
 ${tableRows}
+
+## F-companion: line memory and findings
+
+F1 to F4 lean on Brightwave history built by A and E: upload them after A1 → A4.
+Expectations are in the table; the findings name BW-2219, BW-2245 and BW-2195.
+
+## X-duplicates: the duplicate investigator's pairs
+
+${xPairs.length} pairs (X1a/X1b to X${xPairs.length}a/X${xPairs.length}b), each from its own vendor and each
+tripping the duplicate flag. \`api/scripts/exception-eval.mts\` reads them from
+\`catalog.json\` (\`pairWith\`, \`expectedVerdict\`, \`expect\`) and uploads them
+itself: do not upload these by hand into a team you care about.
+Expected verdicts: ${xVerdicts}.
+
+Render only a new series with \`node scripts/invoice-gen/generate.mjs --out <scratch>\`
+and copy that folder in: a full render re-stamps every PDF and changes bytes.
+
+## Series
+
+${seriesList}
 
 ## Notes
 
