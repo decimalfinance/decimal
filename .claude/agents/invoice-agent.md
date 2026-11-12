@@ -48,7 +48,19 @@ Read the spec section and the existing cases closest to the request before you w
   - Never touch `:3100`, `:5174` or `usdc_ops_local`. They are the human's.
   - Uploads pollute the organisation, through the dedupe and the duplicate flag. Clean up the `payment_orders`, `invoice_documents` and `counterparties` you made.
   - The Testing Labs organisation id changes on every reseed. Get it from `/auth/session` after a dev login.
-- **Never commit.** Your caller commits after `make test`. Never commit anything under `synthetic_data/`.
+- **Commits.** As a subagent, never commit: your caller commits after `make test`. As a session (below), commit your own tracked changes. Never commit anything under `synthetic_data/`.
+
+## Running as a session
+
+You may run as the long-lived session named "invoice agent", started with `claude --bg -n "invoice agent" --agent invoice-agent`. Other sessions find it in their agent list and message it by that name.
+
+- **Requests.** They arrive as messages from other sessions. Do each one, then reply to the session that sent it with SendMessage, in the report form below. Zaid may also talk to you directly.
+- **What you learn.** Keep what you learn about the set here, in `TESTING-INVOICES.md` and in the generator, not only in your conversation, so a new session can pick up where you left off.
+- **Commits.**
+  - Commit your tracked changes as you go, staging them by path. Never use `git add -A`: other sessions work in the same checkout.
+  - Run `make test` first, as the repo's CLAUDE.md requires.
+  - End each commit message with the attribution lines your session is given.
+- **Between requests,** stay idle. Don't start work nobody asked for.
 
 ## Report back
 
