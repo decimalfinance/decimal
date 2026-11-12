@@ -48,7 +48,7 @@ function totalsBlock(c, fmt, { taxLabel = 'Tax' } = {}) {
     </tr>`;
   let out = '<table style="width:auto; margin-left:auto; font-size:10.5px;">';
   out += row('Subtotal', c.shownSubtotal);
-  if (c.shownTax != null) out += row(taxLabel, c.shownTax);
+  if (c.shownTax != null) out += row(c.taxLabel ?? taxLabel, c.shownTax);
   out += row('Total due', c.shownTotal, true);
   out += '</table>';
   return out;
@@ -337,6 +337,20 @@ function scene(mode, paperHtml, stampDate) {
   throw new Error(`unknown degrade mode: ${mode}`);
 }
 
+// ---- Overlays (X series): a diagonal stamp and a boxed note ------------------
+// Absolutely positioned over the paper (which is position:relative), so they
+// work on every layout. Text stays in the PDF text layer.
+function overlays(spec) {
+  let out = '';
+  if (spec.stamp) {
+    out += `<div style="position:absolute; left:3.3in; top:5.2in; transform: rotate(-16deg); border:4px solid rgba(178,34,34,0.6); color:rgba(178,34,34,0.65); font-family:Helvetica,sans-serif; font-weight:800; font-size:44px; letter-spacing:0.22em; padding:4px 22px; border-radius:6px;">${esc(spec.stamp)}</div>`;
+  }
+  if (spec.note) {
+    out += `<div style="position:absolute; left:0.6in; right:0.6in; top:7.3in; border:1.5px solid #333; padding:10px 14px; font-family:Helvetica,Arial,sans-serif; font-size:11px; line-height:1.5; color:#1a1a1a; background:#fafafa;">${esc(spec.note)}</div>`;
+  }
+  return out;
+}
+
 // ---- Entry point ------------------------------------------------------------
 // Returns a full HTML document for either print-to-pdf or screenshot capture.
 export function buildHtml(spec, vendor, computed) {
@@ -369,6 +383,6 @@ export function buildHtml(spec, vendor, computed) {
     html, body { width: 8.5in; }
     /* Definite height, not min-height: flex children (sidebar stretch, flex:1
        rows, margin-top:auto footers) get no free space from min-height alone. */
-    .paper { width: 8.5in; height: 10.9in; padding: 0.6in; overflow: hidden; }
-  </style></head><body>${paper}${spec.renderSalt ? `<!-- ${spec.renderSalt} -->` : ''}</body></html>`;
+    .paper { width: 8.5in; height: 10.9in; padding: 0.6in; overflow: hidden; position: relative; }
+  </style></head><body>${paper}${overlays(spec)}${spec.renderSalt ? `<!-- ${spec.renderSalt} -->` : ''}</body></html>`;
 }

@@ -43,6 +43,7 @@ function compute(spec) {
     c.shownSubtotal = spec.printedSubtotal ?? c.subtotalCents / 100;
     c.shownTax = spec.printedTax ?? (c.taxCents == null ? null : c.taxCents / 100);
     c.shownTotal = spec.printedTotal ?? c.trueTotalCents / 100;
+    c.taxLabel = spec.taxLabel;
   }
   if (spec.statementRows) {
     c.shownTotal = spec.statementRows.filter((r) => r.status === 'Open').reduce((s, r) => s + r.amount, 0);
@@ -121,6 +122,7 @@ for (const spec of CASES) {
     currency: spec.currency ?? 'USD',
     documentTotal: computed.shownTotal != null ? fmt(computed.shownTotal) : null,
     expect: spec.expect,
+    ...(spec.pairWith ? { pairWith: spec.pairWith, expectedVerdict: spec.expectedVerdict } : {}),
   });
   console.log(`  ${spec.id}  ${spec.file}`);
 }
@@ -159,8 +161,8 @@ for (const { spec, computed } of Object.values(byId)) {
 }
 
 // Invoice numbers unique except the A2/B4 pair; A3's vendor appears once.
-const nums = CASES.filter((s) => s.invoiceNo && s.id !== 'B4').map((s) => s.invoiceNo);
-check(new Set(nums).size === nums.length, 'invoice numbers must be unique apart from B4');
+const nums = CASES.filter((s) => s.invoiceNo && s.id !== 'B4' && !s.pairWith).map((s) => s.invoiceNo);
+check(new Set(nums).size === nums.length, 'invoice numbers must be unique apart from B4 and the X pairs');
 check(CASES.filter((s) => s.vendor === 'juniper').length === 1, "A3's vendor must appear nowhere else");
 
 // E3–E6 test the per-bill ceiling exception, so the ceiling must be their only
@@ -169,6 +171,32 @@ for (const id of ['E3', 'E4', 'E5', 'E6']) {
   const { spec, computed } = byId[id];
   check(cents(computed.shownTotal) > 10_000_000, `${id} must be over the $100,000 ceiling`);
   check(CASES.filter((s) => s.vendor === spec.vendor).length === 1, `${id}'s vendor must appear nowhere else`);
+}
+
+// X series: six duplicate-investigator pairs. Each pair is one vendor that
+// appears nowhere else, and each must trip the duplicate gate (same invoice
+// number, or no number on at least one side and exactly equal totals).
+const normNo = (n) => (n ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '') || null;
+const XEXPECT = {
+  X1: { sameNo: true, sameTotal: true, sameBytes: false },
+  X2: { sameNo: true, sameTotal: false },
+  X3: { sameNo: false, noNumber: true, sameTotal: true },
+  X4: { sameNo: false, noNumber: true, sameTotal: true, sameBytes: false },
+  X5: { sameNo: true, sameTotal: false },
+  X6: { sameNo: false, noNumber: true, sameTotal: true },
+};
+for (const [n, want] of Object.entries(XEXPECT)) {
+  const a = byId[`${n}a`], b = byId[`${n}b`];
+  if (!a || !b) { check(false, `${n}: both halves must exist`); continue; }
+  check(a.spec.vendor === b.spec.vendor, `${n}: both invoices must be from one vendor`);
+  check(CASES.filter((s) => s.vendor === a.spec.vendor).length === 2, `${n}: its vendor must appear nowhere else`);
+  check(b.spec.pairWith === `${n}a`, `${n}b must pair with ${n}a`);
+  const sameTotal = cents(a.computed.shownTotal) === cents(b.computed.shownTotal);
+  check(sameTotal === want.sameTotal, `${n}: totals ${want.sameTotal ? 'must be equal' : 'must differ'}`);
+  const na = normNo(a.spec.invoiceNo), nb = normNo(b.spec.invoiceNo);
+  if (want.noNumber) check(!na && !nb && sameTotal, `${n}: no numbers and equal totals needed to trip the gate`);
+  else check(na && na === nb, `${n}: same invoice number needed to trip the gate`);
+  if (want.sameBytes === false) check(sha(a.outPath) !== sha(b.outPath), `${n}: files must differ byte-wise`);
 }
 
 // Text layer + renderability (uses the same tools intake uses, when present).

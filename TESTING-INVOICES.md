@@ -128,6 +128,30 @@ cases live in `scripts/invoice-gen/cases.mjs` like the rest.)
 
 ---
 
+## X. The duplicate investigator: six pairs (12 invoices)
+
+Pairs for `api/scripts/exception-eval.mts`, which uploads each pair itself
+(a, then b) and checks the exception agent's verdict. Both invoices in a pair
+come from one fictional vendor (same name and address, so one vendor in
+Decimal), used nowhere else, billed to Testing Labs. Every pair trips the
+duplicate gate (`api/src/payments/duplicate-check.ts`): the same invoice number
+(letters and digits, case ignored), or no number on at least one side and
+exactly equal totals. The second of each pair carries `pairWith`,
+`expectedVerdict` and `expect` in `catalog.json`. Files are in `X-duplicates/`.
+
+| Pair | Vendor | a | b | Verdict |
+|---|---|---|---|---|
+| X1 | Larkspur Courier Services | LCS-40417, $822.00 | same invoice re-rendered with a COPY stamp (different bytes) | duplicate |
+| X2 | Fernhill Landscape Co | FLC-2209, $2,400 + 10% tax (wrong) = $2,640.00 | "Corrected invoice", FLC-2209, 8.25% tax = $2,598.00, says it replaces the first | replacement |
+| X3 | Orchard Lane Properties | no number, "Rent for October", $3,800.00 | no number, "Rent for November", $3,800.00 | not_duplicate |
+| X4 | Thornbury Estates LLC | no number, "Rent for October", $4,250.00 | the same invoice sent again (different bytes) | duplicate |
+| X5 | Kestrel Industrial Repair | KIR-3305, "Panel repair, Bay 2", $1,685.00, 2026-09-14 | KIR-3305 reused for a Bay 5 compressor overhaul, $2,975.50, 2026-10-27 | not_duplicate |
+| X6 | Quillfeather Advisory | no number, "Consulting services, 10 hours", $1,500.00, 2026-10-06 | same line and total, 2026-10-15, nothing else to tell them apart | unsure |
+
+The gate matches on upload time, not invoice date, so X3, X4 and X6 trip the
+14-day same-amount rule when uploaded together. Two different invoice numbers
+never trip it, which is why there is no pair of that kind.
+
 ## Format requirements
 
 - **PDF preferred**, one invoice per file. Images (PNG/JPEG/HEIC) welcome for
@@ -145,7 +169,7 @@ cases live in `scripts/invoice-gen/cases.mjs` like the rest.)
 
 - Don't make every invoice pathological. Sections A and E must be **clean** —
   if everything is broken, a real flag stops standing out.
-- Don't reuse invoice numbers across vendors except where B4 requires it.
+- Don't reuse invoice numbers across vendors except where B4 requires it. (The X pairs reuse a number within one vendor, on purpose.)
 - Don't bill anything to a company other than Testing Labs except B1.
 - Don't generate hundreds. 22 invoices covering distinct behaviour beats 200
   that all take the same path.

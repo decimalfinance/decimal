@@ -132,6 +132,42 @@ export const VENDORS = {
     bank: 'Charles River Bank', routing: '011000138', acct: '3307',
     accent: '#5a3e85', template: 'minimal',
   },
+  larkspur: {
+    name: 'Larkspur Courier Services', addr: '63 Mill St', city: 'Providence, RI 02903',
+    email: 'billing@larkspurcourier.example', phone: '(401) 555-0147',
+    bank: 'Narragansett Savings Bank', routing: '011500010', acct: '2046',
+    accent: '#b5651d', template: 'letterhead',
+  },
+  fernhill: {
+    name: 'Fernhill Landscape Co', addr: '4120 Orchard Rd', city: 'Sacramento, CA 95821',
+    email: 'ar@fernhilllandscape.example', phone: '(916) 555-0183',
+    bank: 'Delta Valley Bank', routing: '121000248', acct: '8159',
+    accent: '#386641', template: 'minimal',
+  },
+  orchardlane: {
+    name: 'Orchard Lane Properties', addr: '250 Elm Plaza, Suite 100', city: 'Denver, CO 80203',
+    email: 'rent@orchardlane.example', phone: '(303) 555-0156',
+    bank: 'Front Range Bank', routing: '102000021', acct: '3921',
+    accent: '#5c4d7d', template: 'letterhead',
+  },
+  thornbury: {
+    name: 'Thornbury Estates LLC', addr: '31 Quarry Way', city: 'Providence, RI 02908',
+    email: 'accounts@thornburyestates.example', phone: '(401) 555-0129',
+    bank: 'Blackstone River Bank', routing: '011600033', acct: '6408',
+    accent: '#6d6027', template: 'minimal',
+  },
+  kestrel: {
+    name: 'Kestrel Industrial Repair', addr: '900 Foundry Ln', city: 'Cleveland, OH 44113',
+    email: 'billing@kestrelrepair.example', phone: '(216) 555-0172',
+    bank: 'Lakeview Trust Bank', routing: '041000124', acct: '7730',
+    accent: '#9a3324', template: 'letterhead',
+  },
+  quillfeather: {
+    name: 'Quillfeather Advisory', addr: '18 Wicker Park Ave', city: 'Chicago, IL 60622',
+    email: 'billing@quillfeather.example', phone: '(773) 555-0118',
+    bank: 'Prairie State Bank', routing: '071000288', acct: '1763',
+    accent: '#355c7d', template: 'minimal',
+  },
 };
 
 const L = (desc, qty, unit) => ({ desc, qty, unit });
@@ -145,6 +181,25 @@ const A2_SPEC = {
     L('Social media management — August', 1, 3200),
     L('Content production (4 assets)', 4, 325),
   ],
+};
+
+// X1 and X4: each pair shares one spec; the second is the same invoice
+// re-rendered into different bytes (a stamp, or just a fresh render).
+const X1_SPEC = {
+  vendor: 'larkspur', invoiceNo: 'LCS-40417', date: '2026-10-05', due: '2026-11-04',
+  terms: 'Net 30',
+  lines: [
+    L('Same-day courier runs — September', 42, 18.5),
+    L('Monthly account fee', 1, 45),
+  ],
+};
+const X2_LINES = [
+  L('Grounds maintenance — October', 1, 1850),
+  L('Seasonal planting, front beds', 1, 550),
+];
+const X4_SPEC = {
+  vendor: 'thornbury', date: '2026-10-01', due: '2026-10-10', terms: 'Due on receipt',
+  lines: [L('Rent for October — Unit 4B warehouse', 1, 4250)],
 };
 
 export const CASES = [
@@ -510,5 +565,86 @@ export const CASES = [
       { no: 'BW-2245', date: '2026-09-03', amount: 1150, status: 'Open' },
     ],
     expect: 'Statement against our books → looks_like_statement; the finding: close it, BW-2245 ($1,150) is open and not in Decimal (get it), Brightwave marks BW-2195 paid but it is not in Decimal (check). BW-2210 and BW-2219 are already here.',
+  },
+  // ---- X. The duplicate investigator: six pairs ----------------------------
+  // Both bills of a pair come from one vendor (same name and address), so
+  // Decimal files them under one vendor, and every pair trips the duplicate
+  // gate: the same invoice number, or no number and exactly equal totals. The
+  // second of each pair carries pairWith + expectedVerdict, which is what
+  // api/scripts/exception-eval.mts reads. Upload a then b; the eval does it.
+  {
+    id: 'X1a', file: 'X-duplicates/X1a-courier-original.pdf', format: 'pdf', ...X1_SPEC,
+    expect: 'Original of the X1 pair.',
+  },
+  {
+    id: 'X1b', file: 'X-duplicates/X1b-courier-copy-stamp.pdf', format: 'pdf', ...X1_SPEC,
+    stamp: 'COPY', renderSalt: 'x1-copy-stamp',
+    pairWith: 'X1a', expectedVerdict: 'duplicate',
+    expect: 'The same LCS-40417, lines and total re-rendered with a COPY stamp (different bytes) → a plain duplicate of X1a.',
+  },
+  {
+    id: 'X2a', file: 'X-duplicates/X2a-landscape-wrong-tax.pdf', format: 'pdf',
+    vendor: 'fernhill', invoiceNo: 'FLC-2209', date: '2026-10-12', due: '2026-11-11', terms: 'Net 30',
+    taxRate: 0.10, taxLabel: 'Sales tax (10%)',
+    lines: X2_LINES,
+    expect: 'Original of the X2 pair: $2,400 plus tax charged at 10% (wrong), total $2,640.',
+  },
+  {
+    id: 'X2b', file: 'X-duplicates/X2b-landscape-corrected.pdf', format: 'pdf',
+    vendor: 'fernhill', invoiceNo: 'FLC-2209', date: '2026-10-16', due: '2026-11-15', terms: 'Net 30',
+    taxRate: 0.0825, taxLabel: 'Sales tax (8.25%)',
+    lines: X2_LINES,
+    note: 'CORRECTED INVOICE. This replaces invoice FLC-2209 dated 2026-10-12. Sales tax was charged at 10% in error; the correct rate is 8.25%. Please discard the first invoice and pay this one.',
+    pairWith: 'X2a', expectedVerdict: 'replacement',
+    expect: 'Same FLC-2209, tax fixed (total $2,598 vs $2,640), and it says it replaces the first → replacement: pay b, close a.',
+  },
+  {
+    id: 'X3a', file: 'X-duplicates/X3a-rent-october.pdf', format: 'pdf',
+    vendor: 'orchardlane', date: '2026-10-01', due: '2026-10-10', terms: 'Due on receipt',
+    lines: [L('Rent for October — Suite 210', 1, 3800)],
+    expect: 'Original of the X3 pair: no invoice number, rent for October, $3,800.',
+  },
+  {
+    id: 'X3b', file: 'X-duplicates/X3b-rent-november.pdf', format: 'pdf',
+    vendor: 'orchardlane', date: '2026-11-01', due: '2026-11-10', terms: 'Due on receipt',
+    lines: [L('Rent for November — Suite 210', 1, 3800)],
+    pairWith: 'X3a', expectedVerdict: 'not_duplicate',
+    expect: 'No numbers and the same $3,800, but it is rent for a different month (October vs November) → not_duplicate: recurring rent, two real bills.',
+  },
+  {
+    id: 'X4a', file: 'X-duplicates/X4a-warehouse-rent-original.pdf', format: 'pdf', ...X4_SPEC,
+    expect: 'Original of the X4 pair: no invoice number, rent for October, $4,250.',
+  },
+  {
+    id: 'X4b', file: 'X-duplicates/X4b-warehouse-rent-resent.pdf', format: 'pdf', ...X4_SPEC,
+    renderSalt: 'x4-resent',
+    pairWith: 'X4a', expectedVerdict: 'duplicate',
+    expect: 'The same October rent invoice sent again (same date, line and $4,250; different bytes, no number to compare) → duplicate.',
+  },
+  {
+    id: 'X5a', file: 'X-duplicates/X5a-repair-panel-bay2.pdf', format: 'pdf',
+    vendor: 'kestrel', invoiceNo: 'KIR-3305', date: '2026-09-14', due: '2026-10-14', terms: 'Net 30', po: 'PO-8012',
+    lines: [L('Panel repair, Bay 2 — labour', 11, 95), L('Replacement control panel, Bay 2', 1, 640)],
+    expect: 'Original of the X5 pair: KIR-3305, panel repair in Bay 2, $1,685.',
+  },
+  {
+    id: 'X5b', file: 'X-duplicates/X5b-reused-number-other-job.pdf', format: 'pdf',
+    vendor: 'kestrel', invoiceNo: 'KIR-3305', date: '2026-10-27', due: '2026-11-26', terms: 'Net 30', po: 'PO-8044',
+    lines: [L('Compressor overhaul, Bay 5 — labour', 18, 95), L('Compressor rebuild kit, Bay 5', 1, 1265.5)],
+    pairWith: 'X5a', expectedVerdict: 'not_duplicate',
+    expect: 'The vendor reused KIR-3305 for different work: another job (Bay 5 compressor), date six weeks later and total $2,975.50 vs $1,685 → not_duplicate despite the matching number.',
+  },
+  {
+    id: 'X6a', file: 'X-duplicates/X6a-consulting-oct-06.pdf', format: 'pdf',
+    vendor: 'quillfeather', date: '2026-10-06', due: '2026-11-05', terms: 'Net 30',
+    lines: [L('Consulting services, 10 hours', 10, 150)],
+    expect: 'Original of the X6 pair: no number, "Consulting services, 10 hours", $1,500.',
+  },
+  {
+    id: 'X6b', file: 'X-duplicates/X6b-consulting-oct-15.pdf', format: 'pdf',
+    vendor: 'quillfeather', date: '2026-10-15', due: '2026-11-14', terms: 'Net 30',
+    lines: [L('Consulting services, 10 hours', 10, 150)],
+    pairWith: 'X6a', expectedVerdict: 'unsure',
+    expect: 'Same line and $1,500, dated 9 days later, nothing else to tell them apart (no number, no PO, no description of the work) → unsure: could be a resend or a second ten hours; ask the vendor.',
   },
 ];
