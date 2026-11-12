@@ -17,7 +17,7 @@ Decimal is an accounts-payable product. A bill arrives by upload or forwarded em
 | Anything non-trivial | `docs/ARCHITECTURE.md` |
 | Creating or editing any page | `frontend/src/pages/PAGE-PLAYBOOK.md`. Mandatory. |
 | Verifying a change in the browser | `TESTBENCH.md` |
-| Generating test invoices | `TESTING-INVOICES.md` |
+| Generating test invoices | Hand it to the `invoice-agent` (`.claude/agents/invoice-agent.md`), which follows `TESTING-INVOICES.md` |
 | Looking for the next thing to build | `docs/OPEN-WORK.md` |
 | Resuming payment work | `docs/reference/` |
 
