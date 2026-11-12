@@ -15,6 +15,8 @@
 //   inbooks   after replay: that bill uploaded to Decimal is held as already in Xero; "Same bill" links it
 //   late      after replay: sent again with the key 9.5 minutes after the first send, the edge of Decimal's window
 //   discount  a trade discount as a negative line, as "Correct the figures" adds it (exceptions/arithmetic.ts)
+// With STOP_AT_REVIEW=1 a bill is left in review instead, every line given its Category,
+// for a person to work on (a test brief): nothing is confirmed, approved or sent.
 
 import crypto from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -303,6 +305,15 @@ async function runBill(key: string, s: Scenario) {
   }));
 
   const subtotal = s.lines.reduce((t, l) => t + l.qty * l.unit, 0);
+  if (process.env.STOP_AT_REVIEW) {
+    await call(`/organizations/${org}/bills/${billId}/save`, team.owner.token, {
+      fields: { vendorName: s.vendor, invoiceNumber: s.number, invoiceDate: s.date, dueDate: s.due, terms: 'Net 30', currency: 'USD', total: Math.round((subtotal + s.tax) * 100) / 100, taxAmount: s.tax },
+      lines: s.lines.map((l) => ({ description: l.description, quantity: l.qty, unitPrice: l.unit, amount: Math.round(l.qty * l.unit * 100) / 100, category: l.category, categoryConfirmed: true })),
+      confirmedFieldKeys: [],
+    });
+    console.log('left in review:', JSON.stringify({ bill: billId, number: s.number, page: `http://127.0.0.1:5274/organizations/${org}/bills/${billId}` }));
+    return { billId, sync: null };
+  }
   await call(`/organizations/${org}/bills/${billId}/confirm`, team.owner.token, {
     fields: { vendorName: s.vendor, invoiceNumber: s.number, invoiceDate: s.date, dueDate: s.due, terms: 'Net 30', currency: 'USD', total: Math.round((subtotal + s.tax) * 100) / 100, taxAmount: s.tax },
     lines: s.lines.map((l) => ({ description: l.description, quantity: l.qty, unitPrice: l.unit, amount: Math.round(l.qty * l.unit * 100) / 100, category: l.category, categoryConfirmed: true })),
