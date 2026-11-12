@@ -86,6 +86,16 @@ export function billFactsFrom(row: BillRow): BillFacts {
   };
 }
 
+/** An upload time as a person writes it: "12 Nov 2026, 07:36:46 UTC". The model is shown
+ *  this, never the raw timestamp, because it copies what it is shown into text people read. */
+export function uploadedForPeople(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const day = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'UTC' });
+  return `${day}, ${time} UTC`;
+}
+
 // ---- comparison ------------------------------------------------------------
 
 const cents = (n: number | null) => (n === null ? null : Math.round(n * 100));
@@ -258,7 +268,26 @@ export type ValidatedFinding = {
   adjustments: string[];
 };
 
-const clampText = (v: unknown, max: number): string => (typeof v === 'string' ? v.trim().replace(/\s+/g, ' ').slice(0, max) : '');
+// Text from the model is cut to fit, but never mid-word: the cut is made at a word
+// and marked with an ellipsis, so a person never reads half a word.
+const clampText = (v: unknown, max: number): string => {
+  const text = typeof v === 'string' ? v.trim().replace(/\s+/g, ' ') : '';
+  if (text.length <= max) return text;
+  const room = text.slice(0, max - 1);
+  const wholeWords = text[max - 1] === ' ' ? room : room.slice(0, Math.max(room.lastIndexOf(' '), 0));
+  return `${(wholeWords.length >= max / 2 ? wholeWords : room).replace(/[\s.,;:(–—-]+$/u, '')}…`;
+};
+
+// The reason is what a person records for their decision, so a long one keeps whole
+// sentences: it ends after the last sentence that fits, unless that would drop most
+// of it, and is cut at a word only when no sentence fits.
+const clampReason = (v: unknown, max: number): string => {
+  const text = typeof v === 'string' ? v.trim().replace(/\s+/g, ' ') : '';
+  if (text.length <= max) return text;
+  let end = 0;
+  for (const m of text.slice(0, max + 1).matchAll(/[.!?](?= )/g)) end = (m.index ?? 0) + 1;
+  return end >= max / 3 ? text.slice(0, end) : clampText(text, max);
+};
 const textList = (v: unknown, maxItems: number, maxLen: number): string[] =>
   (Array.isArray(v) ? v : []).map((x) => clampText(x, maxLen)).filter(Boolean).slice(0, maxItems);
 
@@ -326,8 +355,8 @@ export function validateFinding(
     adjustments.push('the totals differ, which a true duplicate would not');
   }
 
-  const headline = clampText(raw.headline, 120) || fallbackHeadline.slice(0, 120);
-  let reason = clampText(raw.reason, 300);
+  const headline = clampText(raw.headline, 120) || clampText(fallbackHeadline, 120);
+  let reason = clampReason(raw.reason, 300);
   if (reason.length < 3) reason = headline;
 
   return {

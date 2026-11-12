@@ -9,7 +9,7 @@ import { extractPdfLayoutText } from '../payments/doc-provenance.js';
 import { plural, startStep, type JobRef } from '../companion/steps.js';
 import { runAgent, type AgentRun, type AgentTool } from './agent.js';
 import {
-  billFactsFrom, compareBills, validateFinding, VERDICTS,
+  billFactsFrom, compareBills, uploadedForPeople, validateFinding, VERDICTS,
   type BillComparison, type BillFacts, type BillRow, type ValidatedFinding,
 } from './duplicate-logic.js';
 
@@ -41,8 +41,8 @@ How to work:
 - Never do arithmetic yourself. compare_bills has already computed every difference.
 - confidence: high only when the evidence leaves no reasonable doubt; medium when it points one way but something is missing; low otherwise.
 - headline: one plain sentence a finance person reads first, under 120 characters, for example "Corrected reissue of HCI-20931: tax fixed from $0 to $8,336". Say "bill", never "payment order".
-- Your finding is shown on BOTH bills, so in the headline, reason and claims never say "this bill" or "the other bill". Name bills by invoice number, and by upload date when the numbers are the same ("the copy uploaded 12 Sep").
-- reason: one or two sentences, written as the reason a person would record for their decision. It is shown to them to confirm or edit.
+- Your finding is shown on BOTH bills, so in the headline, reason and claims never say "this bill" or "the other bill". Name bills by invoice number, and by upload date when the numbers are the same, as "the copy uploaded" followed by the date get_bill gives.
+- reason: one or two sentences, under 250 characters in all, written as the reason a person would record for their decision. It is shown to them to confirm or edit.
 - checked: short phrases for what you verified. couldNotCheck: anything you could not verify.
 
 Finish by calling submit_finding. Do not reply in prose.`;
@@ -110,7 +110,7 @@ function withRefs(which: Which, f: BillFacts, seen: Set<string>) {
     total: { value: f.total, ref: ref('total') },
     lines: f.lines.map((l, i) => ({ ...l, ref: ref(`line.${i}`) })),
     state: f.state,
-    uploadedAt: f.uploadedAt,
+    uploadedAt: uploadedForPeople(f.uploadedAt),
     confirmedByAPerson: f.confirmed,
     document: f.documentFilename,
   };
@@ -188,7 +188,7 @@ export async function investigateDuplicatePair(args: {
           bills: rows.map((r, i) => {
             const f = billFactsFrom(r as BillRow);
             const ref = `history.${i}`; seen.add(ref);
-            return { ref, invoiceNumber: f.invoiceNumber, total: f.total, invoiceDate: f.invoiceDate, uploadedAt: f.uploadedAt, state: f.state, firstLine: f.lines[0]?.description ?? null };
+            return { ref, invoiceNumber: f.invoiceNumber, total: f.total, invoiceDate: f.invoiceDate, uploadedAt: uploadedForPeople(f.uploadedAt), state: f.state, firstLine: f.lines[0]?.description ?? null };
           }),
         };
       },
@@ -231,8 +231,8 @@ export async function investigateDuplicatePair(args: {
   const why = args.matchKind === 'same_invoice_number'
     ? 'they share an invoice number'
     : 'they are for exactly the same amount and were uploaded within 14 days of each other, and at least one has no invoice number';
-  const user = `Bill "this" (${facts.this.invoiceNumber ?? 'no number'}, total ${facts.this.total} ${facts.this.currency}, uploaded ${facts.this.uploadedAt}) `
-    + `and bill "other" (${facts.other.invoiceNumber ?? 'no number'}, total ${facts.other.total} ${facts.other.currency}, uploaded ${facts.other.uploadedAt}) `
+  const user = `Bill "this" (${facts.this.invoiceNumber ?? 'no number'}, total ${facts.this.total} ${facts.this.currency}, uploaded ${uploadedForPeople(facts.this.uploadedAt)}) `
+    + `and bill "other" (${facts.other.invoiceNumber ?? 'no number'}, total ${facts.other.total} ${facts.other.currency}, uploaded ${uploadedForPeople(facts.other.uploadedAt)}) `
     + `from ${facts.this.vendorName ?? 'the same vendor'} were flagged as a possible duplicate because ${why}. Investigate and submit your finding.`;
 
   const run = await runAgent({ label: 'duplicate', system: SYSTEM, user, tools });

@@ -14,6 +14,7 @@
 //
 // It refuses to run against anything but the bench: it seeds organizations and
 // uploads documents, and none of that belongs in anyone's own data.
+import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -80,9 +81,12 @@ async function call(path: string, body: unknown, token?: string, method = 'POST'
 
 async function upload(orgId: string, token: string, rel: string): Promise<string> {
   const bytes = await readFile(join(INVOICES, rel));
-  const filename = rel.split('/').pop()!;
+  // Uploaded under a neutral name. The investigator reads a document's name as
+  // evidence, and the catalog's names state the answer ("B4-duplicate-of-A2.pdf").
+  const ext = rel.slice(rel.lastIndexOf('.'));
+  const filename = `invoice-${randomBytes(2).toString('hex')}${ext}`;
   const out = await call(`/organizations/${orgId}/invoices/upload`, {
-    filename, mimeType: filename.endsWith('.pdf') ? 'application/pdf' : 'image/png', dataBase64: bytes.toString('base64'), autoAdvance: false,
+    filename, mimeType: ext === '.pdf' ? 'application/pdf' : 'image/png', dataBase64: bytes.toString('base64'), autoAdvance: false,
   }, token);
   const id = out?.paymentOrders?.[0]?.paymentOrder?.paymentOrderId;
   if (!id) throw new Error(`upload of ${rel} produced no bill`);

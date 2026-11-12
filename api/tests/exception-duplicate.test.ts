@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  billFactsFrom, compareBills, pairKey, pairFingerprint, sideOf, recommendationFor, validateFinding,
+  billFactsFrom, compareBills, pairKey, pairFingerprint, sideOf, recommendationFor, uploadedForPeople, validateFinding,
   type BillFacts, type BillRow, type FingerprintSide,
 } from '../src/exceptions/duplicate-logic.js';
 
@@ -210,6 +210,38 @@ test('an unknown verdict reads as unsure, and an empty reason falls back to the 
   assert.equal(v.headline, 'Looks like a duplicate of INV-1');
   assert.equal(v.reason, 'Looks like a duplicate of INV-1');
   assert.deepEqual(v.checked, []);
+});
+
+// A cut must end at a word, so the text before the ellipsis is the start of the
+// original followed by a space there.
+const cutAtWord = (cut: string, original: string) =>
+  cut.endsWith('…') && original.startsWith(cut.slice(0, -1)) && original[cut.length - 1] === ' ';
+
+test('a long reason keeps its whole sentences, and a long headline is cut at a word', () => {
+  const sentence = (n: number) => `Sentence ${n} explains one part of why the two bills are the same invoice sent twice.`;
+  const headline = `Brightwave BW-2210 captured twice: ${'both copies match line for line '.repeat(5)}`.trim();
+  const v = validateFinding({
+    verdict: 'duplicate', confidence: 'high', headline, reason: [1, 2, 3, 4, 5].map(sentence).join(' '),
+    findings: [{ claim: 'c', refs: ['this.total'] }], checked: [], couldNotCheck: [],
+  }, seen, identical, 'fallback');
+  assert.equal(v.reason, [1, 2, 3].map(sentence).join(' '), 'ends after the last sentence that fits');
+  assert.ok(v.headline.length <= 120);
+  assert.ok(cutAtWord(v.headline, headline), v.headline);
+});
+
+test('the model is shown upload times as a person writes them, never a raw timestamp', () => {
+  assert.equal(uploadedForPeople('2026-11-12T07:36:46.258Z'), '12 Nov 2026, 07:36:46 UTC');
+  assert.equal(uploadedForPeople('not a date'), 'not a date');
+});
+
+test('a reason with no sentence that fits is cut at a word, within what a person can record', () => {
+  const reason = `The two bills ${'carry the same lines and the same total '.repeat(10)}end.`;
+  const v = validateFinding({
+    verdict: 'duplicate', confidence: 'high', headline: 'h', reason,
+    findings: [{ claim: 'c', refs: ['this.total'] }], checked: [], couldNotCheck: [],
+  }, seen, identical, 'fallback');
+  assert.ok(v.reason.length <= 300, 'the clearance and close reasons take at most 300');
+  assert.ok(cutAtWord(v.reason, reason), v.reason);
 });
 
 // ---- the terminal tool ------------------------------------------------------
