@@ -4,6 +4,7 @@
 // the right, and Decimal's own steps folded under the reading. The lines use
 // the design's words: "raised a finding: …", "fixed the total: …".
 import { Fragment, useState, type ReactNode } from 'react';
+import { Link, useParams } from 'react-router';
 import type { BillCompanionNote, BillDetail } from '../../api';
 import { when } from '../../kit/format';
 import { CLOSE_REASONS, DETAIL_FIELDS, FIELD_LABELS, VENDOR_FIELDS, duplicateOf, fieldsFrom, syncProblem, type Face } from './model';
@@ -52,7 +53,7 @@ function FindingName({ text }: { text: string }) {
   );
 }
 
-export function historyItems(detail: BillDetail, note: BillCompanionNote | null | undefined): Item[] {
+export function historyItems(detail: BillDetail, note: BillCompanionNote | null | undefined, organizationId = ''): Item[] {
   const draft = detail.draft;
   const log = draft.workLog;
   const items: Item[] = [];
@@ -143,8 +144,28 @@ export function historyItems(detail: BillDetail, note: BillCompanionNote | null 
     const name = nameOf(who);
     if (h.kind === 'uploaded') {
       arrived = arrived ?? at;
-      const file = draft.document?.filename ?? 'the document';
-      push({ id: `h-up-${h.at}`, at, who, line: <><b>{name}</b> uploaded <span className="num">{file}</span></>, plain: `${name} uploaded ${file}` });
+      // The file as it was uploaded, even when the bill shows only its own pages of it,
+      // and the other bills it held.
+      const file = draft.upload?.filename ?? draft.document?.filename ?? 'the document';
+      const others = draft.upload?.otherBills ?? [];
+      const called = (b: (typeof others)[number]) => b.invoiceNumber ?? b.vendorName;
+      const joiner = (i: number) => (i === 0 ? '' : i === others.length - 1 ? ' and ' : ', ');
+      const held = others.length === 0 ? '' : `, with ${others.length === 1 ? 'another bill' : `${others.length} other bills`} in it: `;
+      push({
+        id: `h-up-${h.at}`, at, who,
+        line: (
+          <>
+            <b>{name}</b> uploaded <span className="num">{file}</span>{held}
+            {others.map((b, i) => (
+              <Fragment key={b.paymentOrderId}>
+                {joiner(i)}
+                <Link className="num" to={`/organizations/${organizationId}/bills/${b.paymentOrderId}`}>{called(b)}</Link>
+              </Fragment>
+            ))}
+          </>
+        ),
+        plain: `${name} uploaded ${file}${held}${others.map((b, i) => `${joiner(i)}${called(b)}`).join('')}`,
+      });
     } else if (h.kind === 'forwarded') {
       arrived = arrived ?? at;
       push({ id: `h-fw-${h.at}`, at, who, line: <><b>{name}</b> forwarded it by email</>, plain: `${name} forwarded it by email` });
@@ -351,7 +372,8 @@ export function History({
   /** Open from the start: on a bill past review, where it is half the story. */
   startOpen?: boolean;
 }) {
-  const items = historyItems(detail, note);
+  const { organizationId = '' } = useParams();
+  const items = historyItems(detail, note, organizationId);
   const [open, setOpen] = useState(startOpen);
   const [stepsOpen, setStepsOpen] = useState<Record<string, boolean>>({});
   if (items.length === 0) return null;

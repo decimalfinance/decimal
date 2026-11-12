@@ -14,6 +14,7 @@ const FACTS_MIN_WIDTH = 561;
 export function DocPane({
   organizationId,
   document: doc,
+  upload,
   pagesStored,
   source,
   width,
@@ -22,6 +23,8 @@ export function DocPane({
 }: {
   organizationId: string;
   document: BillDraft['document'];
+  /** The file the bill came in, when that held other bills: its own pages are shown, and the rest a click away. */
+  upload?: BillDraft['upload'];
   /** While the file is still being read, how many pages exist so far. */
   pagesStored?: number;
   /** Where the field in hand was read from. */
@@ -35,17 +38,31 @@ export function DocPane({
   const [urls, setUrls] = useState<string[]>([]);
   const [failed, setFailed] = useState(false);
   const [zoom, setZoom] = useState(100);
-  const pageCount = pagesStored ?? doc?.pageCount ?? 0;
+  // A bill that is some pages of a bigger upload shows its own pages, and the whole
+  // file when asked. Its marks are on its own pages: page 1 of them is page `from` of
+  // the whole file.
+  const own = upload?.pages ?? null;
+  const [whole, setWhole] = useState(false);
+  const showsWhole = Boolean(whole && upload && own);
+  const shownId = showsWhole ? upload!.invoiceDocumentId : doc?.invoiceDocumentId ?? null;
+  const name = own ? upload!.filename : doc?.filename ?? null;
+  const offset = showsWhole ? own!.from - 1 : 0;
+  const pageCount = pagesStored ?? (showsWhole ? upload!.pageCount : doc?.pageCount) ?? 0;
   const pageRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const turn = (to: boolean) => {
+    setUrls([]);
+    setFailed(false);
+    setWhole(to);
+  };
 
   useEffect(() => {
-    if (!doc || pageCount <= 0) return;
+    if (!doc || !shownId || pageCount <= 0) return;
     let cancelled = false;
     const made: string[] = [];
     (async () => {
       try {
         for (let i = 0; i < pageCount; i += 1) {
-          const url = await invoiceIntakeApi.fetchPageObjectUrl(organizationId, doc.invoiceDocumentId, i);
+          const url = await invoiceIntakeApi.fetchPageObjectUrl(organizationId, shownId, i);
           if (cancelled) {
             URL.revokeObjectURL(url);
             return;
@@ -61,13 +78,26 @@ export function DocPane({
       cancelled = true;
       made.forEach((u) => URL.revokeObjectURL(u));
     };
-  }, [organizationId, doc?.invoiceDocumentId, pageCount, doc]);
+  }, [organizationId, shownId, pageCount, doc]);
 
-  // Bring the marked spot into view when it moves to another page.
+  // Bring the marked spot into view when it moves to another page, and when its
+  // page arrives (Show all loads the whole file afresh).
+  const markedPage = source ? source.page - 1 + offset : null;
+  const markedShown = markedPage !== null && urls.length > markedPage;
   useEffect(() => {
-    if (!source) return;
-    pageRefs.current[source.page - 1]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }, [source]);
+    if (markedPage === null || !markedShown) return;
+    const page = pageRefs.current[markedPage];
+    if (!page) return;
+    // A page whose image hasn't loaded has no height yet, so it would count as in view.
+    const image = page.querySelector('img');
+    const bring = () => page.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (!image || image.complete) {
+      bring();
+      return;
+    }
+    image.addEventListener('load', bring, { once: true });
+    return () => image.removeEventListener('load', bring);
+  }, [source, markedPage, markedShown]);
 
   const step = (dir: 1 | -1) => {
     setZoom((z) => (dir === 1
@@ -78,8 +108,15 @@ export function DocPane({
   return (
     <div className="bp-doc" style={{ width }}>
       <div className="bp-doc-bar">
-        <span className="bp-doc-name" title={doc?.filename}>{doc?.filename ?? 'No document'}</span>
-        {pageCount > 0 ? <span className="bp-doc-pages">{pageCount} {pageCount === 1 ? 'page' : 'pages'}</span> : null}
+        <span className="bp-doc-name" title={name ?? undefined}>{name ?? 'No document'}</span>
+        {own && !showsWhole ? (
+          <span className="bp-doc-pages">{pagesOfText(own, upload!.pageCount)}</span>
+        ) : pageCount > 0 ? <span className="bp-doc-pages">{pageCount} {pageCount === 1 ? 'page' : 'pages'}</span> : null}
+        {own ? (
+          <button type="button" className="bl-showall" onClick={() => turn(!showsWhole)}>
+            {showsWhole ? `Show ${pagesText(own)}` : 'Show all'}
+          </button>
+        ) : null}
         <span className="bp-zoom">
           <button type="button" className="bp-zoom-btn" title="Zoom out" aria-label="Zoom out" disabled={zoom <= ZOOM_STEPS[0]!} onClick={() => step(-1)}>−</button>
           <span className="bp-zoom-pct num">{zoom}%</span>
@@ -107,8 +144,8 @@ export function DocPane({
               className={`bp-page${faint ? ' is-faint' : ''}`}
               style={{ width: `${zoom}%` }}
             >
-              <img src={url} alt={`${doc.filename}, page ${i + 1}`} />
-              {source && source.page - 1 === i ? (
+              <img src={url} alt={`${name}, page ${i + 1}`} />
+              {source && source.page - 1 + offset === i ? (
                 <span
                   className="bp-hl"
                   style={{
@@ -129,6 +166,10 @@ export function DocPane({
     </div>
   );
 }
+
+const pagesText = ({ from, to }: { from: number; to: number }) => (from === to ? `page ${from}` : `pages ${from} to ${to}`);
+/** "page 2 of 3": which of the upload's pages are this bill's. */
+const pagesOfText = (pages: { from: number; to: number }, of: number | null) => `${pagesText(pages)}${of ? ` of ${of}` : ''}`;
 
 /**
  * The hairline between the facts and the document. Resting on it thickens it,

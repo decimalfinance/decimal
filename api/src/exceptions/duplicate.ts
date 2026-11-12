@@ -6,6 +6,7 @@
 // is decided in code (`recommendationFor`), and the person confirms.
 import { prisma } from '../infra/prisma.js';
 import { extractPdfLayoutText } from '../payments/doc-provenance.js';
+import { billDocumentIdOf } from '../payments/split-pages.js';
 import { plural, startStep, type JobRef } from '../companion/steps.js';
 import { runAgent, type AgentRun, type AgentTool } from './agent.js';
 import {
@@ -200,7 +201,8 @@ export async function investigateDuplicatePair(args: {
       run: async (a) => {
         const which: Which = a.which === 'other' ? 'other' : 'this';
         if (!docText.has(which)) {
-          const docId = orders[which].invoiceDocumentId;
+          // Its own pages, when its upload held several invoices: never another bill's.
+          const docId = billDocumentIdOf(orders[which]);
           const doc = docId
             ? await prisma.invoiceDocument.findFirst({
               where: { invoiceDocumentId: docId, organizationId: args.organizationId },

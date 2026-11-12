@@ -1301,6 +1301,18 @@ export interface BillDraft {
     /** 'processing' while Decimal is still working on the file the bill came from. */
     status: 'processing' | 'processed' | 'failed' | 'removed';
   } | null;
+  /**
+   * The file it was uploaded in, when that held other bills too. `document` is then
+   * this bill's own pages of it, when they could be told apart (`pages`), or the
+   * whole file when they couldn't (`pages` null).
+   */
+  upload?: {
+    invoiceDocumentId: string;
+    filename: string;
+    pageCount: number | null;
+    pages: { from: number; to: number } | null;
+    otherBills: Array<{ paymentOrderId: string; invoiceNumber: string | null; vendorName: string; state: string }>;
+  } | null;
   /** Nothing could be read off the document: the fields are placeholders until a person types them. */
   unreadable: boolean;
   fields: BillDraftField[];

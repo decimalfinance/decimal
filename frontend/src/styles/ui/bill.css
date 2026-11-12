@@ -816,6 +816,8 @@ html.app-zoom:has(.ui.bp) .ui.toast { zoom: var(--app-unzoom); --app-zoom: 1; }
 }
 .ui .bp-doc-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ui .bp-doc-pages { flex: none; padding: 1px 6px; background: var(--grey); color: var(--ink-3); }
+/* Show all, on a bill that is some pages of a bigger upload: never wraps, never shrinks. */
+.ui .bp-doc-bar .bl-showall { flex: none; white-space: nowrap; }
 .ui .bp-zoom { margin-left: auto; flex: none; display: flex; align-items: center; gap: 6px; color: var(--ink-3); }
 .ui .bp-zoom-btn {
   width: 18px;

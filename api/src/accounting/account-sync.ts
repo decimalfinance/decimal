@@ -26,6 +26,7 @@ import { xeroIsMadeUp, xeroWriteClientFor } from '../integrations/xero-connector
 import { BillGone, PostedUnchecked, quickBooksBooks, type Books } from './books-poster.js';
 import { getQuickBooksForOrg, postingEnabledSince, postingTarget, type PostingTarget } from './connections.js';
 import { postingDateChoiceOf, postingDateFor } from './closed-period.js';
+import { billDocumentIdOf } from '../payments/split-pages.js';
 import { PostedTotalDiffers, recordBillPaymentInQuickBooks, syncPaymentToQuickBooks } from './sync.js';
 import { BUILTIN_ACCOUNT_PREFIX } from './default-chart.js';
 import { vendorForBill } from './vendor-match.js';
@@ -547,7 +548,8 @@ export async function syncApprovedBill(paymentOrderId: string): Promise<Accounti
       externalBillBalance: posted.billBalance, error: null, syncedAt: new Date(), ...(sent ? { metadataJson: {} } : {}),
     });
     logger.info('accounting_sync.bill_posted', { organizationId: order.organizationId, paymentOrderId, system, billId: posted.billId });
-    await attachInvoice(books, order.organizationId, paymentOrderId, order.invoiceDocumentId, posted.billId);
+    // Its own pages, when its upload held several invoices.
+    await attachInvoice(books, order.organizationId, paymentOrderId, billDocumentIdOf(order), posted.billId);
     return 'synced';
   } catch (error) {
     if (error instanceof PostedTotalDiffers || error instanceof PostedUnchecked) {

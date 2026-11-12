@@ -180,7 +180,7 @@ export function BillPage() {
         <div className="bp-sheet">
           <div className="bp-sheet-scrim" onClick={() => setSheet(false)} />
           <div className="bp-sheet-panel" role="dialog" aria-label="The document">
-            <DocPane organizationId={organizationId} document={data.draft.document} source={null} width="100%" onClose={() => setSheet(false)} />
+            <DocPane organizationId={organizationId} document={data.draft.document} upload={data.draft.upload} source={null} width="100%" onClose={() => setSheet(false)} />
           </div>
         </div>
       ) : null}

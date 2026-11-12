@@ -10,11 +10,13 @@ import {
   getInvoiceDocumentWithBytes,
   storeInvoiceDocument,
   storeInvoiceDocumentPages,
+  storePagesDocument,
   setInvoiceDocumentPageCount,
   setInvoiceDocumentStatus,
 } from './documents.js';
 import { UNREADABLE_MARKS, extractPaymentRowsFromDocument, renderDocumentToImages, type ExtractedRow } from './document-extract.js';
-import { extractPdfLayoutText, ungroundedFields } from './doc-provenance.js';
+import { extractPdfLayoutText, findTextMatches, ungroundedFields } from './doc-provenance.js';
+import { pdfPages, planPageSplit, shiftSources, type PageRange } from './split-pages.js';
 import {
   extractPdfTextLayer, extractImageTextLayer, refineInvoiceSources, stripUnmeasuredSources,
   PROVENANCE_VERSION,
@@ -275,6 +277,44 @@ export async function processInvoiceDocument(args: {
   }
   if (!unreadable) await reading.done(...describeRead(extraction.rows));
 
+  // One upload, several invoices: each bill gets its own pages (split-pages.ts), found
+  // by where each invoice's number is printed. Done before the boxes are measured, so
+  // each invoice's are measured on its own pages, never on another invoice's copy of
+  // the same template. Any failure and nothing is split: each bill keeps the whole file.
+  const ownPages = new Map<number, { range: PageRange; invoiceDocumentId: string; filename: string; of: number }>();
+  const isPdf = args.mimeType === 'application/pdf' || args.filename.toLowerCase().endsWith('.pdf');
+  if (!unreadable && isPdf && boxPages && invoiceDocumentId && extraction.rows.length > 1) {
+    const words = boxPages;
+    const plan = planPageSplit(extraction.rows.map((row) => {
+      const number = row.source_invoice?.invoiceNumber ?? row.reference;
+      return number ? findTextMatches(words, [number]).map((m) => m.page) : null;
+    }), words.length);
+    if (plan) {
+      try {
+        for (const [index, range] of plan.entries()) {
+          const stored = await storePagesDocument({
+            organizationId: args.organizationId,
+            uploadedByUserId: args.actorUserId,
+            uploadName: args.filename,
+            from: range.from,
+            to: range.to,
+            bytes: await pdfPages(args.fileBytes, range),
+            pageImages: prerenderedPages?.slice(range.from - 1, range.to) ?? [],
+          });
+          ownPages.set(index, { range, ...stored, of: words.length });
+        }
+      } catch (error) {
+        ownPages.clear();
+        logger.warn('invoice_intake.split_failed', {
+          organizationId: args.organizationId,
+          filename: args.filename,
+          ...(error instanceof Error ? { message: error.message } : {}),
+        });
+      }
+    }
+    await recordStep(job, 'split', ...describeSplit(extraction.rows, ownPages));
+  }
+
   // Exact provenance: re-locate every extracted value among the words actually
   // printed on the page and replace the model's box with the real coordinates.
   //
@@ -284,9 +324,12 @@ export async function processInvoiceDocument(args: {
   // voice, and worse than no highlight at all.
   try {
     let refined = 0;
-    for (const row of extraction.rows) {
+    for (const [index, row] of extraction.rows.entries()) {
       if (!row.source_invoice) continue;
-      if (boxPages) refined += refineInvoiceSources(row.source_invoice, boxPages).refined;
+      const own = ownPages.get(index);
+      if (own) shiftSources(row.source_invoice, own.range);
+      const pages = own && boxPages ? boxPages.slice(own.range.from - 1, own.range.to) : boxPages;
+      if (pages) refined += refineInvoiceSources(row.source_invoice, pages).refined;
       else stripUnmeasuredSources(row.source_invoice as unknown as Record<string, unknown>);
     }
     logger.info('invoice_intake.provenance_refined', {
@@ -307,10 +350,12 @@ export async function processInvoiceDocument(args: {
     // Null for anything with no text layer: "we could not check" is not
     // "we checked and it was fine", and the photographs are where an
     // invented figure is most likely and least detectable.
-    for (const row of extraction.rows) {
+    for (const [index, row] of extraction.rows.entries()) {
       if (!row.source_invoice) continue;
+      // Its figures are checked against its own pages.
+      const own = ownPages.get(index);
       (row.source_invoice as unknown as Record<string, unknown>).ungrounded =
-        ungroundedFields(row.source_invoice as unknown as Record<string, unknown>, textPages);
+        ungroundedFields(row.source_invoice as unknown as Record<string, unknown>, own && textPages ? textPages.slice(own.range.from - 1, own.range.to) : textPages);
     }
   } catch (error) {
     logger.warn('invoice_intake.provenance_refine_failed', {
@@ -335,7 +380,7 @@ export async function processInvoiceDocument(args: {
   // OCR-driven coding: map each invoice's "what it's for" to an expense account in the
   // org's chart (no-op when QuickBooks isn't connected). Surfaced later as a candidate.
   const categorising = await startStep(job, 'categories', 'Working out what each line is for');
-  const categoryOutcomes: Array<[text: string, detail: string | null, noted: boolean]> = [];
+  const categoryOutcomes: Array<[text: string, detail: string | null, noted: boolean, bill: string]> = [];
   const ocrCodings = await suggestOcrCodings(
     args.organizationId,
     extraction.rows.map((r) => ({
@@ -451,6 +496,8 @@ export async function processInvoiceDocument(args: {
               pageCount: extraction.pageCount,
               modelLatencyMs: extraction.modelLatencyMs,
               rowIndex: index,
+              // Its own pages, when the upload held several invoices (split-pages.ts).
+              ...(ownPages.has(index) ? { pages: (({ range, ...doc }) => ({ ...doc, from: range.from, to: range.to }))(ownPages.get(index)!) } : {}),
             },
           },
         },
@@ -469,13 +516,13 @@ export async function processInvoiceDocument(args: {
         const known = precedents;
         precedents = await loadPrecedents(args.organizationId).catch(() => known);
       }
-      categoryOutcomes.push(describeCategories(
+      categoryOutcomes.push([...describeCategories(
         vendorName,
         counterpartyWallet.counterpartyId,
         (row.source_invoice?.lineItems ?? []).map((l) => l.description).filter(Boolean),
         ocrCodings[index] ?? null,
         precedents,
-      ));
+      ), row.reference ?? vendorName]);
 
       {
         const { recordOpeningFlags } = await import('./bills.js');
@@ -603,7 +650,11 @@ export async function processInvoiceDocument(args: {
     const [text, detail, noted] = categoryOutcomes[0]!;
     await (noted ? categorising.noted(text, detail) : categorising.done(text, detail));
   } else if (categoryOutcomes.length > 1) {
-    await categorising.done(`Categorised ${plural(categoryOutcomes.length, 'bill')}`, categoryOutcomes.map(([t]) => t).join('. '));
+    // Each bill's own, named, since one document's bills are categorised one by one.
+    await categorising.done(
+      `Categorised ${plural(categoryOutcomes.length, 'bill')}`,
+      `${categoryOutcomes.map(([t, , , bill]) => `${bill}: ${t.charAt(0).toLowerCase()}${t.slice(1)}`).join('. ')}.`,
+    );
   } else {
     await categorising.failed('No bill came out of this document to categorise');
   }
@@ -1308,6 +1359,15 @@ function describeRead(rows: ExtractedRow[]): [string, string | null] {
     `Read a bill from ${row.counterparty}${row.reference ? `, invoice ${row.reference}` : ''}, for ${money(row.amount, row.currency)}`,
     lines > 0 ? `${plural(lines, 'line item')}.` : 'No line items on it.',
   ];
+}
+
+/** What the split did, in the job's words: which pages went to which bill, or why none did. */
+function describeSplit(rows: ExtractedRow[], own: Map<number, { range: PageRange }>): ['done' | 'noted', string, string | null] {
+  if (own.size === 0) {
+    return ['noted', 'Kept the pages together', 'Where one invoice ends and the next begins isn’t clear from the pages, so each bill shows the whole document.'];
+  }
+  const pages = ({ from, to }: PageRange) => (from === to ? `page ${from}` : `pages ${from} to ${to}`);
+  return ['done', 'Gave each bill its own pages', rows.map((r, i) => `${r.reference ?? r.counterparty}: ${own.get(i) ? pages(own.get(i)!.range) : 'the whole document'}`).join('. ') + '.'];
 }
 
 function describeGrounding(rows: ExtractedRow[], hasTextLayer: boolean): ['done' | 'noted', string, string | null] {

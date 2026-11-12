@@ -393,7 +393,7 @@ export function Review({
           )}
         </div>
         <Separator rowRef={rowRef} width={doc.width} setWidth={doc.setWidth} />
-        <DocPane organizationId={organizationId} document={draft.document} source={spot} width={doc.width} faint={couldntRead} />
+        <DocPane organizationId={organizationId} document={draft.document} upload={draft.upload} source={spot} width={doc.width} faint={couldntRead} />
       </div>
 
       {isReading ? (

@@ -5,6 +5,7 @@
 // are not things to ask a language model. The model reads what these return and
 // judges; it never computes a difference or names an action.
 import { createHash } from 'node:crypto';
+import { pagesOf } from '../payments/split-pages.js';
 
 // ---- bill facts ------------------------------------------------------------
 
@@ -82,7 +83,8 @@ export function billFactsFrom(row: BillRow): BillFacts {
     state: row.state,
     uploadedAt: row.createdAt.toISOString(),
     confirmed: Boolean(verification && verification.confirmedAt),
-    documentFilename: row.invoiceDocument?.filename ?? null,
+    // Its own pages' name, when its upload held several invoices.
+    documentFilename: pagesOf(row.metadataJson)?.filename ?? row.invoiceDocument?.filename ?? null,
   };
 }
 

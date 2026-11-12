@@ -58,6 +58,51 @@ export async function storeInvoiceDocument(args: {
   return { invoiceDocumentId: created.invoiceDocumentId, reused: false };
 }
 
+/**
+ * A bill's own pages, when its upload held several invoices (split-pages.ts): a
+ * document of their own, so the bill page shows them alone and posting attaches them
+ * alone. Never an upload: its hash is kept apart from uploads' ("pages:"), so the same
+ * bytes uploaded later are read as an upload of their own, and it is on no list.
+ * Splitting the same upload again finds the one already made.
+ */
+export async function storePagesDocument(args: {
+  organizationId: string;
+  uploadedByUserId: string | null;
+  uploadName: string;
+  from: number;
+  to: number;
+  bytes: Buffer;
+  pageImages: Array<{ bytes: Buffer; mime: string }>;
+}): Promise<{ invoiceDocumentId: string; filename: string }> {
+  const sha256 = `pages:${createHash('sha256').update(args.bytes).digest('hex')}`;
+  const base = args.uploadName.replace(/\.pdf$/i, '');
+  const filename = `${base} (${args.from === args.to ? `page ${args.from}` : `pages ${args.from}-${args.to}`}).pdf`;
+  const key = { organizationId_sha256: { organizationId: args.organizationId, sha256 } };
+  const select = { invoiceDocumentId: true, filename: true } as const;
+  const doc = await prisma.invoiceDocument.findUnique({ where: key, select })
+    ?? await prisma.invoiceDocument.create({
+      data: {
+        organizationId: args.organizationId,
+        filename,
+        mimeType: 'application/pdf',
+        byteSize: args.bytes.length,
+        sha256,
+        data: new Uint8Array(args.bytes),
+        pageCount: args.to - args.from + 1,
+        status: 'processed',
+        uploadedByUserId: args.uploadedByUserId,
+      },
+      select,
+    }).catch(async (error) => {
+      // Made by a reading of the same upload a moment ago.
+      const made = await prisma.invoiceDocument.findUnique({ where: key, select });
+      if (made) return made;
+      throw error;
+    });
+  if (args.pageImages.length > 0) await storeInvoiceDocumentPages(doc.invoiceDocumentId, args.pageImages);
+  return doc;
+}
+
 export async function setInvoiceDocumentPageCount(invoiceDocumentId: string, pageCount: number | null) {
   if (pageCount == null) return;
   await prisma.invoiceDocument.update({

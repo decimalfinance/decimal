@@ -28,6 +28,7 @@ import { companionReadiness } from '../companion/readiness.js';
 import { readCeilingException, activeCeilingException } from './ceiling-exception.js';
 import { readPayableHold, describePayableHold } from './vendor-payable.js';
 import { evaluateBillFlags, summarizeBillFlags, dayText, displayOrgName, systemName } from './bill-flags.js';
+import { billDocumentIdOf, pagesOf } from './split-pages.js';
 import { HIGHLIGHTABLE_FIELDS } from './question-fields.js';
 import type { BillFlag } from './bill-flags.js';
 import { getBillCeilingMinor } from '../approvals/store.js';
@@ -51,13 +52,14 @@ async function ensureProvenance(order: {
   const extracted = agent && isRecord(agent.extracted) ? agent.extracted : null;
   if (!agent || !extracted) return { extracted, metadata };
   if (agent.provenanceVersion === PROVENANCE_VERSION) return { extracted, metadata };
-  if (!order.invoiceDocumentId) return { extracted, metadata };
+  const documentId = billDocumentIdOf(order);
+  if (!documentId) return { extracted, metadata };
   // A read-only look takes the bill as stored; the backfill waits for a person.
   if (readOnly) return { extracted, metadata };
 
   try {
     const doc = await prisma.invoiceDocument.findUnique({
-      where: { invoiceDocumentId: order.invoiceDocumentId },
+      where: { invoiceDocumentId: documentId },
       select: { data: true, filename: true, mimeType: true },
     });
     if (!doc) return { extracted, metadata };
@@ -1785,6 +1787,23 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   });
   if (!order) return null;
 
+  // Its own pages, when its upload held several invoices (split-pages.ts): what the
+  // page shows beside it. Whether the reading is done is still the upload's to say.
+  const ownPages = pagesOf(order.metadataJson);
+  const pagesDocument = ownPages ? await prisma.invoiceDocument.findFirst({
+    where: { organizationId, invoiceDocumentId: ownPages.invoiceDocumentId },
+    select: { invoiceDocumentId: true, filename: true, mimeType: true, byteSize: true, pageCount: true, status: true },
+  }) : null;
+  // The other bills the same upload held, so the page can say so and link to them.
+  const sameUpload = order.invoiceDocumentId ? await prisma.paymentOrder.findMany({
+    where: { organizationId, invoiceDocumentId: order.invoiceDocumentId, paymentOrderId: { not: order.paymentOrderId } },
+    orderBy: { createdAt: 'asc' },
+    select: {
+      paymentOrderId: true, invoiceNumber: true, state: true,
+      counterparty: { select: { displayName: true } }, counterpartyWallet: { select: { label: true } },
+    },
+  }) : [];
+
   // Same source of truth the capability middleware uses to refuse the save, so
   // the screen and the server cannot disagree about who may prepare a bill.
   // Without a viewer (internal callers) nothing is being rendered to anybody,
@@ -2455,7 +2474,21 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       isNew: order.counterpartyWallet.trustState === 'unreviewed',
       trustState: order.counterpartyWallet.trustState,
     },
-    document: order.invoiceDocument,
+    document: pagesDocument ? { ...pagesDocument, status: order.invoiceDocument?.status ?? pagesDocument.status } : order.invoiceDocument,
+    // The upload it came from, when that held other bills too: its own pages of it,
+    // if it has them, and the others, to link to.
+    upload: sameUpload.length === 0 || !order.invoiceDocument ? null : {
+      invoiceDocumentId: order.invoiceDocument.invoiceDocumentId,
+      filename: order.invoiceDocument.filename,
+      pageCount: order.invoiceDocument.pageCount,
+      pages: pagesDocument && ownPages ? { from: ownPages.from, to: ownPages.to } : null,
+      otherBills: sameUpload.map((b) => ({
+        paymentOrderId: b.paymentOrderId,
+        invoiceNumber: b.invoiceNumber,
+        vendorName: b.counterparty?.displayName ?? b.counterpartyWallet.label,
+        state: b.state,
+      })),
+    },
     // Nothing could be read off the document: every field the reader marks
     // came back unreadable, and the bill is a placeholder until a person keys
     // it in (see unreadableRow in invoice-intake.ts).

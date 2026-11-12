@@ -13,6 +13,7 @@ import { beforeEach, test } from 'node:test';
 import { config } from '../src/config.js';
 import { prisma } from '../src/infra/prisma.js';
 import { drainAsyncIntake } from '../src/payments/invoice-intake.js';
+import { storePagesDocument } from '../src/payments/documents.js';
 import { categoryNamesFor } from '../src/payments/bills.js';
 import { createPolicy, upsertPolicySet } from '../src/approvals/store.js';
 import { enablePosting, setQuickBooksForTests } from '../src/accounting/connections.js';
@@ -188,6 +189,30 @@ test('quickbooks: the invoice goes on the bill it posted, once; a file QuickBook
   assert.equal(sync?.externalBillId, 'B2');
   assert.match(String((sync?.metadataJson as { attachmentFailed?: string } | null)?.attachmentFailed), /Unsupported file format/, 'and why the file is not on it');
   assert.equal(calls.attachments.length, 1);
+});
+
+test('quickbooks: a bill that is some pages of a bigger upload goes into the books with those pages alone', async () => {
+  const w = await makeWorld();
+  const { calls } = fakeQuickBooks();
+  await connect(w.orgId);
+  // Page 2 of a three-invoice upload, as the split leaves it (split-pages.ts).
+  const order = await prisma.paymentOrder.findUniqueOrThrow({ where: { paymentOrderId: w.bills.submitted }, include: { invoiceDocument: true } });
+  const bytes = Buffer.from('%PDF-1.4 page two alone');
+  const own = await storePagesDocument({
+    organizationId: w.orgId, uploadedByUserId: null, uploadName: order.invoiceDocument!.filename, from: 2, to: 2, bytes, pageImages: [],
+  });
+  const metadata = order.metadataJson as { agent: { sourceDocument?: Record<string, unknown> } & Record<string, unknown> } & Record<string, unknown>;
+  await prisma.paymentOrder.update({
+    where: { paymentOrderId: w.bills.submitted },
+    data: { metadataJson: { ...metadata, agent: { ...metadata.agent, sourceDocument: { ...metadata.agent.sourceDocument, pages: { ...own, from: 2, to: 2, of: 3 } } } } },
+  });
+  await approve(w);
+
+  assert.equal(calls.attachments.length, 1);
+  const sent = calls.attachments[0]!.file;
+  assert.equal(sent.fileName, own.filename);
+  assert.match(sent.fileName, / \(page 2\)\.pdf$/);
+  assert.ok(sent.bytes.equals(bytes), 'its page, never the other bills\' invoices');
 });
 
 test('quickbooks: nothing is posted before approval, and an organisation without QuickBooks leaves no trace', async () => {
