@@ -152,9 +152,63 @@ The gate matches on upload time, not invoice date, so X3, X4 and X6 trip the
 14-day same-amount rule when uploaded together. Two different invoice numbers
 never trip it, which is why there is no pair of that kind.
 
+## R. The arithmetic investigator: six correct documents (6 invoices)
+
+When a bill's figures don't add up, code sees only the figures that were *read*. These
+documents are correct, and each holds something a reader can miss. The backend's eval
+uploads each, removes the figure named in `hidden` from the stored reading, and the
+investigator must find it in the document. Files are in `R-arithmetic/`; each vendor is
+fictional and used by its one case. `catalog.json` carries `expectedVerdict`
+(`missed`, `misread` or `document_error`), `hidden` (`{description, amount, page}`, null
+for R5), `vendor`, `invoiceNumber` and `documentTotal`. The pairs-only fields of X
+(`pairWith`) are absent, so `exception-eval.mts` ignores these.
+
+| Case | Vendor | Document | Verdict | Hidden |
+|---|---|---|---|---|
+| R1 | Alderbrook Fixings Ltd | Lines $2,000.00 (3 lines), Freight $85.00 and Sales tax 8% $160.00 in the totals block, total $2,245.00 | missed | Freight, 85.00, page 1 |
+| R2 | Tamarack Tile & Stone | Lines $3,000.00, "Less 10% trade discount" −$300.00, total $2,700.00, no tax | missed | the discount, -300.00, page 1 |
+| R3 | Wexford Custom Cabinetry | Lines $4,000.00, "Less deposit received 2026-09-02" −$1,000.00, "Balance due" $3,000.00, no tax | missed | the deposit, -1000.00, page 1 |
+| R4 | Halvorsen Mechanical Contractors | Two pages, 14 lines; the last 3 ($1,140.00 + $865.50 + $420.00) and the totals ($20,815.50) are on page 2 | missed | "the 3 lines on page 2", 2425.50, page 2 |
+| R5 | Dunmore Print Finishing | Lines sum $1,850.00, total prints $1,580.00 (transposed), no tax, nothing explains it | document_error | none |
+| R6 | Sandpiper Surveying | Lump-sum lines with no quantity or price: Site survey $1,836.00, Drawings $1,200.00, Permit filing $415.00, total $3,451.00 | misread | Site survey, 1836.00 (the eval rewrites it to $1,386.00) |
+
+Order: any. R1 to R4 are the same shape (a figure on the page that was never read) from
+four angles: a totals-block add-on, a negative adjustment, a negative adjustment that is
+payment rather than price, and a figure on another page. R5 is the control: every figure
+was read right, so the investigator must say the vendor is wrong and not hunt for a figure.
+R6 is the opposite: a figure that was read, wrongly.
+
+Hidden amounts are signed strings, negative when the figure reduces the total.
+
+## M. Multi-invoice uploads: one PDF, several invoices (6 files)
+
+Intake makes one bill per invoice in an upload, and each bill should keep only its own
+pages. These files hold several invoices (or an invoice plus a slip or cover page) so
+that page ranges can be tested. Files are in `M-multi-invoice/`. `catalog.json` gives
+`expectBills`: a list of `{vendor, invoiceNumber, total, pages: [first, last]}`, 1-based
+and inclusive, in document order, plus `pages` (the file's page count). They carry no
+single `vendor`, `invoiceNumber` or `documentTotal`. Each vendor is fictional and used
+only in its own M case (M6 reuses M1's).
+
+| Case | File holds | Expected bills |
+|---|---|---|
+| M1 | Three one-page invoices from three vendors (three layouts): Linden Pest Control LPC-5501 $680.00, Marrow Street Bakery Supply MSB-3120 $1,215.00, Corvid IT Services CIT-9047 $2,340.00 | 3: [1,1] [2,2] [3,3] |
+| M2 | Two invoices from ONE vendor, same template: Pinegate Event Rentals PER-8801 $1,450.00 (1 page), PER-8802 $4,224.00 (2 pages, totals on its second). "Net 30" prints on all three pages, and the continuation page repeats the vendor email, terms and due date | 2: [1,1] [2,3] |
+| M3 | Saltmarsh Marine Supply SMS-4417 $1,860.00, then a detachable payment slip ("Please detach and return with your payment") repeating the number and amount due | 1: [1,2] |
+| M4 | Two short invoices on ONE page, top and bottom half: Fairweather Janitorial FJ-2031 $1,100.00, Goldfinch Staffing Group GSG-7714 $1,196.00 | 2: both [1,1] |
+| M5 | A cover sheet from a forwarding service (Parcelpost Document Forwarding, not a billing vendor) listing the two attached invoices, then Ravensworth Signage RS-3382 $2,640.00 and Thistledown Catering Co TC-1190 $975.00, one page each | 2: [1,2] [3,3]. The cover goes with the first invoice |
+| M6 | M1 again, image-only: grayscale 150 dpi page images, no text layer | the same 3 as M1 |
+
+What each proves: M1 is the plain split. M2 is the trap where repeated template values
+(`Net 30`, the vendor block) on every page must not read as a new invoice, and the
+second invoice's first page has no totals. M3 is a page that looks like an invoice (same
+number and amount) but is not one. M4 shows a page range cannot always separate bills.
+M5 has a page that belongs to no invoice and must be attached to a neighbour. M6 makes
+the splitter work from pixels.
+
 ## Format requirements
 
-- **PDF preferred**, one invoice per file. Images (PNG/JPEG/HEIC) welcome for
+- **PDF preferred**, one invoice per file (the M series is the exception: several per file, on purpose). Images (PNG/JPEG/HEIC) welcome for
   section C — that's the point of C1/C2.
 - Realistic vendor names, addresses, invoice numbers, dates. Dates within the
   last 90 days; due dates 15–45 days out.

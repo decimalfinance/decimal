@@ -21,6 +21,22 @@ const BASE_CSS = `
 
 // Line rows + totals block shared by the tabular layouts.
 function linesTable(spec, fmt, { headBg = '#f2f2f2', rule = '#d8d8d8' } = {}) {
+  if (spec.lumpSum) {
+    // Lump-sum lines: a description and an amount, no quantity or unit price.
+    const lump = spec.lines.map((l) => `
+      <tr>
+        <td style="padding:7px 8px 7px 0; border-bottom:1px solid ${rule};">${esc(l.desc)}</td>
+        <td class="num" style="padding:7px 0 7px 8px; border-bottom:1px solid ${rule};">${fmt(l.qty * l.unit)}</td>
+      </tr>`).join('');
+    return `
+    <table style="font-size:10.5px;">
+      <thead><tr style="background:${headBg};">
+        <th style="text-align:left; padding:6px 8px 6px 6px; font-size:8.5px; letter-spacing:0.08em;">DESCRIPTION</th>
+        <th class="num" style="padding:6px 6px 6px 8px; font-size:8.5px; letter-spacing:0.08em;">AMOUNT</th>
+      </tr></thead>
+      <tbody>${lump}</tbody>
+    </table>`;
+  }
   const rows = spec.lines.map((l) => `
     <tr>
       <td style="padding:7px 8px 7px 0; border-bottom:1px solid ${rule};">${esc(l.desc)}</td>
@@ -48,8 +64,9 @@ function totalsBlock(c, fmt, { taxLabel = 'Tax' } = {}) {
     </tr>`;
   let out = '<table style="width:auto; margin-left:auto; font-size:10.5px;">';
   out += row('Subtotal', c.shownSubtotal);
+  for (const a of c.adjustments ?? []) out += row(esc(a.label), a.amount);
   if (c.shownTax != null) out += row(c.taxLabel ?? taxLabel, c.shownTax);
-  out += row('Total due', c.shownTotal, true);
+  out += row(c.totalLabel ?? 'Total due', c.shownTotal, true);
   out += '</table>';
   return out;
 }
@@ -267,7 +284,7 @@ function multipage(spec, v, c, fmt) {
   const group = (g, i, last) => `
     <div style="${i > 0 ? 'page-break-before: always;' : ''}">
       ${i > 0 ? `<div style="display:flex; justify-content:space-between; color:#888; font-size:9px; padding-bottom:8px; border-bottom:1px solid #ddd; margin-bottom:16px;">
-        <span>${esc(v.name)} — Invoice ${esc(spec.invoiceNo)} (continued)</span><span>Page ${i + 1} of ${spec.lineGroups.length}</span></div>` : ''}
+        <span>${esc(v.name)} — Invoice ${esc(spec.invoiceNo)} (continued)${spec.repeatMeta ? ` · ${esc(v.email)} · Terms ${esc(spec.terms)} · Due ${esc(spec.due)}` : ''}</span><span>Page ${i + 1} of ${spec.lineGroups.length}</span></div>` : ''}
       <div style="font-size:11px; font-weight:700; color:${v.accent}; margin:18px 0 8px;">${esc(g.title)}</div>
       ${linesTable({ lines: g.lines }, fmt)}
       ${!last ? `<div style="color:#999; font-size:9px; margin-top:14px; font-style:italic;">Continued on next page — total on final page.</div>` : ''}
@@ -297,7 +314,89 @@ function multipage(spec, v, c, fmt) {
   </div>`;
 }
 
-const LAYOUTS = { letterhead, minimal, twocol, statement, creditnote, eu, multipage };
+
+// ---- Remittance slip (M3): the detachable second page of an invoice ---------
+function remitslip(spec, v, c) {
+  return `
+  <div class="paper" style="font-family: Helvetica, Arial, sans-serif; color:#1a1a1a; display:flex; flex-direction:column;">
+    <div style="border-top:2px dashed #999; margin-top:4.6in; padding-top:22px;">
+      <div style="font-size:9px; letter-spacing:0.12em; color:#888;">DETACH HERE</div>
+      <div style="font-size:19px; font-weight:700; color:${v.accent}; margin-top:16px;">Payment slip</div>
+      <div style="font-size:11px; margin-top:6px;">Please detach and return with your payment.</div>
+      <table style="width:auto; margin-top:22px;">${metaRows([
+        ['PAYABLE TO', v.name], ['INVOICE NO.', spec.invoiceNo], ['INVOICE DATE', spec.date], ['DUE DATE', spec.due],
+        ['CUSTOMER', c.billTo.name]])}</table>
+      <div style="display:flex; justify-content:space-between; align-items:baseline; margin-top:26px; border-top:1px solid #ccc; padding-top:14px; width:4.2in;">
+        <div style="font-size:11px; color:#555;">Amount due</div>
+        <div style="font-size:19px; font-weight:700;">${money(spec.slipAmount)}</div>
+      </div>
+      <div style="margin-top:26px; font-size:10px; color:#444; line-height:1.6;">
+        Mail to: ${esc(v.name)}<br>${esc(v.addr)}<br>${esc(v.city)}
+      </div>
+    </div>
+  </div>`;
+}
+
+// ---- Forwarding-service cover page (M5) --------------------------------------
+function cover(spec, v, c) {
+  const rows = spec.listing.map((r) => `
+    <tr>
+      <td style="padding:8px 8px 8px 0; border-bottom:1px solid #ddd;">${esc(r.vendor)}</td>
+      <td style="padding:8px; border-bottom:1px solid #ddd;">${esc(r.no)}</td>
+      <td style="padding:8px; border-bottom:1px solid #ddd;">${r.date}</td>
+      <td class="num" style="padding:8px 0 8px 8px; border-bottom:1px solid #ddd;">${money(r.amount)}</td>
+    </tr>`).join('');
+  return `
+  <div class="paper" style="font-family: Helvetica, Arial, sans-serif; color:#1a1a1a; display:flex; flex-direction:column;">
+    <div style="font-size:17px; font-weight:700; color:${v.accent};">${esc(v.name)}</div>
+    <div style="color:#666; font-size:9.5px; margin-top:4px;">${esc(v.addr)} · ${esc(v.city)}<br>${esc(v.email)} · ${esc(v.phone)}</div>
+    <div style="margin-top:34px; font-size:22px; letter-spacing:0.1em; font-weight:300;">FORWARDING COVER SHEET</div>
+    <div style="margin-top:6px; color:#666; font-size:10px;">Forwarded ${spec.date}</div>
+    <div style="margin-top:26px;">${billToBlock(c.billTo, 'FORWARDED FOR')}</div>
+    <div style="margin-top:28px; font-size:11px;">The following ${spec.listing.length} vendor invoices are attached, in this order:</div>
+    <div style="margin-top:12px;">
+      <table style="font-size:10.5px;">
+        <thead><tr style="background:#f2f2f2;">
+          <th style="text-align:left; padding:6px 8px 6px 6px; font-size:8.5px; letter-spacing:0.08em;">VENDOR</th>
+          <th style="text-align:left; padding:6px 8px; font-size:8.5px; letter-spacing:0.08em;">INVOICE NO.</th>
+          <th style="text-align:left; padding:6px 8px; font-size:8.5px; letter-spacing:0.08em;">DATE</th>
+          <th class="num" style="padding:6px 6px 6px 8px; font-size:8.5px; letter-spacing:0.08em;">AMOUNT</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div style="margin-top:22px; color:#777; font-size:9.5px; line-height:1.5;">
+      This sheet is a transmittal only and is not an invoice. Each attached invoice is payable to the vendor named on it.
+    </div>
+  </div>`;
+}
+
+// ---- Two short invoices on one page (M4) -------------------------------------
+function twoup(spec) {
+  const half = ({ spec: h, vendor: v, c }, last) => `
+    <div style="height:5.3in; overflow:hidden; ${last ? '' : 'border-bottom:2px dashed #aaa; margin-bottom:0.15in;'} font-family: Helvetica, Arial, sans-serif; color:#1a1a1a; display:flex; flex-direction:column;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+        <div>
+          <div style="font-family: Georgia, serif; font-size:17px; font-weight:700; color:${v.accent};">${esc(v.name)}</div>
+          <div style="color:#666; font-size:9px; margin-top:3px;">${esc(v.addr)} · ${esc(v.city)}<br>${esc(v.email)} · ${esc(v.phone)}</div>
+        </div>
+        <div style="font-size:21px; letter-spacing:0.16em; font-weight:300;">INVOICE</div>
+      </div>
+      <div style="display:flex; justify-content:space-between; margin-top:16px;">
+        <div>${billToBlock(c.billTo)}</div>
+        <table style="width:auto;">${metaRows([
+          ['INVOICE NO.', h.invoiceNo], ['INVOICE DATE', h.date], ['DUE DATE', h.due], ['TERMS', h.terms]])}</table>
+      </div>
+      <div style="margin-top:14px;">${linesTable(h, money)}</div>
+      <div style="margin-top:10px;">${totalsBlock(c, money)}</div>
+      <div style="margin-top:auto; font-size:9px; color:#444; padding-bottom:8px;">
+        Remit by ACH: ${esc(v.bank)} · Routing ${v.routing} · Account ****${v.acct}
+      </div>
+    </div>`;
+  return `<div class="paper" style="padding-top:0.5in; padding-bottom:0.3in;">${spec.halfParts.map((p, i) => half(p, i === spec.halfParts.length - 1)).join('')}</div>`;
+}
+
+const LAYOUTS = { letterhead, minimal, twocol, statement, creditnote, eu, multipage, remitslip, cover, twoup };
 
 // ---- Degradation scenes (section C screenshots) -----------------------------
 function scene(mode, paperHtml, stampDate) {

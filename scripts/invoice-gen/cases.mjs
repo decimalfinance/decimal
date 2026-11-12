@@ -168,6 +168,89 @@ export const VENDORS = {
     bank: 'Prairie State Bank', routing: '071000288', acct: '1763',
     accent: '#355c7d', template: 'minimal',
   },
+  // ---- R and M series: fictional vendors. Bank names are made up and the
+  // routing numbers are checksum-valid but in an unassigned range (09xx), so
+  // none of them is a real bank's.
+  alderbrook: {
+    name: 'Alderbrook Fixings Ltd', addr: '14 Kiln Row', city: 'Tacoma, WA 98402',
+    email: 'accounts@alderbrookfixings.example', phone: '(253) 555-0131',
+    bank: 'Tideflat Savings', routing: '091100100', acct: '3014', accent: '#496b3c', template: 'letterhead',
+  },
+  tamarack: {
+    name: 'Tamarack Tile & Stone', addr: '602 Millrace Dr', city: 'Spokane, WA 99201',
+    email: 'billing@tamaracktile.example', phone: '(509) 555-0166',
+    bank: 'Inland Mutual Bank', routing: '091100171', acct: '5527', accent: '#7a4e2d', template: 'minimal',
+  },
+  wexford: {
+    name: 'Wexford Custom Cabinetry', addr: '75 Joiner St', city: 'Madison, WI 53703',
+    email: 'office@wexfordcabinetry.example', phone: '(608) 555-0143',
+    bank: 'Four Lakes Credit Bank', routing: '091100249', acct: '8841', accent: '#4a3b6b', template: 'letterhead',
+  },
+  halvorsen: {
+    name: 'Halvorsen Mechanical Contractors', addr: '2300 Frontage Rd', city: 'Fargo, ND 58103',
+    email: 'ar@halvorsenmech.example', phone: '(701) 555-0152',
+    bank: 'Red River Commerce Bank', routing: '091100317', acct: '2206', accent: '#a0472d', template: 'letterhead',
+  },
+  dunmore: {
+    name: 'Dunmore Print Finishing', addr: '31 Bindery Ct', city: 'Scranton, PA 18503',
+    email: 'billing@dunmorefinishing.example', phone: '(570) 555-0137',
+    bank: 'Lackawanna Valley Bank', routing: '091100388', acct: '6693', accent: '#2c5d7c', template: 'minimal',
+  },
+  sandpiper: {
+    name: 'Sandpiper Surveying', addr: '8 Jetty Ave', city: 'Wilmington, NC 28401',
+    email: 'accounts@sandpipersurvey.example', phone: '(910) 555-0124',
+    bank: 'Cape Fear Trust', routing: '091100456', acct: '4478', accent: '#1f6f78', template: 'letterhead',
+  },
+  linden: {
+    name: 'Linden Pest Control', addr: '55 Orchard Ct', city: 'Raleigh, NC 27601',
+    email: 'billing@lindenpest.example', phone: '(919) 555-0188',
+    bank: 'Triangle Community Bank', routing: '091100524', acct: '1182', accent: '#5e7d2b', template: 'letterhead',
+  },
+  marrow: {
+    name: 'Marrow Street Bakery Supply', addr: '19 Marrow St', city: 'Baltimore, MD 21201',
+    email: 'orders@marrowbakery.example', phone: '(410) 555-0175',
+    bank: 'Chesapeake Savings', routing: '091100595', acct: '9035', accent: '#b0642a', template: 'minimal',
+  },
+  corvid: {
+    name: 'Corvid IT Services', addr: '420 Lakeshore Blvd', city: 'Cleveland, OH 44114',
+    email: 'invoices@corvidit.example', phone: '(216) 555-0191',
+    bank: 'Erie Shore Bank', routing: '091100663', acct: '3350', accent: '#3b3f8f', template: 'twocol',
+  },
+  pinegate: {
+    name: 'Pinegate Event Rentals', addr: '1700 Harvest Way', city: 'Sacramento, CA 95814',
+    email: 'billing@pinegaterentals.example', phone: '(916) 555-0159',
+    bank: 'Delta Valley Bank', routing: '091100731', acct: '7712', accent: '#8c3a5a', template: 'letterhead',
+  },
+  saltmarsh: {
+    name: 'Saltmarsh Marine Supply', addr: '3 Wharf Rd', city: 'Portland, ME 04101',
+    email: 'ar@saltmarshmarine.example', phone: '(207) 555-0113',
+    bank: 'Casco Harbor Bank', routing: '091100809', acct: '5120', accent: '#17506b', template: 'letterhead',
+  },
+  fairweather: {
+    name: 'Fairweather Janitorial', addr: '640 Pine Hollow Rd', city: 'Boise, ID 83702',
+    email: 'billing@fairweatherjanitorial.example', phone: '(208) 555-0147',
+    bank: 'Sawtooth Bank', routing: '091100870', acct: '2987', accent: '#3f7a5c', template: 'minimal',
+  },
+  goldfinch: {
+    name: 'Goldfinch Staffing Group', addr: '212 Birch Ln', city: 'Omaha, NE 68102',
+    email: 'ar@goldfinchstaffing.example', phone: '(402) 555-0182',
+    bank: 'Platte River Bank', routing: '091100948', acct: '6401', accent: '#b8891a', template: 'minimal',
+  },
+  ravensworth: {
+    name: 'Ravensworth Signage', addr: '77 Anvil Way', city: 'Pittsburgh, PA 15201',
+    email: 'accounts@ravensworthsigns.example', phone: '(412) 555-0166',
+    bank: 'Three Rivers Bank', routing: '091101015', acct: '8836', accent: '#5a2a2a', template: 'letterhead',
+  },
+  thistledown: {
+    name: 'Thistledown Catering Co', addr: '9 Greenhouse Ln', city: 'Asheville, NC 28801',
+    email: 'billing@thistledowncatering.example', phone: '(828) 555-0129',
+    bank: 'Blue Ridge Savings', routing: '091101086', acct: '4052', accent: '#6b4b8a', template: 'minimal',
+  },
+  // Not a billing vendor: the forwarding service whose cover page opens M5.
+  parcelpost: {
+    name: 'Parcelpost Document Forwarding', addr: '4 Relay Plaza', city: 'Newark, NJ 07102',
+    email: 'desk@parcelpostforwarding.example', phone: '(973) 555-0140', accent: '#444a52',
+  },
 };
 
 const L = (desc, qty, unit) => ({ desc, qty, unit });
@@ -647,4 +730,204 @@ export const CASES = [
     pairWith: 'X6a', expectedVerdict: 'unsure',
     expect: 'Same line and $1,500, dated 9 days later, nothing else to tell them apart (no number, no PO, no description of the work) → unsure: could be a resend or a second ten hours; ask the vendor.',
   },
+  // ---- R. The arithmetic investigator: correct documents with a figure a
+  // reader can miss. The eval uploads each, removes `hidden` from the stored
+  // reading, and the investigator must find it in the document. R1-R4 are
+  // `missed` (a figure on the page that was never read), R6 `misread` (read
+  // wrong), R5 `document_error` (the vendor's own mistake; nothing to find).
+  {
+    id: 'R1', file: 'R-arithmetic/R1-freight-in-totals.pdf', format: 'pdf',
+    vendor: 'alderbrook', invoiceNo: 'AF-7721', date: '2026-10-19', due: '2026-11-18', terms: 'Net 30', po: 'PO-8120',
+    lines: [
+      L('Cabinet hardware kit', 20, 45),
+      L('Mounting rails, 8 ft', 40, 12.5),
+      L('Fastener assortment, bulk', 1, 600),
+    ],
+    taxRate: 0.08, taxLabel: 'Sales tax (8%)',
+    adjustments: [{ label: 'Freight', amount: 85 }],
+    expectedVerdict: 'missed',
+    hidden: { description: 'Freight', amount: '85.00', page: 1 },
+    expect: 'Lines $2,000.00, Freight $85.00 and Sales tax $160.00 sit in the totals block, total $2,245.00. Freight is not a line, so a reading that kept only the lines and tax is $85.00 short: the investigator finds the freight.',
+  },
+  {
+    id: 'R2', file: 'R-arithmetic/R2-trade-discount.pdf', format: 'pdf',
+    vendor: 'tamarack', invoiceNo: 'TTS-3358', date: '2026-10-08', due: '2026-11-07', terms: 'Net 30',
+    lines: [
+      L('Porcelain floor tile, 600 sq ft', 600, 2),
+      L('Natural stone threshold slabs', 8, 125),
+      L('Grout and sealant, commercial', 1, 800),
+    ],
+    adjustments: [{ label: 'Less 10% trade discount', amount: -300 }],
+    expectedVerdict: 'missed',
+    hidden: { description: 'Less 10% trade discount', amount: '-300.00', page: 1 },
+    expect: 'Lines $3,000.00, "Less 10% trade discount" −$300.00, total $2,700.00, no tax. The discount is a negative figure in the totals block; without it the reading is $300.00 over: the investigator finds the discount.',
+  },
+  {
+    id: 'R3', file: 'R-arithmetic/R3-deposit-received.pdf', format: 'pdf',
+    vendor: 'wexford', invoiceNo: 'WCC-1046', date: '2026-10-14', due: '2026-11-13', terms: 'Net 30', po: 'PO-8135',
+    lines: [
+      L('Custom walnut reception desk', 1, 2900),
+      L('Wall-mounted storage cabinets', 2, 450),
+      L('On-site installation', 1, 200),
+    ],
+    adjustments: [{ label: 'Less deposit received 2026-09-02', amount: -1000 }],
+    totalLabel: 'Balance due',
+    expectedVerdict: 'missed',
+    hidden: { description: 'Less deposit received 2026-09-02', amount: '-1000.00', page: 1 },
+    expect: 'Lines $4,000.00, "Less deposit received 2026-09-02" −$1,000.00, "Balance due" $3,000.00, no tax. A deposit already paid is not a discount; the reading without it is $1,000.00 over: the investigator finds the deposit.',
+  },
+  {
+    id: 'R4', file: 'R-arithmetic/R4-last-three-lines-page-2.pdf', format: 'pdf',
+    vendor: 'halvorsen', invoiceNo: 'HMC-60412', date: '2026-10-21', due: '2026-11-20', terms: 'Net 30', po: 'PO-8151',
+    multipage: true, pages: 2,
+    lineGroups: [
+      { title: 'Boiler room modernisation — materials and labour', lines: [
+        L('Condensing boiler, 500 MBH', 1, 6840),
+        L('Boiler flue kit, stainless', 1, 925),
+        L('Primary loop circulator pumps', 2, 610),
+        L('Expansion tank, 80 gal', 1, 385),
+        L('Copper pipe, 2 in, per ft', 120, 14.25),
+        L('Pipe fittings and unions', 1, 540),
+        L('Pipe insulation, 2 in', 120, 3.1),
+        L('Isolation valves, 2 in', 6, 118),
+        L('Digital thermostat controls', 4, 142.5),
+        L('Pressure relief valves', 2, 96),
+        L('Pipefitter labour, hours', 56, 88),
+      ] },
+      { title: 'Commissioning and close-out', lines: [
+        L('System flush and chemical treatment', 1, 1140),
+        L('Combustion analysis and tuning', 1, 865.5),
+        L('Operator training and manuals', 1, 420),
+      ] },
+    ],
+    expectedVerdict: 'missed',
+    hidden: { description: 'the 3 lines on page 2', amount: '2425.50', page: 2 },
+    expect: 'Two pages, 14 lines; the last 3 lines ($1,140.00 + $865.50 + $420.00 = $2,425.50) and the totals are on page 2. A reading that stopped at page 1 is $2,425.50 short: the investigator finds the page-2 lines.',
+  },
+  {
+    id: 'R5', file: 'R-arithmetic/R5-vendor-transposed-total.pdf', format: 'pdf',
+    vendor: 'dunmore', invoiceNo: 'DPF-2290', date: '2026-10-12', due: '2026-11-11', terms: 'Net 30',
+    lines: [
+      L('Perfect binding, 500 booklets', 500, 1.9),
+      L('Spot UV cover coating', 1, 600),
+      L('Shrink-wrap and carton packing', 1, 300),
+    ],
+    printedTotal: 1580,
+    expectedVerdict: 'document_error',
+    hidden: null,
+    expect: 'Lines sum to $1,850.00 but the total prints $1,580.00 (digits transposed), no tax, nothing on the page explains the gap. Every figure was read correctly; the vendor made the mistake → document_error, there is nothing to find.',
+  },
+  {
+    id: 'R6', file: 'R-arithmetic/R6-lump-sum-lines.pdf', format: 'pdf',
+    vendor: 'sandpiper', invoiceNo: 'SS-0918', date: '2026-10-02', due: '2026-11-01', terms: 'Net 30',
+    lumpSum: true,
+    lines: [
+      L('Site survey', 1, 1836),
+      L('Drawings', 1, 1200),
+      L('Permit filing', 1, 415),
+    ],
+    expectedVerdict: 'misread',
+    hidden: { description: 'Site survey', amount: '1836.00', page: 1 },
+    expect: 'Three lump-sum lines with no quantity or price: Site survey $1,836.00, Drawings $1,200.00, Permit filing $415.00, total $3,451.00. The eval rewrites the survey to $1,386.00 as a scan misread would, so the lines no longer reach the total: the investigator finds the digits swapped → misread.',
+  },
+
+  // ---- M. Multi-invoice uploads: one PDF holding several invoices. The
+  // parts of each file are specs in PARTS (rendered to scratch, joined with
+  // pdfunite); expectBills lists the bills intake should make, with each
+  // bill's own 1-based inclusive page range, in document order.
+  {
+    id: 'M1', file: 'M-multi-invoice/M1-three-vendors.pdf', format: 'pdf',
+    compose: ['M1.1', 'M1.2', 'M1.3'], pages: 3,
+    expectBills: [
+      { vendor: 'Linden Pest Control', invoiceNumber: 'LPC-5501', total: '$680.00', pages: [1, 1] },
+      { vendor: 'Marrow Street Bakery Supply', invoiceNumber: 'MSB-3120', total: '$1,215.00', pages: [2, 2] },
+      { vendor: 'Corvid IT Services', invoiceNumber: 'CIT-9047', total: '$2,340.00', pages: [3, 3] },
+    ],
+    expect: 'One upload, three one-page invoices from three different vendors (three layouts) → 3 bills, one page each: [1,1], [2,2], [3,3].',
+  },
+  {
+    id: 'M2', file: 'M-multi-invoice/M2-one-vendor-two-invoices.pdf', format: 'pdf',
+    compose: ['M2.1', 'M2.2'], pages: 3,
+    expectBills: [
+      { vendor: 'Pinegate Event Rentals', invoiceNumber: 'PER-8801', total: '$1,450.00', pages: [1, 1] },
+      { vendor: 'Pinegate Event Rentals', invoiceNumber: 'PER-8802', total: '$4,224.00', pages: [2, 3] },
+    ],
+    expect: 'Two invoices from ONE vendor on the same template: PER-8801 is one page, PER-8802 runs onto a second page with its totals there. "Net 30" and the vendor block print on every page, so a page-split must not treat each page as its own invoice → 2 bills: [1,1], [2,3].',
+  },
+  {
+    id: 'M3', file: 'M-multi-invoice/M3-invoice-with-remittance-slip.pdf', format: 'pdf',
+    compose: ['M3.1', 'M3.2'], pages: 2,
+    expectBills: [
+      { vendor: 'Saltmarsh Marine Supply', invoiceNumber: 'SMS-4417', total: '$1,860.00', pages: [1, 2] },
+    ],
+    expect: 'One invoice whose page 2 is a detachable remittance slip repeating the invoice number and amount due → 1 bill, [1,2]: the slip is not a second invoice.',
+  },
+  {
+    id: 'M4', file: 'M-multi-invoice/M4-two-invoices-one-page.pdf', format: 'pdf',
+    template: 'twoup',
+    halves: [
+      { vendor: 'fairweather', invoiceNo: 'FJ-2031', date: '2026-10-09', due: '2026-11-08', terms: 'Net 30',
+        lines: [L('Office cleaning — October, 2 visits/week', 1, 920), L('Window wash, ground floor', 1, 180)] },
+      { vendor: 'goldfinch', invoiceNo: 'GSG-7714', date: '2026-10-10', due: '2026-11-09', terms: 'Net 30',
+        lines: [L('Temporary front desk cover, hours', 32, 28), L('Placement fee', 1, 300)] },
+    ],
+    expectBills: [
+      { vendor: 'Fairweather Janitorial', invoiceNumber: 'FJ-2031', total: '$1,100.00', pages: [1, 1] },
+      { vendor: 'Goldfinch Staffing Group', invoiceNumber: 'GSG-7714', total: '$1,196.00', pages: [1, 1] },
+    ],
+    expect: 'Two short invoices from two vendors on ONE page, top half and bottom half → 2 bills, both on page [1,1]: a page range cannot separate them, so each bill keeps the one page.',
+  },
+  {
+    id: 'M5', file: 'M-multi-invoice/M5-forwarder-cover-page.pdf', format: 'pdf',
+    compose: ['M5.0', 'M5.1', 'M5.2'], pages: 3,
+    expectBills: [
+      { vendor: 'Ravensworth Signage', invoiceNumber: 'RS-3382', total: '$2,640.00', pages: [1, 2] },
+      { vendor: 'Thistledown Catering Co', invoiceNumber: 'TC-1190', total: '$975.00', pages: [3, 3] },
+    ],
+    expect: 'A cover page from a forwarding service listing the two attached invoices, then two one-page invoices from two vendors → 2 bills: [1,2] and [3,3]. The cover goes with the first invoice.',
+  },
+  {
+    id: 'M6', file: 'M-multi-invoice/M6-three-vendors-scan.pdf', format: 'pdf',
+    rasterOf: 'M1', pages: 3, noTextLayer: true,
+    expectBills: [
+      { vendor: 'Linden Pest Control', invoiceNumber: 'LPC-5501', total: '$680.00', pages: [1, 1] },
+      { vendor: 'Marrow Street Bakery Supply', invoiceNumber: 'MSB-3120', total: '$1,215.00', pages: [2, 2] },
+      { vendor: 'Corvid IT Services', invoiceNumber: 'CIT-9047', total: '$2,340.00', pages: [3, 3] },
+    ],
+    expect: 'M1 again as an image-only scan PDF (grayscale, 150 dpi, no text layer) → the same 3 bills, [1,1], [2,2], [3,3]; the pages have to be read from the images.',
+  },
 ];
+
+// Parts of the composed M files. Not catalogued; rendered to scratch only.
+export const PARTS = {
+  'M1.1': { vendor: 'linden', invoiceNo: 'LPC-5501', date: '2026-10-05', due: '2026-11-04', terms: 'Net 30',
+    lines: [L('Quarterly pest inspection and treatment', 1, 540), L('Rodent bait station service', 4, 35)] },
+  'M1.2': { vendor: 'marrow', invoiceNo: 'MSB-3120', date: '2026-10-06', due: '2026-11-05', terms: 'Net 30',
+    lines: [L('Bread flour, 50 lb sacks', 18, 32.5), L('Cultured butter, 36 lb case', 5, 118), L('Parchment sheets, 1000 ct', 4, 10)] },
+  'M1.3': { vendor: 'corvid', invoiceNo: 'CIT-9047', date: '2026-10-07', due: '2026-11-06', terms: 'Net 30',
+    lines: [L('Managed IT support — October', 1, 1800), L('Firewall licence renewal', 1, 540)] },
+  'M2.1': { vendor: 'pinegate', invoiceNo: 'PER-8801', date: '2026-10-09', due: '2026-11-08', terms: 'Net 30',
+    lines: [L('Folding chairs, white resin', 120, 3.5), L('Round tables, 60 in', 10, 85), L('Delivery and pickup', 1, 180)] },
+  'M2.2': { vendor: 'pinegate', invoiceNo: 'PER-8802', date: '2026-10-16', due: '2026-11-15', terms: 'Net 30', multipage: true, pages: 2, repeatMeta: true,
+    lineGroups: [
+      { title: 'Autumn gala — rental items', lines: [
+        L('Folding chairs, gold chiavari', 200, 6), L('Banquet tables, 8 ft', 24, 22), L('Linen tablecloths, ivory', 24, 14),
+        L('Linen napkins, ivory', 200, 1.1), L('Stage decking, 4x8 panel', 12, 45), L('Lectern with microphone', 1, 95),
+        L('String lighting, 100 ft', 6, 30), L('Heat lamps, propane', 4, 60) ] },
+      { title: 'Services', lines: [
+        L('Delivery, setup and teardown crew', 1, 600), L('Insurance and damage waiver', 1, 285) ] },
+    ] },
+  'M3.1': { vendor: 'saltmarsh', invoiceNo: 'SMS-4417', date: '2026-10-13', due: '2026-11-12', terms: 'Net 30',
+    lines: [L('Marine-grade rope, 600 ft', 1, 780), L('Stainless cleats', 12, 35), L('Bilge pump', 2, 330)] },
+  'M3.2': { template: 'remitslip', vendor: 'saltmarsh', invoiceNo: 'SMS-4417', date: '2026-10-13', due: '2026-11-12',
+    slipAmount: 1860 },
+  'M5.0': { template: 'cover', vendor: 'parcelpost', date: '2026-10-22',
+    listing: [
+      { vendor: 'Ravensworth Signage', no: 'RS-3382', date: '2026-10-19', amount: 2640 },
+      { vendor: 'Thistledown Catering Co', no: 'TC-1190', date: '2026-10-20', amount: 975 },
+    ] },
+  'M5.1': { vendor: 'ravensworth', invoiceNo: 'RS-3382', date: '2026-10-19', due: '2026-11-18', terms: 'Net 30',
+    lines: [L('Illuminated lobby sign, 6 ft', 1, 1980), L('Mounting hardware and install', 1, 660)] },
+  'M5.2': { vendor: 'thistledown', invoiceNo: 'TC-1190', date: '2026-10-20', due: '2026-11-19', terms: 'Net 30',
+    lines: [L('Working lunch catering, 25 guests', 25, 33), L('Beverage service', 1, 150)] },
+};
