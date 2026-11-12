@@ -2278,6 +2278,9 @@ export interface IntegrationSetup {
   /** A turn that failed and is being tried again: the AI service, or an answer that never came. */
   retrying: { failed: number; of: number; cause: 'service' | 'answer' } | null;
   company: { name: string | null; confirmedAt: string | null };
+  /** The latest sign-in that came back in this setup, and whether the connection still holds. Unlike
+   *  goConditions' signed_in, it doesn't wait for the company to be confirmed. */
+  signIn: { at: string | null; live: boolean };
   /** Reading their books: each step as it is done. */
   study: { status: 'running' | 'finished' | 'failed' | null; steps: Array<{ key: string; text: string }> | null; error: string | null };
   calls: IntegrationSetupCall[];

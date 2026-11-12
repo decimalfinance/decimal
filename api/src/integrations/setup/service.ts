@@ -459,7 +459,7 @@ async function billsSince(organizationId: string, system: SetupSystem, since: Da
 async function setupView(setup: IntegrationSetup) {
   const connector = connectorFor(setup.system);
   const done = setup.status === 'done';
-  const [messages, calls, conditions, retry, connection, onCards] = await Promise.all([
+  const [messages, calls, conditions, retry, connection, onCards, cameBack] = await Promise.all([
     prisma.integrationSetupMessage.findMany({
       where: { setupId: setup.setupId },
       orderBy: { createdAt: 'asc' },
@@ -468,8 +468,9 @@ async function setupView(setup: IntegrationSetup) {
     prisma.integrationSetupCall.findMany({ where: { setupId: setup.setupId }, orderBy: { createdAt: 'asc' } }),
     doneConditions(setup),
     retrying(setup),
-    done ? connector.connection(setup.organizationId) : Promise.resolve(null),
+    connector.connection(setup.organizationId),
     cardAnswers(setup.setupId),
+    prisma.integrationSetupEvent.findFirst({ where: { setupId: setup.setupId, kind: 'signed_in' }, orderBy: { seq: 'desc' }, select: { at: true } }),
   ]);
   const posting = done ? postingNow(setup, connection) : null;
   const questions = new Map(calls.map((c) => [c.key, c.question]));
@@ -486,6 +487,10 @@ async function setupView(setup: IntegrationSetup) {
     running: messages.some((m) => m.status === 'running'),
     retrying: retry,
     company: { name: setup.companyName, confirmedAt: setup.companyConfirmedAt?.toISOString() ?? null },
+    // The latest sign-in that came back in this setup, and whether the connection still holds.
+    // goConditions' signed_in waits for the company to be confirmed too, so the screen goes by
+    // this to stop offering a sign-in the moment one comes back.
+    signIn: { at: cameBack?.at.toISOString() ?? null, live: connection?.status === 'connected' },
     study: { status: setup.studyStatus, steps: setup.studySteps, error: setup.studyError },
     calls: calls.map((c) => ({
       key: c.key,

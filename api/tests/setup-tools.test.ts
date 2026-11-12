@@ -226,6 +226,26 @@ test('setup tools: the sign-in coming back wakes it, and it is told nobody typed
   assert.deepEqual((await lastMessage(w, setupId)).actions, []);
 });
 
+test('setup tools: the view says when a sign-in came back and whether it holds, before the company is confirmed', async () => {
+  const w = await makeOrg();
+  const state = pretendSystem();
+  script([{ calls: [{ tool: 'offer_sign_in' }], say: 'Sign in to start.' }, { say: 'Is it Larkspur Freight?' }]);
+  const setupId = await start(w);
+  const before = await view(w, setupId);
+  assert.deepEqual(before.signIn, { at: null, live: false });
+  const offeredAt: string = before.messages.at(-1).createdAt;
+  assert.equal(before.messages.at(-1).actions[0].kind, 'sign_in');
+
+  await signIn(w, state);
+  const after = await view(w, setupId);
+  assert.equal(after.signIn.live, true);
+  assert.ok(after.signIn.at > offeredAt, 'it came back after the offer, so the screen drops that button');
+  assert.equal(after.goConditions.find((c: { key: string }) => c.key === 'signed_in').done, false, 'Go still waits for the company to be confirmed');
+
+  state.connection = { ...state.connection!, status: 'needs_reauth' };
+  assert.equal((await view(w, setupId)).signIn.live, false, 'a sign-in that no longer holds gets offered again');
+});
+
 // ─── The person's word ────────────────────────────────────────────────────────
 
 test('setup tools: only something a person just said can confirm the company', async () => {

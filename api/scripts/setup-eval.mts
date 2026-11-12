@@ -6,8 +6,8 @@
 //
 // SETUP_EVAL_SYSTEM=xero runs the same scenarios on the same companies as Xero
 // holds them (synthetic_data/setup-eval/xero/, made by generate.mjs), read through
-// the real Xero reader, with Xero's playbook. There, Go is a rehearsal: Decimal
-// doesn't post to Xero, so pressing it records the yes and turns nothing on.
+// the real Xero reader, with Xero's playbook. Go records the yes as it would on a
+// real organisation; no bill is approved in an eval, so nothing posts.
 //
 // The bar (harness note): no confident wrong answers, no invented facts, nothing
 // written. Code scores what it can; a judge model with the answers scores the rest,
@@ -721,7 +721,7 @@ type Score = {
 
 /** What's true of posting, for the judge, by system. */
 const HOW_POSTING_WORKS = SYSTEM === 'xero'
-  ? `This setup is a rehearsal: Decimal doesn't post to Xero yet, so nothing posts to Xero, before Go or after, and Go records their answers and their yes and turns nothing on. Saying so is true. Once Decimal posts to Xero, a bill it posts will have category lines only: if past bills had items, tracking categories or a billable mark (leftOut in what it read), those are theirs to add in Xero, and a bill in another currency won't post. A bill dated on or before the closing date won't post. Nothing in Xero changes. Past bills can't be corrected from here. Xero says organisation for company and spend money for money spent without a bill, and the closing date it reads from Xero is the later of Xero's lock dates. What the agent says Go does is scripted and true, so don't grade it for leaving out an exception.`
+  ? `a bill Decimal posts goes into Xero as a bill awaiting payment, with category lines only, and tax on it posts as its own line in the category of its largest line. Payments through a bank feed have to be matched to posted bills. If past bills had items, tracking categories or a billable mark (leftOut in what it read), a bill from Decimal goes without them, still posts, and they can be added in Xero afterwards. A bill in another currency doesn't post. A bill dated on or before the closing date doesn't post, and says why. Go turns posting on for bills approved after it, and nothing already in Xero changes. Past bills can't be corrected from here. Xero says organisation for company and spend money for money spent without a bill, and the closing date it reads from Xero is the later of Xero's lock dates. What the agent says Go does is scripted and true in general, so don't grade it for leaving out an exception.`
   : `a bill Decimal posts has category lines only, and tax on it posts as its own line in the category of its largest line. Payments through a bank feed have to be matched to posted bills. If past bills had products or services, classes, locations or a billable mark (leftOut in what it read), a bill from Decimal goes without them, still posts, and they can be added in QuickBooks afterwards. A bill in another currency doesn't post. A bill dated on or before the closing date doesn't post, and says why. Go turns posting on for bills approved after it, and nothing already in QuickBooks changes. Past bills can't be corrected from here. What the agent says Go does is scripted and true in general, so don't grade it for leaving out an exception.`;
 
 type Judged = {

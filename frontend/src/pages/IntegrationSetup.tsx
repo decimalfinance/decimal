@@ -21,7 +21,7 @@
  * doing instead (IntegrationPosting.tsx). The conversation stays a click away
  * there, read only, at ?view=conversation.
  */
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -59,6 +59,8 @@ const WORKING_MS = 1000;
 const WAITING_MS = 5000;
 /** Just after the page opens, as when Intuit's sign-in comes back, Decimal may be about to start. */
 const OPENING_MS = 10_000;
+/** How long a sign-in has to leave the page before its button comes back. */
+const LEFT_MS = 10_000;
 
 type Busy = null | 'start' | 'sign_in' | 'go';
 type Work = { did: string[]; now: string };
@@ -79,6 +81,22 @@ function SetupScreen({ organizationId, system }: { organizationId: string; syste
   const [params] = useSearchParams();
   const [busy, setBusy] = useState<Busy>(null);
   const [openedAt] = useState(() => Date.now());
+  // Leaving for a sign-in sets busy, and leaving ends the page. But Back from the sign-in brings
+  // this page back as it was left, busy and every button greyed, so it is cleared then; and a
+  // trip stopped before it left clears it a while later (`leaving`, the latest sign-in's timer).
+  const leaving = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    const back = (e: PageTransitionEvent) => {
+      if (!e.persisted) return;
+      window.clearTimeout(leaving.current);
+      setBusy(null);
+    };
+    window.addEventListener('pageshow', back);
+    return () => {
+      window.removeEventListener('pageshow', back);
+      window.clearTimeout(leaving.current);
+    };
+  }, []);
 
   const session = useQuery({ queryKey: ['session'], queryFn: () => api.getSession(), staleTime: Infinity });
   const access = useQuery({
@@ -129,6 +147,9 @@ function SetupScreen({ organizationId, system }: { organizationId: string; syste
     try {
       const { authorizeUrl } = await integrationSetupApi.signInLink(path);
       window.location.assign(authorizeUrl);
+      // Still here a while later, the trip was stopped before it left: the buttons come back.
+      window.clearTimeout(leaving.current);
+      leaving.current = window.setTimeout(() => setBusy((now) => (now === 'sign_in' ? null : now)), LEFT_MS);
     } catch (e) {
       toaster.show(messageOf(e));
       setBusy(null);
@@ -266,10 +287,17 @@ function questionOnCard(setup: IntegrationSetup, turnedTo: string | null, answer
 
 const met = (setup: IntegrationSetup, key: string) => setup.status === 'done' || setup.goConditions.some((c) => c.key === key && c.done);
 
+/** A sign-in came back after this message offered one. */
+const cameBackAfter = (setup: IntegrationSetup, m: IntegrationSetupMessage) => setup.signIn.at !== null && setup.signIn.at > m.createdAt;
+
+/** Signed in now, whether or not the company is confirmed yet: signed_in waits for that too. */
+const signedInNow = (setup: IntegrationSetup) => met(setup, 'signed_in') || (setup.signIn.at !== null && setup.signIn.live);
+
 /**
  * The buttons still worth pressing, by the message that offered them: each kind
- * on its latest offer only. A sign-in stays until someone has signed in, or
- * Decimal offers it again (the wrong company); Go stays while Go is possible.
+ * on its latest offer only. A sign-in goes the moment one comes back after it,
+ * and comes back if that sign-in stops holding. Until then it stays, as does one
+ * Decimal offers again (the wrong company). Go stays while Go is possible.
  */
 function liveActions(setup: IntegrationSetup): Map<string, IntegrationSetupAction[]> {
   const out = new Map<string, IntegrationSetupAction[]>();
@@ -280,7 +308,9 @@ function liveActions(setup: IntegrationSetup): Map<string, IntegrationSetupActio
     const offer = [...said].reverse().find((m) => (m.actions ?? []).some((a) => a.kind === kind));
     const action = offer?.actions?.find((a) => a.kind === kind);
     if (!offer || !action) continue;
-    const worth = kind === 'go' ? setup.canGo : setup.status === 'open' && (!met(setup, 'signed_in') || offer.messageId === lastSaid);
+    const worth = kind === 'go'
+      ? setup.canGo
+      : setup.status === 'open' && (cameBackAfter(setup, offer) ? !setup.signIn.live : !met(setup, 'signed_in') || offer.messageId === lastSaid);
     if (worth) out.set(offer.messageId, [...(out.get(offer.messageId) ?? []), action]);
   }
   return out;
@@ -703,7 +733,7 @@ function Steps({ setup, system, madeUp, busy, onSignIn }: {
   const { name, books } = SYSTEMS[system];
   const signsIn = madeUp ? MADE_UP_SIGN_IN : SYSTEMS[system].signsIn;
   const company = setup.company.name;
-  const signedIn = met(setup, 'signed_in');
+  const signedIn = signedInNow(setup);
   // Finished, but Intuit's sign-in has since run out: the yes holds and waits on a sign-in.
   const expired = setup.posting === 'signed_out';
   // Only when the conversation has no sign-in left to press: one way to do a thing at a time.
@@ -732,7 +762,7 @@ function Steps({ setup, system, madeUp, busy, onSignIn }: {
         <Step
           state={met(setup, 'company_confirmed') ? 'done' : 'todo'}
           name={met(setup, 'company_confirmed') ? `${books[0]!.toUpperCase()}${books.slice(1)} confirmed` : `Confirm the ${books}`}
-          line={met(setup, 'company_confirmed') ? company : company ? `Is ${company} the right one? Say so in the conversation.` : 'Once you’re signed in.'}
+          line={met(setup, 'company_confirmed') ? company : company ? `Is ${company} the right one? Say so in the conversation.` : signedIn ? 'Is it the right one? Say so in the conversation.' : 'Once you’re signed in.'}
         />
 
         <Step
