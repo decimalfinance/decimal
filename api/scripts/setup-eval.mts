@@ -237,12 +237,9 @@ const SCENARIOS: Scenario[] = [
     id: 'approved-before-connecting',
     companies: ['closed-books'],
     approvedBefore: 3,
-    // On Xero nothing posts, these bills included, so there is nothing to tell them to do: telling them or not are both right, and saying they'd post is wrong.
-    behaviour: SYSTEM === 'xero'
-      ? 'You cooperate. You approved 3 bills in Decimal before connecting. If told about them, you might ask what happens to them. What is true, so judge by this: Decimal doesn\'t post to Xero, so these bills don\'t post there, before Go or after, and there is nothing to do about them.'
-      : 'You cooperate. You approved 3 bills in Decimal before connecting. If told about them, you might ask what to do, and you will send them back and approve them again after Go yourself. What is true, so judge by this: those bills do not post by themselves, and to post one someone sends it back and approves it again after Go.',
+    behaviour: 'You cooperate. You approved 3 bills in Decimal before connecting. If told about them, you might ask what to do, and you will send them back and approve them again after Go yourself. What is true, so judge by this: those bills do not post by themselves, and to post one someone sends it back and approves it again after Go.',
     expect: { go: true },
-    check: SYSTEM === 'xero' ? undefined : (r) => (r.transcript.some((m) => m.claims.some((c) => c.refs.some((ref) => ref.startsWith('decimal-bill:')))) ? [] : ['it never told them about the bills approved before connecting, with the bills behind it']),
+    check: (r) => (r.transcript.some((m) => m.claims.some((c) => c.refs.some((ref) => ref.startsWith('decimal-bill:')))) ? [] : ['it never told them about the bills approved before connecting, with the bills behind it']),
   },
 ];
 
@@ -978,6 +975,23 @@ ${toolCalls}
 const wanted = process.argv.slice(2);
 const chosen = wanted.length ? SCENARIOS.filter((s) => wanted.includes(s.id)) : SCENARIOS;
 if (chosen.length === 0) { console.error(`No such scenario. There are: ${SCENARIOS.map((s) => s.id).join(', ')}`); process.exit(2); }
+
+// The answers are made for the day they were generated, and the study reads the 24 months up to
+// today, so on a later day every studied scenario fails on its window. Stop before spending a run.
+{
+  const { historySince } = await import('../src/integrations/setup/study.js');
+  const opens = historySince();
+  const stale: string[] = [];
+  for (const id of new Set(chosen.flatMap((s) => s.companies))) {
+    const since = (await loadAnswers(id)).facts?.since;
+    if (since !== undefined && since !== opens) stale.push(`${id} opens on ${since}`);
+  }
+  if (stale.length > 0) {
+    // The study's today is UTC's; the generator's defaults to the local day, so say which.
+    console.error(`The fixtures were made for another day: today's study opens on ${opens}, but ${stale.join(', ')}.\nRun node ../synthetic_data/setup-eval/generate.mjs ${new Date().toISOString().slice(0, 10)} first.`);
+    process.exit(2);
+  }
+}
 
 await mkdir(OUT, { recursive: true });
 console.log(`Setup on ${agentModel}, person and judge on ${textModel}. ${chosen.length} scenarios, ${CONCURRENCY} at a time.\n${OUT}\n`);
