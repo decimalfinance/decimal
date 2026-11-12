@@ -67,25 +67,44 @@ export function Facts({ detail }: { detail: BillDetail }) {
     const entry = fields[key];
     const text = shown(def.kind, entry?.value.trim() ?? '');
     const label = <span key={`${key}-k`} className="bp-kv-k">{LABEL[key] ?? def.label}</span>;
-    if (!text) {
-      return [label, <span key={`${key}-v`} className="bp-kv-v is-none">Not on the document</span>];
-    }
     const change = changed.get(key);
     const settler = draft.confirmedBy?.[key] ?? null;
-    if (change && change.from !== 'not on document') {
-      const was = shown(def.kind, change.from);
-      const face = change.by ? (settler?.name === change.by ? settler : { name: change.by, avatarUrl: null }) : null;
-      const note = <ByNote face={face} text={<>Changed by {change.by ?? 'a person'} · the document says <Value def={def} text={was} /></>} />;
+    // What a person did to it against Decimal's reading: changed, added or removed.
+    // The field's own mark says it (address parts included); a bill's corrections
+    // say it for one sent before fields had marks.
+    const personal = entry?.state === 'changed' || Boolean(change);
+    const was = entry?.state === 'changed' ? shown(def.kind, entry.read)
+      : change && change.from !== 'not on document' ? shown(def.kind, change.from) : '';
+    const byName = entry?.changedBy?.name ?? change?.by ?? null;
+    const face = !byName ? null
+      : entry?.changedBy?.name === byName ? entry.changedBy
+      : settler?.name === byName ? settler
+      : { name: byName, avatarUrl: null };
+    const avatar = face ? <Avatar name={face.name} src={face.avatarUrl} size={12} /> : null;
+    if (!text) {
+      if (personal && was) {
+        // The document has it and a person took it out: never "Not on the document".
+        const note = <ByNote face={face} text={<>Removed by {byName ?? 'a person'} · the document says <Value def={def} text={was} /></>} />;
+        return [label, <span key={`${key}-v`} className="bp-kv-v"><Hover note={note}><span className="bp-kv-was is-alone">{was}</span></Hover>{avatar}</span>];
+      }
+      return [label, <span key={`${key}-v`} className="bp-kv-v is-none">Not on the document</span>];
+    }
+    if (personal && !was) {
+      const note = <ByNote face={face} text={`Added by ${byName ?? 'a person'} · not on the document`} />;
+      return [label, <span key={`${key}-v`} className="bp-kv-v"><Hover note={note}><Value def={def} text={text} /></Hover>{avatar}</span>];
+    }
+    if (personal) {
+      const note = <ByNote face={face} text={<>Changed by {byName ?? 'a person'} · the document says <Value def={def} text={was} /></>} />;
       return [
         label,
         <span key={`${key}-v`} className="bp-kv-v">
           <Hover note={note}><span className="bp-kv-now"><Value def={def} text={text} /></span></Hover>
           <span className="bp-kv-was">{was}</span>
-          {face ? <Avatar name={face.name} src={face.avatarUrl} size={12} /> : null}
+          {avatar}
         </span>,
       ];
     }
-    const note = entry?.state === 'confirmed' && settler ? <ByNote face={settler} text={`Confirmed by ${settler.name}`} /> : null;
+    const note = entry?.state === 'confirmed' && settler ? <ByNote face={settler} text={`Checked by ${settler.name}`} /> : null;
     return [label, <span key={`${key}-v`} className="bp-kv-v"><Hover note={note}><Value def={def} text={text} /></Hover></span>];
   };
 

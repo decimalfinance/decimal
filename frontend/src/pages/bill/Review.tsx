@@ -28,6 +28,7 @@ import {
   DISCOUNT_FIELD,
   VENDOR_FIELDS,
   landsAt,
+  blankField,
   bodyOf,
   closeReasonFor,
   fieldsFrom,
@@ -38,6 +39,8 @@ import {
   newLineId,
   parseMoney,
   sendGap,
+  withTick,
+  withValue,
   type Face,
   type FieldDef,
   type ChipTone,
@@ -165,7 +168,7 @@ export function Review({
   // Nothing changes while Decimal is still reading: its reading would land on top.
   const canEdit = editable && !isReading;
   const unreadable = draft.unreadable;
-  const typedAny = Object.values(fields).some((f) => f.state === 'confirmed') || lines.some((l) => l.description.trim());
+  const typedAny = Object.values(fields).some((f) => f.state === 'changed' || f.state === 'confirmed') || lines.some((l) => l.description.trim());
   // Until somebody starts typing, a bill nothing could be read from says so.
   const couldntRead = unreadable && !isReading && !byHand && !typedAny;
   const filename = draft.document?.filename ?? null;
@@ -209,16 +212,19 @@ export function Review({
   const dueDay = fields.dueDate?.value && /^\d{4}-\d{2}-\d{2}/.test(fields.dueDate.value) ? fields.dueDate.value : null;
   const late = dueDay !== null && header.stage !== 'done' && daysPast(dueDay) > 0;
 
+  // Typing changes a value; only the tick says a reading is right. Which a field
+  // is, the comparison with Decimal's reading decides (withValue), as the server's does.
   const edit = (key: string, value: string) => {
-    setFields((f) => ({ ...f, [key]: { ...(f[key] ?? { reason: null, inferred: false, source: null }), value, state: 'confirmed' } }));
+    setFields((f) => ({ ...f, [key]: withValue(key, f[key] ?? blankField(), value, viewer) }));
   };
   const confirmField = (key: string) => {
-    setFields((f) => (f[key] ? { ...f, [key]: { ...f[key]!, state: 'confirmed' } } : f));
+    setFields((f) => (f[key] ? { ...f, [key]: withTick(key, f[key]!) } : f));
   };
   const byOf = (key: string): Face | null => {
     const entry = fields[key];
-    if (entry?.state !== 'confirmed') return null;
-    return draft.confirmedBy?.[key] ?? viewer;
+    if (entry?.state === 'changed') return entry.changedBy;
+    if (entry?.state === 'confirmed') return draft.confirmedBy?.[key] ?? viewer;
+    return null;
   };
 
   const box = (def: FieldDef) => {
@@ -242,7 +248,7 @@ export function Review({
   };
 
   const fixTotal = async (to: number) => {
-    const next: Fields = { ...fields, total: { ...(fields.total ?? { reason: null, inferred: false, source: null }), value: String(to), state: 'confirmed' } };
+    const next: Fields = { ...fields, total: withValue('total', fields.total ?? blankField(), String(to), viewer) };
     setFields(next);
     await save(bodyOf(next, lines, noteForApprovers));
   };

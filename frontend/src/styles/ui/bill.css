@@ -959,6 +959,8 @@ html.app-zoom:has(.ui.bp) .ui.toast { zoom: var(--app-unzoom); --app-zoom: 1; }
 .ui .bp-kv-v.is-none { color: var(--ink-4); }
 .ui .bp-kv-now { font-weight: 600; }
 .ui .bp-kv-was { margin-left: 6px; font: 10.5px var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -.01em; color: var(--ink-4); text-decoration: line-through; text-decoration-color: var(--edge-hover); }
+/* A value a person removed: what the document says, struck, with nothing before it. */
+.ui .bp-kv-was.is-alone { margin-left: 0; }
 .ui .bp-kv-v .avatar { margin-left: 6px; vertical-align: -2px; }
 /* A note over a read-only value while the pointer rests on it. */
 .ui .bp-hover { position: relative; display: inline-block; white-space: nowrap; cursor: default; }

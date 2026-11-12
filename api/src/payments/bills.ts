@@ -1069,6 +1069,12 @@ const BILL_FIELD_LABELS: Record<string, string> = {
   'vendor.email': 'Email',
   vendorAddress: 'Vendor address',
   remitTo: 'Remit to address',
+  // Each part of the vendor's address, as its box is labelled on the bill page.
+  'remitTo.street': 'Street',
+  'remitTo.city': 'City',
+  'remitTo.state': 'State',
+  'remitTo.zip': 'ZIP code',
+  'remitTo.country': 'Country',
 };
 
 // What each policy override is called in a sentence. Keyed by the rule the
@@ -1680,9 +1686,33 @@ export function deriveInvoiceReference(extracted: Record<string, unknown>): stri
   return parts.length > 1 ? parts.join('-') : null;
 }
 
-export type ReviewFieldState = 'read' | 'needs_look' | 'not_on_document' | 'confirmed';
+/**
+ * A field on the bill page. `changed`: a person changed it from Decimal's reading
+ * ("Changed by", with what was read). `confirmed`: Decimal asked for a look and a
+ * person ticked its reading ("Checked by"). Otherwise how the reading went.
+ */
+export type ReviewFieldState = 'read' | 'needs_look' | 'not_on_document' | 'confirmed' | 'changed';
+type ReadingState = Exclude<ReviewFieldState, 'confirmed' | 'changed'>;
 
-function fieldState(args: {
+function fieldState(args: Parameters<typeof readingState>[0] & {
+  /** The ticks: a person said the reading is right. */
+  confirmedKeys: Set<string>;
+  /** The page's keys a person changed from the reading (billFieldReadings). */
+  changedKeys?: Set<string>;
+  /** The page's key, when the reading is judged under another (an address part). */
+  markKey?: string;
+}): { state: ReviewFieldState; reason: string | null } {
+  const mark = args.markKey ?? args.key;
+  if (args.changedKeys?.has(mark)) return { state: 'changed', reason: null };
+  const reading = readingState(args);
+  // Only a reading Decimal asked about takes a tick. A tick on any other field,
+  // from when typing in a field counted as one, says nothing, so it shows nothing.
+  if (reading.state === 'needs_look' && args.confirmedKeys.has(mark)) return { state: 'confirmed', reason: null };
+  return reading;
+}
+
+/** How Decimal's reading of a field went, whatever a person has done with it since. */
+function readingState(args: {
   key: string;
   value: unknown;
   fieldConfidence: Record<string, unknown> | null;
@@ -1692,9 +1722,7 @@ function fieldState(args: {
   issues?: Array<{ field: string; note: string }> | null;
   /** Fields whose value could not be found in the document's text layer. */
   ungrounded?: string[] | null;
-  confirmedKeys: Set<string>;
-}): { state: ReviewFieldState; reason: string | null } {
-  if (args.confirmedKeys.has(args.key)) return { state: 'confirmed', reason: null };
+}): { state: ReadingState; reason: string | null } {
   const empty = args.value == null || args.value === '';
   if (empty) return { state: 'not_on_document', reason: null };
 
@@ -1744,9 +1772,11 @@ function fieldState(args: {
  * amber box that was never painted — a refusal has to be actionable, which
  * means it can only name what they can see.
  *
- * Correcting a value does not settle it, and that is deliberate: the screen
- * keeps the marker up after an edit, so the gate agreeing with the screen is
- * the whole point. Confirm is the one signal that means a person looked.
+ * Two things settle one, as the screen shows them: a tick, a person saying the
+ * reading is right ("Checked by"), or a real change, a person putting their own
+ * value there ("Changed by"). The change is measured here, against the reading
+ * (billFieldReadings), never taken from the page: typing a value and putting it
+ * back changes nothing, so it settles nothing.
  */
 function uncheckedFields(args: {
   extracted: Record<string, unknown>;
@@ -1762,6 +1792,7 @@ function uncheckedFields(args: {
     ? (extracted.ungrounded as unknown[]).filter((v): v is string => typeof v === 'string')
     : null;
   const confirmedKeys = new Set(input.confirmedFieldKeys ?? []);
+  const changedKeys = new Set(billFieldReadings(extracted, input.fields).filter((r) => r.changed).map((r) => r.mark));
   const f = input.fields;
 
   // The submitted body IS the value — no fallback chain, unlike the draft
@@ -1780,7 +1811,7 @@ function uncheckedFields(args: {
   ];
   const unchecked = candidates
     .filter(({ key, value }) => fieldState({
-      key, value, fieldConfidence, fieldStatus, issues, ungrounded, confirmedKeys,
+      key, value, fieldConfidence, fieldStatus, issues, ungrounded, confirmedKeys, changedKeys,
     }).state === 'needs_look')
     .map(({ key }) => key);
 
@@ -1961,6 +1992,9 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   const verifiedFields = verification && isRecord(verification.fields) ? verification.fields : null;
   const valueOf = (key: string, extractedValue: unknown) =>
     verifiedFields && key in verifiedFields ? verifiedFields[key] : extractedValue;
+  // What a person changed from Decimal's reading, as the history and the send see it.
+  const readings = billFieldReadings(extracted, verifiedFields ?? {});
+  const changedKeys = new Set(readings.filter((r) => r.changed).map((r) => r.mark));
 
   const headerFieldDefs: Array<{ key: string; label: string; value: unknown }> = [
     { key: 'invoiceNumber', label: 'Invoice number', value: valueOf('invoiceNumber', str(extracted.invoiceNumber) ?? order.invoiceNumber) },
@@ -1979,7 +2013,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   };
   const fields = headerFieldDefs.map((f) => ({
     ...f,
-    ...fieldState({ key: f.key, value: f.value, fieldConfidence, fieldStatus, issues, ungrounded, confirmedKeys }),
+    ...fieldState({ key: f.key, value: f.value, fieldConfidence, fieldStatus, issues, ungrounded, confirmedKeys, changedKeys }),
     // A field with no value has nothing on the page to point at.
     source: f.value == null || f.value === '' ? null : sourceOf(sourceKeyByField[f.key] ?? f.key),
   }));
@@ -2005,7 +2039,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       // absence, and every bill came up amber for a value it had read cleanly.
       // "We could not read this" and "this section does not exist" are
       // different statements, and only one of them is the reader's problem.
-      ...fieldState({ key: pickAddressConfidenceKey(usedVendorAddress), value, fieldConfidence, fieldStatus, issues, ungrounded, confirmedKeys }),
+      ...fieldState({ key: pickAddressConfidenceKey(usedVendorAddress), markKey: `remitTo.${part}`, value, fieldConfidence, fieldStatus, issues, ungrounded, confirmedKeys, changedKeys }),
       // Each box points at its own words, falling back to the whole address
       // block when only that could be located.
       //
@@ -2220,9 +2254,18 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   // categories a person picked or ticked.
   const confirmedByIds: Record<string, unknown> = verification && isRecord(verification.confirmedBy) ? verification.confirmedBy : {};
   const savedLineRows = (verifiedLines ?? []).filter(isRecord);
+  // Who put each changed field's value there: the last change the history has for it.
+  const changeRows = changedKeys.size === 0 ? [] : await prisma.billFieldChange.findMany({
+    where: { organizationId, paymentOrderId: order.paymentOrderId },
+    orderBy: { changedAt: 'desc' },
+    select: { fieldKey: true, changedByUserId: true },
+  });
+  const lastChangedBy = new Map<string, string | null>();
+  for (const row of changeRows) if (!lastChangedBy.has(row.fieldKey)) lastChangedBy.set(row.fieldKey, row.changedByUserId);
   const confirmerIds = [...new Set([
     ...Object.values(confirmedByIds).map((v) => str(v)),
     ...savedLineRows.map((l) => str(l.categoryConfirmedBy)),
+    ...lastChangedBy.values(),
   ].filter((v): v is string => Boolean(v)))];
   const confirmers = new Map(confirmerIds.length > 0
     ? (await prisma.user.findMany({ where: { userId: { in: confirmerIds } }, select: { userId: true, displayName: true, email: true, avatarUrl: true } }))
@@ -2232,6 +2275,26 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   const confirmedBy = Object.fromEntries(Object.entries(confirmedByIds)
     .map(([key, id]) => [key, personOf(str(id))] as const)
     .filter((entry): entry is readonly [string, { name: string; avatarUrl: string | null }] => entry[1] !== null));
+
+  // Each field against Decimal's reading, by the page's keys, for its mark: what was
+  // read and how the reading went (to go back to when a value is put back), whether a
+  // person changed it, and who did. The page compares as it goes and then takes this.
+  const unreadableReading = readingWasUnreadable(extracted);
+  const addressKey = pickAddressConfidenceKey(remitSource(extracted).usedVendorAddress);
+  const marks = Object.fromEntries(readings.map((r) => {
+    // The comparison counts no tax line as $0.00; the page shows it as nothing.
+    const read = r.field === 'taxAmount' ? (unreadableReading ? null : num(extracted.taxAmount)) : r.readValue;
+    const look: { state: ReadingState; reason: string | null } = r.field === 'taxAmount'
+      ? { state: read == null ? 'not_on_document' : 'read', reason: null }
+      : readingState({ key: r.mark.startsWith('remitTo.') ? addressKey : r.mark, value: read, fieldConfidence, fieldStatus, issues, ungrounded });
+    return [r.mark, {
+      read: read == null || read === '' ? null : String(read),
+      look: look.state,
+      reason: look.reason,
+      changed: r.changed,
+      by: r.changed ? personOf(lastChangedBy.get(r.field) ?? null) : null,
+    }] as const;
+  }));
 
   // A saved line keeps saying where its category came from: the proposal it
   // still matches (a guess stays a guess until someone settles it), or the
@@ -2573,6 +2636,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
         issues,
         ungrounded,
         confirmedKeys,
+        changedKeys,
       }).state,
       emailState: fieldState({
         key: 'vendor.email',
@@ -2582,6 +2646,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
         issues,
         ungrounded,
         confirmedKeys,
+        changedKeys,
       }).state,
       isNew: order.counterpartyWallet.trustState === 'unreviewed',
       trustState: order.counterpartyWallet.trustState,
@@ -2630,6 +2695,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     highlightableFields: [...HIGHLIGHTABLE_FIELDS],
     lines,
     confirmedBy,
+    marks,
     // "This is us", said off this bill: the conversation shows it as theirs.
     tradingNamesFromHere: tradingNamesRecordedFrom(flagOrg.tradingNames, paymentOrderId),
     categoryOptions,
@@ -2677,12 +2743,77 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
 // Confirm & send for approval — the one commit (spec §6)
 // -----------------------------------------------------------------------------
 
+/** Whether the reading found nothing on the document: every field it marks came back unreadable. */
+function readingWasUnreadable(extracted: Record<string, unknown>): boolean {
+  const status = isRecord(extracted.fieldStatus) ? extracted.fieldStatus : null;
+  return UNREADABLE_MARKS.every((key) => status?.[key] === 'unreadable');
+}
+
+/**
+ * Every field the bill page compares with Decimal's reading: what Decimal read, what
+ * the bill holds now, and whether a person has changed it from the reading. `field`
+ * is the key a change is recorded under, `mark` the page's key for the same field.
+ *
+ * The page's marks, the history and the check before sending all go by this, so
+ * "Changed by" under a field, its line in History and the send agree. Typing a
+ * value and putting it back is no change at all.
+ *
+ * "What was read" means what the screen first showed (see billFieldCorrections). A
+ * document that couldn't be read gives placeholders ("Unreadable document", a cent)
+ * that the screen never shows, so its reading is nothing. A field the body doesn't
+ * carry (`present` false) stands as read.
+ */
+export function billFieldReadings(
+  extracted: Record<string, unknown>,
+  fields: Record<string, unknown>,
+): Array<{ field: string; mark: string; readValue: unknown; value: unknown; present: boolean; changed: boolean }> {
+  const unreadable = readingWasUnreadable(extracted);
+  const read = <T>(value: T): T | null => (unreadable ? null : value);
+  const remit = remitSource(extracted).remitTo;
+  const sentRemit = isRecord(fields.remitTo) ? fields.remitTo : null;
+  const rows: Array<{ field: string; mark: string; readValue: unknown; present: boolean; sent: unknown }> = [
+    ...([
+      ['vendorName', 'vendor.name', read(str(extracted.vendorName))],
+      ['vendorEmail', 'vendor.email', read(str(extracted.vendorEmail))],
+      ['invoiceNumber', 'invoiceNumber', read(str(extracted.invoiceNumber))],
+      ['invoiceDate', 'invoiceDate', read(str(extracted.invoiceDate))],
+      ['dueDate', 'dueDate', read(str(extracted.dueDate))],
+      ['terms', 'terms', read(str(extracted.terms))],
+      ['poNumber', 'poNumber', read(str(extracted.poNumber))],
+      ['discount', 'discount', read(str(extracted.earlyPayDiscount))],
+      ['currency', 'currency', read(str(extracted.currency)?.toUpperCase() ?? null) ?? 'USD'],
+      ['total', 'total', read(num(extracted.amount))],
+      // The draft screen renders 0 when the document carries no tax line.
+      ['taxAmount', 'taxAmount', read(num(extracted.taxAmount)) ?? 0],
+    ] as const).map(([field, mark, readValue]) => ({ field, mark, readValue, present: field in fields, sent: fields[field] })),
+    ...REMIT_PARTS.map((part) => ({
+      field: `remitTo.${part}`,
+      mark: `remitTo.${part}`,
+      readValue: read(str(remit[part])),
+      present: sentRemit !== null && part in sentRemit,
+      sent: sentRemit?.[part],
+    })),
+  ];
+  return rows.map((r) => {
+    const value = !r.present ? r.readValue : typeof r.sent === 'string' ? r.sent.trim() || null : r.sent ?? null;
+    // No tax line and a tax of $0.00 are one figure. The page sends an empty tax as
+    // null, so without this every first save of such a bill recorded "changed the tax
+    // from $0.00 to nothing" for a field nobody touched.
+    const same = r.field === 'taxAmount' ? (value ?? 0) === (r.readValue ?? 0)
+      : r.field === 'currency' ? String(value ?? '').toUpperCase() === String(r.readValue ?? '').toUpperCase()
+      : value === (r.readValue ?? null);
+    return { field: r.field, mark: r.mark, readValue: r.readValue ?? null, value, present: r.present, changed: r.present && !same };
+  });
+}
+
 /**
  * Fields a person changed from what the screen first showed them.
  *
  * Shared by confirm and by save, so a correction made while a bill is still
  * being worked reads the same as one made at the moment of confirming, and
- * saving twice does not record the same change twice.
+ * saving twice does not record the same change twice. The address parts are
+ * left to the history (billFieldReadings): the corrections a bill keeps are the
+ * figures and facts its approvers read.
  */
 export function billFieldCorrections(
   extracted: Record<string, unknown>,
@@ -2696,33 +2827,21 @@ export function billFieldCorrections(
    */
   byUserId?: string | null,
 ): Array<{ field: string; readValue: unknown; correctedValue: unknown; byUserId?: string | null }> {
-  const readValues: Record<string, unknown> = {
-    vendorName: str(extracted.vendorName),
-    vendorEmail: str(extracted.vendorEmail),
-    invoiceNumber: str(extracted.invoiceNumber),
-    invoiceDate: str(extracted.invoiceDate),
-    dueDate: str(extracted.dueDate),
-    terms: str(extracted.terms),
-    poNumber: str(extracted.poNumber),
-    discount: str(extracted.earlyPayDiscount),
-    currency: str(extracted.currency)?.toUpperCase() ?? 'USD',
-    total: num(extracted.amount),
-    // The draft screen renders 0 when the document carries no tax line.
-    taxAmount: num(extracted.taxAmount) ?? 0,
-  };
-  const out: Array<{ field: string; readValue: unknown; correctedValue: unknown; byUserId?: string | null }> = [];
-  for (const [key, readValue] of Object.entries(readValues)) {
-    if (!(key in fields)) continue;
-    const corrected = (fields as Record<string, unknown>)[key] ?? null;
-    // No tax line and a tax of $0.00 are one figure. The page sends an empty
-    // tax as null, so without this every first save of such a bill recorded
-    // "changed the tax from $0.00 to nothing" for a field nobody touched.
-    if (key === 'taxAmount' && (corrected ?? 0) === (readValue ?? 0)) continue;
-    if (corrected !== (readValue ?? null)) {
-      out.push({ field: key, readValue: readValue ?? null, correctedValue: corrected, ...(byUserId ? { byUserId } : {}) });
-    }
-  }
-  return out;
+  return billFieldReadings(extracted, fields)
+    .filter((r) => r.changed && !r.field.startsWith('remitTo.'))
+    .map((r) => ({ field: r.field, readValue: r.readValue, correctedValue: r.value, ...(byUserId ? { byUserId } : {}) }));
+}
+
+/**
+ * What a save or a send writes to the history: every field the body carries,
+ * measured from the reading. recordFieldChanges keeps only what moved since the
+ * last record, so a field put back to what Decimal read is recorded as changed
+ * back, instead of the history still saying it was changed.
+ */
+function fieldHistoryOf(extracted: Record<string, unknown>, fields: Record<string, unknown>) {
+  return billFieldReadings(extracted, fields)
+    .filter((r) => r.present)
+    .map((r) => ({ field: r.field, from: r.readValue, to: r.changed ? r.value : r.readValue }));
 }
 
 /**
@@ -3043,10 +3162,13 @@ export async function submitBillForApproval(input: SubmitBillInput) {
     changedByUserId: input.actorUserId,
     phase: 'draft',
     reason: 'confirm',
-    changes: corrections.map((c) => {
-      const r = c as { field: string; readValue: unknown; correctedValue: unknown };
-      return { field: r.field, from: r.readValue, to: r.correctedValue };
-    }),
+    changes: [
+      ...fieldHistoryOf(extracted, input.fields),
+      // The categories a person moved, which only the send records.
+      ...corrections
+        .filter((c) => c.field.startsWith('Category'))
+        .map((c) => ({ field: c.field, from: c.readValue, to: c.correctedValue })),
+    ],
   });
 
   const confirmedTotal = input.fields.total ?? num(extracted.amount) ?? amountRawToUsd(order.amountRaw);
@@ -5778,7 +5900,7 @@ export async function saveBillDraft(input: {
     changedByUserId: input.actorUserId,
     phase: 'draft',
     reason: 'save',
-    changes: corrections.map((c) => ({ field: c.field, from: c.readValue, to: c.correctedValue })),
+    changes: fieldHistoryOf(extracted, input.fields),
   });
 
   // And what the save did to the checks, so the history can say a flag was

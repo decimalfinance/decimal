@@ -1182,9 +1182,23 @@ export interface BillDraftField {
   key: string;
   label: string;
   value: string | number | null;
-  state: 'read' | 'needs_look' | 'not_on_document' | 'confirmed';
+  /** `changed`: a person changed it from Decimal's reading. `confirmed`: a person ticked a reading Decimal doubted. */
+  state: 'read' | 'needs_look' | 'not_on_document' | 'confirmed' | 'changed';
   reason: string | null;
   source?: DocSource;
+}
+
+/**
+ * A field against Decimal's reading, by the bill page's keys: what was read and how
+ * that went (what the field goes back to when a value is put back), whether a person
+ * changed it, and who put the value there.
+ */
+export interface BillFieldMark {
+  read: string | null;
+  look: 'read' | 'needs_look' | 'not_on_document';
+  reason: string | null;
+  changed: boolean;
+  by: { name: string; avatarUrl: string | null } | null;
 }
 
 /**
@@ -1350,6 +1364,7 @@ export interface BillDraft {
   highlightableFields: string[];
   /** Who confirmed each field, by its key ("invoiceDate", "vendor.name", "remitTo.city"). */
   confirmedBy?: Record<string, { name: string; avatarUrl: string | null }>;
+  marks?: Record<string, BillFieldMark>;
   /** Names recorded as the organisation's own off this bill ("This is us"), and who recorded them. */
   tradingNamesFromHere?: Array<{ name: string; byName: string | null; at: string | null; removed?: boolean }>;
   comments: Array<{

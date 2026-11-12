@@ -10,8 +10,8 @@ export type BillComment = BillDraft['comments'][number];
 export type Face = { name: string; avatarUrl: string | null };
 export type FieldState = BillDraftField['state'];
 
-/** How a field is drawn: read by Decimal, wanting a look, settled by a person, empty, wrong, being read, never read. */
-export type Look = 'read' | 'look' | 'confirmed' | 'none' | 'wrong' | 'reading' | 'unread';
+/** How a field is drawn: read by Decimal, wanting a look, its reading ticked by a person, changed by one, empty, wrong, being read, never read. */
+export type Look = 'read' | 'look' | 'confirmed' | 'changed' | 'none' | 'wrong' | 'reading' | 'unread';
 export type FieldKind = 'text' | 'code' | 'date' | 'money';
 export type FieldDef = { key: string; label: string; kind: FieldKind };
 
@@ -43,42 +43,103 @@ export const FIELD_LABELS: Record<string, string> = Object.fromEntries(
   [...VENDOR_FIELDS, ...DETAIL_FIELDS, DISCOUNT_FIELD].map((f) => [f.key, f.label]),
 );
 
-export type FieldEntry = { value: string; state: FieldState; reason: string | null; inferred: boolean; source: DocSource };
+/** How Decimal's reading of a field went: what the field goes back to when a value is put back. */
+export type ReadState = 'read' | 'needs_look' | 'not_on_document';
+
+export type FieldEntry = {
+  value: string;
+  state: FieldState;
+  reason: string | null;
+  inferred: boolean;
+  source: DocSource;
+  /** What Decimal read ('' for nothing), how that went, and why it wants a look if it does. */
+  read: string;
+  readState: ReadState;
+  readReason: string | null;
+  /** A person said the reading is right. It counts only where Decimal doubted the reading. */
+  ticked: boolean;
+  /** Who put a changed value there. */
+  changedBy: Face | null;
+};
 export type Fields = Record<string, FieldEntry>;
+
+export const blankField = (): FieldEntry => ({
+  value: '', state: 'not_on_document', reason: null, inferred: false, source: null,
+  read: '', readState: 'not_on_document', readReason: null, ticked: false, changedBy: null,
+});
 
 export function fieldsFrom(draft: BillDraft): Fields {
   const out: Fields = {};
-  for (const f of [...draft.fields, ...draft.remitFields]) {
-    out[f.key] = {
-      value: f.value == null ? '' : String(f.value),
-      state: f.state,
-      reason: f.reason,
-      inferred: Boolean(f.inferred),
-      source: f.source ?? null,
+  const entry = (key: string, value: unknown, state: FieldState, reason: string | null, inferred: boolean, source: DocSource): FieldEntry => {
+    const mark = draft.marks?.[key];
+    const shownValue = value == null ? '' : String(value);
+    const readState: ReadState = mark?.look ?? (state === 'changed' || state === 'confirmed' ? 'read' : state);
+    return {
+      value: shownValue,
+      state,
+      reason: reason ?? (state === 'needs_look' ? mark?.reason ?? null : null),
+      inferred,
+      source,
+      read: mark ? mark.read ?? '' : shownValue,
+      readState,
+      readReason: mark ? mark.reason : reason,
+      ticked: readState === 'needs_look' && Boolean(draft.confirmedBy?.[key]),
+      changedBy: mark?.changed ? mark.by : null,
     };
-  }
-  out['vendor.name'] = { value: draft.vendor.name ?? '', state: draft.vendor.nameState, reason: null, inferred: false, source: draft.vendor.nameSource ?? null };
-  out['vendor.email'] = { value: draft.vendor.email ?? '', state: draft.vendor.emailState, reason: null, inferred: false, source: draft.vendor.emailSource ?? null };
-  // Tax has no state of its own on the draft: read when the page shows one,
-  // settled once someone has confirmed or typed it.
-  const tax = draft.taxAmount;
-  out.taxAmount = {
-    value: tax == null ? '' : String(tax),
-    state: draft.confirmedBy?.taxAmount ? 'confirmed' : tax == null ? 'not_on_document' : 'read',
-    reason: null,
-    inferred: false,
-    source: draft.totalsSources?.tax ?? null,
   };
+  for (const f of [...draft.fields, ...draft.remitFields]) {
+    out[f.key] = entry(f.key, f.value, f.state, f.reason, Boolean(f.inferred), f.source ?? null);
+  }
+  out['vendor.name'] = entry('vendor.name', draft.vendor.name, draft.vendor.nameState, null, false, draft.vendor.nameSource ?? null);
+  out['vendor.email'] = entry('vendor.email', draft.vendor.email, draft.vendor.emailState, null, false, draft.vendor.emailSource ?? null);
+  // Tax has no state of its own on the draft: read when the page shows one,
+  // changed once someone has changed it.
+  const tax = draft.taxAmount;
+  out.taxAmount = entry('taxAmount', tax, draft.marks?.taxAmount?.changed ? 'changed' : tax == null ? 'not_on_document' : 'read', null, false, draft.totalsSources?.tax ?? null);
   // A document nothing could be read from carries placeholders ("Unreadable
   // document", a cent): they are not what the bill says, so the page shows
   // nothing there until someone types it. Empty saves as null, so the server
   // keeps its own record meanwhile.
   if (draft.unreadable) {
-    for (const [key, entry] of Object.entries(out)) {
-      if (entry.state !== 'confirmed') out[key] = { ...entry, value: '', state: 'not_on_document', reason: null, inferred: false };
+    for (const [key, e] of Object.entries(out)) {
+      out[key] = e.state === 'changed' || e.state === 'confirmed'
+        ? { ...e, read: '' }
+        : { ...e, value: '', state: 'not_on_document', reason: null, inferred: false, read: '', readState: 'not_on_document', readReason: null };
     }
   }
   return out;
+}
+
+/**
+ * Whether a value is what Decimal read, compared as the server compares them
+ * (billFieldReadings): money as figures, no tax line as $0.00, the currency in
+ * any case, text without its spaces. Typing a value and putting it back is no change.
+ */
+export function asRead(key: string, value: string, read: string): boolean {
+  if (key === 'total' || key === 'taxAmount') {
+    const now = parseMoney(value);
+    const was = parseMoney(read);
+    return key === 'taxAmount' ? (now ?? 0) === (was ?? 0) : now === was;
+  }
+  if (key === 'currency') return (value.trim().toUpperCase() || 'USD') === (read.trim().toUpperCase() || 'USD');
+  return value.trim() === read.trim();
+}
+
+/** A field's state from what a person did with it: changed from the reading, a tick on a reading Decimal doubted, or as read. */
+function settled(key: string, e: FieldEntry): FieldEntry {
+  const changed = !asRead(key, e.value, e.read);
+  const state: FieldState = changed ? 'changed' : e.ticked && e.readState === 'needs_look' ? 'confirmed' : e.readState;
+  return { ...e, state, reason: state === 'needs_look' ? e.readReason : null, changedBy: changed ? e.changedBy : null };
+}
+
+/** The field with a value a person typed. */
+export function withValue(key: string, e: FieldEntry, value: string, by: Face): FieldEntry {
+  return settled(key, { ...e, value, changedBy: by });
+}
+
+/** The field with its reading ticked as right. */
+export function withTick(key: string, e: FieldEntry): FieldEntry {
+  return settled(key, { ...e, ticked: true });
 }
 
 // While Decimal reads a bill (5r) its parts land one tick apart, in this
@@ -218,7 +279,8 @@ export function bodyOf(fields: Fields, lines: LineEntry[], note: string | null):
         category: l.category ?? null,
         ...(l.settledBy ? { categoryConfirmed: true } : {}),
       })),
-    confirmedFieldKeys: Object.entries(fields).filter(([, f]) => f.state === 'confirmed').map(([key]) => key),
+    // The ticks. A change is the server's to see, by comparing with the reading.
+    confirmedFieldKeys: Object.entries(fields).filter(([, f]) => f.ticked).map(([key]) => key),
     noteForApprovers: note,
   };
 }

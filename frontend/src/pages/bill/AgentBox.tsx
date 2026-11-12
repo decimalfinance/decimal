@@ -478,9 +478,10 @@ export function AgentBox({
     if (detail.requester) map.set(detail.requester.name, detail.requester.avatarUrl);
     for (const s of detail.approval?.steps ?? []) if (s.person) map.set(s.person.name, s.person.avatarUrl);
     for (const by of Object.values(draft.confirmedBy ?? {})) map.set(by.name, by.avatarUrl);
+    for (const mark of Object.values(draft.marks ?? {})) if (mark.by) map.set(mark.by.name, mark.by.avatarUrl);
     map.set(viewer.name, viewer.avatarUrl);
     return map;
-  }, [detail, draft.confirmedBy, viewer]);
+  }, [detail, draft.confirmedBy, draft.marks, viewer]);
   // The viewer's message while Decimal judges whether it answers anything.
   const [saying, setSaying] = useState<{ text: string; at: Date } | null>(null);
   const thread = useMemo(() => {

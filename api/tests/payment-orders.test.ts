@@ -318,7 +318,7 @@ test('bills workbench triages uploads; review confirm sends the bill onward', as
             ],
             categoryHint: 'Cloud hosting',
             confidence: { vendor: 0.98, amount: 0.97, overall: 0.95 },
-            fieldConfidence: { invoiceNumber: 0.99, invoiceDate: 0.7, dueDate: 0.95, total: 0.97 },
+            fieldConfidence: { invoiceNumber: 0.99, invoiceDate: 0.7, dueDate: 0.95, total: 0.97, 'vendor.name': 0.7 },
           },
         },
       ],
@@ -393,7 +393,8 @@ test('bills workbench triages uploads; review confirm sends the bill onward', as
       ],
       // vendor.name rides along: these two hold their value outside the fields
       // list, and used to have no confirmed state at all — so they were the
-      // only fields somebody could be asked about and never tick off.
+      // only fields somebody could be asked about and never tick off. Its
+      // reading is a doubtful one here, as a tick counts only on those.
       confirmedFieldKeys: ['invoiceDate', 'vendor.name'],
       noteForApprovers: 'Recurring cloud bill, verified against the document.',
     },
@@ -430,6 +431,118 @@ test('bills workbench triages uploads; review confirm sends the bill onward', as
   assert.equal(confirmedField.state, 'confirmed');
   assert.equal(reviewAfter.vendor.nameState, 'confirmed', 'and it survives a reload for the vendor too');
   assert.ok(reviewAfter.vendor.emailState, 'both vendor fields carry a state at all');
+});
+
+test('a field says what a person did with it: changed from the reading, or a tick on a reading Decimal doubted', async () => {
+  const setup = await createPaymentOrderSetup();
+  const wallet = Keypair.generate().publicKey.toBase58();
+  setInvoiceIntakeRuntimeForTests({
+    extractRowsFromDocument: async () => ({
+      rows: [
+        {
+          counterparty: 'Acme Cloud Services',
+          amount: 4820,
+          currency: 'USD',
+          reference: 'INV-20411',
+          due_date: '2026-08-01',
+          wallet_address: wallet,
+          notes: 'Cloud hosting',
+          source_invoice: {
+            vendorName: 'Acme Cloud Services', vendorAddress: null, vendorEmail: null,
+            amount: 4820, currency: 'USD', invoiceNumber: 'INV-20411', invoiceDate: '2026-07-02', dueDate: '2026-08-01',
+            terms: 'Net 30', poNumber: null, earlyPayDiscount: null, subtotal: 4820, taxAmount: 0, billToName: null,
+            remitTo: { street: '450 Westlake Ave N', city: 'Seattle', state: 'WA', zip: '98109' },
+            paymentDetails: null, walletAddress: wallet,
+            lineItems: [{ description: 'Cloud hosting', quantity: 1, unitPrice: 4820, total: 4820 }],
+            categoryHint: 'Cloud hosting',
+            confidence: { vendor: 0.98, amount: 0.97, overall: 0.95 },
+            // The invoice date is a reading Decimal doubts; the rest it read cleanly.
+            fieldConfidence: { invoiceNumber: 0.99, invoiceDate: 0.7, dueDate: 0.95, total: 0.97 },
+          },
+        },
+      ],
+      modelLatencyMs: 5,
+      pageCount: 1,
+    }),
+  });
+  const org = setup.organization.organizationId;
+  const upload = await post(`/organizations/${org}/invoices/upload`, {
+    filename: 'acme-marks.pdf',
+    mimeType: 'application/pdf',
+    dataBase64: Buffer.from('%PDF-1.4 acme marks').toString('base64'),
+    sourceTreasuryWalletId: setup.sourceTreasuryWallet.treasuryWalletId,
+    autoAdvance: false,
+  }, setup.sessionToken);
+  const billId = upload.paymentOrders[0].paymentOrder.paymentOrderId;
+  const draftOf = () => get(`/organizations/${org}/bills/${billId}/draft`, setup.sessionToken);
+  const stateOf = (d: { fields: Array<{ key: string; state: string }>; remitFields: Array<{ key: string; state: string }> }, key: string) =>
+    [...d.fields, ...d.remitFields].find((f) => f.key === key)?.state;
+  const body = (fields: Record<string, unknown> = {}, confirmedFieldKeys: string[] = []) => ({
+    fields: {
+      vendorName: 'Acme Cloud Services', invoiceNumber: 'INV-20411', invoiceDate: '2026-07-02', dueDate: '2026-08-01',
+      terms: 'Net 30', currency: 'USD', total: 4820, taxAmount: 0,
+      remitTo: { street: '450 Westlake Ave N', city: 'Seattle', state: 'WA', zip: '98109', country: null },
+      ...fields,
+    },
+    lines: [{ description: 'Cloud hosting', quantity: 1, unitPrice: 4820, amount: 4820, category: 'Cloud hosting & infrastructure', categoryConfirmed: true }],
+    confirmedFieldKeys,
+  });
+  const save = (b: ReturnType<typeof body>) => post(`/organizations/${org}/bills/${billId}/save`, b, setup.sessionToken);
+
+  // As read: no marks, and each field knows what Decimal read.
+  let d = await draftOf();
+  assert.equal(stateOf(d, 'invoiceNumber'), 'read');
+  assert.equal(stateOf(d, 'invoiceDate'), 'needs_look');
+  assert.deepEqual(d.marks.invoiceNumber, { read: 'INV-20411', look: 'read', reason: null, changed: false, by: null });
+  assert.equal(d.marks.invoiceDate.look, 'needs_look');
+  assert.equal(d.marks.taxAmount.read, '0');
+
+  // A tick says the reading is right. On a reading Decimal didn't doubt it says
+  // nothing, so it shows nothing; on one it did, the field is checked.
+  await save(body({}, ['invoiceNumber', 'invoiceDate']));
+  d = await draftOf();
+  assert.equal(stateOf(d, 'invoiceNumber'), 'read');
+  assert.equal(stateOf(d, 'invoiceDate'), 'confirmed');
+  assert.ok(d.confirmedBy.invoiceDate?.name, 'the tick keeps who made it');
+
+  // Nothing changed yet, so the history has nothing.
+  assert.equal(await prisma.billFieldChange.count({ where: { paymentOrderId: billId } }), 0);
+
+  // A real change: changed, with what was read and who put the new value there.
+  await save(body({ invoiceNumber: 'INV-20412' }, ['invoiceDate']));
+  d = await draftOf();
+  assert.equal(stateOf(d, 'invoiceNumber'), 'changed');
+  assert.equal(d.marks.invoiceNumber.read, 'INV-20411');
+  assert.equal(d.marks.invoiceNumber.changed, true);
+  assert.equal(d.marks.invoiceNumber.by?.name, 'Payments Operator');
+
+  // Put back as read: no mark, and the history says it was changed back,
+  // rather than still saying it was changed.
+  await save(body({}, ['invoiceDate']));
+  d = await draftOf();
+  assert.equal(stateOf(d, 'invoiceNumber'), 'read');
+  assert.equal(d.marks.invoiceNumber.changed, false);
+  assert.equal(d.marks.invoiceNumber.by, null);
+  const numberChanges = await prisma.billFieldChange.findMany({
+    where: { paymentOrderId: billId, fieldKey: 'invoiceNumber' }, orderBy: { changedAt: 'asc' },
+  });
+  assert.deepEqual(numberChanges.map((c) => [c.previousValue, c.newValue]), [['INV-20411', 'INV-20412'], ['INV-20412', 'INV-20411']]);
+
+  // An address part is a field like any other, and the history names it.
+  await save(body({ remitTo: { street: '460 Westlake Ave N', city: 'Seattle', state: 'WA', zip: '98109', country: null } }, ['invoiceDate']));
+  d = await draftOf();
+  assert.equal(stateOf(d, 'remitTo.street'), 'changed');
+  assert.equal(d.marks['remitTo.street'].read, '450 Westlake Ave N');
+  const log = await get(`/organizations/${org}/bills/${billId}/draft`, setup.sessionToken);
+  assert.ok(log.workLog.some((e: { text: string }) => e.text === 'Street changed from 450 Westlake Ave N to 460 Westlake Ave N'));
+
+  // The send: a reading Decimal doubted needs a tick or a real change. Untouched
+  // and unticked, it's refused, naming the field.
+  const refused = await postExpectingStatus(`/organizations/${org}/bills/${billId}/confirm`, body(), setup.sessionToken, 400);
+  assert.match(JSON.stringify(refused), /Invoice date/);
+  // A change settles it as a tick does: the person put their own value there.
+  const sent = await post(`/organizations/${org}/bills/${billId}/confirm`, body({ invoiceDate: '2026-07-03' }), setup.sessionToken);
+  assert.equal(sent.detail.state, 'submitted');
 });
 
 test('grounding runs when the bill is created, not only on old documents', async () => {
