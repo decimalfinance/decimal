@@ -266,6 +266,17 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/pay-itemi
   }));
 }));
 
+// "Correct the figures" with what the exception agent found on the document:
+// the lines the bill is missing and the figures it has wrong
+// (correctFiguresFromDocument). Anyone reviewing may, as they may type it.
+billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/correct-figures', asyncRoute(async (req, res) => {
+  const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
+  await assertOrganizationAccess(organizationId, req.auth!);
+  await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
+  const { correctFiguresFromDocument } = await import('../payments/bills.js');
+  res.json(await correctFiguresFromDocument({ organizationId, paymentOrderId, actorUserId: req.auth!.userId }));
+}));
+
 // A bill dated in a period the books have closed: post it on the first open day,
 // keep its date, or take that back (choosePostingDate). Posting on the first open
 // day is the ordinary fix and anyone reviewing may make it; keeping the date waits

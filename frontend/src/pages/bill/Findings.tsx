@@ -5,7 +5,7 @@
 // conversation. Nothing here acts on its own: the card's button does.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
-import type { BillDraft } from '../../api';
+import type { BillDraft, FigureCorrection } from '../../api';
 import { usd } from '../../kit/format';
 import { CLOSE_REASONS, closeReasonFor, type CloseReason, type Flag } from './model';
 import { Chevron, Figures, Mark } from './parts';
@@ -248,6 +248,19 @@ function FiguresStrip({ was, wasLabel, now, nowLabel }: { was: number; wasLabel:
   );
 }
 
+/** "Add the line page 1 prints: “Freight”, $85.00. Then the lines and tax come to …" */
+function correctionText(c: FigureCorrection, withTax: boolean): string {
+  const listed = (items: string[]) => (items.length <= 2 ? items.join(' and ') : `${items.slice(0, -1).join('; ')}; and ${items[items.length - 1]}`);
+  const pages = [...new Set(c.add.map((a) => a.page))];
+  const one = pages.length === 1;
+  const adds = c.add.length === 0 ? null
+    : c.add.length === 1 ? `Add the line page ${c.add[0]!.page} prints: “${c.add[0]!.description}”, ${usd(c.add[0]!.amount)}.`
+    : `Add the ${c.add.length} lines ${one ? `page ${pages[0]} prints` : 'the document prints'}: ${listed(c.add.map((a) => `“${a.description}”, ${usd(a.amount)}${one ? '' : ` (page ${a.page})`}`))}.`;
+  const changes = c.change.map((m) => `Change ${m.what === 'line' ? `“${m.label}”` : `the ${m.label.toLowerCase()}`} from ${usd(m.from)} to ${usd(m.to)}, as page ${m.page} prints it.`);
+  const category = c.add.length === 0 ? '' : c.add.length === 1 ? ' The new line needs a category.' : ' The new lines need a category.';
+  return `${[adds, ...changes].filter(Boolean).join(' ')} Then the lines${withTax ? ' and tax' : ''} come to ${usd(c.total)}, the total on the document.${category} The change is recorded under your name.`;
+}
+
 export type CardResult = { reason?: string; name?: string; closeReason?: CloseReason; note?: string };
 
 /**
@@ -350,6 +363,20 @@ export function ConfirmCard({ card, flag, draft, totals, busy, onConfirm, onCanc
   };
 
   if (action === 'fix_fields') {
+    // What Decimal found on the document, when it found it: exactly what will change.
+    const correction = flag?.finding?.status === 'ready' ? flag.finding.correction : undefined;
+    if (correction) {
+      const withTax = (draft.taxAmount ?? 0) !== 0;
+      return (
+        <div ref={boxRef} className="bp-card">
+          <FiguresStrip was={totals.lines} wasLabel={withTax ? 'Lines and tax' : 'The lines add up to'} now={correction.total} nowLabel="Corrected" />
+          <div className="bp-card-text">
+            <Figures text={correctionText(correction, withTax)} />
+          </div>
+          {buttons('Yes, correct it', true, {})}
+        </div>
+      );
+    }
     return (
       <div ref={boxRef} className="bp-card">
         <FiguresStrip was={totals.printed} wasLabel="Total on the document" now={totals.lines} nowLabel="The lines add up to" />

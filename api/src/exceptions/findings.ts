@@ -32,6 +32,22 @@ export type FlagFinding = {
   points: FindingPoint[];
   /** One of the flag's own resolutions, and the reason to prefill. */
   recommended: { action: string; reason: string } | null;
+  /**
+   * The arithmetic flags only (arithmetic.ts): the figures the document shows
+   * the bill is missing or has wrong. "Correct the figures" applies exactly this.
+   */
+  correction?: FigureCorrection;
+};
+
+export type FigureCorrection = {
+  /** The check it came from. Applying it is refused once the figures have moved on. */
+  fingerprint: string;
+  /** Lines to add. Signed: a discount or a deposit is negative. */
+  add: Array<{ description: string; amount: number; page: number }>;
+  /** Figures to put right. `line` is the bill line's index, from 0. */
+  change: Array<{ what: 'line' | 'tax' | 'total'; line: number | null; label: string; from: number; to: number; page: number }>;
+  /** The bill's total once corrected: its lines and tax come to this. */
+  total: number;
 };
 
 const money = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });

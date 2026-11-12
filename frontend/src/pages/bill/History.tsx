@@ -102,6 +102,11 @@ export function historyItems(detail: BillDetail, note: BillCompanionNote | null 
       const what = `cleared it: not a duplicate${other ? ` of ${other}` : ''}`;
       line = <><b>{name}</b> <Figures text={what} />{reason ? ',' : null}{because}</>;
       plain = `${name} ${what}`;
+    } else if (e.rule === 'figures_from_document') {
+      // What Decimal found on the document, applied: "added Freight, $85.00, from page 1".
+      const what = `corrected the figures from the document${reason ? `: ${reason}` : ''}`;
+      line = <><b>{name}</b> <Figures text={what} /></>;
+      plain = `${name} ${what}`;
     } else if (e.rule === 'bill_ceiling') {
       line = <><b>{name}</b> allowed it over the bill limit, this bill only{reason ? ',' : null}{because}</>;
       plain = `${name} allowed it over the bill limit`;
@@ -202,7 +207,7 @@ export function historyItems(detail: BillDetail, note: BillCompanionNote | null 
       const f = fields[d.key];
       return f && f.value.trim() !== '' && f.state !== 'not_on_document';
     }).length;
-    const lines = draft.lines.length;
+    const lines = draft.readLines ?? draft.lines.length;
     const what = filled || lines
       ? `read the document and filled in ${counted(filled, 'field')} and ${counted(lines, 'line')}`
       : 'read the document';

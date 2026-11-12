@@ -1227,6 +1227,20 @@ export interface FlagFinding {
   headline: string;
   points: Array<{ text: string; tone: 'ok' | 'warn' | 'bad'; billId?: string | null; billState?: string | null }>;
   recommended: { action: string; reason: string } | null;
+  /**
+   * The arithmetic flags only: what the document shows the bill is missing or
+   * has wrong. "Correct the figures" applies exactly this (billsApi.correctFigures).
+   */
+  correction?: FigureCorrection;
+}
+
+export interface FigureCorrection {
+  /** Lines to add. Signed: a discount or a deposit is negative. */
+  add: Array<{ description: string; amount: number; page: number }>;
+  /** Figures to put right. `line` is the bill line's index, from 0. */
+  change: Array<{ what: 'line' | 'tax' | 'total'; line: number | null; label: string; from: number; to: number; page: number }>;
+  /** The bill's total once corrected: its lines and tax come to this. */
+  total: number;
 }
 
 export interface BillDraftLine {
@@ -1315,6 +1329,8 @@ export interface BillDraft {
   } | null;
   /** Nothing could be read off the document: the fields are placeholders until a person types them. */
   unreadable: boolean;
+  /** How many lines the reading found. A line added since doesn't count. */
+  readLines?: number;
   fields: BillDraftField[];
   remitFields: BillDraftField[];
   /** A reference to offer when the document prints no invoice number. */
@@ -1578,6 +1594,12 @@ export const billsApi = {
       method: 'POST',
       body: JSON.stringify({ reason }),
     });
+  },
+  // "Correct the figures" with what the exception agent found on the document:
+  // the lines the bill is missing and the figures it has wrong. Refused when the
+  // figures have changed since it read the document.
+  correctFigures(organizationId: string, paymentOrderId: string) {
+    return request<BillDraft>(`/organizations/${organizationId}/bills/${paymentOrderId}/correct-figures`, { method: 'POST', body: '{}' });
   },
   // A bill dated in a period the books have closed: post it on the first open
   // day (anyone), keep its date (an admin, with a reason), or take that back.

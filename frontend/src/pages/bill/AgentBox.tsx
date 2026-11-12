@@ -597,7 +597,15 @@ export function AgentBox({
         await billsApi.notABill(organizationId, billId, { reason: result.closeReason ?? card.reason, note: result.note || null });
         toaster.show('Closed. It won’t be approved or posted.');
       } else if (card.action === 'fix_fields') {
-        await onFixTotal(itemisedTotal);
+        if (flagOf(card.flagKind)?.finding?.correction) {
+          // Saved first, so the server corrects what is on the page; a figure
+          // changed since Decimal read the document is refused, and it reads again.
+          await onSaveNow();
+          await billsApi.correctFigures(organizationId, billId);
+          toaster.show('Corrected. The figures now add up to the total on the document.');
+        } else {
+          await onFixTotal(itemisedTotal);
+        }
       } else if (card.action === 'pay_the_lines') {
         await onSaveNow();
         await billsApi.payItemised(organizationId, billId, result.reason ?? '');

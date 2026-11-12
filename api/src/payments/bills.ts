@@ -35,6 +35,7 @@ import { getBillCeilingMinor } from '../approvals/store.js';
 import { involvedBillIds } from './bill-visibility.js';
 import type { ExtractedInvoice } from './document-extract.js';
 import { badRequest, conflict, forbidden, notFound } from '../infra/api-errors.js';
+import type { BillFigures } from '../exceptions/arithmetic.js';
 
 // Exact field→document boxes for ANY bill, whenever it is opened: if this
 // order's extraction predates the provenance pass (or the matcher improved),
@@ -1013,6 +1014,7 @@ const OVERRIDE_LABELS: Record<string, string> = {
   bill_ceiling: 'Allowed past the bill limit',
   similar_vendor: 'Vendor names settled',
   in_books: 'Checked against the books',
+  figures_from_document: 'Corrected the figures from the document',
 };
 
 // Several rows can share a timestamp, because one thing a person did writes a
@@ -1085,6 +1087,33 @@ function documentAmounts(
     total: verifiedFields && 'total' in verifiedFields
       ? num(verifiedFields.total)
       : num(extracted?.amount),
+  };
+}
+
+/**
+ * The bill's figures as the review screen has them: its saved lines once
+ * somebody has saved, else the lines as read, with the amounts the arithmetic
+ * flags judge. The exception agent's arithmetic check (exceptions/arithmetic.ts)
+ * is made on these and fingerprinted by them, so getBillDraft, the check and the
+ * correction all have to read them from here. Line i is the draft's line i.
+ */
+export function billFiguresOf(metadataJson: unknown): BillFigures {
+  const metadata = isRecord(metadataJson) ? metadataJson : {};
+  const extracted = extractedOf(metadataJson);
+  const verification = isRecord(metadata.verification) ? metadata.verification : null;
+  const saved = verification && Array.isArray(verification.lines) ? verification.lines.filter(isRecord) : null;
+  const read = Array.isArray(extracted?.lineItems) ? (extracted!.lineItems as unknown[]).filter(isRecord) : [];
+  const { subtotal, tax, total } = documentAmounts(extracted, verification);
+  return {
+    lines: (saved ?? read).map((l) => ({
+      description: str(l.description) ?? '',
+      quantity: num(l.quantity),
+      unitPrice: num(l.unitPrice),
+      amount: num(saved ? l.amount : l.total),
+    })),
+    subtotal,
+    tax,
+    total,
   };
 }
 
@@ -2298,7 +2327,25 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
           texts: [...findingLines.map((l) => l.description), str(extracted.notes), str(extracted.poNumber), str(extracted.reference)].filter((t): t is string => Boolean(t)),
         }));
       } else if (f.kind === 'lines_do_not_sum' || f.kind === 'total_does_not_reconcile') {
-        const finding = F.arithmeticFinding({ kind: f.kind, vendorName, lines: findingLines, subtotal: amounts.subtotal, tax: amounts.tax, total: amounts.total });
+        const plain = F.arithmeticFinding({ kind: f.kind, vendorName, lines: findingLines, subtotal: amounts.subtotal, tax: amounts.tax, total: amounts.total });
+        // Why they don't add up, read off the document by the exception agent
+        // (exceptions/arithmetic.ts), once per set of figures and in the
+        // background. Until it has, and when it finds nothing, the plain finding.
+        const A = await import('../exceptions/arithmetic.js');
+        const figures = billFiguresOf(metadata);
+        const fingerprint = A.figuresFingerprint(billDocumentIdOf(order), figures);
+        const check = A.readArithmeticCheck(metadata);
+        const gap = A.gapOf(figures);
+        const checkable = A.canCheckFigures() && order.state === 'draft' && !opts.readOnly
+          && gap !== null && Math.abs(gap) >= 1 && billDocumentIdOf(order) !== null;
+        if (checkable && A.needsCheck(check, fingerprint)) A.startFiguresCheck(organizationId, order.paymentOrderId);
+        const finding = A.figuresFinding({
+          check: check?.fingerprint === fingerprint ? check : null,
+          checking: checkable && A.isCheckingFigures(order.paymentOrderId),
+          f: figures,
+          vendorName,
+          plain,
+        });
         if (finding) findings.set(f.kind, finding);
       } else if (f.kind === 'addressed_elsewhere') {
         const billToName = str(extracted.billToName);
@@ -2493,6 +2540,9 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
     // came back unreadable, and the bill is a placeholder until a person keys
     // it in (see unreadableRow in invoice-intake.ts).
     unreadable: UNREADABLE_MARKS.every((key) => fieldStatus?.[key] === 'unreadable'),
+    // The lines the reading found, for History's account of it: a line added
+    // since, by hand or from the document by a correction, isn't the reading's.
+    readLines: extractedLines.filter(isRecord).length,
     fields,
     remitFields,
     // Offered, never filled in.
@@ -2599,6 +2649,10 @@ export function billFieldCorrections(
   for (const [key, readValue] of Object.entries(readValues)) {
     if (!(key in fields)) continue;
     const corrected = (fields as Record<string, unknown>)[key] ?? null;
+    // No tax line and a tax of $0.00 are one figure. The page sends an empty
+    // tax as null, so without this every first save of such a bill recorded
+    // "changed the tax from $0.00 to nothing" for a field nobody touched.
+    if (key === 'taxAmount' && (corrected ?? 0) === (readValue ?? 0)) continue;
     if (corrected !== (readValue ?? null)) {
       out.push({ field: key, readValue: readValue ?? null, correctedValue: corrected, ...(byUserId ? { byUserId } : {}) });
     }
@@ -4156,7 +4210,7 @@ export async function payItemisedTotal(args: {
   const order = await prisma.paymentOrder.findFirst({
     where: { organizationId: args.organizationId, paymentOrderId: args.paymentOrderId },
     select: {
-      paymentOrderId: true, state: true, metadataJson: true,
+      paymentOrderId: true, state: true, metadataJson: true, invoiceDocumentId: true,
       transferRequests: { select: { transferRequestId: true }, take: 1 },
     },
   });
@@ -4256,6 +4310,168 @@ export async function payItemisedTotal(args: {
     state: order.state,
     at,
   });
+
+  // Decimal had found on the document what the figures were missing, and the
+  // lines were paid instead: what it suggested is marked passed over.
+  await noteFiguresCheckOutcome(order, 'rejected', args.actorUserId);
+
+  return getBillDraft(args.organizationId, args.paymentOrderId, args.actorUserId);
+}
+
+/** The arithmetic check's suggestion, decided: only one made on the figures the bill had. */
+async function noteFiguresCheckOutcome(
+  order: { invoiceDocumentId: string | null; metadataJson: unknown },
+  outcome: 'accepted' | 'rejected',
+  decidedByUserId: string,
+) {
+  const A = await import('../exceptions/arithmetic.js');
+  const check = A.readArithmeticCheck(order.metadataJson);
+  if (!check?.suggestionId || (check.verdict !== 'missed' && check.verdict !== 'misread')) return;
+  if (check.fingerprint !== A.figuresFingerprint(billDocumentIdOf(order), billFiguresOf(order.metadataJson))) return;
+  const { logSuggestionOutcome } = await import('./suggestion-log.js');
+  await logSuggestionOutcome({ aiSuggestionId: check.suggestionId, outcome, decidedByUserId });
+}
+
+/**
+ * "Correct the figures", when the exception agent found on the document what
+ * the bill is missing or has wrong (exceptions/arithmetic.ts): add those lines
+ * and put right those figures, exactly as it found them, and save the bill as
+ * the review screen would. A line added has no category yet: the person picks
+ * one, as for a line they add themselves.
+ *
+ * Refused unless the check was made on the figures the bill has now. A figure
+ * changed since makes it a different bill from the one the document was read
+ * against, and the check is made again on the next read.
+ */
+export async function correctFiguresFromDocument(args: {
+  organizationId: string;
+  paymentOrderId: string;
+  actorUserId: string;
+}) {
+  const order = await prisma.paymentOrder.findFirst({
+    where: { organizationId: args.organizationId, paymentOrderId: args.paymentOrderId },
+    select: { paymentOrderId: true, state: true, invoiceDocumentId: true, metadataJson: true },
+  });
+  if (!order) throw notFound('No such bill.');
+  if (order.state !== 'draft') throw conflict(`This bill is ${order.state}: its figures are settled.`);
+  const A = await import('../exceptions/arithmetic.js');
+  const figures = billFiguresOf(order.metadataJson);
+  const check = A.readArithmeticCheck(order.metadataJson);
+  const moved = 'The figures have changed since Decimal read the document. It is reading it again.';
+  if (!check || check.fingerprint !== A.figuresFingerprint(billDocumentIdOf(order), figures)) throw conflict(moved);
+  const correction = A.correctionOf(check, figures);
+  if (!correction) throw conflict('Decimal found nothing on the document to correct.');
+
+  const draft = await getBillDraft(args.organizationId, args.paymentOrderId, args.actorUserId) as unknown as {
+    readOnly: boolean;
+    fields: Array<{ key: string; value: string | number | null; state: string }>;
+    remitFields: Array<{ key: string; value: string | number | null; state: string }>;
+    vendor: { name: string; email: string | null; nameState: string; emailState: string };
+    confirmedBy: Record<string, unknown> | null;
+    lines: Array<{ description: string; quantity: number | null; unitPrice: number | null; amount: number | null; category: string | null; categoryConfirmedBy: unknown }>;
+    taxAmount: number | null;
+    verification: { noteForApprovers: string | null } | null;
+  } | null;
+  if (!draft) throw notFound('No such bill.');
+  if (draft.readOnly) throw forbidden('You cannot change this bill.');
+  // The draft's lines are the figures' lines, one for one (billFiguresOf).
+  if (draft.lines.length !== figures.lines.length || draft.lines.some((l, i) => l.amount !== figures.lines[i]!.amount)) throw conflict(moved);
+
+  // The body the review screen would send (frontend model.ts, bodyOf), with the
+  // correction made in it.
+  const byKey = new Map([...draft.fields, ...draft.remitFields].map((f) => [f.key, f]));
+  const text = (key: string) => {
+    const v = byKey.get(key)?.value;
+    return v === null || v === undefined || v === '' ? null : String(v);
+  };
+  const lines: SubmitBillInput['lines'] = draft.lines.map((l) => ({
+    description: l.description,
+    quantity: l.quantity,
+    unitPrice: l.unitPrice,
+    amount: l.amount,
+    category: l.category ?? null,
+    ...(l.categoryConfirmedBy ? { categoryConfirmed: true } : {}),
+  }));
+  let taxAmount = draft.taxAmount;
+  let total = Number(byKey.get('total')?.value);
+  const settled = new Set<string>();
+  for (const c of correction.change) {
+    const line = c.what === 'line' && c.line !== null ? lines[c.line] : undefined;
+    if (line) {
+      // A price that made the amount read makes the amount printed: 1 × $1,386.00 becomes 1 × $1,836.00.
+      if (line.quantity && line.unitPrice !== null && Math.abs(line.quantity * line.unitPrice - c.from) < 0.005) {
+        const price = Math.round((c.to / line.quantity) * 100) / 100;
+        if (Math.abs(price * line.quantity - c.to) < 0.005) line.unitPrice = price;
+      }
+      line.amount = c.to;
+    } else if (c.what === 'tax') {
+      taxAmount = c.to;
+      settled.add('taxAmount');
+    } else if (c.what === 'total') {
+      total = c.to;
+      settled.add('total');
+    }
+  }
+  for (const a of correction.add) lines.push({ description: a.description, quantity: null, unitPrice: null, amount: a.amount, category: null });
+
+  const confirmed = new Set([
+    ...[...byKey.values()].filter((f) => f.state === 'confirmed').map((f) => f.key),
+    ...(draft.vendor.nameState === 'confirmed' ? ['vendor.name'] : []),
+    ...(draft.vendor.emailState === 'confirmed' ? ['vendor.email'] : []),
+    ...(draft.confirmedBy?.taxAmount ? ['taxAmount'] : []),
+    ...settled,
+  ]);
+  const before = figures.total;
+  await saveBillDraft({
+    organizationId: args.organizationId,
+    paymentOrderId: args.paymentOrderId,
+    actorUserId: args.actorUserId,
+    fields: {
+      vendorName: draft.vendor.name.trim() || null,
+      vendorEmail: draft.vendor.email?.trim() || null,
+      invoiceNumber: text('invoiceNumber'),
+      invoiceDate: text('invoiceDate'),
+      dueDate: text('dueDate'),
+      terms: text('terms'),
+      poNumber: text('poNumber'),
+      discount: text('discount'),
+      currency: text('currency') ?? 'USD',
+      ...(Number.isFinite(total) && total > 0 ? { total } : {}),
+      taxAmount,
+      remitTo: {
+        street: text('remitTo.street'),
+        city: text('remitTo.city'),
+        state: text('remitTo.state'),
+        zip: text('remitTo.zip'),
+        country: text('remitTo.country'),
+      },
+    },
+    lines: lines.filter((l) => l.description.trim()),
+    confirmedFieldKeys: [...confirmed],
+    noteForApprovers: draft.verification?.noteForApprovers ?? null,
+  });
+
+  // The record: what was changed and that the document is where it came from.
+  // Read with the save's resolved flags as one thing the person did (History.tsx).
+  await prisma.paymentOrderEvent.create({
+    data: {
+      organizationId: args.organizationId,
+      paymentOrderId: order.paymentOrderId,
+      eventType: 'policy_overridden',
+      actorType: 'user',
+      actorId: args.actorUserId,
+      beforeState: order.state,
+      afterState: order.state,
+      payloadJson: {
+        rule: 'figures_from_document',
+        short: 'Corrected the figures from the document',
+        reason: A.correctionWords(correction, true),
+        from: before,
+        to: correction.total,
+      },
+    },
+  });
+  await noteFiguresCheckOutcome(order, 'accepted', args.actorUserId);
 
   return getBillDraft(args.organizationId, args.paymentOrderId, args.actorUserId);
 }

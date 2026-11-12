@@ -1865,6 +1865,24 @@ test('a field the form defaulted is not recorded as a human correction', async (
   assert.equal(taxRow, undefined, 'a defaulted tax of 0 is not somebody correcting the document');
 });
 
+test('an empty tax saved on a bill with no tax line is not recorded as a change', async () => {
+  // The other way round: the page sends an empty tax as null, and a document
+  // with no tax line reads as 0. Every first save of such a bill wrote
+  // "changed the tax from $0.00 to nothing" in History, under the name of
+  // whoever saved it, for a field nobody had touched.
+  const { orgId, owner } = await makeOrg();
+  const bill = await uploadAndConfirm(orgId, owner.token, {
+    vendor: 'Empty Tax Vendor', amount: 400, invoiceNo: 'ET-1', billTo: 'Halcyon Labs, Inc.',
+  });
+  await post(`/organizations/${orgId}/bills/${bill.billId}/save`, {
+    fields: { invoiceNumber: 'ET-1', invoiceDate: '2026-08-02', dueDate: '2026-08-30', terms: 'Net 30', currency: 'USD', total: 400, taxAmount: null },
+    lines: [{ description: 'Cloud hosting', quantity: 1, unitPrice: 400, amount: 400, category: null }],
+    confirmedFieldKeys: [],
+  }, owner.token);
+  const changes = await prisma.billFieldChange.findMany({ where: { paymentOrderId: bill.billId, fieldKey: 'taxAmount' } });
+  assert.deepEqual(changes, [], 'no tax line and a tax of 0 are the same figure');
+});
+
 test('the ask list says who could actually settle the flag being asked about', async () => {
   // Nine colleagues in one flat dropdown, including a viewer, with nothing to
   // say that only two of them could act on a bill addressed to another company.

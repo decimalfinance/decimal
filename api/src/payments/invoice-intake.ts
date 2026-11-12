@@ -532,6 +532,13 @@ export async function processInvoiceDocument(args: {
           actorUserId: args.actorUserId ?? null,
         });
         await recordStep(billJob, 'checks', ...describeChecks(flags));
+        // Figures that don't add up: the exception agent reads the document for
+        // why now, in the background, so the answer is waiting when someone
+        // opens the bill. Never awaited.
+        if (flags.some((f) => f.kind === 'lines_do_not_sum' || f.kind === 'total_does_not_reconcile')) {
+          const { startFiguresCheck } = await import('../exceptions/arithmetic.js');
+          startFiguresCheck(args.organizationId, paymentOrder.paymentOrderId);
+        }
       }
 
       // If this bill looks like a duplicate, the exception agent investigates

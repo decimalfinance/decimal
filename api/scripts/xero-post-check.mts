@@ -14,6 +14,7 @@
 //   replay    one bill sent twice with one key, a minute apart, as a retry does when an answer is lost
 //   inbooks   after replay: that bill uploaded to Decimal is held as already in Xero; "Same bill" links it
 //   late      after replay: sent again with the key 9.5 minutes after the first send, the edge of Decimal's window
+//   discount  a trade discount as a negative line, as "Correct the figures" adds it (exceptions/arithmetic.ts)
 
 import crypto from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -71,6 +72,15 @@ const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISO
 const n = () => 1000 + Math.floor(Math.random() * 9000);
 
 const SCENARIOS: Record<string, () => Scenario> = {
+  discount: () => ({
+    vendor: 'Tamarack Tile & Stone', address: ['77 Quarry Road', 'Fresno, CA 93721'], number: `TTS-${n()}`, date: day(-2), due: day(28),
+    lines: [
+      { description: 'Porcelain floor tile, 40 boxes', qty: 1, unit: 3000, category: category('General Expenses', 'Office Expenses') },
+      { description: 'Less 10% trade discount', qty: 1, unit: -300, category: category('General Expenses', 'Office Expenses') },
+    ],
+    tax: 0,
+    expect: 'a bill for 2,700.00 with a 3,000.00 line and a -300.00 discount line; awaiting payment; the PDF attached',
+  }),
   fresh: () => ({
     vendor: 'Harbor Light Electric', address: ['18 Pier Road', 'Oakland, CA 94607'], number: `HLE-${n()}`, date: day(-2), due: day(28),
     lines: [
