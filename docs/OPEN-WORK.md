@@ -9,6 +9,11 @@ Things that were designed but never built. Compiled 2026-09-17 by checking the o
 - **Documentation and memo rules** as a policy type: require a note or attachment above a threshold.
 - **Budgets.**
 - **Class and Location pass-through to QuickBooks, bulk coding, and a coding accuracy view.**
+- **Xero, the rest of posting.** Approved bills post to Xero (`api/src/accounting/xero-books.ts`). Still missing:
+  - **What a line carries.** Only its Category: no tracking categories (Xero's classes), no items, no tax rate. Tax goes in as a line of its own on the larger line's Category, as it does for QuickBooks.
+  - **Books in another currency.** Setup refuses books whose home currency isn't USD (`not_usd` in `api/src/integrations/setup/findings.ts`), for both systems.
+  - **A paid bill.** Recording the payment against the bill is QuickBooks-only (`syncSettledPaymentOrder`). It waits with the rest of payment work.
+  - **Going live.** A production backend, and a production redirect URI on the Xero app. Xero's free Starter tier allows five connected organisations and 1,000 calls a day for each; the sixth connection needs a card and moves the app to Core.
 - **Multi-invoice PDFs.** One upload that contains several bills should offer to split into several bills.
 - **Retract an approval** (an approver takes back their own sign-off; recall is the submitter's tool) and **mark as synced** (resolve a bill already entered in QuickBooks by hand). Neither exists. Vendor-level hold, once on this list, is built.
 - **Team members, the rest of design 1a.** Removing someone from an organisation needs an endpoint and a rule for the approval tasks they hold: reroute them through the silent recompile, or refuse while they hold any. The design's remove menu and confirmation were left out until then. Invitation emails: the design says "They’ll get an email"; today the admin copies a link that is shown once (`sendInviteEmail` beside `sendVerificationEmail` would do it). Handing on the primary admin role has an endpoint (`/primary-admin/transfer`) but no place in the new page.
