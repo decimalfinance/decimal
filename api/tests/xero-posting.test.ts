@@ -367,6 +367,36 @@ test('xero: a bill already in Xero is held until someone says, and "same bill" l
   assert.equal(books.files.length, 0, 'their own entry, with whatever they attached');
 });
 
+test('xero: a held bill\'s page shows what held it, when only the contact Decimal found in Xero makes it a match, and an answer from it goes through', async () => {
+  const w = await makeWorld();
+  // Keyed into Xero by hand without its number, under a contact Decimal's copy doesn't
+  // have: only the contact Decimal finds by name makes it the same vendor's bill.
+  xero(organisation({
+    Contacts: [{ ContactID: 'c-submit', Name: 'Submit Co', ContactStatus: 'ACTIVE', IsSupplier: true }],
+    Invoices: [{
+      InvoiceID: 'hand-2', Type: 'ACCPAY', Status: 'AUTHORISED', Contact: { ContactID: 'c-submit', Name: 'Submit Co' },
+      Date: xeroDate('2026-08-03'), DueDate: xeroDate('2026-08-31'), LineAmountTypes: 'NoTax', CurrencyCode: 'USD',
+      LineItems: [{ LineItemID: 'h-2', Description: 'Services', AccountCode: '485', LineAmount: 700, TaxAmount: 0 }],
+      SubTotal: 700, TotalTax: 0, Total: 700, AmountDue: 700, UpdatedDateUTC: xeroDate('2026-08-04'),
+    }],
+  }));
+  await connectXero(w.orgId);
+  await approve(w);
+  assert.equal((await syncOf(w.bills.submitted))?.status, 'held');
+
+  // Opening the bill must show the bill that held it, the moment it opens and after any look.
+  const sameBill = (detail: Row) => detail.draft.flags.find((f: Row) => f.kind === 'in_books')?.resolutions.find((r: Row) => r.action === 'same_bill')?.targetId;
+  const opened = await get(`/organizations/${w.orgId}/bills/${w.bills.submitted}/detail`, w.owner.token);
+  assert.equal(sameBill(opened), 'hand-2', 'on the page as it opens');
+  await drainBackgroundWork();
+  assert.equal(sameBill(await get(`/organizations/${w.orgId}/bills/${w.bills.submitted}/detail`, w.owner.token)), 'hand-2', 'and after any look');
+
+  const said = await post(`/organizations/${w.orgId}/bills/${w.bills.submitted}/in-books`, { recordId: 'hand-2', same: true }, w.owner.token);
+  assert.equal(said.posting, 'synced');
+  assert.equal(said.linked, true);
+  assert.equal((await syncOf(w.bills.submitted))?.externalBillId, 'hand-2');
+});
+
 test('xero: once Xero is the team\'s books, Categories come from its chart, without bank, system or archived accounts', async () => {
   const w = await makeWorld();
   xero(organisation());

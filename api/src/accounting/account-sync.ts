@@ -499,7 +499,10 @@ export async function syncApprovedBill(paymentOrderId: string): Promise<Accounti
         },
       });
       if (inBooks.kind === 'held') {
-        await save({ status: 'held', requestId, error: inBooks.message });
+        // The vendor found for it is kept, so the look made when the bill is opened looks
+        // for this vendor too (knownVendorIds): without it, a contact found only by name
+        // here is one that look can't know, so it looks again and can't find what held it.
+        await save({ status: 'held', requestId, error: inBooks.message, ...(vendor?.vendorId ? { externalVendorId: vendor.vendorId } : {}) });
         logger.info('accounting_sync.bill_held', { organizationId: order.organizationId, paymentOrderId, system });
         return 'held';
       }
