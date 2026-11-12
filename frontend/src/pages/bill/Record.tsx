@@ -175,6 +175,10 @@ function checkedWords(detail: BillDetail, viewer: Face, yourTurn: boolean): Lead
   // the posting waits for someone to say whether it's the same bill.
   const what = inBooksWhat(draft.flags.find((f) => f.kind === 'in_books' && f.severity === 'warning')?.message);
   if (what && !detail.posting) points.push({ tone: 'bad', text: `${what} Nobody has said yet whether it’s this one. Approving it doesn’t post it twice: it waits for that answer.` });
+  // A bill dated in a closed period: the books get the first open day, or, when an admin
+  // kept its date, nothing until the period is reopened. The approvers hear which.
+  const closedPeriod = draft.flags.find((f) => f.kind === 'dated_in_closed_period');
+  if (closedPeriod) points.push({ tone: closedPeriod.severity === 'warning' ? 'bad' : 'ok', text: closedPeriod.message });
   const sends = [...detail.history.before, ...detail.history.after].filter((h) => h.kind === 'submitted' && h.at);
   return {
     text: `${yourTurn ? 'Ready for your approval. ' : ''}${changed}`,

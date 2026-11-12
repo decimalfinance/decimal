@@ -1607,7 +1607,7 @@ export const billsApi = {
   setPostingDate(
     organizationId: string,
     paymentOrderId: string,
-    body: { choice: 'open_period' } | { choice: 'keep'; reason: string } | { choice: 'clear' },
+    body: { choice: 'keep'; reason: string } | { choice: 'clear' },
   ) {
     return request<{ postOn: string | null; draft: BillDraft }>(`/organizations/${organizationId}/bills/${paymentOrderId}/posting-date`, {
       method: 'POST',

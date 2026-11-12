@@ -85,6 +85,9 @@ export function InboxPage() {
   const tab: Tab = isTab(asked) ? asked : 'all';
   const [search, setSearch] = useState('');
   const [picked, setPicked] = useState<string | null>(null);
+  // The keys' cursor shows once ↑ or ↓ is pressed. Shown from the start, the first
+  // row looked chosen when nothing had been, and a lone row always did.
+  const [keyed, setKeyed] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
 
   const inbox = useQuery({
@@ -136,9 +139,15 @@ export function InboxPage() {
       if (e.key === 'Enter' && on?.closest('a, button')) return;
       const at = shown.findIndex((r) => r.key === cursor);
       if (at < 0) return;
+      // Enter opens only a row the cursor shows; the first ↑ or ↓ shows it where it is.
+      if (e.key === 'Enter' && !keyed) return;
       e.preventDefault();
       if (e.key === 'Enter') {
         navigate(shown[at]!.to);
+        return;
+      }
+      if (!keyed) {
+        setKeyed(true);
         return;
       }
       const next = Math.max(0, Math.min(shown.length - 1, at + (e.key === 'ArrowDown' ? 1 : -1)));
@@ -147,7 +156,7 @@ export function InboxPage() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [shown, cursor, navigate]);
+  }, [shown, cursor, keyed, navigate]);
 
   return (
     <div className="ui inbox-page">
@@ -221,7 +230,7 @@ export function InboxPage() {
               </Cells>
             </div>
             {shown.map((row) => (
-              <InboxRow key={row.key} row={row} picked={row.key === cursor} onPick={() => setPicked(row.key)} />
+              <InboxRow key={row.key} row={row} picked={keyed && row.key === cursor} onPick={() => setPicked(row.key)} />
             ))}
             {!inbox.isSuccess ? (
               inbox.isError ? (

@@ -237,9 +237,12 @@ const orderOf = (kind: string) => {
   return i < 0 ? FINDING_ORDER.length : i;
 };
 
-/** The flags a person has to deal with, in the order to settle them. Settled overrides and notes are not findings. */
+/** The flags a person has to deal with, in the order to settle them. Settled overrides, and notes with nothing to do, are not findings. */
 export function findingsOf(draft: BillDraft): Flag[] {
-  const live = draft.flags.filter((f) => f.blocking || (f.severity !== 'info' && f.resolutions.length > 0));
+  // Anything with something to do about it, or that holds the bill. A note with an
+  // answer is one: what Decimal did by itself (posting on the first open day), which
+  // someone may undo, is said as Decimal's message, not left out.
+  const live = draft.flags.filter((f) => f.blocking || f.resolutions.length > 0);
   return [...live].sort((a, b) => Number(b.blocking) - Number(a.blocking) || orderOf(a.kind) - orderOf(b.kind));
 }
 

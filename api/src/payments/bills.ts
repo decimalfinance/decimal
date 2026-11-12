@@ -27,7 +27,7 @@ import { findDuplicateBills, readDuplicateOverride, describeDuplicate, matchDupl
 import { companionReadiness } from '../companion/readiness.js';
 import { readCeilingException, activeCeilingException } from './ceiling-exception.js';
 import { readPayableHold, describePayableHold } from './vendor-payable.js';
-import { evaluateBillFlags, summarizeBillFlags, dayText, displayOrgName, systemName } from './bill-flags.js';
+import { evaluateBillFlags, summarizeBillFlags, displayOrgName, systemName } from './bill-flags.js';
 import { billDocumentIdOf, pagesOf } from './split-pages.js';
 import { HIGHLIGHTABLE_FIELDS } from './question-fields.js';
 import type { BillFlag } from './bill-flags.js';
@@ -813,6 +813,7 @@ async function recordFlagChanges(args: {
   const rows: Array<{ eventType: string; flag: BillFlag }> = [];
   for (const [kind, flag] of now) if (!was.has(kind)) rows.push({ eventType: 'bill_flag_raised', flag });
   for (const [kind, flag] of was) if (!now.has(kind)) rows.push({ eventType: 'bill_flag_cleared', flag });
+  await recordWhatDecimalDid(args);
   if (rows.length === 0) return;
 
   await prisma.paymentOrderEvent.createMany({
@@ -836,6 +837,70 @@ async function recordFlagChanges(args: {
         message: flag.message,
       },
       ...(args.at ? { createdAt: args.at } : {}),
+    })),
+  });
+}
+
+/**
+ * What Decimal did about a bill by itself (a flag's `did`: the posting date it chose
+ * for a bill dated in a closed period), on the bill's record as Decimal's. Written
+ * when this write brings it about, and whenever what it did changes.
+ *
+ * Checked against the record as well as the flags before this write: what Decimal
+ * does can begin on a read, when the books close a month while the bill waits, and
+ * a read writes nothing. So the next write catches it up, stamped just before itself,
+ * and sending the bill for approval counts as one.
+ */
+async function recordWhatDecimalDid(args: {
+  organizationId: string;
+  paymentOrderId: string;
+  before: BillFlag[];
+  after: BillFlag[];
+  state: string;
+  at?: Date;
+}) {
+  const did = [...args.before, ...args.after].filter((f) => f.did);
+  if (did.length === 0) return;
+  const recorded = await prisma.paymentOrderEvent.findMany({
+    where: { paymentOrderId: args.paymentOrderId, eventType: 'policy_overridden', actorType: 'system' },
+    orderBy: { createdAt: 'desc' },
+    select: { payloadJson: true },
+  });
+  // The last thing Decimal recorded for each rule.
+  const last = new Map<string, string>();
+  for (const e of recorded) {
+    const p = isRecord(e.payloadJson) ? e.payloadJson : {};
+    const rule = str(p.rule);
+    if (rule && !last.has(rule)) last.set(rule, str(p.short) ?? '');
+  }
+  const at = (args.at ?? new Date()).getTime();
+  const rows: Array<{ did: NonNullable<BillFlag['did']>; at: Date }> = [];
+  // Done before this write and never written down: just before it.
+  for (const f of args.before) {
+    if (!f.did || last.get(f.did.rule) === f.did.text) continue;
+    rows.push({ did: f.did, at: new Date(at - 1) });
+    last.set(f.did.rule, f.did.text);
+  }
+  // Brought about by this write, or still not written down: just after it.
+  for (const f of args.after) {
+    if (!f.did) continue;
+    const was = args.before.find((b) => b.kind === f.kind)?.did?.text;
+    if (was === f.did.text && last.get(f.did.rule) === f.did.text) continue;
+    rows.push({ did: f.did, at: new Date(at + 1) });
+    last.set(f.did.rule, f.did.text);
+  }
+  if (rows.length === 0) return;
+  await prisma.paymentOrderEvent.createMany({
+    data: rows.map((r) => ({
+      organizationId: args.organizationId,
+      paymentOrderId: args.paymentOrderId,
+      eventType: 'policy_overridden',
+      actorType: 'system',
+      actorId: null,
+      beforeState: args.state,
+      afterState: args.state,
+      payloadJson: { rule: r.did.rule, short: r.did.text, choice: 'decimal' },
+      createdAt: r.at,
     })),
   });
 }
@@ -2843,12 +2908,22 @@ export async function submitBillForApproval(input: SubmitBillInput) {
   // The submitted body IS the bill at this moment: it is what the rest of this
   // function is about to commit. Gating on anything else means gating on a
   // different bill from the one being approved.
-  const blocking = (await flagsForOrder(input.organizationId, input.paymentOrderId, {
+  const submitted = await flagsForOrder(input.organizationId, input.paymentOrderId, {
     verification: { fields: input.fields, lines: input.lines },
-  })).filter((f) => f.blocking);
+  });
+  const blocking = submitted.filter((f) => f.blocking);
   if (blocking.length > 0) {
     throw new Error(`Resolve the flagged issue first: ${blocking[0]!.message}`);
   }
+  // What Decimal did with the bill since its last save (the posting date it chose,
+  // when the books closed in the meantime) goes on the record before the approvers see it.
+  await recordWhatDecimalDid({
+    organizationId: input.organizationId,
+    paymentOrderId: input.paymentOrderId,
+    before: submitted,
+    after: submitted,
+    state: order.state,
+  });
 
   const metadata = isRecord(order.metadataJson) ? order.metadataJson : {};
   const agent = isRecord(metadata.agent) ? metadata.agent : {};
@@ -4477,17 +4552,17 @@ export async function correctFiguresFromDocument(args: {
 }
 
 // A bill dated in a period the books have closed (accounting/closed-period.ts):
-// post it on the first open day, keep its date for a period someone will reopen,
-// or take that choice back. Chosen in review, where the flag is, and never moving
-// the bill's own date, which stays for when it is due and for spotting duplicates.
-// The first open day is worked out here from the books' date, not taken from the
-// screen. Who chose, and what, goes on the bill's history.
+// Decimal posts it on the first open day itself. An admin may keep its date instead,
+// for a period someone will reopen, and anyone may take that back. Chosen in review,
+// where the flag is, and never moving the bill's own date, which stays for when it is
+// due and for spotting duplicates. Who chose, and what, goes on the bill's history,
+// and `postOn` answers with the day the books will get.
 export async function choosePostingDate(args: {
   organizationId: string;
   paymentOrderId: string;
   actorUserId: string;
   actorName: string;
-  choice: 'open_period' | 'keep' | 'clear';
+  choice: 'keep' | 'clear';
   reason?: string | null;
 }) {
   const order = await prisma.paymentOrder.findFirst({
@@ -4497,37 +4572,41 @@ export async function choosePostingDate(args: {
   if (!order) throw notFound('Bill not found');
   if (order.state !== 'draft') throw conflict('A bill’s posting date is chosen in review. Send it back to change it.');
 
-  const { closedBooksFor, dateOnly, firstOpenDay, postingDateChoiceOf } = await import('../accounting/closed-period.js');
+  const { closedBooksFor, dateOnly, postingDateChoiceOf, postingDateFor } = await import('../accounting/closed-period.js');
   const metadata = isRecord(order.metadataJson) ? order.metadataJson : {};
   const verification = isRecord(metadata.verification) ? metadata.verification : null;
   const fields = verification && isRecord(verification.fields) ? verification.fields : null;
   const billDate = dateOnly(fields?.invoiceDate) ?? dateOnly(extractedOf(order.metadataJson)?.invoiceDate);
   const previous = postingDateChoiceOf(metadata);
+  const books = await closedBooksFor(args.organizationId);
   const at = new Date();
+  const answer = async (choice: typeof previous) => ({
+    postOn: postingDateFor(billDate, choice, books?.closedThrough ?? null),
+    draft: await getBillDraft(args.organizationId, args.paymentOrderId, args.actorUserId),
+  });
 
   let next: import('../accounting/closed-period.js').PostingDateChoice | null = null;
-  if (args.choice !== 'clear') {
-    const books = await closedBooksFor(args.organizationId);
+  if (args.choice === 'keep') {
     if (!books || !billDate || billDate > books.closedThrough) {
       throw conflict('The books aren’t closed through this bill’s date, so there’s nothing to choose.');
     }
     next = {
-      kind: args.choice,
-      postOn: args.choice === 'open_period' ? firstOpenDay(books.closedThrough) : null,
+      kind: 'keep',
+      postOn: null,
       billDate,
       closedThrough: books.closedThrough,
       system: books.system,
       byUserId: args.actorUserId,
       byName: args.actorName,
-      reason: args.choice === 'keep' ? args.reason?.trim() || null : null,
+      reason: args.reason?.trim() || null,
       at: at.toISOString(),
     };
   } else if (!previous) {
-    return { postOn: null, draft: await getBillDraft(args.organizationId, args.paymentOrderId, args.actorUserId) };
+    return answer(null);
   }
 
-  const short = next?.kind === 'open_period' ? `chose to post it on ${dayText(next.postOn!)}, the first open day`
-    : next?.kind === 'keep' ? 'kept its date, in a closed period'
+  const short = next ? 'kept its date, in a closed period'
+    : previous?.kind === 'keep' ? 'took back keeping its date'
     : 'took back the posting date chosen for it';
   const flagsBefore = await flagsForOrder(args.organizationId, order.paymentOrderId);
   const { postingDate: _dropped, ...rest } = metadata;
@@ -4565,7 +4644,7 @@ export async function choosePostingDate(args: {
     state: order.state,
     at,
   });
-  return { postOn: next?.postOn ?? null, draft: await getBillDraft(args.organizationId, args.paymentOrderId, args.actorUserId) };
+  return answer(next);
 }
 
 // Send an already-APPROVED (but unpaid) bill back to draft — the recovery

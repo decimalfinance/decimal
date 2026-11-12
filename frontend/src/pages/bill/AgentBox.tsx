@@ -555,14 +555,12 @@ export function AgentBox({
       return;
     }
     if (pill.action === 'post_in_open_period') {
-      // Reversible, so it happens at once and the toast offers Undo.
+      // Takes back an admin's keeping its date: Decimal posts it on the first open
+      // day again. Keeping it once more is the admin's, with a reason, so no Undo.
       setBusy(true);
       try {
-        const { postOn } = await billsApi.setPostingDate(organizationId, billId, { choice: 'open_period' });
-        const undo = () => void billsApi.setPostingDate(organizationId, billId, { choice: 'clear' })
-          .then(() => refresh())
-          .catch((e) => toaster.show(e instanceof Error ? e.message : 'That didn’t go through. Try again.'));
-        toaster.show(`It posts to ${books} on ${postOn ? calendarDay(postOn) : 'the first open day'}. The bill keeps its own date.`, { undo });
+        const { postOn } = await billsApi.setPostingDate(organizationId, billId, { choice: 'clear' });
+        toaster.show(`It posts to ${books} on ${postOn ? `${calendarDay(postOn)}, the first open day` : 'the first open day'}. The bill keeps its own date.`);
         await refresh();
       } catch (e) {
         toaster.show(e instanceof Error ? e.message : 'That didn’t go through. Try again.');

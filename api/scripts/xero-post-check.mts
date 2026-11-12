@@ -9,7 +9,7 @@
 // Scenarios, run in the order given:
 //   fresh     a new vendor: a contact is made; two Categories and tax
 //   known     a vendor the books have: its contact is found, not made again
-//   locked    dated on or before Xero's lock date: refused, and nothing is sent
+//   locked    dated on or before Xero's lock date: posts dated the first open day, due when it was
 //   archived  its contact is archived in Xero (made and archived here first): refused, no second contact
 //   replay    one bill sent twice with one key, a minute apart, as a retry does when an answer is lost
 //   inbooks   after replay: that bill uploaded to Decimal is held as already in Xero; "Same bill" links it
@@ -17,6 +17,8 @@
 //   discount  a trade discount as a negative line, as "Correct the figures" adds it (exceptions/arithmetic.ts)
 // With STOP_AT_REVIEW=1 a bill is left in review instead, every line given its Category,
 // for a person to work on (a test brief): nothing is confirmed, approved or sent.
+// With STOP_IN_APPROVAL=1 it is sent for approval and left waiting there, for a look at
+// the page the approvers see: nothing is approved or sent to Xero.
 
 import crypto from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -104,7 +106,7 @@ const SCENARIOS: Record<string, () => Scenario> = {
       vendor: 'Harbor Light Electric', address: ['18 Pier Road', 'Oakland, CA 94607'], number, date: '2008-09-15', due: '2008-10-15',
       lines: [{ description: 'Emergency call-out, September 2008', qty: 1, unit: 180, category: category('Repairs and Maintenance', 'General Expenses') }],
       tax: 0,
-      expect: 'refused in words before anything is sent: dated on or before Xero\'s lock date; no bill in Xero',
+      expect: 'dated on or before Xero\'s lock date, so it posts dated the first open day after it (1 Oct 2008 on the Demo Company), still due 15 Oct 2008',
       before: async () => console.log('lock date, read live:', await xeroBooks(xero!).closedThrough(null)),
       after: async () => console.log('in xero:', JSON.stringify({ bills: await billsNumbered(number) })),
     };
@@ -319,6 +321,10 @@ async function runBill(key: string, s: Scenario) {
     lines: s.lines.map((l) => ({ description: l.description, quantity: l.qty, unitPrice: l.unit, amount: Math.round(l.qty * l.unit * 100) / 100, category: l.category, categoryConfirmed: true })),
     confirmedFieldKeys: ['vendorName', 'invoiceNumber', 'invoiceDate', 'dueDate', 'terms', 'currency', 'total', 'taxAmount', 'subtotal', 'poNumber', 'discount', 'vendorEmail', 'remitTo'],
   });
+  if (process.env.STOP_IN_APPROVAL) {
+    console.log('left in approval:', JSON.stringify({ bill: billId, number: s.number, page: `http://127.0.0.1:5274/organizations/${org}/bills/${billId}` }));
+    return { billId, sync: null };
+  }
   const by = await approve(billId);
   const sync = await syncOf(billId);
   console.log('decimal:', JSON.stringify({ approvedBy: by, status: sync?.status, contact: sync?.externalVendorId, bill: sync?.externalBillId, error: sync?.error, attempts: sync?.attempts }));

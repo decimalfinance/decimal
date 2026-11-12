@@ -474,13 +474,15 @@ export async function syncApprovedBill(paymentOrderId: string): Promise<Accounti
       return await fail(`This bill is in ${currency}, and Decimal posts in USD only. Enter it in ${label} by hand.`);
     }
     // A closed period stays closed, whether or not the books would only have warned. A
-    // bill chosen in review to post on the first open day (closed-period.ts) posts dated
-    // that day while it still has the date it was chosen for, and keeps its own date.
+    // bill dated in one posts dated the first open day as the books stand now, even if
+    // they closed another month since review said which day (closed-period.ts), and
+    // keeps its own date. Only an admin's keeping its date holds it, until the period
+    // is reopened.
     const billDate = billHeader.billDate?.trim() || null;
-    const postOn = postingDateFor(billDate, postingDateChoiceOf(order.metadataJson));
-    const closed = postOn ? await books.closedThrough(outcome) : null;
+    const closed = billDate ? await books.closedThrough(outcome) : null;
+    const postOn = postingDateFor(billDate, postingDateChoiceOf(order.metadataJson), closed);
     if (postOn && closed && postOn <= closed) {
-      return await fail(`This bill is dated ${billDate}${postOn !== billDate ? ` (to post on ${postOn})` : ''}, and the books are closed through ${closed}. Send it back to post it in the open period, or reopen the period in ${label}, then retry.`);
+      return await fail(`This bill is dated ${billDate}, a date an admin kept, and the books are closed through ${closed}. Reopen the period in ${label}, or send it back to post it on the first open day, then retry.`);
     }
     const vendor = await vendorForBill(order.organizationId, system, books.companyId, vendorLabel, outcome) ?? await books.vendorNamed(vendorLabel);
     if (vendor && 'problem' in vendor) return await fail(vendor.problem);

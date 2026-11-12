@@ -88,6 +88,12 @@ export type BillFlag = {
    * more confusingly. Asking is always available: it is never the dangerous act.
    */
   resolutions: FlagResolution[];
+  /**
+   * What Decimal did about it by itself, for the bill's history. `text` reads after
+   * its name ("set it to post on 1 Oct 2008, …"); `rule` is the record's. Written when
+   * the flag first says it and whenever it changes (recordWhatDecimalDid in bills.ts).
+   */
+  did?: { rule: string; text: string };
 };
 
 const ASK: FlagResolution = {
@@ -500,49 +506,42 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
   // Dated in a period the books have closed.
   //
   // QuickBooks and Xero both refuse a bill dated on or before the date the books are
-  // closed through. Found only at posting, the bill has had its whole approval chain
-  // first, so review says so and offers the ordinary fix, which anyone may take: post
-  // it on the first open day, the bill keeping its own date for when it is due.
-  // Keeping the date instead waits on someone reopening the period, the books'
-  // owner's call, so it is an admin's. Either choice stands while the bill keeps the
-  // date it was made for and the books stay closed where they were.
+  // closed through. Decimal doesn't ask: it posts it on the first open day, the
+  // ordinary fix for a late bill (closed-period.ts), and says so, with why, as a note
+  // that holds nothing. The bill keeps its own date for when it is due. Keeping that
+  // date instead waits on someone reopening the period, the books' owner's call, so
+  // it is an admin's, and it stands while the bill keeps the date it was made for and
+  // the books stay closed where they were. Past review, the approvers read the same,
+  // and its one answer is a question: the date is changed by sending it back.
   const cp = facts.closedPeriod;
   if (cp?.billDate && cp.billDate <= cp.closedThrough) {
     const system = systemName(cp.system);
-    const choice = cp.choice && cp.choice.billDate === cp.billDate ? cp.choice : null;
     const open = firstOpenDayOf(cp.closedThrough);
-    const postOnOpen: FlagResolution = { action: 'post_in_open_period', label: `Post it on ${dayText(open)}`, requires: 'anyone', noReason: true, detail: `${system} gets it dated ${dayText(open)}, the first open day. The bill keeps its own date for when it's due.` };
-    // Past review nothing here is a button: the page shows findings with no actions
-    // outside review, and a warning with none at all would show nowhere.
-    if (choice?.kind === 'open_period' && choice.postOn && choice.postOn > cp.closedThrough) {
-      // Settled: a note, for the approvers as much as anyone.
-      flags.push({
-        kind: 'dated_in_closed_period',
-        severity: 'info',
-        blocking: false,
-        short: `Posts on ${dayText(choice.postOn)}`,
-        resolutions: [],
-        message: `Dated ${dayText(cp.billDate)}, in a period ${system} is closed through. ${choice.byName} chose to post it on ${dayText(choice.postOn)}, the first open day. The bill keeps its own date for when it's due.`,
-      });
-    } else if (choice?.kind === 'keep' && choice.closedThrough === cp.closedThrough) {
+    const choice = cp.choice;
+    const kept = choice?.kind === 'keep' && choice.billDate === cp.billDate && choice.closedThrough === cp.closedThrough;
+    if (kept) {
       flags.push({
         kind: 'dated_in_closed_period',
         severity: 'warning',
         blocking: false,
         short: 'Kept a closed date',
-        resolutions: cp.inReview ? [postOnOpen, ASK] : [ASK],
+        resolutions: cp.inReview
+          ? [{ action: 'post_in_open_period', label: `Post it on ${dayText(open)}`, requires: 'anyone', noReason: true, detail: `${system} gets it dated ${dayText(open)}, the first open day. The bill keeps its own date for when it's due.` }, ASK]
+          : [ASK],
         message: `Dated ${dayText(cp.billDate)}, and ${system} is closed through ${dayText(cp.closedThrough)}. ${choice.byName} kept its date${choice.reason ? `: "${choice.reason}"` : ''}. ${system} won't take it until the period is reopened there.`,
       });
     } else {
       flags.push({
         kind: 'dated_in_closed_period',
-        severity: 'warning',
-        blocking: cp.inReview,
-        short: 'In a closed period',
+        severity: 'info',
+        blocking: false,
+        short: `Posts on ${dayText(open)}`,
         resolutions: cp.inReview
-          ? [postOnOpen, { action: 'keep_date', label: 'Keep its date', requires: 'admin', detail: `${system} won't take it until someone reopens the period there. Only when that's planned.` }, ASK]
+          ? [{ action: 'keep_date', label: 'Keep its date', requires: 'admin', detail: `${system} won't take it until someone reopens the period there. Only when that's planned.` }, ASK]
           : [ASK],
-        message: `This bill is dated ${dayText(cp.billDate)}, and ${system} is closed through ${dayText(cp.closedThrough)}. ${system} won't take a bill dated in a closed period${cp.inReview ? '.' : ': send it back to post it in the open period.'}`,
+        // The first sentence is read back by the page's card for keeping the date.
+        message: `This bill is dated ${dayText(cp.billDate)}, and ${system} is closed through ${dayText(cp.closedThrough)}. ${system} won't take a bill dated in a closed period, so Decimal will post it there on ${dayText(open)}, the first open day. The bill keeps its own date for when it's due.`,
+        did: { rule: 'posting_date', text: `set it to post on ${dayText(open)}, the first open day, because ${system} is closed through ${dayText(cp.closedThrough)}` },
       });
     }
   }

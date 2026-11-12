@@ -813,19 +813,19 @@ const choice = (over: Partial<PostingDateChoice> = {}): PostingDateChoice => ({
 });
 const closedFlag = (facts: Parameters<typeof evaluateBillFlags>[0]) => evaluateBillFlags(facts).find((f) => f.kind === 'dated_in_closed_period');
 
-test('a bill dated in a closed period is held at review: the first open day is anyone\'s fix, keeping the date an admin\'s', () => {
+test('a bill dated in a closed period: Decimal posts it on the first open day itself, and says so', () => {
   const flag = closedFlag(closed());
   assert.ok(flag);
-  assert.equal(flag.severity, 'warning');
-  assert.equal(flag.blocking, true);
-  assert.equal(flag.short, 'In a closed period');
-  assert.equal(flag.message, 'This bill is dated 14 Sep 2026, and QuickBooks is closed through 30 Sep 2026. QuickBooks won\'t take a bill dated in a closed period.');
-  assert.deepEqual(flag.resolutions.map((r) => [r.action, r.requires, r.noReason ?? false]), [
-    ['post_in_open_period', 'anyone', true],
-    ['keep_date', 'admin', false],
-    ['ask_someone', 'anyone', false],
+  assert.equal(flag.severity, 'info');
+  assert.equal(flag.blocking, false, 'nothing for anyone to do, so nothing holds it');
+  assert.equal(flag.short, 'Posts on 1 Oct 2026');
+  assert.equal(flag.message, 'This bill is dated 14 Sep 2026, and QuickBooks is closed through 30 Sep 2026. QuickBooks won\'t take a bill dated in a closed period, so Decimal will post it there on 1 Oct 2026, the first open day. The bill keeps its own date for when it\'s due.');
+  assert.deepEqual(flag.did, { rule: 'posting_date', text: 'set it to post on 1 Oct 2026, the first open day, because QuickBooks is closed through 30 Sep 2026' });
+  // The one other way waits on someone reopening the period, the books' owner's call.
+  assert.deepEqual(flag.resolutions.map((r) => [r.action, r.requires]), [
+    ['keep_date', 'admin'],
+    ['ask_someone', 'anyone'],
   ]);
-  assert.equal(flag.resolutions[0]!.label, 'Post it on 1 Oct 2026');
 });
 
 test('the day the books are closed through is closed; the day after is open', () => {
@@ -836,50 +836,52 @@ test('the day the books are closed through is closed; the day after is open', ()
   assert.equal(closedFlag(closed({ system: 'xero' }))?.message.includes('Xero is closed through 30 Sep 2026'), true);
 });
 
-test('posting on the first open day settles it, and approvers read who chose it', () => {
-  const flag = closedFlag(closed({ choice: choice() }));
-  assert.ok(flag);
-  assert.equal(flag.severity, 'info');
-  assert.equal(flag.blocking, false);
-  assert.equal(flag.short, 'Posts on 1 Oct 2026');
-  assert.deepEqual(flag.resolutions, []);
-  assert.match(flag.message, /Ines Park chose to post it on 1 Oct 2026, the first open day/);
+test('the first open day is as the books stand now: closed another month, it moves on', () => {
+  const later = closedFlag(closed({ closedThrough: '2026-10-31' }));
+  assert.equal(later?.short, 'Posts on 1 Nov 2026');
+  assert.equal(later?.blocking, false);
+  // A first open day a person chose before Decimal chose it itself changes nothing.
+  assert.equal(closedFlag(closed({ choice: choice() }))?.message.includes('Decimal will post it there on 1 Oct 2026'), true);
 });
 
-test('a choice stands only for the date it was made for, and the books it was made against', () => {
-  // The bill's date was corrected since.
-  assert.equal(closedFlag(closed({ billDate: '2026-09-20', choice: choice() }))?.blocking, true);
-  // The books closed October too: the first open day it chose is closed now.
-  const later = closedFlag(closed({ closedThrough: '2026-10-31', choice: choice() }));
-  assert.equal(later?.blocking, true);
-  assert.equal(later?.resolutions[0]?.label, 'Post it on 1 Nov 2026');
-});
-
-test('keeping its date clears the hold but stays a warning, and a later close raises it again', () => {
+test('an admin keeping its date stays a warning, and stands only for the date and the books it was made against', () => {
   const kept = closedFlag(closed({ choice: choice({ kind: 'keep', postOn: null, reason: 'Reopening September for the audit' }) }));
   assert.ok(kept);
   assert.equal(kept.severity, 'warning');
   assert.equal(kept.blocking, false);
   assert.equal(kept.short, 'Kept a closed date');
-  assert.deepEqual(kept.resolutions.map((r) => r.action), ['post_in_open_period', 'ask_someone'], 'the first open day stays on offer');
+  assert.equal(kept.did, undefined, 'a person\'s choice, recorded where they made it');
+  assert.deepEqual(kept.resolutions.map((r) => [r.action, r.label]), [['post_in_open_period', 'Post it on 1 Oct 2026'], ['ask_someone', 'Ask someone']], 'anyone may take it back');
   assert.match(kept.message, /Ines Park kept its date: "Reopening September for the audit"\. QuickBooks won't take it until the period is reopened there\./);
-  assert.equal(closedFlag(closed({ closedThrough: '2026-10-31', choice: choice({ kind: 'keep', postOn: null }) }))?.blocking, true);
+  // The bill's date was corrected since, or the books closed October too: back to the first open day.
+  assert.equal(closedFlag(closed({ billDate: '2026-09-20', choice: choice({ kind: 'keep', postOn: null }) }))?.short, 'Posts on 1 Oct 2026');
+  assert.equal(closedFlag(closed({ closedThrough: '2026-10-31', choice: choice({ kind: 'keep', postOn: null }) }))?.short, 'Posts on 1 Nov 2026');
 });
 
-test('past review it holds nothing and its only answer is a question: the date is changed by sending it back', () => {
+test('past review the approvers read the same, and its only answer is a question', () => {
   const flag = closedFlag(closed({ inReview: false }));
   assert.ok(flag);
   assert.equal(flag.blocking, false);
   assert.deepEqual(flag.resolutions.map((r) => r.action), ['ask_someone']);
-  assert.match(flag.message, /send it back to post it in the open period\.$/);
+  assert.match(flag.message, /so Decimal will post it there on 1 Oct 2026, the first open day/);
   const kept = closedFlag(closed({ inReview: false, choice: choice({ kind: 'keep', postOn: null }) }));
   assert.deepEqual(kept?.resolutions.map((r) => r.action), ['ask_someone']);
 });
 
-test('posting goes by the chosen first open day only while the bill keeps the date it was chosen for', () => {
+test('posting goes by the books as they stand: the first open day, unless an admin\'s keeping its date still stands', () => {
+  const keep = choice({ kind: 'keep', postOn: null });
+  assert.equal(postingDateFor('2026-09-14', null, '2026-09-30'), '2026-10-01');
+  assert.equal(postingDateFor('2026-09-30', null, '2026-09-30'), '2026-10-01', 'the closing day itself is closed');
+  assert.equal(postingDateFor('2026-10-01', null, '2026-09-30'), '2026-10-01');
+  assert.equal(postingDateFor('2026-09-14', null, null), '2026-09-14', 'books with no closing date');
+  assert.equal(postingDateFor('2026-09-14', keep, '2026-09-30'), '2026-09-14', 'kept: refused until the period is reopened');
+  assert.equal(postingDateFor('2026-09-14', keep, '2026-10-31'), '2026-11-01', 'closed further since it was kept');
+  assert.equal(postingDateFor('2026-09-14', keep, '2026-08-31'), '2026-09-14', 'reopened: its own date');
+  assert.equal(postingDateFor(null, null, '2026-09-30'), null);
+  // The payment-time posting reads no closing date: a first open day chosen in review, or its own.
   assert.equal(postingDateFor('2026-09-14', choice()), '2026-10-01');
   assert.equal(postingDateFor('2026-09-20', choice()), '2026-09-20');
-  assert.equal(postingDateFor('2026-09-14', choice({ kind: 'keep', postOn: null })), '2026-09-14');
+  assert.equal(postingDateFor('2026-09-14', keep), '2026-09-14');
   assert.equal(postingDateFor('2026-09-14', null), '2026-09-14');
   assert.equal(postingDateFor(null, choice()), null);
   assert.equal(firstOpenDay('2026-12-31'), '2027-01-01');

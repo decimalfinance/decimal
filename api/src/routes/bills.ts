@@ -281,8 +281,9 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/correct-f
 // keep its date, or take that back (choosePostingDate). Posting on the first open
 // day is the ordinary fix and anyone reviewing may make it; keeping the date waits
 // on someone reopening the period in the books, which is an admin's to plan.
+// Decimal posts a bill dated in a closed period on the first open day itself: an
+// admin may keep its date instead, and anyone may take that back.
 const postingDateSchema = z.discriminatedUnion('choice', [
-  z.object({ choice: z.literal('open_period') }),
   z.object({ choice: z.literal('keep'), reason: z.string().trim().min(3).max(300) }),
   z.object({ choice: z.literal('clear') }),
 ]);

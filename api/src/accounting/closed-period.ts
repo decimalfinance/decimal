@@ -3,10 +3,12 @@
 // QuickBooks and Xero both refuse a bill dated on or before the date the books are
 // closed through, and posting looks, live, right before it posts (account-sync.ts).
 // Found only then, the bill has had its whole approval chain first and sits approved
-// and refused. So review says so earlier (the dated_in_closed_period flag in
-// bill-flags.ts) and offers the ordinary fix: post it on the first open day. The bill
-// keeps its own date, for when it is due and for spotting duplicates; only the books
-// get the other, and the choice is recorded on the bill with who made it.
+// and refused. So Decimal settles it itself, as Ramp does and as accounting practice
+// has it for an ordinary late bill: the books get it dated the first open day, and the
+// bill keeps its own date, for when it is due and for spotting duplicates. Review says
+// so (the dated_in_closed_period flag in bill-flags.ts), with why, and the bill's
+// history records it. The one other way is an admin's: keep its date, for a period
+// someone means to reopen, recorded on the bill with who chose it and why.
 //
 // The flag rules run for every bill on every read, so review can't look live each
 // time. It uses the books' own date as last read, read again in the background once
@@ -23,9 +25,10 @@ export type BooksSystem = 'quickbooks' | 'xero';
 export type ClosedBooks = { system: BooksSystem; closedThrough: string };
 
 /**
- * What someone chose for a bill dated in a closed period, kept on the bill
- * (metadata.postingDate). `open_period`: the books get it dated `postOn`, the first open
- * day. `keep`: it keeps its date, for a period someone means to reopen.
+ * What an admin chose for a bill dated in a closed period, kept on the bill
+ * (metadata.postingDate). `keep`: it keeps its date, for a period someone means to
+ * reopen. `open_period` is from before Decimal chose the first open day itself, when a
+ * person pressed for it; it is read, and changes nothing now.
  */
 export type PostingDateChoice = {
   kind: 'open_period' | 'keep';
@@ -141,10 +144,27 @@ export function postingDateChoiceOf(metadata: unknown): PostingDateChoice | null
 }
 
 /**
- * The date the books get for this bill: the first open day someone chose, while the
- * bill still has the date it was chosen for, otherwise the bill's own.
+ * Whether an admin's keeping a bill's date still stands: made for the date it has, with
+ * the books closed through the same day. Once the books close further the period to
+ * reopen is a different one, and the bill goes back to the first open day.
  */
-export function postingDateFor(billDate: string | null, choice: PostingDateChoice | null): string | null {
-  if (billDate && choice?.kind === 'open_period' && choice.billDate === billDate && choice.postOn) return choice.postOn;
-  return billDate;
+export function keepsItsDate(billDate: string, choice: PostingDateChoice | null, closedThrough: string): boolean {
+  return choice?.kind === 'keep' && choice.billDate === billDate && choice.closedThrough === closedThrough;
+}
+
+/**
+ * The date the books get for this bill. Dated on or before the day they're closed
+ * through, it's the first open day, unless an admin kept its date; otherwise its own.
+ *
+ * Without `closedThrough` (the payment-time posting in account-sync.ts, frozen with
+ * payments, reads no closing date) it goes by a first open day a person chose in review
+ * before Decimal chose it itself, and otherwise the bill's own date.
+ */
+export function postingDateFor(billDate: string | null, choice: PostingDateChoice | null, closedThrough?: string | null): string | null {
+  if (!billDate) return null;
+  if (closedThrough === undefined) {
+    return choice?.kind === 'open_period' && choice.billDate === billDate && choice.postOn ? choice.postOn : billDate;
+  }
+  if (!closedThrough || billDate > closedThrough || keepsItsDate(billDate, choice, closedThrough)) return billDate;
+  return firstOpenDay(closedThrough);
 }

@@ -308,15 +308,17 @@ test('xero: when Xero refuses, nothing was made, so the next send gets a key of 
   assert.equal(books.bills().length, 1);
 });
 
-test('xero: a bill dated on or before Xero\'s lock date doesn\'t post, and says why', async () => {
+test('xero: a bill dated on or before Xero\'s lock date posts on the first open day, still due when it was', async () => {
   const w = await makeWorld();
   const books = xero(organisation({}, { PeriodLockDate: xeroDate('2026-08-31') }));
   await connectXero(w.orgId);
   await approve(w);
   const sync = await syncOf(w.bills.submitted);
-  assert.equal(sync?.status, 'error');
-  assert.equal(sync?.error, 'This bill is dated 2026-08-02, and the books are closed through 2026-08-31. Send it back to post it in the open period, or reopen the period in Xero, then retry.');
-  assert.equal(books.sent.filter((r) => r.method === 'PUT').length, 0);
+  assert.equal(sync?.status, 'synced', sync?.error ?? '');
+  const [put] = books.writes('Invoices');
+  const bill = bodyOf(put!).Invoices[0];
+  assert.equal(bill.Date, '2026-09-01', 'Xero takes it dated the first open day');
+  assert.equal(bill.DueDate, '2026-08-30', 'when it is due is the vendor\'s, unchanged');
 });
 
 test('xero: a bill Xero records at another total stays posted, never sent again, and says where to correct it', async () => {

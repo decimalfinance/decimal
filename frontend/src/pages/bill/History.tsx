@@ -6,7 +6,7 @@
 import { Fragment, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import type { BillCompanionNote, BillDetail } from '../../api';
-import { when } from '../../kit/format';
+import { calendarDay, when } from '../../kit/format';
 import { CLOSE_REASONS, DETAIL_FIELDS, FIELD_LABELS, VENDOR_FIELDS, duplicateOf, fieldsFrom, syncProblem, type Face } from './model';
 import { Badge, Chevron, FaceOf, Figures, dayAndTime } from './parts';
 
@@ -228,6 +228,12 @@ export function historyItems(detail: BillDetail, note: BillCompanionNote | null 
     const name = nameOf(who);
     const at = new Date(e.at);
     const m = /^(.*?) changed from (.*) to (.*)$/.exec(e.text);
+    // A date field's change reads as the page writes dates ("15 Sep 2008"), not as stored.
+    if (m && DETAIL_FIELDS.some((f) => f.key === e.field && f.kind === 'date')) {
+      const day = (v: string) => (/^\d{4}-\d{2}-\d{2}$/.test(v) ? calendarDay(v) : v);
+      m[2] = day(m[2]!);
+      m[3] = day(m[3]!);
+    }
     const label = (e.field && FIELD_LABELS[e.field]) || m?.[1] || 'A field';
     const settled = who !== 'decimal' && settles(e);
     if (e.field === 'total' && settled && m) {
