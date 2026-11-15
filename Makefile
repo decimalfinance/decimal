@@ -22,7 +22,7 @@ PG       := postgresql://usdc_ops:usdc_ops@127.0.0.1:54329
 DB ?= $(DEV_DB)
 
 .SILENT:
-.PHONY: dev stop test test-one reset bench bench-stop help sync-postgres-schema
+.PHONY: dev stop test test-one reset bench bench-stop help sync-postgres-schema deps
 
 # Two rules here, both learned the hard way.
 #
@@ -36,7 +36,7 @@ DB ?= $(DEV_DB)
 #    "pid 0 is not a child of this shell" and make reported a termination.
 #    Both described the trap, not the thing that actually broke. Named pids and
 #    `;` chaining remove the array and the ambiguity together.
-dev: ## start everything (db + api + web) -> localhost:5174
+dev: deps ## start everything (db + api + web) -> localhost:5174
 	set -euo pipefail; \
 	if [[ -f api/.env ]]; then set -a; source api/.env; set +a; fi; \
 	export DATABASE_URL="$(PG)/$(DEV_DB)?schema=public"; \
@@ -75,7 +75,7 @@ test-one: ## run one API test file against the test database: make test-one FILE
 reset: ## wipe local dev data (schema stays)
 	set -euo pipefail && ./scripts/db-reset.sh $(DEV_DB) $(BENCH_DB)
 
-bench: ## background stack for AI testing -> localhost:5274
+bench: deps ## background stack for AI testing -> localhost:5274
 	set -euo pipefail && ./scripts/bench.sh up
 
 # --- deliberately not in help ---------------------------------------------
@@ -83,6 +83,15 @@ bench: ## background stack for AI testing -> localhost:5274
 # put its own stack down without touching yours. See TESTBENCH.md.
 bench-stop:
 	set -euo pipefail && ./scripts/bench.sh down
+
+# A fresh clone has no packages: dev and bench install them first, from the
+# lockfiles, and only where node_modules is missing. An install already there is
+# left alone.
+deps:
+	set -euo pipefail; \
+	for d in api frontend; do \
+	  if [[ ! -d $$d/node_modules ]]; then echo "Installing $$d packages (npm ci)"; (cd $$d && npm ci); fi; \
+	done
 
 # Applies postgres/init/*.sql to $(DB). Called by dev, test and bench.
 sync-postgres-schema:
