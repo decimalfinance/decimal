@@ -327,7 +327,7 @@ export function restingMessage(draft: BillDraft, fields: Fields, lines: LineEntr
   if (uncategorised) return 'Nothing to flag. Some lines still need a category.';
   if (firstBill && guessed) return `Nothing to flag. This is the first bill from ${draft.vendor.name}, so its categories are a first guess. Check them.`;
   if (guessed) return 'Nothing to flag. Some categories are a first guess. Check them.';
-  if (firstBill) return `Nothing to flag. This is the first bill from ${draft.vendor.name}.`;
+  if (firstBill) return endSentence(`Nothing to flag. This is the first bill from ${draft.vendor.name}`);
   return 'Nothing to flag. Every figure is on the page, the lines add up to the total, and each line has a category.';
 }
 
@@ -343,7 +343,16 @@ export const isSettledRecord = (f: Flag) =>
 export function notesOf(draft: BillDraft): string[] {
   return draft.flags
     .filter((f) => !f.blocking && f.severity === 'info' && f.resolutions.length === 0 && !isSettledRecord(f))
-    .map((f) => (f.kind === 'new_vendor' ? `First bill from ${draft.vendor.name}.` : f.message));
+    .map((f) => (f.kind === 'new_vendor' ? endSentence(`First bill from ${draft.vendor.name}`) : f.message));
+}
+
+/**
+ * Ends a sentence with one full stop. A sentence that already ends in one, as
+ * "Sterling Office Supply, Inc." does, gets no second.
+ */
+export function endSentence(text: string): string {
+  const t = text.trim();
+  return /[.!?]$/.test(t) ? t : `${t}.`;
 }
 
 /**

@@ -7,7 +7,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import type { BillDraft, FigureCorrection } from '../../api';
 import { usd } from '../../kit/format';
-import { CLOSE_REASONS, closeReasonFor, type CloseReason, type Flag } from './model';
+import { CLOSE_REASONS, closeReasonFor, endSentence, type CloseReason, type Flag } from './model';
 import { Chevron, Figures, Mark } from './parts';
 
 export type Action = Flag['resolutions'][number]['action'];
@@ -169,7 +169,10 @@ function Comparison({ flag, organizationId }: { flag: Flag; organizationId: stri
         </div>
       ) : null}
       {brief.reason ? <div className="bp-reason">{brief.reason}</div> : null}
-      {brief.couldNotCheck.length > 0 ? <div className="bp-reason">Couldn’t check: {brief.couldNotCheck.join('; ')}.</div> : null}
+      {brief.couldNotCheck.length > 0 ? (
+        // Each item is the model's own sentence and may end in a full stop already.
+        <div className="bp-reason">Couldn’t check: {endSentence(brief.couldNotCheck.map((c) => c.trim().replace(/[.;\s]+$/, '')).join('; '))}</div>
+      ) : null}
     </>
   );
 }
