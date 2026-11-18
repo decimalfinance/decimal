@@ -4,9 +4,9 @@ Accounts payable with agents built into the work. Decimal reads each bill, flags
 
 ## A bill comes in
 
-![A PDF is dropped on the Bills page, Decimal reads it, the total is traced to the page, and the bill is sent for approval](docs/readme/1-a-bill-comes-in.gif)
+![A bill is uploaded with the Upload a bill button, Decimal reads it, the total is traced to the page, and the bill is sent for approval](docs/readme/1-a-bill-comes-in.gif)
 
-Drop a PDF or forward the email, and Decimal reads it as you watch. Click a figure to see where on the page it came from. Decimal says what it isn't sure of: here, the categories, since this is the vendor's first bill.
+Upload a PDF or forward the email, and Decimal reads it as you watch. Click a figure to see where on the page it came from. Decimal says what it isn't sure of: here, the categories, since this is the vendor's first bill.
 
 ## A duplicate is caught
 
