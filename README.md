@@ -4,13 +4,13 @@ Accounts payable with agents built into the work. Decimal reads each bill, flags
 
 ## A bill comes in
 
-![A bill is uploaded with the Upload a bill button, Decimal reads it, the total is traced to the page, and the bill is sent for approval](docs/readme/1-a-bill-comes-in.gif)
+![A bill is uploaded with the Upload a bill button, Decimal reads it, the total is traced to the page, and the bill is sent for approval](docs/readme/1-a-bill-comes-in.webp)
 
 Upload a PDF or forward the email, and Decimal reads it as you watch. Click a figure to see where on the page it came from. Decimal says what it isn't sure of: here, the categories, since this is the vendor's first bill.
 
 ## A duplicate is caught
 
-![An agent compares a copy with the bill that came in before it, recommends closing it, and a person closes it](docs/readme/2-a-duplicate-is-caught.gif)
+![An agent compares a copy with the bill that came in before it, recommends closing it, and a person closes it](docs/readme/2-a-duplicate-is-caught.webp)
 
 An agent compares the two bills figure by figure, reads both documents and recommends what to do. Closing the copy is still a person's click.
 
@@ -18,7 +18,7 @@ An agent compares the two bills figure by figure, reads both documents and recom
 
 ## Figures that don't add up
 
-![An agent finds the freight charge the reading missed, and a person adds it to the bill](docs/readme/3-figures-that-dont-add-up.gif)
+![An agent finds the freight charge the reading missed, and a person adds it to the bill](docs/readme/3-figures-that-dont-add-up.webp)
 
 An agent reads the document to find out why: here, a freight charge the reading left off. Code checks every figure it names before the correction is offered.
 
@@ -26,19 +26,19 @@ An agent reads the document to find out why: here, a freight charge the reading 
 
 ## Who approves what
 
-![An admin splits bills at $5,000 and puts an approver on each path](docs/readme/4-who-approves-what.gif)
+![An admin splits bills at $5,000 and puts an approver on each path](docs/readme/4-who-approves-what.webp)
 
 Admins draw the rules: split by amount, vendor, Category or a vendor's first bill, and put people on each path.
 
 ## Approved means it's in the books
 
-![An approver approves a bill from the Inbox and it is posted to Xero](docs/readme/5-approved-means-posted.gif)
+![An approver approves a bill from the Inbox and it is posted to Xero](docs/readme/5-approved-means-posted.webp)
 
 The last approval posts the bill to QuickBooks or Xero with the invoice attached. This one went to Xero's Demo Company.
 
 ## Connect your books
 
-![Decimal reads two years of a company's books in Xero, asks three questions, and the admin presses Go](docs/readme/6-connect-your-books.gif)
+![Decimal reads two years of a company's books in Xero, asks about what it found, and the admin presses Go](docs/readme/6-connect-your-books.webp)
 
 Setup is a conversation. Decimal reads 24 months of the books and asks about what it found: look-alike vendors, lines coded two ways, the closing date. Nothing posts until an admin presses Go.
 
@@ -46,7 +46,7 @@ Setup is a conversation. Decimal reads 24 months of the books and asks about wha
 
 ---
 
-**Status.** Everything up to posting to the books is built. Paying the bill isn't built yet, and there is no hosted version. The GIFs were recorded on a made-up company with synthetic invoices.
+**Status.** Everything up to posting to the books is built. Paying the bill isn't built yet, and there is no hosted version. Everything above was recorded on a made-up company with synthetic invoices.
 
 **More.** Where the AI stops, how each agent was measured and what isn't built: [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md). How the system is built: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
