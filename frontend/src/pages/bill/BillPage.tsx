@@ -14,10 +14,27 @@ import { Record } from './Record';
 import { Review } from './Review';
 import type { Access } from './Findings';
 
-/** Decimal is still investigating a finding: read again shortly. */
+/** Decimal is still investigating a finding, or a bill just approved is on its way to the books: read again shortly. */
 function stillWorking(detail: BillDetail | undefined) {
   return Boolean(detail?.draft.flags.some((f) => f.brief?.status === 'running' || f.finding?.status === 'running'))
-    || detail?.draft.booksCheck?.status === 'running';
+    || detail?.draft.booksCheck?.status === 'running'
+    || onItsWay(detail);
+}
+
+const ON_ITS_WAY_MS = 2 * 60_000;
+
+/**
+ * Approved, and the books don't have it yet. The post runs after the approval returns, so
+ * without this the page would never show it land until reloaded. Only for a couple of
+ * minutes: a bill approved before the books were connected never posts by itself.
+ */
+function onItsWay(detail: BillDetail | undefined) {
+  if (!detail?.books || !['approved', 'auto_approved'].includes(detail.approval?.macroState ?? '')) return false;
+  if (detail.posting && detail.posting.status !== 'pending') return false;
+  const since = detail.posting
+    ? Date.parse(detail.posting.at)
+    : Math.max(0, ...(detail.approval?.steps ?? []).map((s) => (s.actedAt ? Date.parse(s.actedAt) : 0)));
+  return Date.now() - since < ON_ITS_WAY_MS;
 }
 
 /** The file the bill came from is still being worked on: its checks are still to come. */
