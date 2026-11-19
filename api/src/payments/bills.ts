@@ -206,7 +206,7 @@ function bucketAndStatus(args: {
   if (state === 'draft') {
     // An approver sent it back: it's a draft again, but with homework.
     if (invoice?.macro_state === 'rejected') {
-      return { bucket: 'draft', subStatus: { kind: 'loud', text: 'Sent back — needs changes', tone: 'warning' } };
+      return { bucket: 'draft', subStatus: { kind: 'loud', text: 'Sent back for changes', tone: 'warning' } };
     }
     return { bucket: 'draft', subStatus: { kind: 'plain', text: 'Needs a check', tone: 'info' } };
   }
@@ -237,10 +237,10 @@ function bucketAndStatus(args: {
             bucket: 'in_approval',
             subStatus: { kind: 'person', text: `Waiting on ${waitingOn}`, tone: 'neutral', blockedBy: { name: waitingOn } },
           }
-        : { bucket: 'needs_attention', subStatus: { kind: 'loud', text: 'Approval has no one to act — check your flow', tone: 'danger' } };
+        : { bucket: 'needs_attention', subStatus: { kind: 'loud', text: 'No one can approve this. Check your approval flow.', tone: 'danger' } };
     }
     if (invoice.macro_state === 'returned_for_info') {
-      return { bucket: 'in_approval', subStatus: { kind: 'plain', text: 'Returned — needs info', tone: 'warning' } };
+      return { bucket: 'in_approval', subStatus: { kind: 'plain', text: 'Returned for more information', tone: 'warning' } };
     }
     if (invoice.macro_state === 'on_hold') {
       return { bucket: 'in_approval', subStatus: { kind: 'plain', text: 'On hold', tone: 'neutral' } };
@@ -251,7 +251,7 @@ function bucketAndStatus(args: {
         return {
           bucket: 'to_pay',
           subStatus: waitingOn
-            ? { kind: 'person', text: `Release — waiting on ${waitingOn}`, tone: 'neutral', blockedBy: { name: waitingOn } }
+            ? { kind: 'person', text: `Release waiting on ${waitingOn}`, tone: 'neutral', blockedBy: { name: waitingOn } }
             : { kind: 'plain', text: 'Awaiting release', tone: 'neutral' },
         };
       }
