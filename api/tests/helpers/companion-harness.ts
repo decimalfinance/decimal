@@ -19,7 +19,7 @@
 // chats, steps, briefs and suggestion log) and sessions may differ.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { after, before, beforeEach, test } from 'node:test';
+import { after, before, beforeEach } from 'node:test';
 import { AddressInfo } from 'node:net';
 import { createApp } from '../../src/app.js';
 import { prisma } from '../../src/infra/prisma.js';

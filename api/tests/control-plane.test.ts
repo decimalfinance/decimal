@@ -8,7 +8,6 @@ import { createApp } from '../src/app.js';
 import { DEVNET_RPC_URL, config } from '../src/config.js';
 import { prisma } from '../src/infra/prisma.js';
 import { requireTestDatabase } from './helpers/require-test-database.js';
-import { USDC_MINT } from '../src/solana.js';
 import { setPrivyWalletRuntimeForTests } from '../src/wallets/personal.js';
 import { resetRateLimitBuckets } from '../src/infra/rate-limit.js';
 import { setSquadsTreasuryRuntimeForTests } from '../src/squads/treasury.js';
@@ -1575,7 +1574,7 @@ test('Squads vault payment proposals turn payment orders into executable treasur
   assert.equal(
     executedBatch.items.every((order: { reconciliationDetail: { latestExecution: { submittedSignature: string; state: string } | null; requestDisplayState: string } }) =>
       order.reconciliationDetail.latestExecution?.submittedSignature === runExecuted.executedSignature
-      && order.reconciliationDetail.latestExecution.state === 'settled'
+      && order.reconciliationDetail.latestExecution?.state === 'settled'
       && order.reconciliationDetail.requestDisplayState === 'matched',
     ),
     true,

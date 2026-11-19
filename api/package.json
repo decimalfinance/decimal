@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "prisma generate && tsx watch src/index.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.tests.json",
     "prisma:generate": "prisma generate",
     "test": "NODE_ENV=test OPENAI_API_KEY= ANTHROPIC_API_KEY= XERO_CLIENT_ID= XERO_CLIENT_SECRET= INBOUND_EMAIL_DOMAIN=bills.decimal.test RESEND_INBOUND_WEBHOOK_SECRET=\"whsec_$(printf 'decimal-test-only-not-a-secret' | base64)\" tsx --test --test-concurrency=1 tests/**/*.test.ts"
   },

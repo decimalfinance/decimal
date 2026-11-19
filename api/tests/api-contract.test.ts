@@ -14,11 +14,12 @@ test('API contract has stable unique endpoint IDs and covers the backend surface
 
 test('OpenAPI spec is generated from the API contract', () => {
   const spec = buildOpenApiSpec();
+  const paths = spec.paths as Record<string, Record<string, { operationId: string; security?: unknown[] }>>;
   assert.equal(spec.openapi, '3.1.0');
   assert.equal(spec.info.title, 'Decimal API');
-  assert.equal(spec.paths['/organizations/{organizationId}/payment-orders/{paymentOrderId}/proof'].get.operationId, 'payment_order_proof');
-  assert.equal(spec.paths['/organizations/{organizationId}/payment-orders/batch-csv/preview'].post.operationId, 'preview_payment_orders_batch_csv');
-  assert.deepEqual(spec.paths['/health'].get.security, []);
+  assert.equal(paths['/organizations/{organizationId}/payment-orders/{paymentOrderId}/proof']!.get!.operationId, 'payment_order_proof');
+  assert.equal(paths['/organizations/{organizationId}/payment-orders/batch-csv/preview']!.post!.operationId, 'preview_payment_orders_batch_csv');
+  assert.deepEqual(paths['/health']!.get!.security, []);
 });
 
 test('typed Decimal client interpolates path, query, body, and auth headers', async () => {

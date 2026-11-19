@@ -243,11 +243,6 @@ async function get(path: string, token: string) {
   assert.equal(res.status, 200, `GET ${path} → ${res.status}: ${text}`);
   return JSON.parse(text);
 }
-async function del(path: string, token: string) {
-  const res = await fetch(`${baseUrl}${path}`, { method: 'DELETE', headers: { authorization: `Bearer ${token}` } });
-  assert.equal(res.status, 200, `DELETE ${path} → ${res.status}`);
-  return res.json();
-}
 async function status(method: string, path: string, token: string, body?: unknown) {
   const res = await fetch(`${baseUrl}${path}`, {
     method,

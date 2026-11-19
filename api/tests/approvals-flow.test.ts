@@ -3536,7 +3536,7 @@ function scriptedInvestigator(verdict: 'duplicate' | 'replacement' | 'not_duplic
   return state;
 }
 
-const dupFlag = (draft: { flags: Array<{ kind: string; blocking: boolean; brief?: any }> }) =>
+const dupFlag = (draft: { flags: Array<{ kind: string; blocking: boolean; brief?: any; resolutions: Array<{ action: string }> }> }) =>
   draft.flags.find((f) => f.kind === 'possible_duplicate');
 
 test('exception agent: a flagged pair shares one brief, and each bill is told its own part', async () => {
@@ -3660,7 +3660,7 @@ test('exception agent: the bill to keep points at the copy, and closing the copy
 test('exception agent: what the admin did is logged against what the agent advised', async () => {
   scriptedInvestigator('duplicate');
   const { orgId, owner } = await makeOrg();
-  const first = await uploadAndConfirm(orgId, owner.token, { vendor: 'Outcome Ltd', amount: 700, invoiceNo: 'OL-5' });
+  await uploadAndConfirm(orgId, owner.token, { vendor: 'Outcome Ltd', amount: 700, invoiceNo: 'OL-5' });
   const second = await uploadAndConfirm(orgId, owner.token, { vendor: 'Outcome Ltd', amount: 700, invoiceNo: 'OL-5' });
   const third = await uploadAndConfirm(orgId, owner.token, { vendor: 'Outcome Ltd', amount: 900, invoiceNo: 'OL-6' });
   await uploadAndConfirm(orgId, owner.token, { vendor: 'Outcome Ltd', amount: 900, invoiceNo: 'OL-6' });

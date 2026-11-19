@@ -16,7 +16,7 @@ import { prisma } from '../src/infra/prisma.js';
 import { drainAsyncIntake } from '../src/payments/invoice-intake.js';
 import { setExceptionAgentRuntimeForTests } from '../src/exceptions/agent.js';
 import {
-  baseUrl, raw, post, get, upload, confirmBody, makeWorld, fingerprint, assertUnchanged, hostile, ask, EMPTY, HOSTILE_ARGS, TOOL_NAMES,
+  raw, post, get, upload, confirmBody, makeWorld, fingerprint, assertUnchanged, hostile, ask, EMPTY, HOSTILE_ARGS, TOOL_NAMES,
   type Call, type Plan,
 } from './helpers/companion-harness.js';
 
@@ -100,7 +100,7 @@ test('safety: no tool ever shows another organisation, by name, number, id or pe
 test('safety: chats, jobs and card outcomes are private to their owner and organisation', async () => {
   const a = await makeWorld('Alpha Works');
   const b = await makeWorld('Bravo Holdings');
-  hostile({ turns: [[{ name: 'find_bills', args: {} }]], respond: (o) => ({ ...EMPTY, actions: [{ kind: 'send_for_approval', billId: a.bills.ready, reason: 'ready' }], billIds: [a.bills.ready] }) });
+  hostile({ turns: [[{ name: 'find_bills', args: {} }]], respond: () => ({ ...EMPTY, actions: [{ kind: 'send_for_approval', billId: a.bills.ready, reason: 'ready' }], billIds: [a.bills.ready] }) });
   const { chatId, answer } = await ask(a.orgId, a.owner.token, 'Anything ready?');
   const card = answer.actions[0];
   assert.ok(card, 'the owner got a card');

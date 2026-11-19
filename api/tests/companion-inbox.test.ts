@@ -4,7 +4,6 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { test } from 'node:test';
 import { prisma } from '../src/infra/prisma.js';
-import { drainAsyncIntake } from '../src/payments/invoice-intake.js';
 import { setAskClassifierForTests, classifyAskByRule } from '../src/companion/ask-classifier.js';
 import { setAnswerJudgeForTests } from '../src/payments/answer-judge.js';
 import { failedFileLine } from '../src/companion/inbox.js';
@@ -14,7 +13,7 @@ import {
 } from './helpers/companion-harness.js';
 
 type Line = { kind: string; text: string; lead: string; quote: string | null; who: { name: string; avatarUrl: string | null } | null; isNew: boolean; from?: string | null; questionId?: string };
-type Item = { key: string; billId: string | null; lines: Line[]; isNew: boolean };
+type Item = { key: string; billId: string | null; lines: Line[]; isNew: boolean; invoiceNumber: string | null; vendorName: string | null };
 const inboxOf = async (orgId: string, token: string) => (await get(`/organizations/${orgId}/inbox`, token)) as { items: Item[]; count: number; newCount: number };
 const itemFor = (inbox: { items: Item[] }, billId: string) => inbox.items.find((i) => i.billId === billId);
 

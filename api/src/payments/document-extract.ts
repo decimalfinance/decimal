@@ -698,6 +698,15 @@ const ExtractedRowsSchema = z.object({
 });
 
 export type ExtractedRow = z.infer<typeof ExtractedRowSchema>;
+/** A row as the model's reply has it, before the schema fills in its defaults. */
+export type ExtractedRowReply = z.input<typeof ExtractedRowSchema>;
+
+/** The parse every extraction's rows go through; also how a test's scripted reply is read. */
+export function parseExtractedRows(rows: unknown[]): ExtractedRow[] {
+  const parsed = ExtractedRowsSchema.safeParse({ rows });
+  if (!parsed.success) throw new Error(`Extracted payment rows failed schema validation: ${parsed.error.message}`);
+  return parsed.data.rows;
+}
 
 const SUPPORTED_IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif']);
 const MAX_DOCUMENT_PAGES = 10;
@@ -903,21 +912,18 @@ export async function extractPaymentRowsFromDocument(args: {
   }
 
   const rowsRaw = invoices.map(invoiceToPaymentRow);
-  const parsedRows = ExtractedRowsSchema.safeParse({ rows: rowsRaw });
-  if (!parsedRows.success) {
-    throw new Error(`Extracted payment rows failed schema validation: ${parsedRows.error.message}`);
-  }
+  const rows = parseExtractedRows(rowsRaw);
 
   logger.info('document_extract.completed', {
     path: 'vision',
     pageCount: pages.length,
-    rowCount: parsedRows.data.rows.length,
+    rowCount: rows.length,
     latencyMs: totalLatencyMs,
     promptTokens: totalPromptTokens,
     completionTokens: totalCompletionTokens,
     retryAttempted,
     model: firstAttempt.model ?? config.openAiModel,
-    rows: parsedRows.data.rows.map((row) => ({
+    rows: rows.map((row) => ({
       counterparty: row.counterparty,
       amount: row.amount,
       currency: row.currency,
@@ -926,7 +932,7 @@ export async function extractPaymentRowsFromDocument(args: {
     })),
   });
 
-  return { rows: parsedRows.data.rows, modelLatencyMs: totalLatencyMs, pageCount: pages.length };
+  return { rows, modelLatencyMs: totalLatencyMs, pageCount: pages.length };
 }
 
 /**
@@ -1006,20 +1012,17 @@ async function extractFromText(args: {
   // and 0/O confused by OCR — and the characters here are exact. A base58
   // address that is wrong in this text is wrong on the document.
   const rowsRaw = attempt.invoices.map(invoiceToPaymentRow);
-  const parsedRows = ExtractedRowsSchema.safeParse({ rows: rowsRaw });
-  if (!parsedRows.success) {
-    throw new Error(`Extracted payment rows failed schema validation: ${parsedRows.error.message}`);
-  }
+  const rows = parseExtractedRows(rowsRaw);
 
   logger.info('document_extract.completed', {
     path: 'text',
     pageCount: args.pageCount,
-    rowCount: parsedRows.data.rows.length,
+    rowCount: rows.length,
     latencyMs: attempt.latencyMs,
     promptTokens: attempt.usage.promptTokens,
     completionTokens: attempt.usage.completionTokens,
     model: attempt.model ?? config.openAiTextModel ?? config.openAiModel,
-    rows: parsedRows.data.rows.map((row) => ({
+    rows: rows.map((row) => ({
       counterparty: row.counterparty,
       amount: row.amount,
       currency: row.currency,
@@ -1027,7 +1030,7 @@ async function extractFromText(args: {
     })),
   });
 
-  return { rows: parsedRows.data.rows, modelLatencyMs: attempt.latencyMs, pageCount: args.pageCount };
+  return { rows, modelLatencyMs: attempt.latencyMs, pageCount: args.pageCount };
 }
 
 type ExtractionUserContent = Array<

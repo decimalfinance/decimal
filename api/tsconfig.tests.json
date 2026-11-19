@@ -1,0 +1,8 @@
+{
+  // The tests, typechecked with the code they test. tsx strips types when it
+  // runs them, so without this a test could assert on a field that no longer
+  // exists and pass. `npm run typecheck` (in `make test`) checks both configs.
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "rootDir": ".", "noEmit": true },
+  "include": ["src/**/*.ts", "tests/**/*.ts"]
+}

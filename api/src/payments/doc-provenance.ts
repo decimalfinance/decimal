@@ -46,7 +46,7 @@ export type TextPage = {
 };
 
 type Box = { page: number; x0: number; y0: number; x1: number; y1: number }; // page is 1-based
-type SourceBox = {
+export type SourceBox = {
   page: number;
   box: [number, number, number, number];
   /** Degrees to rotate the box about its own centre, when the page is tilted. */

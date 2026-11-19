@@ -12,6 +12,7 @@ import {
   estimateSkewDeg,
   stripUnmeasuredSources,
   type TextPage,
+  type SourceBox,
 } from '../src/payments/doc-provenance.js';
 import {
   stripUnstorableCharacters, repairAgainstDocument,
@@ -403,7 +404,7 @@ test('on a tilted page the box turns with the text instead of growing to fit it'
   const of = (page: TextPage) => {
     const invoice = fakeInvoice({ vendorName: 'Ocean freight inbound APAC' });
     refineInvoiceSources(invoice, [page]);
-    return invoice.fieldSources!.vendorName!;
+    return invoice.fieldSources!.vendorName! as SourceBox;
   };
 
   const a = of(tilted);
@@ -456,7 +457,7 @@ test('a tilt too small to matter is left alone', () => {
   const words = [word('Kepler', 100, 300, 200, 314), word('Legal', 210, 300, 300, 314)];
   const invoice = fakeInvoice({ vendorName: 'Kepler Legal' });
   refineInvoiceSources(invoice, [{ words, aspect: 0.718, skewDeg: -0.25 }]);
-  assert.equal(invoice.fieldSources!.vendorName!.angle, undefined);
+  assert.equal((invoice.fieldSources!.vendorName! as SourceBox).angle, undefined);
 });
 
 test('on a tilted page a row follows its own text, not a flat band', () => {
@@ -615,6 +616,11 @@ function fakeInvoice(overrides: Record<string, unknown>) {
     confidence: { vendor: 1, amount: 1, overall: 1 },
     fieldConfidence: null,
     fieldSources: null,
+    documentKind: null,
+    statementRows: null,
+    appliesToInvoice: null,
+    fieldStatus: null,
+    issues: null,
     ...overrides,
   } as Parameters<typeof refineInvoiceSources>[0];
 }

@@ -596,7 +596,7 @@ test('quickbooks: a vendor is found with its name escaped, inactive ones include
   assert.ok(qb.asked.some((q) => q.includes("DisplayName = 'Submit Co' AND Active IN (true, false)")), qb.asked.join('; '));
   assert.match((await syncOf(w.bills.submitted))?.error ?? '', /"Submit Co" is inactive in QuickBooks/);
   assert.deepEqual(qb.calls.vendors, [], 'no second vendor');
-  assert.deepEqual(qb.calls.bills, []);
+  assert.equal(qb.calls.bills.length, 0);
 
   qb.state.named = { Id: 'V9', Active: true };
   assert.equal((await post(`/organizations/${w.orgId}/payment-orders/${w.bills.submitted}/accounting/sync`, {}, w.owner.token)).outcome, 'synced', 'made active again');

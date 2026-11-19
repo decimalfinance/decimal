@@ -272,7 +272,8 @@ Deep reference lives in `docs/reference/`. Read it only when payment work resume
 
 ## Testing
 
-- `make test` runs the API typecheck, the API tests against `usdc_ops_test`, and the frontend build.
+- `make test` runs the API typecheck, the API tests against `usdc_ops_test`, and the frontend build. The typecheck covers the tests too (`api/tsconfig.tests.json`): tsx strips types when it runs them, so without it a test could read a field that no longer exists and pass.
+- A test scripts the model's extraction with `setInvoiceIntakeRuntimeForTests`. Its reply goes through `parseExtractedRows`, the parse the real extractor uses, so a test gets exactly the rows production would make of that reply, defaults filled in.
 - **Run API tests only through `make test` or `make test-one`.** The tests truncate every table, and importing Prisma loads `api/.env`, which points at the dev database. `assertTestDatabase` in `api/src/infra/prisma.ts` makes any test process (`NODE_ENV=test`, a `tsx --test` child, or a `*.test.ts` run directly) refuse a database whose name doesn't end in `_test`, before a client exists. `api/tests/test-database-guard.test.ts` proves each case.
 - `make test-one FILE=tests/x.test.ts [NAME=pattern]` runs one file (or matching tests) against `usdc_ops_test`, for iterating. `make test` still gates every commit.
 - `api/tests/companion-safety.test.ts` attacks the companion with a hostile scripted model: every tool with every malformed argument, cross-organisation reads, a (person × action × bill) matrix of card proposals, smuggled requests and junk in answers, double clicks, stale cards, a model that throws or loops. "Changed nothing" is measured by fingerprinting every row of every business table before and after; only the companion's own tables may move. Each protection was deliberately broken once to prove a test catches it.

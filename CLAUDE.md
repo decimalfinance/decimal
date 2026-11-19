@@ -64,6 +64,7 @@ What enforces each rule. "Nothing" is a known gap. When the same mistake is corr
 | Money is bigint minor units | Stored columns are `BIGINT`. Arithmetic in code: nothing. |
 | Zod at the boundary | Nothing |
 | `.js` import extensions in the API | `tsc` with `NodeNext`, in `make test` |
+| Tests read only fields that exist | `api/tsconfig.tests.json` typechecks the tests, in `make test` |
 | Product vocabulary, hardcoded colours, em dashes in copy | `api/tests/frontend-rules.test.ts`, over every `.tsx` except the pages listed as not yet redesigned. Other styling rules: nothing. |
 | Approvals never auto-deny; a rejected bill goes back to review | `api/tests/approvals-flow.test.ts` ("it never auto-denies", "reject stops the route") |
 

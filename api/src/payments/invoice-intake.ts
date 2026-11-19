@@ -14,7 +14,7 @@ import {
   setInvoiceDocumentPageCount,
   setInvoiceDocumentStatus,
 } from './documents.js';
-import { UNREADABLE_MARKS, extractPaymentRowsFromDocument, renderDocumentToImages, type ExtractedRow } from './document-extract.js';
+import { UNREADABLE_MARKS, extractPaymentRowsFromDocument, parseExtractedRows, renderDocumentToImages, type ExtractedRow, type ExtractedRowReply } from './document-extract.js';
 import { extractPdfLayoutText, findTextMatches, ungroundedFields } from './doc-provenance.js';
 import { pdfPages, planPageSplit, shiftSources, type PageRange } from './split-pages.js';
 import {
@@ -40,8 +40,18 @@ const defaultRuntime: InvoiceIntakeRuntime = {
 
 let runtime: InvoiceIntakeRuntime = defaultRuntime;
 
-export function setInvoiceIntakeRuntimeForTests(nextRuntime: Partial<InvoiceIntakeRuntime> | null) {
-  runtime = nextRuntime ? { ...defaultRuntime, ...nextRuntime } : defaultRuntime;
+/** What a test scripts in place of the model: its reply, before parsing. */
+type ScriptedExtraction = (
+  args: Parameters<typeof extractPaymentRowsFromDocument>[0],
+) => Promise<{ rows: ExtractedRowReply[]; modelLatencyMs: number; pageCount: number }>;
+
+export function setInvoiceIntakeRuntimeForTests(next: { extractRowsFromDocument?: ScriptedExtraction } | null) {
+  const scripted = next?.extractRowsFromDocument;
+  // A scripted reply goes through the same parse as the model's, so the rows a
+  // test hands over are exactly what production would have made of that reply.
+  runtime = scripted
+    ? { extractRowsFromDocument: async (args) => { const out = await scripted(args); return { ...out, rows: parseExtractedRows(out.rows) }; } }
+    : defaultRuntime;
 }
 
 export type InvoiceIntakeSkippedRow = {
