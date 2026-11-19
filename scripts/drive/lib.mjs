@@ -687,14 +687,21 @@ export class Drive {
   }
 
   // Put files on the page's file input (the open dialog's first), as a drop would.
-  async upload(files, { within } = {}) {
+  async upload(files, { within, timeout = 10_000 } = {}) {
     const list = (Array.isArray(files) ? files : [files]).map((f) => path.resolve(ROOT, f));
     return this.step('upload', list.map((f) => path.basename(f)).join(', '), async () => {
       for (const f of list) if (!existsSync(f)) throw new DriveError(`no file at ${f}`, 'Test PDFs live under synthetic_data/ (see TESTING-INVOICES.md).');
-      const input = within
-        ? await this.page.$(`${within} input[type=file]`)
-        : ((await this.page.$('[role=dialog] input[type=file]')) ?? (await this.page.$('input[type=file]')));
-      if (!input) throw new DriveError('no file input on this page', 'Open the upload dialog first (for example d.click("Upload a bill")).');
+      // A page can draw its drop zone a moment after it settles, so wait for an input.
+      const find = async () =>
+        within
+          ? this.page.$(`${within} input[type=file]`)
+          : ((await this.page.$('[role=dialog] input[type=file]')) ?? (await this.page.$('input[type=file]')));
+      let input = await find();
+      for (const began = Date.now(); !input && Date.now() - began < timeout; ) {
+        await sleep(100);
+        input = await find();
+      }
+      if (!input) throw new DriveError(`no file input on this page after ${Math.round(timeout / 1000)} s`, 'Open the upload dialog first (for example d.click("Upload a bill")).');
       await input.uploadFile(...list);
       await input.dispose();
       await this.settle();
