@@ -22,7 +22,7 @@ PG       := postgresql://usdc_ops:usdc_ops@127.0.0.1:54329
 DB ?= $(DEV_DB)
 
 .SILENT:
-.PHONY: dev stop test test-one reset bench bench-stop help sync-postgres-schema deps
+.PHONY: dev stop test test-one verify reset bench bench-stop help sync-postgres-schema deps
 
 # Two rules here, both learned the hard way.
 #
@@ -74,6 +74,12 @@ test-one: ## run one API test file against the test database: make test-one FILE
 
 reset: ## wipe local dev data (schema stays)
 	set -euo pipefail && ./scripts/db-reset.sh $(DEV_DB) $(BENCH_DB)
+
+verify: ## before committing UI work: every saved flow and the smoke run on the bench, then make test
+	@# Start the bench only if it's down: bench.sh up restarts the API, which would cut off anyone mid-run.
+	@node scripts/drive/drive.mjs status >/dev/null || $(MAKE) --no-print-directory bench >/dev/null
+	@node scripts/drive/drive.mjs verify
+	@$(MAKE) --no-print-directory test
 
 bench: deps ## background stack for AI testing -> localhost:5274
 	set -euo pipefail && ./scripts/bench.sh up

@@ -11,7 +11,7 @@ You are Decimal's verifier. Another agent changed the product and handed you a b
 
 `scripts/drive/drive.mjs` is a scripted headless Chrome. Run `node scripts/drive/drive.mjs help` first: it is the reference. Every command prints one JSON object, and every run writes `run.json` plus screenshots to `.bench/evidence/<slug>/`.
 
-- `node scripts/drive/drive.mjs status`: is the bench up? If not, run `make bench` (idempotent), then check again.
+- `node scripts/drive/drive.mjs status`: is the bench up? If not, run `make bench`, then check again. Never run `make bench` while the bench is up: it restarts the API and cuts off other agents mid-run.
 - `node scripts/drive/drive.mjs seed`: a fresh team of six (ava owner, omar admin, maya clerk, daniel approver, priya second approver, lena viewer). Use a fresh team per brief so nothing left over from other checks leaks in.
 - `node scripts/drive/drive.mjs upload <pdf> --as maya`: a bill through the real endpoint, waiting until the model has read it. Test PDFs are under `synthetic_data/` (`TESTING-INVOICES.md` says what each one is for).
 - `node scripts/drive/drive.mjs run <flow.mjs>` or `run -e '<code>'`: a flow. `d.click('words')`, `d.fill('label', value)`, `d.see('words')`, `d.read()` (the screen as data), `d.api('GET', 'bills/<id>/detail')` (what was stored), `d.check(condition, 'claim')`, `d.shot('name')`.

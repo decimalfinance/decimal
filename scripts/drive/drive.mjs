@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // drive: a fast scripted browser for verifying Decimal on the bench. `drive help`.
-import { existsSync, writeFileSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   BENCH, EVIDENCE, ROOT, Drive, DriveError, apiCall, appRoutes, benchStatus, findChrome, findPerson, listTeams, loadTeam,
   publicTeam, requireBench, seedTeam, sleep, uploadBills,
@@ -26,6 +27,9 @@ Every command prints one JSON object. Evidence (screenshots, run.json) goes to
   drive smoke                       every route in App.tsx as each person, on a fresh team with
                                     one bill; fails on a crash, an uncaught error, a 5xx, or a
                                     blank page. --as <who> for one person, --no-bill to skip upload
+  drive verify                      every flow in scripts/drive/flows/, each on its own fresh team,
+                                    and smoke, all at once; one verdict. --only <regex> for some
+                                    flows, --no-smoke to skip it. \`make verify\` runs this and make test
 
 Options
   --team <name>   which team (default: the last one seeded)
@@ -73,7 +77,7 @@ function parseArgs(argv) {
     else if (a.startsWith('--')) {
       const [k, v] = a.slice(2).split('=');
       if (v !== undefined) flags[k] = v;
-      else if (['strict', 'full', 'help', 'no-bill'].includes(k)) flags[k] = true;
+      else if (['strict', 'full', 'help', 'no-bill', 'no-smoke'].includes(k)) flags[k] = true;
       else flags[k] = argv[++i];
     } else rest.push(a);
   }
@@ -133,7 +137,7 @@ const SMOKE_PDF = 'synthetic_data/invoices/A-routing/A3-first-bill-312.pdf';
 async function smoke(flags) {
   await requireBench();
   const began = Date.now();
-  const team = flags.team ? loadTeam(flags.team) : await seedTeam(`smoke-${Math.random().toString(36).slice(2, 6)}`);
+  const team = flags.team ? loadTeam(flags.team) : await seedTeam(`smoke-${Math.random().toString(36).slice(2, 6)}`, { remember: false });
   const ids = { organizationId: team.organizationId, system: ['quickbooks', 'xero'] };
   const setup = {};
   if (!flags['no-bill']) {
@@ -212,6 +216,69 @@ async function smoke(flags) {
     evidence: path.relative(ROOT, d.dir),
   };
   writeFileSync(path.join(d.dir, 'run.json'), JSON.stringify(result, null, 2));
+  return result;
+}
+
+// Every lasting flow, each on a team seeded just for it, and the smoke run, side
+// by side: each is its own process with its own browser, so one can't disturb
+// another. The verdict is all of them.
+async function verify(flags) {
+  await requireBench();
+  const began = Date.now();
+  const dir = path.join(ROOT, 'scripts/drive/flows');
+  const only = flags.only ? new RegExp(flags.only) : null;
+  const flows = readdirSync(dir).filter((f) => f.endsWith('.mjs')).map((f) => path.basename(f, '.mjs')).filter((n) => !only || only.test(n)).sort();
+  if (!flows.length) throw new DriveError(`no flows match ${flags.only}`, `ls scripts/drive/flows`);
+  const id = stamp();
+  const self = fileURLToPath(import.meta.url);
+  const child = (args) =>
+    new Promise((resolve) => {
+      execFile(process.execPath, [self, ...args], { cwd: ROOT, maxBuffer: 64 * 1024 * 1024, timeout: 15 * 60_000 }, (err, stdout) => {
+        try {
+          resolve(JSON.parse(stdout));
+        } catch {
+          resolve({ ok: false, error: `no verdict: ${(err?.message ?? 'empty output').slice(0, 300)}` });
+        }
+      });
+    });
+  const runFlow = async (name) => {
+    const t = Date.now();
+    const team = await seedTeam(`v${Math.random().toString(36).slice(2, 6)}-${name}`.slice(0, 24).replace(/-+$/, ''), { remember: false });
+    const r = await child(['run', path.join(dir, `${name}.mjs`), '--team', team.name, '--slug', `verify-${id}-${name}`]);
+    return {
+      flow: name,
+      ok: r.ok === true,
+      seconds: Math.round((Date.now() - t) / 1000),
+      team: team.name,
+      checks: (r.steps ?? []).filter((s) => s.action === 'check').length,
+      ...(r.ok ? {} : { failure: r.failure ?? { error: r.error, hint: r.hint } }),
+      evidence: r.evidence ?? path.relative(ROOT, path.join(EVIDENCE, `verify-${id}-${name}`)),
+    };
+  };
+  const [flowResults, smokeResult] = await Promise.all([
+    Promise.all(flows.map(runFlow)),
+    flags['no-smoke'] ? null : child(['smoke', '--slug', `verify-${id}-smoke`]),
+  ]);
+  const smokeOk = !smokeResult || smokeResult.ok === true;
+  const result = {
+    ok: flowResults.every((f) => f.ok) && smokeOk,
+    seconds: Math.round((Date.now() - began) / 1000),
+    flows: flowResults,
+    ...(smokeResult
+      ? {
+          smoke: {
+            ok: smokeResult.ok === true,
+            loads: smokeResult.loads,
+            failed: smokeResult.failed,
+            seconds: smokeResult.seconds,
+            ...(smokeResult.ok ? {} : { failures: (smokeResult.failures ?? []).slice(0, 10), error: smokeResult.error }),
+            evidence: smokeResult.evidence,
+          },
+        }
+      : {}),
+  };
+  mkdirSync(path.join(EVIDENCE, `verify-${id}`), { recursive: true });
+  writeFileSync(path.join(EVIDENCE, `verify-${id}`, 'verify.json'), JSON.stringify(result, null, 2));
   return result;
 }
 
@@ -296,8 +363,13 @@ async function main() {
       print(result);
       return result.ok ? 0 : 1;
     }
+    case 'verify': {
+      const result = await verify(flags);
+      print(result);
+      return result.ok ? 0 : 1;
+    }
     default:
-      throw new DriveError(`no command "${cmd}"`, 'drive help lists them: status, seed, team, upload, shot, run, api, smoke.');
+      throw new DriveError(`no command "${cmd}"`, 'drive help lists them: status, seed, team, upload, shot, run, api, smoke, verify.');
   }
 }
 

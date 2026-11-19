@@ -38,7 +38,9 @@ make bench-stop           # stop ONLY the bench — leaves :3100/:5174 alone
 ./scripts/bench.sh logs   # last 40 lines of the api log
 ```
 
-`make bench` is idempotent: it starts, restarts and reports in one word.
+`make bench` starts the bench, or restarts it if it is running: the restart
+cuts off any other agent mid-run. Run it only when `drive status` says the
+bench is down.
 Logs and pids live in `.bench/` (gitignored).
 
 Note: `make stop` stops **everything**, including Zaid's stack. Use
@@ -163,7 +165,10 @@ node scripts/drive/drive.mjs smoke                  # every route in App.tsx as 
    drive it: a flow with a `d.check` per thing that should now be true, run on
    a fresh team. Done means the flow passes and the evidence exists. "It
    compiles" and "the test passed" are not evidence that a screen works.
-2. **Shared UI, the frame or routing changed:** also run `drive smoke`.
+2. **Before committing UI work, run `make verify`.** It runs every lasting flow
+   in `scripts/drive/flows/` (each on its own fresh team), `drive smoke`, and
+   then `make test`, and gives one verdict. When a journey a person depends on
+   gains a step, its flow gains a check; a new journey gets a new flow.
 3. **A fresh agent judges.** For a new flow or a changed screen, spawn the
    `verifier` agent (`.claude/agents/verifier.md`) with a brief: what should
    now be true, in product words, never how the code does it. It writes its own

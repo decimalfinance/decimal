@@ -30,6 +30,7 @@ Run from the repo root. These are the whole surface. Check `make help` if in dou
 | `make dev` | Postgres, API on `:3100`, frontend on `:5174`, against `usdc_ops_local`. |
 | `make bench` | Background hot-reloading stack for agents: API `:3200`, frontend `:5274`, database `usdc_ops_bench`, fake Squads chain. |
 | `make test` | API typecheck, API tests against `usdc_ops_test`, frontend build. |
+| `make verify` | Before committing UI work: every flow in `scripts/drive/flows/` and the route smoke on the bench, then `make test`. |
 | `make test-one FILE=tests/x.test.ts` | One API test file against `usdc_ops_test`, for iterating. `make test` still gates a commit. |
 | `make reset` | Wipes dev and bench data. Schema stays. |
 | `make stop` | Stops everything including Docker. |

@@ -105,7 +105,9 @@ const ROLE_WORDS = { owner: 'ava', primary: 'ava', admin: 'omar', clerk: 'maya',
 
 const tag = () => Math.random().toString(36).slice(2, 7);
 
-export async function seedTeam(name = tag()) {
+// remember: false leaves the default team alone, for commands that seed their own
+// (smoke, verify) while other agents may be leaning on the default.
+export async function seedTeam(name = tag(), { remember = true } = {}) {
   if (!/^[a-z0-9-]{1,24}$/.test(name)) {
     throw new DriveError(`bad team name "${name}"`, 'Use 1–24 lowercase letters, digits or dashes, or leave it out for a random one.');
   }
@@ -147,7 +149,7 @@ export async function seedTeam(name = tag()) {
   };
   mkdirSync(path.join(STATE, 'teams'), { recursive: true });
   writeFileSync(path.join(STATE, 'teams', `${name}.json`), JSON.stringify(team, null, 2), { mode: 0o600 });
-  writeFileSync(path.join(STATE, 'last-team'), name);
+  if (remember) writeFileSync(path.join(STATE, 'last-team'), name);
   return team;
 }
 
