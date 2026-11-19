@@ -37,7 +37,7 @@ Run from the repo root. These are the whole surface. Check `make help` if in dou
 
 `make bench-stop` stops only the bench and leaves `:3100` and `:5174` alone. `dev` and `bench` run side by side on purpose.
 
-**Never run `tsx --test` or `npm test` directly inside `api/`.** It inherits the dev database URL, and the tests truncate every table. This wiped the dev database once. Always use `make test` or `make test-one`. They also blank `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` and the Xero app's keys: Prisma loads `api/.env` into the test process, so a test that doesn't script the model would otherwise call the real one and spend money, and one about Xero would use the real app.
+**Run API tests only through `make test` or `make test-one`.** The tests truncate every table, and importing Prisma loads `api/.env`, which points at the dev database: a direct run once wiped it. Any test process now refuses a database whose name doesn't end in `_test` (`assertTestDatabase` in `api/src/infra/prisma.ts`), so a direct `tsx --test` or `npm test` fails instead. The make targets also blank `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` and the Xero app's keys, so a test that doesn't script the model can't call the real one and spend money, and one about Xero can't use the real app.
 
 **Never touch `:3100`, `:5174` or `usdc_ops_local` from an agent session.** That is the human's stack. Use the bench.
 
@@ -51,6 +51,21 @@ Run from the repo root. These are the whole surface. Check `make help` if in dou
 - **Frontend:** the redesign is under way. A redesigned page is a `.ui` root styled only from `frontend/src/styles/ui/` and built from `frontend/src/kit/`; see the Frontend section of `docs/ARCHITECTURE.md`. Copy the closest page's shape from `PAGE-PLAYBOOK.md`. A page still in the old system keeps `frontend/src/styles/decimal/`: don't extend it, redesign it. Either way, grep before typing a class name and never hardcode colours, spacing or fonts. Text fills its container, so no `max-width` on prose. The look is a clean institutional bank, never crypto neon.
 - **Product vocabulary:** "bill", "approval", "approvers", "team members", "Category". Never "multisig", "vote", "wallet" or "GL code" in operator-facing copy. A bill is a `PaymentOrder` only in code.
 - **Approvals never auto-deny.** Overdue tasks escalate. A rejected bill goes back to review and is never terminal.
+
+What enforces each rule. "Nothing" is a known gap. When the same mistake is corrected twice, add a check and name it here rather than adding another line of prose.
+
+| Rule | Enforced by |
+|---|---|
+| Tests only touch a `*_test` database | `assertTestDatabase` (`api/src/infra/prisma.ts`), proved by `api/tests/test-database-guard.test.ts` |
+| Tests never call a real model or the real Xero app | `make test` and `make test-one` blank the keys. A direct run against `usdc_ops_test` doesn't. |
+| SQL files are idempotent | `make test` re-runs every file on `usdc_ops_test` |
+| `schema.prisma` matches the SQL | Nothing. A mismatch shows only as a runtime error. |
+| `approval` schema only through `store.ts` | Nothing |
+| Money is bigint minor units | Stored columns are `BIGINT`. Arithmetic in code: nothing. |
+| Zod at the boundary | Nothing |
+| `.js` import extensions in the API | `tsc` with `NodeNext`, in `make test` |
+| Frontend styling and product vocabulary | Nothing |
+| Approvals never auto-deny; a rejected bill goes back to review | `api/tests/approvals-flow.test.ts` ("it never auto-denies", "reject stops the route") |
 
 ## Config and secrets
 
