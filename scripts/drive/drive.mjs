@@ -4,8 +4,8 @@ import { existsSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
-  BENCH, EVIDENCE, ROOT, Drive, DriveError, apiCall, benchStatus, findChrome, findPerson, listTeams, loadTeam,
-  publicTeam, requireBench, seedTeam, uploadBills,
+  BENCH, EVIDENCE, ROOT, Drive, DriveError, apiCall, appRoutes, benchStatus, findChrome, findPerson, listTeams, loadTeam,
+  publicTeam, requireBench, seedTeam, sleep, uploadBills,
 } from './lib.mjs';
 
 const HELP = `drive: a fast scripted browser for verifying Decimal on the bench.
@@ -23,6 +23,9 @@ Every command prints one JSON object. Evidence (screenshots, run.json) goes to
   drive run -e '<code>'             run an inline flow, for example
                                     -e "await d.goto('bills'); await d.see('Bills'); await d.shot('bills')"
   drive api <METHOD> <path> [json]  call the bench API as a person; prints status and body
+  drive smoke                       every route in App.tsx as each person, on a fresh team with
+                                    one bill; fails on a crash, an uncaught error, a 5xx, or a
+                                    blank page. --as <who> for one person, --no-bill to skip upload
 
 Options
   --team <name>   which team (default: the last one seeded)
@@ -31,6 +34,7 @@ Options
   --slug <name>   evidence folder name (default: the command and a timestamp)
   --strict        console errors fail the run, not just uncaught ones
   --full          full-page screenshots
+  --break <regex> answer API reads whose path matches with {}: proves a check can fail
 
 Routes: 'bills' means /organizations/<team org>/bills. A leading / is absolute,
 and :org inside it becomes the team's organisation id.
@@ -49,11 +53,15 @@ Flow API (d):
   d.text(css)                    the text of an element (default main)
   d.shot(name, {full})           screenshot into the evidence folder
   d.check(condition, message)    a PASS/FAIL assertion; a failure stops the run
+  d.expectCrash()                wait for the crash page and return its error, without failing
+  await d.breakApi(regex | null) make matching API reads return {} from now on; null mends them
   d.api(method, path, body)      the bench API as the current person (read back stored values)
   d.wait(ms), d.page (raw puppeteer), d.team, d.person
 
 A failing step stops the run, saves fail.png, and prints the error with a hint and
-what the page showed. Uncaught page errors always fail the run.
+what the page showed. A step that failed fails the run even if the flow caught it.
+A page that crashes (the error boundary's data-app-crash) fails the next step,
+unless d.expectCrash() waited for it. Uncaught errors outside React fail the run.
 Test PDFs live under synthetic_data/ (see TESTING-INVOICES.md).`;
 
 function parseArgs(argv) {
@@ -65,7 +73,7 @@ function parseArgs(argv) {
     else if (a.startsWith('--')) {
       const [k, v] = a.slice(2).split('=');
       if (v !== undefined) flags[k] = v;
-      else if (['strict', 'full', 'help'].includes(k)) flags[k] = true;
+      else if (['strict', 'full', 'help', 'no-bill'].includes(k)) flags[k] = true;
       else flags[k] = argv[++i];
     } else rest.push(a);
   }
@@ -78,13 +86,14 @@ const stamp = () => new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/
 async function withDrive(flags, slug, fn) {
   await requireBench();
   const team = loadTeam(flags.team);
-  const d = await Drive.launch({ team, slug, strict: Boolean(flags.strict), full: Boolean(flags.full), log: (l) => process.stderr.write(`  ${l}\n`) });
+  const d = await Drive.launch({ team, slug, strict: Boolean(flags.strict), full: Boolean(flags.full), breakApi: flags.break, log: (l) => process.stderr.write(`  ${l}\n`) });
   const began = Date.now();
   const result = { ok: true, slug, team: team.name, as: flags.as ?? 'ava', evidence: path.relative(ROOT, d.dir) };
   try {
     await d.as(flags.as ?? 'ava');
     const out = await fn(d);
     if (out !== undefined) result.result = out;
+    await d.finalCheck();
   } catch (err) {
     result.ok = false;
     result.failure = { step: d.steps.at(-1)?.n, error: err.message, ...(err.hint ? { hint: err.hint } : {}) };
@@ -93,6 +102,12 @@ async function withDrive(flags, slug, fn) {
       const file = path.join(d.dir, 'fail.png');
       if (await d.page.screenshot({ path: file }).then(() => true).catch(() => false)) d.shots.push(file);
     }
+  }
+  // A step that failed fails the run, even if the flow caught the error.
+  const failedStep = d.steps.find((st) => st.ok === false);
+  if (result.ok && failedStep) {
+    result.ok = false;
+    result.failure = { step: failedStep.n, error: `step ${failedStep.n} (${failedStep.action}) failed and the flow carried on: ${failedStep.error}`, hint: 'To check a crash on purpose use d.expectCrash(); to check something is absent use d.notSee().' };
   }
   const errors = d.errors();
   const uncaught = Object.values(errors).some((e) => e.pageErrors.length);
@@ -107,6 +122,96 @@ async function withDrive(flags, slug, fn) {
   if (Object.keys(errors).length) result.errors = errors;
   writeFileSync(path.join(d.dir, 'run.json'), JSON.stringify(result, null, 2));
   await d.close();
+  return result;
+}
+
+// Every route in App.tsx, as each person, on a fresh team with one bill read by
+// the model. A route fails on a crash, an uncaught error, a 5xx from the API,
+// "Can't reach Decimal", or a page area still empty after 8 s.
+const SMOKE_PDF = 'synthetic_data/invoices/A-routing/A3-first-bill-312.pdf';
+
+async function smoke(flags) {
+  await requireBench();
+  const began = Date.now();
+  const team = flags.team ? loadTeam(flags.team) : await seedTeam(`smoke-${Math.random().toString(36).slice(2, 6)}`);
+  const ids = { organizationId: team.organizationId, system: ['quickbooks', 'xero'] };
+  const setup = {};
+  if (!flags['no-bill']) {
+    const [up] = await uploadBills(team, findPerson(team, 'maya'), [path.join(ROOT, SMOKE_PDF)]);
+    if (up?.ok && up.bills[0]) {
+      ids.paymentOrderId = up.bills[0].billId;
+      ids.invoiceDocumentId = up.invoiceDocumentId;
+      const detail = await apiCall(team, findPerson(team, 'ava'), 'GET', `bills/${ids.paymentOrderId}/detail`);
+      if (detail.data?.draft?.vendor?.counterpartyId) ids.counterpartyId = detail.data.draft.vendor.counterpartyId;
+      setup.bill = { id: ids.paymentOrderId, readIn: `${up.seconds} s` };
+    } else {
+      setup.bill = { failed: up ?? 'no upload result', note: 'bill routes are skipped' };
+    }
+  }
+  const { routes, skipped } = appRoutes(ids);
+  const people = !flags.as || flags.as === 'all' ? team.people.map((p) => p.first) : [String(flags.as).toLowerCase()];
+  const slug = flags.slug ?? `smoke-${stamp()}`;
+  const d = await Drive.launch({ team, slug, strict: Boolean(flags.strict), breakApi: flags.break, log: () => {} });
+  const failures = [];
+  const warnings = [];
+  for (const who of people) {
+    await d.as(who);
+    const s = d.current;
+    process.stderr.write(`  ${who}: ${routes.length} routes\n`);
+    for (const { pattern, route } of routes) {
+      const mark = { pageErrors: s.pageErrors.length, console: s.console.length, apiErrors: s.apiErrors.length };
+      const problems = [];
+      try {
+        // The last route's crash is already recorded against it; don't charge it to this one.
+        d.crashExpected = true;
+        await d.goto(route);
+        const seen = await d.page.evaluate(() => {
+          const area = document.querySelector('main') ?? document.getElementById('root');
+          return {
+            blank: !area?.innerText.trim() && !document.querySelector('[data-app-crash]'),
+            cantReach: [...document.querySelectorAll('h1')].some((h) => /Can’t reach Decimal/.test(h.innerText)),
+          };
+        });
+        if (seen.blank) problems.push('the page area was still empty after 8 s');
+        if (seen.cantReach) problems.push('"Can’t reach Decimal": the session check failed');
+      } catch (err) {
+        problems.push(err.message);
+      }
+      await sleep(150);
+      // A crash can land after the step settled; the boundary's mark says so.
+      const crashed = await d.page.$eval('[data-app-crash]', (el) => el.getAttribute('data-app-crash')).catch(() => null);
+      if (crashed && !problems.some((p) => p.startsWith('the page crashed'))) problems.push(`the page crashed: ${crashed}`);
+      const thrown = s.pageErrors.slice(mark.pageErrors);
+      const logged = s.console.slice(mark.console);
+      const serverErrors = s.apiErrors.slice(mark.apiErrors).filter((e) => (e.status ?? 0) >= 500);
+      if (thrown.length) problems.push(`uncaught: ${thrown.join(' | ')}`);
+      if (serverErrors.length) problems.push(`the API failed: ${serverErrors.map((e) => `${e.status} ${e.method} ${e.url}`).join(', ')}`);
+      if (logged.length && flags.strict) problems.push(`console: ${logged.join(' | ')}`);
+      else if (logged.length) warnings.push({ as: who, route: pattern, console: logged.slice(0, 3) });
+      const landed = await d.page.evaluate(() => location.pathname).catch(() => null);
+      if (problems.length) {
+        const file = path.join(d.dir, `fail-${who}-${pattern.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '')}.png`);
+        await d.page.screenshot({ path: file }).catch(() => {});
+        failures.push({ as: who, route: pattern, landed: landed?.replaceAll(team.organizationId, ':org'), problems, shot: path.relative(ROOT, file) });
+      }
+    }
+  }
+  await d.close();
+  const result = {
+    ok: failures.length === 0,
+    team: team.name,
+    people,
+    routes: routes.length,
+    loads: routes.length * people.length,
+    failed: failures.length,
+    seconds: Math.round((Date.now() - began) / 1000),
+    setup,
+    failures,
+    ...(warnings.length ? { consoleWarnings: warnings.length, warnings: warnings.slice(0, 15) } : {}),
+    skipped,
+    evidence: path.relative(ROOT, d.dir),
+  };
+  writeFileSync(path.join(d.dir, 'run.json'), JSON.stringify(result, null, 2));
   return result;
 }
 
@@ -186,8 +291,13 @@ async function main() {
       print(result);
       return result.ok ? 0 : 1;
     }
+    case 'smoke': {
+      const result = await smoke(flags);
+      print(result);
+      return result.ok ? 0 : 1;
+    }
     default:
-      throw new DriveError(`no command "${cmd}"`, 'drive help lists them: status, seed, team, upload, shot, run, api.');
+      throw new DriveError(`no command "${cmd}"`, 'drive help lists them: status, seed, team, upload, shot, run, api, smoke.');
   }
 }
 

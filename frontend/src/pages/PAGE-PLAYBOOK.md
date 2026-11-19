@@ -89,6 +89,7 @@ Pages the redesign hasn't reached render inside `<Legacy>` in `App.tsx` (`div.de
 - `useToaster().show(text, { undo, wide })` (`kit/Toast.tsx`): one toast at a time; `undo` adds an Undo button.
 - `Avatar({ name, src, size })`: people only. Its colour comes from the name (`personTone`), so a face looks the same everywhere; pass `tone` only to draw someone differently (pale, not yet reached). Vendors never get an avatar.
 - `Cells` (gap cells for grid rows), `Icon.<name>` (`kit/icons.tsx`), `Orb`, and `useSignOut()` (`kit/Shell.tsx`; asks before signing out).
+- `ErrorBoundary({ resetKey })` (`kit/ErrorBoundary.tsx`): already around every page in `App.tsx`, so a page needs none of its own. A render error shows "This page couldn’t be shown" with Reload; the error goes to the console and `data-app-crash`, never on screen.
 - `format.ts`: `usd`, `calendarDay` (due and invoice dates), `shortDay`, `when`, `fullDay`, `stamp`, `ago`, `daysPast`, `monthOf`, `fileSize`, `firstName`. Money arrives in minor units; never do arithmetic on floats.
 - `hooks.ts`: `useCopy(text)` (a tick for two seconds), `useDismiss(open, ref, close)`.
 - `people.ts`: `initialsOf`, `orgInitials`, `personTone`, `orgTone`, `roleLabel`.

@@ -259,6 +259,35 @@ export async function uploadBills(team, person, files, { timeoutMs = 180_000 } =
   return out;
 }
 
+// Every route the app declares, read from App.tsx so a new page is covered the
+// day it is added. Parameters are filled from `ids`; a route whose ids aren't
+// known is returned in `skipped` with the reason.
+export function appRoutes(ids) {
+  const source = readFileSync(path.join(ROOT, 'frontend/src/App.tsx'), 'utf8');
+  const declared = [...new Set([...source.matchAll(/path="([^"]+)"/g)].map((m) => m[1]))];
+  const routes = [];
+  const skipped = [];
+  for (const pattern of declared) {
+    if (pattern === '*' || pattern === '/*') continue;
+    if (pattern === '/oauth/callback') {
+      skipped.push({ route: pattern, why: 'finishes a real sign-in; needs a provider' });
+      continue;
+    }
+    const params = [...pattern.matchAll(/:([A-Za-z]+)/g)].map((m) => m[1]);
+    const missing = params.filter((p) => !(p in ids));
+    if (missing.length) {
+      skipped.push({ route: pattern, why: `no ${missing.join(', ')} to fill in` });
+      continue;
+    }
+    const values = params.map((p) => [p, [].concat(ids[p])]);
+    // One route per combination (:system is both quickbooks and xero).
+    let filled = [pattern];
+    for (const [p, list] of values) filled = filled.flatMap((r) => list.map((v) => r.replace(`:${p}`, v)));
+    for (const route of filled) routes.push({ pattern, route });
+  }
+  return { routes, skipped };
+}
+
 // ---------------------------------------------------------------------------
 // The browser
 
@@ -358,7 +387,7 @@ function readInPage() {
   return {
     url: location.pathname + location.search,
     title: document.title,
-    crashed: crash ? clean(crash.innerText).slice(0, 400) : null,
+    crashed: crash ? (crash.getAttribute('data-app-crash') ?? 'error').slice(0, 400) : null,
     dialog: dialogs.length ? clean(dialogs[dialogs.length - 1].getAttribute('aria-label') || dialogs[dialogs.length - 1].querySelector('h1,h2,h3')?.innerText || 'open') : null,
     headings: all('h1, h2, h3').map((h) => clean(h.innerText)).filter(Boolean).slice(0, 20),
     buttons: [...new Set(all('button, [role=button], a[href], [role=tab], [role=menuitem]').map((b) => clean(b.getAttribute('aria-label') || b.innerText)).filter(Boolean))].slice(0, 50),
@@ -374,8 +403,10 @@ function readInPage() {
 let markCounter = 0;
 
 export class Drive {
-  constructor({ browser, team, slug, strict = false, full = false, log = () => {} }) {
+  constructor({ browser, team, slug, strict = false, full = false, breakApi, log = () => {} }) {
     this.browser = browser;
+    this.broken = breakApi ? new RegExp(breakApi) : null;
+    this.crashExpected = false;
     this.team = team;
     this.slug = slug;
     this.dir = path.join(EVIDENCE, slug);
@@ -421,6 +452,7 @@ export class Drive {
         { name: 'prefers-reduced-motion', value: 'reduce' },
         { name: 'prefers-color-scheme', value: 'light' },
       ]);
+      if (this.broken) await this.#intercept(page);
       if (person) {
         await page.evaluateOnNewDocument(
           (k, t) => {
@@ -437,8 +469,12 @@ export class Drive {
       const isApi = (r) =>
         ['xhr', 'fetch'].includes(r.resourceType()) && r.url().startsWith(BENCH.api) && !/event-stream/.test(r.headers().accept ?? '');
       const short = (u) => u.replace(BENCH.api, '').replace(this.team.organizationId, ':org');
+      // Work to wait for: the app's API calls, and its own code (a page is a lazy
+      // chunk, blank until its script arrives).
+      const isWork = (r) =>
+        isApi(r) || (['script', 'stylesheet', 'document'].includes(r.resourceType()) && r.url().startsWith(BENCH.web));
       page.on('request', (r) => {
-        if (isApi(r)) {
+        if (isWork(r)) {
           s.inflight.set(r, Date.now());
           s.lastNet = Date.now();
         }
@@ -468,23 +504,83 @@ export class Drive {
     return this;
   }
 
+  // --break / d.breakApi(): the API answers matching reads with {}, as a changed
+  // response shape would. Interception slows every request a little, so a page
+  // only intercepts once a run breaks something.
+  async #intercept(page) {
+    if (page.__driveIntercepting) return;
+    page.__driveIntercepting = true;
+    await page.setRequestInterception(true);
+    page.on('request', (r) => {
+      if (r.isInterceptResolutionHandled()) return;
+      const p = r.url().startsWith(BENCH.api) ? new URL(r.url()).pathname : null;
+      if (this.broken && p && r.method() === 'GET' && this.broken.test(p)) {
+        r.respond({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': BENCH.web }, body: '{}' });
+      } else r.continue();
+    });
+  }
+
   // Wait until the app's own API calls have gone quiet. Calls open for more than
   // three seconds (a stream, a long poll) don't hold it up.
+  // And until the page area has something in it: every page draws at least its
+  // title once it has its data, while React can hold a lazy page back ~300 ms
+  // after its code arrives, with the network quiet in between.
   async settle({ quiet = 250, max = 8000 } = {}) {
     const s = this.current;
     const began = Date.now();
     while (Date.now() - began < max) {
       const now = Date.now();
       const busy = [...s.inflight.values()].some((t) => now - t < 3000);
-      if (!busy && now - s.lastNet >= quiet) break;
+      // Quiet counts from the action too: right after a click the next page
+      // hasn't asked for anything yet, which isn't the same as being done.
+      if (!busy && now - Math.max(s.lastNet, began) >= quiet) {
+        const drawn = await this.page
+          .evaluate(() => {
+            const area = document.querySelector('main') ?? document.getElementById('root');
+            return Boolean(area?.innerText.trim()) || Boolean(document.querySelector('[data-app-crash]'));
+          })
+          .catch(() => true);
+        if (drawn) break;
+      }
       await sleep(40);
     }
     await this.page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r()))).catch(() => {});
   }
 
+  // A crash can land just after a step settles, so a run checks once more at the end.
+  async finalCheck() {
+    if (!this.current) return;
+    await sleep(300);
+    await this.#crashCheck();
+  }
+
   async #crashCheck() {
-    const crash = await this.page.$eval(CRASH_SELECTOR, (el) => el.innerText.replace(/\s+/g, ' ').trim().slice(0, 400)).catch(() => null);
-    if (crash) throw new DriveError(`the page crashed: ${crash}`, 'The error boundary caught a render error. See pageErrors and the console for the stack.');
+    // The boundary shows plain words; the error itself is in the attribute.
+    const crash = await this.page.$eval(CRASH_SELECTOR, (el) => (el.getAttribute('data-app-crash') ?? 'error').slice(0, 400)).catch(() => null);
+    // d.expectCrash() allows the crash it waited for, until the page recovers.
+    if (!crash) this.crashExpected = false;
+    if (crash && !this.crashExpected) {
+      throw new DriveError(`the page had crashed: ${crash}`, 'The error boundary caught a render error after the previous step; the console has the stack. To check a crash on purpose, use d.expectCrash().');
+    }
+  }
+
+  // Wait for the crash page and return the error it caught, without failing. Steps
+  // after it work on the crash page; once it's gone, a crash fails steps again.
+  async expectCrash({ timeout = 10_000 } = {}) {
+    return this.step('expectCrash', null, async () => {
+      const handle = await this.page.waitForSelector(CRASH_SELECTOR, { timeout }).catch(() => null);
+      if (!handle) throw new DriveError(`no crash within ${Math.round(timeout / 1000)} s`, 'The page drew normally. d.read() shows it.');
+      this.crashExpected = true;
+      return handle.evaluate((el) => el.getAttribute('data-app-crash'));
+    });
+  }
+
+  // Break API reads whose path matches (a RegExp or string), or pass null to mend
+  // them. Takes effect for the next request, on every person's page.
+  async breakApi(pattern) {
+    this.broken = pattern ? new RegExp(pattern) : null;
+    if (this.broken) for (const s of this.sessions.values()) await this.#intercept(s.page);
+    this.steps.push({ n: this.steps.length + 1, action: 'breakApi', arg: pattern ? String(pattern) : 'off', as: this.current?.key, ok: true, ms: 0 });
   }
 
   async step(action, arg, fn) {
@@ -493,8 +589,11 @@ export class Drive {
     this.steps.push(entry);
     this.log(`${entry.n} ${action} ${arg ?? ''}`);
     try {
+      // A crash left by an earlier step fails this one, unless this step is the
+      // one that expects it. (A crash can land after a step settles, so checking
+      // before the next step, and at the end of the run, catches every one.)
+      if (this.current && action !== 'expectCrash') await this.#crashCheck();
       const result = await fn();
-      if (this.current && action !== 'as') await this.#crashCheck();
       entry.ok = true;
       return result;
     } catch (err) {

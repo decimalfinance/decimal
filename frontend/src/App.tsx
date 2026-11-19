@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useLayoutEffect, useMemo, type ReactNode } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ErrorBoundary } from './kit/ErrorBoundary';
 import { Shell } from './kit/Shell';
 import { ToasterProvider } from './kit/Toast';
 import { api, ApiError } from './api';
@@ -91,25 +92,27 @@ export function App() {
   });
 
   return (
-    <Suspense fallback={<RouteFallback />}>
-      <Routes>
-        <Route path="/" element={<LandingPage />} />
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
-        {/* Testing sign-in. Not linked from anywhere in the product, and the
-            page reports itself unavailable when the server has dev mode off. */}
-        <Route path="/dev-login" element={<DevLoginPage />} />
-        <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
-        <Route path="/invites/:inviteToken" element={<InviteAcceptPage />} />
-        <Route path="/verify-email" element={<RequireSession sessionQuery={sessionQuery} page={(s) => <OnwardRedirect session={s} />} />} />
-        {/* Signed in but outside the app, like Sign in: no sidebar until there
-            is an organisation to open. */}
-        <Route path="/setup" element={<RequireSession sessionQuery={sessionQuery} page={(s) => <CreateOrganizationPage session={s} />} />} />
-        <Route path="/choose-organization" element={<RequireSession sessionQuery={sessionQuery} page={(s) => <ChooseOrganizationPage session={s} />} />} />
-        <Route path="/*" element={<RequireSession sessionQuery={sessionQuery} />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </Suspense>
+    <ErrorBoundary>
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          {/* Testing sign-in. Not linked from anywhere in the product, and the
+              page reports itself unavailable when the server has dev mode off. */}
+          <Route path="/dev-login" element={<DevLoginPage />} />
+          <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
+          <Route path="/invites/:inviteToken" element={<InviteAcceptPage />} />
+          <Route path="/verify-email" element={<RequireSession sessionQuery={sessionQuery} page={(s) => <OnwardRedirect session={s} />} />} />
+          {/* Signed in but outside the app, like Sign in: no sidebar until there
+              is an organisation to open. */}
+          <Route path="/setup" element={<RequireSession sessionQuery={sessionQuery} page={(s) => <CreateOrganizationPage session={s} />} />} />
+          <Route path="/choose-organization" element={<RequireSession sessionQuery={sessionQuery} page={(s) => <ChooseOrganizationPage session={s} />} />} />
+          <Route path="/*" element={<RequireSession sessionQuery={sessionQuery} />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
+    </ErrorBoundary>
   );
 }
 
@@ -216,6 +219,9 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
         activeOrganizationId={activeOrganizationId}
         onLogout={logout}
       >
+        {/* A page that crashes keeps the sidebar, so there is a way out; going
+            anywhere else gives it another go. */}
+        <ErrorBoundary resetKey={location.pathname}>
           <Suspense fallback={<RouteFallback />}>
             <Routes>
               <Route path="/" element={<HomeRedirect session={session} />} />
@@ -259,6 +265,7 @@ function AppShell({ session }: { session: AuthenticatedSession }) {
               <Route path="*" element={<HomeRedirect session={session} />} />
             </Routes>
           </Suspense>
+        </ErrorBoundary>
       </Shell>
     </ToasterProvider>
   );
