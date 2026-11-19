@@ -443,8 +443,8 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
       short: 'Duplicate cleared',
       resolutions: [],
       message: clearance.onThisBill
-        ? `Looked like a duplicate of ${other} — cleared by ${clearance.byName}: “${clearance.reason}”.`
-        : `Looked like a duplicate of ${other} — cleared on that bill by ${clearance.byName}: “${clearance.reason}”.`,
+        ? `Looked like a duplicate of ${other}. Cleared by ${clearance.byName}: “${clearance.reason}”`
+        : `Looked like a duplicate of ${other}. Cleared on that bill by ${clearance.byName}: “${clearance.reason}”`,
     });
   }
 

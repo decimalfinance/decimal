@@ -128,6 +128,9 @@ export default async function duplicateIsFlagged(d) {
     d.check(!!f && f.blocking && target === other,
       `2. stored: bill ${id.slice(0, 8)} has possible_duplicate=${!!f}, blocking=${f?.blocking}, points at ${target?.slice(0, 8)}; expected the other bill ${other.slice(0, 8)}`);
   }
+  const message = dupFlag(before[second].flags)?.message ?? '';
+  d.check(message.includes('$312.40') && !message.includes('—'),
+    `2. the flag says: "${message}"; expected the amount as $312.40 and no em dash`);
   await d.goto(`bills/${second}`);
   await d.see('Possible duplicate');
   const page2 = await d.read();

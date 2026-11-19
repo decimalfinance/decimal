@@ -3696,8 +3696,8 @@ test('duplicate gate: clearing one bill settles the pair, and a later copy is fl
   // The twin is settled too, and says who decided and why.
   const twin = await flagOf(a.billId);
   assert.equal(twin?.blocking, false, 'the pair was answered, so neither side is still asking');
-  assert.match(twin!.message, /cleared on that bill by .*Two separate orders, confirmed with the vendor\./);
-  assert.match((await flagOf(b.billId))!.message, /— cleared by /);
+  assert.match(twin!.message, /Cleared on that bill by .*Two separate orders, confirmed with the vendor\./);
+  assert.match((await flagOf(b.billId))!.message, /\. Cleared by /);
 
   // The twin's history records its flag stopping, not just the cleared bill's.
   const twinEvents = await prisma.paymentOrderEvent.findMany({ where: { paymentOrderId: a.billId, eventType: 'bill_flag_cleared' } });

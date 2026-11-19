@@ -780,12 +780,12 @@ test('a settled pair shows as a note naming who cleared it and where, and never 
     duplicateClearances: [{ match, clearance: { byName: 'Zara Okafor', reason: 'Two orders.', at: '', onThisBill: false } }],
   }).find((f) => f.kind === 'possible_duplicate')!;
   assert.equal(onTwin.blocking, false);
-  assert.equal(onTwin.message, 'Looked like a duplicate of invoice BW-2210 — cleared on that bill by Zara Okafor: “Two orders.”.');
+  assert.equal(onTwin.message, 'Looked like a duplicate of invoice BW-2210. Cleared on that bill by Zara Okafor: “Two orders.”');
   const onThis = evaluateBillFlags({
     ...baseFacts,
     duplicateClearances: [{ match, clearance: { byName: 'Zara Okafor', reason: 'Two orders.', at: '', onThisBill: true } }],
   }).find((f) => f.kind === 'possible_duplicate')!;
-  assert.match(onThis.message, /^Looked like a duplicate of invoice BW-2210 — cleared by Zara Okafor/);
+  assert.match(onThis.message, /^Looked like a duplicate of invoice BW-2210\. Cleared by Zara Okafor/);
 });
 
 test('an unsettled pair still blocks even when another pair on the same bill was settled', () => {

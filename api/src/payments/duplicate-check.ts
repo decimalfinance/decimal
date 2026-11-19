@@ -207,9 +207,10 @@ export async function settleDuplicates(
 }
 
 export function describeDuplicate(match: DuplicateMatch): string {
-  const amount = (Number(match.amountRaw) / 1_000_000).toLocaleString('en-US', { maximumFractionDigits: 2 });
+  const amount = (Number(match.amountRaw) / 1_000_000).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const when = match.createdAt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   const ref = match.invoiceNumber ? `invoice ${match.invoiceNumber}` : 'a bill';
   const how = match.matchKind === 'same_invoice_number' ? 'the same invoice number' : `the same amount ($${amount})`;
-  return `This looks like a duplicate of ${ref} from this vendor (${when}, $${amount}) — ${how}.`;
+  // `when` is when the other bill came in, not its invoice date, so say so.
+  return `This looks like a duplicate of ${ref} from this vendor (added ${when}, $${amount}), with ${how}.`;
 }
