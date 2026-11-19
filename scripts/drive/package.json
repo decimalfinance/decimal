@@ -1,0 +1,11 @@
+{
+  "name": "decimal-drive",
+  "private": true,
+  "version": "1.0.0",
+  "description": "A fast scripted browser for agents to verify Decimal on the bench (TESTBENCH.md)",
+  "type": "module",
+  "bin": { "drive": "./drive.mjs" },
+  "dependencies": {
+    "puppeteer-core": "24.43.1"
+  }
+}

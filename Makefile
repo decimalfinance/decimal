@@ -89,7 +89,7 @@ bench-stop:
 # left alone.
 deps:
 	set -euo pipefail; \
-	for d in api frontend; do \
+	for d in api frontend scripts/drive; do \
 	  if [[ ! -d $$d/node_modules ]]; then echo "Installing $$d packages (npm ci)"; (cd $$d && npm ci); fi; \
 	done
 
