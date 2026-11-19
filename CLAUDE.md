@@ -16,7 +16,7 @@ Decimal is an accounts-payable product. A bill arrives by upload or forwarded em
 |---|---|
 | Anything non-trivial | `docs/ARCHITECTURE.md` |
 | Creating or editing any page | `frontend/src/pages/PAGE-PLAYBOOK.md`. Mandatory. |
-| Verifying a change in the browser | `TESTBENCH.md` |
+| Verifying a change in the browser | `TESTBENCH.md`, then `node scripts/drive/drive.mjs help` |
 | Generating test invoices | Hand it to the `invoice-agent` (`.claude/agents/invoice-agent.md`), which follows `TESTING-INVOICES.md` |
 | Looking for the next thing to build | `docs/OPEN-WORK.md` |
 | Resuming payment work | `docs/reference/` |
@@ -78,5 +78,5 @@ Dev sign-in for testing: the `/dev-login` page, or `POST /auth/dev/seed` (with `
 ## Working agreement
 
 - Commit as you go. Commits are part of done. Do not accumulate uncommitted work.
-- Ship UI changes with a test brief, as described in `TESTBENCH.md`.
+- Verify every UI change yourself before committing it: drive it on the bench with `scripts/drive` and, for anything a person will see or act on, have the `verifier` agent judge it, as `TESTBENCH.md` describes. Never hand Zaid a brief to run, except a real sign-in to Intuit or Xero.
 - When you change how a subsystem works, update its section in `docs/ARCHITECTURE.md` in the same commit.
