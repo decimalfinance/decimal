@@ -1265,7 +1265,7 @@ function deriveIntakeFlags(args: {
       rule: 'near_duplicate_address',
       reason:
         `This address ${shortenAddress(args.counterpartyWallet.walletAddress)} is almost identical to an existing ` +
-        `address for "${args.nearDuplicate.label}" (${shortenAddress(args.nearDuplicate.address)}) — they differ by only ` +
+        `address for "${args.nearDuplicate.label}" (${shortenAddress(args.nearDuplicate.address)}): they differ by only ` +
         `a character or two. base58 is case-sensitive, so a look-alike like this is usually an OCR/transcription error ` +
         `pointing at the wrong wallet. Confirm the address is exactly correct before paying.`,
     });

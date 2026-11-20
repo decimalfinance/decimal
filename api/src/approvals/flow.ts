@@ -442,14 +442,14 @@ export async function simulateFlow(organizationId: string, flow: FlowNode[], sam
           ownerStandin = true;
         } else {
           const reqName = requester ? nameOf.get(requester) ?? 'the requester' : 'the requester';
-          stuck = `${reqName} submitted this bill, so they can't approve their own "${node.title}" step — and no one else can cover it. `
+          stuck = `${reqName} submitted this bill, so they can't approve their own "${node.title}" step, and no one else can cover it. `
             + `Add another approver to this step, or make sure your owner or an admin can step in.`;
           return;
         }
       }
       if ((removed > 0 || ownerStandin) && requester) {
         const dest = ownerStandin ? `${nameOf.get(ownerId!) ?? 'the owner'} (owner) as a stand-in` : eligible.map((p) => nameOf.get(p)).join(', ');
-        notes.push(`${nameOf.get(requester) ?? 'The requester'} submitted this bill, so their "${node.title}" step goes to ${dest} instead — no one approves their own request.`);
+        notes.push(`${nameOf.get(requester) ?? 'The requester'} submitted this bill, so their "${node.title}" step goes to ${dest} instead. No one approves their own request.`);
       }
       // Show the WHOLE pool — hiding people beyond the quorum made "2 of 3"
       // read as "exactly these two" (and dropped the third name entirely).
@@ -519,8 +519,8 @@ function resolveStage(flow: FlowNode[], opts: {
         if (canOwner) { acting = [...eligible, opts.ownerId!]; ownerStandin = true; }
         else {
           stuck = removedIds.length
-            ? `Everyone set for "${node.title}" is excluded from this stage, and the owner can't cover it — add another person to this step.`
-            : `"${node.title}" has no one assigned who can act — add a person to this step.`;
+            ? `Everyone set for "${node.title}" is excluded from this stage, and the owner can't cover it. Add another person to this step.`
+            : `"${node.title}" has no one assigned who can act. Add a person to this step.`;
           return;
         }
       }
@@ -658,7 +658,7 @@ export async function assistFlow(organizationId: string, message: string, curren
     GROUP BY p.id, p.name, p.email, om.role
     ORDER BY p.name`;
   if (people.length === 0) {
-    return { flow: currentFlow, explanation: 'Add teammates as members first — an approval flow needs people to route to.', outcome: null, deadlock: false };
+    return { flow: currentFlow, explanation: 'Add teammates as members first. An approval flow needs people to route to.', outcome: null, deadlock: false };
   }
   if (!isAiConfigured()) {
     return { flow: currentFlow, explanation: 'The assistant is unavailable right now. You can still edit the flow directly on the canvas.', outcome: null, deadlock: false };
@@ -715,7 +715,7 @@ export async function assistFlow(organizationId: string, message: string, curren
           case 'submit_flow': {
             onStatus?.('drafting', 'Drawing the flow');
             const f = sanitizeFlow(args.flow, validIds);
-            if (!f || f.length === 0) { toolOut = { error: 'The flow was empty or invalid — build at least one step.' }; break; }
+            if (!f || f.length === 0) { toolOut = { error: 'The flow was empty or invalid. Build at least one step.' }; break; }
             onFlow?.(f);
             const { outcome, deadlock } = await finalOutcome(f);
             result = { flow: f, explanation: (typeof args.explanation === 'string' ? args.explanation : 'Updated the flow.').slice(0, 240), outcome, deadlock };
@@ -737,10 +737,10 @@ export async function assistFlow(organizationId: string, message: string, curren
   } catch (error) {
     if (signal?.aborted) throw error; // the route turns this into a clean stop
     logger.warn('flow_assist.failed', { organizationId, ...(error instanceof Error ? { message: error.message } : {}) });
-    return { flow: currentFlow, explanation: "I couldn't work that out just now — try rephrasing, or edit the flow on the canvas.", outcome: null, deadlock: false };
+    return { flow: currentFlow, explanation: "I couldn't work that out just now. Try rephrasing, or edit the flow on the canvas.", outcome: null, deadlock: false };
   }
 
-  return result ?? { flow: currentFlow, explanation: "I couldn't finish that — try rephrasing what you'd like.", outcome: null, deadlock: false };
+  return result ?? { flow: currentFlow, explanation: "I couldn't finish that. Try rephrasing what you'd like.", outcome: null, deadlock: false };
 }
 
 // One turn of the tool-calling loop: send the transcript + tool defs, get back

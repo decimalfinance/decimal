@@ -81,7 +81,7 @@ organizationInvitesRouter.post('/organizations/:organizationId/invites', asyncRo
     throw forbidden('Only the primary admin can invite admins.');
   }
   if (input.role === 'member' && !input.jobRole) {
-    throw badRequest('Choose what this person will do — a member with no role can only watch.');
+    throw badRequest('Choose what this person will do. A member with no role can only watch.');
   }
   if (input.role === 'admin' && input.jobRole) {
     throw badRequest('Admins already have full access, so they take no role on top.');

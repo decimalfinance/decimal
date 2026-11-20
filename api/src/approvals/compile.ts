@@ -248,7 +248,7 @@ export async function compilePlan(tx: Tx, approvable: ApprovableRow, at = new Da
           if (people.length === 0 && node.onUnresolvable) {
             const fb = await resolveTarget(ctx, node.onUnresolvable);
             people.push(...fb.people);
-            alerts.push(`step "${node.purpose ?? 'unnamed'}" unresolvable — fell back`);
+            alerts.push(`step "${node.purpose ?? 'unnamed'}" unresolvable, fell back`);
             unresolvable = fb.people.length === 0;
           }
           resolved.push({
@@ -380,9 +380,9 @@ export async function compilePlan(tx: Tx, approvable: ApprovableRow, at = new Da
     for (const s of emptied) {
       if (assignees.length > 0) {
         for (const personId of assignees) s.approvers.push({ seatId: null, personId, viaDelegation: false });
-        alerts.push(`step ${s.index} had no approvers after SoD/resolution — assigned to ${how}`);
+        alerts.push(`step ${s.index} had no approvers after SoD/resolution, assigned to ${how}`);
       } else {
-        alerts.push(`step ${s.index} has no approvers after SoD/resolution — needs attention`);
+        alerts.push(`step ${s.index} has no approvers after SoD/resolution: needs attention`);
       }
     }
   }

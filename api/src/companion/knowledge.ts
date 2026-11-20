@@ -95,7 +95,7 @@ export function canCode(access: Awaited<ReturnType<typeof getOrgAccess>>): boole
 
 async function assertCanCode(organizationId: string, userId: string) {
   if (!canCode(await getOrgAccess(organizationId, userId))) {
-    throw forbidden('Only someone who codes bills — a bill clerk or an admin — can change what I know.');
+    throw forbidden('Only someone who codes bills (a bill clerk or an admin) can change what I know.');
   }
 }
 

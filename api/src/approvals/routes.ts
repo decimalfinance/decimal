@@ -305,7 +305,7 @@ approvalsRouter.post('/organizations/:organizationId/approvals/flow/assist/strea
     });
     if (!ac.signal.aborted) send('done', result);
   } catch (error) {
-    if (!ac.signal.aborted) send('error', { message: 'The assistant hit a snag. Your flow is unchanged — try again.' });
+    if (!ac.signal.aborted) send('error', { message: 'The assistant hit a snag. Your flow is unchanged, so try again.' });
   } finally {
     res.end();
   }

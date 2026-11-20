@@ -1739,7 +1739,7 @@ function readingState(args: {
   if (args.ungrounded?.includes(args.key)) {
     return {
       state: 'needs_look',
-      reason: 'This value does not appear anywhere in the document text — check it against the page',
+      reason: 'This value does not appear anywhere in the document text. Check it against the page.',
     };
   }
 
@@ -1759,7 +1759,7 @@ function readingState(args: {
   // Extractions made before fieldStatus existed still have to render.
   const confidence = num(args.fieldConfidence?.[args.key]);
   if (confidence != null && confidence < FIELD_CONFIDENCE_THRESHOLD) {
-    return { state: 'needs_look', reason: 'We were not confident reading this off the document — check it against the page' };
+    return { state: 'needs_look', reason: 'We were not confident reading this off the document. Check it against the page.' };
   }
   return { state: 'read', reason: null };
 }
@@ -4243,7 +4243,7 @@ export async function overrideDuplicateFlag(args: {
     paymentOrderId: order.paymentOrderId,
     actorUserId: args.actorUserId,
     actorName: args.actorName,
-    what: `cleared the duplicate flag — “${args.reason}”`,
+    what: `cleared the duplicate flag: “${args.reason}”`,
     flagsBefore,
     flagsAfter,
     at,
@@ -4271,7 +4271,7 @@ export async function overrideDuplicateFlag(args: {
       paymentOrderId: twin.paymentOrderId,
       actorUserId: args.actorUserId,
       actorName: args.actorName,
-      what: `cleared the duplicate flag on the other bill — “${args.reason}”`,
+      what: `cleared the duplicate flag on the other bill: “${args.reason}”`,
       flagsBefore: before,
       flagsAfter: after,
       at,
@@ -4376,7 +4376,7 @@ export async function grantCeilingException(args: {
     paymentOrderId: order.paymentOrderId,
     actorUserId: args.actorUserId,
     actorName: args.actorName,
-    what: `allowed this bill past the ${usdText(ceilingMinor)} ceiling — “${args.reason}”`,
+    what: `allowed this bill past the ${usdText(ceilingMinor)} ceiling: “${args.reason}”`,
     flagsBefore,
     flagsAfter,
     at,
@@ -4429,7 +4429,7 @@ export async function payItemisedTotal(args: {
     throw new Error('The itemised total comes to nothing, which is not a bill to pay.');
   }
   if (amounts.total !== null && Math.abs(itemisedTotal - amounts.total) < 0.005) {
-    throw new Error('The figures on this bill already agree — there is nothing to decide.');
+    throw new Error('The figures on this bill already agree. There is nothing to decide.');
   }
 
   const previousTotal = amounts.total;
@@ -5188,7 +5188,7 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
       // bill — flow edits are never retroactive, so this stays true forever.
       flowVersion: plan?.policy_version ?? null,
       protectionNote: requesterExcluded && requesterView && firstApprover
-        ? `This bill skipped ${requesterView.name} and started with ${firstApprover}. The person who asks for a bill can't be its first approver — a second set of eyes always goes first.`
+        ? `This bill skipped ${requesterView.name} and started with ${firstApprover}. The person who asks for a bill can't be its first approver: a second set of eyes always goes first.`
         : null,
       release: releaseRow ? { macroState: releaseRow.macro_state } : null,
     },

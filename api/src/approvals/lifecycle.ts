@@ -195,7 +195,7 @@ export async function executeCommand(envelope: CommandEnvelope): Promise<Command
         if (['approved', 'auto_approved'].includes(approvable.macro_state)) {
           throw new ApprovalEngineError(
             'invalid_state',
-            'This bill is already approved — an admin can send it back to draft.',
+            'This bill is already approved. An admin can send it back to draft.',
           );
         }
         await closeLiveTasks(tx, task.plan_id, 'obsolete');

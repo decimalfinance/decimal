@@ -218,7 +218,7 @@ organizationsRouter.patch('/organizations/:organizationId/members/:userId/access
       throw forbidden('Only the primary admin can promote or demote admins.');
     }
     if (userId === req.auth!.userId) {
-      throw forbidden('You are the primary admin — transfer that first if you want to step down.');
+      throw forbidden('You are the primary admin. Transfer that first if you want to step down.');
     }
     const target = await prisma.organizationMembership.findUnique({
       where: { organizationId_userId: { organizationId, userId } },
@@ -227,7 +227,7 @@ organizationsRouter.patch('/organizations/:organizationId/members/:userId/access
       throw forbidden('That person is not an active member.');
     }
     if (target.role === 'primary_admin') {
-      throw forbidden('The primary admin cannot be demoted — transfer the seat instead.');
+      throw forbidden('The primary admin cannot be demoted. Transfer the seat instead.');
     }
     await prisma.$transaction(async (tx) => {
       await tx.organizationMembership.update({

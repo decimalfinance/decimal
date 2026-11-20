@@ -110,7 +110,7 @@ export async function requestRecall(input: RequestRecallInput): Promise<{
       throw new ApprovalEngineError('forbidden_role', 'Only the person who submitted this bill can ask for it back.');
     }
     if (['approved', 'auto_approved'].includes(approvable.macro_state)) {
-      throw new ApprovalEngineError('invalid_state', 'This bill is already approved — an admin can send it back to draft.');
+      throw new ApprovalEngineError('invalid_state', 'This bill is already approved. An admin can send it back to draft.');
     }
     if (!RECALLABLE.has(approvable.macro_state)) {
       throw new ApprovalEngineError('invalid_state', `This bill is ${approvable.macro_state} — there is nothing in approval to recall.`);

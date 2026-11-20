@@ -1175,7 +1175,7 @@ function buildWalletRetryCorrection(invalid: InvalidWalletReport[]): string {
   const lines = invalid
     .map(
       (w, i) =>
-        `${i + 1}. Vendor "${w.vendorName}" — you returned "${w.walletAddress}", which is NOT valid base58.`,
+        `${i + 1}. Vendor "${w.vendorName}": you returned "${w.walletAddress}", which is NOT valid base58.`,
     )
     .join('\n');
   return (

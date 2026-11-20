@@ -90,7 +90,7 @@ export const ROLE_DEFINITIONS: Array<{ key: RoleKey; name: string; summary: stri
   { key: 'bill_clerk', name: 'Bill Clerk', summary: "Enters and confirms a bill's details and coding. Cannot approve bills or see payments." },
   { key: 'approver', name: 'Approver', summary: 'Signs off on bills assigned to them. Cannot edit bills, send payments, or see bank details.' },
   { key: 'payer', name: 'Payer', summary: 'Sends approved payments and sees balances. Cannot create, edit, or approve bills.' },
-  { key: 'viewer', name: 'Viewer', summary: 'Sees everything, changes nothing — cannot even bring a bill in. For auditors and stakeholders.' },
+  { key: 'viewer', name: 'Viewer', summary: 'Sees everything and changes nothing, not even bringing a bill in. For auditors and stakeholders.' },
 ];
 
 /**

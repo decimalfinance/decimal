@@ -84,7 +84,7 @@ export async function requestBillRecall(input: {
   // runs through decideRecall — nothing is skipped except the interval in which
   // the same person waits for themselves.
   if (await canDecideRecall(input.organizationId, actorId)) {
-    await decideRecall({ requestId, actorId, grant: true, note: 'Recalled directly — the asker is an admin.' });
+    await decideRecall({ requestId, actorId, grant: true, note: 'Recalled directly, because the asker is an admin.' });
     const [decided] = await recallHistory(approvableId);
     return { ...toView(decided!), granted: true };
   }

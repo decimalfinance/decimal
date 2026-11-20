@@ -151,7 +151,7 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/duplicate
   const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
   const { membership } = await assertOrganizationAccess(organizationId, req.auth!);
   if (!membership || (membership.role !== 'primary_admin' && membership.role !== 'admin')) {
-    throw forbidden('Only an admin can clear a duplicate flag — ask one to review this bill.');
+    throw forbidden('Only an admin can clear a duplicate flag. Ask one to review this bill.');
   }
   await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
   const input = duplicateOverrideSchema.parse(req.body);
@@ -586,7 +586,7 @@ billsRouter.post('/organizations/:organizationId/bills/:paymentOrderId/not-a-bil
   const { organizationId, paymentOrderId } = billParamsSchema.parse(req.params);
   const { membership } = await assertOrganizationAccess(organizationId, req.auth!);
   if (!isAdminRole(membership?.role)) {
-    throw forbidden('Only a primary admin or admin can close a bill — ask one to look, or ask a question on it instead.');
+    throw forbidden('Only a primary admin or admin can close a bill. Ask one to look, or ask a question on it instead.');
   }
   await assertBillVisible(organizationId, req.auth!.userId, paymentOrderId);
   const input = notABillSchema.parse(req.body);

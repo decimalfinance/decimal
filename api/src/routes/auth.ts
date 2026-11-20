@@ -391,7 +391,7 @@ authRouter.post('/auth/dev/seed', async (req, res, next) => {
     const organizationName = input.organizationName.trim();
     const nameTaken = await prisma.organization.findFirst({ where: { organizationName } });
     if (nameTaken) {
-      throw conflict('An organization with this name already exists — use a unique name per seed.');
+      throw conflict('An organization with this name already exists. Use a unique name per seed.');
     }
 
     const ownerUser = await upsertDevUser(input.owner.email, input.owner.displayName);
@@ -445,7 +445,7 @@ authRouter.post('/auth/dev/seed', async (req, res, next) => {
       organizationId: organization.organizationId,
       organizationName: organization.organizationName,
       users,
-      note: 'Wallet provisioning skipped — seeded for workflow/approval testing.',
+      note: 'Wallet provisioning skipped: seeded for workflow/approval testing.',
     });
   } catch (error) {
     next(error);

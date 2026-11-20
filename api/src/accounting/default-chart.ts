@@ -31,7 +31,7 @@ export const DEFAULT_EXPENSE_ACCOUNTS: ExpenseAccount[] = [
   // The catch-all (GL synthesis D3/P1): the accountant's holding tank every
   // ledger already has (QBO: "Uncategorized Expense" / "Ask My Accountant").
   // Coding uncertainty parks here — it never blocks a bill.
-  { id: 'builtin:uncategorized', name: 'Uncategorized expense', description: 'Parked for your accountant to place — sweep before close' },
+  { id: 'builtin:uncategorized', name: 'Uncategorized expense', description: 'Parked for your accountant to place. Sweep before close.' },
 ];
 
 export const UNCATEGORIZED_ACCOUNT = DEFAULT_EXPENSE_ACCOUNTS[DEFAULT_EXPENSE_ACCOUNTS.length - 1]!;

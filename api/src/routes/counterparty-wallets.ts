@@ -151,7 +151,7 @@ counterpartyWalletsRouter.patch('/organizations/:organizationId/counterparties/:
     throw new Error('Blocking a vendor (or unblocking one) is the primary admin’s call.');
   }
   if (input.status !== 'payable' && !input.reason?.trim()) {
-    throw new Error('Give a reason — it goes on the vendor’s record.');
+    throw new Error('Give a reason. It goes on the vendor’s record.');
   }
   const user = await prisma.user.findUniqueOrThrow({ where: { userId: req.auth!.userId }, select: { displayName: true } });
   const updated = await setVendorPayableStatus({

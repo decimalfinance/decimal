@@ -362,7 +362,7 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
       severity: 'danger',
       blocking: true,
       short: facts.vendorHold.status === 'blocked' ? 'Vendor blocked' : 'Vendor on hold',
-      resolutions: [{ action: 'release_vendor', label: 'Review the vendor', requires: 'admin', detail: 'The hold is released on the vendor, where it was set — not here.' }, ASK],
+      resolutions: [{ action: 'release_vendor', label: 'Review the vendor', requires: 'admin', detail: 'The hold is released on the vendor, where it was set, not here.' }, ASK],
       message: describePayableHold(facts.vendorName, facts.vendorHold),
     });
   }
@@ -383,7 +383,7 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
         blocking: false,
         short: 'Ceiling exception',
         resolutions: [],
-        message: `Over the ${usdText(facts.ceilingMinor)} ceiling — allowed for this bill by ${granted.byName}: “${granted.reason}”. The ceiling itself is unchanged.`,
+        message: `Over the ${usdText(facts.ceilingMinor)} ceiling, allowed for this bill by ${granted.byName}: “${granted.reason}”. The ceiling itself is unchanged.`,
       });
     } else {
       // A grant that no longer fits the bill it was granted for. Say so, rather
@@ -581,8 +581,8 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
       // "lists 0 invoice numbers" when the heading said STATEMENT OF ACCOUNT
       // would be worse than saying nothing about the count.
       message: refs.length > 0
-        ? `This lists ${refs.length} invoice number${refs.length === 1 ? '' : 's'} (${refs.slice(0, 3).join(', ')}${refs.length > 3 ? '…' : ''}), so it looks like a statement of account rather than one invoice. Paying a statement pays every invoice on it again — settle the individual invoices instead.`
-        : 'This document presents itself as a statement of account rather than one invoice. Paying a statement pays every invoice on it again — settle the individual invoices instead.',
+        ? `This lists ${refs.length} invoice number${refs.length === 1 ? '' : 's'} (${refs.slice(0, 3).join(', ')}${refs.length > 3 ? '…' : ''}), so it looks like a statement of account rather than one invoice. Paying a statement pays every invoice on it again. Settle the individual invoices instead.`
+        : 'This document presents itself as a statement of account rather than one invoice. Paying a statement pays every invoice on it again. Settle the individual invoices instead.',
     });
   }
 
@@ -601,8 +601,8 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
         ASK,
       ],
       message: negativeTotal
-        ? `The total on this document is negative, which makes it a credit note — money the vendor owes you, not money to send. Apply it against their balance rather than paying it.`
-        : `"${facts.documentType.invoiceNumber}" is a credit-note series, not an invoice series. A credit note reduces what you owe — paying it sends money the wrong way.`,
+        ? `The total on this document is negative, which makes it a credit note: money the vendor owes you, not money to send. Apply it against their balance rather than paying it.`
+        : `"${facts.documentType.invoiceNumber}" is a credit-note series, not an invoice series. A credit note reduces what you owe, so paying it sends money the wrong way.`,
     });
   }
 
@@ -632,8 +632,8 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
       short: 'Fewer approvers than your policy',
       resolutions: [],
       message: lowered
-        ? `Signed by ${lowered[2]} instead of the ${lowered[1]} your policy asks for — there weren't enough people eligible to sign this one.`
-        : `Fewer people signed this than your policy asks for — there weren't enough eligible approvers.`,
+        ? `Signed by ${lowered[2]} instead of the ${lowered[1]} your policy asks for. There weren't enough people eligible to sign this one.`
+        : `Fewer people signed this than your policy asks for. There weren't enough eligible approvers.`,
     });
   }
 
@@ -673,7 +673,7 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
       blocking: true,
       short: 'Lines do not add up',
       resolutions: [{ action: 'fix_fields', label: 'Correct the figures', requires: 'anyone', detail: 'Fix the lines or the total so they agree with the document.' }, PAY_THE_LINES, ASK],
-      message: `The line items add up to ${money(lineItemsTotal)}, but the document says ${money(against)}. Something was read wrong, or the document disagrees with itself — check it against the original before paying.`,
+      message: `The line items add up to ${money(lineItemsTotal)}, but the document says ${money(against)}. Something was read wrong, or the document disagrees with itself. Check it against the original before paying.`,
     });
   }
   if (subtotal !== null && total !== null
@@ -701,8 +701,8 @@ export function evaluateBillFlags(facts: BillFlagFacts): BillFlag[] {
       short: 'Paying the itemised total',
       resolutions: [],
       message: facts.shortPay.documentTotal !== null
-        ? `Paying the ${money(facts.shortPay.itemisedTotal)} this bill itemises rather than the ${money(facts.shortPay.documentTotal)} printed on it — decided by ${facts.shortPay.byName}: “${facts.shortPay.reason}”.`
-        : `Paying the ${money(facts.shortPay.itemisedTotal)} this bill itemises — decided by ${facts.shortPay.byName}: “${facts.shortPay.reason}”.`,
+        ? `Paying the ${money(facts.shortPay.itemisedTotal)} this bill itemises rather than the ${money(facts.shortPay.documentTotal)} printed on it, decided by ${facts.shortPay.byName}: “${facts.shortPay.reason}”.`
+        : `Paying the ${money(facts.shortPay.itemisedTotal)} this bill itemises, decided by ${facts.shortPay.byName}: “${facts.shortPay.reason}”.`,
     });
   }
 

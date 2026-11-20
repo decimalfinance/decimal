@@ -30,7 +30,6 @@ Faults the flows in `scripts/drive/flows/` turned up on 2026-11-20. Where a flow
 - **A step that needs any two of four names one person.** The status line says "Waiting on Ava Chen" (`bucketAndStatus` uses the first open person), and an approver's footer reads "you or Ava, Priya or Omar", as if one approval will do.
 - **The work log credits a finding to the uploader.** The "Addressed to …" finding is stored with the uploader's name, while History says the Decimal agent raised it.
 - **A clerk isn't told why they can't answer a finding.** "This is us" and "Close as not ours" are greyed with no note that an admin must answer.
-- **Em dashes in copy the API writes.** The `.tsx` scan can't see the API: 67 string literals in 28 files of `api/src` have an em dash between words. Some are on screen (flag messages, errors), some are model prompts or log lines. Reword the ones a person reads, then extend `frontend-rules.test.ts` to those.
 
 ## Deferred on purpose
 

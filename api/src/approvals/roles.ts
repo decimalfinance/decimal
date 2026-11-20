@@ -107,7 +107,7 @@ async function assertRoleTakeable(organizationId: string, userId: string) {
     SELECT role FROM organization_memberships
     WHERE organization_id = ${organizationId}::uuid AND user_id = ${userId}::uuid AND status = 'active'`;
   if (tier[0] && (tier[0].role === 'primary_admin' || tier[0].role === 'admin')) {
-    throw new Error('Admins already have full access — roles are for members.');
+    throw new Error('Admins already have full access. Roles are for members.');
   }
 }
 
@@ -118,7 +118,7 @@ export async function assignRole(organizationId: string, roleKey: RoleKey, userI
     SELECT role FROM organization_memberships
     WHERE organization_id = ${organizationId}::uuid AND user_id = ${userId}::uuid AND status = 'active'`;
   if (tier[0] && (tier[0].role === 'primary_admin' || tier[0].role === 'admin')) {
-    throw new Error('Admins already have full access — roles are for members.');
+    throw new Error('Admins already have full access. Roles are for members.');
   }
   const { ensurePersonForUser } = await import('./wiring.js');
   const personId = await prisma.$transaction((tx) => ensurePersonForUser(tx, organizationId, userId));

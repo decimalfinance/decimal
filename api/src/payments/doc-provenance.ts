@@ -234,7 +234,7 @@ export async function extractImageTextLayer(
     const code = (error as { code?: string }).code;
     logger.warn('doc_provenance.ocr_failed', {
       ...(code === 'ENOENT'
-        ? { message: 'tesseract not installed — image documents get no source highlights. brew install tesseract' }
+        ? { message: 'tesseract is not installed, so image documents get no source highlights. Install it with: brew install tesseract' }
         : {}),
       ...(error instanceof Error ? { message: error.message } : {}),
     });
