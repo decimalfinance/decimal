@@ -48,6 +48,7 @@ Run from the repo root. These are the whole surface. Check `make help` if in dou
 - **The `approval` schema is outside Prisma on purpose.** Reach it only through raw SQL in `api/src/approvals/store.ts`.
 - **Money is bigint minor units.** USDC raw is dollars × 10^6. Never floats.
 - **Validate JSON payloads with Zod** at the boundary.
+- **A response a page reads is typed once, in `api/src/contract/`.** The frontend imports it from there and `checks.ts` proves the API sends it. Change what an endpoint returns and its contract type in the same commit; a new call in `frontend/src/api.ts` goes on the contract.
 - **ESM imports use `.js` extensions** even in `.ts` source.
 - **Frontend:** the redesign is under way. A redesigned page is a `.ui` root styled only from `frontend/src/styles/ui/` and built from `frontend/src/kit/`; see the Frontend section of `docs/ARCHITECTURE.md`. Copy the closest page's shape from `PAGE-PLAYBOOK.md`. A page still in the old system keeps `frontend/src/styles/decimal/`: don't extend it, redesign it. Either way, grep before typing a class name and never hardcode colours, spacing or fonts. Text fills its container, so no `max-width` on prose. The look is a clean institutional bank, never crypto neon.
 - **Product vocabulary:** "bill", "approval", "approvers", "team members", "Category". Never "multisig", "vote", "wallet" or "GL code" in operator-facing copy. A bill is a `PaymentOrder` only in code.
@@ -64,6 +65,7 @@ What enforces each rule. "Nothing" is a known gap. When the same mistake is corr
 | `approval` schema only through `store.ts` | Nothing |
 | Money is bigint minor units | Stored columns are `BIGINT`. Arithmetic in code: nothing. |
 | Zod at the boundary | Nothing |
+| Frontend and API agree on what an endpoint sends | `api/src/contract/checks.ts`, in the API typecheck, for the endpoints on the contract. `api/tests/contract-coverage.test.ts` lists every other call in `frontend/src/api.ts` and only lets that list shrink |
 | `.js` import extensions in the API | `tsc` with `NodeNext`, in `make test` |
 | Tests read only fields that exist | `api/tsconfig.tests.json` typechecks the tests, in `make test` |
 | Product vocabulary, hardcoded colours, em dashes in copy | `api/tests/frontend-rules.test.ts`, over every `.tsx` except the pages listed as not yet redesigned. Other styling rules: nothing. |

@@ -29,6 +29,7 @@ Faults the flows in `scripts/drive/flows/` turned up on 2026-11-20. Where a flow
 - **The other bill of a cleared duplicate pair doesn't say why.** The reason is in that bill's cleared flag ("Cleared on that bill by …: “reason”"), but the bill page doesn't show cleared flags, and its History says only "Ava Chen settled Possible duplicate". `duplicate-is-flagged.mjs` holds that bill to who, not why. The first bill's History also never records that the flag was raised on it.
 - **A step that needs any two of four names one person.** The status line says "Waiting on Ava Chen" (`bucketAndStatus` uses the first open person), and an approver's footer reads "you or Ava, Priya or Omar", as if one approval will do.
 - **The work log credits a finding to the uploader.** The "Addressed to …" finding is stored with the uploader's name, while History says the Decimal agent raised it.
+- **One invoice with several references in its lines is blocked as a statement.** `looks_like_statement` (`api/src/payments/bill-flags.ts`) fires when a bill's lines carry more than one distinct reference, so a carrier invoice listing three load numbers (LH-48213, LH-48226, LH-48240) was blocked. Found while recording the README, not by a flow.
 - **A clerk isn't told why they can't answer a finding.** "This is us" and "Close as not ours" are greyed with no note that an admin must answer.
 
 ## Deferred on purpose

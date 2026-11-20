@@ -61,10 +61,12 @@ import type {
   WalletAuthorizationStatus,
 } from './types';
 import { getPublicApiBaseUrl } from './public-config';
-// The bill responses are the API's contract (api/src/contract/): the API's typecheck
+// The responses on the API's contract (api/src/contract/): the API's typecheck
 // proves it sends them, and the pages read the same types. Change them there.
 import type { BillBucket, BillDetail, BillDraft, BillRecall, BillsWorkbench, InboxSignal, PendingDocument, WorkbenchBill } from '../../api/src/contract/bills.js';
 export type * from '../../api/src/contract/bills.js';
+import type { Inbox, InboxLineKind } from '../../api/src/contract/inbox.js';
+export type * from '../../api/src/contract/inbox.js';
 
 const API_BASE_URL = getPublicApiBaseUrl();
 const AUTH_STORAGE_KEY = 'usdc_ops_v2.session_token';
@@ -1717,46 +1719,6 @@ export interface CompanionActionCard {
   result: string | null;
 }
 
-export type InboxLineKind = 'approval' | 'question' | 'reply' | 'review' | 'sign_off' | 'sent_back' | 'unreadable' | 'sync_failed' | 'sync_held';
-
-/** One thing wanted of a person on a bill: who it comes from, what they did, their words. */
-export interface InboxLine {
-  kind: InboxLineKind;
-  /** The whole line as one sentence. */
-  text: string;
-  /** Before any quote: "Zara Okafor asked". */
-  lead: string;
-  /** Their own words: a question, an answer, a reason. */
-  quote: string | null;
-  /** None for what Decimal raises itself. */
-  who: { name: string; avatarUrl: string | null } | null;
-  at: string;
-  /** Since this person last opened the bill. */
-  isNew: boolean;
-  /** For a line about the books: which, by name. */
-  books?: string;
-  from?: string | null;
-  questionId?: string;
-}
-
-/** One bill in a person's inbox, with everything wanted of them on it. */
-export interface InboxItem {
-  key: string;
-  billId: string | null;
-  jobId: string | null;
-  vendorName: string;
-  /** What the bill is for: its first line, or its memo. */
-  description: string | null;
-  invoiceNumber: string | null;
-  amountUsd: number | null;
-  status: string | null;
-  dueAt: string | null;
-  href: 'draft' | 'bill' | null;
-  lines: InboxLine[];
-  latestAt: string;
-  isNew: boolean;
-}
-
 /** A vendor's kind of line the companion remembers a category for, learned from lines people settled. */
 export interface RememberedLine {
   key: string;
@@ -1787,7 +1749,7 @@ export const knowledgeApi = {
 
 export const inboxApi = {
   get(organizationId: string) {
-    return request<{ items: InboxItem[]; count: number; newCount: number }>(`/organizations/${organizationId}/inbox`);
+    return request<Inbox>(`/organizations/${organizationId}/inbox`);
   },
   seen(organizationId: string, billId: string) {
     return request<{ ok: true }>(`/organizations/${organizationId}/inbox/seen`, { method: 'POST', body: JSON.stringify({ billId }) });
