@@ -65,6 +65,7 @@ Conventions that hold everywhere:
 
 - **Money is bigint minor units.** USDC raw is dollars × 10^6. Never floats, never cents.
 - **JSON payloads are validated with Zod** at the boundary.
+- **What an endpoint sends is a contract.** `api/src/contract/` holds response types as a page receives them (JSON, so a date is an ISO string), with no imports, so the API and the frontend compile the same file. `checks.ts` proves, in `npm run typecheck`, that each covered endpoint's service function returns what its contract type says (`Wire<T>` in `wire.ts` is a value after `res.json()`). The frontend reads those types through `src/api.ts`. A field a page relies on can't go missing or change type on either side without failing `make test`. Text the database holds as a plain string is narrowed to the contract's union where it is read (`oneOf` and `allOf` in `infra/one-of.ts`); stored JSON is parsed with Zod. Covered so far: a bill's detail and the Bills list.
 - **ESM throughout.** Relative imports use explicit `.js` extensions even in `.ts` source.
 
 ## Database (Live)

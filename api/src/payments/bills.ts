@@ -10,6 +10,9 @@
 // happens BEFORE a bill enters routing.
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../infra/prisma.js';
+import { z } from 'zod';
+import { allOf, oneOf } from '../infra/one-of.js';
+import type { BillCloseReason, BillDraft, CategoryFrom, DocumentKind, DocumentStatus, FlagFinding } from '../contract/bills.js';
 import { logger } from '../infra/logger.js';
 import { USDC_DECIMALS } from '../solana.js';
 import { markBillSubmitted, cancelPaymentOrder, getPaymentOrderDetail } from './orders.js';
@@ -272,10 +275,31 @@ function bucketAndStatus(args: {
 }
 
 /** The reason picked when a bill was closed as not a bill to pay. */
-function closedReasonOf(metadataJson: unknown): string | null {
+const CategoryFromSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('memory'), like: z.string(), invoiceNumber: z.string().nullable().catch(null), paymentOrderId: z.string().nullable().catch(null), by: z.string().nullable().catch(null), books: z.string().nullable().optional().catch(null) }),
+  z.object({ kind: z.literal('similar'), like: z.string(), invoiceNumber: z.string().nullable().catch(null), paymentOrderId: z.string().nullable().catch(null), by: z.string().nullable().catch(null), vendorName: z.string().nullable().optional().catch(null) }),
+  z.object({ kind: z.literal('model') }),
+]);
+
+/** Why a proposed Category was proposed, read back from what was stored; anything unreadable is the model's guess. */
+function categoryFromOf(value: unknown): CategoryFrom {
+  const parsed = CategoryFromSchema.safeParse(value);
+  return parsed.success ? parsed.data : { kind: 'model' };
+}
+
+const CLOSE_REASONS = allOf<BillCloseReason>()(['duplicate', 'statement', 'credit_note', 'not_ours', 'unreadable', 'other']);
+const DOCUMENT_KINDS = allOf<DocumentKind>()(['statement', 'credit_note', 'receipt', 'quote', 'purchase_order', 'other']);
+const DOCUMENT_STATUSES = allOf<DocumentStatus>()(['processing', 'processed', 'failed', 'removed']);
+
+/** Why a bill was closed, as stored; a reason the list doesn't know reads as 'other'. */
+function closeReason(value: unknown): BillCloseReason | null {
+  return value == null ? null : oneOf(value, CLOSE_REASONS, 'other' as const);
+}
+
+function closedReasonOf(metadataJson: unknown): BillCloseReason | null {
   const meta = isRecord(metadataJson) ? metadataJson : null;
   const notABill = meta && isRecord(meta.notABill) ? meta.notABill : null;
-  return notABill ? str(notABill.reason) : null;
+  return notABill ? closeReason(notABill.reason) : null;
 }
 
 /**
@@ -535,7 +559,7 @@ async function approvalRouteFor(organizationId: string, paymentOrderId: string) 
        AND a.type = 'invoice'
        AND a.attributes->>'paymentOrderId' = ${paymentOrderId}
      ORDER BY t.step_index, p2.name`;
-  return rows.map((r) => ({
+  return rows.map((r): BillDraft['route'][number] => ({
     name: r.name,
     stepIndex: r.step_index,
     // Collapsed to three words a strip can render. 'waiting' is the one that
@@ -1990,13 +2014,15 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
 
   // Verified values (post-confirm) win over the raw read for display.
   const verifiedFields = verification && isRecord(verification.fields) ? verification.fields : null;
-  const valueOf = (key: string, extractedValue: unknown) =>
-    verifiedFields && key in verifiedFields ? verifiedFields[key] : extractedValue;
+  const valueOf = (key: string, extractedValue: unknown): string | number | null => {
+    const v = verifiedFields && key in verifiedFields ? verifiedFields[key] : extractedValue;
+    return typeof v === 'string' || typeof v === 'number' ? v : null;
+  };
   // What a person changed from Decimal's reading, as the history and the send see it.
   const readings = billFieldReadings(extracted, verifiedFields ?? {});
   const changedKeys = new Set(readings.filter((r) => r.changed).map((r) => r.mark));
 
-  const headerFieldDefs: Array<{ key: string; label: string; value: unknown }> = [
+  const headerFieldDefs: Array<{ key: string; label: string; value: string | number | null }> = [
     { key: 'invoiceNumber', label: 'Invoice number', value: valueOf('invoiceNumber', str(extracted.invoiceNumber) ?? order.invoiceNumber) },
     { key: 'invoiceDate', label: 'Invoice date', value: valueOf('invoiceDate', str(extracted.invoiceDate)) },
     { key: 'dueDate', label: 'Due date', value: valueOf('dueDate', str(extracted.dueDate) ?? (order.dueAt ? order.dueAt.toISOString().slice(0, 10) : null)) },
@@ -2027,7 +2053,8 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   const remitToVerified = verifiedFields && isRecord(verifiedFields.remitTo) ? verifiedFields.remitTo : null;
   const remitPartSourceKey = { street: 'remitStreet', city: 'remitCity', state: 'remitState', zip: 'remitZip', country: 'remitCountry' } as const;
   const remitFields = REMIT_PARTS.map((part) => {
-    const value = remitToVerified ? remitToVerified[part] : str(remitTo[part]);
+    const verified = remitToVerified ? remitToVerified[part] : null;
+    const value = remitToVerified ? (typeof verified === 'string' || typeof verified === 'number' ? verified : null) : str(remitTo[part]);
     return {
       key: `remitTo.${part}`,
       label: part === 'zip' ? 'ZIP code' : part[0]!.toUpperCase() + part.slice(1),
@@ -2316,7 +2343,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       amount: num(line.amount),
       category,
       categoryFrom: !settledBy && proposal && category && proposal.category === category
-        ? (isRecord(proposal.from) ? proposal.from : { kind: 'model' as const })
+        ? categoryFromOf(proposal.from)
         : null,
       categoryConfirmedBy: settledBy,
       source: read >= 0 ? lineSource(extractedLines[read] as Record<string, unknown>) : null,
@@ -2370,7 +2397,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   // A document that is not an invoice, and what it means against our records.
   // The classification is the model's; the reconciliation is a join.
   const declaredKind = str(extracted.documentKind);
-  const notABillKind = declaredKind && declaredKind !== 'invoice' ? declaredKind : null;
+  const notABillKind = declaredKind && declaredKind !== 'invoice' ? oneOf(declaredKind, DOCUMENT_KINDS, 'other' as const) : null;
   const statementRows = Array.isArray(extracted.statementRows)
     ? (extracted.statementRows as unknown[]).filter(isRecord)
     : [];
@@ -2432,7 +2459,7 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
   // (exceptions/findings.ts): worked out in code on every read, except whether
   // the bill-to name is us, which is a model call made once in the background
   // and remembered on the bill. Best-effort: a failure leaves the flag as it was.
-  const findings = new Map<string, unknown>();
+  const findings = new Map<string, FlagFinding>();
   try {
     const F = await import('../exceptions/findings.js');
     const vendorName = order.counterparty?.displayName ?? order.counterpartyWallet.label;
@@ -2651,7 +2678,9 @@ export async function getBillDraft(organizationId: string, paymentOrderId: strin
       isNew: order.counterpartyWallet.trustState === 'unreviewed',
       trustState: order.counterpartyWallet.trustState,
     },
-    document: pagesDocument ? { ...pagesDocument, status: order.invoiceDocument?.status ?? pagesDocument.status } : order.invoiceDocument,
+    document: pagesDocument
+      ? { ...pagesDocument, status: oneOf(order.invoiceDocument?.status ?? pagesDocument.status, DOCUMENT_STATUSES, 'processed' as const) }
+      : order.invoiceDocument && { ...order.invoiceDocument, status: oneOf(order.invoiceDocument.status, DOCUMENT_STATUSES, 'processed' as const) },
     // The upload it came from, when that held other bills too: its own pages of it,
     // if it has them, and the others, to link to.
     upload: sameUpload.length === 0 || !order.invoiceDocument ? null : {
@@ -4936,7 +4965,7 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
     : null;
   const closed = order.state === 'cancelled'
     ? {
-        reason: notABill ? str(notABill.reason) : null,
+        reason: notABill ? closeReason(notABill.reason) : null,
         note: notABill ? str(notABill.note) : null,
         by: closer ? { name: closer.displayName?.trim() || closer.email, avatarUrl: closer.avatarUrl } : null,
         at: notABill ? str(notABill.markedAt) : null,
@@ -4993,7 +5022,7 @@ export async function getBillDetail(organizationId: string, paymentOrderId: stri
       posting,
       books,
       approval: null,
-      viewer: { personId: null, name: null, isRequester: false, openTaskId: null, anyTaskId: null },
+      viewer: { personId: null, name: null, isRequester: false, openTaskId: null, cannotApprove: null, anyTaskId: null },
       requester: null,
     };
   }

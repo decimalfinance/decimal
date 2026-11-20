@@ -19,6 +19,10 @@ import { trackBackgroundWork } from '../infra/background.js';
 import { conflict, notFound } from '../infra/api-errors.js';
 import { logger } from '../infra/logger.js';
 import { prisma } from '../infra/prisma.js';
+import { allOf, oneOf } from '../infra/one-of.js';
+import type { BooksCheckStatus } from '../contract/bills.js';
+
+const BOOKS_CHECK_STATUSES = allOf<BooksCheckStatus>()(['running', 'ready', 'failed']);
 import type { BooksBill, BooksReader } from '../integrations/books.js';
 import { connectorFor } from '../integrations/connectors.js';
 import { readOutcome } from '../integrations/setup/outcome.js';
@@ -331,7 +335,7 @@ export async function ensureBooksCheck(organizationId: string, paymentOrderId: s
 /** What the flag rules need about a bill and the books (bill-flags.ts). */
 export type BooksFlagFacts = {
   system: string;
-  status: string;
+  status: BooksCheckStatus;
   matches: BooksMatch[];
   answers: Array<{ recordId: string; same: boolean; byName: string; at: string }>;
 };
@@ -358,7 +362,7 @@ export async function booksFactsFor(organizationId: string, paymentOrderIds: str
     for (const r of rows) {
       out.set(r.paymentOrderId, {
         system: r.system,
-        status: r.status,
+        status: oneOf(r.status, BOOKS_CHECK_STATUSES, 'failed' as const),
         matches: matchesOf(r.matches),
         answers: answersOf(r.answers).map((a) => ({ recordId: a.recordId, same: a.same, byName: nameOf.get(a.byUserId) ?? 'Someone', at: a.at })),
       });
