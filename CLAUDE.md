@@ -78,7 +78,7 @@ Committed, non-secret config: `config/api.config.json` and `frontend/src/public-
 
 Dev sign-in for testing: the `/dev-login` page, or `POST /auth/dev/seed` (with `DEV_AUTH_SECRET` from `api/.env`) to build a team and get a session per person. A seeded person signs in later through ordinary `POST /auth/register` with any password: a passwordless `@dev.decimal.test` account claims it on first use. Only `@dev.decimal.test` addresses work.
 
-`synthetic_data/` and `outputs/` are gitignored. Never commit regenerable fixtures or pitch material.
+`synthetic_data/` and `outputs/` are gitignored, except the setup-eval generator (`synthetic_data/setup-eval/generate.mjs`, `xero.mjs`, `lib/`), whose source is tracked so its fixtures can be rebuilt. Never commit regenerable fixtures or pitch material.
 
 ## Working agreement
 

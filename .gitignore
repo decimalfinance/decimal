@@ -42,7 +42,15 @@ tmp/
 ds-bundle/
 
 # Regenerable test data. Rebuild with scripts/invoice-gen (see TESTING-INVOICES.md).
-synthetic_data/
+# The setup-eval generator is the exception: its source is tracked, and the
+# companies, answers and Xero files it writes are rebuilt with
+# `node synthetic_data/setup-eval/generate.mjs [YYYY-MM-DD]`.
+synthetic_data/*
+!synthetic_data/setup-eval/
+synthetic_data/setup-eval/*
+!synthetic_data/setup-eval/generate.mjs
+!synthetic_data/setup-eval/xero.mjs
+!synthetic_data/setup-eval/lib/
 
 # One-off local scripts. Tracked ones were force-added on purpose.
 api/scripts/
