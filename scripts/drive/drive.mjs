@@ -311,7 +311,7 @@ async function main() {
       return 0;
     }
     case 'upload': {
-      if (!args.length) throw new DriveError('which files?', 'drive upload synthetic_data/testbench/meridian-mw-1.pdf --as maya');
+      if (!args.length) throw new DriveError('which files?', 'drive upload synthetic_data/invoices/A-routing/A3-first-bill-312.pdf --as maya');
       const team = loadTeam(flags.team);
       const results = await uploadBills(team, findPerson(team, flags.as ?? 'maya'), args);
       print({ ok: results.every((r) => r.ok), team: team.name, as: flags.as ?? 'maya', uploads: results });
