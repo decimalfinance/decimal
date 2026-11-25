@@ -235,18 +235,18 @@ screen, then prepared by a Bill Clerk (Priya or Omar), confirmed, and routed.
 
 ---
 
-## Generated set (2026-08-18)
+## The generated set
 
-All 22 invoices exist in `synthetic_data/invoices/` (sections A–E, plus
-`catalog.json` with per-file expectations and a `README.md` with the upload
-order). Regenerate any time with:
+`synthetic_data/invoices/` holds series A to F (upload), R, X and M (evals), with
+`catalog.json` (per-file expectations) and a `README.md` (upload order). The generated
+README lists every series. Regenerate with:
 
 ```
 cd scripts/invoice-gen && npm install   # once
-node scripts/invoice-gen/generate.mjs
+node scripts/invoice-gen/generate.mjs --out <scratch dir>
 ```
 
-Generator lives in `scripts/invoice-gen/` (branch `worktree-invoice-set-v3`).
-Before testing E2, set a bill ceiling of $100,000 as Zara on the Policies
-page — no ceiling is seeded, so E2 cannot block without it. Testbench brief:
-`synthetic_data/testbench/briefs/009-invoice-set-v3.md`.
+Render to a scratch dir and copy in only what is new: a full render re-stamps every PDF
+and changes bytes, which breaks the sha256 dedupe and the duplicate pairs.
+Before testing E2 to E6, set a bill ceiling of $100,000 as Zara on the Policies page:
+no ceiling is seeded, so they cannot block without it.
